@@ -132,6 +132,17 @@ async def _cmd_remind(update, context) -> None:
         await update.message.reply_text(user_facing_error(e))
 
 
+async def _cmd_rate(update, _context) -> None:
+    """Оценить последний ответ агента: /rate 1..5 или /rate 0..1."""
+    from src.communication.telegram_commands import add_rating_from_text
+
+    msg = (update.message.text if update.message and update.message.text else "").strip()
+    parts = msg.split(maxsplit=1)
+    raw_value = parts[1] if len(parts) > 1 else ""
+    text = await asyncio.to_thread(add_rating_from_text, raw_value)
+    await update.message.reply_text((text or "Нет данных.")[:4000])
+
+
 async def _cmd_cancel(update, context) -> None:
     """Остановить автономный режим (то же, что /stop)."""
     from src.communication.autonomous_mode import stop_autonomous_loop, is_autonomous_running
@@ -526,6 +537,7 @@ def main() -> None:
         help_handler=_cmd_help,
         cancel_handler=_cmd_cancel,
         remind_handler=_cmd_remind,
+        rate_handler=_cmd_rate,
         status_handler=_cmd_status,
         quality_handler=_cmd_quality,
         quality_export_handler=_cmd_quality_export,

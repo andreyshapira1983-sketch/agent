@@ -326,8 +326,9 @@ def run_bot(
     help_handler: CommandCallback | None = None,
     cancel_handler: CommandCallback | None = None,
     remind_handler: CommandCallback | None = None,
+    rate_handler: CommandCallback | None = None,
 ) -> None:
-    """Run Telegram bot with long polling. Optional: /status, /quality, /quality_export, /reset_quality, /log, /tasks, /mood, /autonomous, /stop, /safe_expand, /apply_sandbox_only, /guard, /help, /cancel, /remind."""
+    """Run Telegram bot with long polling. Optional: /status, /quality, /quality_export, /reset_quality, /log, /tasks, /mood, /autonomous, /stop, /safe_expand, /apply_sandbox_only, /guard, /help, /cancel, /remind, /rate."""
     app = Application.builder().token(token).build()
     app.add_error_handler(_on_error)
     app.add_handler(TgMessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
@@ -338,6 +339,8 @@ def run_bot(
         app.add_handler(CommandHandler("cancel", _wrap_set_chat(cancel_handler)))
     if remind_handler:
         app.add_handler(CommandHandler("remind", _wrap_set_chat(remind_handler)))
+    if rate_handler:
+        app.add_handler(CommandHandler("rate", _wrap_set_chat(rate_handler)))
     if status_handler:
         app.add_handler(CommandHandler("status", _wrap_set_chat(status_handler)))
     if quality_handler:

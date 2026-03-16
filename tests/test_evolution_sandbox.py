@@ -1,4 +1,5 @@
 """Тесты sandbox: копия проекта, применение патча, pytest в sandbox."""
+import tempfile
 import pytest
 from pathlib import Path
 
@@ -73,3 +74,21 @@ def test_cleanup_sandbox():
     path = str(sandbox)
     cleanup_sandbox(sandbox)
     assert not Path(path).exists()
+
+
+def test_incremental_sandbox_keeps_template_unchanged(monkeypatch, tmp_path):
+    root = _project_root()
+    monkeypatch.setenv("EVOLUTION_INCREMENTAL_SANDBOX", "1")
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+
+    sandbox = create_sandbox(root)
+    rel = "tests/test_governance_policy_engine.py"
+    template_file = tmp_path / "agent_sandbox_cache" / "template" / rel
+    original_template_text = template_file.read_text(encoding="utf-8")
+    try:
+        apply_in_sandbox(sandbox, rel, "# changed in sandbox\n")
+        sandbox_text = (sandbox / rel).read_text(encoding="utf-8")
+        assert sandbox_text == "# changed in sandbox\n"
+        assert template_file.read_text(encoding="utf-8") == original_template_text
+    finally:
+        cleanup_sandbox(sandbox)

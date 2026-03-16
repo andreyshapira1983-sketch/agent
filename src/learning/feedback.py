@@ -45,5 +45,27 @@ def add_feedback(request: str, response: str, rating: float | None = None) -> No
     _save()
 
 
+def rate_last_feedback(rating: float) -> bool:
+    """Выставить рейтинг последнему обмену (предпочтительно последнему unrated)."""
+    try:
+        val = float(rating)
+    except Exception:
+        return False
+    if val < 0.0 or val > 1.0:
+        return False
+
+    for item in reversed(_log):
+        if item.get("rating") is None:
+            item["rating"] = val
+            _save()
+            return True
+
+    if _log:
+        _log[-1]["rating"] = val
+        _save()
+        return True
+    return False
+
+
 def get_recent_feedback(n: int = 50) -> list[dict[str, Any]]:
     return _log[-n:]

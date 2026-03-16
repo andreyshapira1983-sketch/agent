@@ -228,6 +228,7 @@ def get_help_text() -> str:
         "/safe_expand — расширяться только через песочницу (propose_patch → validate → accept_patch)",
         "/apply_sandbox_only — применять только помеченное из песочницы (блокирует write_file/propose_file_edit в автономном режиме)",
         "/apply_validated — применить все проверенные патчи из песочницы (без программирования)",
+        "/rate X — оценить последний ответ (X: 1..5 или 0..1, например /rate 5 или /rate 0.8)",
         "/remind завтра 18:00 купить молоко — напоминание (или: через 2 часа позвонить)",
         "",
         "Команды не обязательны: можно писать обычными фразами.",
@@ -235,6 +236,35 @@ def get_help_text() -> str:
         "Обычное сообщение — агент отвечает и при необходимости выполняет действия на ПК.",
     ]
     return "\n".join(lines)
+
+
+def add_rating_from_text(raw_value: str) -> str:
+    """Считать рейтинг из текста и привязать к последнему обмену в feedback."""
+    value = (raw_value or "").strip().replace(",", ".")
+    if not value:
+        return "Укажи оценку: /rate 1..5 или /rate 0..1"
+    try:
+        parsed = float(value)
+    except ValueError:
+        return "Не понял оценку. Пример: /rate 5 или /rate 0.8"
+
+    # Поддержка привычной шкалы 1..5 и нормированной 0..1.
+    if 1.0 <= parsed <= 5.0:
+        normalized = parsed / 5.0
+    elif 0.0 <= parsed <= 1.0:
+        normalized = parsed
+    else:
+        return "Оценка вне диапазона. Используй 1..5 или 0..1"
+
+    try:
+        from src.learning.feedback import rate_last_feedback
+
+        ok = rate_last_feedback(normalized)
+        if not ok:
+            return "Пока нечего оценивать: сначала нужен хотя бы один ответ агента."
+        return f"Принял оценку: {parsed:g} (нормировано: {normalized:.2f}). Учту в обучении."
+    except Exception as e:
+        return f"Не удалось сохранить оценку: {e!s}"
 
 
 def get_quality_status() -> str:

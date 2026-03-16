@@ -4,6 +4,8 @@ Sandbox для патчей: копия проекта → применение 
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -11,6 +13,10 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+
+
+_INCREMENTAL_ENV = "EVOLUTION_INCREMENTAL_SANDBOX"
+_CACHE_DIR_NAME = "agent_sandbox_cache"
 
 
 def _ignore_for_copy(directory: Path | str, names: list[str]) -> list[str]:
@@ -24,6 +30,79 @@ def _ignore_for_copy(directory: Path | str, names: list[str]) -> list[str]:
     return [n for n in names if n in ignore or n.endswith(".pyc") or n.endswith(".bak")]
 
 
+def _is_incremental_enabled() -> bool:
+    return (os.getenv(_INCREMENTAL_ENV) or "1").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _copy_with_hardlinks(src: str, dst: str) -> str:
+    """Копирование файла через hardlink; fallback на copy2 при ограничениях ФС."""
+    try:
+        os.link(src, dst)
+    except OSError:
+        shutil.copy2(src, dst)
+    return dst
+
+
+def _cache_paths(tmp_root: Path) -> tuple[Path, Path, Path]:
+    cache_root = tmp_root / _CACHE_DIR_NAME
+    template_dir = cache_root / "template"
+    meta_path = cache_root / "template_meta.json"
+    return cache_root, template_dir, meta_path
+
+
+def _project_signature(project_root: Path) -> str:
+    """Лёгкий отпечаток проекта: path+size+mtime для инвалидации шаблона."""
+    h = hashlib.sha256()
+    for root, dirs, files in os.walk(project_root):
+        dirs[:] = [d for d in dirs if d not in set(_ignore_for_copy(root, dirs))]
+        for name in sorted(files):
+            if name.endswith(".pyc") or name.endswith(".bak"):
+                continue
+            full = Path(root) / name
+            rel = full.relative_to(project_root).as_posix()
+            try:
+                st = full.stat()
+            except OSError:
+                continue
+            h.update(rel.encode("utf-8", errors="ignore"))
+            h.update(str(st.st_size).encode("ascii"))
+            h.update(str(st.st_mtime_ns).encode("ascii"))
+    return h.hexdigest()
+
+
+def _ensure_template(project_root: Path) -> Path:
+    tmp_root = Path(tempfile.gettempdir())
+    cache_root, template_dir, meta_path = _cache_paths(tmp_root)
+    cache_root.mkdir(parents=True, exist_ok=True)
+
+    sig = _project_signature(project_root)
+    current_sig = ""
+    try:
+        if meta_path.exists():
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            current_sig = str((meta or {}).get("signature") or "")
+    except Exception:
+        current_sig = ""
+
+    if template_dir.exists() and current_sig == sig:
+        return template_dir
+
+    if template_dir.exists():
+        shutil.rmtree(template_dir, ignore_errors=True)
+    shutil.copytree(
+        project_root,
+        template_dir,
+        ignore=_ignore_for_copy,
+        dirs_exist_ok=False,
+        symlinks=False,
+    )
+    meta_path.write_text(
+        json.dumps({"signature": sig, "created_at": time.time()}, ensure_ascii=False, indent=0),
+        encoding="utf-8",
+    )
+    return template_dir
+
+
 def create_sandbox(project_root: Path) -> Path:
     """
     Создать копию проекта во временной директории.
@@ -31,12 +110,23 @@ def create_sandbox(project_root: Path) -> Path:
     """
     parent = Path(tempfile.gettempdir())
     sandbox_path = parent / f"sandbox_{os.getpid()}_{time.time_ns()}"
+    if not _is_incremental_enabled():
+        shutil.copytree(
+            project_root,
+            sandbox_path,
+            ignore=_ignore_for_copy,
+            dirs_exist_ok=False,
+            symlinks=False,
+        )
+        return sandbox_path
+
+    template_dir = _ensure_template(project_root)
     shutil.copytree(
-        project_root,
+        template_dir,
         sandbox_path,
-        ignore=_ignore_for_copy,
         dirs_exist_ok=False,
         symlinks=False,
+        copy_function=_copy_with_hardlinks,
     )
     return sandbox_path
 
@@ -47,6 +137,17 @@ def apply_in_sandbox(sandbox_root: Path, relative_path: str, content: str) -> No
     if not str(target).startswith(str(sandbox_root)):
         raise PermissionError(f"Path escapes sandbox: {relative_path}")
     target.parent.mkdir(parents=True, exist_ok=True)
+
+    # Если файл hardlink на шаблон, отвязываем inode перед записью.
+    if target.exists():
+        try:
+            if target.stat().st_nlink > 1:
+                detached = target.with_suffix(target.suffix + ".detached")
+                shutil.copy2(target, detached)
+                os.replace(detached, target)
+        except OSError:
+            pass
+
     target.write_text(content, encoding="utf-8")
 
 

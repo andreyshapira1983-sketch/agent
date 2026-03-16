@@ -4,8 +4,11 @@
 """
 from __future__ import annotations
 
+import json
+import os
 import random
 from collections import deque
+from pathlib import Path
 from typing import Any
 
 EMOTION_KEYS = (
@@ -24,9 +27,38 @@ _state: dict[str, float] = {k: 0.0 for k in EMOTION_KEYS}
 # История доминирующей эмоции: (name, value) за последние шаги
 _history: deque[tuple[str, float]] = deque(maxlen=50)
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_STATE_PATH = Path((os.getenv("EMOTION_STATE_PATH") or str(_PROJECT_ROOT / "data" / "emotion_state.json")).strip())
+
 
 def _clamp(v: float) -> float:
     return max(0.0, min(1.0, v))
+
+
+def _load_state() -> None:
+    """Загрузить emotion state с диска (если есть)."""
+    global _state
+    try:
+        if not _STATE_PATH.exists():
+            return
+        raw = json.loads(_STATE_PATH.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            return
+        for k in EMOTION_KEYS:
+            v = raw.get(k)
+            if isinstance(v, (int, float)):
+                _state[k] = _clamp(float(v))
+    except Exception:
+        pass
+
+
+def _save_state() -> None:
+    """Сохранить emotion state на диск без падения по I/O ошибкам."""
+    try:
+        _STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _STATE_PATH.write_text(json.dumps(_state, ensure_ascii=False, indent=0), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def get_state() -> dict[str, float]:
@@ -39,6 +71,7 @@ def set_state(state: dict[str, float]) -> None:
     for k in EMOTION_KEYS:
         if k in state and isinstance(state[k], (int, float)):
             _state[k] = _clamp(float(state[k]))
+    _save_state()
 
 
 def update(deltas: dict[str, float]) -> None:
@@ -48,6 +81,7 @@ def update(deltas: dict[str, float]) -> None:
     # После обновления — записать снэпшот доминирующей эмоции
     name, value = get_dominant()
     _history.append((name, float(value)))
+    _save_state()
 
 
 def decay_tick() -> None:
@@ -57,6 +91,7 @@ def decay_tick() -> None:
     # Тоже обновляем историю после затухания
     name, value = get_dominant()
     _history.append((name, float(value)))
+    _save_state()
 
 
 def get_dominant() -> tuple[str, float]:
@@ -118,3 +153,6 @@ def trigger_random_event() -> None:
     which = random.choice(EMOTION_KEYS)
     delta = (random.random() - 0.4) * 0.25
     update({which: delta})
+
+
+_load_state()
