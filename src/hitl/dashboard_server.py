@@ -1,9 +1,24 @@
+
+
+from __future__ import annotations
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+app = FastAPI(title="Agent Dashboard API")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
+
 """
 Dashboard API server: state, queue, audit, workspace.
 Запуск в отдельном потоке рядом с Telegram ботом (main не блокируется).
 Endpoints: GET /api/dashboard (всё для карты), GET /api/state, /api/queue, /api/audit, /api/workspace.
 """
-from __future__ import annotations
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 import json
 import logging
@@ -290,3 +305,52 @@ def start_dashboard_thread(host: str = "127.0.0.1", port: int | None = None) -> 
     t.start()
     _log.info("Dashboard server thread started: http://%s:%s", host, port)
     return t
+
+    # Экспорт FastAPI app для ASGI (uvicorn)
+    from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import HTMLResponse, JSONResponse
+    from fastapi.staticfiles import StaticFiles
+
+    app = FastAPI(title="Agent Dashboard API")
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
+
+    @app.get("/api/dashboard")
+    def api_dashboard():
+        return JSONResponse(get_dashboard_data())
+
+    @app.get("/api/state")
+    def api_state():
+        return JSONResponse(_safe(_get_state_for_api) or {})
+
+    @app.get("/api/queue")
+    def api_queue():
+        try:
+            from src.tasks.queue import peek, size
+            return JSONResponse({"size": size(), "tasks": peek(50)})
+        except Exception:
+            return JSONResponse({"size": 0, "tasks": []})
+
+    @app.get("/api/audit")
+    def api_audit(n: int = 50):
+        try:
+            from src.hitl.audit_log import get_audit_tail
+            return JSONResponse(get_audit_tail(n))
+        except Exception:
+            return JSONResponse([])
+
+    @app.get("/api/workspace")
+    def api_workspace(depth: int = 3, entries: int = 200):
+        try:
+            from src.environment.filesystem import build_tree_snapshot
+            return JSONResponse({"tree": build_tree_snapshot(_ROOT, max_depth=depth, max_entries=entries)})
+        except Exception as e:
+            return JSONResponse({"tree": "", "error": str(e)})
+
+    dashboard_dir = _ROOT / "dashboard"
+    if dashboard_dir.is_dir():
+        app.mount("/dashboard", StaticFiles(directory=str(dashboard_dir), html=True), name="dashboard")
+    else:
+        @app.get("/dashboard")
+        def serve_dashboard():
+            return HTMLResponse("<p>Dashboard static files not found. Create <code>dashboard/</code> with index.html.</p>")

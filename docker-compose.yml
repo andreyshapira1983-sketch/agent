@@ -1,52 +1,42 @@
+version: '3.8'
+
 services:
   agent:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: agent-12-systems
+    container_name: ai-agent-12systems
     restart: unless-stopped
-    
     environment:
+      # Copy from your .env file
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - TELEGRAM=${TELEGRAM}
       - TELEGRAM_ALERTS_CHAT_ID=${TELEGRAM_ALERTS_CHAT_ID}
       - TELEGRAM_ALERTS_MIN_INTERVAL_SEC=${TELEGRAM_ALERTS_MIN_INTERVAL_SEC:-60}
-      - TELEGRAM_AUTONOMOUS_EVENTS=${TELEGRAM_AUTONOMOUS_EVENTS:-1}
-      - TELEGRAM_EVENT_TYPES=${TELEGRAM_EVENT_TYPES}
-      - TELEGRAM_STEP_INTERVAL_SEC=${TELEGRAM_STEP_INTERVAL_SEC:-10}
-      - AUTONOMOUS_START=${AUTONOMOUS_START}
-      - APPLY_SANDBOX_ONLY=${APPLY_SANDBOX_ONLY}
-      - SAFE_EXPAND=${SAFE_EXPAND}
+      - AUTONOMOUS_START=${AUTONOMOUS_START:-0}
       - INITIATIVE_TEMPERATURE=${INITIATIVE_TEMPERATURE:-0.7}
-      - TOOL_SLOW_THRESHOLD_SEC=${TOOL_SLOW_THRESHOLD_SEC:-5}
-      - BUILD_CODE_INDEX=${BUILD_CODE_INDEX}
-      - DASHBOARD=${DASHBOARD}
+      - TOOL_SLOW_THRESHOLD_SEC=${TOOL_SLOW_THRESHOLD_SEC:-3}
+      - DASHBOARD=${DASHBOARD:-1}
       - DASHBOARD_PORT=${DASHBOARD_PORT:-8765}
-      - AGENT_NEUTRAL_FAMILY_MODE=${AGENT_NEUTRAL_FAMILY_MODE}
-      - AGENT_STRICT_MODE=${AGENT_STRICT_MODE}
-    
-    env_file:
-      - .env
-    
+      - AGENT_PROFILE=${AGENT_PROFILE:-stable}
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+
     volumes:
-      - ./data:/app/data
-      - ./backups:/app/backups
-      - ./config:/app/config
-      - ./logs:/app/logs
-    
+      # Persist data across restarts
+      - agent_data:/app/data
+      - agent_logs:/app/logs
+      
+      # Development: uncomment to enable hot-reload
+      # - ./src:/app/src
+      # - ./config:/app/config
+      # - ./templates:/app/templates
+
     ports:
-      - "${DASHBOARD_PORT:-8765}:8765"
-    
-    networks:
-      - agent-network
-    
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    
-    # Resource limits (adjust based on your needs)
+      # Dashboard (if DASHBOARD=1)
+      - "8765:8765"
+
+    # Resource limits
     deploy:
       resources:
         limits:
@@ -56,6 +46,22 @@ services:
           cpus: '1'
           memory: 1G
 
-networks:
-  agent-network:
-    driver: bridge
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Override for development (uncomment to use)
+    # command: python -m src.main
+    # stdin_open: true
+    # tty: true
+
+volumes:
+  agent_data:
+  agent_logs:
+
+# For development with hot-reload, use:
+# docker compose watch
+# (requires Docker Desktop 4.20+ or Docker Engine 4.20+)

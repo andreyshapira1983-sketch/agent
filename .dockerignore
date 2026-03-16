@@ -1,9 +1,31 @@
-# Python cache
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
 .Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
 # Virtual environments
 venv/
@@ -11,44 +33,40 @@ env/
 ENV/
 .venv
 
-# IDE and editors
+# IDE
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
 *~
 .DS_Store
-.cursor
 
-# Testing
+# Tests & coverage
 .pytest_cache/
-.mypy_cache/
 .coverage
-.tox/
 htmlcov/
+.mypy_cache/
+.ruff_cache/
 test-results/
 
-# Project-specific
-.env
-.env.local
-data/
-backups/
+# Logs
 logs/
 *.log
 
-# Git
-.git/
-.gitignore
+# Local data (exclude from image, use volumes)
+backups/
+data/
 
 # Documentation
-docs/archive/
+docs/
 *.md
+!README.md
 
-# Build artifacts
-build/
-dist/
-*.egg-info/
+# CI/CD
+.github/
 
-# OS
-.DS_Store
-Thumbs.db
+# Caches
+.cache/
+tmp/
+temp/

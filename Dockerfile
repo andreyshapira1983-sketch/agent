@@ -1,47 +1,55 @@
-# Build stage
-FROM python:3.10-slim as builder
+# Multi-stage build for Python AI Agent
+FROM python:3.11-slim as builder
 
 WORKDIR /app
 
-# Install system dependencies for build
+# Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     gcc \
-    g++ \
-    make \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
+# Copy requirements and install Python dependencies
 COPY requirements.txt .
-
-# Create virtual environment and install dependencies
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --user -r requirements.txt
 
 # Runtime stage
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install runtime dependencies (ffmpeg for video processing)
+# Install runtime dependencies (ffmpeg for audio processing, curl for health checks)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy virtual environment from builder
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# Create non-root user for security
+RUN useradd -m -u 1000 agent
+
+# Copy Python dependencies from builder
+COPY --from=builder /root/.local /home/agent/.local
 
 # Copy application code
-COPY . .
+COPY --chown=agent:agent src/ /app/src/
+COPY --chown=agent:agent config/ /app/config/
+COPY --chown=agent:agent templates/ /app/templates/
+COPY --chown=agent:agent .env.example /app/.env.example
 
 # Create data directory for persistence
-RUN mkdir -p /app/data /app/backups
+RUN mkdir -p /app/data /app/logs && chown -R agent:agent /app/data /app/logs
+
+# Set environment variables
+ENV PATH=/home/agent/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Switch to non-root user
+USER agent
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import sys; sys.exit(0)" || exit 1
+    CMD curl -f http://localhost:8765/health || exit 1 || python -c "import sys; sys.exit(0)"
 
-# Run application
-CMD ["python", "-m", "src.main"]
+# Run the application
+ENTRYPOINT ["python", "-m", "src.main"]
