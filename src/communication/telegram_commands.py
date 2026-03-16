@@ -61,6 +61,8 @@ def get_help_text() -> str:
         "Команды бота:",
         "/help — этот список",
         "/status — статус агента (квоты, последний цикл, очередь)",
+        "/quality — quality-метрики и последние ремонты/патчи",
+        "/reset_quality — сбросить quality-метрики и историю",
         "/tasks или /queue — очередь задач",
         "/log [N] [action] [module] [priority] — последние действия",
         "/mood или /emotions — эмоциональное состояние",
@@ -75,6 +77,46 @@ def get_help_text() -> str:
         "Обычное сообщение — агент отвечает и при необходимости выполняет действия на ПК.",
     ]
     return "\n".join(lines)
+
+
+def get_quality_status() -> str:
+    """Quality-метрики и краткая история последних ремонтов/патчей."""
+    from src.monitoring.metrics import get_metrics
+
+    m = get_metrics()
+    q = (m.get("quality") or {}) if isinstance(m, dict) else {}
+    lines = ["Quality:"]
+    lines.append(f"  Решено задач: {q.get('tasks_solved', 0)}")
+    lines.append(f"  Принято патчей: {q.get('accepted_patches', 0)}")
+    lines.append(f"  Успешных ремонтов: {q.get('successful_repairs', 0)}")
+    lines.append(f"  Проваленных ремонтов: {q.get('failed_repairs', 0)}")
+    ratio = q.get("test_pass_ratio")
+    if ratio is None:
+        lines.append("  Тесты: данных пока нет")
+    else:
+        lines.append(f"  Тесты: pass_ratio={ratio} ({q.get('test_runs_passed', 0)}/{q.get('test_runs_total', 0)})")
+    history = q.get("recent_history") or []
+    if history:
+        lines.append("Последние события:")
+        for item in history[-5:]:
+            event_type = item.get("event_type", "event")
+            status = item.get("status", "unknown")
+            target = item.get("target_path") or "-"
+            patch_id = item.get("patch_id") or "-"
+            note = item.get("note") or ""
+            suffix = f"; note={note}" if note else ""
+            lines.append(f"  {event_type}: {status}; path={target}; patch={patch_id}{suffix}")
+    else:
+        lines.append("Последние события: пока нет")
+    return "\n".join(lines)
+
+
+def reset_quality_status() -> str:
+    """Сбросить quality-метрики и историю событий."""
+    from src.monitoring.metrics import metrics
+
+    metrics.reset_quality()
+    return "Quality-метрики и история сброшены."
 
 
 def get_agent_status() -> str:
@@ -167,6 +209,9 @@ def get_agent_status() -> str:
                     f"Тесты: pass_ratio={ratio} ({quality.get('test_runs_passed', 0)}/{quality.get('test_runs_total', 0)}) "
                     f"[source=runtime_metrics timestamp={ts}]"
                 )
+            history = quality.get("recent_history") or []
+            if history:
+                lines.append(f"Quality history: {len(history)} событий [source=runtime_metrics timestamp={ts}]")
     except Exception:
         lines.append("Метрики: не удалось прочитать.")
     try:

@@ -5,6 +5,7 @@ Metrics: calls, errors, successes, timing, recent requests, per-tool execution t
 from __future__ import annotations
 
 from collections import deque
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from typing import Any
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _QUALITY_STORAGE_PATH = _PROJECT_ROOT / "data" / "quality_metrics.json"
+_MAX_QUALITY_HISTORY = 20
 
 
 class Metrics:
@@ -29,6 +31,7 @@ class Metrics:
         self.failed_repairs = 0
         self.test_runs_total = 0
         self.test_runs_passed = 0
+        self._quality_history: list[dict[str, Any]] = []
         self._storage_path = storage_path or _QUALITY_STORAGE_PATH
         self._load_quality_state()
 
@@ -45,6 +48,8 @@ class Metrics:
             self.failed_repairs = int(raw.get("failed_repairs", 0) or 0)
             self.test_runs_total = int(raw.get("test_runs_total", 0) or 0)
             self.test_runs_passed = int(raw.get("test_runs_passed", 0) or 0)
+            history = raw.get("recent_history") or []
+            self._quality_history = list(history) if isinstance(history, list) else []
         except Exception:
             pass
 
@@ -58,6 +63,29 @@ class Metrics:
             )
         except Exception:
             pass
+
+    def _append_quality_event(
+        self,
+        *,
+        event_type: str,
+        status: str,
+        patch_id: str | None = None,
+        target_path: str | None = None,
+        note: str | None = None,
+    ) -> None:
+        event: dict[str, Any] = {
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "event_type": event_type,
+            "status": status,
+        }
+        if patch_id:
+            event["patch_id"] = patch_id
+        if target_path:
+            event["target_path"] = target_path
+        if note:
+            event["note"] = note[:200]
+        self._quality_history.append(event)
+        self._quality_history = self._quality_history[-_MAX_QUALITY_HISTORY:]
 
     def record_call(self) -> None:
         self.calls += 1
@@ -98,15 +126,35 @@ class Metrics:
         self.tasks_solved += 1
         self._save_quality_state()
 
-    def record_patch_accepted(self) -> None:
+    def record_patch_accepted(self, *, patch_id: str | None = None, target_path: str | None = None) -> None:
         self.accepted_patches += 1
+        self._append_quality_event(
+            event_type="accepted_patch",
+            status="ok",
+            patch_id=patch_id,
+            target_path=target_path,
+        )
         self._save_quality_state()
 
-    def record_repair_attempt(self, *, success: bool) -> None:
+    def record_repair_attempt(
+        self,
+        *,
+        success: bool,
+        patch_id: str | None = None,
+        target_path: str | None = None,
+        note: str | None = None,
+    ) -> None:
         if success:
             self.successful_repairs += 1
         else:
             self.failed_repairs += 1
+        self._append_quality_event(
+            event_type="repair_attempt",
+            status="ok" if success else "failed",
+            patch_id=patch_id,
+            target_path=target_path,
+            note=note,
+        )
         self._save_quality_state()
 
     def record_test_run(self, *, passed: bool) -> None:
@@ -129,7 +177,23 @@ class Metrics:
             "test_runs_total": self.test_runs_total,
             "test_runs_passed": self.test_runs_passed,
             "test_pass_ratio": self.get_test_pass_ratio(),
+            "recent_history": self.get_recent_quality_history(limit=_MAX_QUALITY_HISTORY),
         }
+
+    def get_recent_quality_history(self, limit: int = 10) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        return self._quality_history[-limit:]
+
+    def reset_quality(self) -> None:
+        self.tasks_solved = 0
+        self.accepted_patches = 0
+        self.successful_repairs = 0
+        self.failed_repairs = 0
+        self.test_runs_total = 0
+        self.test_runs_passed = 0
+        self._quality_history = []
+        self._save_quality_state()
 
     def get_average_time(self) -> float:
         if not self.execution_times:

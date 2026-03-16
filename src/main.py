@@ -22,10 +22,21 @@ if _open_key:
     os.environ["OPENAI_API_KEY"] = _open_key
 
 
-async def _cmd_status(update, context) -> None:
-    from telegram import Update
+async def _cmd_status(update, _context) -> None:
     from src.communication.telegram_commands import get_agent_status
     text = await asyncio.to_thread(get_agent_status)
+    await update.message.reply_text((text or "Нет данных.")[:4000])
+
+
+async def _cmd_quality(update, _context) -> None:
+    from src.communication.telegram_commands import get_quality_status
+    text = await asyncio.to_thread(get_quality_status)
+    await update.message.reply_text((text or "Нет данных.")[:4000])
+
+
+async def _cmd_reset_quality(update, _context) -> None:
+    from src.communication.telegram_commands import reset_quality_status
+    text = await asyncio.to_thread(reset_quality_status)
     await update.message.reply_text((text or "Нет данных.")[:4000])
 
 
@@ -376,6 +387,8 @@ def main() -> None:
         cancel_handler=_cmd_cancel,
         remind_handler=_cmd_remind,
         status_handler=_cmd_status,
+        quality_handler=_cmd_quality,
+        reset_quality_handler=_cmd_reset_quality,
         log_handler=_cmd_log,
         tasks_handler=_cmd_tasks,
         mood_handler=_cmd_mood,

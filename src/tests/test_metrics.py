@@ -9,9 +9,9 @@ def test_metrics_class(tmp_path):
     m.record_error()
     m.log_time(0.5)
     m.record_task_solved()
-    m.record_patch_accepted()
-    m.record_repair_attempt(success=True)
-    m.record_repair_attempt(success=False)
+    m.record_patch_accepted(patch_id="p1", target_path="src/a.py")
+    m.record_repair_attempt(success=True, patch_id="p2", target_path="src/a.py", note="ok")
+    m.record_repair_attempt(success=False, patch_id="p3", target_path="src/b.py", note="failed")
     m.record_test_run(passed=True)
     m.record_test_run(passed=False)
 
@@ -27,6 +27,7 @@ def test_metrics_class(tmp_path):
     assert summary["quality"]["test_runs_total"] == 2  # nosec B101
     assert summary["quality"]["test_runs_passed"] == 1  # nosec B101
     assert summary["quality"]["test_pass_ratio"] == 0.5  # nosec B101
+    assert len(summary["quality"]["recent_history"]) == 3  # nosec B101
 
 
 def test_get_metrics():
@@ -82,9 +83,9 @@ def test_quality_metrics_persist_between_instances(tmp_path):
 
     m1 = Metrics(storage_path=storage)
     m1.record_task_solved()
-    m1.record_patch_accepted()
-    m1.record_repair_attempt(success=True)
-    m1.record_repair_attempt(success=False)
+    m1.record_patch_accepted(patch_id="p1", target_path="src/x.py")
+    m1.record_repair_attempt(success=True, patch_id="p2", target_path="src/y.py", note="accepted")
+    m1.record_repair_attempt(success=False, patch_id="p3", target_path="src/z.py", note="rejected")
     m1.record_test_run(passed=True)
     m1.record_test_run(passed=False)
 
@@ -98,5 +99,20 @@ def test_quality_metrics_persist_between_instances(tmp_path):
     assert summary["quality"]["test_runs_total"] == 2  # nosec B101
     assert summary["quality"]["test_runs_passed"] == 1  # nosec B101
     assert summary["quality"]["test_pass_ratio"] == 0.5  # nosec B101
+    assert len(summary["quality"]["recent_history"]) == 3  # nosec B101
+
+
+def test_reset_quality_clears_counters_and_history(tmp_path):
+    storage = tmp_path / "quality_metrics.json"
+    m = Metrics(storage_path=storage)
+    m.record_patch_accepted(patch_id="p1", target_path="src/x.py")
+    m.record_repair_attempt(success=False, patch_id="p2", target_path="src/y.py")
+
+    m.reset_quality()
+
+    summary = m.get_metrics_summary()
+    assert summary["quality"]["accepted_patches"] == 0  # nosec B101
+    assert summary["quality"]["failed_repairs"] == 0  # nosec B101
+    assert summary["quality"]["recent_history"] == []  # nosec B101
 
 

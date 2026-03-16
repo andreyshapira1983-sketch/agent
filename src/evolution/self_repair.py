@@ -74,7 +74,7 @@ def try_repair() -> bool:
         logger.warning("try_repair: не удалось определить файл ошибки из вывода pytest")
         try:
             from src.monitoring.metrics import metrics  # noqa: PLC0415
-            metrics.record_repair_attempt(success=False)
+            metrics.record_repair_attempt(success=False, note="failure_parse_error")
         except Exception:
             pass
         return False
@@ -93,7 +93,11 @@ def try_repair() -> bool:
         logger.warning("try_repair: generate_patch вернул None (нет ключа LLM или ошибка)")
         try:
             from src.monitoring.metrics import metrics  # noqa: PLC0415
-            metrics.record_repair_attempt(success=False)
+            metrics.record_repair_attempt(
+                success=False,
+                target_path=failure.get("file"),
+                note="patch_generation_failed",
+            )
         except Exception:
             pass
         return False
@@ -111,7 +115,12 @@ def try_repair() -> bool:
         logger.warning("try_repair: кандидат %s не прошёл sandbox-тесты", patch_id)
         try:
             from src.monitoring.metrics import metrics  # noqa: PLC0415
-            metrics.record_repair_attempt(success=False)
+            metrics.record_repair_attempt(
+                success=False,
+                patch_id=patch_id,
+                target_path=failure.get("file"),
+                note="sandbox_validation_failed",
+            )
         except Exception:
             pass
         return False
@@ -121,7 +130,12 @@ def try_repair() -> bool:
     success = "applied to" in msg
     try:
         from src.monitoring.metrics import metrics  # noqa: PLC0415
-        metrics.record_repair_attempt(success=success)
+        metrics.record_repair_attempt(
+            success=success,
+            patch_id=patch_id,
+            target_path=failure.get("file"),
+            note=msg,
+        )
     except Exception:
         pass
     return success

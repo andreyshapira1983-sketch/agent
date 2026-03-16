@@ -202,7 +202,7 @@ def accept_patch_to_stable(patch_id: str) -> str:
             pass
         try:
             from src.monitoring.metrics import metrics
-            metrics.record_patch_accepted()
+            metrics.record_patch_accepted(patch_id=patch_id, target_path=entry.get("target_path"))
         except Exception:
             pass
         # Remove from manifest so it is not applied again

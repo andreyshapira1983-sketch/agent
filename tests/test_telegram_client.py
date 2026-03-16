@@ -60,6 +60,8 @@ def test_run_bot_registers_minimal_command_and_message_routing(monkeypatch) -> N
         "token",
         help_handler=_dummy,
         status_handler=_dummy,
+        quality_handler=_dummy,
+        reset_quality_handler=_dummy,
         log_handler=_dummy,
         tasks_handler=_dummy,
         mood_handler=_dummy,
@@ -76,6 +78,8 @@ def test_run_bot_registers_minimal_command_and_message_routing(monkeypatch) -> N
     command_names = [h[1] for h in fake_app.handlers if isinstance(h, tuple) and h[0] == "command"]
     assert "help" in command_names
     assert "status" in command_names
+    assert "quality" in command_names
+    assert "reset_quality" in command_names
     assert "log" in command_names
     assert "tasks" in command_names
     assert "queue" in command_names
