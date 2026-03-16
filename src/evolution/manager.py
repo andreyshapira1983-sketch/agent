@@ -63,9 +63,94 @@ class EvolutionManager:
         self.evolution_log.append(message)
         logger.info("evolution: %s", message)
 
-    def generate_patch(self, error_info):
-        """Заглушка: создание патча по информации об ошибке."""
-        pass
+    def generate_patch(self, error_info: dict) -> "str | None":
+        """
+        Сгенерировать патч для исправления ошибки через LLM (OpenAI).
+        error_info: {"file": "relative/path.py", "error": "...", "traceback": "..."}
+        Возвращает patch_id из safety.submit_candidate_patch, или None при неудаче.
+        """
+        import os
+        import re
+        from pathlib import Path
+
+        target_path = (error_info or {}).get("file") or ""
+        if not target_path:
+            logger.warning("generate_patch: нет 'file' в error_info")
+            return None
+
+        project_root = Path(__file__).resolve().parents[2]
+        full_path = (project_root / target_path).resolve()
+        if not str(full_path).startswith(str(project_root)):
+            logger.warning("generate_patch: путь вне проекта: %s", target_path)
+            return None
+
+        try:
+            current_content = full_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            logger.warning("generate_patch: файл не найден: %s", full_path)
+            return None
+
+        key = os.getenv("OPENAI_API_KEY") or os.getenv("OPEN_KEY_API", "")
+        if not key:
+            logger.warning("generate_patch: OPENAI_API_KEY не задан — LLM пропущен")
+            return None
+
+        error_summary = (error_info.get("error") or "")[:500]
+        traceback_text = (error_info.get("traceback") or "")[:1500]
+        user_msg = (
+            f"File: {target_path}\n\n"
+            f"Error: {error_summary}\n\n"
+            f"Traceback:\n{traceback_text}\n\n"
+            f"Current file content:\n---\n{current_content[:6000]}\n---\n"
+            "Output ONLY the corrected full file content. No explanation, no markdown fences."
+        )
+
+        try:
+            from openai import OpenAI  # noqa: PLC0415
+            client = OpenAI(api_key=key)
+            r = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a patch generator. Fix the Python error described by the user. "
+                            "Output ONLY the corrected full file content. No explanation, no markdown."
+                        ),
+                    },
+                    {"role": "user", "content": user_msg},
+                ],
+            )
+            new_content = (r.choices[0].message.content or "").strip()
+            if new_content.startswith("```"):
+                new_content = re.sub(r"^```\w*\n?", "", new_content)
+                new_content = re.sub(r"\n?```\s*$", "", new_content)
+            new_content = new_content.strip()
+        except Exception as e:
+            logger.exception("generate_patch: ошибка LLM: %s", e)
+            return None
+
+        if not new_content or len(new_content) < 10:
+            logger.warning("generate_patch: LLM вернул пустой/короткий контент")
+            return None
+
+        try:
+            from src.evolution.safety import submit_candidate_patch  # noqa: PLC0415
+            patch_id = submit_candidate_patch(
+                target_path,
+                new_content,
+                reason=f"auto-repair: {error_summary[:100]}",
+            )
+        except Exception as e:
+            logger.exception("generate_patch: ошибка submit: %s", e)
+            return None
+
+        if patch_id.startswith("Error:"):
+            logger.warning("generate_patch: submit отклонён: %s", patch_id)
+            return None
+
+        self.log_change(f"generate_patch: создан кандидат {patch_id} для {target_path}")
+        return patch_id
 
     def apply_patch(self, patch_name):
         original_file_path = self.get_target_file_path(patch_name)
