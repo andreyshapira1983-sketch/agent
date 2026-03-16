@@ -17,6 +17,12 @@ class Metrics:
         self._recent_requests: deque = deque(maxlen=20)
         self._tool_times: dict[str, deque[float]] = {}
         self._tool_times_maxlen = 100
+        self.tasks_solved = 0
+        self.accepted_patches = 0
+        self.successful_repairs = 0
+        self.failed_repairs = 0
+        self.test_runs_total = 0
+        self.test_runs_passed = 0
 
     def record_call(self) -> None:
         self.calls += 1
@@ -53,6 +59,39 @@ class Metrics:
     def record_request_preview(self, text: str) -> None:
         self._recent_requests.append((text[:80] + "..." if len(text) > 80 else text))
 
+    def record_task_solved(self) -> None:
+        self.tasks_solved += 1
+
+    def record_patch_accepted(self) -> None:
+        self.accepted_patches += 1
+
+    def record_repair_attempt(self, *, success: bool) -> None:
+        if success:
+            self.successful_repairs += 1
+        else:
+            self.failed_repairs += 1
+
+    def record_test_run(self, *, passed: bool) -> None:
+        self.test_runs_total += 1
+        if passed:
+            self.test_runs_passed += 1
+
+    def get_test_pass_ratio(self) -> float | None:
+        if self.test_runs_total <= 0:
+            return None
+        return round(self.test_runs_passed / self.test_runs_total, 3)
+
+    def get_quality_summary(self) -> dict[str, Any]:
+        return {
+            "tasks_solved": self.tasks_solved,
+            "accepted_patches": self.accepted_patches,
+            "successful_repairs": self.successful_repairs,
+            "failed_repairs": self.failed_repairs,
+            "test_runs_total": self.test_runs_total,
+            "test_runs_passed": self.test_runs_passed,
+            "test_pass_ratio": self.get_test_pass_ratio(),
+        }
+
     def get_average_time(self) -> float:
         if not self.execution_times:
             return 0.0
@@ -66,6 +105,7 @@ class Metrics:
             "last_duration_sec": round(self.execution_times[-1], 2) if self.execution_times else None,
             "recent_requests": list(self._recent_requests)[-10:],
             "average_time": self.get_average_time(),
+            "quality": self.get_quality_summary(),
         }
         tool_summary = self.get_tool_times_summary()
         if tool_summary:

@@ -59,6 +59,11 @@ def try_repair() -> bool:
     Возвращает False если не удалось починить.
     """
     ok, output = _run_pytest()
+    try:
+        from src.monitoring.metrics import metrics  # noqa: PLC0415
+        metrics.record_test_run(passed=ok)
+    except Exception:
+        pass
     if ok:
         logger.info("try_repair: все тесты прошли, ремонт не нужен")
         return True
@@ -67,6 +72,11 @@ def try_repair() -> bool:
     failure = _parse_first_failure(output)
     if not failure:
         logger.warning("try_repair: не удалось определить файл ошибки из вывода pytest")
+        try:
+            from src.monitoring.metrics import metrics  # noqa: PLC0415
+            metrics.record_repair_attempt(success=False)
+        except Exception:
+            pass
         return False
 
     logger.info("try_repair: первая ошибка в %s", failure["file"])
@@ -81,16 +91,37 @@ def try_repair() -> bool:
     patch_id = mgr.generate_patch(failure)
     if not patch_id:
         logger.warning("try_repair: generate_patch вернул None (нет ключа LLM или ошибка)")
+        try:
+            from src.monitoring.metrics import metrics  # noqa: PLC0415
+            metrics.record_repair_attempt(success=False)
+        except Exception:
+            pass
         return False
 
     logger.info("try_repair: кандидат %s создан, sandbox-валидация...", patch_id)
     from src.evolution.safety import validate_candidate_with_tests, accept_patch_to_stable  # noqa: PLC0415
 
     validated = validate_candidate_with_tests(patch_id)
+    try:
+        from src.monitoring.metrics import metrics  # noqa: PLC0415
+        metrics.record_test_run(passed=validated)
+    except Exception:
+        pass
     if not validated:
         logger.warning("try_repair: кандидат %s не прошёл sandbox-тесты", patch_id)
+        try:
+            from src.monitoring.metrics import metrics  # noqa: PLC0415
+            metrics.record_repair_attempt(success=False)
+        except Exception:
+            pass
         return False
 
     msg = accept_patch_to_stable(patch_id)
     logger.info("try_repair: accept → %s", msg)
-    return "applied to" in msg
+    success = "applied to" in msg
+    try:
+        from src.monitoring.metrics import metrics  # noqa: PLC0415
+        metrics.record_repair_attempt(success=success)
+    except Exception:
+        pass
+    return success

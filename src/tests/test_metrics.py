@@ -8,12 +8,25 @@ def test_metrics_class():
     m.record_success()
     m.record_error()
     m.log_time(0.5)
+    m.record_task_solved()
+    m.record_patch_accepted()
+    m.record_repair_attempt(success=True)
+    m.record_repair_attempt(success=False)
+    m.record_test_run(passed=True)
+    m.record_test_run(passed=False)
 
     summary = m.get_metrics_summary()
     assert summary["calls"] == 2  # nosec B101
     assert summary["errors"] == 1  # nosec B101
     assert summary["successes"] == 1  # nosec B101
     assert summary["last_duration_sec"] == 0.5  # nosec B101
+    assert summary["quality"]["tasks_solved"] == 1  # nosec B101
+    assert summary["quality"]["accepted_patches"] == 1  # nosec B101
+    assert summary["quality"]["successful_repairs"] == 1  # nosec B101
+    assert summary["quality"]["failed_repairs"] == 1  # nosec B101
+    assert summary["quality"]["test_runs_total"] == 2  # nosec B101
+    assert summary["quality"]["test_runs_passed"] == 1  # nosec B101
+    assert summary["quality"]["test_pass_ratio"] == 0.5  # nosec B101
 
 
 def test_get_metrics():
@@ -21,6 +34,7 @@ def test_get_metrics():
     assert "calls" in summary  # nosec B101
     assert "errors" in summary  # nosec B101
     assert "successes" in summary  # nosec B101
+    assert "quality" in summary  # nosec B101
     assert summary == metrics.get_metrics_summary()  # nosec B101
 
 

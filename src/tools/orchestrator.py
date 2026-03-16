@@ -393,6 +393,12 @@ class Orchestrator:
                 "success": success,
                 "expected_result": result[:200],
             })
+            if success:
+                try:
+                    from src.monitoring.metrics import metrics
+                    metrics.record_task_solved()
+                except Exception:
+                    pass
             outcomes.append({"task_id": task.id, "success": success, "result_preview": result[:150]})
             completed_task_ids.add(task.id)
         return outcomes

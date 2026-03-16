@@ -200,6 +200,11 @@ def accept_patch_to_stable(patch_id: str) -> str:
             record_evolution_accept()
         except Exception:
             pass
+        try:
+            from src.monitoring.metrics import metrics
+            metrics.record_patch_accepted()
+        except Exception:
+            pass
         # Remove from manifest so it is not applied again
         manifest = [m for m in _load_manifest() if m.get("patch_id") != patch_id]
         _save_manifest(manifest)

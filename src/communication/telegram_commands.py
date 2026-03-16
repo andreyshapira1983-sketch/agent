@@ -151,6 +151,22 @@ def get_agent_status() -> str:
             lines.append(
                 f"Последний ответ: {m['last_duration_sec']} с [source=runtime_metrics timestamp={ts}]"
             )
+        quality = m.get("quality") or {}
+        if quality:
+            lines.append(
+                "Качество: "
+                f"решено задач={quality.get('tasks_solved', 0)}, "
+                f"принято патчей={quality.get('accepted_patches', 0)}, "
+                f"успешных ремонтов={quality.get('successful_repairs', 0)}, "
+                f"проваленных ремонтов={quality.get('failed_repairs', 0)} "
+                f"[source=runtime_metrics timestamp={ts}]"
+            )
+            ratio = quality.get("test_pass_ratio")
+            if ratio is not None:
+                lines.append(
+                    f"Тесты: pass_ratio={ratio} ({quality.get('test_runs_passed', 0)}/{quality.get('test_runs_total', 0)}) "
+                    f"[source=runtime_metrics timestamp={ts}]"
+                )
     except Exception:
         lines.append("Метрики: не удалось прочитать.")
     try:
