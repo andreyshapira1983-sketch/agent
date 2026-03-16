@@ -1,0 +1,14 @@
+import pytest
+from src.personality import personal_identity
+
+class TestPersonalIdentity:
+    def test_emotion_initialization(self):
+        identity = personal_identity.PersonalIdentity()
+        assert identity is not None
+
+    def test_emotion_reaction(self):
+        identity = personal_identity.PersonalIdentity()
+        identity.update_emotion('frustration')
+        assert identity.get_emotion('frustration') > 0
+
+    # Здесь можно добавить дополнительные тесты для проверки других функций

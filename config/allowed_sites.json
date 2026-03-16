@@ -1,0 +1,20 @@
+{
+  "description": "URL-префиксы сайтов, на которых агенту разрешено работать (fetch, портфолио, бесплатные библиотеки). Задачи с URL не из списка пропускаются, в Telegram уходит уведомление.",
+  "allowed_url_prefixes": [
+    "https://animevost.org",
+    "https://wtr-lab.com",
+    "https://www.fanmtl.com",
+    "https://fanmtl.com",
+    "https://chatgpt.com",
+    "https://github.com",
+    "https://api.github.com",
+    "https://www.gutenberg.org",
+    "https://gutenberg.org",
+    "https://openlibrary.org",
+    "https://www.wikibooks.org",
+    "https://wikibooks.org",
+    "https://ru.wikibooks.org",
+    "https://en.wikisource.org",
+    "https://wikisource.org"
+  ]
+}

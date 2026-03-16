@@ -1,0 +1,14 @@
+# Модульность
+
+class Module:
+    def __init__(self, name):
+        self.name = name
+
+    def execute(self):
+        # Логика выполнения модуля
+        pass
+
+# Пример использования
+if __name__ == '__main__':
+    my_module = Module('SampleModule')
+    my_module.execute()

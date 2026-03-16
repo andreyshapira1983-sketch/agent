@@ -1,0 +1,76 @@
+{
+  "active_profile": "canary",
+  "prompt_rules": "",
+  "version": 1,
+  "system_context_paths": [
+    "docs/AGENT_MASTER.md",
+    "docs/AGENT_DOCS_INDEX.md",
+    "README.md",
+    "AGENT_ARCHITECTURE.md",
+    "docs/AGENT_VISIBILITY_TEST.md",
+    "docs/ARCHITECTURE_PLAN.md",
+    "EVOLUTION.md",
+    "docs/GENETICS.md",
+    "config/SELF_MODEL.md"
+  ],
+  "system_context_max_chars": 14000,
+  "workspace_snapshot_max_chars": 5000,
+  "workspace_snapshot_max_depth": 4,
+  "workspace_snapshot_max_entries": 220,
+  "autonomy_limits": {
+    "max_json_input_len": 100000,
+    "max_parse_json_output_len": 50000,
+    "max_aggregate_array_len": 10000,
+    "max_suggest_priority_tasks": 1000,
+    "fetch_max_response_bytes": 1048576,
+    "fetch_cache_max_entries": 50,
+    "fetch_cache_ttl_sec": 0
+  },
+  "tool_performance": {
+    "warn_threshold_sec": 5.0
+  },
+  "profiles": {
+    "shadow": {
+      "autonomy_limits": {
+        "max_json_input_len": 100000,
+        "max_parse_json_output_len": 50000,
+        "max_aggregate_array_len": 10000,
+        "max_suggest_priority_tasks": 1000,
+        "fetch_max_response_bytes": 1048576,
+        "fetch_cache_max_entries": 100,
+        "fetch_cache_ttl_sec": 30
+      },
+      "tool_performance": {
+        "warn_threshold_sec": 2.0
+      }
+    },
+    "canary": {
+      "autonomy_limits": {
+        "max_json_input_len": 80000,
+        "max_parse_json_output_len": 40000,
+        "max_aggregate_array_len": 5000,
+        "max_suggest_priority_tasks": 500,
+        "fetch_max_response_bytes": 524288,
+        "fetch_cache_max_entries": 50,
+        "fetch_cache_ttl_sec": 15
+      },
+      "tool_performance": {
+        "warn_threshold_sec": 1.5
+      }
+    },
+    "stable": {
+      "autonomy_limits": {
+        "max_json_input_len": 50000,
+        "max_parse_json_output_len": 25000,
+        "max_aggregate_array_len": 2000,
+        "max_suggest_priority_tasks": 200,
+        "fetch_max_response_bytes": 262144,
+        "fetch_cache_max_entries": 30,
+        "fetch_cache_ttl_sec": 10
+      },
+      "tool_performance": {
+        "warn_threshold_sec": 1.0
+      }
+    }
+  }
+}

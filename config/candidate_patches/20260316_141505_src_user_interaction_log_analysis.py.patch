@@ -1,0 +1,12 @@
+# Модуль для анализа логов взаимодействий пользователей
+import json
+
+def analyze_user_logs(log_file):
+    with open(log_file, 'r') as file:
+        logs = json.load(file)
+        # Здесь будет логика анализа логов
+        print(logs)
+        # Вывести часто используемые команды, паттерны и т.д.
+
+if __name__ == '__main__':
+    analyze_user_logs('path/to/user_logs.json')

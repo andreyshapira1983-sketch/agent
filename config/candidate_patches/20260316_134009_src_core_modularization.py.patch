@@ -1,0 +1,20 @@
+# Модуль для управления модульностью системы
+
+class Modularization:
+    def __init__(self):
+        self.modules = {}
+
+    def add_module(self, name, module):
+        self.modules[name] = module
+
+    def get_module(self, name):
+        return self.modules.get(name)
+
+    def run_all_modules(self):
+        for module in self.modules.values():
+            if hasattr(module, 'run'):
+                module.run()
+
+# Пример использования
+if __name__ == '__main__':
+    modularization_system = Modularization()

@@ -1,0 +1,13 @@
+# Модуль для мониторинга производительности системы
+import psutil
+import time
+
+def monitor_performance():
+    while True:
+        cpu_usage = psutil.cpu_percent(interval=1)
+        ram_usage = psutil.virtual_memory().percent
+        print(f'CPU Usage: {cpu_usage}%, RAM Usage: {ram_usage}%')
+        time.sleep(5)  # Пауза между измерениями
+
+if __name__ == '__main__':
+    monitor_performance()

@@ -1,0 +1,10 @@
+# Модуль для автоматизации отчетности
+import json
+
+def generate_report(data):
+    report = f"Report: {data}"
+    with open('report.json', 'w') as file:
+        json.dump(report, file)
+
+if __name__ == '__main__':
+    generate_report({'metric1': 'value1', 'metric2': 'value2'})

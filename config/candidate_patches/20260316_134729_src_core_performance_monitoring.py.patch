@@ -1,0 +1,10 @@
+# Мониторинг и анализ производительности
+
+import time
+
+def monitor_performance(func):
+    start_time = time.time()
+    result = func()
+    end_time = time.time()
+    print(f'Performance: {end_time - start_time} seconds')
+    return result

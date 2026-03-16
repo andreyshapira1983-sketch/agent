@@ -1,0 +1,21 @@
+import unittest
+from finance_manager import FinanceManager
+
+class TestFinanceManager(unittest.TestCase):
+    def setUp(self):
+        self.fm = FinanceManager(initial_balance=100)
+
+    def test_add_funds(self):
+        self.fm.add_funds(50)
+        self.assertEqual(self.fm.get_balance(), 150)
+
+    def test_deduct_funds(self):
+        self.fm.deduct_funds(30)
+        self.assertEqual(self.fm.get_balance(), 70)
+
+    def test_insufficient_funds(self):
+        with self.assertRaises(ValueError):
+            self.fm.deduct_funds(200)
+
+if __name__ == '__main__':
+    unittest.main()

@@ -1,0 +1,5 @@
+import pytest  # Добавлен импорт pytest
+
+pytestmark = pytest.mark.usefixtures('mocker')
+
+# Остальной код тестов остается без изменений.

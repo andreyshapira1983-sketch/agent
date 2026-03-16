@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Agent Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <style>
+    :root {
+      --bg: #0f0f12;
+      --card: #1a1a20;
+      --text: #e4e4e7;
+      --muted: #71717a;
+      --accent: #a78bfa;
+      --edge: #3f3f46;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    #header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 48px;
+      background: var(--card);
+      border-bottom: 1px solid var(--edge);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      z-index: 10;
+    }
+    #header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; }
+    #live {
+      margin-left: 12px;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    #live::before {
+      content: '';
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #22c55e;
+      margin-right: 6px;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    #main-left {
+      position: fixed;
+      top: 48px;
+      left: 0;
+      right: 320px;
+      bottom: 0;
+      min-width: 400px;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+      overflow: hidden;
+    }
+    #file-tree-section {
+      flex: 1;
+      min-height: 200px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      border-bottom: 1px solid var(--edge);
+    }
+    #file-tree-section h2 { margin: 0; padding: 8px 12px; font-size: 0.95rem; color: var(--accent); background: var(--card); }
+    #file-tree {
+      flex: 1;
+      overflow: auto;
+      padding: 8px 12px;
+      font-size: 0.8rem;
+      font-family: ui-monospace, monospace;
+    }
+    #file-tree .tree-item { padding: 2px 0; cursor: pointer; }
+    #file-tree .tree-item:hover { color: var(--accent); }
+    #file-tree .tree-item.folder { font-weight: 600; }
+    #file-tree .tree-item .indent { display: inline-block; width: 1.2em; }
+    #graph-section { flex: 0 0 220px; min-height: 180px; }
+    #graph-section h2 { margin: 0; padding: 6px 12px; font-size: 0.85rem; color: var(--muted); background: var(--card); }
+    #graph {
+      width: 100%;
+      height: 100%;
+      min-height: 180px;
+    }
+    #graph svg { display: block; width: 100%; height: 100%; min-height: 180px; }
+    #sidebar {
+      position: fixed;
+      top: 48px;
+      right: 0;
+      width: 320px;
+      bottom: 0;
+      background: var(--card);
+      border-left: 1px solid var(--edge);
+      padding: 16px;
+      overflow-y: auto;
+      font-size: 0.875rem;
+    }
+    #sidebar h2 { margin: 0 0 8px 0; font-size: 0.95rem; color: var(--accent); }
+    #focus-box {
+      margin-bottom: 12px;
+      padding: 10px;
+      background: #0c0c0f;
+      border-radius: 8px;
+      border: 1px solid var(--edge);
+    }
+    #focus-box h2 { color: #a78bfa; }
+    #live-state-box { margin-bottom: 12px; }
+    #sidebar pre {
+      background: #0c0c0f;
+      padding: 10px;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-size: 0.75rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    #sidebar .meta { color: var(--muted); font-size: 0.8rem; margin-bottom: 12px; }
+    .node { cursor: pointer; }
+    .node circle { stroke-width: 2; transition: stroke-width 0.15s; }
+    .node:hover circle { stroke-width: 3; stroke: var(--accent); }
+    .node.selected circle { stroke: var(--accent); stroke-width: 3; }
+    .link { stroke: var(--edge); stroke-opacity: 0.6; }
+    .tooltip {
+      position: fixed;
+      background: var(--card);
+      border: 1px solid var(--edge);
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      pointer-events: none;
+      z-index: 20;
+      max-width: 260px;
+    }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <h1>Agent Dashboard</h1>
+    <span id="live">Live</span>
+  </div>
+  <div id="main-left">
+    <div id="file-tree-section">
+      <h2>Карта проекта (папки и файлы)</h2>
+      <div id="file-tree"></div>
+    </div>
+    <div id="graph-section">
+      <h2>Компоненты</h2>
+      <div id="graph"></div>
+    </div>
+  </div>
+  <div id="sidebar">
+    <div id="focus-box">
+      <h2>Фокус</h2>
+      <p id="focus-text" class="meta">—</p>
+    </div>
+    <div id="live-state-box">
+      <h2>Живое состояние</h2>
+      <p id="live-state-text" class="meta">Загрузка...</p>
+      <svg id="emotion-history" width="100%" height="60"></svg>
+    </div>
+    <div id="initiative-visor-box">
+      <h2>Визор инициативы</h2>
+      <p id="initiative-visor-text" class="meta">—</p>
+    </div>
+    <p class="meta">Клик по папке/файлу или узлу — детали. Обновление каждые 2 с.</p>
+    <div id="details">Выберите элемент на карте или узел компонента.</div>
+  </div>
+  <div id="tooltip" class="tooltip" style="display: none;"></div>
+
+  <script>
+    const API = '/api/dashboard';
+    const POLL_MS = 2000;
+    let data = null;
+    let selectedId = null;
+    let simulation = null;
+    let nodeElements = null;
+    let linkElements = null;
+    const expandedFolders = new Set();
+
+    function updateFileTree(tree) {
+      const el = document.getElementById('file-tree');
+      if (!el) return;
+      if (!tree || !tree.length) {
+        el.innerHTML = '<span class="meta">Структура не загружена.</span>';
+        return;
+      }
+      function render(items, level) {
+        let html = '';
+        (items || []).forEach(item => {
+          const id = 'ft-' + (item.path || item.name || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+          const isDir = !!item.isDir;
+          const indent = level * 1.2;
+          const open = expandedFolders.has(item.path || item.name);
+          if (isDir) {
+            html += '<div class="tree-item folder" data-path="' + (item.path || '') + '" data-open="' + open + '" style="padding-left:' + indent + 'em">';
+            html += '<span class="indent">' + (open ? '▼' : '▶') + '</span> ' + (item.name || '') + '</div>';
+            if (open && item.children && item.children.length) {
+              html += render(item.children, level + 1);
+            }
+          } else {
+            html += '<div class="tree-item file" data-path="' + (item.path || '') + '" style="padding-left:' + (indent + 1.2) + 'em">';
+            html += '<span class="indent"></span> ' + (item.name || '') + '</div>';
+          }
+        });
+        return html;
+      }
+      el.innerHTML = render(tree, 0);
+      el.querySelectorAll('.tree-item.folder').forEach(node => {
+        node.addEventListener('click', function(e) {
+          e.stopPropagation();
+          const path = this.getAttribute('data-path');
+          if (expandedFolders.has(path)) expandedFolders.delete(path);
+          else expandedFolders.add(path);
+          updateFileTree(data && data.file_tree ? data.file_tree : tree);
+        });
+      });
+      el.querySelectorAll('.tree-item.file').forEach(node => {
+        node.addEventListener('click', function(e) {
+          e.stopPropagation();
+          const path = this.getAttribute('data-path');
+          selectedId = null;
+          document.querySelectorAll('#graph .node').forEach(n => n.classList.remove('selected'));
+          const details = document.getElementById('details');
+          details.innerHTML = '<strong>Файл</strong><br><code style="word-break:break-all">' + (path || '') + '</code>';
+        });
+      });
+    }
+
+    function fetchData() {
+      fetch(API)
+        .then(r => r.json())
+        .then(d => {
+          data = d;
+          document.getElementById('live').textContent = 'Live ' + (d.ts ? d.ts.slice(11, 19) : '');
+          updateLiveState(d);
+          updateFileTree(d.file_tree || []);
+          updateGraph(d);
+        })
+        .catch(() => {});
+    }
+
+    function updateGraph(d) {
+      const modules = d.modules || [];
+      const edges = d.edges || [];
+      const g = document.getElementById('graph');
+      if (!g) return;
+      if (!modules.length) {
+        g.innerHTML = '<div style="padding:2rem;color:var(--muted);font-size:0.9rem;">Загрузка карты… (модули: ' + (d.modules ? 'нет' : '—') + ')</div>';
+        return;
+      }
+      if (g.querySelector('div')) g.innerHTML = '';
+
+      let width = g.clientWidth || 600;
+      let height = g.clientHeight || 400;
+      if (width < 200) width = 600;
+      if (height < 200) height = 400;
+      const nodes = modules.map((m, i) => ({
+        ...m,
+        id: m.id,
+        x: width / 2 + (i - 4) * 60,
+        y: height / 2 + (i % 3) * 40
+      }));
+      const nodeById = new Map(nodes.map(n => [n.id, n]));
+      const links = edges.map(e => ({
+        source: nodeById.get(e.from) || e.from,
+        target: nodeById.get(e.to) || e.to
+      }));
+
+      if (!simulation) {
+        const svg = d3.select('#graph').append('svg')
+          .attr('viewBox', [0, 0, width, height])
+          .attr('width', '100%').attr('height', '100%')
+          .attr('preserveAspectRatio', 'xMidYMid meet');
+        svg.append('g').attr('class', 'links');
+        svg.append('g').attr('class', 'nodes');
+
+        simulation = d3.forceSimulation(nodes)
+          .force('link', d3.forceLink(links).distance(80))
+          .force('charge', d3.forceManyBody().strength(-200))
+          .force('center', d3.forceCenter(width / 2, height / 2))
+          .force('collision', d3.forceCollide().radius(28));
+
+        simulation.on('tick', () => {
+          d3.select('#graph .links').selectAll('line')
+            .attr('x1', d => d.source.x)
+            .attr('y1', d => d.source.y)
+            .attr('x2', d => d.target.x)
+            .attr('y2', d => d.target.y);
+          d3.select('#graph .nodes').selectAll('g')
+            .attr('transform', d => `translate(${d.x},${d.y})`);
+        });
+      } else {
+        simulation.nodes(nodes);
+        simulation.force('link').links(links);
+        simulation.alpha(0.3).restart();
+      }
+
+      const link = d3.select('#graph .links').selectAll('line').data(links);
+      link.join('line').attr('class', 'link');
+
+      const node = d3.select('#graph .nodes').selectAll('g').data(nodes);
+      const nodeEnter = node.enter().append('g').attr('class', 'node').attr('id', d => 'node-' + d.id);
+      nodeEnter.append('circle').attr('r', 22).attr('fill', d => colorByType(d.type));
+      nodeEnter.append('text').attr('dy', 5).attr('text-anchor', 'middle').attr('fill', '#fff').attr('font-size', 10)
+        .text(d => d.label.length > 12 ? d.label.slice(0, 11) + '…' : d.label);
+      nodeEnter.merge(node).attr('class', d => 'node' + (selectedId === d.id ? ' selected' : ''));
+
+      nodeEnter.on('click', (ev, d) => {
+        selectedId = d.id;
+        showDetails(d);
+        d3.selectAll('.node').classed('selected', n => n.id === d.id);
+      });
+      nodeEnter.on('mouseover', (ev, d) => {
+        const tt = document.getElementById('tooltip');
+        tt.textContent = d.label + (d.type ? ' (' + d.type + ')' : '');
+        tt.style.display = 'block';
+        tt.style.left = (ev.pageX + 10) + 'px';
+        tt.style.top = (ev.pageY + 10) + 'px';
+      });
+      nodeEnter.on('mouseout', () => {
+        document.getElementById('tooltip').style.display = 'none';
+      });
+      nodeEnter.on('mousemove', (ev) => {
+        const tt = document.getElementById('tooltip');
+        tt.style.left = (ev.pageX + 10) + 'px';
+        tt.style.top = (ev.pageY + 10) + 'px';
+      });
+
+      nodeEnter.call(d3.drag()
+        .on('start', (ev, d) => { if (!ev.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+        .on('drag', (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
+        .on('end', (ev, d) => { if (!ev.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }));
+
+      node.exit().remove();
+    }
+
+    function updateLiveState(d) {
+      const live = d.live_state || {};
+      updateFocus(live.focus);
+      const box = document.getElementById('live-state-text');
+      const tod = live.time_of_day || '—';
+      const lt = live.local_time || '';
+      const emotion = live.emotion || {};
+      const dom = emotion.dominant || '—';
+      const intensity = emotion.intensity || '';
+      const planner = live.planner || {};
+      const goal = (planner.last_goal || '').slice(0, 80) || '—';
+      const lastAct = planner.last_action || '';
+      box.innerHTML =
+        'Время: <b>' + tod + '</b>' + (lt ? ' (' + lt + ')' : '') + '<br>' +
+        'Эмоция: <b>' + dom + '</b>' + (intensity ? ' (' + intensity + ')' : '') + '<br>' +
+        'Цель: <b>' + goal + '</b>' + (lastAct ? '<br>Последнее действие: ' + lastAct : '');
+      drawEmotionHistory(emotion.history || []);
+      updateInitiativeVisor(live.initiative_visor);
+    }
+
+    function updateFocus(focus) {
+      const el = document.getElementById('focus-text');
+      if (!el) return;
+      if (!focus) {
+        el.innerHTML = '—';
+        return;
+      }
+      const goal = (focus.goal || '').replace(/</g, '&lt;').slice(0, 120) || '—';
+      const task = (focus.current_task || '').replace(/</g, '&lt;').slice(0, 80) || '—';
+      const thought = (focus.thought || '').replace(/</g, '&lt;').slice(0, 120) || '—';
+      let html = '<b>Цель:</b> ' + goal + '<br><b>Задача:</b> ' + task + '<br><b>Мысль:</b> ' + thought;
+      const events = focus.last_events || [];
+      if (events.length) {
+        html += '<br><br><b>Последние действия:</b><br>';
+        events.slice(0, 5).forEach(function(e) {
+          const a = (e.action || '').replace(/</g, '&lt;');
+          const ts = (e.ts || '').slice(11, 19);
+          html += '<span class="meta">' + ts + '</span> ' + a + '<br>';
+        });
+      }
+      el.innerHTML = html;
+    }
+
+    function updateInitiativeVisor(v) {
+      const el = document.getElementById('initiative-visor-text');
+      if (!el) return;
+      if (!v || (v && v.meta_goal === '' && !v.initiative_ts)) {
+        el.innerHTML = 'Нет данных. Включи автономный режим: <code>AUTONOMOUS_START=1</code> в .env или команда <code>/autonomous</code> в Telegram — тогда появятся цель и мысль.';
+        return;
+      }
+      const meta = (v.meta_goal || '—').replace(/</g, '&lt;');
+      const reason = (v.reason || '—').replace(/</g, '&lt;');
+      const ts = v.ts || '';
+      const hint = (!v.meta_goal && !v.reason) ? ' <span class="meta">(появятся, когда в цикле очередь пуста и планировщик выберет цель)</span>' : '';
+      let line = 'Мета-цель: <b>' + meta + '</b><br>Мысль: ' + reason + hint + (ts ? '<br><span class="meta">' + ts + '</span>' : '');
+      if (v.initiative_ts) {
+        line += '<br><br>Проактивность: ';
+        if (v.initiative_sent) {
+          line += 'написал в Telegram';
+          if (v.initiative_message_preview) line += '<br><em>' + (v.initiative_message_preview || '').replace(/</g, '&lt;').slice(0, 120) + (v.initiative_message_preview.length > 120 ? '…' : '') + '</em>';
+        } else {
+          line += 'молчал';
+          if (v.initiative_silent_reason) line += ' (' + (v.initiative_silent_reason || '').replace(/</g, '&lt;') + ')';
+        }
+        line += '<br><span class="meta">' + (v.initiative_ts || '') + '</span>';
+      }
+      el.innerHTML = line;
+    }
+
+    function drawEmotionHistory(history) {
+      const svg = d3.select('#emotion-history');
+      if (!svg.node()) return;
+      svg.selectAll('*').remove();
+      const width = svg.node().clientWidth || 260;
+      const height = 60;
+      svg.attr('viewBox', [0, 0, width, height]);
+      if (!history || !history.length) return;
+      const x = d3.scaleLinear().domain([0, history.length - 1]).range([4, width - 4]);
+      const y = d3.scaleLinear().domain([0, 1]).range([height - 8, 8]);
+      const colorByEmotion = d3.scaleOrdinal()
+        .domain(['frustration','excitement','anxiety','curiosity','fatigue','aggression'])
+        .range(['#f97316','#22c55e','#facc15','#38bdf8','#a855f7','#ef4444']);
+      const line = d3.line()
+        .x((d, i) => x(i))
+        .y(d => y(d.value))
+        .curve(d3.curveMonotoneX);
+      svg.append('path')
+        .datum(history)
+        .attr('fill', 'none')
+        .attr('stroke', '#4ade80')
+        .attr('stroke-width', 1.5)
+        .attr('d', line);
+      const last = history[history.length - 1];
+      svg.selectAll('circle')
+        .data(history)
+        .enter()
+        .append('circle')
+        .attr('cx', (d, i) => x(i))
+        .attr('cy', d => y(d.value))
+        .attr('r', d => d === last ? 3 : 1.8)
+        .attr('fill', d => colorByEmotion(d.emotion));
+    }
+
+    function colorByType(t) {
+      const map = { core: '#6366f1', queue: '#22c55e', governance: '#f59e0b', tools: '#a78bfa', planning: '#ec4899', comm: '#06b6d4', hitl: '#64748b' };
+      return map[t] || '#71717a';
+    }
+
+    function showDetails(d) {
+      const el = document.getElementById('details');
+      if (!data) return;
+      let html = '<h2>' + (d.label || d.id) + '</h2>';
+      if (d.id === 'queue') {
+        const q = data.queue && data.queue[0];
+        const tasks = (q && q.tasks) || [];
+        html += '<p class="meta">Задач в очереди: ' + (q && q.size !== undefined ? q.size : 0) + '</p>';
+        html += '<pre>' + (tasks.length ? tasks.map((t, i) => (i + 1) + '. ' + (t.tool || t.id) + ' ' + (t.arguments_preview || '')).join('\n') : 'Пусто') + '</pre>';
+      } else if (d.id === 'audit') {
+        const audit = (data.audit || []).slice(-15);
+        html += '<pre>' + audit.map(e => (e.ts || '').slice(11, 19) + ' ' + (e.action || '') + ' ' + JSON.stringify(e.details || {}).slice(0, 80)).join('\n') + '</pre>';
+      } else if (d.id === 'agent' || d.id === 'orchestrator') {
+        html += '<pre>' + JSON.stringify(data.state || {}, null, 2).slice(0, 1500) + '</pre>';
+      } else if (d.id === 'policy') {
+        html += '<pre>Metrics: ' + JSON.stringify(data.metrics || {}, null, 2).slice(0, 800) + '</pre>';
+      } else {
+        html += '<pre>' + JSON.stringify(d, null, 2) + '</pre>';
+      }
+      el.innerHTML = html;
+    }
+
+    fetchData();
+    setInterval(fetchData, POLL_MS);
+    window.addEventListener('resize', () => {
+      const g = document.getElementById('graph');
+      if (simulation && g) simulation.force('center', d3.forceCenter(g.clientWidth / 2, g.clientHeight / 2));
+    });
+  </script>
+</body>
+</html>

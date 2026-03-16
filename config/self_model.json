@@ -1,0 +1,193 @@
+{
+  "version": 1,
+  "description": "Self-Model: what this agent has. Read to understand own architecture.",
+  "systems": {
+    "memory": [
+      "short_term",
+      "long_term",
+      "context_manager",
+      "knowledge_store"
+    ],
+    "learning": [
+      "adaptation",
+      "emotion_matrix",
+      "feedback",
+      "feedback_analyzer",
+      "self_learning"
+    ],
+    "evolution": [
+      "config_manager",
+      "versioning",
+      "self_repair"
+    ],
+    "monitoring": [
+      "metrics",
+      "feedback_loop",
+      "self_eval"
+    ],
+    "planning": [
+      "goals",
+      "planner",
+      "schemas",
+      "self_model",
+      "simulation"
+    ],
+    "tools": [
+      "registry",
+      "orchestrator",
+      "base"
+    ],
+    "execution": [
+      "context",
+      "executor",
+      "self_model"
+    ],
+    "communication": [
+      "telegram_client",
+      "interface"
+    ],
+    "security": [
+      "policy",
+      "validator",
+      "sandbox",
+      "ethics",
+      "compliance"
+    ],
+    "core": [
+      "intelligence",
+      "prompt",
+      "language"
+    ],
+    "reflection": [
+      "self_review",
+      "prompt_optimizer",
+      "strategy_adjuster",
+      "self_model_analyzer",
+      "self_improvement_planner"
+    ],
+    "meta": [
+      "strategy_selector",
+      "reasoning_modes",
+      "cognitive_control"
+    ],
+    "knowledge": [
+      "store",
+      "retrieval",
+      "graph"
+    ],
+    "environment": [
+      "filesystem",
+      "virtual_env",
+      "api_world",
+      "browser"
+    ],
+    "computer_control": [
+      "controller"
+    ],
+    "finance": [
+      "usage_tracker",
+      "limits",
+      "cost_optimization",
+      "model_selector"
+    ],
+    "hitl": [
+      "audit_log",
+      "approvals",
+      "dashboard_api"
+    ],
+    "agency": [
+      "autonomy_manager",
+      "decision_gate",
+      "interrupt_handler"
+    ],
+    "tasks": [
+      "manager",
+      "queue",
+      "task_state"
+    ],
+    "state": [
+      "agent_state",
+      "activity_log",
+      "confidence"
+    ],
+    "runtime": [
+      "scheduler",
+      "event_loop",
+      "persistence"
+    ],
+    "orchestration": [
+      "router",
+      "pipeline",
+      "lifecycle"
+    ],
+    "multi_agent": [
+      "messaging",
+      "coordination",
+      "roles"
+    ],
+    "perception": [
+      "parsers",
+      "multimodal",
+      "context_interpreter"
+    ],
+    "personality": [
+      "personality"
+    ]
+  },
+  "tools": [
+    "get_current_time",
+    "read_file",
+    "write_file",
+    "propose_file_edit",
+    "list_dir",
+    "run_pytest",
+    "add_feedback",
+    "save_experience",
+    "update_prompt_rules",
+    "get_metrics",
+    "run_self_repair",
+    "get_prompt_rules",
+    "get_feedback_summary",
+    "rollback_config",
+    "restore_config_from_template",
+    "get_audit_log",
+    "list_templates",
+    "create_from_template",
+    "run_lint",
+    "analyze_self_model",
+    "get_improvement_plan",
+    "update_self_model",
+    "generate_module_skeleton",
+    "apply_patch_with_approval",
+    "get_architecture_docs"
+  ],
+  "missing": {
+    "vector_memory": true,
+    "reflection_engine": true,
+    "auto_patch_generator": true,
+    "agent_spawner": true,
+    "chroma_or_vector_store": true,
+    "rule_derivation": true,
+    "auto_tests_generator": true
+  },
+  "dependencies": {
+    "core": [
+      "tools",
+      "memory",
+      "prompt"
+    ],
+    "learning": [
+      "feedback",
+      "memory"
+    ],
+    "evolution": [
+      "config_manager",
+      "versioning",
+      "security"
+    ],
+    "tools": [
+      "registry",
+      "security.validator"
+    ]
+  }
+}

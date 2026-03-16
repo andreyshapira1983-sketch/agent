@@ -1,0 +1,248 @@
+{
+  "counts": {
+    "src_files": 150,
+    "test_files": 32,
+    "symbol_checks": 145,
+    "symbol_issues": 2,
+    "duplicate_src_filenames": 5,
+    "duplicate_test_filenames": 1,
+    "duplicate_test_names": 0,
+    "nesting_issues": 173
+  },
+  "top_issues": [
+    {
+      "type": "duplicate_src_filename",
+      "severity": 85,
+      "data": {
+        "name": "telegram_client.py",
+        "files": [
+          "src/communication/telegram_client.py",
+          "src/telegram_client.py"
+        ]
+      }
+    },
+    {
+      "type": "duplicate_src_filename",
+      "severity": 85,
+      "data": {
+        "name": "manager.py",
+        "files": [
+          "src/evolution/manager.py",
+          "src/tasks/manager.py"
+        ]
+      }
+    },
+    {
+      "type": "duplicate_src_filename",
+      "severity": 85,
+      "data": {
+        "name": "sandbox.py",
+        "files": [
+          "src/evolution/sandbox.py",
+          "src/security/sandbox.py"
+        ]
+      }
+    },
+    {
+      "type": "duplicate_src_filename",
+      "severity": 85,
+      "data": {
+        "name": "reflection.py",
+        "files": [
+          "src/learning/reflection.py",
+          "src/reflection/reflection.py"
+        ]
+      }
+    },
+    {
+      "type": "duplicate_src_filename",
+      "severity": 85,
+      "data": {
+        "name": "vector_memory.py",
+        "files": [
+          "src/memory/vector_memory.py",
+          "src/tools/vector_memory.py"
+        ]
+      }
+    },
+    {
+      "type": "duplicate_test_filename",
+      "severity": 80,
+      "data": {
+        "name": "test_reflection.py",
+        "files": [
+          "tests/learning/test_reflection.py",
+          "tests/test_reflection.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/agent_spawner.py",
+        "expected_any_of": [
+          "tests/agency/test_agent_spawner.py",
+          "tests/test_agent_spawner.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/autonomy_manager.py",
+        "expected_any_of": [
+          "tests/agency/test_autonomy_manager.py",
+          "tests/test_autonomy_manager.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/centralized_agent_manager.py",
+        "expected_any_of": [
+          "tests/agency/test_centralized_agent_manager.py",
+          "tests/test_centralized_agent_manager.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/decision_gate.py",
+        "expected_any_of": [
+          "tests/agency/test_decision_gate.py",
+          "tests/test_decision_gate.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/family_store.py",
+        "expected_any_of": [
+          "tests/agency/test_family_store.py",
+          "tests/test_family_store.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/interrupt_handler.py",
+        "expected_any_of": [
+          "tests/agency/test_interrupt_handler.py",
+          "tests/test_interrupt_handler.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/professions_store.py",
+        "expected_any_of": [
+          "tests/agency/test_professions_store.py",
+          "tests/test_professions_store.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/supervisor.py",
+        "expected_any_of": [
+          "tests/agency/test_supervisor.py",
+          "tests/test_supervisor.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/worker_agent.py",
+        "expected_any_of": [
+          "tests/agency/test_worker_agent.py",
+          "tests/test_worker_agent.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/cognitive_model/module.py",
+        "expected_any_of": [
+          "tests/cognitive_model/test_module.py",
+          "tests/test_module.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/communication/autonomous_mode.py",
+        "expected_any_of": [
+          "tests/communication/test_autonomous_mode.py",
+          "tests/test_autonomous_mode.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/communication/dialogue_generator.py",
+        "expected_any_of": [
+          "tests/communication/test_dialogue_generator.py",
+          "tests/test_dialogue_generator.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/communication/google_tts.py",
+        "expected_any_of": [
+          "tests/communication/test_google_tts.py",
+          "tests/test_google_tts.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/communication/interface.py",
+        "expected_any_of": [
+          "tests/communication/test_interface.py",
+          "tests/test_interface.py"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+# Модуль для реализации событийно-ориентированной архитектуры
+
+class EventDriven:
+    def __init__(self):
+        self.listeners = {}
+
+    def on(self, event, listener):
+        if event not in self.listeners:
+            self.listeners[event] = []
+        self.listeners[event].append(listener)
+
+    def emit(self, event, data):
+        if event in self.listeners:
+            for listener in self.listeners[event]:
+                listener(data)
+
+# Пример использования
+if __name__ == '__main__':
+    event_system = EventDriven()

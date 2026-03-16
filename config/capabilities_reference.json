@@ -1,0 +1,25 @@
+{
+  "description": "Reference: all possible systems and capabilities. Compare with self_model to see gaps.",
+  "memory": ["short_term", "long_term", "vector_memory", "knowledge_graph", "context_manager", "knowledge_store"],
+  "learning": ["feedback", "self_learning", "reflection", "rule_derivation", "feedback_analyzer", "adaptation"],
+  "evolution": ["config_manager", "versioning", "self_repair", "auto_patch", "auto_tests", "agent_spawner"],
+  "monitoring": ["metrics", "feedback_loop", "self_eval", "tracing"],
+  "planning": ["planner", "goals", "simulation", "schemas"],
+  "tools": ["registry", "orchestrator", "base"],
+  "execution": ["executor", "context"],
+  "communication": ["telegram_client", "interface", "api_webhook"],
+  "security": ["policy", "validator", "sandbox", "ethics", "compliance", "audit"],
+  "core": ["intelligence", "prompt", "language"],
+  "reflection": ["self_review", "prompt_optimizer", "strategy_adjuster", "self_improvement_planner"],
+  "meta": ["strategy_selector", "reasoning_modes", "cognitive_control"],
+  "knowledge": ["store", "retrieval", "graph", "vector_store"],
+  "multi_agent": ["messaging", "coordination", "roles"],
+  "capability_levels": {
+    "L1_basic": "single agent, memory, tools",
+    "L2_learning": "feedback, rules update, metrics",
+    "L3_evolution": "self_repair, versioning, rollback",
+    "L4_self_model": "self_model, capabilities_ref, analyze_self_model",
+    "L5_self_improvement": "improvement_planner, generate_module, update_self_model",
+    "L6_agent_spawner": "templates, create agents, multi_agent"
+  }
+}

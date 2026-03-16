@@ -1,0 +1,219 @@
+[
+  {
+    "patch_id": "20260314_205602_src_foo.py",
+    "target_path": "src/foo.py",
+    "reason": "x",
+    "validated": false,
+    "created_at": "20260314_205602"
+  },
+  {
+    "patch_id": "20260315_090310_tests_test_communication.py",
+    "target_path": "tests/test_communication.py",
+    "reason": "",
+    "validated": true,
+    "created_at": "20260315_090310"
+  },
+  {
+    "patch_id": "20260315_131330_src_tests_test_finance_manager.py",
+    "target_path": "src/tests/test_finance_manager.py",
+    "reason": "",
+    "validated": true,
+    "created_at": "20260315_131330"
+  },
+  {
+    "patch_id": "20260315_131330_src_tests_test_personality.py",
+    "target_path": "src/tests/test_personality.py",
+    "reason": "",
+    "validated": true,
+    "created_at": "20260315_131330"
+  },
+  {
+    "patch_id": "20260315_131653_src_tests_test_personality.py",
+    "target_path": "src/tests/test_personality.py",
+    "reason": "Добавление тестов в test_personality.py для проверки базовых функций.",
+    "validated": true,
+    "created_at": "20260315_131653"
+  },
+  {
+    "patch_id": "20260315_145828_src_cognitive_model_cognitive_model.py",
+    "target_path": "src/cognitive_model/cognitive_model.py",
+    "reason": "",
+    "validated": false,
+    "created_at": "20260315_145828"
+  },
+  {
+    "patch_id": "20260316_134009_src_core_modularization.py",
+    "target_path": "src/core/modularization.py",
+    "reason": "",
+    "validated": false,
+    "created_at": "20260316_134009"
+  },
+  {
+    "patch_id": "20260316_134009_src_core_event_driven_architecture.py",
+    "target_path": "src/core/event_driven_architecture.py",
+    "reason": "",
+    "validated": false,
+    "created_at": "20260316_134009"
+  },
+  {
+    "patch_id": "20260316_134009_src_core_api_integration.py",
+    "target_path": "src/core/api_integration.py",
+    "reason": "",
+    "validated": false,
+    "created_at": "20260316_134009"
+  },
+  {
+    "patch_id": "20260316_134009_src_core_adaptive_algorithms.py",
+    "target_path": "src/core/adaptive_algorithms.py",
+    "reason": "",
+    "validated": false,
+    "created_at": "20260316_134009"
+  },
+  {
+    "patch_id": "20260316_134009_src_core_performance_monitoring.py",
+    "target_path": "src/core/performance_monitoring.py",
+    "reason": "",
+    "validated": false,
+    "created_at": "20260316_134009"
+  },
+  {
+    "patch_id": "20260316_134729_src_core_modularization.py",
+    "target_path": "src/core/modularization.py",
+    "reason": "Создание нового модуля для поддержки модульности.",
+    "validated": false,
+    "created_at": "20260316_134729"
+  },
+  {
+    "patch_id": "20260316_134729_src_core_event_driven.py",
+    "target_path": "src/core/event_driven.py",
+    "reason": "Создание нового модуля для реализации событийно-ориентированной архитектуры.",
+    "validated": false,
+    "created_at": "20260316_134729"
+  },
+  {
+    "patch_id": "20260316_134729_src_core_api_integration.py",
+    "target_path": "src/core/api_integration.py",
+    "reason": "Создание нового модуля для интеграции API.",
+    "validated": false,
+    "created_at": "20260316_134729"
+  },
+  {
+    "patch_id": "20260316_134729_src_core_adaptive_algorithm.py",
+    "target_path": "src/core/adaptive_algorithm.py",
+    "reason": "Создание нового модуля для поддержки адаптивных алгоритмов.",
+    "validated": false,
+    "created_at": "20260316_134729"
+  },
+  {
+    "patch_id": "20260316_134729_src_core_performance_monitoring.py",
+    "target_path": "src/core/performance_monitoring.py",
+    "reason": "Создание нового модуля для мониторинга и анализа производительности.",
+    "validated": false,
+    "created_at": "20260316_134729"
+  },
+  {
+    "patch_id": "20260316_134729_src_core_documentation_testing.py",
+    "target_path": "src/core/documentation_testing.py",
+    "reason": "Создание нового модуля для улучшения документации и тестирования.",
+    "validated": false,
+    "created_at": "20260316_134729"
+  },
+  {
+    "patch_id": "20260316_140928_src_data_processing_real_time_optimization.py",
+    "target_path": "src/data_processing/real_time_optimization.py",
+    "reason": "",
+    "validated": false,
+    "created_at": "20260316_140928"
+  },
+  {
+    "patch_id": "20260316_140929_src_multilingual_support.py",
+    "target_path": "src/multilingual/support.py",
+    "reason": "",
+    "validated": false,
+    "created_at": "20260316_140929"
+  },
+  {
+    "patch_id": "20260316_140929_src_chatbot_support_bot.py",
+    "target_path": "src/chatbot/support_bot.py",
+    "reason": "",
+    "validated": false,
+    "created_at": "20260316_140929"
+  },
+  {
+    "patch_id": "20260316_140929_src_big_data_analysis.py",
+    "target_path": "src/big_data/analysis.py",
+    "reason": "",
+    "validated": false,
+    "created_at": "20260316_140929"
+  },
+  {
+    "patch_id": "20260316_140929_src_ai_integration_ml_models.py",
+    "target_path": "src/ai_integration/ml_models.py",
+    "reason": "",
+    "validated": false,
+    "created_at": "20260316_140929"
+  },
+  {
+    "patch_id": "20260316_140929_src_personalized_responses_custom_response_model.py",
+    "target_path": "src/personalized_responses/custom_response_model.py",
+    "reason": "",
+    "validated": false,
+    "created_at": "20260316_140929"
+  },
+  {
+    "patch_id": "20260316_140929_src_feedback_quality_improvement.py",
+    "target_path": "src/feedback/quality_improvement.py",
+    "reason": "",
+    "validated": false,
+    "created_at": "20260316_140929"
+  },
+  {
+    "patch_id": "20260316_141505_src_performance_monitoring_monitoring.py",
+    "target_path": "src/performance_monitoring/monitoring.py",
+    "reason": "Создание системы мониторинга производительности.",
+    "validated": false,
+    "created_at": "20260316_141505"
+  },
+  {
+    "patch_id": "20260316_141505_src_user_interaction_log_analysis.py",
+    "target_path": "src/user_interaction/log_analysis.py",
+    "reason": "Создание модуля для анализа логов взаимодействий пользователей.",
+    "validated": false,
+    "created_at": "20260316_141505"
+  },
+  {
+    "patch_id": "20260316_141505_src_api_integration.py",
+    "target_path": "src/api/integration.py",
+    "reason": "Проектирование RESTful API для интеграции.",
+    "validated": false,
+    "created_at": "20260316_141505"
+  },
+  {
+    "patch_id": "20260316_141505_src_reporting_automation.py",
+    "target_path": "src/reporting/automation.py",
+    "reason": "Разработка механизма автоматической отчетности.",
+    "validated": false,
+    "created_at": "20260316_141505"
+  },
+  {
+    "patch_id": "20260316_141505_src_caching_cache_system.py",
+    "target_path": "src/caching/cache_system.py",
+    "reason": "Внедрение системы кэширования.",
+    "validated": false,
+    "created_at": "20260316_141505"
+  },
+  {
+    "patch_id": "20260316_141505_src_versioning_version_control.py",
+    "target_path": "src/versioning/version_control.py",
+    "reason": "Создание системы версионирования ответов.",
+    "validated": false,
+    "created_at": "20260316_141505"
+  },
+  {
+    "patch_id": "20260316_141505_src_user_analysis_user_data_analysis.py",
+    "target_path": "src/user_analysis/user_data_analysis.py",
+    "reason": "Внедрение анализа пользовательских данных.",
+    "validated": false,
+    "created_at": "20260316_141505"
+  }
+]

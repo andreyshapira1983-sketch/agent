@@ -1,0 +1,13 @@
+# Модуль для кэширования данных
+import time
+from functools import lru_cache
+
+@lru_cache(maxsize=100)
+def get_data(param):
+    # Симуляция длительной функции
+    time.sleep(2)  # Имитируем задержку
+    return f'Data for {param}'
+
+if __name__ == '__main__':
+    print(get_data('test'))
+    print(get_data('test'))  # Этот вызов будет кэширован

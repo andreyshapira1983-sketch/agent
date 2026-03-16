@@ -1,0 +1,12 @@
+# Событийно-ориентированная архитектура
+
+event_handlers = {}
+
+def register_event(event_name, handler):
+    if event_name not in event_handlers:
+        event_handlers[event_name] = []
+    event_handlers[event_name].append(handler)
+
+def trigger_event(event_name, *args, **kwargs):
+    for handler in event_handlers.get(event_name, []):
+        handler(*args, **kwargs)

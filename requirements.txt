@@ -1,0 +1,12 @@
+python-telegram-bot>=20.0
+requests
+pydub
+gTTS>=2.5.1
+opencv-python==4.5.5
+numpy==1.21.2
+Pillow==8.4.0
+imageio==2.16.1
+moviepy==1.0.3
+psutil>=6.0.0
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0

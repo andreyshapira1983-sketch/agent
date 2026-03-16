@@ -1,0 +1,36 @@
+{
+  "active_profile": "canary",
+  "symbol_check_mode": "strict",
+  "symbol_check_whitelist": [],
+  "summary_path": "test-results/layout_validation_summary.json",
+  "summary_top_n": 20,
+  "profiles": {
+    "shadow": {
+      "symbol_check_mode": "off",
+      "symbol_check_whitelist": [
+        "src/tests/*",
+        "src/tools/*"
+      ],
+      "summary_path": "test-results/layout_validation_summary.shadow.json",
+      "summary_top_n": 30
+    },
+    "canary": {
+      "symbol_check_mode": "relaxed",
+      "symbol_check_whitelist": [
+        "src/tests/*"
+      ],
+      "summary_path": "test-results/layout_validation_summary.canary.json",
+      "summary_top_n": 20
+    },
+    "stable": {
+      "symbol_check_mode": "strict",
+      "symbol_check_whitelist": [
+        "src/tests/*",
+        "src/tools/autopatch.py",
+        "src/tools/vector_memory.py"
+      ],
+      "summary_path": "test-results/layout_validation_summary.stable.json",
+      "summary_top_n": 20
+    }
+  }
+}

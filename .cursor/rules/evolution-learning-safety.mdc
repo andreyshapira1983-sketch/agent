@@ -1,0 +1,23 @@
+---
+description: Ограничения для evolution и learning — самоизменение и размножение агентов
+globs: src/evolution/**/*.py, src/learning/**/*.py
+alwaysApply: false
+---
+
+# Безопасность evolution и learning
+
+При любых изменениях в `src/evolution/` и `src/learning/` соблюдай архитектурные ограничения из **ARCHITECTURE_PLAN_FULL.md** (разделы «Ограничения самоизменения» и «Ограничения размножения агентов»).
+
+## Самоизменение (auto_patch, rule_derivation)
+
+- **Не применять патчи к работающему агенту.** Поток: stable → candidate_patch → sandbox_agent → auto_tests → apply только при успехе.
+- **auto_patch** не меняет код запущенного процесса; только копию/кандидата, затем тесты.
+- **rule_derivation:** ввести **rule_limit**, **rule_score**, **rule_decay** — иначе rule explosion.
+
+## Размножение агентов (agent_spawner)
+
+- **Создавать агентов может только Supervisor.** Модуль типа `agent_spawner` не создаёт агентов напрямую — только отправляет **spawn_request**.
+- Задачи — через **task_queue**, не через прямое создание агента под задачу.
+- Обязательные ограничения: **max_agents**, **spawn_depth_limit**, **agent_ttl**.
+
+При добавлении auto_patch, rule_derivation или agent_spawner сначала реализуй эти ограничения; без них код считать небезопасным и не мержить в стабильную ветку.

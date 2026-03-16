@@ -1,0 +1,15 @@
+........................................................................ [ 48%]
+........................................................................ [ 97%]
+....                                                                     [100%]
+============================== warnings summary ===============================
+tests/test_orchestrator_autonomous.py::test_orchestrator_run_cycle
+tests/test_orchestrator_autonomous.py::test_orchestrator_act_marks_cannot_read_as_failure
+tests/test_orchestrator_autonomous.py::test_orchestrator_run_stops_on_quota
+tests/test_orchestrator_autonomous.py::test_orchestrator_run_stops_on_quota
+tests/test_orchestrator_autonomous.py::test_orchestrator_run_with_check_alerts_every_n_cycles
+tests/test_orchestrator_autonomous.py::test_orchestrator_run_with_check_alerts_every_n_cycles
+  C:\Users\andre\Downloads\agent\src\reflection\reflection.py:20: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+148 passed, 6 warnings in 1.97s

@@ -1,0 +1,17 @@
+import unittest
+from personality import Personality
+
+class TestPersonality(unittest.TestCase):
+    def setUp(self):
+        self.personality = Personality()
+
+    def test_emotional_reactions(self):
+        self.personality.update_emotion('happiness', 1)
+        self.assertEqual(self.personality.get_emotion('happiness'), 1)
+
+    def test_identity_handling(self):
+        identity = self.personality.get_identity()
+        self.assertIsInstance(identity, str)
+
+if __name__ == '__main__':
+    unittest.main()

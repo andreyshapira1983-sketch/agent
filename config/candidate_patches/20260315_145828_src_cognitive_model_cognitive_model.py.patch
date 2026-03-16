@@ -1,0 +1,28 @@
+# Модуль многоуровневой когнитивной модели
+
+class Planner:
+    def generate_topics(self):
+        # Логика генерации тем для разговора 
+        return ['тема1', 'тема2', 'тема3']
+
+class Memory:
+    def __init__(self):
+        self.data = {}
+
+    def save(self, key, value):
+        # Логика для сохранения данных
+        self.data[key] = value
+
+    def retrieve(self, key):
+        # Логика для извлечения данных
+        return self.data.get(key, None)
+
+class DialogueGenerator:
+    def __init__(self, planner, memory):
+        self.planner = planner
+        self.memory = memory
+
+    def generate_response(self):
+        # Логика для генерации ответа на основе плана и памяти
+        topic = self.planner.generate_topics()[0]
+        return f'Как насчет поговорить о {topic}?'

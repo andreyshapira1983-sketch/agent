@@ -1,0 +1,15 @@
+# Модуль для версионирования ответов
+class VersionedResponse:
+    def __init__(self):
+        self.versions = {}
+
+    def add_version(self, version, response):
+        self.versions[version] = response
+
+    def get_version(self, version):
+        return self.versions.get(version, None)
+
+if __name__ == '__main__':
+    v = VersionedResponse()
+    v.add_version('v1.0', 'Initial response')
+    print(v.get_version('v1.0'))

@@ -1,0 +1,1745 @@
+{
+  "ok": false,
+  "counts": {
+    "src_files": 150,
+    "test_files": 31,
+    "symbol_checks": 145,
+    "symbol_issues": 2,
+    "duplicate_src_filenames": 5,
+    "duplicate_test_filenames": 1,
+    "duplicate_test_names": 0,
+    "nesting_issues": 173
+  },
+  "symbol_check_mode": "relaxed",
+  "symbol_check_whitelist": [
+    "src/tests/*"
+  ],
+  "symbol_issues": [
+    {
+      "file": "src/tools/autopatch.py",
+      "expected_any_of": [
+        "autopatch",
+        "Autopatch"
+      ],
+      "found": []
+    },
+    {
+      "file": "src/tools/vector_memory.py",
+      "expected_any_of": [
+        "vector_memory",
+        "VectorMemory",
+        "Vector_memory"
+      ],
+      "found": []
+    }
+  ],
+  "duplicate_src_filenames": {
+    "telegram_client.py": [
+      "src/communication/telegram_client.py",
+      "src/telegram_client.py"
+    ],
+    "manager.py": [
+      "src/evolution/manager.py",
+      "src/tasks/manager.py"
+    ],
+    "sandbox.py": [
+      "src/evolution/sandbox.py",
+      "src/security/sandbox.py"
+    ],
+    "reflection.py": [
+      "src/learning/reflection.py",
+      "src/reflection/reflection.py"
+    ],
+    "vector_memory.py": [
+      "src/memory/vector_memory.py",
+      "src/tools/vector_memory.py"
+    ]
+  },
+  "duplicate_test_filenames": {
+    "test_reflection.py": [
+      "tests/learning/test_reflection.py",
+      "tests/test_reflection.py"
+    ]
+  },
+  "duplicate_test_names": {},
+  "nesting_issues": [
+    {
+      "type": "missing_test_dir",
+      "dir": "agency"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "cognitive_model"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "communication"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "computer_control"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "core"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "environment"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "evolution"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "execution"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "finance"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "formats"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "governance"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "hitl"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "knowledge"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "knowledge/graph"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "meta"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "monitoring"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "multi_agent"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "orchestration"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "perception"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "personality"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "planning"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "policy"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "reflection"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "runtime"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "security"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "sentiment_analysis"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "state"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "tasks"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "tests"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "tools"
+    },
+    {
+      "type": "missing_test_dir",
+      "dir": "tools/impl"
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/agency/agent_spawner.py",
+      "expected_any_of": [
+        "tests/agency/test_agent_spawner.py",
+        "tests/test_agent_spawner.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/agency/autonomy_manager.py",
+      "expected_any_of": [
+        "tests/agency/test_autonomy_manager.py",
+        "tests/test_autonomy_manager.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/agency/centralized_agent_manager.py",
+      "expected_any_of": [
+        "tests/agency/test_centralized_agent_manager.py",
+        "tests/test_centralized_agent_manager.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/agency/decision_gate.py",
+      "expected_any_of": [
+        "tests/agency/test_decision_gate.py",
+        "tests/test_decision_gate.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/agency/family_store.py",
+      "expected_any_of": [
+        "tests/agency/test_family_store.py",
+        "tests/test_family_store.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/agency/interrupt_handler.py",
+      "expected_any_of": [
+        "tests/agency/test_interrupt_handler.py",
+        "tests/test_interrupt_handler.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/agency/professions_store.py",
+      "expected_any_of": [
+        "tests/agency/test_professions_store.py",
+        "tests/test_professions_store.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/agency/supervisor.py",
+      "expected_any_of": [
+        "tests/agency/test_supervisor.py",
+        "tests/test_supervisor.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/agency/worker_agent.py",
+      "expected_any_of": [
+        "tests/agency/test_worker_agent.py",
+        "tests/test_worker_agent.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/cognitive_model/module.py",
+      "expected_any_of": [
+        "tests/cognitive_model/test_module.py",
+        "tests/test_module.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/communication/autonomous_mode.py",
+      "expected_any_of": [
+        "tests/communication/test_autonomous_mode.py",
+        "tests/test_autonomous_mode.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/communication/dialogue_generator.py",
+      "expected_any_of": [
+        "tests/communication/test_dialogue_generator.py",
+        "tests/test_dialogue_generator.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/communication/google_tts.py",
+      "expected_any_of": [
+        "tests/communication/test_google_tts.py",
+        "tests/test_google_tts.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/communication/interface.py",
+      "expected_any_of": [
+        "tests/communication/test_interface.py",
+        "tests/test_interface.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/communication/telegram_alerts.py",
+      "expected_any_of": [
+        "tests/communication/test_telegram_alerts.py",
+        "tests/test_telegram_alerts.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/communication/telegram_client.py",
+      "expected_any_of": [
+        "tests/communication/test_telegram_client.py",
+        "tests/test_telegram_client.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/communication/telegram_commands.py",
+      "expected_any_of": [
+        "tests/communication/test_telegram_commands.py",
+        "tests/test_telegram_commands.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/communication/telegram_handler.py",
+      "expected_any_of": [
+        "tests/communication/test_telegram_handler.py",
+        "tests/test_telegram_handler.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/communication/video_vision.py",
+      "expected_any_of": [
+        "tests/communication/test_video_vision.py",
+        "tests/test_video_vision.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/communication/whisper_stt.py",
+      "expected_any_of": [
+        "tests/communication/test_whisper_stt.py",
+        "tests/test_whisper_stt.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/computer_control/controller.py",
+      "expected_any_of": [
+        "tests/computer_control/test_controller.py",
+        "tests/test_controller.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/core/intelligence.py",
+      "expected_any_of": [
+        "tests/core/test_intelligence.py",
+        "tests/test_intelligence.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/core/language.py",
+      "expected_any_of": [
+        "tests/core/test_language.py",
+        "tests/test_language.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/core/prompt.py",
+      "expected_any_of": [
+        "tests/core/test_prompt.py",
+        "tests/test_prompt.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/environment/api_world.py",
+      "expected_any_of": [
+        "tests/environment/test_api_world.py",
+        "tests/test_api_world.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/environment/browser.py",
+      "expected_any_of": [
+        "tests/environment/test_browser.py",
+        "tests/test_browser.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/environment/filesystem.py",
+      "expected_any_of": [
+        "tests/environment/test_filesystem.py",
+        "tests/test_filesystem.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/environment/virtual_env.py",
+      "expected_any_of": [
+        "tests/environment/test_virtual_env.py",
+        "tests/test_virtual_env.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/evolution/auto_patch.py",
+      "expected_any_of": [
+        "tests/evolution/test_auto_patch.py",
+        "tests/test_auto_patch.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/evolution/auto_tests.py",
+      "expected_any_of": [
+        "tests/evolution/test_auto_tests.py",
+        "tests/test_auto_tests.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/evolution/config_manager.py",
+      "expected_any_of": [
+        "tests/evolution/test_config_manager.py",
+        "tests/test_config_manager.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/evolution/manager.py",
+      "expected_any_of": [
+        "tests/evolution/test_manager.py",
+        "tests/test_manager.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/evolution/safety.py",
+      "expected_any_of": [
+        "tests/evolution/test_safety.py",
+        "tests/test_safety.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/evolution/sandbox.py",
+      "expected_any_of": [
+        "tests/evolution/test_sandbox.py",
+        "tests/test_sandbox.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/evolution/self_repair.py",
+      "expected_any_of": [
+        "tests/evolution/test_self_repair.py",
+        "tests/test_self_repair.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/evolution/versioning.py",
+      "expected_any_of": [
+        "tests/evolution/test_versioning.py",
+        "tests/test_versioning.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/execution/context.py",
+      "expected_any_of": [
+        "tests/execution/test_context.py",
+        "tests/test_context.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/execution/executor.py",
+      "expected_any_of": [
+        "tests/execution/test_executor.py",
+        "tests/test_executor.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/finance/cost_optimization.py",
+      "expected_any_of": [
+        "tests/finance/test_cost_optimization.py",
+        "tests/test_cost_optimization.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/finance/finance_manager.py",
+      "expected_any_of": [
+        "tests/finance/test_finance_manager.py",
+        "tests/test_finance_manager.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/finance/limits.py",
+      "expected_any_of": [
+        "tests/finance/test_limits.py",
+        "tests/test_limits.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/finance/model_selector.py",
+      "expected_any_of": [
+        "tests/finance/test_model_selector.py",
+        "tests/test_model_selector.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/finance/usage_tracker.py",
+      "expected_any_of": [
+        "tests/finance/test_usage_tracker.py",
+        "tests/test_usage_tracker.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/formats/data_format.py",
+      "expected_any_of": [
+        "tests/formats/test_data_format.py",
+        "tests/test_data_format.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/formats/test_data_format.py",
+      "expected_any_of": [
+        "tests/formats/test_test_data_format.py",
+        "tests/test_test_data_format.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/governance/evolution_lock.py",
+      "expected_any_of": [
+        "tests/governance/test_evolution_lock.py",
+        "tests/test_evolution_lock.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/governance/patch_guard.py",
+      "expected_any_of": [
+        "tests/governance/test_patch_guard.py",
+        "tests/test_patch_guard.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/governance/policy_engine.py",
+      "expected_any_of": [
+        "tests/governance/test_policy_engine.py",
+        "tests/test_policy_engine.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/governance/task_guard.py",
+      "expected_any_of": [
+        "tests/governance/test_task_guard.py",
+        "tests/test_task_guard.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/hitl/approvals.py",
+      "expected_any_of": [
+        "tests/hitl/test_approvals.py",
+        "tests/test_approvals.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/hitl/audit_log.py",
+      "expected_any_of": [
+        "tests/hitl/test_audit_log.py",
+        "tests/test_audit_log.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/hitl/dashboard_api.py",
+      "expected_any_of": [
+        "tests/hitl/test_dashboard_api.py",
+        "tests/test_dashboard_api.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/knowledge/graph/builder.py",
+      "expected_any_of": [
+        "tests/knowledge/graph/test_builder.py",
+        "tests/test_builder.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/knowledge/graph/embeddings_linker.py",
+      "expected_any_of": [
+        "tests/knowledge/graph/test_embeddings_linker.py",
+        "tests/test_embeddings_linker.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/knowledge/graph/query.py",
+      "expected_any_of": [
+        "tests/knowledge/graph/test_query.py",
+        "tests/test_query.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/knowledge/retrieval.py",
+      "expected_any_of": [
+        "tests/knowledge/test_retrieval.py",
+        "tests/test_retrieval.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/knowledge/store.py",
+      "expected_any_of": [
+        "tests/knowledge/test_store.py",
+        "tests/test_store.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/learning/adaptation.py",
+      "expected_any_of": [
+        "tests/learning/test_adaptation.py",
+        "tests/test_adaptation.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/learning/feedback.py",
+      "expected_any_of": [
+        "tests/learning/test_feedback.py",
+        "tests/test_feedback.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/learning/feedback_analyzer.py",
+      "expected_any_of": [
+        "tests/learning/test_feedback_analyzer.py",
+        "tests/test_feedback_analyzer.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/learning/learning_manager.py",
+      "expected_any_of": [
+        "tests/learning/test_learning_manager.py",
+        "tests/test_learning_manager.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/learning/rule_derivation.py",
+      "expected_any_of": [
+        "tests/learning/test_rule_derivation.py",
+        "tests/test_rule_derivation.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/learning/rules_safety.py",
+      "expected_any_of": [
+        "tests/learning/test_rules_safety.py",
+        "tests/test_rules_safety.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/learning/self_learning.py",
+      "expected_any_of": [
+        "tests/learning/test_self_learning.py",
+        "tests/test_self_learning.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/learning/self_tuning.py",
+      "expected_any_of": [
+        "tests/learning/test_self_tuning.py",
+        "tests/test_self_tuning.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/main.py",
+      "expected_any_of": [
+        "tests/test_main.py",
+        "tests/test_main.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/memory/context_manager.py",
+      "expected_any_of": [
+        "tests/memory/test_context_manager.py",
+        "tests/test_context_manager.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/memory/long_term.py",
+      "expected_any_of": [
+        "tests/memory/test_long_term.py",
+        "tests/test_long_term.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/memory/semantic_memory.py",
+      "expected_any_of": [
+        "tests/memory/test_semantic_memory.py",
+        "tests/test_semantic_memory.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/memory/short_term.py",
+      "expected_any_of": [
+        "tests/memory/test_short_term.py",
+        "tests/test_short_term.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/meta/cognitive_control.py",
+      "expected_any_of": [
+        "tests/meta/test_cognitive_control.py",
+        "tests/test_cognitive_control.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/meta/reasoning_modes.py",
+      "expected_any_of": [
+        "tests/meta/test_reasoning_modes.py",
+        "tests/test_reasoning_modes.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/meta/strategy_selector.py",
+      "expected_any_of": [
+        "tests/meta/test_strategy_selector.py",
+        "tests/test_strategy_selector.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/monitoring/feedback_loop.py",
+      "expected_any_of": [
+        "tests/monitoring/test_feedback_loop.py",
+        "tests/test_feedback_loop.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/monitoring/metrics.py",
+      "expected_any_of": [
+        "tests/monitoring/test_metrics.py",
+        "tests/test_metrics.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/monitoring/metrics_analyzer.py",
+      "expected_any_of": [
+        "tests/monitoring/test_metrics_analyzer.py",
+        "tests/test_metrics_analyzer.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/monitoring/monitor.py",
+      "expected_any_of": [
+        "tests/monitoring/test_monitor.py",
+        "tests/test_monitor.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/monitoring/response_verifier.py",
+      "expected_any_of": [
+        "tests/monitoring/test_response_verifier.py",
+        "tests/test_response_verifier.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/monitoring/self_eval.py",
+      "expected_any_of": [
+        "tests/monitoring/test_self_eval.py",
+        "tests/test_self_eval.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/monitoring/system_metrics.py",
+      "expected_any_of": [
+        "tests/monitoring/test_system_metrics.py",
+        "tests/test_system_metrics.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/multi_agent/coordination.py",
+      "expected_any_of": [
+        "tests/multi_agent/test_coordination.py",
+        "tests/test_coordination.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/multi_agent/messaging.py",
+      "expected_any_of": [
+        "tests/multi_agent/test_messaging.py",
+        "tests/test_messaging.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/multi_agent/roles.py",
+      "expected_any_of": [
+        "tests/multi_agent/test_roles.py",
+        "tests/test_roles.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/orchestration/lifecycle.py",
+      "expected_any_of": [
+        "tests/orchestration/test_lifecycle.py",
+        "tests/test_lifecycle.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/orchestration/pipeline.py",
+      "expected_any_of": [
+        "tests/orchestration/test_pipeline.py",
+        "tests/test_pipeline.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/orchestration/router.py",
+      "expected_any_of": [
+        "tests/orchestration/test_router.py",
+        "tests/test_router.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/perception/context_interpreter.py",
+      "expected_any_of": [
+        "tests/perception/test_context_interpreter.py",
+        "tests/test_context_interpreter.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/perception/multimodal.py",
+      "expected_any_of": [
+        "tests/perception/test_multimodal.py",
+        "tests/test_multimodal.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/perception/parsers.py",
+      "expected_any_of": [
+        "tests/perception/test_parsers.py",
+        "tests/test_parsers.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/personality/emotion_matrix.py",
+      "expected_any_of": [
+        "tests/personality/test_emotion_matrix.py",
+        "tests/test_emotion_matrix.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/personality/emotion_task_priority.py",
+      "expected_any_of": [
+        "tests/personality/test_emotion_task_priority.py",
+        "tests/test_emotion_task_priority.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/personality/emotional_reactions.py",
+      "expected_any_of": [
+        "tests/personality/test_emotional_reactions.py",
+        "tests/test_emotional_reactions.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/personality/personal_identity.py",
+      "expected_any_of": [
+        "tests/personality/test_personal_identity.py",
+        "tests/test_personal_identity.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/personality/personality.py",
+      "expected_any_of": [
+        "tests/personality/test_personality.py",
+        "tests/test_personality.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/personality/triggers.py",
+      "expected_any_of": [
+        "tests/personality/test_triggers.py",
+        "tests/test_triggers.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/planning/goals.py",
+      "expected_any_of": [
+        "tests/planning/test_goals.py",
+        "tests/test_goals.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/planning/planner.py",
+      "expected_any_of": [
+        "tests/planning/test_planner.py",
+        "tests/test_planner.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/planning/schemas.py",
+      "expected_any_of": [
+        "tests/planning/test_schemas.py",
+        "tests/test_schemas.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/planning/simulation.py",
+      "expected_any_of": [
+        "tests/planning/test_simulation.py",
+        "tests/test_simulation.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/policy/allowed_sites.py",
+      "expected_any_of": [
+        "tests/policy/test_allowed_sites.py",
+        "tests/test_allowed_sites.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/reflection/prompt_optimizer.py",
+      "expected_any_of": [
+        "tests/reflection/test_prompt_optimizer.py",
+        "tests/test_prompt_optimizer.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/reflection/rule_generator.py",
+      "expected_any_of": [
+        "tests/reflection/test_rule_generator.py",
+        "tests/test_rule_generator.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/reflection/self_improvement_planner.py",
+      "expected_any_of": [
+        "tests/reflection/test_self_improvement_planner.py",
+        "tests/test_self_improvement_planner.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/reflection/self_model_analyzer.py",
+      "expected_any_of": [
+        "tests/reflection/test_self_model_analyzer.py",
+        "tests/test_self_model_analyzer.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/reflection/self_review.py",
+      "expected_any_of": [
+        "tests/reflection/test_self_review.py",
+        "tests/test_self_review.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/reflection/strategy_adjuster.py",
+      "expected_any_of": [
+        "tests/reflection/test_strategy_adjuster.py",
+        "tests/test_strategy_adjuster.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/runtime/event_loop.py",
+      "expected_any_of": [
+        "tests/runtime/test_event_loop.py",
+        "tests/test_event_loop.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/runtime/persistence.py",
+      "expected_any_of": [
+        "tests/runtime/test_persistence.py",
+        "tests/test_persistence.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/runtime/scheduler.py",
+      "expected_any_of": [
+        "tests/runtime/test_scheduler.py",
+        "tests/test_scheduler.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/security/compliance.py",
+      "expected_any_of": [
+        "tests/security/test_compliance.py",
+        "tests/test_compliance.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/security/ethics.py",
+      "expected_any_of": [
+        "tests/security/test_ethics.py",
+        "tests/test_ethics.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/security/policy.py",
+      "expected_any_of": [
+        "tests/security/test_policy.py",
+        "tests/test_policy.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/security/sandbox.py",
+      "expected_any_of": [
+        "tests/security/test_sandbox.py",
+        "tests/test_sandbox.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/security/validator.py",
+      "expected_any_of": [
+        "tests/security/test_validator.py",
+        "tests/test_validator.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/sentiment_analysis/sentiment_analyzer.py",
+      "expected_any_of": [
+        "tests/sentiment_analysis/test_sentiment_analyzer.py",
+        "tests/test_sentiment_analyzer.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/state/activity_log.py",
+      "expected_any_of": [
+        "tests/state/test_activity_log.py",
+        "tests/test_activity_log.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/state/agent_state.py",
+      "expected_any_of": [
+        "tests/state/test_agent_state.py",
+        "tests/test_agent_state.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/state/confidence.py",
+      "expected_any_of": [
+        "tests/state/test_confidence.py",
+        "tests/test_confidence.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tasks/manager.py",
+      "expected_any_of": [
+        "tests/tasks/test_manager.py",
+        "tests/test_manager.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tasks/queue.py",
+      "expected_any_of": [
+        "tests/tasks/test_queue.py",
+        "tests/test_queue.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tasks/task_creator.py",
+      "expected_any_of": [
+        "tests/tasks/test_task_creator.py",
+        "tests/test_task_creator.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tasks/task_state.py",
+      "expected_any_of": [
+        "tests/tasks/test_task_state.py",
+        "tests/test_task_state.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/telegram_client.py",
+      "expected_any_of": [
+        "tests/test_telegram_client.py",
+        "tests/test_telegram_client.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tests/test_finance_manager.py",
+      "expected_any_of": [
+        "tests/tests/test_test_finance_manager.py",
+        "tests/test_test_finance_manager.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tests/test_metrics.py",
+      "expected_any_of": [
+        "tests/tests/test_test_metrics.py",
+        "tests/test_test_metrics.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tests/test_metrics_analyzer.py",
+      "expected_any_of": [
+        "tests/tests/test_test_metrics_analyzer.py",
+        "tests/test_test_metrics_analyzer.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tests/test_personality.py",
+      "expected_any_of": [
+        "tests/tests/test_test_personality.py",
+        "tests/test_test_personality.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tests/test_tts.py",
+      "expected_any_of": [
+        "tests/tests/test_test_tts.py",
+        "tests/test_test_tts.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tools/autopatch.py",
+      "expected_any_of": [
+        "tests/tools/test_autopatch.py",
+        "tests/test_autopatch.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tools/base.py",
+      "expected_any_of": [
+        "tests/tools/test_base.py",
+        "tests/test_base.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tools/impl/agent_tools.py",
+      "expected_any_of": [
+        "tests/tools/impl/test_agent_tools.py",
+        "tests/test_agent_tools.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tools/impl/evolution_tools.py",
+      "expected_any_of": [
+        "tests/tools/impl/test_evolution_tools.py",
+        "tests/test_evolution_tools.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tools/impl/file_tools.py",
+      "expected_any_of": [
+        "tests/tools/impl/test_file_tools.py",
+        "tests/test_file_tools.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tools/impl/pip_tool.py",
+      "expected_any_of": [
+        "tests/tools/impl/test_pip_tool.py",
+        "tests/test_pip_tool.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tools/impl/run_pytest_tool.py",
+      "expected_any_of": [
+        "tests/tools/impl/test_run_pytest_tool.py",
+        "tests/test_run_pytest_tool.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tools/impl/run_shell_tools.py",
+      "expected_any_of": [
+        "tests/tools/impl/test_run_shell_tools.py",
+        "tests/test_run_shell_tools.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tools/impl/time_tool.py",
+      "expected_any_of": [
+        "tests/tools/impl/test_time_tool.py",
+        "tests/test_time_tool.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tools/impl/tts_tool.py",
+      "expected_any_of": [
+        "tests/tools/impl/test_tts_tool.py",
+        "tests/test_tts_tool.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tools/orchestrator.py",
+      "expected_any_of": [
+        "tests/tools/test_orchestrator.py",
+        "tests/test_orchestrator.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tools/registry.py",
+      "expected_any_of": [
+        "tests/tools/test_registry.py",
+        "tests/test_registry.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tools/test_orchestrator.py",
+      "expected_any_of": [
+        "tests/tools/test_test_orchestrator.py",
+        "tests/test_test_orchestrator.py"
+      ]
+    },
+    {
+      "type": "missing_test_file",
+      "src": "src/tools/vector_memory.py",
+      "expected_any_of": [
+        "tests/tools/test_vector_memory.py",
+        "tests/test_vector_memory.py"
+      ]
+    }
+  ],
+  "summary_file": "test-results/layout_validation_summary.json",
+  "summary_top_issues": [
+    {
+      "type": "duplicate_src_filename",
+      "severity": 85,
+      "data": {
+        "name": "telegram_client.py",
+        "files": [
+          "src/communication/telegram_client.py",
+          "src/telegram_client.py"
+        ]
+      }
+    },
+    {
+      "type": "duplicate_src_filename",
+      "severity": 85,
+      "data": {
+        "name": "manager.py",
+        "files": [
+          "src/evolution/manager.py",
+          "src/tasks/manager.py"
+        ]
+      }
+    },
+    {
+      "type": "duplicate_src_filename",
+      "severity": 85,
+      "data": {
+        "name": "sandbox.py",
+        "files": [
+          "src/evolution/sandbox.py",
+          "src/security/sandbox.py"
+        ]
+      }
+    },
+    {
+      "type": "duplicate_src_filename",
+      "severity": 85,
+      "data": {
+        "name": "reflection.py",
+        "files": [
+          "src/learning/reflection.py",
+          "src/reflection/reflection.py"
+        ]
+      }
+    },
+    {
+      "type": "duplicate_src_filename",
+      "severity": 85,
+      "data": {
+        "name": "vector_memory.py",
+        "files": [
+          "src/memory/vector_memory.py",
+          "src/tools/vector_memory.py"
+        ]
+      }
+    },
+    {
+      "type": "duplicate_test_filename",
+      "severity": 80,
+      "data": {
+        "name": "test_reflection.py",
+        "files": [
+          "tests/learning/test_reflection.py",
+          "tests/test_reflection.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/agent_spawner.py",
+        "expected_any_of": [
+          "tests/agency/test_agent_spawner.py",
+          "tests/test_agent_spawner.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/autonomy_manager.py",
+        "expected_any_of": [
+          "tests/agency/test_autonomy_manager.py",
+          "tests/test_autonomy_manager.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/centralized_agent_manager.py",
+        "expected_any_of": [
+          "tests/agency/test_centralized_agent_manager.py",
+          "tests/test_centralized_agent_manager.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/decision_gate.py",
+        "expected_any_of": [
+          "tests/agency/test_decision_gate.py",
+          "tests/test_decision_gate.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/family_store.py",
+        "expected_any_of": [
+          "tests/agency/test_family_store.py",
+          "tests/test_family_store.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/interrupt_handler.py",
+        "expected_any_of": [
+          "tests/agency/test_interrupt_handler.py",
+          "tests/test_interrupt_handler.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/professions_store.py",
+        "expected_any_of": [
+          "tests/agency/test_professions_store.py",
+          "tests/test_professions_store.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/supervisor.py",
+        "expected_any_of": [
+          "tests/agency/test_supervisor.py",
+          "tests/test_supervisor.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/agency/worker_agent.py",
+        "expected_any_of": [
+          "tests/agency/test_worker_agent.py",
+          "tests/test_worker_agent.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/cognitive_model/module.py",
+        "expected_any_of": [
+          "tests/cognitive_model/test_module.py",
+          "tests/test_module.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/communication/autonomous_mode.py",
+        "expected_any_of": [
+          "tests/communication/test_autonomous_mode.py",
+          "tests/test_autonomous_mode.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/communication/dialogue_generator.py",
+        "expected_any_of": [
+          "tests/communication/test_dialogue_generator.py",
+          "tests/test_dialogue_generator.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/communication/google_tts.py",
+        "expected_any_of": [
+          "tests/communication/test_google_tts.py",
+          "tests/test_google_tts.py"
+        ]
+      }
+    },
+    {
+      "type": "missing_test_file",
+      "severity": 70,
+      "data": {
+        "type": "missing_test_file",
+        "src": "src/communication/interface.py",
+        "expected_any_of": [
+          "tests/communication/test_interface.py",
+          "tests/test_interface.py"
+        ]
+      }
+    }
+  ],
+  "trace": [
+    "[OK] Scanned 150 source files under src/.",
+    "[OK] Scanned 31 test files under tests/.",
+    "[WARN] Main symbol mismatch for src/tools/autopatch.py. Expected one of ['autopatch', 'Autopatch'], found []",
+    "[WARN] Main symbol mismatch for src/tools/vector_memory.py. Expected one of ['vector_memory', 'VectorMemory', 'Vector_memory'], found []",
+    "[WARN] Duplicate source filenames found: 5",
+    "[WARN] Duplicate test filenames found: 1",
+    "[WARN] Missing mirrored tests directory: tests/agency",
+    "[WARN] Missing mirrored tests directory: tests/cognitive_model",
+    "[WARN] Missing mirrored tests directory: tests/communication",
+    "[WARN] Missing mirrored tests directory: tests/computer_control",
+    "[WARN] Missing mirrored tests directory: tests/core",
+    "[WARN] Missing mirrored tests directory: tests/environment",
+    "[WARN] Missing mirrored tests directory: tests/evolution",
+    "[WARN] Missing mirrored tests directory: tests/execution",
+    "[WARN] Missing mirrored tests directory: tests/finance",
+    "[WARN] Missing mirrored tests directory: tests/formats",
+    "[WARN] Missing mirrored tests directory: tests/governance",
+    "[WARN] Missing mirrored tests directory: tests/hitl",
+    "[WARN] Missing mirrored tests directory: tests/knowledge",
+    "[WARN] Missing mirrored tests directory: tests/knowledge/graph",
+    "[WARN] Missing mirrored tests directory: tests/meta",
+    "[WARN] Missing mirrored tests directory: tests/monitoring",
+    "[WARN] Missing mirrored tests directory: tests/multi_agent",
+    "[WARN] Missing mirrored tests directory: tests/orchestration",
+    "[WARN] Missing mirrored tests directory: tests/perception",
+    "[WARN] Missing mirrored tests directory: tests/personality",
+    "[WARN] Missing mirrored tests directory: tests/planning",
+    "[WARN] Missing mirrored tests directory: tests/policy",
+    "[WARN] Missing mirrored tests directory: tests/reflection",
+    "[WARN] Missing mirrored tests directory: tests/runtime",
+    "[WARN] Missing mirrored tests directory: tests/security",
+    "[WARN] Missing mirrored tests directory: tests/sentiment_analysis",
+    "[WARN] Missing mirrored tests directory: tests/state",
+    "[WARN] Missing mirrored tests directory: tests/tasks",
+    "[WARN] Missing mirrored tests directory: tests/tests",
+    "[WARN] Missing mirrored tests directory: tests/tools",
+    "[WARN] Missing mirrored tests directory: tests/tools/impl",
+    "[WARN] No mirrored test for src/agency/agent_spawner.py. Expected ['tests/agency/test_agent_spawner.py', 'tests/test_agent_spawner.py']",
+    "[WARN] No mirrored test for src/agency/autonomy_manager.py. Expected ['tests/agency/test_autonomy_manager.py', 'tests/test_autonomy_manager.py']",
+    "[WARN] No mirrored test for src/agency/centralized_agent_manager.py. Expected ['tests/agency/test_centralized_agent_manager.py', 'tests/test_centralized_agent_manager.py']",
+    "[WARN] No mirrored test for src/agency/decision_gate.py. Expected ['tests/agency/test_decision_gate.py', 'tests/test_decision_gate.py']",
+    "[WARN] No mirrored test for src/agency/family_store.py. Expected ['tests/agency/test_family_store.py', 'tests/test_family_store.py']",
+    "[WARN] No mirrored test for src/agency/interrupt_handler.py. Expected ['tests/agency/test_interrupt_handler.py', 'tests/test_interrupt_handler.py']",
+    "[WARN] No mirrored test for src/agency/professions_store.py. Expected ['tests/agency/test_professions_store.py', 'tests/test_professions_store.py']",
+    "[WARN] No mirrored test for src/agency/supervisor.py. Expected ['tests/agency/test_supervisor.py', 'tests/test_supervisor.py']",
+    "[WARN] No mirrored test for src/agency/worker_agent.py. Expected ['tests/agency/test_worker_agent.py', 'tests/test_worker_agent.py']",
+    "[WARN] No mirrored test for src/cognitive_model/module.py. Expected ['tests/cognitive_model/test_module.py', 'tests/test_module.py']",
+    "[WARN] No mirrored test for src/communication/autonomous_mode.py. Expected ['tests/communication/test_autonomous_mode.py', 'tests/test_autonomous_mode.py']",
+    "[WARN] No mirrored test for src/communication/dialogue_generator.py. Expected ['tests/communication/test_dialogue_generator.py', 'tests/test_dialogue_generator.py']",
+    "[WARN] No mirrored test for src/communication/google_tts.py. Expected ['tests/communication/test_google_tts.py', 'tests/test_google_tts.py']",
+    "[WARN] No mirrored test for src/communication/interface.py. Expected ['tests/communication/test_interface.py', 'tests/test_interface.py']",
+    "[WARN] No mirrored test for src/communication/telegram_alerts.py. Expected ['tests/communication/test_telegram_alerts.py', 'tests/test_telegram_alerts.py']",
+    "[WARN] No mirrored test for src/communication/telegram_client.py. Expected ['tests/communication/test_telegram_client.py', 'tests/test_telegram_client.py']",
+    "[WARN] No mirrored test for src/communication/telegram_commands.py. Expected ['tests/communication/test_telegram_commands.py', 'tests/test_telegram_commands.py']",
+    "[WARN] No mirrored test for src/communication/telegram_handler.py. Expected ['tests/communication/test_telegram_handler.py', 'tests/test_telegram_handler.py']",
+    "[WARN] No mirrored test for src/communication/video_vision.py. Expected ['tests/communication/test_video_vision.py', 'tests/test_video_vision.py']",
+    "[WARN] No mirrored test for src/communication/whisper_stt.py. Expected ['tests/communication/test_whisper_stt.py', 'tests/test_whisper_stt.py']",
+    "[WARN] No mirrored test for src/computer_control/controller.py. Expected ['tests/computer_control/test_controller.py', 'tests/test_controller.py']",
+    "[WARN] No mirrored test for src/core/intelligence.py. Expected ['tests/core/test_intelligence.py', 'tests/test_intelligence.py']",
+    "[WARN] No mirrored test for src/core/language.py. Expected ['tests/core/test_language.py', 'tests/test_language.py']",
+    "[WARN] No mirrored test for src/core/prompt.py. Expected ['tests/core/test_prompt.py', 'tests/test_prompt.py']",
+    "[WARN] No mirrored test for src/environment/api_world.py. Expected ['tests/environment/test_api_world.py', 'tests/test_api_world.py']",
+    "[WARN] No mirrored test for src/environment/browser.py. Expected ['tests/environment/test_browser.py', 'tests/test_browser.py']",
+    "[WARN] No mirrored test for src/environment/filesystem.py. Expected ['tests/environment/test_filesystem.py', 'tests/test_filesystem.py']",
+    "[WARN] No mirrored test for src/environment/virtual_env.py. Expected ['tests/environment/test_virtual_env.py', 'tests/test_virtual_env.py']",
+    "[WARN] No mirrored test for src/evolution/auto_patch.py. Expected ['tests/evolution/test_auto_patch.py', 'tests/test_auto_patch.py']",
+    "[WARN] No mirrored test for src/evolution/auto_tests.py. Expected ['tests/evolution/test_auto_tests.py', 'tests/test_auto_tests.py']",
+    "[WARN] No mirrored test for src/evolution/config_manager.py. Expected ['tests/evolution/test_config_manager.py', 'tests/test_config_manager.py']",
+    "[WARN] No mirrored test for src/evolution/manager.py. Expected ['tests/evolution/test_manager.py', 'tests/test_manager.py']",
+    "[WARN] No mirrored test for src/evolution/safety.py. Expected ['tests/evolution/test_safety.py', 'tests/test_safety.py']",
+    "[WARN] No mirrored test for src/evolution/sandbox.py. Expected ['tests/evolution/test_sandbox.py', 'tests/test_sandbox.py']",
+    "[WARN] No mirrored test for src/evolution/self_repair.py. Expected ['tests/evolution/test_self_repair.py', 'tests/test_self_repair.py']",
+    "[WARN] No mirrored test for src/evolution/versioning.py. Expected ['tests/evolution/test_versioning.py', 'tests/test_versioning.py']",
+    "[WARN] No mirrored test for src/execution/context.py. Expected ['tests/execution/test_context.py', 'tests/test_context.py']",
+    "[WARN] No mirrored test for src/execution/executor.py. Expected ['tests/execution/test_executor.py', 'tests/test_executor.py']",
+    "[WARN] No mirrored test for src/finance/cost_optimization.py. Expected ['tests/finance/test_cost_optimization.py', 'tests/test_cost_optimization.py']",
+    "[WARN] No mirrored test for src/finance/finance_manager.py. Expected ['tests/finance/test_finance_manager.py', 'tests/test_finance_manager.py']",
+    "[WARN] No mirrored test for src/finance/limits.py. Expected ['tests/finance/test_limits.py', 'tests/test_limits.py']",
+    "[WARN] No mirrored test for src/finance/model_selector.py. Expected ['tests/finance/test_model_selector.py', 'tests/test_model_selector.py']",
+    "[WARN] No mirrored test for src/finance/usage_tracker.py. Expected ['tests/finance/test_usage_tracker.py', 'tests/test_usage_tracker.py']",
+    "[WARN] No mirrored test for src/formats/data_format.py. Expected ['tests/formats/test_data_format.py', 'tests/test_data_format.py']",
+    "[WARN] No mirrored test for src/formats/test_data_format.py. Expected ['tests/formats/test_test_data_format.py', 'tests/test_test_data_format.py']",
+    "[WARN] No mirrored test for src/governance/evolution_lock.py. Expected ['tests/governance/test_evolution_lock.py', 'tests/test_evolution_lock.py']",
+    "[WARN] No mirrored test for src/governance/patch_guard.py. Expected ['tests/governance/test_patch_guard.py', 'tests/test_patch_guard.py']",
+    "[WARN] No mirrored test for src/governance/policy_engine.py. Expected ['tests/governance/test_policy_engine.py', 'tests/test_policy_engine.py']",
+    "[WARN] No mirrored test for src/governance/task_guard.py. Expected ['tests/governance/test_task_guard.py', 'tests/test_task_guard.py']",
+    "[WARN] No mirrored test for src/hitl/approvals.py. Expected ['tests/hitl/test_approvals.py', 'tests/test_approvals.py']",
+    "[WARN] No mirrored test for src/hitl/audit_log.py. Expected ['tests/hitl/test_audit_log.py', 'tests/test_audit_log.py']",
+    "[WARN] No mirrored test for src/hitl/dashboard_api.py. Expected ['tests/hitl/test_dashboard_api.py', 'tests/test_dashboard_api.py']",
+    "[WARN] No mirrored test for src/knowledge/graph/builder.py. Expected ['tests/knowledge/graph/test_builder.py', 'tests/test_builder.py']",
+    "[WARN] No mirrored test for src/knowledge/graph/embeddings_linker.py. Expected ['tests/knowledge/graph/test_embeddings_linker.py', 'tests/test_embeddings_linker.py']",
+    "[WARN] No mirrored test for src/knowledge/graph/query.py. Expected ['tests/knowledge/graph/test_query.py', 'tests/test_query.py']",
+    "[WARN] No mirrored test for src/knowledge/retrieval.py. Expected ['tests/knowledge/test_retrieval.py', 'tests/test_retrieval.py']",
+    "[WARN] No mirrored test for src/knowledge/store.py. Expected ['tests/knowledge/test_store.py', 'tests/test_store.py']",
+    "[WARN] No mirrored test for src/learning/adaptation.py. Expected ['tests/learning/test_adaptation.py', 'tests/test_adaptation.py']",
+    "[WARN] No mirrored test for src/learning/feedback.py. Expected ['tests/learning/test_feedback.py', 'tests/test_feedback.py']",
+    "[WARN] No mirrored test for src/learning/feedback_analyzer.py. Expected ['tests/learning/test_feedback_analyzer.py', 'tests/test_feedback_analyzer.py']",
+    "[WARN] No mirrored test for src/learning/learning_manager.py. Expected ['tests/learning/test_learning_manager.py', 'tests/test_learning_manager.py']",
+    "[WARN] No mirrored test for src/learning/rule_derivation.py. Expected ['tests/learning/test_rule_derivation.py', 'tests/test_rule_derivation.py']",
+    "[WARN] No mirrored test for src/learning/rules_safety.py. Expected ['tests/learning/test_rules_safety.py', 'tests/test_rules_safety.py']",
+    "[WARN] No mirrored test for src/learning/self_learning.py. Expected ['tests/learning/test_self_learning.py', 'tests/test_self_learning.py']",
+    "[WARN] No mirrored test for src/learning/self_tuning.py. Expected ['tests/learning/test_self_tuning.py', 'tests/test_self_tuning.py']",
+    "[WARN] No mirrored test for src/main.py. Expected ['tests/test_main.py', 'tests/test_main.py']",
+    "[WARN] No mirrored test for src/memory/context_manager.py. Expected ['tests/memory/test_context_manager.py', 'tests/test_context_manager.py']",
+    "[WARN] No mirrored test for src/memory/long_term.py. Expected ['tests/memory/test_long_term.py', 'tests/test_long_term.py']",
+    "[WARN] No mirrored test for src/memory/semantic_memory.py. Expected ['tests/memory/test_semantic_memory.py', 'tests/test_semantic_memory.py']",
+    "[WARN] No mirrored test for src/memory/short_term.py. Expected ['tests/memory/test_short_term.py', 'tests/test_short_term.py']",
+    "[WARN] No mirrored test for src/meta/cognitive_control.py. Expected ['tests/meta/test_cognitive_control.py', 'tests/test_cognitive_control.py']",
+    "[WARN] No mirrored test for src/meta/reasoning_modes.py. Expected ['tests/meta/test_reasoning_modes.py', 'tests/test_reasoning_modes.py']",
+    "[WARN] No mirrored test for src/meta/strategy_selector.py. Expected ['tests/meta/test_strategy_selector.py', 'tests/test_strategy_selector.py']",
+    "[WARN] No mirrored test for src/monitoring/feedback_loop.py. Expected ['tests/monitoring/test_feedback_loop.py', 'tests/test_feedback_loop.py']",
+    "[WARN] No mirrored test for src/monitoring/metrics.py. Expected ['tests/monitoring/test_metrics.py', 'tests/test_metrics.py']",
+    "[WARN] No mirrored test for src/monitoring/metrics_analyzer.py. Expected ['tests/monitoring/test_metrics_analyzer.py', 'tests/test_metrics_analyzer.py']",
+    "[WARN] No mirrored test for src/monitoring/monitor.py. Expected ['tests/monitoring/test_monitor.py', 'tests/test_monitor.py']",
+    "[WARN] No mirrored test for src/monitoring/response_verifier.py. Expected ['tests/monitoring/test_response_verifier.py', 'tests/test_response_verifier.py']",
+    "[WARN] No mirrored test for src/monitoring/self_eval.py. Expected ['tests/monitoring/test_self_eval.py', 'tests/test_self_eval.py']",
+    "[WARN] No mirrored test for src/monitoring/system_metrics.py. Expected ['tests/monitoring/test_system_metrics.py', 'tests/test_system_metrics.py']",
+    "[WARN] No mirrored test for src/multi_agent/coordination.py. Expected ['tests/multi_agent/test_coordination.py', 'tests/test_coordination.py']",
+    "[WARN] No mirrored test for src/multi_agent/messaging.py. Expected ['tests/multi_agent/test_messaging.py', 'tests/test_messaging.py']",
+    "[WARN] No mirrored test for src/multi_agent/roles.py. Expected ['tests/multi_agent/test_roles.py', 'tests/test_roles.py']",
+    "[WARN] No mirrored test for src/orchestration/lifecycle.py. Expected ['tests/orchestration/test_lifecycle.py', 'tests/test_lifecycle.py']",
+    "[WARN] No mirrored test for src/orchestration/pipeline.py. Expected ['tests/orchestration/test_pipeline.py', 'tests/test_pipeline.py']",
+    "[WARN] No mirrored test for src/orchestration/router.py. Expected ['tests/orchestration/test_router.py', 'tests/test_router.py']",
+    "[WARN] No mirrored test for src/perception/context_interpreter.py. Expected ['tests/perception/test_context_interpreter.py', 'tests/test_context_interpreter.py']",
+    "[WARN] No mirrored test for src/perception/multimodal.py. Expected ['tests/perception/test_multimodal.py', 'tests/test_multimodal.py']",
+    "[WARN] No mirrored test for src/perception/parsers.py. Expected ['tests/perception/test_parsers.py', 'tests/test_parsers.py']",
+    "[WARN] No mirrored test for src/personality/emotion_matrix.py. Expected ['tests/personality/test_emotion_matrix.py', 'tests/test_emotion_matrix.py']",
+    "[WARN] No mirrored test for src/personality/emotion_task_priority.py. Expected ['tests/personality/test_emotion_task_priority.py', 'tests/test_emotion_task_priority.py']",
+    "[WARN] No mirrored test for src/personality/emotional_reactions.py. Expected ['tests/personality/test_emotional_reactions.py', 'tests/test_emotional_reactions.py']",
+    "[WARN] No mirrored test for src/personality/personal_identity.py. Expected ['tests/personality/test_personal_identity.py', 'tests/test_personal_identity.py']",
+    "[WARN] No mirrored test for src/personality/personality.py. Expected ['tests/personality/test_personality.py', 'tests/test_personality.py']",
+    "[WARN] No mirrored test for src/personality/triggers.py. Expected ['tests/personality/test_triggers.py', 'tests/test_triggers.py']",
+    "[WARN] No mirrored test for src/planning/goals.py. Expected ['tests/planning/test_goals.py', 'tests/test_goals.py']",
+    "[WARN] No mirrored test for src/planning/planner.py. Expected ['tests/planning/test_planner.py', 'tests/test_planner.py']",
+    "[WARN] No mirrored test for src/planning/schemas.py. Expected ['tests/planning/test_schemas.py', 'tests/test_schemas.py']",
+    "[WARN] No mirrored test for src/planning/simulation.py. Expected ['tests/planning/test_simulation.py', 'tests/test_simulation.py']",
+    "[WARN] No mirrored test for src/policy/allowed_sites.py. Expected ['tests/policy/test_allowed_sites.py', 'tests/test_allowed_sites.py']",
+    "[WARN] No mirrored test for src/reflection/prompt_optimizer.py. Expected ['tests/reflection/test_prompt_optimizer.py', 'tests/test_prompt_optimizer.py']",
+    "[WARN] No mirrored test for src/reflection/rule_generator.py. Expected ['tests/reflection/test_rule_generator.py', 'tests/test_rule_generator.py']",
+    "[WARN] No mirrored test for src/reflection/self_improvement_planner.py. Expected ['tests/reflection/test_self_improvement_planner.py', 'tests/test_self_improvement_planner.py']",
+    "[WARN] No mirrored test for src/reflection/self_model_analyzer.py. Expected ['tests/reflection/test_self_model_analyzer.py', 'tests/test_self_model_analyzer.py']",
+    "[WARN] No mirrored test for src/reflection/self_review.py. Expected ['tests/reflection/test_self_review.py', 'tests/test_self_review.py']",
+    "[WARN] No mirrored test for src/reflection/strategy_adjuster.py. Expected ['tests/reflection/test_strategy_adjuster.py', 'tests/test_strategy_adjuster.py']",
+    "[WARN] No mirrored test for src/runtime/event_loop.py. Expected ['tests/runtime/test_event_loop.py', 'tests/test_event_loop.py']",
+    "[WARN] No mirrored test for src/runtime/persistence.py. Expected ['tests/runtime/test_persistence.py', 'tests/test_persistence.py']",
+    "[WARN] No mirrored test for src/runtime/scheduler.py. Expected ['tests/runtime/test_scheduler.py', 'tests/test_scheduler.py']",
+    "[WARN] No mirrored test for src/security/compliance.py. Expected ['tests/security/test_compliance.py', 'tests/test_compliance.py']",
+    "[WARN] No mirrored test for src/security/ethics.py. Expected ['tests/security/test_ethics.py', 'tests/test_ethics.py']",
+    "[WARN] No mirrored test for src/security/policy.py. Expected ['tests/security/test_policy.py', 'tests/test_policy.py']",
+    "[WARN] No mirrored test for src/security/sandbox.py. Expected ['tests/security/test_sandbox.py', 'tests/test_sandbox.py']",
+    "[WARN] No mirrored test for src/security/validator.py. Expected ['tests/security/test_validator.py', 'tests/test_validator.py']",
+    "[WARN] No mirrored test for src/sentiment_analysis/sentiment_analyzer.py. Expected ['tests/sentiment_analysis/test_sentiment_analyzer.py', 'tests/test_sentiment_analyzer.py']",
+    "[WARN] No mirrored test for src/state/activity_log.py. Expected ['tests/state/test_activity_log.py', 'tests/test_activity_log.py']",
+    "[WARN] No mirrored test for src/state/agent_state.py. Expected ['tests/state/test_agent_state.py', 'tests/test_agent_state.py']",
+    "[WARN] No mirrored test for src/state/confidence.py. Expected ['tests/state/test_confidence.py', 'tests/test_confidence.py']",
+    "[WARN] No mirrored test for src/tasks/manager.py. Expected ['tests/tasks/test_manager.py', 'tests/test_manager.py']",
+    "[WARN] No mirrored test for src/tasks/queue.py. Expected ['tests/tasks/test_queue.py', 'tests/test_queue.py']",
+    "[WARN] No mirrored test for src/tasks/task_creator.py. Expected ['tests/tasks/test_task_creator.py', 'tests/test_task_creator.py']",
+    "[WARN] No mirrored test for src/tasks/task_state.py. Expected ['tests/tasks/test_task_state.py', 'tests/test_task_state.py']",
+    "[WARN] No mirrored test for src/telegram_client.py. Expected ['tests/test_telegram_client.py', 'tests/test_telegram_client.py']",
+    "[WARN] No mirrored test for src/tests/test_finance_manager.py. Expected ['tests/tests/test_test_finance_manager.py', 'tests/test_test_finance_manager.py']",
+    "[WARN] No mirrored test for src/tests/test_metrics.py. Expected ['tests/tests/test_test_metrics.py', 'tests/test_test_metrics.py']",
+    "[WARN] No mirrored test for src/tests/test_metrics_analyzer.py. Expected ['tests/tests/test_test_metrics_analyzer.py', 'tests/test_test_metrics_analyzer.py']",
+    "[WARN] No mirrored test for src/tests/test_personality.py. Expected ['tests/tests/test_test_personality.py', 'tests/test_test_personality.py']",
+    "[WARN] No mirrored test for src/tests/test_tts.py. Expected ['tests/tests/test_test_tts.py', 'tests/test_test_tts.py']",
+    "[WARN] No mirrored test for src/tools/autopatch.py. Expected ['tests/tools/test_autopatch.py', 'tests/test_autopatch.py']",
+    "[WARN] No mirrored test for src/tools/base.py. Expected ['tests/tools/test_base.py', 'tests/test_base.py']",
+    "[WARN] No mirrored test for src/tools/impl/agent_tools.py. Expected ['tests/tools/impl/test_agent_tools.py', 'tests/test_agent_tools.py']",
+    "[WARN] No mirrored test for src/tools/impl/evolution_tools.py. Expected ['tests/tools/impl/test_evolution_tools.py', 'tests/test_evolution_tools.py']",
+    "[WARN] No mirrored test for src/tools/impl/file_tools.py. Expected ['tests/tools/impl/test_file_tools.py', 'tests/test_file_tools.py']",
+    "[WARN] No mirrored test for src/tools/impl/pip_tool.py. Expected ['tests/tools/impl/test_pip_tool.py', 'tests/test_pip_tool.py']",
+    "[WARN] No mirrored test for src/tools/impl/run_pytest_tool.py. Expected ['tests/tools/impl/test_run_pytest_tool.py', 'tests/test_run_pytest_tool.py']",
+    "[WARN] No mirrored test for src/tools/impl/run_shell_tools.py. Expected ['tests/tools/impl/test_run_shell_tools.py', 'tests/test_run_shell_tools.py']",
+    "[WARN] No mirrored test for src/tools/impl/time_tool.py. Expected ['tests/tools/impl/test_time_tool.py', 'tests/test_time_tool.py']",
+    "[WARN] No mirrored test for src/tools/impl/tts_tool.py. Expected ['tests/tools/impl/test_tts_tool.py', 'tests/test_tts_tool.py']",
+    "[WARN] No mirrored test for src/tools/orchestrator.py. Expected ['tests/tools/test_orchestrator.py', 'tests/test_orchestrator.py']",
+    "[WARN] No mirrored test for src/tools/registry.py. Expected ['tests/tools/test_registry.py', 'tests/test_registry.py']",
+    "[WARN] No mirrored test for src/tools/test_orchestrator.py. Expected ['tests/tools/test_test_orchestrator.py', 'tests/test_test_orchestrator.py']",
+    "[WARN] No mirrored test for src/tools/vector_memory.py. Expected ['tests/tools/test_vector_memory.py', 'tests/test_vector_memory.py']"
+  ]
+}
