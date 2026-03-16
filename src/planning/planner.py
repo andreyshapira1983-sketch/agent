@@ -4,8 +4,11 @@ MVP: rule-based + initiative question generator.
 """
 from __future__ import annotations
 
+import json
+import os
 import random
 from collections import Counter
+from typing import Any
 
 from src.planning.schemas import Plan, PlanStep
 
@@ -15,14 +18,32 @@ _topic_counter: Counter[str] = Counter()
 # Пороговое число повторений, после которого смена темы считается «усиленной»
 TOPIC_REPEAT_THRESHOLD = 3
 
+_PLANNER_TOOLS = {
+    "get_current_time",
+    "fetch_url",
+    "suggest_priority",
+    "aggregate_simple",
+    "parse_json",
+    "get_my_inbox",
+    "generate_question",
+    "get_metrics",
+    "get_reading_log",
+}
+
 
 def make_plan(goal: str) -> Plan:
-    """Create a simple plan from goal. Can be extended with LLM later."""
+    """Create plan from goal. Prefer LLM planner when available, fallback to rule-based."""
+    _track_topic((goal or "").lower())
+    llm_plan = _make_llm_plan(goal)
+    if llm_plan is not None:
+        return llm_plan
+    return _make_rule_plan(goal)
+
+
+def _make_rule_plan(goal: str) -> Plan:
+    """Rule-based fallback planner."""
     steps: list[PlanStep] = []
     goal_lower = goal.lower()
-
-    # Обновить метрику интереса к теме
-    _track_topic(goal_lower)
 
     if "время" in goal_lower or "time" in goal_lower or "который час" in goal_lower:
         steps.append(PlanStep(tool="get_current_time", arguments={}))
@@ -58,6 +79,61 @@ def make_plan(goal: str) -> Plan:
         steps.append(PlanStep(tool="get_metrics", arguments={}))
 
     return Plan(goal=goal, steps=steps)
+
+
+def _make_llm_plan(goal: str) -> Plan | None:
+    """
+    LLM planner: генерирует 1-3 шага с инструментами.
+    Если LLM недоступен/ошибка/плохой JSON — вернуть None и использовать rule-based fallback.
+    """
+    key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if not key:
+        return None
+    try:
+        from openai import OpenAI
+    except Exception:
+        return None
+    try:
+        client = OpenAI(api_key=key)
+        prompt = (
+            "Ты планировщик агента. Верни только JSON без markdown. "
+            "Формат: {\"steps\":[{\"tool\":\"...\",\"arguments\":{}}]}\n"
+            f"Доступные инструменты: {sorted(_PLANNER_TOOLS)}\n"
+            "Правила: максимум 3 шага, минимум 1; только инструменты из списка; arguments всегда объект.\n"
+            f"Цель: {goal}"
+        )
+        r = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=250,
+            timeout=25,
+        )
+        if not r.choices or not r.choices[0].message.content:
+            return None
+        raw = (r.choices[0].message.content or "").strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            raw = raw.replace("json", "", 1).strip()
+        data = json.loads(raw)
+        raw_steps = data.get("steps") if isinstance(data, dict) else None
+        if not isinstance(raw_steps, list):
+            return None
+        steps: list[PlanStep] = []
+        for item in raw_steps[:3]:
+            if not isinstance(item, dict):
+                continue
+            tool = str(item.get("tool") or "").strip()
+            if tool not in _PLANNER_TOOLS:
+                continue
+            args = item.get("arguments")
+            if not isinstance(args, dict):
+                args = {}
+            steps.append(PlanStep(tool=tool, arguments=args))
+        if not steps:
+            return None
+        return Plan(goal=goal, steps=steps)
+    except Exception:
+        return None
 
 
 # ------------------------------------------------------------------
