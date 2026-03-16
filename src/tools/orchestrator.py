@@ -396,7 +396,11 @@ class Orchestrator:
             if success:
                 try:
                     from src.monitoring.metrics import metrics
-                    metrics.record_task_solved()
+                    metrics.record_task_solved(
+                        task_id=task.id,
+                        tool_name=tool_name,
+                        note=str((task.payload or {}).get("arguments") or {})[:120],
+                    )
                 except Exception:
                     pass
             outcomes.append({"task_id": task.id, "success": success, "result_preview": result[:150]})

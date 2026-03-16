@@ -7,9 +7,11 @@ from __future__ import annotations
 import logging
 import os
 import time
+import json
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 _log = logging.getLogger(__name__)
 
@@ -17,6 +19,7 @@ _MAX_MESSAGE_LEN = 4000
 _last_autonomous_sent: float = 0.0
 _last_chat_id: str | None = None  # чат, куда писали боту — сюда же шлём алерты, если TELEGRAM_ALERTS_CHAT_ID не задан
 _logged_404_once = False  # чтобы не спамить в консоль при повторных 404
+_SUMMARY_STATE_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "quality_summary_state.json"
 
 
 def set_last_chat_id(chat_id: str) -> None:
@@ -114,6 +117,39 @@ def send_alert(text: str) -> None:
     Не бросает исключений — ошибки логируются.
     """
     _send_to_alerts_chat(text)
+
+
+def send_daily_quality_summary_if_due(force: bool = False, now_struct: time.struct_time | None = None) -> bool:
+    """
+    Раз в сутки отправить сводку качества в Telegram.
+    Если force=True — отправить без проверки даты.
+    """
+    chat_id = get_alerts_chat_id()
+    if not chat_id:
+        return False
+    now = now_struct or time.localtime()
+    today = f"{now.tm_year:04d}-{now.tm_mon:02d}-{now.tm_mday:02d}"
+    if not force and _SUMMARY_STATE_PATH.exists():
+        try:
+            raw = json.loads(_SUMMARY_STATE_PATH.read_text(encoding="utf-8"))
+            if raw.get("last_sent_date") == today:
+                return False
+        except Exception:
+            pass
+    try:
+        from src.communication.telegram_commands import get_weekly_quality_summary
+        text = get_weekly_quality_summary()
+    except Exception as e:
+        _log.debug("daily quality summary: %s", e)
+        return False
+    if not _send_to_alerts_chat(text):
+        return False
+    try:
+        _SUMMARY_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _SUMMARY_STATE_PATH.write_text(json.dumps({"last_sent_date": today}, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    return True
 
 
 def send_proactive_voice(voice_path: str) -> bool:

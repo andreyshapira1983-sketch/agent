@@ -1,8 +1,9 @@
 """
-Формирование ответов для команд Telegram: /status, /log.
+Формирование ответов для команд Telegram: /status, /quality, /quality_export, /log.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 
@@ -62,6 +63,7 @@ def get_help_text() -> str:
         "/help — этот список",
         "/status — статус агента (квоты, последний цикл, очередь)",
         "/quality — quality-метрики и последние ремонты/патчи",
+        "/quality_export [json|text] — выгрузить quality-отчёт в файл",
         "/reset_quality — сбросить quality-метрики и историю",
         "/tasks или /queue — очередь задач",
         "/log [N] [action] [module] [priority] — последние действия",
@@ -109,6 +111,47 @@ def get_quality_status() -> str:
     else:
         lines.append("Последние события: пока нет")
     return "\n".join(lines)
+
+
+def get_weekly_quality_summary() -> str:
+    """Краткая сводка качества за доступную историю последних событий и текущие счётчики."""
+    from src.monitoring.metrics import get_metrics
+
+    m = get_metrics()
+    q = (m.get("quality") or {}) if isinstance(m, dict) else {}
+    history = q.get("recent_history") or []
+    accepted = sum(1 for item in history if item.get("event_type") == "accepted_patch" and item.get("status") == "ok")
+    repaired_ok = sum(1 for item in history if item.get("event_type") == "repair_attempt" and item.get("status") == "ok")
+    repaired_failed = sum(1 for item in history if item.get("event_type") == "repair_attempt" and item.get("status") == "failed")
+    tasks = sum(1 for item in history if item.get("event_type") == "task_solved")
+    lines = ["Недельная сводка качества:"]
+    lines.append(f"  Решено задач: {q.get('tasks_solved', 0)} (важных в истории: {tasks})")
+    lines.append(f"  Принято патчей: {q.get('accepted_patches', 0)} (в истории: {accepted})")
+    lines.append(f"  Ремонты: успешных={q.get('successful_repairs', 0)} неуспешных={q.get('failed_repairs', 0)}")
+    ratio = q.get("test_pass_ratio")
+    if ratio is not None:
+        lines.append(f"  Тесты: pass_ratio={ratio} ({q.get('test_runs_passed', 0)}/{q.get('test_runs_total', 0)})")
+    lines.append(f"  История: repair_ok={repaired_ok}, repair_failed={repaired_failed}, accepted_patch={accepted}")
+    if history:
+        last = history[-1]
+        lines.append(
+            f"  Последнее событие: {last.get('event_type', 'event')} {last.get('status', 'unknown')} "
+            f"path={last.get('target_path', '-') or '-'}"
+        )
+    return "\n".join(lines)
+
+
+def export_quality_status(report_format: str = "text") -> str:
+    """Экспортировать quality-отчёт в файл и вернуть путь с кратким итогом."""
+    from src.monitoring.metrics import export_quality_report
+
+    result = export_quality_report(report_format=report_format)
+    if not result.startswith("Exported to "):
+        return result
+    path = result.replace("Exported to ", "", 1)
+    if (report_format or "text").strip().lower() == "json":
+        return f"Quality JSON export готов: {path}"
+    return f"Quality text export готов: {path}"
 
 
 def reset_quality_status() -> str:

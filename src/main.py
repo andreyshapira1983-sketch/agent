@@ -40,6 +40,18 @@ async def _cmd_reset_quality(update, _context) -> None:
     await update.message.reply_text((text or "Нет данных.")[:4000])
 
 
+async def _cmd_quality_export(update, _context) -> None:
+    from src.communication.telegram_commands import export_quality_status
+
+    msg = (update.message.text if update.message and update.message.text else "").strip()
+    parts = msg.split(maxsplit=1)
+    report_format = "text"
+    if len(parts) > 1 and parts[1].strip().lower() in ("json", "text", "txt"):
+        report_format = parts[1].strip().lower()
+    text = await asyncio.to_thread(export_quality_status, report_format)
+    await update.message.reply_text((text or "Нет данных.")[:4000])
+
+
 async def _cmd_log(update, context) -> None:
     from src.communication.telegram_commands import (
         get_agent_log,
@@ -381,6 +393,17 @@ def main() -> None:
         _autonomous_thread = threading.Thread(target=_run_autonomous_loop, daemon=True, name="autonomous-loop")
         _autonomous_thread.start()
         print("Автономный режим (автомат) запущен при старте. Отчёты о циклах будут приходить в Telegram. Остановить: /stop")
+    def _quality_summary_loop():
+        import time
+        while True:
+            try:
+                from src.communication.telegram_alerts import send_daily_quality_summary_if_due
+                send_daily_quality_summary_if_due()
+            except Exception:
+                pass
+            time.sleep(1800)
+    _quality_summary_thread = threading.Thread(target=_quality_summary_loop, daemon=True, name="quality-summary-loop")
+    _quality_summary_thread.start()
     run_bot(
         token,
         help_handler=_cmd_help,
@@ -388,6 +411,7 @@ def main() -> None:
         remind_handler=_cmd_remind,
         status_handler=_cmd_status,
         quality_handler=_cmd_quality,
+        quality_export_handler=_cmd_quality_export,
         reset_quality_handler=_cmd_reset_quality,
         log_handler=_cmd_log,
         tasks_handler=_cmd_tasks,

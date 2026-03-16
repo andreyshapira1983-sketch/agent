@@ -61,6 +61,7 @@ def test_run_bot_registers_minimal_command_and_message_routing(monkeypatch) -> N
         help_handler=_dummy,
         status_handler=_dummy,
         quality_handler=_dummy,
+        quality_export_handler=_dummy,
         reset_quality_handler=_dummy,
         log_handler=_dummy,
         tasks_handler=_dummy,
@@ -79,6 +80,7 @@ def test_run_bot_registers_minimal_command_and_message_routing(monkeypatch) -> N
     assert "help" in command_names
     assert "status" in command_names
     assert "quality" in command_names
+    assert "quality_export" in command_names
     assert "reset_quality" in command_names
     assert "log" in command_names
     assert "tasks" in command_names

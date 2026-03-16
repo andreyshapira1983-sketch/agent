@@ -14,6 +14,17 @@ from typing import Any
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _QUALITY_STORAGE_PATH = _PROJECT_ROOT / "data" / "quality_metrics.json"
 _MAX_QUALITY_HISTORY = 20
+_EXPORTS_DIR = _PROJECT_ROOT / "data" / "exports"
+
+_IMPORTANT_TASK_TOOLS = {
+    "accept_patch",
+    "apply_validated",
+    "request_patch",
+    "analyze_self_model",
+    "get_improvement_plan",
+    "run_self_repair",
+    "check_performance_alerts",
+}
 
 
 class Metrics:
@@ -122,8 +133,22 @@ class Metrics:
     def record_request_preview(self, text: str) -> None:
         self._recent_requests.append((text[:80] + "..." if len(text) > 80 else text))
 
-    def record_task_solved(self) -> None:
+    def record_task_solved(
+        self,
+        *,
+        task_id: str | None = None,
+        tool_name: str | None = None,
+        note: str | None = None,
+    ) -> None:
         self.tasks_solved += 1
+        if tool_name in _IMPORTANT_TASK_TOOLS:
+            self._append_quality_event(
+                event_type="task_solved",
+                status="ok",
+                patch_id=task_id,
+                target_path=tool_name,
+                note=note,
+            )
         self._save_quality_state()
 
     def record_patch_accepted(self, *, patch_id: str | None = None, target_path: str | None = None) -> None:
@@ -223,6 +248,43 @@ metrics = Metrics()
 def get_metrics() -> dict[str, Any]:
     """Совместимость: возвращает то же, что metrics.get_metrics_summary()."""
     return metrics.get_metrics_summary()
+
+
+def export_quality_report(report_format: str = "text", file_path: str | None = None) -> str:
+    """
+    Выгрузить quality-отчёт в JSON или TXT.
+    Возвращает путь к записанному файлу или сообщение об ошибке.
+    """
+    fmt = (report_format or "text").strip().lower()
+    if fmt not in ("text", "txt", "json"):
+        return "Export failed: supported formats are text and json"
+    try:
+        payload = metrics.get_quality_summary()
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        suffix = "json" if fmt == "json" else "txt"
+        path = Path(file_path) if file_path else (_EXPORTS_DIR / f"quality_{ts}.{suffix}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if fmt == "json":
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        else:
+            lines = [
+                "Quality export",
+                f"tasks_solved={payload.get('tasks_solved', 0)}",
+                f"accepted_patches={payload.get('accepted_patches', 0)}",
+                f"successful_repairs={payload.get('successful_repairs', 0)}",
+                f"failed_repairs={payload.get('failed_repairs', 0)}",
+                f"test_pass_ratio={payload.get('test_pass_ratio')}",
+                "recent_history:",
+            ]
+            for item in payload.get("recent_history") or []:
+                lines.append(
+                    f"- {item.get('timestamp_utc', '-')}: {item.get('event_type', 'event')} {item.get('status', 'unknown')} "
+                    f"path={item.get('target_path', '-')} id={item.get('patch_id', '-')}"
+                )
+            path.write_text("\n".join(lines), encoding="utf-8")
+        return f"Exported to {path}"
+    except Exception as e:
+        return f"Export failed: {e!s}"
 
 
 def analyze_tool_performance(top_n: int = 10) -> str:

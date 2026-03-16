@@ -8,7 +8,7 @@ def test_metrics_class(tmp_path):
     m.record_success()
     m.record_error()
     m.log_time(0.5)
-    m.record_task_solved()
+    m.record_task_solved(task_id="t1", tool_name="request_patch", note="small fix")
     m.record_patch_accepted(patch_id="p1", target_path="src/a.py")
     m.record_repair_attempt(success=True, patch_id="p2", target_path="src/a.py", note="ok")
     m.record_repair_attempt(success=False, patch_id="p3", target_path="src/b.py", note="failed")
@@ -27,7 +27,7 @@ def test_metrics_class(tmp_path):
     assert summary["quality"]["test_runs_total"] == 2  # nosec B101
     assert summary["quality"]["test_runs_passed"] == 1  # nosec B101
     assert summary["quality"]["test_pass_ratio"] == 0.5  # nosec B101
-    assert len(summary["quality"]["recent_history"]) == 3  # nosec B101
+    assert len(summary["quality"]["recent_history"]) == 4  # nosec B101
 
 
 def test_get_metrics():
@@ -82,7 +82,7 @@ def test_quality_metrics_persist_between_instances(tmp_path):
     storage = tmp_path / "quality_metrics.json"
 
     m1 = Metrics(storage_path=storage)
-    m1.record_task_solved()
+    m1.record_task_solved(task_id="t1", tool_name="request_patch", note="fix issue")
     m1.record_patch_accepted(patch_id="p1", target_path="src/x.py")
     m1.record_repair_attempt(success=True, patch_id="p2", target_path="src/y.py", note="accepted")
     m1.record_repair_attempt(success=False, patch_id="p3", target_path="src/z.py", note="rejected")
@@ -99,7 +99,7 @@ def test_quality_metrics_persist_between_instances(tmp_path):
     assert summary["quality"]["test_runs_total"] == 2  # nosec B101
     assert summary["quality"]["test_runs_passed"] == 1  # nosec B101
     assert summary["quality"]["test_pass_ratio"] == 0.5  # nosec B101
-    assert len(summary["quality"]["recent_history"]) == 3  # nosec B101
+    assert len(summary["quality"]["recent_history"]) == 4  # nosec B101
 
 
 def test_reset_quality_clears_counters_and_history(tmp_path):
@@ -114,5 +114,32 @@ def test_reset_quality_clears_counters_and_history(tmp_path):
     assert summary["quality"]["accepted_patches"] == 0  # nosec B101
     assert summary["quality"]["failed_repairs"] == 0  # nosec B101
     assert summary["quality"]["recent_history"] == []  # nosec B101
+
+
+def test_export_quality_report_json_and_text(tmp_path):
+    from src.monitoring.metrics import export_quality_report
+
+    json_path = tmp_path / "quality.json"
+    txt_path = tmp_path / "quality.txt"
+
+    out_json = export_quality_report("json", file_path=str(json_path))
+    out_txt = export_quality_report("text", file_path=str(txt_path))
+
+    assert "Exported" in out_json  # nosec B101
+    assert "Exported" in out_txt  # nosec B101
+    assert json_path.exists()  # nosec B101
+    assert txt_path.exists()  # nosec B101
+
+
+def test_record_task_solved_only_important_tools_add_history(tmp_path):
+    m = Metrics(storage_path=tmp_path / "quality_metrics.json")
+
+    m.record_task_solved(task_id="t1", tool_name="get_current_time")
+    m.record_task_solved(task_id="t2", tool_name="request_patch", note="important")
+
+    history = m.get_recent_quality_history()
+    assert len(history) == 1  # nosec B101
+    assert history[0]["event_type"] == "task_solved"  # nosec B101
+    assert history[0]["target_path"] == "request_patch"  # nosec B101
 
 
