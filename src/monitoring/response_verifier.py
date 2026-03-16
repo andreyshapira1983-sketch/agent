@@ -62,7 +62,9 @@ def enforce_verified_system_metrics(reply: str) -> str:
 
     if not snapshot.get("ok"):
         return (
-            reply + "\n\n[Анти-симуляционный контур: в ответе были числа про систему, но подтверждённых метрик нет.]"
+            reply
+            + "\n\n[Анти-симуляционный контур: ответ заблокирован, в ответе были числа про систему, "
+            + f"но подтверждённых метрик нет (source={source} timestamp={ts}).]"
         )
 
     cpu = snapshot.get("cpu_percent")
@@ -78,6 +80,7 @@ def enforce_verified_system_metrics(reply: str) -> str:
 
     # Не заменять ответ целиком — дополняем подтверждёнными метриками, чтобы пользователь видел и ответ агента, и факты
     appendix = (
-        f"\n\n[Подтверждённые метрики: CPU={cpu}% RAM={ram}% (source={source}). Топ процессов:\n{top_text}]"
+        f"\n\n[Анти-симуляционный контур: неподтверждённый фрагмент был заменён подтверждёнными метриками. "
+        f"CPU={cpu}% RAM={ram}% (source={source} timestamp={ts}). Топ процессов:\n{top_text}]"
     )
     return reply + appendix

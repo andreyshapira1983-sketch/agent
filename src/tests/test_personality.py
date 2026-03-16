@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import os
-
 from src.personality import emotion_matrix, emotional_reactions, personality, triggers
+from src.personality.emotional_reactions import FLAVOR_TEMPLATES
 from src.personality.personal_identity import PersonalIdentity
 
 
@@ -23,7 +22,7 @@ def test_emotional_flavor_for_high_frustration() -> None:
     emotion_matrix.set_state({"frustration": 0.8})
     flavor = emotional_reactions.get_emotional_flavor(threshold=0.35)
     assert flavor is not None
-    assert "Агент" in flavor or "Фрустрация" in flavor or "расстроен" in flavor
+    assert flavor in FLAVOR_TEMPLATES["frustration"]["high"]
 
 
 def test_get_whim_from_emotions_when_fatigue_high(monkeypatch) -> None:

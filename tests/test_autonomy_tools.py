@@ -96,19 +96,29 @@ def test_aggregate_simple_single_pass_result():
 
 
 def test_aggregate_simple_array_capped():
+    from src.evolution.config_manager import load_config
     from src.tools.impl.autonomy_tools import MAX_AGGREGATE_ARRAY_LEN
-    big = "[" + ",".join("0" for _ in range(MAX_AGGREGATE_ARRAY_LEN + 100)) + "]"
+    cfg = load_config()
+    max_len = (cfg.get("autonomy_limits") or {}).get(
+        "max_aggregate_array_len", MAX_AGGREGATE_ARRAY_LEN
+    )
+    big = "[" + ",".join("0" for _ in range(max_len + 100)) + "]"
     out = call("aggregate_simple", values_json=big)
     data = json.loads(out)
-    assert data["count"] == MAX_AGGREGATE_ARRAY_LEN
+    assert data["count"] == max_len
 
 
 def test_suggest_priority_tasks_capped():
+    from src.evolution.config_manager import load_config
     from src.tools.impl.autonomy_tools import MAX_SUGGEST_PRIORITY_TASKS
-    big = json.dumps([f"task_{i}" for i in range(MAX_SUGGEST_PRIORITY_TASKS + 50)])
+    cfg = load_config()
+    max_tasks = (cfg.get("autonomy_limits") or {}).get(
+        "max_suggest_priority_tasks", MAX_SUGGEST_PRIORITY_TASKS
+    )
+    big = json.dumps([f"task_{i}" for i in range(max_tasks + 50)])
     out = call("suggest_priority", tasks_json=big)
     data = json.loads(out)
-    assert len(data["order"]) == MAX_SUGGEST_PRIORITY_TASKS
+    assert len(data["order"]) == max_tasks
 
 
 def test_manage_queue_status():
