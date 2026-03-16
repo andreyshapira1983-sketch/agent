@@ -1,0 +1,61 @@
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agent-12-systems
+    restart: unless-stopped
+    
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - TELEGRAM=${TELEGRAM}
+      - TELEGRAM_ALERTS_CHAT_ID=${TELEGRAM_ALERTS_CHAT_ID}
+      - TELEGRAM_ALERTS_MIN_INTERVAL_SEC=${TELEGRAM_ALERTS_MIN_INTERVAL_SEC:-60}
+      - TELEGRAM_AUTONOMOUS_EVENTS=${TELEGRAM_AUTONOMOUS_EVENTS:-1}
+      - TELEGRAM_EVENT_TYPES=${TELEGRAM_EVENT_TYPES}
+      - TELEGRAM_STEP_INTERVAL_SEC=${TELEGRAM_STEP_INTERVAL_SEC:-10}
+      - AUTONOMOUS_START=${AUTONOMOUS_START}
+      - APPLY_SANDBOX_ONLY=${APPLY_SANDBOX_ONLY}
+      - SAFE_EXPAND=${SAFE_EXPAND}
+      - INITIATIVE_TEMPERATURE=${INITIATIVE_TEMPERATURE:-0.7}
+      - TOOL_SLOW_THRESHOLD_SEC=${TOOL_SLOW_THRESHOLD_SEC:-5}
+      - BUILD_CODE_INDEX=${BUILD_CODE_INDEX}
+      - DASHBOARD=${DASHBOARD}
+      - DASHBOARD_PORT=${DASHBOARD_PORT:-8765}
+      - AGENT_NEUTRAL_FAMILY_MODE=${AGENT_NEUTRAL_FAMILY_MODE}
+      - AGENT_STRICT_MODE=${AGENT_STRICT_MODE}
+    
+    env_file:
+      - .env
+    
+    volumes:
+      - ./data:/app/data
+      - ./backups:/app/backups
+      - ./config:/app/config
+      - ./logs:/app/logs
+    
+    ports:
+      - "${DASHBOARD_PORT:-8765}:8765"
+    
+    networks:
+      - agent-network
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+networks:
+  agent-network:
+    driver: bridge
