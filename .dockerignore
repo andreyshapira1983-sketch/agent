@@ -1,54 +1,35 @@
-# Python cache
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-
-# Virtual environments
-venv/
-env/
-ENV/
-.venv
-
-# IDE and editors
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
+# Exclude unnecessary files from build context
+.git
+.gitignore
+.github
 .cursor
-
-# Testing
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv
+.env
+.env.example
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+*.egg-info/
+dist/
+build/
+*.log
+logs/
+backups/
+test-results/
+.dockerignore
+docker-compose.dev.yml
+README.md
+DOCKER_BUILD.md
+ERRORS_AND_FIXES.md
+docs/
 .pytest_cache/
 .mypy_cache/
-.coverage
-.tox/
-htmlcov/
-test-results/
-
-# Project-specific
-.env
-.env.local
-data/
-backups/
-logs/
-*.log
-
-# Git
-.git/
-.gitignore
-
-# Documentation
-docs/archive/
 *.md
-
-# Build artifacts
-build/
-dist/
-*.egg-info/
-
-# OS
-.DS_Store
-Thumbs.db

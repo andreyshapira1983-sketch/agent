@@ -1,0 +1,54 @@
+version: "3.9"
+
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: telegram-agent-dev
+    restart: no
+    
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      DASHBOARD: "1"
+      DASHBOARD_PORT: "8765"
+      AGENT_NEUTRAL_FAMILY_MODE: "1"
+    
+    env_file:
+      - .env
+    
+    ports:
+      - "8765:8765"
+    
+    volumes:
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./templates:/app/templates
+      - agent_dev_logs:/app/logs
+      - agent_dev_data:/app/data
+    
+    networks:
+      - agent_network
+    
+    # Hot reload: watch for changes in src directory
+    develop:
+      watch:
+        - action: sync
+          path: ./src
+          target: /app/src
+        - action: sync
+          path: ./config
+          target: /app/config
+        - action: rebuild
+          path: requirements.txt
+
+volumes:
+  agent_dev_logs:
+    driver: local
+  agent_dev_data:
+    driver: local
+
+networks:
+  agent_network:
+    driver: bridge

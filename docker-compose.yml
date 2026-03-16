@@ -1,61 +1,94 @@
+version: "3.9"
+
 services:
   agent:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: agent-12-systems
+    container_name: telegram-agent
     restart: unless-stopped
     
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - TELEGRAM=${TELEGRAM}
-      - TELEGRAM_ALERTS_CHAT_ID=${TELEGRAM_ALERTS_CHAT_ID}
-      - TELEGRAM_ALERTS_MIN_INTERVAL_SEC=${TELEGRAM_ALERTS_MIN_INTERVAL_SEC:-60}
-      - TELEGRAM_AUTONOMOUS_EVENTS=${TELEGRAM_AUTONOMOUS_EVENTS:-1}
-      - TELEGRAM_EVENT_TYPES=${TELEGRAM_EVENT_TYPES}
-      - TELEGRAM_STEP_INTERVAL_SEC=${TELEGRAM_STEP_INTERVAL_SEC:-10}
-      - AUTONOMOUS_START=${AUTONOMOUS_START}
-      - APPLY_SANDBOX_ONLY=${APPLY_SANDBOX_ONLY}
-      - SAFE_EXPAND=${SAFE_EXPAND}
-      - INITIATIVE_TEMPERATURE=${INITIATIVE_TEMPERATURE:-0.7}
-      - TOOL_SLOW_THRESHOLD_SEC=${TOOL_SLOW_THRESHOLD_SEC:-5}
-      - BUILD_CODE_INDEX=${BUILD_CODE_INDEX}
-      - DASHBOARD=${DASHBOARD}
-      - DASHBOARD_PORT=${DASHBOARD_PORT:-8765}
-      - AGENT_NEUTRAL_FAMILY_MODE=${AGENT_NEUTRAL_FAMILY_MODE}
-      - AGENT_STRICT_MODE=${AGENT_STRICT_MODE}
+      # Core configuration
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      
+      # Load from .env (override below for production)
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      TELEGRAM: ${TELEGRAM}
+      TELEGRAM_ALERTS_CHAT_ID: ${TELEGRAM_ALERTS_CHAT_ID:-}
+      TELEGRAM_ALERTS_MIN_INTERVAL_SEC: ${TELEGRAM_ALERTS_MIN_INTERVAL_SEC:-60}
+      TELEGRAM_AUTONOMOUS_EVENTS: ${TELEGRAM_AUTONOMOUS_EVENTS:-1}
+      TELEGRAM_EVENT_TYPES: ${TELEGRAM_EVENT_TYPES:-}
+      TELEGRAM_STEP_INTERVAL_SEC: ${TELEGRAM_STEP_INTERVAL_SEC:-10}
+      
+      # Autonomous mode
+      AUTONOMOUS_START: ${AUTONOMOUS_START:-0}
+      APPLY_SANDBOX_ONLY: ${APPLY_SANDBOX_ONLY:-0}
+      INITIATIVE_TEMPERATURE: ${INITIATIVE_TEMPERATURE:-0.7}
+      TOOL_SLOW_THRESHOLD_SEC: ${TOOL_SLOW_THRESHOLD_SEC:-5}
+      
+      # Optional features
+      BUILD_CODE_INDEX: ${BUILD_CODE_INDEX:-0}
+      DASHBOARD: ${DASHBOARD:-1}
+      DASHBOARD_PORT: "8765"
+      AGENT_NEUTRAL_FAMILY_MODE: ${AGENT_NEUTRAL_FAMILY_MODE:-0}
+      AGENT_STRICT_MODE: ${AGENT_STRICT_MODE:-0}
     
+    # Load additional env vars from .env file
     env_file:
       - .env
     
-    volumes:
-      - ./data:/app/data
-      - ./backups:/app/backups
-      - ./config:/app/config
-      - ./logs:/app/logs
-    
     ports:
-      - "${DASHBOARD_PORT:-8765}:8765"
+      - "8765:8765"  # Dashboard (if enabled)
     
-    networks:
-      - agent-network
+    volumes:
+      # Application data
+      - agent_data:/app/data
+      - agent_backups:/app/backups
+      - agent_logs:/app/logs
+      - agent_config:/app/config
+      
+      # Optional: development bind mount (uncomment for local development)
+      # - ./src:/app/src
+      # - ./config:/app/config
     
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+        reservations:
+          cpus: "1"
+          memory: 1G
+    
+    # Logging
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
     
-    # Resource limits (adjust based on your needs)
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '1'
-          memory: 1G
+    # Network
+    networks:
+      - agent_network
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    read_only_root_filesystem: false  # Keep false: app needs to write logs/config
+
+volumes:
+  agent_data:
+    driver: local
+  agent_backups:
+    driver: local
+  agent_logs:
+    driver: local
+  agent_config:
+    driver: local
 
 networks:
-  agent-network:
+  agent_network:
     driver: bridge
