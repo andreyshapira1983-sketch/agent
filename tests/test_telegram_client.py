@@ -141,3 +141,136 @@ def test_handle_message_routes_voice_prefix(monkeypatch) -> None:
     assert captured["user_id"] == "42"
     assert captured["text"] == "/voice проверь статус"
     assert captured["prefer_voice"] is True
+
+
+# --- PR-3: media routes and negative API scenarios ---
+
+def test_handle_message_no_text_is_noop(monkeypatch) -> None:
+    """Если message.text is None — обработчик не должен вызываться ни разу."""
+    called: list[object] = []
+
+    async def fake_run_handler(*_args, **_kwargs) -> None:
+        called.append(1)
+
+    monkeypatch.setattr(telegram_client, "_run_handler_with_reply", fake_run_handler)
+
+    update = SimpleNamespace(
+        message=SimpleNamespace(text=None),
+        effective_chat=SimpleNamespace(id=1),
+        effective_user=SimpleNamespace(id=1),
+    )
+    asyncio.run(getattr(telegram_client, "_handle_message")(update, None))
+    assert called == []
+
+
+def test_run_handler_with_reply_no_handler_sends_fallback(monkeypatch) -> None:
+    """Без зарегистрированного handler отправляется fallback-сообщение."""
+    replies: list[str] = []
+
+    async def fake_reply_text(text: str) -> None:
+        replies.append(text)
+
+    monkeypatch.setattr(telegram_client, "_default_handler", None)
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=fake_reply_text))
+    asyncio.run(
+        getattr(telegram_client, "_run_handler_with_reply")(
+            update, "u1", "hello", fallback_no_handler="НЕТ_ОБРАБОТЧИКА"
+        )
+    )
+    assert any("НЕТ_ОБРАБОТЧИКА" in r for r in replies)
+
+
+def test_run_handler_with_reply_handler_exception_sends_user_error(monkeypatch) -> None:
+    """Если handler бросает исключение, пользователю уходит понятное сообщение об ошибке."""
+    replies: list[str] = []
+
+    async def fake_reply_text(text: str) -> None:
+        replies.append(text)
+
+    async def bad_handler(_user_id: str, _text: str) -> str:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(telegram_client, "_default_handler", bad_handler)
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=fake_reply_text))
+    asyncio.run(
+        getattr(telegram_client, "_run_handler_with_reply")(update, "u1", "hello")
+    )
+    assert len(replies) == 1
+    assert isinstance(replies[0], str)
+
+
+def test_get_media_file_or_report_file_too_big_returns_none() -> None:
+    """BadRequest 'File is too big' → дружелюбный ответ, возврат None."""
+    from telegram.error import BadRequest
+
+    replies: list[str] = []
+
+    async def fake_reply_text(text: str) -> None:
+        replies.append(text)
+
+    class _BigMedia:
+        async def get_file(self) -> None:
+            raise BadRequest("File is too big")
+
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=fake_reply_text))
+    result = asyncio.run(
+        getattr(telegram_client, "_get_media_file_or_report")(update, _BigMedia(), "Видео")
+    )
+    assert result is None
+    assert len(replies) == 1
+    assert "большой" in replies[0].lower() or "too big" in replies[0].lower() or "сжат" in replies[0].lower()
+
+
+def test_get_media_file_or_report_telegram_error_returns_none() -> None:
+    """Произвольная TelegramError → ответ пользователю, возврат None."""
+    from telegram.error import TelegramError
+
+    replies: list[str] = []
+
+    async def fake_reply_text(text: str) -> None:
+        replies.append(text)
+
+    class _ErrorMedia:
+        async def get_file(self) -> None:
+            raise TelegramError("network error")
+
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=fake_reply_text))
+    result = asyncio.run(
+        getattr(telegram_client, "_get_media_file_or_report")(update, _ErrorMedia(), "Документ")
+    )
+    assert result is None
+    assert len(replies) == 1
+
+
+def test_handle_file_document_replies_saved_filename(monkeypatch, tmp_path) -> None:
+    """Входящий документ: ответ содержит имя сохранённого файла."""
+    replies: list[str] = []
+
+    async def fake_reply_text(text: str) -> None:
+        replies.append(text)
+
+    class _FakeFile:
+        async def download_to_drive(self, path) -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"data")
+
+    async def fake_get_media(_update, _media, _label):
+        return _FakeFile()
+
+    monkeypatch.setattr(telegram_client, "_get_media_file_or_report", fake_get_media)
+    monkeypatch.setattr(telegram_client, "RECEIVED_FILES_DIR", tmp_path)
+
+    update = SimpleNamespace(
+        message=SimpleNamespace(
+            reply_text=fake_reply_text,
+            photo=None,
+            document=SimpleNamespace(file_name="report.pdf"),
+            video=None,
+            video_note=None,
+            voice=None,
+        ),
+        effective_chat=SimpleNamespace(id=111),
+        effective_user=SimpleNamespace(id=222),
+    )
+    asyncio.run(getattr(telegram_client, "_handle_file")(update, None))
+    assert any("report.pdf" in r for r in replies)
