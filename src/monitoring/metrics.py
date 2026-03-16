@@ -7,7 +7,9 @@ from __future__ import annotations
 from collections import deque
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
+import time
 from typing import Any
 
 
@@ -15,6 +17,8 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _QUALITY_STORAGE_PATH = _PROJECT_ROOT / "data" / "quality_metrics.json"
 _MAX_QUALITY_HISTORY = 20
 _EXPORTS_DIR = _PROJECT_ROOT / "data" / "exports"
+_DEFAULT_QUALITY_BATCH_EVENTS = 10
+_DEFAULT_QUALITY_FLUSH_INTERVAL_SEC = 5.0
 
 _IMPORTANT_TASK_TOOLS = {
     "accept_patch",
@@ -44,7 +48,27 @@ class Metrics:
         self.test_runs_passed = 0
         self._quality_history: list[dict[str, Any]] = []
         self._storage_path = storage_path or _QUALITY_STORAGE_PATH
+        self._quality_batch_events = self._get_quality_batch_events()
+        self._quality_flush_interval_sec = self._get_quality_flush_interval_sec()
+        self._quality_dirty_events = 0
+        self._last_quality_flush_monotonic = time.monotonic()
         self._load_quality_state()
+
+    @staticmethod
+    def _get_quality_batch_events() -> int:
+        raw = (os.getenv("METRICS_BATCH_EVENTS") or "").strip()
+        try:
+            return max(1, int(raw)) if raw else _DEFAULT_QUALITY_BATCH_EVENTS
+        except Exception:
+            return _DEFAULT_QUALITY_BATCH_EVENTS
+
+    @staticmethod
+    def _get_quality_flush_interval_sec() -> float:
+        raw = (os.getenv("METRICS_FLUSH_INTERVAL_SEC") or "").strip()
+        try:
+            return max(0.1, float(raw)) if raw else _DEFAULT_QUALITY_FLUSH_INTERVAL_SEC
+        except Exception:
+            return _DEFAULT_QUALITY_FLUSH_INTERVAL_SEC
 
     def _load_quality_state(self) -> None:
         if not self._storage_path.exists():
@@ -72,8 +96,28 @@ class Metrics:
                 json.dumps(payload, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            self._quality_dirty_events = 0
+            self._last_quality_flush_monotonic = time.monotonic()
         except Exception:
             pass
+
+    def _mark_quality_dirty(self) -> None:
+        self._quality_dirty_events += 1
+        self.flush_quality_state(force=False)
+
+    def flush_quality_state(self, *, force: bool = False) -> None:
+        """Сохранить quality-состояние батчем (или немедленно при force=True)."""
+        if self._quality_dirty_events <= 0:
+            return
+        if force:
+            self._save_quality_state()
+            return
+        if self._quality_dirty_events >= self._quality_batch_events:
+            self._save_quality_state()
+            return
+        elapsed = time.monotonic() - self._last_quality_flush_monotonic
+        if elapsed >= self._quality_flush_interval_sec:
+            self._save_quality_state()
 
     def _append_quality_event(
         self,
@@ -149,7 +193,7 @@ class Metrics:
                 target_path=tool_name,
                 note=note,
             )
-        self._save_quality_state()
+        self._mark_quality_dirty()
 
     def record_patch_accepted(self, *, patch_id: str | None = None, target_path: str | None = None) -> None:
         self.accepted_patches += 1
@@ -159,7 +203,7 @@ class Metrics:
             patch_id=patch_id,
             target_path=target_path,
         )
-        self._save_quality_state()
+        self._mark_quality_dirty()
 
     def record_repair_attempt(
         self,
@@ -180,13 +224,13 @@ class Metrics:
             target_path=target_path,
             note=note,
         )
-        self._save_quality_state()
+        self._mark_quality_dirty()
 
     def record_test_run(self, *, passed: bool) -> None:
         self.test_runs_total += 1
         if passed:
             self.test_runs_passed += 1
-        self._save_quality_state()
+        self._mark_quality_dirty()
 
     def get_test_pass_ratio(self) -> float | None:
         if self.test_runs_total <= 0:
@@ -218,7 +262,8 @@ class Metrics:
         self.test_runs_total = 0
         self.test_runs_passed = 0
         self._quality_history = []
-        self._save_quality_state()
+        self._quality_dirty_events = 1
+        self.flush_quality_state(force=True)
 
     def get_average_time(self) -> float:
         if not self.execution_times:
@@ -336,6 +381,7 @@ def export_quality_report(report_format: str = "text", file_path: str | None = N
     if fmt not in ("text", "txt", "json", "full", "full_text", "full_txt", "full_json"):
         return "Export failed: supported formats are text, json, full"
     try:
+        metrics.flush_quality_state(force=True)
         payload = metrics.get_quality_summary()
         if full_mode:
             payload["extended_history"] = _collect_extended_quality_events(limit=120)

@@ -1,3 +1,5 @@
+import json
+
 from src.monitoring.metrics import Metrics, get_metrics, metrics
 
 
@@ -88,6 +90,7 @@ def test_quality_metrics_persist_between_instances(tmp_path):
     m1.record_repair_attempt(success=False, patch_id="p3", target_path="src/z.py", note="rejected")
     m1.record_test_run(passed=True)
     m1.record_test_run(passed=False)
+    m1.flush_quality_state(force=True)
 
     m2 = Metrics(storage_path=storage)
     summary = m2.get_metrics_summary()
@@ -155,5 +158,47 @@ def test_record_task_solved_only_important_tools_add_history(tmp_path):
     assert len(history) == 1  # nosec B101
     assert history[0]["event_type"] == "task_solved"  # nosec B101
     assert history[0]["target_path"] == "request_patch"  # nosec B101
+
+
+def test_quality_batch_flush_by_event_count(tmp_path):
+    m = Metrics(storage_path=tmp_path / "quality_metrics.json")
+    m._quality_batch_events = 3
+    m._quality_flush_interval_sec = 9999.0
+
+    m.record_test_run(passed=True)
+    m.record_test_run(passed=False)
+    # До порога batch файл ещё не записывается.
+    assert not (tmp_path / "quality_metrics.json").exists()  # nosec B101
+
+    m.record_test_run(passed=True)
+    assert (tmp_path / "quality_metrics.json").exists()  # nosec B101
+    assert m._quality_dirty_events == 0  # nosec B101
+
+
+def test_quality_flush_force_writes_pending(tmp_path):
+    m = Metrics(storage_path=tmp_path / "quality_metrics.json")
+    m._quality_batch_events = 100
+    m._quality_flush_interval_sec = 9999.0
+
+    m.record_patch_accepted(patch_id="p1", target_path="src/a.py")
+    assert not (tmp_path / "quality_metrics.json").exists()  # nosec B101
+
+    m.flush_quality_state(force=True)
+    assert (tmp_path / "quality_metrics.json").exists()  # nosec B101
+
+
+def test_reset_quality_forces_persist(tmp_path):
+    storage = tmp_path / "quality_metrics.json"
+    m = Metrics(storage_path=storage)
+    m._quality_batch_events = 100
+    m._quality_flush_interval_sec = 9999.0
+    m.record_patch_accepted(patch_id="p1", target_path="src/a.py")
+    assert not storage.exists()  # nosec B101
+
+    m.reset_quality()
+
+    assert storage.exists()  # nosec B101
+    payload = json.loads(storage.read_text(encoding="utf-8"))
+    assert payload["accepted_patches"] == 0  # nosec B101
 
 
