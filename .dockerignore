@@ -1,8 +1,13 @@
-# Git
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+# Exclude unnecessary files from build context
 .git
 .gitignore
-
-# Python
+.github
+.cursor
 __pycache__
 *.pyc
 *.pyo
@@ -26,13 +31,11 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-
 # Virtual environments
 venv/
 env/
 ENV/
 .venv
-
 # IDE
 .vscode/
 .idea/
@@ -70,3 +73,30 @@ docs/
 .cache/
 tmp/
 temp/
+=======
+env/
+venv/
+.venv
+.env
+.env.example
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+*.egg-info/
+dist/
+build/
+*.log
+logs/
+backups/
+test-results/
+.dockerignore
+docker-compose.dev.yml
+README.md
+DOCKER_BUILD.md
+ERRORS_AND_FIXES.md
+docs/
+.pytest_cache/
+.mypy_cache/
+*.md
+>>>>>>> 5869125f4e8b7ace43817310bca88fb224da3fa4

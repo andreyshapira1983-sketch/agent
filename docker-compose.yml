@@ -1,4 +1,4 @@
-version: '3.8'
+version: '3.9'
 
 services:
   agent:
@@ -8,60 +8,85 @@ services:
     container_name: ai-agent-12systems
     restart: unless-stopped
     environment:
-      # Copy from your .env file
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - TELEGRAM=${TELEGRAM}
-      - TELEGRAM_ALERTS_CHAT_ID=${TELEGRAM_ALERTS_CHAT_ID}
-      - TELEGRAM_ALERTS_MIN_INTERVAL_SEC=${TELEGRAM_ALERTS_MIN_INTERVAL_SEC:-60}
-      - AUTONOMOUS_START=${AUTONOMOUS_START:-0}
-      - INITIATIVE_TEMPERATURE=${INITIATIVE_TEMPERATURE:-0.7}
-      - TOOL_SLOW_THRESHOLD_SEC=${TOOL_SLOW_THRESHOLD_SEC:-3}
-      - DASHBOARD=${DASHBOARD:-1}
-      - DASHBOARD_PORT=${DASHBOARD_PORT:-8765}
-      - AGENT_PROFILE=${AGENT_PROFILE:-stable}
-      - PYTHONUNBUFFERED=1
-      - PYTHONDONTWRITEBYTECODE=1
-
-    volumes:
-      # Persist data across restarts
-      - agent_data:/app/data
-      - agent_logs:/app/logs
+      # Core configuration
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
       
-      # Development: uncomment to enable hot-reload
+      # Load from .env (or pass directly for production)
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      TELEGRAM: ${TELEGRAM}
+      TELEGRAM_ALERTS_CHAT_ID: ${TELEGRAM_ALERTS_CHAT_ID:-}
+      TELEGRAM_ALERTS_MIN_INTERVAL_SEC: ${TELEGRAM_ALERTS_MIN_INTERVAL_SEC:-60}
+      TELEGRAM_AUTONOMOUS_EVENTS: ${TELEGRAM_AUTONOMOUS_EVENTS:-1}
+      TELEGRAM_EVENT_TYPES: ${TELEGRAM_EVENT_TYPES:-}
+      TELEGRAM_STEP_INTERVAL_SEC: ${TELEGRAM_STEP_INTERVAL_SEC:-10}
+      
+      # Autonomous mode
+      AUTONOMOUS_START: ${AUTONOMOUS_START:-0}
+      APPLY_SANDBOX_ONLY: ${APPLY_SANDBOX_ONLY:-0}
+      INITIATIVE_TEMPERATURE: ${INITIATIVE_TEMPERATURE:-0.7}
+      TOOL_SLOW_THRESHOLD_SEC: ${TOOL_SLOW_THRESHOLD_SEC:-5}
+      
+      # Optional features
+      BUILD_CODE_INDEX: ${BUILD_CODE_INDEX:-0}
+      DASHBOARD: ${DASHBOARD:-1}
+      DASHBOARD_PORT: "8765"
+      AGENT_NEUTRAL_FAMILY_MODE: ${AGENT_NEUTRAL_FAMILY_MODE:-0}
+      AGENT_STRICT_MODE: ${AGENT_STRICT_MODE:-0}
+    
+    # Load additional env vars from .env file
+    env_file:
+      - .env
+    
+    ports:
+      - "8765:8765"  # Dashboard (if enabled)
+    
+    volumes:
+      # Application data
+      - agent_data:/app/data
+      - agent_backups:/app/backups
+      - agent_logs:/app/logs
+      - agent_config:/app/config
+      
+      # Optional: development bind mount (uncomment for local development)
       # - ./src:/app/src
       # - ./config:/app/config
-      # - ./templates:/app/templates
-
-    ports:
-      # Dashboard (if DASHBOARD=1)
-      - "8765:8765"
-
-    # Resource limits
+    
+    # Resource limits (adjust based on your needs)
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: "2"
           memory: 2G
         reservations:
-          cpus: '1'
+          cpus: "1"
           memory: 1G
-
+    
     # Logging
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-
-    # Override for development (uncomment to use)
-    # command: python -m src.main
-    # stdin_open: true
-    # tty: true
+    
+    # Network
+    networks:
+      - agent_network
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   agent_data:
+    driver: local
+  agent_backups:
+    driver: local
   agent_logs:
+    driver: local
+  agent_config:
+    driver: local
 
-# For development with hot-reload, use:
-# docker compose watch
-# (requires Docker Desktop 4.20+ or Docker Engine 4.20+)
+networks:
+  agent_network:
+    driver: bridge
