@@ -64,6 +64,16 @@ def _get_allowed_fetch_prefixes() -> tuple[str, ...]:
 def _fetch_url(url: str) -> str:
     """Safe GET: только разрешённые хосты (config/allowed_sites.json). LRU-кэш с TTL; hit/miss считаются."""
     global _fetch_cache_hits, _fetch_cache_misses
+    try:
+        from src.governance.user_consent import is_internet_allowed
+
+        if not is_internet_allowed():
+            return (
+                "Error: internet access is disabled by user consent. "
+                "Скажи обычной фразой: «разрешаю интернет», чтобы включить."
+            )
+    except Exception:
+        pass
     if not url or not url.strip():
         return "Error: empty URL."
     url_stripped = url.strip()

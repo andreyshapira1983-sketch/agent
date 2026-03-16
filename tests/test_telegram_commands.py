@@ -3,6 +3,7 @@ import importlib
 from src.communication.telegram_commands import (
     export_quality_status,
     get_agent_status,
+    get_human_memory_reply,
     get_quality_status,
     get_weekly_quality_summary,
     reset_quality_status,
@@ -112,6 +113,10 @@ def test_get_weekly_quality_summary(monkeypatch):
     assert "Решено задач: 4" in text
     assert "Принято патчей: 2" in text
     assert "repair_failed=1" in text
+    assert "Короткий вывод:" in text
+    assert "Что стало лучше:" in text
+    assert "Что ломалось:" in text
+    assert "Где риск:" in text
 
 
 def test_export_quality_status(monkeypatch):
@@ -128,6 +133,20 @@ def test_export_quality_status(monkeypatch):
     assert "Quality JSON export готов" in text
 
 
+def test_export_quality_status_full(monkeypatch):
+    metrics_mod = importlib.import_module("src.monitoring.metrics")
+
+    def fake_export_quality_report(report_format: str = "text", file_path=None):
+        _ = file_path
+        return f"Exported to C:/tmp/quality.{ 'txt' if report_format == 'full' else 'json' }"
+
+    monkeypatch.setattr(metrics_mod, "export_quality_report", fake_export_quality_report)
+
+    text = export_quality_status("full")
+
+    assert "FULL export" in text
+
+
 def test_reset_quality_status_calls_metrics_reset(monkeypatch):
     metrics_mod = importlib.import_module("src.monitoring.metrics")
     called = {"reset": False}
@@ -141,3 +160,47 @@ def test_reset_quality_status_calls_metrics_reset(monkeypatch):
 
     assert called["reset"] is True
     assert "сброшены" in text.lower()
+
+
+def test_human_memory_reply_on_greeting_uses_memory(monkeypatch):
+    stm = importlib.import_module("src.memory.short_term")
+    monkeypatch.setattr(
+        stm,
+        "get_messages",
+        lambda _uid: [
+            {"role": "user", "content": "Хочу, чтобы ты запоминал мои темы"},
+            {"role": "assistant", "content": "Запомнил"},
+        ],
+    )
+    cmd = importlib.import_module("src.communication.telegram_commands")
+    monkeypatch.setattr(cmd, "_build_live_brief", lambda: "автономный режим выключен; в очереди задач: 0")
+    monkeypatch.setattr(cmd, "_extract_recent_learning_note", lambda: "изучил новую стратегию саморемонта")
+
+    text = get_human_memory_reply("u1", "Привет")
+
+    assert text is not None
+    assert "Помню" in text
+    assert "изучил новую стратегию" in text
+    assert "Как ты сам" in text
+
+
+def test_human_memory_reply_on_how_are_you(monkeypatch):
+    stm = importlib.import_module("src.memory.short_term")
+    monkeypatch.setattr(
+        stm,
+        "get_messages",
+        lambda _uid: [{"role": "user", "content": "Мы обсуждали улучшение качества"}],
+    )
+    cmd = importlib.import_module("src.communication.telegram_commands")
+    monkeypatch.setattr(cmd, "_build_live_brief", lambda: "последнее действие: run_self_repair")
+
+    text = get_human_memory_reply("u1", "Как дела?")
+
+    assert text is not None
+    assert "По состоянию" in text
+    assert "Как у тебя дела" in text
+
+
+def test_human_memory_reply_returns_none_for_non_smalltalk():
+    text = get_human_memory_reply("u1", "Сделай рефактор src/main.py")
+    assert text is None

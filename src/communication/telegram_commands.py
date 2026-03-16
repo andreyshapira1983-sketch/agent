@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+import re
+from pathlib import Path
 
 
 # Типы действий для фильтра /log
@@ -56,6 +57,159 @@ MODULE_ALIASES = ("self_model", "file_tools", "evolution_tools", "orchestrator",
 PRIORITY_ALIASES = ("high", "medium", "low")
 
 
+_GREET_RE = re.compile(r"^(привет|здравствуй|здравствуйте|добрый\s+(день|вечер|утро)|hello|hi|hey)\b", re.IGNORECASE)
+_SMALLTALK_RE = re.compile(
+    r"(как\s+дела|что\s+у\s+тебя\s+происходит|что\s+делаешь|чем\s+занят|как\s+ты|что\s+нового)",
+    re.IGNORECASE,
+)
+_READING_LOG_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "reading_log.json"
+
+
+def _is_smalltalk_message(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return False
+    if _GREET_RE.search(t):
+        return True
+    return bool(_SMALLTALK_RE.search(t))
+
+
+def _extract_last_user_topic(history: list[dict[str, str]]) -> str:
+    """Вытащить последнюю осмысленную пользовательскую тему из short-term памяти."""
+    for item in reversed(history or []):
+        if item.get("role") != "user":
+            continue
+        content = (item.get("content") or "").strip()
+        low = content.lower()
+        if len(content) < 6:
+            continue
+        if _is_smalltalk_message(content):
+            continue
+        if low in ("ок", "ага", "да", "нет", "понял", "понятно"):
+            continue
+        return content[:120]
+    return ""
+
+
+def _build_live_brief() -> str:
+    """Короткая живая сводка: что агент делал недавно и что сейчас в очереди."""
+    parts: list[str] = []
+    try:
+        from src.communication.autonomous_mode import is_autonomous_running
+
+        parts.append("автономный режим включён" if is_autonomous_running() else "автономный режим сейчас выключен")
+    except Exception:
+        pass
+    try:
+        from src.hitl.audit_log import get_audit_tail
+
+        tail = get_audit_tail(40)
+        last_goal = ""
+        last_tool = ""
+        for e in reversed(tail):
+            if e.get("action") == "autonomous_cycle_end":
+                d = e.get("details") or {}
+                last_goal = str(d.get("goal") or "").strip()
+                if last_goal:
+                    break
+        for e in reversed(tail):
+            if e.get("action") == "autonomous_act":
+                d = e.get("details") or {}
+                tool = str(d.get("tool") or "").strip()
+                ok = d.get("success")
+                if tool:
+                    last_tool = f"последнее действие: {tool} (успех: {ok})"
+                    break
+        if last_goal:
+            parts.append(f"последняя цель: {last_goal[:120]}")
+        if last_tool:
+            parts.append(last_tool)
+    except Exception:
+        pass
+    try:
+        from src.tasks.queue import size
+
+        parts.append(f"в очереди задач: {size()}")
+    except Exception:
+        pass
+    return "; ".join(parts)
+
+
+def _extract_recent_learning_note() -> str:
+    """Короткая заметка из памяти чтения/интернета (data/reading_log.json)."""
+    try:
+        if not _READING_LOG_PATH.exists():
+            return ""
+        raw = json.loads(_READING_LOG_PATH.read_text(encoding="utf-8"))
+        entries = raw.get("entries") or []
+        if not entries:
+            return ""
+        last = entries[-1]
+        title = str(last.get("title") or "").strip()
+        summary = str(last.get("summary") or "").strip()
+        if summary:
+            return summary[:140]
+        if title:
+            return f"недавно изучал: {title[:120]}"
+    except Exception:
+        return ""
+    return ""
+
+
+def get_human_memory_reply(user_id: str, text: str) -> str | None:
+    """
+    Человеческий ответ для small talk с опорой на short-term память и живое состояние.
+    Возвращает None, если это не small talk и нужно стандартное выполнение через LLM.
+    """
+    if not _is_smalltalk_message(text):
+        return None
+    try:
+        from src.memory import short_term
+
+        history = short_term.get_messages(user_id)
+    except Exception:
+        history = []
+
+    last_topic = _extract_last_user_topic(history)
+    live = _build_live_brief()
+    learning_note = _extract_recent_learning_note()
+    low = (text or "").strip().lower()
+
+    if _GREET_RE.search(text or ""):
+        lines = ["Привет. Я на связи."]
+        if last_topic:
+            lines.append(f"Помню из нашего разговора: «{last_topic}»." )
+        if live:
+            lines.append(f"Сейчас у меня так: {live}.")
+        if learning_note:
+            lines.append(f"Из того, что изучил и запомнил: {learning_note}.")
+        lines.append("Как ты сам? Если хочешь, продолжим с того места, где остановились.")
+        return " ".join(lines)
+
+    if "как дела" in low or "как ты" in low:
+        lines = ["У меня рабочий темп, я в контексте нашего диалога."]
+        if live:
+            lines.append(f"По состоянию: {live}.")
+        if learning_note:
+            lines.append(f"Из памяти изученного: {learning_note}.")
+        if last_topic:
+            lines.append(f"И помню твою тему: «{last_topic}».")
+        lines.append("Как у тебя дела?")
+        return " ".join(lines)
+
+    lines = []
+    if live:
+        lines.append(f"Сейчас происходит вот что: {live}.")
+    else:
+        lines.append("Я на связи и готов продолжать разговор.")
+    if last_topic:
+        lines.append(f"Из памяти держу нашу тему: «{last_topic}».")
+    if learning_note:
+        lines.append(f"Из изученного недавно: {learning_note}.")
+    lines.append("Если хочешь, просто расскажи, что сейчас важно для тебя, и я подхвачу.")
+    return " ".join(lines)
+
+
 def get_help_text() -> str:
     """Краткий список команд для /help."""
     lines = [
@@ -63,7 +217,7 @@ def get_help_text() -> str:
         "/help — этот список",
         "/status — статус агента (квоты, последний цикл, очередь)",
         "/quality — quality-метрики и последние ремонты/патчи",
-        "/quality_export [json|text] — выгрузить quality-отчёт в файл",
+        "/quality_export [json|text|full] — выгрузить quality-отчёт в файл",
         "/reset_quality — сбросить quality-метрики и историю",
         "/tasks или /queue — очередь задач",
         "/log [N] [action] [module] [priority] — последние действия",
@@ -76,6 +230,8 @@ def get_help_text() -> str:
         "/apply_validated — применить все проверенные патчи из песочницы (без программирования)",
         "/remind завтра 18:00 купить молоко — напоминание (или: через 2 часа позвонить)",
         "",
+        "Команды не обязательны: можно писать обычными фразами.",
+        "Примеры: «покажи качество», «выгрузи полный отчёт качества», «сбрось метрики качества».",
         "Обычное сообщение — агент отвечает и при необходимости выполняет действия на ПК.",
     ]
     return "\n".join(lines)
@@ -124,13 +280,43 @@ def get_weekly_quality_summary() -> str:
     repaired_ok = sum(1 for item in history if item.get("event_type") == "repair_attempt" and item.get("status") == "ok")
     repaired_failed = sum(1 for item in history if item.get("event_type") == "repair_attempt" and item.get("status") == "failed")
     tasks = sum(1 for item in history if item.get("event_type") == "task_solved")
+    test_total = int(q.get("test_runs_total", 0) or 0)
+    test_passed = int(q.get("test_runs_passed", 0) or 0)
+    pass_ratio = q.get("test_pass_ratio")
+
+    better_parts: list[str] = []
+    broken_parts: list[str] = []
+    risk_parts: list[str] = []
+
+    if accepted > 0:
+        better_parts.append(f"принято патчей: {accepted}")
+    if repaired_ok > repaired_failed:
+        better_parts.append(f"ремонты чаще успешны ({repaired_ok} vs {repaired_failed})")
+    if pass_ratio is not None and float(pass_ratio) >= 0.75:
+        better_parts.append(f"тесты держатся на хорошем уровне ({pass_ratio})")
+
+    if repaired_failed > 0:
+        broken_parts.append(f"было неуспешных ремонтов: {repaired_failed}")
+    if pass_ratio is not None and float(pass_ratio) < 0.75:
+        broken_parts.append(f"просадка test pass ratio до {pass_ratio}")
+    if test_total == 0:
+        broken_parts.append("нет свежих прогонов тестов")
+
+    if repaired_failed >= repaired_ok and repaired_failed > 0:
+        risk_parts.append("риск повторных регрессий в блоках саморемонта")
+    if accepted == 0 and tasks > 0:
+        risk_parts.append("зафиксированы решённые задачи без подтверждённых патчей")
+    if test_total > 0 and test_passed < test_total:
+        risk_parts.append("часть тестов падает, перед релизом нужен прогон")
+    if not risk_parts:
+        risk_parts.append("критичный риск не выявлен, но нужен регулярный контроль")
+
     lines = ["Недельная сводка качества:"]
     lines.append(f"  Решено задач: {q.get('tasks_solved', 0)} (важных в истории: {tasks})")
     lines.append(f"  Принято патчей: {q.get('accepted_patches', 0)} (в истории: {accepted})")
     lines.append(f"  Ремонты: успешных={q.get('successful_repairs', 0)} неуспешных={q.get('failed_repairs', 0)}")
-    ratio = q.get("test_pass_ratio")
-    if ratio is not None:
-        lines.append(f"  Тесты: pass_ratio={ratio} ({q.get('test_runs_passed', 0)}/{q.get('test_runs_total', 0)})")
+    if pass_ratio is not None:
+        lines.append(f"  Тесты: pass_ratio={pass_ratio} ({test_passed}/{test_total})")
     lines.append(f"  История: repair_ok={repaired_ok}, repair_failed={repaired_failed}, accepted_patch={accepted}")
     if history:
         last = history[-1]
@@ -138,6 +324,11 @@ def get_weekly_quality_summary() -> str:
             f"  Последнее событие: {last.get('event_type', 'event')} {last.get('status', 'unknown')} "
             f"path={last.get('target_path', '-') or '-'}"
         )
+    lines.append("")
+    lines.append("Короткий вывод:")
+    lines.append(f"  Что стало лучше: {', '.join(better_parts) if better_parts else 'явного улучшения по истории пока нет'}")
+    lines.append(f"  Что ломалось: {', '.join(broken_parts) if broken_parts else 'критичных сбоев в истории не видно'}")
+    lines.append(f"  Где риск: {', '.join(risk_parts)}")
     return "\n".join(lines)
 
 
@@ -149,8 +340,11 @@ def export_quality_status(report_format: str = "text") -> str:
     if not result.startswith("Exported to "):
         return result
     path = result.replace("Exported to ", "", 1)
-    if (report_format or "text").strip().lower() == "json":
+    fmt = (report_format or "text").strip().lower()
+    if fmt == "json":
         return f"Quality JSON export готов: {path}"
+    if fmt == "full":
+        return f"Quality FULL export готов (расширенная история): {path}"
     return f"Quality text export готов: {path}"
 
 

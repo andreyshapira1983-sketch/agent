@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Agent Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
   <style>
@@ -114,6 +115,61 @@
     }
     #focus-box h2 { color: #a78bfa; }
     #live-state-box { margin-bottom: 12px; }
+    #quality-box {
+      margin-bottom: 12px;
+      padding: 10px;
+      background: #0c0c0f;
+      border-radius: 8px;
+      border: 1px solid var(--edge);
+    }
+    #quality-box h2 { color: #34d399; }
+    .quality-kpis {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .quality-kpi {
+      border: 1px solid var(--edge);
+      border-radius: 6px;
+      padding: 6px;
+      background: #111118;
+    }
+    .quality-kpi .v {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #e4e4e7;
+    }
+    .quality-kpi .k {
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .risk-chip {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      border: 1px solid transparent;
+      margin-bottom: 8px;
+    }
+    .risk-low { color: #22c55e; border-color: #14532d; background: rgba(34, 197, 94, 0.08); }
+    .risk-medium { color: #f59e0b; border-color: #78350f; background: rgba(245, 158, 11, 0.08); }
+    .risk-high { color: #ef4444; border-color: #7f1d1d; background: rgba(239, 68, 68, 0.08); }
+    .quality-history {
+      max-height: 148px;
+      overflow: auto;
+      border-top: 1px dashed var(--edge);
+      padding-top: 6px;
+      font-size: 0.76rem;
+    }
+    .quality-history .row {
+      margin-bottom: 4px;
+      color: #d4d4d8;
+    }
+    .quality-history .row .ts {
+      color: var(--muted);
+      margin-right: 4px;
+    }
     #sidebar pre {
       background: #0c0c0f;
       padding: 10px;
@@ -140,6 +196,7 @@
       z-index: 20;
       max-width: 260px;
     }
+    .is-hidden { display: none; }
   </style>
 </head>
 <body>
@@ -171,10 +228,17 @@
       <h2>Визор инициативы</h2>
       <p id="initiative-visor-text" class="meta">—</p>
     </div>
+    <div id="quality-box">
+      <h2>Quality</h2>
+      <div id="quality-kpis" class="quality-kpis"></div>
+      <span id="quality-risk" class="risk-chip risk-low">risk: low</span>
+      <div id="quality-tests" class="meta">Тесты: —</div>
+      <div id="quality-history" class="quality-history"></div>
+    </div>
     <p class="meta">Клик по папке/файлу или узлу — детали. Обновление каждые 2 с.</p>
     <div id="details">Выберите элемент на карте или узел компонента.</div>
   </div>
-  <div id="tooltip" class="tooltip" style="display: none;"></div>
+  <div id="tooltip" class="tooltip is-hidden"></div>
 
   <script>
     const API = '/api/dashboard';
@@ -242,10 +306,70 @@
           data = d;
           document.getElementById('live').textContent = 'Live ' + (d.ts ? d.ts.slice(11, 19) : '');
           updateLiveState(d);
+          updateQualityPanel(d);
           updateFileTree(d.file_tree || []);
           updateGraph(d);
         })
         .catch(() => {});
+    }
+
+    function updateQualityPanel(d) {
+      const metrics = (d && d.metrics) || {};
+      const q = metrics.quality || {};
+      const kpisEl = document.getElementById('quality-kpis');
+      const riskEl = document.getElementById('quality-risk');
+      const testsEl = document.getElementById('quality-tests');
+      const historyEl = document.getElementById('quality-history');
+      if (!kpisEl || !riskEl || !testsEl || !historyEl) return;
+
+      const tasks = Number(q.tasks_solved || 0);
+      const patches = Number(q.accepted_patches || 0);
+      const okRepairs = Number(q.successful_repairs || 0);
+      const failedRepairs = Number(q.failed_repairs || 0);
+      const testTotal = Number(q.test_runs_total || 0);
+      const testPassed = Number(q.test_runs_passed || 0);
+      const ratio = q.test_pass_ratio;
+      const history = q.recent_history || [];
+
+      kpisEl.innerHTML = [
+        { k: 'Задачи', v: tasks },
+        { k: 'Патчи', v: patches },
+        { k: 'Repair OK', v: okRepairs },
+        { k: 'Repair FAIL', v: failedRepairs },
+      ].map(function(item) {
+        return '<div class="quality-kpi"><div class="v">' + item.v + '</div><div class="k">' + item.k + '</div></div>';
+      }).join('');
+
+      let riskClass = 'risk-low';
+      let riskText = 'risk: low';
+      if (failedRepairs > okRepairs || (ratio !== null && ratio !== undefined && Number(ratio) < 0.7)) {
+        riskClass = 'risk-high';
+        riskText = 'risk: high';
+      } else if (failedRepairs > 0 || (ratio !== null && ratio !== undefined && Number(ratio) < 0.9)) {
+        riskClass = 'risk-medium';
+        riskText = 'risk: medium';
+      }
+      riskEl.className = 'risk-chip ' + riskClass;
+      riskEl.textContent = riskText;
+
+      if (ratio === null || ratio === undefined) {
+        testsEl.textContent = 'Тесты: данных пока нет';
+      } else {
+        testsEl.textContent = 'Тесты: pass_ratio=' + ratio + ' (' + testPassed + '/' + testTotal + ')';
+      }
+
+      if (!history.length) {
+        historyEl.innerHTML = '<div class="meta">История: пока нет событий</div>';
+        return;
+      }
+      historyEl.innerHTML = history.slice(-10).reverse().map(function(item) {
+        const tsRaw = (item.timestamp_utc || '').replace('T', ' ');
+        const ts = tsRaw ? tsRaw.slice(5, 19) : '--:--';
+        const ev = (item.event_type || 'event').replace(/</g, '&lt;');
+        const st = (item.status || 'unknown').replace(/</g, '&lt;');
+        const target = (item.target_path || '-').replace(/</g, '&lt;');
+        return '<div class="row"><span class="ts">' + ts + '</span>' + ev + ' <b>' + st + '</b> · ' + target + '</div>';
+      }).join('');
     }
 
     function updateGraph(d) {

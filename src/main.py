@@ -46,7 +46,7 @@ async def _cmd_quality_export(update, _context) -> None:
     msg = (update.message.text if update.message and update.message.text else "").strip()
     parts = msg.split(maxsplit=1)
     report_format = "text"
-    if len(parts) > 1 and parts[1].strip().lower() in ("json", "text", "txt"):
+    if len(parts) > 1 and parts[1].strip().lower() in ("json", "text", "txt", "full"):
         report_format = parts[1].strip().lower()
     text = await asyncio.to_thread(export_quality_status, report_format)
     await update.message.reply_text((text or "Нет данных.")[:4000])
@@ -229,6 +229,76 @@ async def _handle_telegram(user_id: str, text: str) -> str:
     metrics.record_call()
     metrics.record_request_preview(text)
 
+    low = (text or "").strip().lower()
+
+    def _has_any(words: tuple[str, ...]) -> bool:
+        return any(w in low for w in words)
+
+    # Управление доступами обычными фразами (без slash-команд).
+    if _has_any(("разрешаю интернет", "разреши интернет", "можно интернет", "доступ в интернет")):
+        try:
+            from src.governance.user_consent import set_internet_allowed, get_consent_status_text
+
+            set_internet_allowed(True)
+            reply = "Принял. Интернет разрешён. " + get_consent_status_text()
+            short_term.add_message(user_id, "user", text)
+            short_term.add_message(user_id, "assistant", reply)
+            metrics.record_success()
+            return reply
+        except Exception:
+            pass
+
+    if _has_any(("запрещаю интернет", "выключи интернет", "без интернета", "интернет нельзя")):
+        try:
+            from src.governance.user_consent import set_internet_allowed, get_consent_status_text
+
+            set_internet_allowed(False)
+            reply = "Принял. Интернет отключён. " + get_consent_status_text()
+            short_term.add_message(user_id, "user", text)
+            short_term.add_message(user_id, "assistant", reply)
+            metrics.record_success()
+            return reply
+        except Exception:
+            pass
+
+    if _has_any(("разрешаю windows", "разрешаю win", "разрешаю powershell", "разрешаю команды windows")):
+        try:
+            from src.governance.user_consent import set_windows_commands_allowed, get_consent_status_text
+
+            set_windows_commands_allowed(True)
+            reply = "Принял. Команды Windows разрешены. " + get_consent_status_text()
+            short_term.add_message(user_id, "user", text)
+            short_term.add_message(user_id, "assistant", reply)
+            metrics.record_success()
+            return reply
+        except Exception:
+            pass
+
+    if _has_any(("запрещаю windows", "запрещаю win", "запрещаю powershell", "windows нельзя", "команды windows нельзя")):
+        try:
+            from src.governance.user_consent import set_windows_commands_allowed, get_consent_status_text
+
+            set_windows_commands_allowed(False)
+            reply = "Принял. Команды Windows отключены. " + get_consent_status_text()
+            short_term.add_message(user_id, "user", text)
+            short_term.add_message(user_id, "assistant", reply)
+            metrics.record_success()
+            return reply
+        except Exception:
+            pass
+
+    if _has_any(("какие доступы", "статус доступов", "доступы", "что разрешено")):
+        try:
+            from src.governance.user_consent import get_consent_status_text
+
+            reply = get_consent_status_text()
+            short_term.add_message(user_id, "user", text)
+            short_term.add_message(user_id, "assistant", reply)
+            metrics.record_success()
+            return reply
+        except Exception:
+            pass
+
     # «Да» / «запусти» после /status — запускаем один цикл.
     if is_start_cycle_intent(text):
         try:
@@ -247,8 +317,55 @@ async def _handle_telegram(user_id: str, text: str) -> str:
         except Exception as e:
             return f"Ошибка при запуске цикла: {e}"
 
+    # Человеческий small talk по памяти: приветствия и «как дела/что происходит» без команд.
+    try:
+        from src.communication.telegram_commands import get_human_memory_reply
+
+        memory_reply = await asyncio.to_thread(get_human_memory_reply, user_id, text)
+        if memory_reply:
+            short_term.add_message(user_id, "user", text)
+            short_term.add_message(user_id, "assistant", memory_reply)
+            metrics.record_success()
+            return memory_reply
+    except Exception:
+        pass
+
     # Natural language interface: фраза пользователя → намерение → агент выполняет действие.
     intent = await asyncio.to_thread(interpret_intent, text)
+    if intent.get("command") in ("get_status", "get_metrics"):
+        try:
+            from src.communication.telegram_commands import get_agent_status
+
+            return await asyncio.to_thread(get_agent_status)
+        except Exception as e:
+            return f"Не удалось получить статус: {e}"
+    if intent.get("command") == "get_quality":
+        try:
+            from src.communication.telegram_commands import get_quality_status
+
+            return await asyncio.to_thread(get_quality_status)
+        except Exception as e:
+            return f"Не удалось получить quality: {e}"
+    if intent.get("command") in ("export_quality_text", "export_quality_json", "export_quality_full"):
+        try:
+            from src.communication.telegram_commands import export_quality_status
+
+            fmt_map = {
+                "export_quality_text": "text",
+                "export_quality_json": "json",
+                "export_quality_full": "full",
+            }
+            fmt = fmt_map.get(intent.get("command"), "text")
+            return await asyncio.to_thread(export_quality_status, fmt)
+        except Exception as e:
+            return f"Не удалось выгрузить quality-отчёт: {e}"
+    if intent.get("command") == "reset_quality":
+        try:
+            from src.communication.telegram_commands import reset_quality_status
+
+            return await asyncio.to_thread(reset_quality_status)
+        except Exception as e:
+            return f"Не удалось сбросить quality-метрики: {e}"
     if intent.get("command") == "run_cycle":
         try:
             from src.tools.orchestrator import Orchestrator

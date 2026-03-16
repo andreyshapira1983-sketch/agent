@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 from openai import OpenAI
@@ -17,6 +18,7 @@ from src.tools.orchestrator import run_tool
 _client: OpenAI | None = None
 
 MAX_TOOL_ROUNDS = 10
+_READING_LOG_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "reading_log.json"
 
 
 def _client_get() -> OpenAI:
@@ -146,6 +148,33 @@ def _current_status_extra() -> str:
         return ""
 
 
+def _reading_memory_extra(limit: int = 3) -> str:
+    """Короткая сводка накопленного изученного контента из reading_log."""
+    try:
+        if not _READING_LOG_PATH.exists():
+            return ""
+        raw = json.loads(_READING_LOG_PATH.read_text(encoding="utf-8"))
+        entries = raw.get("entries") or []
+        if not entries:
+            return ""
+        last = entries[-max(1, min(limit, 10)):]
+        lines: list[str] = []
+        for item in reversed(last):
+            title = str(item.get("title") or item.get("url") or "").strip()
+            summary = str(item.get("summary") or "").strip()
+            if not title and not summary:
+                continue
+            if summary:
+                lines.append(f"- {title[:80]}: {summary[:180]}")
+            else:
+                lines.append(f"- {title[:120]}")
+        if not lines:
+            return ""
+        return "Память изученного (используй в ответах и планировании):\n" + "\n".join(lines)
+    except Exception:
+        return ""
+
+
 # Лимиты контекста, чтобы не превысить maximum context length модели (400 ошибка)
 _MAX_SYSTEM_CHARS = 52_000
 _MAX_CONTEXT_MESSAGES = 12
@@ -196,4 +225,7 @@ def process_user_input(
     status_block = _current_status_extra()
     if status_block:
         system_extra = (system_extra + "\n\n" + status_block).strip()
+    learned_block = _reading_memory_extra(limit=3)
+    if learned_block:
+        system_extra = (system_extra + "\n\n" + learned_block).strip()
     return chat(messages, model=model, system_extra=system_extra)

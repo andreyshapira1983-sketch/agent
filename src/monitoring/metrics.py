@@ -250,33 +250,116 @@ def get_metrics() -> dict[str, Any]:
     return metrics.get_metrics_summary()
 
 
+def _collect_extended_quality_events(limit: int = 120) -> list[dict[str, Any]]:
+    """
+    Расширенный список quality-событий для full-экспорта.
+    Берёт обычную quality-историю и дополняет релевантными событиями из audit.
+    """
+    events: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _append(item: dict[str, Any]) -> None:
+        key = json.dumps(item, ensure_ascii=False, sort_keys=True)
+        if key in seen:
+            return
+        seen.add(key)
+        events.append(item)
+
+    for item in metrics.get_recent_quality_history(limit=max(limit, _MAX_QUALITY_HISTORY)):
+        if isinstance(item, dict):
+            _append(item)
+
+    try:
+        from src.hitl.audit_log import get_audit_tail
+
+        for entry in get_audit_tail(max(limit * 4, 200)):
+            action = str(entry.get("action") or "")
+            details = entry.get("details") or {}
+            ts = entry.get("ts") or datetime.now(timezone.utc).isoformat()
+
+            if action in ("apply_patch_with_approval", "accept_patch"):
+                _append(
+                    {
+                        "timestamp_utc": ts,
+                        "event_type": "accepted_patch",
+                        "status": "ok",
+                        "patch_id": details.get("patch_id") or details.get("id") or details.get("task_id"),
+                        "target_path": details.get("target_path") or details.get("path") or "-",
+                        "note": "from_audit",
+                    }
+                )
+            elif action in ("self_repair_attempt", "run_self_repair", "self_repair"):
+                ok = bool(
+                    details.get("success")
+                    or details.get("accepted")
+                    or details.get("patched")
+                )
+                _append(
+                    {
+                        "timestamp_utc": ts,
+                        "event_type": "repair_attempt",
+                        "status": "ok" if ok else "failed",
+                        "patch_id": details.get("patch_id") or details.get("id") or details.get("task_id"),
+                        "target_path": details.get("target_path") or details.get("path") or "-",
+                        "note": "from_audit",
+                    }
+                )
+            elif action == "autonomous_act":
+                if not details.get("success"):
+                    continue
+                tool = str(details.get("tool") or "")
+                if tool and tool in _IMPORTANT_TASK_TOOLS:
+                    _append(
+                        {
+                            "timestamp_utc": ts,
+                            "event_type": "task_solved",
+                            "status": "ok",
+                            "patch_id": details.get("task_id") or details.get("id"),
+                            "target_path": tool,
+                            "note": "from_audit",
+                        }
+                    )
+    except Exception:
+        pass
+
+    events.sort(key=lambda x: str(x.get("timestamp_utc") or ""))
+    return events[-limit:] if limit > 0 else events
+
+
 def export_quality_report(report_format: str = "text", file_path: str | None = None) -> str:
     """
     Выгрузить quality-отчёт в JSON или TXT.
     Возвращает путь к записанному файлу или сообщение об ошибке.
     """
     fmt = (report_format or "text").strip().lower()
-    if fmt not in ("text", "txt", "json"):
-        return "Export failed: supported formats are text and json"
+    full_mode = fmt in ("full", "full_text", "full_txt", "full_json")
+    if fmt not in ("text", "txt", "json", "full", "full_text", "full_txt", "full_json"):
+        return "Export failed: supported formats are text, json, full"
     try:
         payload = metrics.get_quality_summary()
+        if full_mode:
+            payload["extended_history"] = _collect_extended_quality_events(limit=120)
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        suffix = "json" if fmt == "json" else "txt"
+        is_json = fmt in ("json", "full_json")
+        suffix = "json" if is_json else "txt"
         path = Path(file_path) if file_path else (_EXPORTS_DIR / f"quality_{ts}.{suffix}")
         path.parent.mkdir(parents=True, exist_ok=True)
-        if fmt == "json":
+        if is_json:
             path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         else:
+            events_key = "extended_history" if full_mode else "recent_history"
+            events = payload.get(events_key) or []
             lines = [
                 "Quality export",
+                f"mode={'full' if full_mode else 'standard'}",
                 f"tasks_solved={payload.get('tasks_solved', 0)}",
                 f"accepted_patches={payload.get('accepted_patches', 0)}",
                 f"successful_repairs={payload.get('successful_repairs', 0)}",
                 f"failed_repairs={payload.get('failed_repairs', 0)}",
                 f"test_pass_ratio={payload.get('test_pass_ratio')}",
-                "recent_history:",
+                f"{events_key}: total={len(events)}",
             ]
-            for item in payload.get("recent_history") or []:
+            for item in events:
                 lines.append(
                     f"- {item.get('timestamp_utc', '-')}: {item.get('event_type', 'event')} {item.get('status', 'unknown')} "
                     f"path={item.get('target_path', '-')} id={item.get('patch_id', '-')}"
@@ -311,8 +394,6 @@ def export_performance_summary(file_path: str | None = None) -> str:
     Если file_path не задан — пишет в config/performance_logs/ с именем по текущей дате/времени.
     Возвращает путь к записанному файлу или сообщение об ошибке.
     """
-    from datetime import datetime, timezone
-
     try:
         tool_times = metrics.get_tool_times_summary()
         fetch_stats: dict[str, Any] = {}

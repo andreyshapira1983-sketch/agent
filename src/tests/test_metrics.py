@@ -131,6 +131,20 @@ def test_export_quality_report_json_and_text(tmp_path):
     assert txt_path.exists()  # nosec B101
 
 
+def test_export_quality_report_full_json_contains_extended_history(tmp_path):
+    import json
+    from src.monitoring.metrics import export_quality_report
+
+    json_path = tmp_path / "quality_full.json"
+    out_json = export_quality_report("full_json", file_path=str(json_path))
+
+    assert "Exported" in out_json  # nosec B101
+    assert json_path.exists()  # nosec B101
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert "extended_history" in payload  # nosec B101
+    assert isinstance(payload["extended_history"], list)  # nosec B101
+
+
 def test_record_task_solved_only_important_tools_add_history(tmp_path):
     m = Metrics(storage_path=tmp_path / "quality_metrics.json")
 

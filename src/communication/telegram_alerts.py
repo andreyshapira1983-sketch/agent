@@ -230,14 +230,15 @@ def send_agent_step(event_type: str, message: str) -> None:
     Короткое уведомление о шаге агента в Telegram (Начал X, Применил патч, Сгенерировал отчёт).
     Отправляется только если event_type входит в TELEGRAM_EVENT_TYPES (через запятую):
     cycle, goal, task_start, patch, report.
-    По умолчанию ничего не шлём; чтобы получать шаги: TELEGRAM_EVENT_TYPES=task_start,patch,report
+    По умолчанию шлём ключевые шаги: task_start, patch, report.
+    При необходимости можно переопределить через TELEGRAM_EVENT_TYPES.
     или TELEGRAM_EVENT_TYPES=cycle,goal,task_start,patch,report.
     """
     if (os.getenv("TELEGRAM_AUTONOMOUS_EVENTS") or "1").strip().lower() in ("0", "false", "no"):
         return
     allowed_raw = (os.getenv("TELEGRAM_EVENT_TYPES") or "").strip()
     if not allowed_raw:
-        return
+        allowed_raw = "task_start,patch,report"
     allowed = [x.strip().lower() for x in allowed_raw.split(",") if x.strip()]
     if event_type.strip().lower() not in allowed:
         return

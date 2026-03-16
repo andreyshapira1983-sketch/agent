@@ -43,6 +43,16 @@ def _run_python(code: str) -> str:
 
 def _run_powershell(script: str) -> str:
     """Выполнить скрипт PowerShell: powershell -NoProfile -NonInteractive -Command <script>. Без shell."""
+    try:
+        from src.governance.user_consent import is_windows_commands_allowed
+
+        if not is_windows_commands_allowed():
+            return (
+                "Error: Windows commands are disabled by user consent. "
+                "Скажи обычной фразой: «разрешаю команды Windows», чтобы включить."
+            )
+    except Exception:
+        pass
     s = (script or "").strip()
     if not s:
         return "Error: empty script."
