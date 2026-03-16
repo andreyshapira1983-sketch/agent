@@ -5,11 +5,17 @@ Metrics: calls, errors, successes, timing, recent requests, per-tool execution t
 from __future__ import annotations
 
 from collections import deque
+import json
+from pathlib import Path
 from typing import Any
 
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_QUALITY_STORAGE_PATH = _PROJECT_ROOT / "data" / "quality_metrics.json"
+
+
 class Metrics:
-    def __init__(self) -> None:
+    def __init__(self, storage_path: Path | None = None) -> None:
         self.calls = 0
         self.execution_times: list[float] = []
         self.errors: list[str] = []
@@ -23,6 +29,35 @@ class Metrics:
         self.failed_repairs = 0
         self.test_runs_total = 0
         self.test_runs_passed = 0
+        self._storage_path = storage_path or _QUALITY_STORAGE_PATH
+        self._load_quality_state()
+
+    def _load_quality_state(self) -> None:
+        if not self._storage_path.exists():
+            return
+        try:
+            raw = json.loads(self._storage_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                return
+            self.tasks_solved = int(raw.get("tasks_solved", 0) or 0)
+            self.accepted_patches = int(raw.get("accepted_patches", 0) or 0)
+            self.successful_repairs = int(raw.get("successful_repairs", 0) or 0)
+            self.failed_repairs = int(raw.get("failed_repairs", 0) or 0)
+            self.test_runs_total = int(raw.get("test_runs_total", 0) or 0)
+            self.test_runs_passed = int(raw.get("test_runs_passed", 0) or 0)
+        except Exception:
+            pass
+
+    def _save_quality_state(self) -> None:
+        payload = self.get_quality_summary()
+        try:
+            self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+            self._storage_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
 
     def record_call(self) -> None:
         self.calls += 1
@@ -61,20 +96,24 @@ class Metrics:
 
     def record_task_solved(self) -> None:
         self.tasks_solved += 1
+        self._save_quality_state()
 
     def record_patch_accepted(self) -> None:
         self.accepted_patches += 1
+        self._save_quality_state()
 
     def record_repair_attempt(self, *, success: bool) -> None:
         if success:
             self.successful_repairs += 1
         else:
             self.failed_repairs += 1
+        self._save_quality_state()
 
     def record_test_run(self, *, passed: bool) -> None:
         self.test_runs_total += 1
         if passed:
             self.test_runs_passed += 1
+        self._save_quality_state()
 
     def get_test_pass_ratio(self) -> float | None:
         if self.test_runs_total <= 0:
@@ -146,8 +185,6 @@ def export_performance_summary(file_path: str | None = None) -> str:
     Если file_path не задан — пишет в config/performance_logs/ с именем по текущей дате/времени.
     Возвращает путь к записанному файлу или сообщение об ошибке.
     """
-    import json
-    from pathlib import Path
     from datetime import datetime, timezone
 
     try:

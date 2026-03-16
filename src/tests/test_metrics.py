@@ -77,3 +77,26 @@ def test_export_performance_summary():
         assert "timestamp_iso" in data and "tool_times" in data
 
 
+def test_quality_metrics_persist_between_instances(tmp_path):
+    storage = tmp_path / "quality_metrics.json"
+
+    m1 = Metrics(storage_path=storage)
+    m1.record_task_solved()
+    m1.record_patch_accepted()
+    m1.record_repair_attempt(success=True)
+    m1.record_repair_attempt(success=False)
+    m1.record_test_run(passed=True)
+    m1.record_test_run(passed=False)
+
+    m2 = Metrics(storage_path=storage)
+    summary = m2.get_metrics_summary()
+
+    assert summary["quality"]["tasks_solved"] == 1  # nosec B101
+    assert summary["quality"]["accepted_patches"] == 1  # nosec B101
+    assert summary["quality"]["successful_repairs"] == 1  # nosec B101
+    assert summary["quality"]["failed_repairs"] == 1  # nosec B101
+    assert summary["quality"]["test_runs_total"] == 2  # nosec B101
+    assert summary["quality"]["test_runs_passed"] == 1  # nosec B101
+    assert summary["quality"]["test_pass_ratio"] == 0.5  # nosec B101
+
+
