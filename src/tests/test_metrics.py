@@ -1,8 +1,8 @@
 from src.monitoring.metrics import Metrics, get_metrics, metrics
 
 
-def test_metrics_class():
-    m = Metrics()
+def test_metrics_class(tmp_path):
+    m = Metrics(storage_path=tmp_path / "quality_metrics.json")
     m.record_call()
     m.record_call()
     m.record_success()
