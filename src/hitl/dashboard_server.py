@@ -285,12 +285,22 @@ def run_dashboard_server(host: str = "127.0.0.1", port: int | None = None) -> No
             return JSONResponse({"tree": "", "error": str(e)})
 
     dashboard_dir = _ROOT / "dashboard"
+    _dashboard_fallback = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Agent Dashboard</title></head><body>
+    <h1>Agent Dashboard</h1>
+    <p>API: <a href="/api/dashboard">/api/dashboard</a>, <a href="/api/state">/api/state</a>, <a href="/api/queue">/api/queue</a>, <a href="/api/audit">/api/audit</a>, <a href="/api/workspace">/api/workspace</a>.</p>
+    <p><a href="/health">/health</a></p>
+    </body></html>"""
+
+    @app.get("/dashboard")
+    def serve_dashboard():
+        return HTMLResponse(_dashboard_fallback)
+
+    @app.get("/dashboard/")
+    def serve_dashboard_slash():
+        return HTMLResponse(_dashboard_fallback)
+
     if dashboard_dir.is_dir():
         app.mount("/dashboard", StaticFiles(directory=str(dashboard_dir), html=True), name="dashboard")
-    else:
-        @app.get("/dashboard")
-        def serve_dashboard():
-            return HTMLResponse("<p>Dashboard static files not found. Create <code>dashboard/</code> with index.html.</p>")
 
     import uvicorn
     uvicorn.run(app, host=host, port=port, log_level="warning")

@@ -115,7 +115,7 @@ def tasks_for_action(action_id: str) -> list[tuple[str, dict[str, Any], int]]:
         ]
     if action_id == "run_maintenance":
         return [
-            ("get_metrics", {}, 6),
+            ("get_metrics", {}, 100),
             ("check_performance_alerts", {}, 5),
         ]
     # legacy
