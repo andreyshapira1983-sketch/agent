@@ -1,0 +1,92 @@
+# Autonomous AI Agent — зависимости
+# Установка: pip install -r requirements.txt
+
+# ── Обязательные ──────────────────────────────────────────────────────────────
+
+# LLM (OpenAI: chat, vision, whisper)
+openai>=1.30.0
+
+# LLM (Anthropic Claude: Haiku, Sonnet, Opus)
+anthropic>=0.30.0
+
+# HTTP (GitHub backend, Telegram sink/bot, Web Crawler)
+requests>=2.31.0
+
+# Загрузка .env
+python-dotenv>=1.0.0
+
+# ── Поиск и парсинг ───────────────────────────────────────────────────────────
+
+# Поиск (SearchTool backend) — переименован из duckduckgo-search
+ddgs>=9.0.0
+
+# HTML парсинг (WebCrawler, DocumentParser HTML)
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# ── Мониторинг ────────────────────────────────────────────────────────────────
+
+# Мониторинг ресурсов (HardwareInteractionLayer)
+psutil>=5.9.0
+
+# ── Документы ────────────────────────────────────────────────────────────────
+
+# PDF парсинг (DocumentParser)
+pdfplumber>=0.11.0
+pypdf>=4.0.0
+
+# DOCX парсинг (DocumentParser)
+python-docx>=1.1.0
+
+# XLSX / XLS парсинг (DocumentParser)
+openpyxl>=3.1.0
+xlrd>=2.0.0
+
+# PowerPoint парсинг (DocumentParser)
+python-pptx>=0.6.23
+
+# LibreOffice ODT/ODS/ODP парсинг (DocumentParser)
+odfpy>=1.4.1
+
+# RTF парсинг (DocumentParser)
+striprtf>=0.0.26
+
+# Outlook MSG парсинг (DocumentParser)
+extract-msg>=0.48.0
+
+# 7Z архивы (DocumentParser)
+py7zr>=0.20.0
+
+# RAR архивы (DocumentParser) — также требует unrar в PATH
+rarfile>=4.1
+
+# Аудио/видео метаданные (DocumentParser — mp3, mp4, wav и др.)
+mutagen>=1.47.0
+
+# PE-метаданные бинарных файлов (DocumentParser — exe, dll)
+pefile>=2023.2.7
+
+# ── Браузер ───────────────────────────────────────────────────────────────────
+
+# Headless браузер (BrowserTool — Layer 5)
+# Установка браузера: playwright install chromium
+playwright>=1.40.0
+
+# ── Векторный поиск (опционально) ────────────────────────────────────────────
+
+# Семантический поиск (VectorStore — Layer 2)
+# Если не установлен — используется встроенный TF-IDF
+chromadb>=0.4.0
+sentence-transformers>=2.2.0
+
+# ── Опциональные ──────────────────────────────────────────────────────────────
+
+# Работа с GitHub через PyGithub (альтернатива GitHubBackend на requests)
+# PyGithub>=2.1.0
+
+# Hugging Face
+huggingface_hub>=0.20.0
+
+# Local in-process neural backend (LOCAL_LLM_ENABLED=1)
+transformers>=4.40.0
+torch>=2.2.0

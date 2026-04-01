@@ -1,0 +1,59 @@
+# API keys and secrets
+.env
+*.env
+config/.env
+config.ini
+config.local.ini
+secrets.json
+secrets.yaml
+secrets.yml
+
+# OAuth tokens and credentials (NEVER commit)
+token.json
+config/token.json
+config/credentials.json
+credentials.json
+
+# Agent runtime data (potentially sensitive)
+memory/
+.agent_memory/
+*.pkl
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs (may contain sensitive data)
+*.log
+logs/
+
+# Telegram session files (contain auth tokens)
+*.session
+*.session-journal
+
+# Jupyter
+.ipynb_checkpoints/

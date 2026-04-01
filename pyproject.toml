@@ -1,0 +1,40 @@
+[tool.pylint.messages_control]
+disable = [
+    "broad-exception-caught",            # W0718 — catch-all handlers intentional in agent runtime
+    "broad-exception-raised",            # W0719
+    "protected-access",                  # W0212 — cross-module access within own project
+    "exec-used",                         # W0122 — used for loading goal files
+    "attribute-defined-outside-init",    # W0201 — dynamic attribute patterns
+    "reimported",                        # W0404 — local re-imports for scoping
+    "multiple-imports",                  # C0410 — convenience multi-import
+    "no-member",                         # E1101 — false positives with __slots__ + object.__setattr__
+    "unused-import",                     # W0611 — handled by ruff/Pylance
+    "missing-module-docstring",          # C0114
+    "missing-class-docstring",           # C0115
+    "missing-function-docstring",        # C0116
+    "line-too-long",                     # C0301
+    "too-many-arguments",               # R0913
+    "too-many-instance-attributes",     # R0902
+    "too-many-locals",                  # R0914
+    "too-many-branches",                # R0912
+    "too-many-statements",              # R0915
+    "too-many-return-statements",       # R0911
+    "too-few-public-methods",           # R0903
+    "import-outside-toplevel",          # C0415
+]
+
+[tool.ruff.lint]
+ignore = [
+    "BLE001",   # blind-except — intentional catch-all in production agent
+    "S102",     # exec — used for loading goal config files
+    "E501",     # line too long
+    "F401",     # unused import — re-exports in __init__.py
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/*" = ["S101"]
+
+[tool.pyright]
+reportMissingImports = "warning"
+reportMissingModuleSource = "none"
