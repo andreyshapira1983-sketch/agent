@@ -409,27 +409,28 @@ class TerminalTool(BaseTool):
             }
 
         try:
-            # SECURITY: shell=False — команда разбивается на список аргументов
+            # SECURITY: все вызовы идут через центральный CommandGateway
+            from execution.command_gateway import CommandGateway
+            gw = CommandGateway.get_instance()
             args = shlex.split(command)
-            proc = subprocess.run(
+            r = gw.execute(
                 args,
-                shell=False,
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
                 timeout=timeout or self.timeout,
                 cwd=self.working_dir,
-                check=False,
+                caller='TerminalTool.run',
             )
+            if not r.allowed:
+                return {
+                    'error': f'Команда заблокирована: {r.reject_reason}',
+                    'blocked_command': command,
+                    'success': False,
+                }
             return {
-                'stdout': proc.stdout,
-                'stderr': proc.stderr,
-                'returncode': proc.returncode,
-                'success': proc.returncode == 0,
+                'stdout': r.stdout,
+                'stderr': r.stderr,
+                'returncode': r.returncode,
+                'success': r.returncode == 0,
             }
-        except subprocess.TimeoutExpired:
-            return {'error': f'Timeout {timeout}s exceeded', 'success': False}
         except Exception as e:
             return {'error': str(e), 'success': False}
 
@@ -1618,18 +1619,25 @@ class NetworkTool(BaseTool):
 
     def _ping(self, host: str, count: int = 3) -> dict:
         import platform
+        # SECURITY: validate host — only hostname/IP, no injection
+        host = str(host).strip()
+        if not re.match(r'^[a-zA-Z0-9.\-:]+$', host) or len(host) > 253:
+            return {'error': f'Invalid host: {host[:50]}', 'success': False}
+        count = max(1, min(int(count), 10))
         flag = '-n' if platform.system() == 'Windows' else '-c'
         try:
-            proc = subprocess.run(
+            from execution.command_gateway import CommandGateway
+            gw = CommandGateway.get_instance()
+            r = gw.execute(
                 ['ping', flag, str(count), host],
-                capture_output=True, text=True,
-                encoding='utf-8', errors='replace',
-                timeout=15, check=False,
+                timeout=15, caller='NetworkTool._ping',
+                allow_network=True,
             )
             return {
-                'stdout':    proc.stdout,
-                'reachable': proc.returncode == 0,
-                'success':   True,
+                'stdout':    r.stdout,
+                'reachable': r.returncode == 0,
+                'success':   r.allowed,
+                'error':     r.reject_reason if not r.allowed else None,
             }
         except Exception as e:
             return {'error': str(e), 'success': False}
@@ -3430,8 +3438,16 @@ class ArchiveTool(BaseTool):
 
     def _rar_action(self, action: str, archive_path: str, kwargs: dict) -> dict:
         """RAR операции через WinRAR CLI (Rar.exe / UnRAR.exe)."""
+        # SECURITY: validate all paths through PathValidator
+        _pv = PathValidator()
+        _ok, _reason = _pv.validate(archive_path)
+        if not _ok:
+            return {'error': f'Path blocked: {_reason}', 'success': False}
 
         password = kwargs.get('password')
+        # SECURITY: sanitize password — no shell metacharacters
+        if password and not re.match(r'^[\w\-@#$%^&*()+=!.]+$', str(password)):
+            return {'error': 'Password contains forbidden characters', 'success': False}
         pwd_flag = [f'-p{password}'] if password else []
 
         if action == 'create':
@@ -3441,8 +3457,17 @@ class ArchiveTool(BaseTool):
             sources = kwargs.get('source_paths', [])
             if not sources:
                 return {'error': 'source_paths обязателен для create', 'success': False}
+            # SECURITY: validate source paths
+            for sp in sources:
+                _s_ok, _s_reason = _pv.validate(sp)
+                if not _s_ok:
+                    return {'error': f'Source path blocked: {_s_reason}', 'success': False}
             cmd = [rar_exe, 'a', '-ep1'] + pwd_flag + [archive_path] + sources
-            r = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            from execution.command_gateway import CommandGateway
+            gw = CommandGateway.get_instance()
+            r = gw.execute(cmd, timeout=120, caller='ArchiveTool.rar_create')
+            if not r.allowed:
+                return {'error': r.reject_reason, 'success': False}
             if r.returncode not in (0, 1):  # WinRAR: 0=ok, 1=warning
                 return {'error': r.stderr or r.stdout, 'success': False}
             return {'path': archive_path, 'format': 'rar', 'success': True}
@@ -3469,7 +3494,11 @@ class ArchiveTool(BaseTool):
                 cmd[0] = unrar_exe
             else:
                 cmd = [unrar_exe, 'x', '-y'] + pwd_flag + [archive_path, dest + '\\']
-            r = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            from execution.command_gateway import CommandGateway
+            gw = CommandGateway.get_instance()
+            r = gw.execute(cmd, timeout=120, caller='ArchiveTool.rar_extract')
+            if not r.allowed:
+                return {'error': r.reject_reason, 'success': False}
             if r.returncode not in (0, 1):
                 return {'error': r.stderr or r.stdout, 'success': False}
             return {'dest': dest, 'success': True}
@@ -3485,7 +3514,11 @@ class ArchiveTool(BaseTool):
                 except Exception as e:
                     return {'error': str(e), 'success': False}
             cmd = [unrar_exe, 'l'] + pwd_flag + [archive_path]
-            r = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            from execution.command_gateway import CommandGateway
+            gw = CommandGateway.get_instance()
+            r = gw.execute(cmd, timeout=60, caller='ArchiveTool.rar_list')
+            if not r.allowed:
+                return {'error': r.reject_reason, 'success': False}
             # Парсим вывод UnRAR
             lines = r.stdout.splitlines()
             files = [ln.split()[-1] for ln in lines if ln.strip() and
@@ -3681,19 +3714,26 @@ class NotificationTool(BaseTool):
         # Fallback: Windows PowerShell toast
         if os.name == 'nt':
             try:
+                # SECURITY: sanitize title/message to prevent PS injection
+                def _ps_escape(s: str) -> str:
+                    return str(s).replace('"', '`"').replace("'", "`'").replace('`', '``')[:200]
+                safe_title = _ps_escape(title)
+                safe_msg = _ps_escape(message)
+                safe_timeout = int(max(1, min(timeout, 30))) * 1000
                 ps_cmd = (
                     f'Add-Type -AssemblyName System.Windows.Forms; '
                     f'$n = New-Object System.Windows.Forms.NotifyIcon; '
                     f'$n.Icon = [System.Drawing.SystemIcons]::Information; '
                     f'$n.Visible = $true; '
-                    f'$n.ShowBalloonTip({timeout * 1000}, '
-                    f'"{title}", "{message}", '
+                    f'$n.ShowBalloonTip({safe_timeout}, '
+                    f'"{safe_title}", "{safe_msg}", '
                     f'[System.Windows.Forms.ToolTipIcon]::None); '
-                    f'Start-Sleep -Milliseconds {timeout * 1000 + 500}; '
+                    f'Start-Sleep -Milliseconds {safe_timeout + 500}; '
                     f'$n.Dispose()'
                 )
                 subprocess.Popen(
-                    ['powershell', '-Command', ps_cmd],
+                    ['powershell', '-NoProfile', '-NonInteractive',
+                     '-Command', ps_cmd],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 return {'sent': True, 'title': title,
@@ -4066,16 +4106,24 @@ class CodeAnalyzerTool(BaseTool):
 
             elif action == 'lint':
                 path = kwargs.get('path', '')
+                # SECURITY: validate path through PathValidator
+                if path:
+                    _pv = PathValidator()
+                    _pv_ok, _pv_reason = _pv.validate(path)
+                    if not _pv_ok:
+                        return {'error': f'Path blocked: {_pv_reason}', 'success': False}
                 try:
-                    proc = subprocess.run(
+                    from execution.command_gateway import CommandGateway
+                    gw = CommandGateway.get_instance()
+                    r = gw.execute(
                         ['python', '-m', 'pylint', '--output-format=text', path],
-                        capture_output=True, text=True,
-                        encoding='utf-8', errors='replace',
-                        timeout=60, check=False,
+                        timeout=60, caller='CodeAnalysisTool.lint',
                     )
+                    if not r.allowed:
+                        return {'error': r.reject_reason, 'success': False}
                     return {
-                        'output':     proc.stdout[:3000],
-                        'returncode': proc.returncode,
+                        'output':     r.stdout[:3000],
+                        'returncode': r.returncode,
                         'success':    True,
                     }
                 except FileNotFoundError:

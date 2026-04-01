@@ -151,24 +151,27 @@ class ExecutionSystem:
             return
 
         try:
-            # SECURITY: shell=False — команда разбивается на список аргументов
+            # SECURITY: все вызовы идут через центральный CommandGateway
+            from execution.command_gateway import CommandGateway
+            gw = CommandGateway.get_instance()
             args = shlex.split(task.command)
-            proc = subprocess.run(
+            r = gw.execute(
                 args,
-                shell=False,
-                capture_output=True,
-                text=True,
                 timeout=timeout,
                 cwd=self.working_dir,
-                check=False,
+                caller='ExecutionSystem._run',
             )
-            task.stdout = proc.stdout
-            task.stderr = proc.stderr
-            task.returncode = proc.returncode
-            task.status = TaskStatus.SUCCESS if proc.returncode == 0 else TaskStatus.FAILED
-        except subprocess.TimeoutExpired:
-            task.status = TaskStatus.TIMEOUT
-            task.error = f"Таймаут {timeout}s превышен"
+            if not r.allowed:
+                task.status = TaskStatus.REJECTED
+                task.error = f"CommandGateway: {r.reject_reason}"
+                return
+            task.stdout = r.stdout
+            task.stderr = r.stderr
+            task.returncode = r.returncode
+            task.status = TaskStatus.SUCCESS if r.returncode == 0 else TaskStatus.FAILED
+            if r.reject_reason and 'Таймаут' in r.reject_reason:
+                task.status = TaskStatus.TIMEOUT
+                task.error = r.reject_reason
         except Exception as exc:
             task.status = TaskStatus.FAILED
             task.error = str(exc)

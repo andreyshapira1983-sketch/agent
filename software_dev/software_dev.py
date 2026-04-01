@@ -403,18 +403,27 @@ class SoftwareDevelopmentSystem:
                         output=f"CommandValidator заблокировал: {reason}",
                         duration=0.0, returncode=-1,
                     )
-                proc = subprocess.run(
+                from execution.command_gateway import CommandGateway
+                gw = CommandGateway.get_instance()
+                r = gw.execute(
                     shlex.split(cmd),
-                    shell=False, capture_output=True,
-                    text=True, timeout=120, cwd=self.working_dir, check=False,
+                    timeout=120, cwd=self.working_dir,
+                    caller='SoftwareDev.build',
                 )
-                result = BuildResult(
-                    command=cmd,
-                    success=proc.returncode == 0,
-                    output=proc.stdout + proc.stderr,
-                    duration=time.time() - t0,
-                    returncode=proc.returncode,
-                )
+                if not r.allowed:
+                    result = BuildResult(
+                        command=cmd, success=False,
+                        output=f"CommandGateway: {r.reject_reason}",
+                        duration=0.0, returncode=-1,
+                    )
+                else:
+                    result = BuildResult(
+                        command=cmd,
+                        success=r.returncode == 0,
+                        output=r.stdout + r.stderr,
+                        duration=r.duration,
+                        returncode=r.returncode,
+                    )
             except (OSError, subprocess.TimeoutExpired, ValueError) as e:
                 result = BuildResult(
                     command=cmd, success=False,

@@ -752,13 +752,14 @@ class ActionDispatcher:
             return None
         ps_cmd = adapted
         try:
-            r = subprocess.run(
+            from execution.command_gateway import CommandGateway
+            gw = CommandGateway.get_instance()
+            r = gw.execute(
                 ['powershell', '-NoProfile', '-NonInteractive', '-Command', ps_cmd],
-                capture_output=True, text=True,
-                encoding='utf-8', errors='replace',
-                timeout=20, creationflags=0x08000000,
-                check=False,
+                timeout=20, caller='ActionDispatcher._try_powershell_fallback',
             )
+            if not r.allowed:
+                return None
             output = (r.stdout or '').strip()
             stderr = (r.stderr or '').strip()
             ok = r.returncode == 0
@@ -770,7 +771,7 @@ class ActionDispatcher:
                 'error':   stderr if not ok else None,
                 'note':    f'PowerShell fallback: {ps_cmd[:80]}',
             }
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, Exception):
             return None
 
     @staticmethod
@@ -907,25 +908,14 @@ class ActionDispatcher:
                 'code': f'print("{text_escaped}")\n',
             }
 
-        # Event log команды → Python через win32evtlog / конвертация в PowerShell
+        # Event log команды -> делегируем в PowerShell через _powershell_event_log
         if any(kw in low for kw in ('get-eventlog', 'get-winevent', 'wevtutil', 'journalctl', 'eventlog')):
-            ps_cmd = ActionDispatcher.__dict__.get('_powershell_event_log')
-            # Берём Python-вариант через psutil / ctypes (не требует win32)
-            return {
-                'mode': 'python',
-                'code': (
-                    "import subprocess, sys\n"
-                    "r = subprocess.run(\n"
-                    "    ['powershell', '-NoProfile', '-NonInteractive', '-Command',\n"
-                    "     \"Get-WinEvent -LogName Application -MaxEvents 20 -ErrorAction SilentlyContinue \"\n"
-                    "     \"| Where-Object {$_.LevelDisplayName -in 'Error','Critical'} \"\n"
-                    "     \"| Select-Object TimeCreated,LevelDisplayName,Message \"\n"
-                    "     \"| Format-List | Out-String -Width 200\"],\n"
-                    "    capture_output=True, text=True, timeout=30\n"
-                    ")\n"
-                    "print(r.stdout or r.stderr or 'No event log data')\n"
-                ),
-            }
+            return {'mode': 'powershell', 'command': (
+                r"Get-WinEvent -LogName Application -MaxEvents 20 -ErrorAction SilentlyContinue "
+                r"| Where-Object {$_.LevelDisplayName -in 'Error','Critical'} "
+                r"| Select-Object TimeCreated,LevelDisplayName,Message "
+                r"| Format-List | Out-String -Width 200"
+            )}
 
         # Цепочки: cd <dir> && python <script>.py → конвертируем в прямой вызов
         _cd_and_py = re.match(
@@ -978,19 +968,23 @@ class ActionDispatcher:
         # Разрешаем только read-only подмножество командлетов.
         if any(tok in low for tok in _PS_RISKY_TOKENS):
             return self._fail('bash', command, 'PowerShell-команда отклонена политикой безопасности')
-        if not low.startswith('get-') and 'get-winevent' not in low:
-            return self._fail('bash', command, 'Разрешены только read-only PowerShell-команды')
+        # SECURITY: strict get- prefix check (no 'get-winevent' special case)
+        if not low.startswith('get-'):
+            return self._fail('bash', command, 'Разрешены только read-only PowerShell-команды (get-*)')
 
+        # SECURITY: дополнительно блокируем цепочки/пайпы в read-only команде тоже
+        # (уже проверено через _PS_RISKY_TOKENS выше, но двойная проверка)
         try:
-            r = subprocess.run(
+            from execution.command_gateway import CommandGateway
+            gw = CommandGateway.get_instance()
+            r = gw.execute(
                 ['powershell', '-NoProfile', '-NonInteractive', '-Command', cmd],
-                capture_output=True, text=True,
-                encoding='utf-8', errors='replace',
-                timeout=30, creationflags=0x08000000,
-                check=False,
+                timeout=30, caller='ActionDispatcher._run_powershell',
             )
             output = (r.stdout or '').strip()
             stderr = (r.stderr or '').strip()
+            if not r.allowed:
+                return self._fail('bash', command, r.reject_reason)
             ok = r.returncode == 0
             return {
                 'type':    'bash',
