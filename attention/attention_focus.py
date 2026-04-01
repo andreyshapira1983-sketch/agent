@@ -217,7 +217,7 @@ class AttentionFocusManager:
 
     def _switch_mode(self, mode: AttentionMode):
         if self._mode != mode:
-            self._log(f"Режим внимания: {self._mode.value} → {mode.value}")
+            self._log(f"Режим внимания: {self._mode.value} -> {mode.value}")
             self._mode = mode
 
     def _log(self, message: str):
