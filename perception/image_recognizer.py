@@ -216,8 +216,15 @@ class ImageRecognizer:
             # Строим сообщение вручную — openai_client.infer() работает только с текстом,
             # поэтому вызываем нативный клиент напрямую
             import openai as _openai
-            api_key = self.client.api_key if self.client is not None else os.environ.get('OPENAI_API_KEY', '')
-            oa = _openai.OpenAI(api_key=api_key)
+            # SECURITY: не читаем os.environ напрямую — только через уже инициализированный клиент
+            _inner = getattr(self.client, '_client', None)
+            if _inner is not None:
+                oa = _inner
+            elif self.client is not None and hasattr(self.client, 'api_key'):
+                oa = _openai.OpenAI(api_key=self.client.api_key)
+            else:
+                self._log('Vision API: клиент OpenAI не инициализирован', level='error')
+                return ''
             response = oa.chat.completions.create(
                 model=self.model,
                 messages=cast(Any, [{

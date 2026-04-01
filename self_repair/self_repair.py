@@ -516,9 +516,11 @@ class SelfRepairSystem:
             return False, f'patch_code: ошибка верификации подписи, откат: {e}'
 
         # ── 8. Финальная валидация через py_compile ──
+        from safety.secrets_proxy import safe_env as _safe_env
         check = subprocess.run(
             [sys.executable, '-m', 'py_compile', abs_path],
-            capture_output=True, text=True, timeout=15, check=False
+            capture_output=True, text=True, timeout=15, check=False,
+            env=_safe_env(),
         )
         if check.returncode != 0:
             shutil.copy2(bak_path, abs_path)  # откат
@@ -545,6 +547,7 @@ class SelfRepairSystem:
             return True, 'smoke_runner.py отсутствует — smoke пропущен'
 
         self._log(f"[SelfRepair] Запускаю smoke_runner после правки ядра: {os.path.basename(abs_path)}")
+        from safety.secrets_proxy import safe_env as _safe_env
         result = subprocess.run(
             [sys.executable, smoke_runner],
             capture_output=True,
@@ -552,6 +555,7 @@ class SelfRepairSystem:
             timeout=120,
             check=False,
             cwd=self.working_dir,
+            env=_safe_env(),
         )
         if result.returncode == 0:
             self._record_core_smoke_event(

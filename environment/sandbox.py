@@ -154,12 +154,15 @@ class SandboxLayer:
 
         t_start = time.time()
         try:
+            # SECURITY: фильтруем env — subprocess не наследует секреты
+            from safety.secrets_proxy import safe_env
             proc = subprocess.run(
                 [sys.executable, '-I', '-c', runner, encoded_code, encoded_ctx],
                 capture_output=True,
                 text=True,
                 timeout=max(1, int(timeout)),
                 check=False,
+                env=safe_env(),
             )
             run.duration = time.time() - t_start
             run.stdout = (proc.stdout or '')

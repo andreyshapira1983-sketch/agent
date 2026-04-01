@@ -103,6 +103,7 @@ class Monitoring:
         print_logs: bool = True,
         log_file: str | None = None,
         sink=None,
+        scrubber=None,
     ):
         """
         Args:
@@ -110,11 +111,13 @@ class Monitoring:
             print_logs — выводить логи в консоль
             log_file   — путь к файлу для записи логов (None = не писать в файл)
             sink       — внешний обработчик: объект с методом write(entry: dict)
+            scrubber   — callable(str) → str, маскирует секреты в тексте перед записью
         """
         self.min_level = min_level
         self.print_logs = print_logs
         self.log_file = log_file
         self.sink = sink
+        self._scrubber = scrubber  # SECURITY: авто-маскировка секретов
 
         self._logs: list[LogEntry] = []
         self._max_logs: int = 10_000   # ограничение в памяти — старые записи обрезаются
@@ -125,7 +128,11 @@ class Monitoring:
     # ── Logging ───────────────────────────────────────────────────────────────
 
     def log(self, message: str, level: LogLevel = LogLevel.INFO, source: str | None = None, data: dict | None = None):
-        """Записывает событие в лог."""
+        """Записывает событие в лог. SECURITY: автоматически маскирует секреты."""
+        if self._scrubber:
+            message = self._scrubber(message)
+            if data:
+                data = self._scrub_data(data)
         entry = LogEntry(level, message, source=source, data=data)
         self._logs.append(entry)
         # Обрезаем старые записи чтобы не было утечки памяти
@@ -302,6 +309,20 @@ class Monitoring:
     def _should_print(self, level: LogLevel) -> bool:
         levels = [lvl for lvl in LogLevel]
         return self.print_logs and levels.index(level) >= levels.index(self.min_level)
+
+    def _scrub_data(self, data: dict) -> dict:
+        """Рекурсивно маскирует секреты в data-словаре."""
+        if not self._scrubber or not isinstance(data, dict):
+            return data
+        result = {}
+        for k, v in data.items():
+            if isinstance(v, str):
+                result[k] = self._scrubber(v)
+            elif isinstance(v, dict):
+                result[k] = self._scrub_data(v)
+            else:
+                result[k] = v
+        return result
 
     def _write_to_file(self, entry: LogEntry):
         if not self.log_file:

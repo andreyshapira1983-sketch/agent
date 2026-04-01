@@ -205,6 +205,9 @@ def build_agent(
     from safety.security import SecuritySystem
     security = SecuritySystem(load_env=True)
 
+    # SECURITY: подключаем авто-маскировку секретов в логах
+    monitoring._scrubber = security.scrub_text
+
     # ════════════════════════════════════════════════════════════════════════
     # LLM клиент (инструмент для Cognitive Core)
     # OpenAI (gpt-4o) — по умолчанию для лёгких задач.

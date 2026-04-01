@@ -91,9 +91,12 @@ class SpeechRecognizer:
             # Переиспользуем уже созданный openai.OpenAI из OpenAIClient
             oa = getattr(self.client, '_client', None)
             if oa is None:
+                # SECURITY: не читаем os.environ напрямую
                 import openai as _openai
-                api_key = self.client.api_key if self.client is not None else os.environ.get('OPENAI_API_KEY', '')
-                oa = _openai.OpenAI(api_key=api_key)
+                if self.client is not None and hasattr(self.client, 'api_key'):
+                    oa = _openai.OpenAI(api_key=self.client.api_key)
+                else:
+                    return TranscriptionResult(text='', error='OpenAI клиент не инициализирован')
 
             kwargs: dict[str, Any] = {'model': self.model, 'response_format': 'verbose_json'}
             if language:
@@ -135,9 +138,12 @@ class SpeechRecognizer:
         try:
             oa = getattr(self.client, '_client', None)
             if oa is None:
+                # SECURITY: не читаем os.environ напрямую
                 import openai as _openai
-                api_key = self.client.api_key if self.client is not None else os.environ.get('OPENAI_API_KEY', '')
-                oa = _openai.OpenAI(api_key=api_key)
+                if self.client is not None and hasattr(self.client, 'api_key'):
+                    oa = _openai.OpenAI(api_key=self.client.api_key)
+                else:
+                    return TranscriptionResult(text='', error='OpenAI клиент не инициализирован')
 
             with open(path, 'rb') as f:
                 response = oa.audio.translations.create(

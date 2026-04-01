@@ -491,9 +491,11 @@ class ModuleBuilder:
                 return self._finish(result, t0)
 
             # ── 8. py_compile — финальная валидация ───────────────────────
+            from safety.secrets_proxy import safe_env as _safe_env
             check = subprocess.run(
                 [sys.executable, '-m', 'py_compile', abs_file],
                 capture_output=True, text=True, timeout=15, check=False,
+                env=_safe_env(),
             )
             if check.returncode != 0:
                 # Откатываемся
@@ -552,6 +554,7 @@ class ModuleBuilder:
             return True, None
 
         self._log(f"[build] Запускаю smoke_runner после правки ядра: {os.path.basename(file_path)}")
+        from safety.secrets_proxy import safe_env as _safe_env
         result = subprocess.run(
             [sys.executable, smoke_runner],
             capture_output=True,
@@ -559,6 +562,7 @@ class ModuleBuilder:
             timeout=120,
             check=False,
             cwd=self.working_dir,
+            env=_safe_env(),
         )
         if result.returncode == 0:
             self._record_core_smoke_event(

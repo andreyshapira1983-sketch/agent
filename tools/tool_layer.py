@@ -4509,8 +4509,10 @@ class GUIAgentTool(BaseTool):
         pyautogui.FAILSAFE = True
         pyautogui.PAUSE = 0.1
 
-        api_key = (getattr(self._llm, 'api_key', None)
-                   or os.environ.get('OPENAI_API_KEY', ''))
+        # SECURITY: не читаем os.environ напрямую — только через уже переданный LLM-клиент
+        api_key = getattr(self._llm, 'api_key', None) or ''
+        if not api_key:
+            return {'success': False, 'error': 'OpenAI API key не доступен для ScreenAgent'}
         oa = _openai.OpenAI(api_key=api_key)
 
         steps_log: list[dict] = []
