@@ -61,7 +61,7 @@ class SelfRepairSystem:
         monitoring=None,
         sandbox=None,
         governance=None,
-        auto_repair: bool = True,
+        auto_repair: bool = False,  # SECURITY: патчи требуют явного одобрения
         working_dir: str | None = None,
         arch_docs: list | None = None,
     ):
@@ -446,6 +446,49 @@ class SelfRepairSystem:
         except ImportError:
             pass  # CodeValidator недоступен — пропускаем
 
+        # ── 5c. MANDATORY sandbox diff review ──
+        # Патч ОБЯЗАН пройти sandbox-проверку до записи на диск
+        if not self.sandbox:
+            return False, 'patch_code: sandbox обязателен — патч без sandbox запрещён'
+
+        from environment.sandbox import SandboxResult as SR
+        sandbox_run = self.sandbox.run_code(patched_code)
+        if sandbox_run.verdict == SR.UNSAFE:
+            return False, (f'patch_code: sandbox UNSAFE — патч отклонён: '
+                           f'{sandbox_run.error}')
+        diff_action = (f"patch_code: применение патча к {os.path.basename(abs_path)}, "
+                       f"delta {len(patched_code) - len(original_code):+d} символов, "
+                       f"sandbox={sandbox_run.verdict.value}")
+        sim_run = self.sandbox.simulate_action(diff_action)
+        if sim_run.verdict == SR.UNSAFE:
+            return False, (f'patch_code: sandbox diff review UNSAFE — '
+                           f'{sim_run.error}')
+        self._log(f'patch_code: sandbox review passed '
+                  f'(code={sandbox_run.verdict.value}, sim={sim_run.verdict.value})')
+
+        # ── 5d. Human Approval gate — патч ВСЕГДА требует одобрения ──
+        if self.human_approval:
+            _diff_preview = (
+                f"Файл: {os.path.basename(abs_path)}\n"
+                f"Ошибка: {error_description[:200]}\n"
+                f"Оригинал: {len(original_code)} символов\n"
+                f"Патч: {len(patched_code)} символов "
+                f"(delta: {len(patched_code) - len(original_code):+d})\n"
+                f"Sandbox: code={sandbox_run.verdict.value}, "
+                f"sim={sim_run.verdict.value}"
+            )
+            approved = self.human_approval.request_approval(
+                'patch_code', _diff_preview)
+            if not approved:
+                return False, 'patch_code: патч отклонён человеком'
+
+        # ── 5e. Подпись патча HMAC-SHA256 ──
+        from self_repair.patch_signing import sign_patch, verify_patch
+        patch_signature = sign_patch(
+            abs_path, original_code, patched_code,
+            patch_source='self_repair',
+        )
+
         # ── 6. Бэкап оригинала ──
         bak_path = abs_path + '.bak'
         try:
@@ -460,6 +503,17 @@ class SelfRepairSystem:
         except (OSError, IOError) as e:
             shutil.copy2(bak_path, abs_path)  # откат
             return False, f'patch_code: ошибка записи, откат: {e}'
+
+        # ── 7b. Верификация подписи записанного файла ──
+        try:
+            with open(abs_path, 'r', encoding='utf-8') as f:
+                written_code = f.read()
+            if not verify_patch(abs_path, original_code, written_code, patch_signature):
+                shutil.copy2(bak_path, abs_path)
+                return False, 'patch_code: подпись не совпала после записи — файл повреждён, откат'
+        except (OSError, IOError) as e:
+            shutil.copy2(bak_path, abs_path)
+            return False, f'patch_code: ошибка верификации подписи, откат: {e}'
 
         # ── 8. Финальная валидация через py_compile ──
         check = subprocess.run(

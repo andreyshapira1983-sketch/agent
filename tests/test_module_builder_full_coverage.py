@@ -41,6 +41,9 @@ class _SandboxStub:
     def run_code(self, code):
         return _RunResult(self.verdict, self.error)
 
+    def simulate_action(self, action):
+        return _RunResult(self.verdict, self.error)
+
 
 class _LLMStub:
     def __init__(self, responses=None):

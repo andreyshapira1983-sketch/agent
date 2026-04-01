@@ -199,10 +199,12 @@ class ModuleBuilder:
         working_dir: str | None = None,
         registry_path: str | None = None,
         arch_docs: list[str] | None = None,
+        human_approval=None,
     ):
         self.cognitive_core = cognitive_core
         self.sandbox = sandbox
         self.monitoring = monitoring
+        self.human_approval = human_approval
         self.working_dir = os.path.abspath(working_dir or os.getcwd())
         self.arch_docs: list[str] = arch_docs or []
 
@@ -403,6 +405,47 @@ class ModuleBuilder:
             except ImportError:
                 self._log(f"[build] WARNING: CodeValidator недоступен, пропуск проверки ({name})")
 
+            # ── 4b. Sandbox diff-review сгенерированного кода ──────────
+            diff_action = {
+                'type': 'module_build',
+                'module': name,
+                'code_length': len(code),
+                'diff': f'+++ NEW FILE {name}.py\n{code[:2000]}',
+            }
+            sim = self.sandbox.simulate_action(diff_action)
+            if hasattr(sim, 'verdict'):
+                from environment.sandbox import SandboxResult as _SR
+                if sim.verdict == _SR.UNSAFE:
+                    result.status = BuildStatus.REJECTED
+                    result.error = f'Sandbox diff-review UNSAFE: {getattr(sim, "error", "")}'
+                    self._log(f"[build] Отклонено diff-review: {name}")
+                    return self._finish(result, t0)
+            self._log(f"[build] Sandbox diff-review: OK для {name}")
+
+            # ── 4c. Human Approval — обязательное одобрение человеком ──────
+            if self.human_approval:
+                _preview = (
+                    f"ModuleBuilder создаёт новый файл: {name}.py\n"
+                    f"Класс: {class_name}\nРазмер: {len(code)} символов\n"
+                    f"Первые 500 символов кода:\n{code[:500]}"
+                )
+                approved = self.human_approval.request_approval(
+                    'module_build', _preview)
+                if not approved:
+                    result.status = BuildStatus.REJECTED
+                    result.error = 'Модуль отклонён человеком'
+                    self._log(f"[build] Отклонено человеком: {name}")
+                    return self._finish(result, t0)
+
+            # ── 4d. HMAC-подпись сгенерированного кода ────────────────────
+            from self_repair.patch_signing import sign_patch, verify_patch
+            _original = ''  # новый файл — оригинал пустой
+            _module_signature = sign_patch(
+                os.path.join(target_dir, f'{name}.py'),
+                _original, code,
+                patch_source='module_builder',
+            )
+
             # ── 5. Проверка пути (security) ───────────────────────────────
             abs_target = os.path.realpath(os.path.abspath(target_dir))
             wd = os.path.realpath(self.working_dir)
@@ -422,6 +465,30 @@ class ModuleBuilder:
             # ── 7. Записываем файл ────────────────────────────────────────
             with open(abs_file, 'w', encoding='utf-8') as f:
                 f.write(code)
+
+            # ── 7b. Верификация подписи записанного файла ─────────────
+            try:
+                with open(abs_file, 'r', encoding='utf-8') as f:
+                    written_code = f.read()
+                if not verify_patch(
+                    abs_file, _original, written_code, _module_signature
+                ):
+                    bak = abs_file + '.bak'
+                    if os.path.exists(bak):
+                        os.replace(bak, abs_file)
+                    else:
+                        os.remove(abs_file)
+                    result.error = 'Подпись не совпала после записи — файл повреждён, откат'
+                    self._log(f"[build] Подпись не совпала: {name}")
+                    return self._finish(result, t0)
+            except (OSError, IOError) as e:
+                bak = abs_file + '.bak'
+                if os.path.exists(bak):
+                    os.replace(bak, abs_file)
+                elif os.path.exists(abs_file):
+                    os.remove(abs_file)
+                result.error = f'Ошибка верификации подписи: {e}'
+                return self._finish(result, t0)
 
             # ── 8. py_compile — финальная валидация ───────────────────────
             check = subprocess.run(

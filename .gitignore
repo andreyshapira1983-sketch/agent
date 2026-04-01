@@ -7,6 +7,7 @@ config.local.ini
 secrets.json
 secrets.yaml
 secrets.yml
+.patch_key
 
 # OAuth tokens and credentials (NEVER commit)
 token.json

@@ -575,7 +575,7 @@ def build_agent(
         knowledge_system=knowledge,
         human_approval=human_approval,
         monitoring=monitoring,
-        auto_apply=True,   # priority 1-2 применяются автоматически после sandbox-теста
+        auto_apply=False,  # SECURITY: все стратегии требуют явного одобрения
                            # priority 3 — требует подтверждения через human_approval (Telegram)
     )
 
@@ -1052,6 +1052,7 @@ def build_agent(
         monitoring=monitoring,
         working_dir=working_dir,
         registry_path=os.path.join(working_dir, 'dynamic_registry.json'),
+        human_approval=human_approval,
         arch_docs=[
             os.path.join(spec_dir_for_arch, 'архитектура автономного Агента.txt'),
             os.path.join(spec_dir_for_arch, 'Текстовый документ.txt'),
