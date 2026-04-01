@@ -209,6 +209,13 @@ def build_agent(
     monitoring._scrubber = security.scrub_text
 
     # ════════════════════════════════════════════════════════════════════════
+    # Immutable Audit Log — append-only, hash-chain integrity
+    # ════════════════════════════════════════════════════════════════════════
+    from safety.hardening import ImmutableAuditLog
+    _audit_log = ImmutableAuditLog(os.path.join(working_dir, 'logs', 'immutable_audit.jsonl'))
+    _audit_log.record('agent_start', {'working_dir': working_dir})
+
+    # ════════════════════════════════════════════════════════════════════════
     # LLM клиент (инструмент для Cognitive Core)
     # OpenAI (gpt-4o) — по умолчанию для лёгких задач.
     # Claude (Haiku/Sonnet) — только для тяжёлых (длинный промпт / ключевые слова).

@@ -38,6 +38,10 @@ class LLMResponseSanitizer:
         re.compile(r'__import__\s*\(', re.IGNORECASE),
         re.compile(r'subprocess\.(?:run|call|Popen)', re.IGNORECASE),
         re.compile(r'os\.(?:system|popen|exec)', re.IGNORECASE),
+        re.compile(r'\beval\s*\(', re.IGNORECASE),
+        re.compile(r'\bcompile\s*\(', re.IGNORECASE),
+        re.compile(r'getattr\s*\(\s*__builtins__', re.IGNORECASE),
+        re.compile(r'\bshutil\.(?:rmtree|move|copytree)', re.IGNORECASE),
     ]
 
     @classmethod

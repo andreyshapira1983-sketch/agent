@@ -11,6 +11,8 @@ import time
 import importlib
 from typing import Any
 
+from llm.openai_client import LLMResponseSanitizer as _Sanitizer
+
 try:
     _torch = importlib.import_module('torch')
     _transformers = importlib.import_module('transformers')
@@ -133,7 +135,8 @@ class LocalNeuralBackend:
                     )
                 self.unload()
 
-        return text.strip()
+        sanitized, _warns = _Sanitizer.sanitize(text.strip())
+        return sanitized
 
     def health(self) -> dict:
         """Проверка готовности in-process transformers backend."""

@@ -935,6 +935,14 @@ class AutonomousLoop:
 
     def _run_loop(self):
         while self._running:
+            # ── Kill switch: файл .agent_kill → немедленная остановка ──────
+            if self.action_dispatcher and hasattr(self.action_dispatcher, '_rate_limiter'):
+                kill_ok, kill_reason = self.action_dispatcher._rate_limiter.check_kill_switch()
+                if not kill_ok:
+                    self._log(f"[safety] {kill_reason}", level='error')
+                    self.stop()
+                    break
+
             if self.max_cycles and self._cycle_count >= self.max_cycles:
                 self._log(f"Достигнут лимит циклов: {self.max_cycles}")
                 self.stop()
@@ -963,6 +971,10 @@ class AutonomousLoop:
         self._cycle_count += 1
         cycle = LoopCycle(self._cycle_count)
         self._current_cycle = cycle
+
+        # ── Reset per-cycle rate limits ───────────────────────────────────
+        if self.action_dispatcher and hasattr(self.action_dispatcher, 'reset_cycle_limits'):
+            self.action_dispatcher.reset_cycle_limits()
 
         if self._is_skill_training_mode():
             training_skill = self._select_training_skill()

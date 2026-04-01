@@ -32,6 +32,7 @@ import json
 import hashlib
 
 from execution.task_router import TaskRouter as _TaskRouter, TaskIntent as _TaskIntent, TaskStatus as _TaskStatus
+from safety.hardening import ContentSanitizer as _ContentSanitizer, RateLimiter as _RateLimiter, InstructionClassifier as _InstructionClassifier
 
 _TASK_ROUTER = _TaskRouter()
 
@@ -170,8 +171,14 @@ class ActionDispatcher:
         os.makedirs(_DEFAULT_OUTPUT_DIR, exist_ok=True)
         # Проверяем наличие WSL один раз при старте
         self._wsl_available = self._check_wsl()
+        # ── RateLimiter: hard limits на действия ──────────────────────────────
+        self._rate_limiter = _RateLimiter()
 
     # ── Публичный API ─────────────────────────────────────────────────────────
+
+    def reset_cycle_limits(self):
+        """Сбрасывает per-cycle счётчики RateLimiter. Вызывается в начале каждого цикла."""
+        self._rate_limiter.reset_cycle()
 
     def dispatch(self, text: str, goal: str = '',
                  fail_closed_on_semantic_reject: bool = True) -> dict:
@@ -186,6 +193,26 @@ class ActionDispatcher:
         """
         if not text:
             return self._empty_result()
+
+        # ── Kill switch: немедленная остановка ─────────────────────────────
+        kill_ok, kill_reason = self._rate_limiter.check_kill_switch()
+        if not kill_ok:
+            self._log(f'[dispatch] {kill_reason}')
+            return self._empty_result()
+
+        # ── InstructionClassifier: блокируем опасные инструкции ─────────
+        intent, intent_detail = _InstructionClassifier.classify(text[:2000])
+        if intent == _InstructionClassifier.Intent.BLOCKED:
+            self._log(f'[dispatch] BLOCKED instruction: {intent_detail}')
+            return {
+                'actions_found': 0, 'actions_executed': 0,
+                'results': [{'type': 'blocked', 'input': text[:200],
+                             'output': '', 'success': False,
+                             'error': f'INSTRUCTION_BLOCKED: {intent_detail}'}],
+                'success': False,
+                'summary': f'Инструкция заблокирована классификатором: {intent_detail}',
+                'semantic_rejected': False, 'semantic_rejected_count': 0,
+            }
 
         # Сохраняем goal для dedup-scope и relevance check
         self._current_goal = str(goal or '').strip()
@@ -331,6 +358,18 @@ class ActionDispatcher:
 
         results = []
         for action in actions:
+            # ── RateLimiter: per-action hard limit ─────────────────────────
+            rate_ok, rate_reason = self._rate_limiter.check_action()
+            if not rate_ok:
+                self._log(f'[dispatch] {rate_reason}')
+                results.append({
+                    'type': action.get('type', 'unknown'),
+                    'input': str(action.get('input', ''))[:200],
+                    'output': '', 'success': False,
+                    'error': rate_reason, 'latency_ms': 0,
+                })
+                break  # прекращаем цикл: лимит достигнут
+
             t_start = time.time()
             try:
                 r = self._execute_action(action)
@@ -627,6 +666,20 @@ class ActionDispatcher:
     def _execute_action(self, action: dict) -> dict:
         """Маршрутизирует одно действие к нужному инструменту."""
         t = action['type']
+
+        # ── ContentSanitizer: AST/regex валидация ПЕРЕД исполнением ────────
+        if t == 'python':
+            ok, reason = _ContentSanitizer.validate_python(action['input'])
+            if not ok:
+                self._log(f'[python] BLOCKED by ContentSanitizer: {reason}')
+                return self._fail('python', action['input'][:200],
+                                  f'ContentSanitizer: {reason}')
+        elif t == 'bash':
+            ok, reason = _ContentSanitizer.validate_bash(action['input'])
+            if not ok:
+                self._log(f'[bash] BLOCKED by ContentSanitizer: {reason}')
+                return self._fail('bash', action['input'][:200],
+                                  f'ContentSanitizer: {reason}')
 
         if t == 'build_module':
             return self._run_build_module(action['input'], action.get('description', ''))

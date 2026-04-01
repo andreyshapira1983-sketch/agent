@@ -9,6 +9,8 @@ import ipaddress
 import importlib
 from urllib.parse import urljoin, urlparse
 
+from safety.hardening import NetworkGuard as _NetworkGuard
+
 
 class WebCrawler:
     """
@@ -47,6 +49,9 @@ class WebCrawler:
                 "+https://github.com/agent)"
             )
         })
+
+        # Единая SSRF-защита через NetworkGuard (allowlist + DNS pinning)
+        self._network_guard = _NetworkGuard()
 
     # ── Основной интерфейс ────────────────────────────────────────────────────
 
@@ -171,52 +176,6 @@ class WebCrawler:
             time.sleep(self.delay - elapsed)
 
     def _is_safe_url(self, url: str) -> bool:
-        """Блокирует SSRF-цели: не-http(s), localhost, приватные и link-local адреса."""
-        try:
-            parsed = urlparse(url)
-            if parsed.scheme not in ('http', 'https'):
-                return False
-
-            host = (parsed.hostname or '').strip().lower()
-            if not host:
-                return False
-
-            if host in {'localhost', '127.0.0.1', '::1'} or host.endswith('.local'):
-                return False
-
-            # Прямой IP в URL
-            try:
-                ip = ipaddress.ip_address(host)
-                if (
-                    ip.is_private
-                    or ip.is_loopback
-                    or ip.is_link_local
-                    or ip.is_multicast
-                    or ip.is_reserved
-                ):
-                    return False
-                return True
-            except ValueError:
-                pass
-
-            # DNS-имя: проверяем все резолвящиеся адреса (таймаут 5 сек против зависания)
-            _old_timeout = socket.getdefaulttimeout()
-            socket.setdefaulttimeout(5)
-            try:
-                infos = socket.getaddrinfo(host, parsed.port or 80, proto=socket.IPPROTO_TCP)
-            finally:
-                socket.setdefaulttimeout(_old_timeout)
-            for info in infos:
-                ip_text = info[4][0]
-                ip = ipaddress.ip_address(ip_text)
-                if (
-                    ip.is_private
-                    or ip.is_loopback
-                    or ip.is_link_local
-                    or ip.is_multicast
-                    or ip.is_reserved
-                ):
-                    return False
-            return True
-        except (ValueError, OSError, socket.gaierror):
-            return False
+        """Блокирует SSRF-цели через централизованный NetworkGuard."""
+        allowed, _reason = self._network_guard.is_allowed(url)
+        return allowed

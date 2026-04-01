@@ -125,10 +125,15 @@ def _is_public_host(hostname: str) -> bool:
 
 
 def _is_safe_http_url(url: str) -> bool:
+    from safety.hardening import NetworkGuard as _NG
     parsed = urllib.parse.urlparse(str(url or '').strip())
     if parsed.scheme not in {'http', 'https'}:
         return False
     if not parsed.hostname:
+        return False
+    # Единая проверка через NetworkGuard (allowlist + IP-диапазоны + DNS)
+    ok, _reason = _NG().is_allowed(url)
+    if not ok:
         return False
     return _is_public_host(parsed.hostname)
 
