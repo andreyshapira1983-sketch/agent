@@ -537,7 +537,7 @@ class SelfRepairSystem:
         self._log(f'patch_code: {fname} успешно исправлен (бэкап: {fname}.bak)')
         return True, f'Файл {fname} исправлен LLM, синтаксис проверен, бэкап сохранён'
 
-    def _run_core_smoke_if_needed(self, abs_path: str, bak_path: str) -> tuple[bool, str]:
+    def _run_core_smoke_if_needed(self, abs_path: str, _bak_path: str) -> tuple[bool, str]:
         """Автозапуск smoke_runner после правок файлов ядра."""
         core_dir = os.path.join(self.working_dir, 'core')
         smoke_runner = os.path.join(self.working_dir, 'smoke_runner.py')

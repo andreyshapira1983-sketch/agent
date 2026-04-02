@@ -134,7 +134,7 @@ def check_tests(quick: bool = False) -> CheckResult:
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True,
-            cwd=_ROOT, timeout=300,
+            cwd=_ROOT, timeout=300, check=False,
         )
         # Ищем строку "N passed"
         output = result.stdout + result.stderr
@@ -157,11 +157,11 @@ def check_git_status() -> CheckResult:
     try:
         result = subprocess.run(
             ['git', 'status', '--porcelain'],
-            capture_output=True, text=True, cwd=_ROOT, timeout=10,
+            capture_output=True, text=True, cwd=_ROOT, timeout=10, check=False,
         )
         if result.returncode != 0:
             return CheckResult('Git', False, 'git не инициализирован', fixable=True)
-        dirty = [l for l in result.stdout.strip().split('\n') if l.strip()]
+        dirty = [ln for ln in result.stdout.strip().split('\n') if ln.strip()]
         if dirty:
             return CheckResult('Git', False,
                                f'{len(dirty)} неотслеженных/изменённых файлов',
@@ -189,7 +189,7 @@ def check_dependencies() -> CheckResult:
                                fixable=True)
     # Считаем пакеты в lock
     with open(lock, encoding='utf-8') as f:
-        count = sum(1 for l in f if '==' in l)
+        count = sum(1 for ln in f if '==' in ln)
     return CheckResult('Зависимости', True, f'{count} пакетов запинено в lock')
 
 
@@ -211,7 +211,7 @@ def check_change_tracker() -> CheckResult:
     """Проверяет что change_tracker импортируется."""
     try:
         from monitoring.change_tracker import ChangeTracker
-        ct = ChangeTracker()
+        _ct = ChangeTracker()
         return CheckResult('Change Tracker', True, 'Доступен')
     except Exception as e:
         return CheckResult('Change Tracker', False, str(e))
@@ -219,8 +219,9 @@ def check_change_tracker() -> CheckResult:
 
 # ── Основной запуск ────────────────────────────────────────────────────────
 
-def run_preflight(quick: bool = False, fix: bool = False) -> list[CheckResult]:
+def run_preflight(quick: bool = False, fix: bool = False) -> list[CheckResult]:  # noqa: ARG001
     """Запускает все проверки и возвращает результаты."""
+    _ = fix  # reserved for future auto-fix support
     checks = [
         check_critical_files,
         check_configs_valid,

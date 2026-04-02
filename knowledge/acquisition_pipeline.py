@@ -16,7 +16,7 @@ from perception.text_classifier import TextClassifier, TextType
 try:
     from safety.content_fence import detect_injection
 except ImportError:
-    def detect_injection(text):  # type: ignore[misc]
+    def detect_injection(_text):  # type: ignore[misc]
         return []
 
 

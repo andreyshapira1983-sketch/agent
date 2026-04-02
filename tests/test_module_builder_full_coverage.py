@@ -38,10 +38,10 @@ class _SandboxStub:
         self.verdict = verdict
         self.error = error
 
-    def run_code(self, code):
+    def run_code(self, _code):
         return _RunResult(self.verdict, self.error)
 
-    def simulate_action(self, action):
+    def simulate_action(self, _action):
         return _RunResult(self.verdict, self.error)
 
 
@@ -378,7 +378,7 @@ class TestLoadAllFromRegistry(unittest.TestCase):
 
             calls = {"n": 0}
 
-            def fake_import(path, name):
+            def fake_import(_path, name):
                 calls["n"] += 1
                 if name == "badimp":
                     return None
