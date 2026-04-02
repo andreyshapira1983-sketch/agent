@@ -68,12 +68,14 @@ class JobHunter:
     """
 
     def __init__(self, llm=None, telegram_bot=None, telegram_chat_id=None,
-                 monitoring=None, persistent_brain=None):
+                 monitoring=None, persistent_brain=None,
+                 proposal_submitter=None):
         self.llm = llm
         self.telegram_bot = telegram_bot
         self.telegram_chat_id = telegram_chat_id
         self.monitoring = monitoring
         self.persistent_brain = persistent_brain
+        self.proposal_submitter = proposal_submitter  # UpworkProposalSubmitter
 
         self._seen_uids: set[str] = set()   # уже обработанные вакансии
         self._last_run: float = 0.0
@@ -116,8 +118,13 @@ class JobHunter:
                 continue
 
             cover = self._generate_cover_letter(job)
+            # Уведомляем и подаём заявку автоматически (если есть submitter)
             self._notify(job, cover)
-            self._log(f"[job_hunter] ✅ подходит: {job.title[:60]}")
+            submitted = self._try_submit_proposal(job, cover)
+            if submitted:
+                self._log(f"[job_hunter] ✅ заявка подана: {job.title[:60]}")
+            else:
+                self._log(f"[job_hunter] ✅ подходит (без подачи): {job.title[:60]}")
             if self.persistent_brain:
                 self.persistent_brain.record_evolution(
                     event="job_found",
@@ -139,6 +146,35 @@ class JobHunter:
                 ),
             )
         return sent
+
+    # ── Автоматическая подача заявки ─────────────────────────────────────────
+
+    def _try_submit_proposal(self, job: JobListing, cover_letter: str) -> bool:
+        """
+        Если proposal_submitter подключён — подаёт заявку через браузер.
+        Возвращает True если заявка была подана успешно.
+        """
+        if not self.proposal_submitter:
+            return False
+        try:
+            result = self.proposal_submitter.submit(
+                job_url=job.url,
+                cover_letter=cover_letter,
+                job_title=job.title,
+            )
+            if result.success:
+                if self.persistent_brain:
+                    self.persistent_brain.record_evolution(
+                        event="proposal_submitted",
+                        details=f"Заявка подана: {job.title[:100]} | {job.url[:100]}",
+                    )
+                return True
+            else:
+                self._log(f"[job_hunter] Подача не удалась: {result.message}")
+                return False
+        except Exception as e:
+            self._log(f"[job_hunter] Ошибка подачи заявки: {e}")
+            return False
 
     # ── Получение вакансий ────────────────────────────────────────────────────
 

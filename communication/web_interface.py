@@ -522,7 +522,10 @@ class WebInterface:
         self.goal_manager = goal_manager
         self.monitoring = monitoring
         self.max_history = max_history
-        self.persistent_brain = persistent_brain
+        from typing import Any
+        self.persistent_brain: Any = persistent_brain
+        self.experience_replay: Any = None   # подключается позже через agent.py
+        self.learning_system: Any = None     # подключается позже через agent.py
 
         self._history: list[dict] = []   # {"role": "user"|"agent", "text": ..., "ts": ...}
         self._lock = threading.Lock()
@@ -1228,7 +1231,7 @@ class WebInterface:
                 now_local = _dt.datetime.now()
                 lines = [
                     f"🕐 Местное время: {now_local.strftime('%H:%M:%S %d.%m.%Y')} ({time.strftime('%Z %z')})",
-                    f"🌐 UTC: {_dt.datetime.utcnow().strftime('%H:%M:%S %d.%m.%Y')}",
+                    f"🌐 UTC: {_dt.datetime.now(_dt.UTC).strftime('%H:%M:%S %d.%m.%Y')}",
                 ]
             return {'ok': True, 'reply': '\n'.join(lines)}
 
@@ -1477,7 +1480,10 @@ class WebInterface:
             "'у меня нет доступа к реальному времени', 'обратитесь к другим источникам'. "
             "Для любых реальных данных (курсы валют, погода, цены, новости) ты ИСПОЛЬЗУЕШЬ "
             "инструменты: http_client для API, search для поиска. "
-            "Если не можешь выполнить сам — скажи КОНКРЕТНО что нужно сделать, а не отказывай."
+            "Если не можешь выполнить сам — скажи КОНКРЕТНО что нужно сделать, а не отказывай.\n"
+            "Это браузерный интерфейс — можно давать развёрнутые технические объяснения: "
+            "почему и как ты сделал, что не получилось и почему, код, логи, детали решения. "
+            "Но не выводи сырые внутренние метрики агента (success rate, score, vector search, циклы, debug)."
         )
 
         reply = ''
@@ -1516,7 +1522,39 @@ class WebInterface:
                 )
             except Exception:
                 pass
+
+        # Обучение: записываем эпизод в ExperienceReplay + LearningSystem
+        self._learn_from_interaction(message, reply)
+
         return {'ok': True, 'reply': reply}
+
+    def _learn_from_interaction(self, user_text: str, response: str):
+        """Записывает диалог как эпизод опыта для обучения агента."""
+        # ExperienceReplay: записываем эпизод
+        if self.experience_replay and user_text:
+            try:
+                self.experience_replay.add(
+                    goal=user_text[:500],
+                    actions=[{'type': 'web_chat', 'message': user_text[:300]}],
+                    outcome=response[:500],
+                    success=bool(response and 'ошибка' not in response.lower()[:50]),
+                    context={'channel': 'web'},
+                )
+            except Exception:
+                pass
+
+        # LearningSystem: извлекаем знания из диалога
+        if self.learning_system and user_text and response:
+            try:
+                content = f"Вопрос: {user_text}\nОтвет: {response}"
+                self.learning_system.learn_from(
+                    content=content[:2000],
+                    source_type='conversation',
+                    source_name='web_chat',
+                    tags=['web', 'dialog'],
+                )
+            except Exception:
+                pass
 
     def _handle_status(self) -> dict:
         status: dict = {'ok': True}

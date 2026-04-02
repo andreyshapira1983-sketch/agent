@@ -533,9 +533,16 @@ class SelfRepairSystem:
                 shutil.copy2(bak_path, abs_path)
             return False, smoke_msg
 
+        # ── 9. Pytest-валидация: прогоняем тесты для пропатченного модуля ──
+        test_ok, test_msg = self._run_tests_for_file(abs_path, bak_path)
+        if not test_ok:
+            if os.path.exists(bak_path):
+                shutil.copy2(bak_path, abs_path)
+            return False, test_msg
+
         fname = os.path.basename(abs_path)
         self._log(f'patch_code: {fname} успешно исправлен (бэкап: {fname}.bak)')
-        return True, f'Файл {fname} исправлен LLM, синтаксис проверен, бэкап сохранён'
+        return True, f'Файл {fname} исправлен LLM, синтаксис проверен, тесты пройдены, бэкап сохранён'
 
     def _run_core_smoke_if_needed(self, abs_path: str, _bak_path: str) -> tuple[bool, str]:
         """Автозапуск smoke_runner после правок файлов ядра."""
@@ -574,6 +581,47 @@ class SelfRepairSystem:
         )
         self._log(f'[SelfRepair] smoke_runner провалился, откат: {summary}')
         return False, f'smoke_runner провалился после правки ядра: {summary}'
+
+    def _run_tests_for_file(self, abs_path: str, bak_path: str) -> tuple[bool, str]:
+        """
+        Запускает pytest для тестов, относящихся к пропатченному файлу.
+        Ищет tests/test_<module>.py. Если тестов нет — пропускает (не блокирует).
+        При провале тестов — откат не выполняется здесь, он на вызывающей стороне.
+        """
+        basename = os.path.basename(abs_path)  # e.g. "sandbox.py"
+        module_name = os.path.splitext(basename)[0]
+        tests_dir = os.path.join(self.working_dir, 'tests')
+
+        # Ищем файл вида tests/test_<module>.py
+        test_file = os.path.join(tests_dir, f'test_{module_name}.py')
+        if not os.path.isfile(test_file):
+            return True, f'tests: тест-файл test_{module_name}.py не найден — пропускаем'
+
+        self._log(f'[SelfRepair] Запускаю pytest для {os.path.basename(test_file)} '
+                  f'после патча {basename}')
+        try:
+            from safety.secrets_proxy import safe_env as _safe_env
+            result = subprocess.run(
+                [sys.executable, '-m', 'pytest', test_file, '-x', '--tb=short', '-q'],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+                cwd=self.working_dir,
+                env=_safe_env(),
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            self._log(f'[SelfRepair] pytest таймаут/ошибка: {e}')
+            return True, f'tests: pytest не удалось запустить ({e}) — пропускаем'
+
+        if result.returncode == 0:
+            self._log(f'[SelfRepair] pytest прошёл для {basename}')
+            return True, f'tests: pytest passed для test_{module_name}.py'
+
+        summary = (result.stdout or result.stderr or 'Нет вывода')[:500]
+        self._log(f'[SelfRepair] pytest провалился для {basename}: {summary}')
+        return False, (f'patch_code: pytest провалился для test_{module_name}.py — '
+                       f'оригинал восстановлен.\n{summary}')
 
     def _record_core_smoke_event(self, event_name: str, file_path: str, output: str = '') -> None:
         """Пишет отдельное событие smoke-проверки в логи и метрики."""

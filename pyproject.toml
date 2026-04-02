@@ -35,6 +35,11 @@ ignore = [
 "__init__.py" = ["F401"]
 "tests/*" = ["S101"]
 
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::pyparsing.PyparsingDeprecationWarning",
+]
+
 [tool.pyright]
 reportMissingImports = "warning"
 reportMissingModuleSource = "none"

@@ -1,0 +1,9 @@
+{
+  "disk_total_gb": 474.72,
+  "disk_used_gb": 280.32,
+  "disk_free_gb": 194.39,
+  "memory_total_gb": 15.57,
+  "memory_used_gb": 12.95,
+  "memory_available_gb": 2.62,
+  "cpu_percent": 9.1
+}

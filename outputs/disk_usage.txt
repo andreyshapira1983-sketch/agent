@@ -1,0 +1,1 @@
+f"Total: {disk_usage.total}, Used: {disk_usage.used}, Free: {disk_usage.free}, Percent: {disk_usage.percent}\nTotal RAM: {ram_usage.total}, Available RAM: {ram_usage.available}, Used RAM: {ram_usage.used}, Percent: {ram_usage.percent}\n"

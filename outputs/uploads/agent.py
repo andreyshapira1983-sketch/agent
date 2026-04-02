@@ -281,7 +281,7 @@ def build_agent(
         from llm.claude_backend import ClaudeClient
         _claude_client = ClaudeClient(
             api_key=anthropic_key,
-            model="claude-opus-4-20250514",
+            model="claude-haiku-4-5-20251001",
             max_tokens=4096,
             temperature=0.7,
             monitoring=monitoring,
@@ -321,10 +321,9 @@ def build_agent(
         monitoring=monitoring,
     )
     if _claude_client and _openai_client:
-        _claude_model_name = getattr(_claude_client, 'model', 'Claude')
         monitoring.info(
             f"LLM роутер: лёгкие задачи → {model} (OpenAI), "
-            f"тяжёлые → {_claude_model_name} (Anthropic)",
+            "тяжёлые → Claude Haiku 4.5 (Anthropic)",
             source="agent",
         )
     elif _local_client and not _openai_client and not _claude_client:
@@ -1445,20 +1444,12 @@ def build_agent(
 
     # ── Job Hunter — автономный поиск вакансий ────────────────────────────────
     from skills.job_hunter import JobHunter
-    from skills.upwork_proposal_submitter import UpworkProposalSubmitter
-    proposal_submitter = UpworkProposalSubmitter(
-        browser_tool=None,   # per-call: новый браузер headless=False при каждой подаче
-        telegram_bot=telegram_bot,
-        telegram_chat_id=tg_chat_int,
-        monitoring=monitoring,
-    )
     job_hunter = JobHunter(
         llm=llm,
         telegram_bot=telegram_bot,
         telegram_chat_id=tg_chat_int,
         monitoring=monitoring,
         persistent_brain=persistent_brain,
-        proposal_submitter=proposal_submitter,
     )
     loop.job_hunter = job_hunter
 

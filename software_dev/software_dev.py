@@ -42,6 +42,8 @@ class CodeAnalysisResult:
 class TestSuite:
     """Сгенерированный набор тестов."""
 
+    __test__ = False
+
     def __init__(self, source_path: str, code: str, framework: str = 'unittest'):
         self.source_path = source_path
         self.code = code

@@ -219,29 +219,27 @@ class UpworkPortfolioFiller:
                     'message': f'Проект "{title}" успешно добавлен в Upwork Portfolio.',
                     'screenshot_b64': ss_saved,
                 }
-            else:
-                self._notify_telegram(
-                    f"👁 <b>Preview готов — нажми Save!</b>\n📌 {title}\n\n"
-                    "Зайди в браузер и нажми <b>Save / Add Project</b>.",
-                    ss_final
-                )
-                return {
-                    'success': True,
-                    'message': f'Форма заполнена. Открыт Preview — нажми Save в браузере.',
-                    'screenshot_b64': ss_final,
-                }
-        else:
-            # Не дошли до preview — уведомляем пользователя
             self._notify_telegram(
-                f"⚠️ <b>Форма заполнена, но нужна проверка</b>\n📌 {title}\n\n"
-                "Зайди в браузер — проверь и нажми <b>Next: Preview → Save</b>.",
+                f"👁 <b>Preview готов — нажми Save!</b>\n📌 {title}\n\n"
+                "Зайди в браузер и нажми <b>Save / Add Project</b>.",
                 ss_final
             )
             return {
                 'success': True,
-                'message': 'Форма заполнена. Проверь браузер и дожми до Save.',
+                'message': 'Форма заполнена. Открыт Preview — нажми Save в браузере.',
                 'screenshot_b64': ss_final,
             }
+        # Не дошли до preview — уведомляем пользователя
+        self._notify_telegram(
+            f"⚠️ <b>Форма заполнена, но нужна проверка</b>\n📌 {title}\n\n"
+            "Зайди в браузер — проверь и нажми <b>Next: Preview → Save</b>.",
+            ss_final
+        )
+        return {
+            'success': True,
+            'message': 'Форма заполнена. Проверь браузер и дожми до Save.',
+            'screenshot_b64': ss_final,
+        }
 
     # ── Шаги формы ───────────────────────────────────────────────────────────
 

@@ -1,0 +1,32 @@
+{
+  "metrics": {
+    "error_rate": {
+      "description": "Процент операций с ошибками",
+      "target": "< 5%",
+      "current": null
+    },
+    "loop_incidents": {
+      "description": "Количество обнаруженных циклов",
+      "target": "0 за сессию",
+      "current": 0
+    },
+    "task_completion_rate": {
+      "description": "Процент успешно завершенных задач",
+      "target": "> 90%",
+      "current": null
+    },
+    "average_task_time": {
+      "description": "Среднее время выполнения задачи",
+      "target": "Снижение на 20%",
+      "baseline": null
+    }
+  },
+  "tracking": {
+    "start_time": "2026-04-02T13:13:06.051653",
+    "operations_total": 0,
+    "operations_failed": 0,
+    "tasks_total": 0,
+    "tasks_completed": 0,
+    "loops_detected": 0
+  }
+}

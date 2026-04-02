@@ -258,6 +258,16 @@ class StepEvaluator:
         """Обнаруживает подмену retrieve→generate."""
         goal_l = goal.lower()
 
+        # Разговорные вопросы — не retrieve-задачи, пропускаем
+        _CONVERSATIONAL = (
+            'что ты сделал', 'что ты делал', 'как дела', 'привет',
+            'что нового', 'что умеешь', 'расскажи о себе',
+            'who are you', 'what did you do', 'how are you',
+            'что ты знаешь', 'что происходит', 'статус',
+        )
+        if any(c in goal_l for c in _CONVERSATIONAL):
+            return 0.0
+
         # Задача требует FIND/RETRIEVE
         is_retrieve_task = any(kw in goal_l for kw in (
             'найди', 'найти', 'get', 'retrieve', 'find', 'список', 'покажи',

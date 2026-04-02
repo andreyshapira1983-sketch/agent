@@ -1,0 +1,38 @@
+{
+  "error_prevention": {
+    "file_safety": {
+      "strategy": "Проверка путей перед записью",
+      "code": "\nimport os\ndef safe_write(filename, content):\n    try:\n        with open(filename, 'w', encoding='utf-8') as f:\n            f.write(content)\n        return True\n    except Exception as e:\n        print(f\"Ошибка записи: {e}\")\n        return False\n",
+      "priority": "high"
+    },
+    "loop_detection": {
+      "strategy": "Обнаружение повторяющихся действий",
+      "code": "\nclass LoopDetector:\n    def __init__(self):\n        self.history = []\n\n    def check(self, action):\n        self.history.append(action)\n        if len(self.history) >= 3:\n            if len(set(self.history[-3:])) == 1:\n                return True\n        return False\n",
+      "priority": "critical"
+    },
+    "task_decomposition": {
+      "strategy": "Разбиение сложных задач",
+      "code": "\ndef decompose_task(task):\n    steps = []\n    if 'и' in task or 'затем' in task:\n        parts = task.replace('затем', 'и').split('и')\n        for i, part in enumerate(parts):\n            steps.append({\n                'step': i+1,\n                'action': part.strip(),\n                'status': 'pending'\n            })\n    else:\n        steps.append({'step': 1, 'action': task, 'status': 'pending'})\n    return steps\n",
+      "priority": "high"
+    }
+  },
+  "efficiency": {
+    "caching": {
+      "strategy": "Кэширование частых операций",
+      "code": "\ncache = {}\ndef cached_operation(key, operation):\n    if key in cache:\n        return cache[key]\n    result = operation()\n    cache[key] = result\n    return result\n",
+      "priority": "medium"
+    },
+    "batch_processing": {
+      "strategy": "Группировка операций",
+      "code": "\ndef batch_files(operations):\n    grouped = {'read': [], 'write': []}\n    for op in operations:\n        grouped[op['type']].append(op)\n    return grouped\n",
+      "priority": "medium"
+    }
+  },
+  "self_improvement": {
+    "pattern_learning": {
+      "strategy": "Обучение на успешных паттернах",
+      "code": "\ndef learn_patterns(log):\n    sequences = []\n    current = []\n    for entry in log:\n        if entry.get('success'):\n            current.append(entry['action'])\n        else:\n            if len(current) > 2:\n                sequences.append(current)\n            current = []\n    return sequences\n",
+      "priority": "high"
+    }
+  }
+}

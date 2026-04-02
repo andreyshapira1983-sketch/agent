@@ -1,0 +1,34 @@
+{
+  "session_id": "1874700153392",
+  "goal": "твоя цель здесь",
+  "cycle_count": 10,
+  "consecutive_failures": 1,
+  "learning_quality": {
+    "autonomous_loop": {
+      "uses": 3.0,
+      "hits": 2.0,
+      "misses": 1.0
+    },
+    "document_creation": {
+      "uses": 27.0,
+      "hits": 21.0,
+      "misses": 6.0
+    },
+    "plan_python": {
+      "uses": 34.0,
+      "hits": 26.0,
+      "misses": 8.0
+    },
+    "plan_text": {
+      "uses": 1.0,
+      "hits": 1.0,
+      "misses": 0.0
+    },
+    "general": {
+      "uses": 8.0,
+      "hits": 6.0,
+      "misses": 2.0
+    }
+  },
+  "saved_at": 1775122946.8332942
+}

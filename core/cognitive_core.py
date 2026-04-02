@@ -2158,11 +2158,34 @@ class CognitiveCore:
             except (AttributeError, KeyError, OSError):
                 pass
 
+        # Статистика эффективности действий — подсказка для LLM
+        _perf_hint = ""
+        try:
+            _cap = (getattr(self.persistent_brain, 'capability_discovery', None)
+                    if self.persistent_brain else None)
+            _flog = getattr(_cap, '_failure_log', {}) if _cap else {}
+            _weak = []
+            for _at, _st in _flog.items():
+                _total = _st.get('success', 0) + _st.get('fail', 0)
+                if _total >= 3 and _st.get('fail', 0) / _total >= 0.4:
+                    _weak.append(
+                        f"  ⚠ {_at}: провалов {_st['fail']}/{_total} "
+                        f"({_st['fail']/_total:.0%})"
+                    )
+            if _weak:
+                _perf_hint = (
+                    "СТАТИСТИКА ДЕЙСТВИЙ (часто проваливаются — подбери альтернативу):\n"
+                    + "\n".join(_weak[:10]) + "\n\n"
+                )
+        except (AttributeError, KeyError, TypeError, ZeroDivisionError):
+            pass
+
         # Строим промпт, который требует исполняемый формат
         prompt = (
             f"Цель: {goal}\n"
             f"ОС: {_os_name}\n\n"
             f"{_tools_hint}"
+            f"{_perf_hint}"
             "Составь список ИСПОЛНЯЕМЫХ действий. "
             "Используй ТОЛЬКО эти форматы — никакой прозы:\n"
             "SEARCH: запрос  — поиск информации\n"

@@ -75,6 +75,7 @@ class PersistentBrain:
         learning=None,
         autonomous_loop=None,
         sandbox=None,
+        capability_discovery=None,
         monitoring=None,
     ):
         self.data_dir = data_dir
@@ -94,6 +95,7 @@ class PersistentBrain:
         self.environment_model = environment_model
         self.learning = learning
         self.sandbox = sandbox
+        self.capability_discovery = capability_discovery
         self.monitoring = monitoring
 
         # Архитектура агента — загружается один раз при старте, read-only.
@@ -156,6 +158,7 @@ class PersistentBrain:
             self._load_environment()
             self._load_learning()
             self._load_sandbox()
+            self._load_capability_stats()
 
             now = time.time()
             if not self._stats["first_boot"]:
@@ -208,6 +211,7 @@ class PersistentBrain:
             self._save_environment()
             self._save_learning()
             self._save_sandbox()
+            self._save_capability_stats()
 
     # ═══════════════════════════════════════════════════════════════════════
     # АВТОСОХРАНЕНИЕ
@@ -1682,6 +1686,40 @@ class PersistentBrain:
             self._log(f"Загружено: sandbox ({len(restored)} симуляций)")
         except (KeyError, TypeError, AttributeError, ValueError) as e:
             self._log(f"Ошибка загрузки sandbox: {e}", level="error")
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # CAPABILITY STATS — статистика успехов/провалов по типам действий (Слой 35)
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def _save_capability_stats(self):
+        if not self.capability_discovery:
+            return
+        failure_log = getattr(self.capability_discovery, '_failure_log', {})
+        if not failure_log:
+            return
+        self._save_json("capability_stats.json", failure_log)
+
+    def _load_capability_stats(self):
+        if not self.capability_discovery:
+            return
+        data = self._load_json("capability_stats.json", {})
+        if not data:
+            return
+        try:
+            existing = getattr(self.capability_discovery, '_failure_log', {})
+            for action_type, stats in data.items():
+                if action_type in existing:
+                    existing[action_type]['success'] += stats.get('success', 0)
+                    existing[action_type]['fail'] += stats.get('fail', 0)
+                else:
+                    existing[action_type] = {
+                        'success': stats.get('success', 0),
+                        'fail': stats.get('fail', 0),
+                    }
+            self.capability_discovery._failure_log = existing
+            self._log(f"Загружено: capability_stats ({len(data)} типов действий)")
+        except (KeyError, TypeError, AttributeError, ValueError) as e:
+            self._log(f"Ошибка загрузки capability_stats: {e}", level="error")
 
     # ═══════════════════════════════════════════════════════════════════════
     # CONVERSATIONS, LESSONS, EVOLUTION, STATS

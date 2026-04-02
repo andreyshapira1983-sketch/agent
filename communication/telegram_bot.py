@@ -92,7 +92,11 @@ class TelegramBot:
         self.image_recognizer = image_recognizer
         self.document_parser = document_parser
         self.knowledge = knowledge  # knowledge system для поиска знаний в чате
-        self.persistent_brain = None  # подключается позже через agent.py
+        from typing import Any
+        self.persistent_brain: Any = None  # подключается позже через agent.py
+        self.experience_replay: Any = None  # подключается позже через agent.py
+        self.learning_system: Any = None    # подключается позже через agent.py
+        self.reflection: Any = None         # подключается позже через agent.py
 
         # TaskExecutor: прямое исполнение задач через tool_layer
         self._task_executor = None
@@ -512,6 +516,7 @@ class TelegramBot:
                         self.persistent_brain.record_conversation(
                             role="user", message=text, response=exec_reply
                         )
+                    self._learn_from_interaction(text, exec_reply)
                     self.send(chat_id, self._escape(exec_reply))
                 return  # файл уже отправлен или есть текстовый ответ
 
@@ -523,7 +528,38 @@ class TelegramBot:
                 role="user", message=text, response=response
             )
 
+        # Обучение: записываем эпизод в ExperienceReplay + LearningSystem
+        self._learn_from_interaction(text, response)
+
         self.send(chat_id, self._escape(response))
+
+    def _learn_from_interaction(self, user_text: str, response: str):
+        """Записывает диалог как эпизод опыта для обучения агента."""
+        # ExperienceReplay: записываем эпизод
+        if self.experience_replay and user_text:
+            try:
+                self.experience_replay.add(
+                    goal=user_text[:500],
+                    actions=[{'type': 'telegram_chat', 'message': user_text[:300]}],
+                    outcome=response[:500],
+                    success=bool(response and not response.startswith('⚠️')),
+                    context={'channel': 'telegram'},
+                )
+            except Exception:
+                pass
+
+        # LearningSystem: извлекаем знания из диалога
+        if self.learning_system and user_text and response:
+            try:
+                content = f"Вопрос: {user_text}\nОтвет: {response}"
+                self.learning_system.learn_from(
+                    content=content[:2000],
+                    source_type='conversation',
+                    source_name='telegram_chat',
+                    tags=['telegram', 'dialog'],
+                )
+            except Exception:
+                pass
 
     def _build_chat_knowledge_context(self, text: str, max_items: int = 5) -> str:
         """Собирает компактный контекст релевантных знаний для чат-ответа."""
@@ -658,9 +694,12 @@ class TelegramBot:
             )
         else:
             system += (
-                "\n\nВАЖНО: Отвечай как человек для пользователя. "
-                "Не выводи служебные/внутренние данные: метрики, success rate, score, "
-                "confidence, циклы, reasoning/debug/system, vector search, 'текст обрезан'."
+                "\n\nВАЖНО: Это Telegram — общайся как живой человек, просто и понятно. "
+                "Никогда не выводи технические/служебные данные: метрики, success rate, score, "
+                "confidence, циклы, reasoning, debug, system, vector search, traceback, стек вызовов, "
+                "'текст обрезан', имена классов, JSON, внутренние ID. "
+                "Если что-то не получилось — скажи простым языком что не так и что делать, "
+                "без технических деталей. Пиши коротко, дружелюбно, по делу."
             )
 
         # Собираем историю диалога для этого chat_id (последние 20 обменов)
@@ -933,13 +972,22 @@ class TelegramBot:
 
     def _welcome_text(self) -> str:
         # Если есть LLM и личность — генерируем живое приветствие
+        # Используем llm.infer напрямую: converse() подмешивает внутренний контекст
+        # (state, intent, context), который LLM потом пересказывает пользователю.
         if self.cognitive_core and self.personality:
             try:
-                return str(self.cognitive_core.converse(
+                _system = (
+                    self.personality + "\n\n"
+                    "ВАЖНО: Это Telegram. Отвечай как живой человек, коротко. "
+                    "Никаких технических данных, метрик, JSON, context, state, intent, "
+                    "conversation_history, debug. Только человеческий текст."
+                )
+                raw = str(self.cognitive_core.llm.infer(
                     "Пользователь нажал /start. Кратко представься и предложи помощь. "
                     "2-3 предложения. Упомяни что можешь просто общаться или помогать с задачами.",
-                    system=self.personality,
+                    system=_system,
                 ))
+                return self._sanitize_user_response(raw, user_text="/start")
             except (AttributeError, TypeError, ValueError, RuntimeError):
                 pass
         return (

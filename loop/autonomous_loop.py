@@ -9,7 +9,7 @@ import json
 import os
 import time
 from enum import Enum
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class LoopPhase(Enum):
@@ -37,9 +37,9 @@ class LoopCycle:
         self.analysis = None
         self.plan = None
         self.simulation: str | None = None   # результат проверки в sandbox
-        self.action_result = None
-        self.evaluation = None
-        self.learning = None
+        self.action_result: Any = None
+        self.evaluation: Any = None
+        self.learning: Any = None
         self.repair: list | None = None
         self.improvement = None
         self.errors: list[str] = []
@@ -408,6 +408,8 @@ class AutonomousLoop:
         self._subgoal_id_queue: list[str] = []  # очередь id подцелей
         self._goal_decomposed: bool = False     # декомпозиция уже сделана?
         self._current_goal_id: str | None = None
+        self._subgoal_fail_counts: dict[str, int] = {}  # провалы на подцель
+        self._max_subgoal_failures: int = 3              # порог для пере-декомпозиции
 
         # Граф декомпозиции активной подцели (TaskDecompositionEngine, Слой 30)
         # Персистентен между циклами: агент проходит шаги графа последовательно,
@@ -487,7 +489,8 @@ class AutonomousLoop:
                     tool_layer=tool_layer,
                     working_dir=_tex_wd,
                 )
-            except Exception:
+            except Exception as _e:
+                self._log(f"[init] TaskExecutor не загружен: {_e}")
                 self.task_executor = None
         else:
             self.task_executor = None
@@ -501,6 +504,7 @@ class AutonomousLoop:
         self._goal_decomposed = False
         self._subgoal_queue = []
         self._subgoal_id_queue = []
+        self._subgoal_fail_counts = {}
         self._current_goal_id = None
         # Сбрасываем граф тактической декомпозиции
         self._task_graph = None
@@ -670,6 +674,55 @@ class AutonomousLoop:
         # Полный успех: dispatcher явно пометил execution как success.
         return bool(execution.get('success') is True)
 
+    def _verify_action_results(self, cycle: LoopCycle):
+        """Проверяет реальные результаты действий, а не просто отсутствие crash."""
+        ar = cycle.action_result
+        if not ar or not isinstance(ar, dict):
+            return
+        execution = self._extract_execution_result(ar)
+        if not isinstance(execution, dict):
+            return
+        results = execution.get('results', [])
+        if not results:
+            return
+        for r in results:
+            if not r.get('success'):
+                continue
+            atype = str(r.get('type', '')).casefold()
+            output = str(r.get('output', ''))
+            stderr = str(r.get('stderr', ''))
+
+            # 1. bash: stderr содержит реальные ошибки
+            if atype == 'bash' and stderr:
+                for marker in ('error:', 'fatal:', 'traceback',
+                               'permission denied', 'not found'):
+                    if marker in stderr.lower():
+                        r['success'] = False
+                        r['error'] = f"stderr содержит ошибку: {stderr[:200]}"
+                        cycle.errors.append(f"verify:bash: {stderr[:120]}")
+                        break
+
+            # 2. python: traceback в stdout
+            if atype == 'python' and 'Traceback (most recent call last)' in output:
+                r['success'] = False
+                r['error'] = f"Python traceback в output: {output[-200:]}"
+                cycle.errors.append("verify:python: traceback в output")
+
+            # 3. write: проверяем что файл реально создан
+            if atype == 'write':
+                path = (
+                    r.get('input', {}).get('path', '')
+                    if isinstance(r.get('input'), dict) else ''
+                )
+                if path and not os.path.exists(path):
+                    r['success'] = False
+                    r['error'] = f"Файл не создан: {path}"
+                    cycle.errors.append(f"verify:write: файл не создан {path}")
+
+        # Пересчитываем общий success
+        if results:
+            execution['success'] = all(r.get('success') for r in results)
+
     @staticmethod
     def _is_meta_output_path(path: str) -> bool:
         """Распознаёт файлы отчётности и самокомментирования, не являющиеся полезным прогрессом."""
@@ -783,6 +836,25 @@ class AutonomousLoop:
             self._log(f"[subgoal_queue] Отфильтровано {dropped} мусорных подцелей из {len(sub_goals)}")
         self._subgoal_queue = [sg.description for sg in filtered]
         self._subgoal_id_queue = [sg.goal_id for sg in filtered]
+
+    def _redecompose_goal(self, failed_subgoal: str):
+        """Пере-декомпозирует цель после повторных провалов подцели."""
+        # Убираем провалившуюся подцель
+        if failed_subgoal in self._subgoal_queue:
+            idx = self._subgoal_queue.index(failed_subgoal)
+            self._subgoal_queue.pop(idx)
+            if idx < len(self._subgoal_id_queue):
+                failed_id = self._subgoal_id_queue.pop(idx)
+                if self.goal_manager and failed_id:
+                    try:
+                        self.goal_manager.fail(failed_id)
+                    except Exception as _e:
+                        self._log(f"[plan] Ошибка при fail подцели: {_e}")
+
+        # Разрешаем повторную декомпозицию
+        self._goal_decomposed = False
+        self._subgoal_fail_counts.pop(failed_subgoal, None)
+        self._log("[plan] Декомпозиция сброшена — следующий PLAN пере-разобьёт цель.")
 
     def _should_store_cycle_experience(self, cycle: LoopCycle) -> bool:
         """Отсеивает слабые наблюдательные циклы из обучения и replay."""
@@ -1053,7 +1125,8 @@ class AutonomousLoop:
             try:
                 if hasattr(self.budget_control, 'get_exceeded_details'):
                     exceeded_details = self.budget_control.get_exceeded_details()
-            except Exception:
+            except Exception as _e:
+                self._log(f"[budget] Ошибка получения деталей: {_e}")
                 exceeded_details = []
 
             details_text = ", ".join(exceeded_details) if exceeded_details else "unknown"
@@ -1103,9 +1176,11 @@ class AutonomousLoop:
                             f"Причина: {act_reason}\n"
                             "Агент продолжает, накапливает опыт.",
                         )
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        self._log(f"[telegram] Ошибка отправки (low confidence): {_e}")
             cycle.action_result = self._act(cycle.plan)
+            # Верификация реальных результатов действий
+            self._verify_action_results(cycle)
             # Confidence после действия: если ошибки — снижаем
             if cycle.errors:
                 cycle.confidence['act'] = round(
@@ -1193,8 +1268,8 @@ class AutonomousLoop:
                                 self._current_goal_id
                             )
                             self._set_subgoal_queue(open_subgoals)
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        self._log(f"[plan] Ошибка при complete подцели: {_e}")
             elif self._subgoal_queue:
                 self._log(
                     "[plan] Подцель не закрыта: успешный цикл не дал сильного сигнала "
@@ -1202,6 +1277,19 @@ class AutonomousLoop:
                 )
         else:
             self._consecutive_failures = projected_failures
+            # Трекинг провалов текущей подцели → пере-декомпозиция
+            if self._subgoal_queue:
+                current_sg = self._subgoal_queue[0]
+                self._subgoal_fail_counts[current_sg] = (
+                    self._subgoal_fail_counts.get(current_sg, 0) + 1
+                )
+                if self._subgoal_fail_counts[current_sg] >= self._max_subgoal_failures:
+                    self._log(
+                        f"[plan] Подцель провалена "
+                        f"{self._max_subgoal_failures} раз: "
+                        f"'{current_sg[:60]}' — пере-декомпозиция."
+                    )
+                    self._redecompose_goal(current_sg)
 
         # Обновляем состояние "что было сделано" для следующего _observe()
         self._last_cycle_success = cycle.success
@@ -2837,16 +2925,16 @@ else:
                             for _ok in _outcomes:
                                 try:
                                     self.identity.record_action_stats(_t, _ok)
-                                except Exception:
-                                    pass
+                                except Exception as _e:
+                                    self._log(f"[identity] Ошибка записи статистики: {_e}")
                     # ── Слой 35: CapabilityDiscovery — grounding для find_gaps() ──
                     if self.capability_discovery and hasattr(self.capability_discovery, 'record_action_result'):
                         for _r in exec_result.get('results', []):
                             _t = str(_r.get('type', 'unknown')).casefold()
                             try:
                                 self.capability_discovery.record_action_result(_t, bool(_r.get('success')))
-                            except Exception:
-                                pass
+                            except Exception as _e:
+                                self._log(f"[capability] Ошибка записи: {_e}")
                     # Пробрасываем ошибки действий в cycle.errors → self-repair их увидит
                     if not exec_result['success'] and self._current_cycle:
                         for _r in exec_result.get('results', []):
@@ -3110,6 +3198,20 @@ else:
             plan_str = str(cycle.plan)[:300] if cycle.plan else ""
             result_str = str(cycle.action_result)[:300] if cycle.action_result else ""
             eval_str = str(cycle.evaluation)[:300] if cycle.evaluation else ""
+
+            # Извлекаем детальные tool-вызовы из action_result
+            tool_actions = []
+            _ar = cycle.action_result
+            if isinstance(_ar, dict):
+                for r in _ar.get('results', []):
+                    if isinstance(r, dict):
+                        tool_actions.append({
+                            'tool': r.get('type', 'unknown'),
+                            'success': r.get('success', False),
+                            'error': str(r.get('error', ''))[:200] if r.get('error') else None,
+                            'input_short': str(r.get('input', ''))[:200],
+                            'output_short': str(r.get('output', ''))[:200],
+                        })
             is_success = (
                 len(cycle.errors) == 0
                 and self._has_real_work(cycle)
@@ -3142,20 +3244,30 @@ else:
                 except Exception as _e:
                     self._log(f"[learn/skill_library] Ошибка: {_e}")
 
-            # 1. Записываем эпизод в ExperienceReplay (а не напрямую в knowledge)
+            # 1. Записываем эпизод в ExperienceReplay с детальными tool-вызовами
             if self.experience_replay:
+                # actions = реальные tool-вызовы (если есть), иначе текст плана
+                ep_actions = []
+                if tool_actions:
+                    for ta in tool_actions:
+                        status = 'OK' if ta['success'] else f"FAIL: {ta['error'] or '?'}"
+                        ep_actions.append(f"[{ta['tool']}] {status} | {ta['input_short'][:100]}")
+                else:
+                    ep_actions = [plan_str]
                 self.experience_replay.add(
                     goal=goal_str,
-                    actions=[plan_str],
+                    actions=ep_actions,
                     outcome=result_str,
                     success=is_success,
                     context={
                         "cycle_id": cycle.cycle_id,
                         "evaluation": eval_str,
                         "errors": cycle.errors,
+                        "tool_details": tool_actions,
                     },
                 )
-                self._log("[learn] Эпизод записан в ExperienceReplay.")
+                _n_tools = len(tool_actions)
+                self._log(f"[learn] Эпизод записан в ExperienceReplay ({_n_tools} tool-вызовов).")
 
             # Fallback: записываем эпизод в KnowledgeSystem
             elif self.knowledge_system:
@@ -3169,9 +3281,21 @@ else:
 
             # 2. Извлекаем структурированные знания через LearningSystem
             if self.learning_system and cycle.evaluation:
+                # Формируем детальный отчёт включая каждый tool-вызов
+                tool_report = ""
+                if tool_actions:
+                    lines = []
+                    for ta in tool_actions:
+                        status = '✅' if ta['success'] else '❌'
+                        line = f"  {status} {ta['tool']}: {ta['input_short'][:150]}"
+                        if ta['error']:
+                            line += f" → ошибка: {ta['error'][:100]}"
+                        lines.append(line)
+                    tool_report = "\nИнструменты:\n" + "\n".join(lines) + "\n"
                 content = (
                     f"Цель: {goal_str}\n"
                     f"План: {plan_str}\n"
+                    f"{tool_report}"
                     f"Результат: {result_str}\n"
                     f"Оценка: {eval_str}\n"
                     f"Ошибки: {cycle.errors}"
@@ -3270,8 +3394,8 @@ else:
                         f"Событие: {top['event'][:200]}\n"
                         f"Источник: {top['source']}",
                     )
-                except Exception:
-                    pass
+                except Exception as _e:
+                    self._log(f"[telegram] Ошибка отправки (interrupt): {_e}")
             return True
 
         if top['priority'] == 2 and phase == 'pre_act':
@@ -3353,8 +3477,8 @@ else:
                 if limit > 0 and spent / limit > 0.85:
                     confidence -= 0.15
                     reasons.append(f"бюджет исчерпан на {spent/limit:.0%}")
-            except Exception:
-                pass
+            except Exception as _e:
+                self._log(f"[confidence] Ошибка чтения бюджета: {_e}")
 
         confidence = round(max(0.0, min(1.0, confidence)), 2)
         reason = "; ".join(reasons) if reasons else "всё в норме"
@@ -3385,6 +3509,16 @@ else:
                 if 'semantic gate rejected plan, replanning' in msg_lower:
                     self._log(
                         f"[repair] Пропуск мета-ошибки: {self._preview(error_msg, 80)}",
+                        level='warning',
+                    )
+                    continue
+
+                # STEP_EVAL — это оценка качества шага, не аппаратный/кодовый сбой.
+                # Не эскалировать — записываем в лог и пропускаем.
+                if msg_lower.startswith('step_eval:'):
+                    self._log(
+                        f"[repair] Пропуск оценочной ошибки (quality assessment): "
+                        f"{self._preview(error_msg, 80)}",
                         level='warning',
                     )
                     continue
@@ -3507,10 +3641,10 @@ else:
                 self._try_codify_error(key, error_msg)
 
     def _try_codify_error(self, norm_key: str, error_msg: str):
-        """Если ошибка известна — регистрирует готовый шаблон как dynamic skill."""
+        """Если ошибка известна — регистрирует готовый шаблон. Иначе — генерирует."""
+        # Сначала проверяем hardcoded шаблоны
         for err_fragment, skill_keywords, skill_code in self._CODIFIABLE_ERROR_MAP:
             if err_fragment.lower() in error_msg.lower():
-                # Дополняем стандартные ключевые слова словами из целей
                 goal_kws = self._error_goal_keywords.get(norm_key, [])
                 combined_keywords = list(dict.fromkeys(skill_keywords + goal_kws))
                 self.register_dynamic_skill(
@@ -3519,10 +3653,63 @@ else:
                     trigger_error=error_msg[:120],
                 )
                 return
-        # Ошибка не в словаре — логируем для ручного добавления
-        self._log(
-            f"[learn] Неизвестный паттерн (не кодифицирован): {error_msg[:80]}"
-        )
+
+        # Для неизвестных ошибок — генерируем эвристический шаблон
+        goal_kws = self._error_goal_keywords.get(norm_key, [])
+        if not goal_kws:
+            self._log(
+                f"[learn] Неизвестный паттерн (нет ключевых слов): {error_msg[:80]}"
+            )
+            return
+
+        fix_hint = self._infer_fix_hint(error_msg)
+        if fix_hint:
+            code_template = fix_hint['code']
+            keywords = list(dict.fromkeys(goal_kws + fix_hint.get('keywords', [])))
+            self.register_dynamic_skill(
+                keywords=keywords,
+                code=code_template,
+                trigger_error=error_msg[:120],
+            )
+            self._log(
+                f"[learn] AUTO-SKILL сгенерирован для: {error_msg[:60]} "
+                f"→ [{', '.join(keywords[:3])}]"
+            )
+        else:
+            self._log(
+                f"[learn] Неизвестный паттерн (не кодифицирован): {error_msg[:80]}"
+            )
+
+    @staticmethod
+    def _infer_fix_hint(error_msg: str) -> dict | None:
+        """Эвристически определяет тип ошибки и возвращает шаблон исправления."""
+        msg = error_msg.lower()
+        if 'timeout' in msg or 'timed out' in msg:
+            return {
+                'keywords': ['timeout', 'retry'],
+                'code': 'import time; time.sleep(5)  # retry after timeout',
+            }
+        if 'permission' in msg or 'access denied' in msg:
+            return {
+                'keywords': ['permission', 'access'],
+                'code': 'import os; print(f"Check permissions: {os.getcwd()}")',
+            }
+        if 'not found' in msg or 'no such file' in msg or 'filenotfounderror' in msg:
+            return {
+                'keywords': ['file', 'missing', 'path'],
+                'code': 'import os; os.makedirs(os.path.dirname(path), exist_ok=True)',
+            }
+        if 'connection' in msg or 'network' in msg or 'refused' in msg:
+            return {
+                'keywords': ['network', 'connection', 'retry'],
+                'code': 'import time; time.sleep(10)  # network retry backoff',
+            }
+        if 'memory' in msg or 'oom' in msg or 'killed' in msg:
+            return {
+                'keywords': ['memory', 'oom'],
+                'code': 'import gc; gc.collect()  # attempt memory cleanup',
+            }
+        return None
 
     def register_dynamic_skill(
         self,
@@ -3762,8 +3949,8 @@ else:
                             'программная инженерия паттерны',
                         ]
                         topic = _DISCOVERY_TOPICS[self._cycle_count % len(_DISCOVERY_TOPICS)]
-                except Exception:
-                    pass
+                except Exception as _e:
+                    self._log(f"[acquire] Ошибка выбора темы: {_e}")
 
                 if topic and hasattr(self.acquisition_pipeline, 'discover'):
                     self._log(f"[acquire] Очередь пуста — авто-дискавери по теме: {topic[:60]}")
@@ -4367,8 +4554,8 @@ else:
                     _fp = os.path.join(_outputs_dir, _f)
                     if os.path.isfile(_fp) and (_now - os.path.getmtime(_fp)) < 120:
                         _new_files.append(_f)
-        except Exception:
-            pass
+        except Exception as _e:
+            self._log(f"[observe] Ошибка чтения outputs: {_e}")
 
         # Статистика
         total_cycles = self._cycle_count
