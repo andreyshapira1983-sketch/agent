@@ -38,7 +38,7 @@ class ContentSanitizer:
         'eval', 'exec', 'compile', 'execfile',
         '__import__', 'getattr', 'setattr', 'delattr',
         'globals', 'locals', 'vars',
-        'open',  # файловые операции — only allowed with path validation
+        # open — разрешён: PythonRuntimeTool подменяет open() на _safe_open (jail)
     })
 
     _DANGEROUS_AST_ATTRS = frozenset({

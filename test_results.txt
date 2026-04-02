@@ -1,0 +1,99 @@
+........................................................................ [  5%]
+........................................................................ [ 11%]
+........................................................................ [ 16%]
+........................................................................ [ 22%]
+........................................................................ [ 28%]
+........................................................................ [ 33%]
+........................................................................ [ 39%]
+....................................................+++++++++++++++++++++++++++++++++++ Timeout +++++++++++++++++++++++++++++++++++
+~~~~~~~~~~~~~~~~~~ Stack of Thread-740 (_load_loop) (22400) ~~~~~~~~~~~~~~~~~~~
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\threading.py", line 1014, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\threading.py", line 1043, in _bootstrap_inner
+    self.run()
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\threading.py", line 994, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\andre\Downloads\agent\tests\test_memory_quality_regressions.py", line 50, in _load_loop
+    brain.load()
+  File "C:\Users\andre\Downloads\agent\core\persistent_brain.py", line 174, in load
+    du = self.disk_usage()
+  File "C:\Users\andre\Downloads\agent\core\persistent_brain.py", line 861, in disk_usage
+    for dirpath, _, filenames in os.walk(agent_root):
+  File "<frozen os>", line 369, in walk
+~~~~~~~~~~~~~~~~~~ Stack of Thread-739 (_save_loop) (23556) ~~~~~~~~~~~~~~~~~~~
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\threading.py", line 1014, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\threading.py", line 1043, in _bootstrap_inner
+    self.run()
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\threading.py", line 994, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\andre\Downloads\agent\tests\test_memory_quality_regressions.py", line 43, in _save_loop
+    brain.save()
+  File "C:\Users\andre\Downloads\agent\core\persistent_brain.py", line 188, in save
+    with self._lock:
+~~~~~~~~~~~~~~~~~~~~~~~~~ Stack of MainThread (25284) ~~~~~~~~~~~~~~~~~~~~~~~~~
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\pytest\__main__.py", line 9, in <module>
+    raise SystemExit(pytest.console_main())
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\config\__init__.py", line 201, in console_main
+    code = main()
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\config\__init__.py", line 175, in main
+    ret: ExitCode | int = config.hook.pytest_cmdline_main(config=config)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\main.py", line 330, in pytest_cmdline_main
+    return wrap_session(config, _main)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\main.py", line 283, in wrap_session
+    session.exitstatus = doit(config, session) or 0
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\main.py", line 337, in _main
+    config.hook.pytest_runtestloop(session=session)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\main.py", line 362, in pytest_runtestloop
+    item.config.hook.pytest_runtest_protocol(item=item, nextitem=nextitem)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\runner.py", line 113, in pytest_runtest_protocol
+    runtestprotocol(item, nextitem=nextitem)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\runner.py", line 132, in runtestprotocol
+    reports.append(call_and_report(item, "call", log))
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\runner.py", line 241, in call_and_report
+    call = CallInfo.from_call(
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\runner.py", line 341, in from_call
+    result: TResult | None = func()
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\runner.py", line 242, in <lambda>
+    lambda: runtest_hook(item=item, **kwds), when=when, reraise=reraise
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\runner.py", line 174, in pytest_runtest_call
+    item.runtest()
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\unittest.py", line 351, in runtest
+    testcase(result=self)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\unittest\case.py", line 707, in __call__
+    return self.run(*args, **kwds)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\unittest\case.py", line 651, in run
+    self._callTestMethod(testMethod)
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\unittest\case.py", line 606, in _callTestMethod
+    if method() is not None:
+  File "C:\Users\andre\Downloads\agent\tests\test_memory_quality_regressions.py", line 58, in test_persistent_brain_concurrent_load_save_no_crash
+    t1.join()
+  File "C:\Users\andre\AppData\Local\Programs\Python\Python313\Lib\threading.py", line 1094, in join
+    self._handle.join(timeout)
++++++++++++++++++++++++++++++++++++ Timeout +++++++++++++++++++++++++++++++++++
