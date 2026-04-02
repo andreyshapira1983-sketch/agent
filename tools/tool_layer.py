@@ -3439,8 +3439,8 @@ class ArchiveTool(BaseTool):
     def _rar_action(self, action: str, archive_path: str, kwargs: dict) -> dict:
         """RAR операции через WinRAR CLI (Rar.exe / UnRAR.exe)."""
         # SECURITY: validate all paths through PathValidator
-        _pv = PathValidator()
-        _ok, _reason = _pv.validate(archive_path)
+        _base = os.getcwd()
+        _ok, _reason = PathValidator.validate(archive_path, _base)
         if not _ok:
             return {'error': f'Path blocked: {_reason}', 'success': False}
 
@@ -3459,7 +3459,7 @@ class ArchiveTool(BaseTool):
                 return {'error': 'source_paths обязателен для create', 'success': False}
             # SECURITY: validate source paths
             for sp in sources:
-                _s_ok, _s_reason = _pv.validate(sp)
+                _s_ok, _s_reason = PathValidator.validate(sp, _base)
                 if not _s_ok:
                     return {'error': f'Source path blocked: {_s_reason}', 'success': False}
             cmd = [rar_exe, 'a', '-ep1'] + pwd_flag + [archive_path] + sources
@@ -4108,8 +4108,7 @@ class CodeAnalyzerTool(BaseTool):
                 path = kwargs.get('path', '')
                 # SECURITY: validate path through PathValidator
                 if path:
-                    _pv = PathValidator()
-                    _pv_ok, _pv_reason = _pv.validate(path)
+                    _pv_ok, _pv_reason = PathValidator.validate(path, os.getcwd())
                     if not _pv_ok:
                         return {'error': f'Path blocked: {_pv_reason}', 'success': False}
                 try:

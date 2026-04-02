@@ -454,8 +454,8 @@ def run_oauth_flow(client_id: str, client_secret: str, env_path: str = '.env'):
     _update_env(env_path, access_token, refresh_token)
 
     print(f"\nУспех! Токены сохранены в {env_path}")
-    print(f"  access_token  : ***")
-    print(f"  refresh_token : ***" if refresh_token else "  (refresh_token не выдан)")
+    print("  access_token  : ***")
+    print("  refresh_token : ***" if refresh_token else "  (refresh_token не выдан)")
     print(f"  expires_in    : {expires_in} сек ({expires_in // 3600} ч)")
 
 

@@ -96,7 +96,7 @@ class SpeechRecognizer:
                 if self.client is not None and hasattr(self.client, 'api_key'):
                     oa = _openai.OpenAI(api_key=self.client.api_key)
                 else:
-                    return TranscriptionResult(text='', error='OpenAI клиент не инициализирован')
+                    return TranscriptionResult(path=path, text='', confidence=0.0)
 
             kwargs: dict[str, Any] = {'model': self.model, 'response_format': 'verbose_json'}
             if language:
@@ -143,7 +143,7 @@ class SpeechRecognizer:
                 if self.client is not None and hasattr(self.client, 'api_key'):
                     oa = _openai.OpenAI(api_key=self.client.api_key)
                 else:
-                    return TranscriptionResult(text='', error='OpenAI клиент не инициализирован')
+                    return TranscriptionResult(path=path, text='', confidence=0.0)
 
             with open(path, 'rb') as f:
                 response = oa.audio.translations.create(
