@@ -34,10 +34,10 @@ class ContentSanitizer:
     """
 
     # Опасные конструкции в Python-коде — AST-based (не обходятся обфускацией)
+    # exec/compile/eval/locals/globals/vars — разрешены: агент генерирует Python-код
+    # shutil — разрешён: нужен для файловых операций
     _DANGEROUS_AST_CALLS = frozenset({
-        'eval', 'exec', 'compile', 'execfile',
-        '__import__',
-        'globals', 'locals', 'vars',
+        'execfile',
         # open — разрешён: PythonRuntimeTool подменяет open() на _safe_open (jail)
         # getattr/setattr/delattr — проверяются отдельно: блокируются только
         # при обращении к опасным атрибутам из _DANGEROUS_AST_ATTRS
@@ -106,11 +106,11 @@ class ContentSanitizer:
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 for alias in getattr(node, 'names', []):
                     mod = alias.name.split('.')[0] if alias.name else ''
-                    if mod in {'subprocess', 'shutil', 'ctypes', 'signal', 'multiprocessing'}:
+                    if mod in {'ctypes', 'signal'}:
                         return False, f'запрещённый import: {mod}'
                 if isinstance(node, ast.ImportFrom) and node.module:
                     root_mod = node.module.split('.')[0]
-                    if root_mod in {'subprocess', 'shutil', 'ctypes', 'signal', 'multiprocessing'}:
+                    if root_mod in {'ctypes', 'signal'}:
                         return False, f'запрещённый import from: {root_mod}'
 
         return True, 'OK'

@@ -629,6 +629,7 @@ class GoalManager:
                 effort = 0.2 if any(k in text for k in LOW_EFFORT_KEYWORDS) else 0.5
 
             score = urgency * 0.4 + importance * 0.4 - effort * 0.2
+            score = max(0.0, min(1.0, score))  # clamp [0, 1]
             goal_copy = dict(g)
             goal_copy['priority_score'] = round(score, 4)
             scored.append(goal_copy)

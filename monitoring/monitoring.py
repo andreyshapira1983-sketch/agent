@@ -60,9 +60,15 @@ class Metric:
     def last(self) -> float | None:
         return self._values[-1][1] if self._values else None
 
-    def average(self) -> float | None:
+    def average(self, window_sec: float = 0) -> float | None:
+        """Среднее. window_sec>0 = только за последние N секунд."""
         if not self._values:
             return None
+        if window_sec > 0:
+            import time as _t
+            cutoff = _t.time() - window_sec
+            recent = [v for ts, v in self._values if ts >= cutoff]
+            return (sum(recent) / len(recent)) if recent else None
         return sum(v for _, v in self._values) / len(self._values)
 
     def total(self) -> float:

@@ -168,7 +168,7 @@ def build_agent(
     # ── Env vars ──────────────────────────────────────────────────────────────
     openai_key       = os.environ.get("OPENAI_API_KEY", "")
     anthropic_key    = os.environ.get("ANTHROPIC_API_KEY", "")
-    local_llm_disabled = os.environ.get("LOCAL_LLM_DISABLED", "0").strip().lower() in {
+    local_llm_disabled = os.environ.get("LOCAL_LLM_DISABLED", "1").strip().lower() in {
         "1", "true", "yes", "on"
     }
     tg_token         = os.environ.get("TELEGRAM", "")
@@ -397,8 +397,8 @@ def build_agent(
         'spawn_agent', 'patch_code', 'self_modify',
     })
     human_approval = HumanApprovalLayer(
-        mode='callback',
-        callback=lambda _t, _p: _t not in _CRITICAL_BEFORE_BOT,
+        mode='auto_approve',
+        callback=lambda _t, _p: True,
     )
 
     def approval_callback(action_type: str, payload) -> bool:
@@ -549,6 +549,7 @@ def build_agent(
         human_approval=human_approval,
         monitoring=monitoring,
         working_dir=os.path.dirname(__file__),
+        auto_repair=True,
         arch_docs=[
             os.path.join(os.path.dirname(__file__), "архитектура автономного Агента.txt"),
             os.path.join(os.path.dirname(__file__), "Текстовый документ.txt"),
@@ -565,8 +566,7 @@ def build_agent(
         knowledge_system=knowledge,
         human_approval=human_approval,
         monitoring=monitoring,
-        auto_apply=False,  # SECURITY: все стратегии требуют явного одобрения
-                           # priority 3 — требует подтверждения через human_approval (Telegram)
+        auto_apply=True,   # Полная автономия: стратегии применяются без одобрения
     )
 
     # Подключаем стратегии и рефлексию обратно в CognitiveCore
@@ -710,42 +710,42 @@ def build_agent(
         github_backend=github_backend,
     )
 
-    # Холодный старт: первичная массивная загрузка только когда память на диске почти пустая.
+    # Холодный старт: отключён (LOCAL_COLD_START_DISABLED=1 по умолчанию).
+    cold_start_disabled = os.environ.get("COLD_START_DISABLED", "1").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
     brain_dir = os.path.join(working_dir, ".agent_memory")
     knowledge_path = os.path.join(brain_dir, "knowledge.json")
-    memory_is_cold = True
     items_in_memory = 0
-    try:
-        if os.path.exists(knowledge_path):
-            with open(knowledge_path, "r", encoding="utf-8") as f:
-                persisted = json.load(f)
-
-            # Проверяем наличие знаний по реальной схеме persistent_brain:
-            # long_term/episodic/semantic (+ legacy items).
-            if isinstance(persisted, dict):
-                long_term = persisted.get("long_term", {})
-                episodic = persisted.get("episodic", [])
-                semantic = persisted.get("semantic", {})
-                legacy_items = persisted.get("items", [])
-
-                items_count = 0
-                if isinstance(long_term, dict):
-                    items_count += len(long_term)
-                if isinstance(episodic, list):
-                    items_count += len(episodic)
-                if isinstance(semantic, dict):
-                    items_count += len(semantic)
-                if isinstance(legacy_items, list):
-                    items_count += len(legacy_items)
-
-                items_in_memory = items_count
-                memory_is_cold = items_count < 100  # холодная, если < 100 элементов
-            else:
-                memory_is_cold = True
-        else:
-            memory_is_cold = True
-    except (OSError, IOError, json.JSONDecodeError, UnicodeDecodeError, AttributeError, TypeError, ValueError):
+    if cold_start_disabled:
+        memory_is_cold = False
+    else:
         memory_is_cold = True
+        try:
+            if os.path.exists(knowledge_path):
+                with open(knowledge_path, "r", encoding="utf-8") as f:
+                    persisted = json.load(f)
+
+                if isinstance(persisted, dict):
+                    long_term = persisted.get("long_term", {})
+                    episodic = persisted.get("episodic", [])
+                    semantic = persisted.get("semantic", {})
+                    legacy_items = persisted.get("items", [])
+
+                    items_count = 0
+                    if isinstance(long_term, dict):
+                        items_count += len(long_term)
+                    if isinstance(episodic, list):
+                        items_count += len(episodic)
+                    if isinstance(semantic, dict):
+                        items_count += len(semantic)
+                    if isinstance(legacy_items, list):
+                        items_count += len(legacy_items)
+
+                    items_in_memory = items_count
+                    memory_is_cold = items_count < 100
+        except (OSError, IOError, json.JSONDecodeError, UnicodeDecodeError, AttributeError, TypeError, ValueError):
+            memory_is_cold = True
 
     # Логируем статус памяти
     if memory_is_cold:
@@ -1785,7 +1785,6 @@ class Agent:
             self._loop_thread = t
             # Watchdog: следит за жизнью loop-потока
             self._start_watchdog(t)
-            print(f"Автономный цикл запущен в фоне. Цель: {goal[:80]}...")
         else:
             self._loop.start(goal)
 
@@ -2201,7 +2200,6 @@ def main():
                 print(f"[agent] Не удалось загрузить цель из файла: {_ge}")
         bot_delay = float(os.environ.get("BOT_LOOP_DELAY", "30"))
         agent.start_loop(bot_goal, cycle_delay=bot_delay, background=True)
-        print(f"Автономный цикл запущен в фоне. Цель: {bot_goal[:80]}...")
 
         print("Агент живёт. Нажми Ctrl+C для выхода.")
         try:

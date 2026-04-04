@@ -1424,6 +1424,11 @@ class AutonomousLoop:
             cycle.action_result = self._act(cycle.plan)
             # Верификация реальных результатов действий
             self._verify_action_results(cycle)
+            # Синхронизация status после verify (контракты могут понизить execution.success)
+            if isinstance(cycle.action_result, dict):
+                _exec = cycle.action_result.get('execution', cycle.action_result)
+                if isinstance(_exec, dict) and not _exec.get('success', True):
+                    cycle.action_result['status'] = 'failed'
             # Confidence после действия: если ошибки — снижаем
             if cycle.errors:
                 cycle.confidence['act'] = round(
@@ -3296,11 +3301,13 @@ else:
                 if exec_result['actions_found'] > 0:
                     n_ok  = sum(1 for r in exec_result['results'] if r['success'])
                     n_all = exec_result['actions_found']
-                    self._log(
-                        f"[act] Исполнено {n_ok}/{n_all} действий. "
-                        + ("Все успешны." if exec_result['success']
-                           else "Есть ошибки — см. execution.")
-                    )
+                    if n_ok == n_all:
+                        _act_verdict = "Все успешны."
+                    elif exec_result['success']:
+                        _act_verdict = f"Частичный успех ({n_ok} ок, {n_all - n_ok} ошибок)."
+                    else:
+                        _act_verdict = "Есть ошибки — см. execution."
+                    self._log(f"[act] Исполнено {n_ok}/{n_all} действий. {_act_verdict}")
                     # ── Слой 45: Identity — записываем статистику реальных действий ──
                     if self.identity:
                         _type_success: dict[str, list[bool]] = {}

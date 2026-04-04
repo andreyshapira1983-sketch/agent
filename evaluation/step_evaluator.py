@@ -172,10 +172,14 @@ class StepEvaluator:
         )
 
         # Финальный verdict
+        _critical = ('WRONG_TOOL', 'SUBSTITUTION', 'ЛОЖНЫЙ', 'IRRELEVANT')
+        _has_critical = any(kw in i for i in issues for kw in _critical)
         if not issues:
             verdict = 'SUCCESS'
-        elif score >= 0.7:
-            verdict = 'PARTIAL'
+        elif score >= 0.7 and not _has_critical:
+            verdict = 'SUCCESS'  # высокий score + только minor issues = SUCCESS
+        elif score >= 0.4 and not _has_critical:
+            verdict = 'PARTIAL'  # средний score без критических issues
         elif any('WRONG_TOOL' in i for i in issues):
             verdict = 'FAILED_WRONG_TOOL'
         elif any('IRRELEVANT' in i for i in issues):

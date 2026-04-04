@@ -463,7 +463,8 @@ class ActionDispatcher:
 
         executed     = sum(1 for r in results if r['success'] is not None)
         ok_count     = sum(1 for r in results if r.get('success'))
-        success      = (ok_count / len(results) >= 0.5) if results else True
+        # Пустой results или 0 выполненных → НЕ успех (раньше было True — врало)
+        success      = bool(results) and (ok_count / len(results) >= 0.5)
         summary      = self._make_summary(results)
 
         return {

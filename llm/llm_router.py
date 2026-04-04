@@ -20,6 +20,7 @@
 
 import os
 import re
+import time
 import importlib
 
 
@@ -80,16 +81,18 @@ class LLMRouter:
         self._local = local_client          # локальный LLM (in-process backend) или None
         self.monitoring = monitoring
 
-        mode = os.environ.get('LLM_ROUTER_MODE', 'local-first').strip().lower()
-        self._mode = mode if mode in {'balanced', 'local-first', 'llm-first'} else 'local-first'
+        mode = os.environ.get('LLM_ROUTER_MODE', 'llm-first').strip().lower()
+        self._mode = mode if mode in {'balanced', 'local-first', 'llm-first'} else 'llm-first'
 
         # Дневной бюджетный лимит (USD). 0 = local-only (API не вызывается).
         try:
-            self._daily_budget_usd = float(os.environ.get('LLM_DAILY_BUDGET_USD', '0.0'))
+            self._daily_budget_usd = float(os.environ.get('LLM_DAILY_BUDGET_USD', '100.0'))
         except (ValueError, TypeError):
-            self._daily_budget_usd = 0.0
+            self._daily_budget_usd = 10.0
         # budget=0 → сразу включаем режим "только local"
         self._budget_exhausted = (self._daily_budget_usd == 0.0)
+        self._budget_day_start = time.time()  # начало текущего «дня» бюджета
+        self._budget_spent_at_day_start = 0.0  # snapshot total_cost_usd на старте дня
 
         # Статистика маршрутизации
         self._routed_light = 0
@@ -140,16 +143,30 @@ class LLMRouter:
               max_tokens: int | None = None) -> str:
         """Выбирает клиент и вызывает infer()."""
         # ── Budget guard: дневной лимит расходов ─────────────────────────────
-        if self._daily_budget_usd > 0 and not self._budget_exhausted:
-            spent = self.total_cost_usd
-            if spent >= self._daily_budget_usd:
-                self._budget_exhausted = True
-                if self.monitoring:
-                    self.monitoring.warning(
-                        f"[router] BUDGET EXHAUSTED: ${spent:.4f} >= "
-                        f"${self._daily_budget_usd:.2f} — только local",
-                        source="llm_router",
-                    )
+        # Автосброс: 24ч с момента старта «дня» → новый день
+        if self._daily_budget_usd > 0:
+            now = time.time()
+            if now - self._budget_day_start >= 86400:
+                self._budget_day_start = now
+                self._budget_spent_at_day_start = self.total_cost_usd
+                if self._budget_exhausted:
+                    self._budget_exhausted = False
+                    if self.monitoring:
+                        self.monitoring.info(
+                            "[router] Новый день бюджета — лимит сброшен",
+                            source="llm_router",
+                        )
+
+            if not self._budget_exhausted:
+                day_spent = self.total_cost_usd - self._budget_spent_at_day_start
+                if day_spent >= self._daily_budget_usd:
+                    self._budget_exhausted = True
+                    if self.monitoring:
+                        self.monitoring.warning(
+                            f"[router] BUDGET EXHAUSTED: ${day_spent:.4f} >= "
+                            f"${self._daily_budget_usd:.2f} — только local",
+                            source="llm_router",
+                        )
         # Если бюджет исчерпан — только локальный (бесплатный)
         if self._budget_exhausted:
             if self._local is not None and self._local_available():

@@ -141,7 +141,9 @@ class KnowledgeVerificationSystem:
 
         # Смешиваем детерминированную оценку с LLM (6:4 в пользу LLM при наличии)
         blended_conf = round(confidence * 0.6 + det['confidence'] * 0.4, 3)
-        blended_conf = min(1.0, blended_conf * (0.5 + source_trust * 0.5))
+        # source_trust повышает уверенность, а не снижает (раньше множитель 0.5-1.0 урезал)
+        trust_boost = 0.85 + source_trust * 0.15   # [0.85 .. 1.0]
+        blended_conf = min(1.0, blended_conf * trust_boost)
 
         result = VerificationResult(
             claim=claim,

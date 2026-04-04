@@ -359,13 +359,17 @@ class ReflectionSystem:
         success_count = sum(1 for s in _SUCCESS if s in analysis_l or s in result_l)
 
         # Keyword-эвристика
-        det_achieved = success_count > fail_count or (success_count == 0 and fail_count == 0)
+        # Нет сигналов вообще = неизвестно (раньше считалось "достигнута" → ложный успех)
+        if success_count == 0 and fail_count == 0:
+            det_achieved = False  # лучше перепроверить, чем врать
+        else:
+            det_achieved = success_count > fail_count
 
         if not self.cognitive_core:
             return det_achieved
 
-        # LLM для уточнения (только если keyword-результат неоднозначен)
-        if success_count == fail_count:
+        # LLM для уточнения (если нет сигналов или ничья)
+        if success_count == fail_count or (success_count == 0 and fail_count == 0):
             verdict = self.cognitive_core.decision_making(
                 options=['цель достигнута', 'цель не достигнута'],
                 context_note=f"Анализ:\n{analysis}"

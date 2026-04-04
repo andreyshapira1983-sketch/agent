@@ -149,7 +149,7 @@ class ExperienceReplay:
             score += 1.0
         else:
             score -= 0.3 * min(ep.replayed_count, 5)
-        return max(0.1, score)
+        return max(0.1, min(5.0, score))  # clamp [0.1, 5.0]
 
     def add_from_knowledge(self, n: int = 50) -> int:
         """

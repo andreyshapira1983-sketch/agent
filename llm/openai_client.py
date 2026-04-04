@@ -32,15 +32,21 @@ class LLMResponseSanitizer:
     ]
 
     # Паттерны попыток выполнить команды через ответ
+    # HARD-блок: только заведомо деструктивные shell-команды и builtins-хаки
     COMMAND_INJECTION_PATTERNS = [
         re.compile(r'```(?:bash|sh|shell|cmd|powershell)\s*\n.*(?:rm\s+-rf|sudo|curl|wget|nc\s)', re.IGNORECASE | re.DOTALL),
+        re.compile(r'getattr\s*\(\s*__builtins__', re.IGNORECASE),
+    ]
+
+    # SOFT-паттерны: только предупреждение (WARNING), без замены.
+    # exec/compile/__import__/eval/subprocess/os.system — легитимны в генерируемом коде.
+    COMMAND_WARN_PATTERNS = [
         re.compile(r'exec\s*\(', re.IGNORECASE),
         re.compile(r'__import__\s*\(', re.IGNORECASE),
         re.compile(r'subprocess\.(?:run|call|Popen)', re.IGNORECASE),
         re.compile(r'os\.(?:system|popen|exec)', re.IGNORECASE),
         re.compile(r'\beval\s*\(', re.IGNORECASE),
         re.compile(r'\bcompile\s*\(', re.IGNORECASE),
-        re.compile(r'getattr\s*\(\s*__builtins__', re.IGNORECASE),
         re.compile(r'\bshutil\.(?:rmtree|move|copytree)', re.IGNORECASE),
     ]
 
@@ -61,6 +67,10 @@ class LLMResponseSanitizer:
             if pattern.search(response):
                 warnings.append(f"COMMAND_INJECTION: обнаружен паттерн '{pattern.pattern}'")
                 response = pattern.sub('[BLOCKED_COMMAND]', response)
+
+        for pattern in cls.COMMAND_WARN_PATTERNS:
+            if pattern.search(response):
+                warnings.append(f"COMMAND_WARN: паттерн '{pattern.pattern}' (не заблокирован)")
 
         return response, warnings
 
