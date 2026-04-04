@@ -205,7 +205,12 @@ class SelfRepairSystem:
                     f"Перезапуск '{component}' запрещён — сервис не в whitelist. "
                     f"Разрешены: {', '.join(sorted(_ALLOWED_SERVICES))}")
 
-            cmd = f"sc start {component}" if self._is_windows() else f"systemctl restart {component}"
+            # Безопасная передача как list — без shell-интерполяции
+            if self._is_windows():
+                cmd_list = ['sc', 'start', component]
+            else:
+                cmd_list = ['systemctl', 'restart', component]
+            cmd = ' '.join(cmd_list)  # текстовое представление для логов/sandbox
 
             # Проверяем команду в sandbox перед выполнением
             if self.sandbox:
@@ -614,7 +619,7 @@ class SelfRepairSystem:
         self._log(f'[SelfRepair] smoke_runner провалился, откат: {summary}')
         return False, f'smoke_runner провалился после правки ядра: {summary}'
 
-    def _run_tests_for_file(self, abs_path: str, bak_path: str) -> tuple[bool, str]:
+    def _run_tests_for_file(self, abs_path: str, _bak_path: str) -> tuple[bool, str]:
         """
         Запускает pytest для тестов, относящихся к пропатченному файлу.
         Ищет tests/test_<module>.py. Если тестов нет — пропускает (не блокирует).

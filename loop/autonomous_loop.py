@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -2845,7 +2846,7 @@ try:
 except FileNotFoundError:
     print("Файл памяти не найден — агент на холодном старте")
 except Exception as e:
-    self._log_exc("print_fallback", e)
+    print(f"Ошибка при чтении памяти: {e}")
 ```"""
         ),
 
@@ -2949,22 +2950,19 @@ result = {'success': True, 'status': 'non_actionable', 'skipped': True}
             """\
 ```python
 import datetime, zoneinfo
-city_tz = {
-    'тель': 'Asia/Jerusalem', 'tel': 'Asia/Jerusalem', 'israel': 'Asia/Jerusalem',
-    'нью': 'America/New_York', 'new york': 'America/New_York', 'nyc': 'America/New_York',
-    'москв': 'Europe/Moscow', 'moscow': 'Europe/Moscow',
-    'лондон': 'Europe/London', 'london': 'Europe/London',
-    'берлин': 'Europe/Berlin', 'berlin': 'Europe/Berlin',
-    'париж': 'Europe/Paris', 'paris': 'Europe/Paris',
-}
-goal_l = goal.lower()
-tz_name = next((tz for key, tz in city_tz.items() if key in goal_l), None)
-if tz_name:
+cities = [
+    ('Тель-Авив', 'Asia/Jerusalem'),
+    ('Нью-Йорк', 'America/New_York'),
+    ('Москва', 'Europe/Moscow'),
+    ('Лондон', 'Europe/London'),
+    ('Берлин', 'Europe/Berlin'),
+    ('Париж', 'Europe/Paris'),
+]
+print("Текущее время в городах:")
+for name, tz_name in cities:
     tz = zoneinfo.ZoneInfo(tz_name)
     now = datetime.datetime.now(tz)
-    print(f"Текущее время: {now.strftime('%H:%M %Z')} ({tz_name})")
-else:
-    print(f"Текущее UTC время: {datetime.datetime.utcnow().strftime('%H:%M UTC')}")
+    print(f"  {name:12s} {now.strftime('%H:%M %Z')}")
 ```"""
         ),
 
@@ -2979,13 +2977,10 @@ else:
 import os
 has_creds = bool(os.environ.get('EMAIL_USERNAME') or os.environ.get('GMAIL_USER'))
 if has_creds:
-    print(f"EMAIL: пробуем выполнить через email tool (EMAIL_USERNAME задан)")
-    result = tools.use('email', action='unread') if 'непрочитан' in goal.lower() else tools.use('email', action='search', query=goal)
-    print(result)
+    print("EMAIL: credentials настроены. Используйте email tool для работы с почтой.")
 else:
     print("BLOCKED: для работы с Gmail нужен EMAIL_USERNAME и EMAIL_PASSWORD в .env или credentials.json")
     print("Задача не может быть выполнена через web-поиск.")
-    result = {'success': False, 'status': 'blocked', 'reason': 'Email credentials not configured'}
 ```"""
         ),
 
@@ -3000,13 +2995,10 @@ import os
 has_creds = bool(os.environ.get('GOOGLE_CALENDAR_CREDENTIALS') or
                  os.path.exists('config/credentials.json'))
 if has_creds:
-    print("CALENDAR: пробуем выполнить через calendar tool")
-    result = tools.use('calendar', action='list', query=goal)
-    print(result)
+    print("CALENDAR: credentials настроены. Используйте calendar tool для работы.")
 else:
     print("BLOCKED: для работы с Google Calendar нужен credentials.json с OAuth токеном")
     print("Задача не может быть выполнена через web-поиск.")
-    result = {'success': False, 'status': 'blocked', 'reason': 'Calendar credentials not configured'}
 ```"""
         ),
 
@@ -3032,6 +3024,23 @@ else:
         for keywords, template in self._dynamic_skills:
             if any(kw in goal_l for kw in keywords):
                 matched = next(kw for kw in keywords if kw in goal_l)
+                # SECURITY: AST-валидация dynamic skill перед исполнением
+                _code_block = re.search(r'```python\n(.+?)```', template, re.DOTALL)
+                if _code_block:
+                    try:
+                        from safety.hardening import ContentSanitizer
+                        _ok, _reason = ContentSanitizer.validate_python(_code_block.group(1))
+                        if not _ok:
+                            self._log(
+                                f"[plan] DYNAMIC_SKILL '{matched}' заблокирован: {_reason}"
+                            )
+                            continue
+                    except ImportError:
+                        self._log(
+                            f"[plan] DYNAMIC_SKILL '{matched}' заблокирован: "
+                            f"ContentSanitizer недоступен"
+                        )
+                        continue
                 self._log(
                     f"[plan] DYNAMIC_SKILL: ключевое слово '{matched}' → "
                     f"выученный шаблон (без LLM)."
@@ -4136,6 +4145,20 @@ else:
         """Считает частоту каждой ошибки. При достижении порога — авто-кодифицирует."""
         if not errors:
             return
+        # Ограничиваем рост словарей ошибок (защита от утечки памяти)
+        if len(self._error_hit_counter) > 200:
+            top_keys = sorted(
+                self._error_hit_counter,
+                key=lambda k: self._error_hit_counter[k],
+                reverse=True,
+            )[:100]
+            self._error_hit_counter = {
+                k: self._error_hit_counter[k] for k in top_keys
+            }
+            self._error_goal_keywords = {
+                k: v for k, v in self._error_goal_keywords.items()
+                if k in self._error_hit_counter
+            }
         goal_words = [
             w for w in (str(self._goal or '') + ' ' +
                         str(self._subgoal_queue[0] if self._subgoal_queue else '')).lower().split()
@@ -4205,27 +4228,57 @@ else:
         if 'timeout' in msg or 'timed out' in msg:
             return {
                 'keywords': ['timeout', 'retry'],
-                'code': 'import time; time.sleep(5)  # retry after timeout',
+                'code': (
+                    '```python\n'
+                    'print("Timeout detected in previous operation.")\n'
+                    'print("Retrying with reduced scope in next cycle.")\n'
+                    '```'
+                ),
             }
         if 'permission' in msg or 'access denied' in msg:
             return {
                 'keywords': ['permission', 'access'],
-                'code': 'import os; print(f"Check permissions: {os.getcwd()}")',
+                'code': (
+                    '```python\n'
+                    'import os\n'
+                    'cwd = os.getcwd()\n'
+                    'can_write = os.access(cwd, os.W_OK)\n'
+                    'print(f"Working directory: {cwd}")\n'
+                    'print(f"Write permission: {can_write}")\n'
+                    '```'
+                ),
             }
         if 'not found' in msg or 'no such file' in msg or 'filenotfounderror' in msg:
             return {
                 'keywords': ['file', 'missing', 'path'],
-                'code': 'import os; os.makedirs(os.path.dirname(path), exist_ok=True)',
+                'code': (
+                    '```python\n'
+                    'import os\n'
+                    'os.makedirs("outputs", exist_ok=True)\n'
+                    'print(f"Директория outputs/ создана")\n'
+                    '```'
+                ),
             }
         if 'connection' in msg or 'network' in msg or 'refused' in msg:
             return {
                 'keywords': ['network', 'connection', 'retry'],
-                'code': 'import time; time.sleep(10)  # network retry backoff',
+                'code': (
+                    '```python\n'
+                    'print("Network/connection error detected.")\n'
+                    'print("Will retry in next cycle with fallback.")\n'
+                    '```'
+                ),
             }
         if 'memory' in msg or 'oom' in msg or 'killed' in msg:
             return {
                 'keywords': ['memory', 'oom'],
-                'code': 'import gc; gc.collect()  # attempt memory cleanup',
+                'code': (
+                    '```python\n'
+                    'import gc\n'
+                    'collected = gc.collect()\n'
+                    'print(f"Memory cleanup: {collected} objects collected")\n'
+                    '```'
+                ),
             }
         return None
 
@@ -4252,7 +4305,6 @@ else:
         )
         # P1: дублируем в StructuredSkillRegistry для приоритетного поиска
         try:
-            from skills.structured_skills import StructuredSkill
             structured = StructuredSkill.from_legacy(keywords, code)
             if not self.structured_skills.has(structured.name):
                 self.structured_skills.register(structured)
@@ -4773,7 +4825,6 @@ else:
         if not self.telegram_bot or not self.telegram_chat_id:
             return
         try:
-            import hashlib
             jobs_file = os.path.join('outputs', 'upwork_jobs.txt')
             if not os.path.exists(jobs_file):
                 return
