@@ -1,5 +1,0 @@
-Python test timestamp: 2026-04-03T10:39:59.464674Z
-CPU percent: 10.3
-Memory: total=16716918784, available=7447007232, used=9269911552
-Disk C: total=509722226688, used=297573781504, free=212148445184
-Current working directory: C:\Users\andre\Downloads\agent

@@ -1,1 +1,0 @@
-"\n".join([f"PID: {process.info['pid']}, Name: {process.info['name']}, Status: {process.info['status']}" for process in processes])

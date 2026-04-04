@@ -1,8 +1,0 @@
-{
-  "filesystem": true,
-  "translate": true,
-  "network": false,
-  "http_client": true,
-  "nlp": true,
-  "self_monitor": true
-}

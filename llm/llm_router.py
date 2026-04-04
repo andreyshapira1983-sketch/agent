@@ -47,9 +47,12 @@ CHEAP_PROMPT_CHARS = 2500
 # Если промпт длиннее этого порога — задача считается тяжёлой
 HEAVY_PROMPT_CHARS = 12000
 # Сколько символов от начала промпта проверяем на HEAVY_KEYWORDS.
-# Контекст/история добавляются ПОСЛЕ инструкции, поэтому ключевые слова
-# из фонового описания агента не должны влиять на классификацию.
-HEAVY_KEYWORD_SCAN_CHARS = 800
+# Снижено до 400: фоновый контекст агента (описывающий архитектуру, стратегию)
+# попадал в первые 800 символов и ложно маркировал лёгкие задачи как тяжёлые.
+HEAVY_KEYWORD_SCAN_CHARS = 400
+# Промпт короче этого порога НЕ считается тяжёлым по ключевым словам,
+# даже если слова найдены — короткий промпт = простая задача.
+HEAVY_KEYWORD_MIN_LENGTH = 3000
 
 
 class LLMRouter:
@@ -81,8 +84,8 @@ class LLMRouter:
         self._local = local_client          # локальный LLM (in-process backend) или None
         self.monitoring = monitoring
 
-        mode = os.environ.get('LLM_ROUTER_MODE', 'llm-first').strip().lower()
-        self._mode = mode if mode in {'balanced', 'local-first', 'llm-first'} else 'llm-first'
+        mode = os.environ.get('LLM_ROUTER_MODE', 'balanced').strip().lower()
+        self._mode = mode if mode in {'balanced', 'local-first', 'llm-first'} else 'balanced'
 
         # Дневной бюджетный лимит (USD). 0 = local-only (API не вызывается).
         try:
@@ -116,12 +119,13 @@ class LLMRouter:
     def _local_available(self) -> bool:
         if self._local is None:
             return False
-        # Не используем локальный Qwen если RAM > 92% — выгружаем и отдаём задачу облаку.
-        # 85% было слишком агрессивно: Qwen 1.5B занимает ~1.5 GB,
-        # и при 88% памяти модель выгружалась сразу после загрузки.
+        # Проверяем RAM: если > 90% — не грузим/выгружаем модель.
+        # Порог совпадает с LOCAL_LLM_UNLOAD_THRESHOLD чтобы не было цикла
+        # "роутер считает доступной → infer грузит → infer выгружает → повтор".
+        _ram_limit = float(os.environ.get('LOCAL_LLM_UNLOAD_THRESHOLD', '90'))
         try:
             _psutil = importlib.import_module('psutil')
-            if _psutil.virtual_memory().percent > 92.0:
+            if _psutil.virtual_memory().percent > _ram_limit:
                 try:
                     getattr(self._local, 'unload')()
                 except (AttributeError, TypeError):
@@ -238,18 +242,20 @@ class LLMRouter:
 
     def _is_heavy(self, prompt: str, system: str | None) -> bool:
         """Возвращает True если задача считается тяжёлой."""
-        # Маркер в system-сообщении
+        # Маркер в system-сообщении — явный запрос тяжёлого LLM
         if system and '[HEAVY]' in system:
             return True
-        # Длинный промпт
+        # Длинный промпт — задача объёмная
         if len(prompt) > HEAVY_PROMPT_CHARS:
             return True
-        # Ключевые слова проверяем только в начале промпта (инструкция),
-        # а не во всём контексте/истории — иначе фоновое описание архитектуры
-        # агента делает каждый вызов «тяжёлым».
-        scan_head = (prompt or '')[:HEAVY_KEYWORD_SCAN_CHARS]
-        if _HEAVY_KEYWORDS.search(scan_head):
-            return True
+        # Ключевые слова проверяем только если промпт достаточно длинный.
+        # Короткий промпт (< HEAVY_KEYWORD_MIN_LENGTH) — это простая задача,
+        # даже если в контексте агента есть слова "архитектура"/"стратегия".
+        prompt_len = len(prompt or '')
+        if prompt_len >= HEAVY_KEYWORD_MIN_LENGTH:
+            scan_head = (prompt or '')[:HEAVY_KEYWORD_SCAN_CHARS]
+            if _HEAVY_KEYWORDS.search(scan_head):
+                return True
         return False
 
     def _is_cheap(self, prompt: str, system: str | None) -> bool:

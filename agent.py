@@ -168,7 +168,7 @@ def build_agent(
     # ── Env vars ──────────────────────────────────────────────────────────────
     openai_key       = os.environ.get("OPENAI_API_KEY", "")
     anthropic_key    = os.environ.get("ANTHROPIC_API_KEY", "")
-    local_llm_disabled = os.environ.get("LOCAL_LLM_DISABLED", "1").strip().lower() in {
+    local_llm_disabled = os.environ.get("LOCAL_LLM_DISABLED", "0").strip().lower() in {
         "1", "true", "yes", "on"
     }
     tg_token         = os.environ.get("TELEGRAM", "")
@@ -223,8 +223,8 @@ def build_agent(
     _openai_client = None
     if openai_key:
         from llm.openai_client import OpenAIClient
-        # Пробуем запрошенную модель, при ошибке "model not found" — падаем на gpt-4o
-        _model_candidates = [model, "gpt-4o", "gpt-4o-mini"]
+        # Пробуем запрошенную модель, при ошибке "model not found" — падаем на gpt-5.1
+        _model_candidates = [model, "gpt-5.1"]
         _seen = set()
         _model_candidates = [m for m in _model_candidates if not (m in _seen or _seen.add(m))]
         for _candidate in _model_candidates:

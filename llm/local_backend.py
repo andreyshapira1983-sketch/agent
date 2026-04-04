@@ -49,6 +49,7 @@ class LocalNeuralBackend:
         self._model: Any = None
         self._device = "cpu"
         self._load_error = ""
+        self._unloaded_by_ram = False  # True если модель выгружена из-за нехватки RAM
 
     def infer(self, prompt: str, context=None, system: str | None = None,
               history: list | None = None, max_tokens: int | None = None) -> str:
@@ -126,13 +127,14 @@ class LocalNeuralBackend:
                 _ram_pct = _psutil.virtual_memory().percent
             except (ImportError, AttributeError, TypeError, ValueError, RuntimeError, OSError):
                 _ram_pct = 100.0  # нет psutil — выгружаем безопасно
-            _unload_threshold = float(os.environ.get("LOCAL_LLM_UNLOAD_THRESHOLD", "75"))
+            _unload_threshold = float(os.environ.get("LOCAL_LLM_UNLOAD_THRESHOLD", "90"))
             if _ram_pct > _unload_threshold:
                 if self.monitoring:
                     self.monitoring.info(
                         f"[local_backend] RAM {_ram_pct:.0f}% > {_unload_threshold:.0f}% — выгружаю Qwen",
                         source="local_backend",
                     )
+                self._unloaded_by_ram = True
                 self.unload()
 
         sanitized, _warns = _Sanitizer.sanitize(text.strip())
@@ -148,11 +150,12 @@ class LocalNeuralBackend:
                 "loaded": False,
                 "error": "transformers/torch не установлены",
             }
+        loaded = self._model is not None and self._tokenizer is not None
         return {
-            "ok": True,
+            "ok": loaded or (not self._load_error and not self._unloaded_by_ram),
             "backend": "transformers",
             "model": self.model,
-            "loaded": self._model is not None and self._tokenizer is not None,
+            "loaded": loaded,
             "device": self._device,
             "error": self._load_error,
         }
@@ -223,6 +226,7 @@ class LocalNeuralBackend:
                 self._model.to(self._device)
             self._model.eval()
             self._load_error = ""
+            self._unloaded_by_ram = False
             if self.monitoring:
                 self.monitoring.info(
                     f"Local transformers model loaded: {self.model} on {self._device}",
