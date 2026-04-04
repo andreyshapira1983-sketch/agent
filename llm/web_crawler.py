@@ -35,6 +35,7 @@ class WebCrawler:
         self.max_content_kb = max_content_kb
         self.delay = delay
         self._last_request = 0.0
+        self._throttle_lock = __import__('threading').Lock()
 
         try:
             requests = importlib.import_module('requests')
@@ -78,14 +79,21 @@ class WebCrawler:
             }
 
         self._throttle()
+        # Изолируем cookies между fetch()-вызовами
+        session = self._new_session()
         try:
-            resp = self._session.get(url, timeout=self.timeout, allow_redirects=True)
+            resp = self._safe_get(session, url)
+            if resp is None:
+                return {
+                    'url': url, 'title': '', 'text': '',
+                    'links': [], 'status': 0,
+                    'success': False,
+                    'error': 'Redirect привёл к заблокированному URL (SSRF protection)',
+                }
             self._last_request = time.time()
 
-            if len(resp.content) > self.max_content_kb * 1024:
-                content = resp.content[:self.max_content_kb * 1024]
-            else:
-                content = resp.content
+            # Streaming: ограничиваем размер до max_content_kb
+            content = self._read_limited(resp)
 
             result = self._parse_html(url, content, resp.headers.get('content-type', ''))
             result['status'] = resp.status_code
@@ -96,7 +104,7 @@ class WebCrawler:
             return {
                 'url': url, 'title': '', 'text': '',
                 'links': [], 'status': 0,
-                'success': False, 'error': str(e),
+                'success': False, 'error': str(e)[:200],
             }
 
     def crawl(self, start_url: str, depth: int = 1,
@@ -171,9 +179,67 @@ class WebCrawler:
             return {'url': url, 'title': '', 'text': text, 'links': []}
 
     def _throttle(self):
-        elapsed = time.time() - self._last_request
-        if elapsed < self.delay:
-            time.sleep(self.delay - elapsed)
+        with self._throttle_lock:
+            elapsed = time.time() - self._last_request
+            if elapsed < self.delay:
+                time.sleep(self.delay - elapsed)
+
+    def _new_session(self):
+        """Создаёт изолированную сессию (без утечки cookies между сайтами)."""
+        s = self._requests.Session()
+        s.headers.update(self._session.headers)
+        return s
+
+    def _safe_get(self, session, url: str, max_redirects: int = 5):
+        """GET с ручным follow-redirect — проверяем каждый hop через NetworkGuard."""
+        current_url = url
+        for _ in range(max_redirects):
+            resp = session.get(current_url, timeout=self.timeout,
+                               allow_redirects=False, stream=True)
+            if resp.is_redirect or resp.is_permanent_redirect:
+                location = resp.headers.get('Location', '')
+                if not location:
+                    return resp
+                next_url = urljoin(current_url, location)
+                if not self._is_safe_url(next_url):
+                    resp.close()
+                    return None  # redirect к внутреннему IP — блокируем
+                current_url = next_url
+                resp.close()
+                continue
+            return resp
+        # Слишком много редиректов
+        return None
+
+    def _read_limited(self, resp) -> bytes:
+        """Читает тело ответа с ограничением по размеру (streaming)."""
+        max_bytes = self.max_content_kb * 1024
+        chunks = []
+        total = 0
+        try:
+            for chunk in resp.iter_content(chunk_size=8192):
+                if not chunk:
+                    continue
+                remaining = max_bytes - total
+                if remaining <= 0:
+                    break
+                chunks.append(chunk[:remaining])
+                total += len(chunk[:remaining])
+        finally:
+            resp.close()
+        return b''.join(chunks)
+
+    def _fetch_with_retry(self, url: str, retries: int = 2) -> dict:
+        """fetch() с повторами при 5xx / connection-ошибках."""
+        last_result: dict = {}
+        for attempt in range(retries + 1):
+            last_result = self.fetch(url)
+            status = last_result.get('status', 0)
+            if last_result.get('success') or (400 <= status < 500):
+                return last_result
+            if attempt < retries:
+                time.sleep(1.0 * (attempt + 1))  # простой backoff
+        return last_result
 
     def _is_safe_url(self, url: str) -> bool:
         """Блокирует SSRF-цели через централизованный NetworkGuard."""

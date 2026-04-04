@@ -51,45 +51,41 @@ def _resolve_public_ips(hostname: str, port: int | None = None) -> set[str]:
             or ip.is_reserved
             or ip.is_unspecified
         ):
-            return set()
+            continue  # Фильтруем небезопасные IP, а не отклоняем весь хост
         safe_ips.add(str(ip))
+    # Если есть ТОЛЬКО небезопасные IP и ни одного публичного — отклоняем
     return safe_ips
 
 
 class _PinnedDNS:
-    """Временный DNS pinning: разрешает целевой host только в заранее одобренные IP."""
+    """Временный DNS pinning: разрешает целевой host только в заранее одобренные IP.
+
+    БЕЗОПАСНАЯ версия: не патчит глобальный socket.getaddrinfo.
+    Вместо этого проверяет результат resolve и блокирует неодобренные IP.
+    """
 
     def __init__(self, hostname: str, allowed_ips: set[str]):
         self.hostname = str(hostname or '').strip().lower()
         self.allowed_ips = set(allowed_ips or set())
-        self._orig = None
 
     def __enter__(self):
-        self._orig = socket.getaddrinfo
-        orig = self._orig
-
-        def _patched(host, *args, **kwargs):
-            if orig is None:
-                raise socket.gaierror('DNS pinning unavailable')
-            host_str = str(host or '').strip().lower()
-            infos = orig(host, *args, **kwargs)
-            if host_str != self.hostname:
-                return infos
-            filtered = []
-            for info in infos:
-                ip_s = str(info[4][0])
-                if ip_s in self.allowed_ips:
-                    filtered.append(info)
-            if not filtered:
-                raise socket.gaierror(f'DNS pin mismatch for {self.hostname}')
-            return filtered
-
-        socket.getaddrinfo = _patched
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        if self._orig is not None:
-            socket.getaddrinfo = self._orig
+        pass
+
+    def verify(self, host: str, port: int = 80) -> None:
+        """Проверяет что DNS для host резолвится только в allowed IPs."""
+        host_str = str(host or '').strip().lower()
+        if host_str != self.hostname:
+            return
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+        for info in infos:
+            ip_s = str(info[4][0])
+            if ip_s not in self.allowed_ips:
+                raise socket.gaierror(
+                    f'DNS pin mismatch for {self.hostname}: {ip_s} not in allowed set'
+                )
 
 
 def _html_to_text(html: str, max_chars: int | None = None) -> str:
@@ -155,17 +151,20 @@ def _http_get(url: str, timeout: int = 15, headers: dict | None = None) -> str |
         for k, v in headers.items():
             req.add_header(k, v)
     try:
-        # DNS pinning на время connect/request: блокирует rebinding на приватные IP.
-        with _DNS_PIN_LOCK:
-            with _PinnedDNS(host, pinned_ips):
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    raw = resp.read()
-                    charset = 'utf-8'
-                    ct = resp.headers.get('Content-Type', '')
-                    m = re.search(r'charset=([^\s;]+)', ct)
-                    if m:
-                        charset = m.group(1)
-                    return raw.decode(charset, errors='replace')
+        # DNS pinning: проверяем что resolve не ушёл на приватный IP (anti-rebinding)
+        pin = _PinnedDNS(host, pinned_ips)
+        pin.verify(host, port)
+        _MAX_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MB — защита от OOM
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read(_MAX_RESPONSE_BYTES + 1)
+            if len(raw) > _MAX_RESPONSE_BYTES:
+                return None  # слишком большой ответ
+            charset = 'utf-8'
+            ct = resp.headers.get('Content-Type', '')
+            m = re.search(r'charset=([^\s;]+)', ct)
+            if m:
+                charset = m.group(1)
+            return raw.decode(charset, errors='replace')
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, OSError):
         return None
 

@@ -42,9 +42,13 @@ _CHEAP_KEYWORDS = re.compile(
 )
 
 # Промпт дешевле этого порога — кандидат на локальный LLM
-CHEAP_PROMPT_CHARS = 1200
+CHEAP_PROMPT_CHARS = 2500
 # Если промпт длиннее этого порога — задача считается тяжёлой
 HEAVY_PROMPT_CHARS = 12000
+# Сколько символов от начала промпта проверяем на HEAVY_KEYWORDS.
+# Контекст/история добавляются ПОСЛЕ инструкции, поэтому ключевые слова
+# из фонового описания агента не должны влиять на классификацию.
+HEAVY_KEYWORD_SCAN_CHARS = 800
 
 
 class LLMRouter:
@@ -76,8 +80,16 @@ class LLMRouter:
         self._local = local_client          # локальный LLM (in-process backend) или None
         self.monitoring = monitoring
 
-        mode = os.environ.get('LLM_ROUTER_MODE', 'balanced').strip().lower()
-        self._mode = mode if mode in {'balanced', 'local-first', 'llm-first'} else 'balanced'
+        mode = os.environ.get('LLM_ROUTER_MODE', 'local-first').strip().lower()
+        self._mode = mode if mode in {'balanced', 'local-first', 'llm-first'} else 'local-first'
+
+        # Дневной бюджетный лимит (USD). 0 = local-only (API не вызывается).
+        try:
+            self._daily_budget_usd = float(os.environ.get('LLM_DAILY_BUDGET_USD', '0.0'))
+        except (ValueError, TypeError):
+            self._daily_budget_usd = 0.0
+        # budget=0 → сразу включаем режим "только local"
+        self._budget_exhausted = (self._daily_budget_usd == 0.0)
 
         # Статистика маршрутизации
         self._routed_light = 0
@@ -101,10 +113,12 @@ class LLMRouter:
     def _local_available(self) -> bool:
         if self._local is None:
             return False
-        # Не используем локальный Qwen если RAM > 85% — выгружаем и отдаём задачу облаку
+        # Не используем локальный Qwen если RAM > 92% — выгружаем и отдаём задачу облаку.
+        # 85% было слишком агрессивно: Qwen 1.5B занимает ~1.5 GB,
+        # и при 88% памяти модель выгружалась сразу после загрузки.
         try:
             _psutil = importlib.import_module('psutil')
-            if _psutil.virtual_memory().percent > 85.0:
+            if _psutil.virtual_memory().percent > 92.0:
                 try:
                     getattr(self._local, 'unload')()
                 except (AttributeError, TypeError):
@@ -125,6 +139,28 @@ class LLMRouter:
               history: list | None = None,
               max_tokens: int | None = None) -> str:
         """Выбирает клиент и вызывает infer()."""
+        # ── Budget guard: дневной лимит расходов ─────────────────────────────
+        if self._daily_budget_usd > 0 and not self._budget_exhausted:
+            spent = self.total_cost_usd
+            if spent >= self._daily_budget_usd:
+                self._budget_exhausted = True
+                if self.monitoring:
+                    self.monitoring.warning(
+                        f"[router] BUDGET EXHAUSTED: ${spent:.4f} >= "
+                        f"${self._daily_budget_usd:.2f} — только local",
+                        source="llm_router",
+                    )
+        # Если бюджет исчерпан — только локальный (бесплатный)
+        if self._budget_exhausted:
+            if self._local is not None and self._local_available():
+                self._routed_local += 1
+                return self._local.infer(prompt, context=context, system=system,
+                                         history=history, max_tokens=max_tokens)
+            raise RuntimeError(
+                f"Дневной бюджет LLM исчерпан (${self.total_cost_usd:.4f} "
+                f">= ${self._daily_budget_usd:.2f}), локальный LLM недоступен"
+            )
+
         ordered_clients = self._build_priority(prompt, system)
         last_error = None
         for client_name, client in ordered_clients:
@@ -191,8 +227,11 @@ class LLMRouter:
         # Длинный промпт
         if len(prompt) > HEAVY_PROMPT_CHARS:
             return True
-        # Ключевые слова
-        if _HEAVY_KEYWORDS.search(prompt):
+        # Ключевые слова проверяем только в начале промпта (инструкция),
+        # а не во всём контексте/истории — иначе фоновое описание архитектуры
+        # агента делает каждый вызов «тяжёлым».
+        scan_head = (prompt or '')[:HEAVY_KEYWORD_SCAN_CHARS]
+        if _HEAVY_KEYWORDS.search(scan_head):
             return True
         return False
 

@@ -4,6 +4,7 @@
 # pylint: disable=broad-except
 
 
+import time
 import uuid
 from enum import Enum
 
@@ -92,19 +93,33 @@ class TaskGraph:
     def to_list(self) -> list[dict]:
         return [t.to_dict() for t in self._nodes.values()]
 
-    def expand_node(self, task_id: str, subtasks: list['Subtask']):
+    def expand_node(self, task_id: str, subtasks: list['Subtask'],
+                     max_depth: int = 4, max_nodes: int = 64) -> bool:
         """
         Рекурсивное расширение: помечает узел как SKIPPED и добавляет подузлы.
 
         Используется когда подзадача оказалась слишком сложной и сама требует
         декомпозиции. Подузлы не имеют зависимостей (готовы к выполнению сразу).
+
+        Returns:
+            True если расширение выполнено, False если заблокировано лимитами.
         """
         original = self._nodes.get(task_id)
+        new_depth = (original.depth + 1) if original else 0
+        if new_depth >= max_depth:
+            self._rejection_reason = ('MAX_DEPTH', new_depth, max_depth)
+            return False
+        if len(self._nodes) + len(subtasks) > max_nodes:
+            self._rejection_reason = ('MAX_TOTAL_NODES',
+                                      len(self._nodes) + len(subtasks), max_nodes)
+            return False
+        self._rejection_reason = None
         if original:
             original.status = SubtaskStatus.SKIPPED
         for sub in subtasks:
-            sub.depth = (original.depth + 1) if original else 0
+            sub.depth = new_depth
             self._nodes[sub.task_id] = sub
+        return True
 
     def topological_order(self) -> list[Subtask]:
         """Топологическая сортировка задач (порядок выполнения без параллелизма)."""
@@ -143,7 +158,16 @@ class TaskDecompositionEngine:
         - Orchestration (Слой 18)      — исполнение декомпозированных задач
         - Agent System (Слой 4)        — делегирование подзадач агентам
         - Autonomous Loop (Слой 20)    — декомпозиция в фазе plan
+
+    OWNERSHIP CONTRACT:
+        Владеет: TaskGraph (внутри вызова decompose/execute_graph).
+        НЕ владеет: Goal-объектами (GoalManager), Roadmap-ами (LongHorizonPlanning).
+        Принимает goal (строку) от AutonomousLoop, не мутирует внешние структуры.
+        TaskGraph персистентен между циклами — хранится в AutonomousLoop._task_graph.
     """
+
+    MAX_DEPTH = 4            # жёсткий лимит глубины рекурсивной декомпозиции
+    MAX_TOTAL_NODES = 64     # максимум узлов в одном TaskGraph
 
     def __init__(self, cognitive_core=None, agent_system=None, monitoring=None):
         self.cognitive_core = cognitive_core
@@ -167,6 +191,8 @@ class TaskDecompositionEngine:
         """
         self._log(f"Декомпозиция: '{goal[:60]}'")
         graph = TaskGraph()
+        self._trace('decompose_start', goal=goal[:120],
+                    max_subtasks=max_subtasks, has_llm=bool(self.cognitive_core))
 
         if not self.cognitive_core:
             return self._decompose_deterministic(goal, max_subtasks)
@@ -209,7 +235,9 @@ class TaskDecompositionEngine:
                             context: dict | None = None) -> TaskGraph:
         """
         Рекурсивная декомпозиция: каждую подзадачу разбивает ещё раз до depth уровней.
+        depth ограничен MAX_DEPTH, общее число узлов — MAX_TOTAL_NODES.
         """
+        depth = min(depth, self.MAX_DEPTH)
         root_graph = self.decompose(goal, context=context)
 
         if depth <= 1:
@@ -217,15 +245,27 @@ class TaskDecompositionEngine:
 
         all_tasks = root_graph.to_list()
         for t_dict in all_tasks:
+            if len(root_graph._nodes) >= self.MAX_TOTAL_NODES:
+                self._log(f"Лимит узлов ({self.MAX_TOTAL_NODES}) достигнут, остановка рекурсии")
+                self._trace('decompose_recursive_stop', reason='MAX_TOTAL_NODES',
+                            current_nodes=len(root_graph._nodes))
+                break
+            if t_dict['depth'] >= self.MAX_DEPTH - 1:
+                self._trace('decompose_recursive_skip', task_id=t_dict['task_id'],
+                            reason='MAX_DEPTH', depth=t_dict['depth'])
+                continue
             if t_dict['depth'] < depth - 1:
                 sub_graph = self.decompose(t_dict['goal'], max_subtasks=4)
                 for sub_task_dict in sub_graph.to_list():
+                    if len(root_graph._nodes) >= self.MAX_TOTAL_NODES:
+                        break
                     task = Subtask(
                         task_id=sub_task_dict['task_id'],
                         goal=sub_task_dict['goal'],
                         role=sub_task_dict.get('role'),
                         depends_on=[t_dict['task_id']],
                         priority=sub_task_dict.get('priority', 2),
+                        metadata={'parent_goal': goal},
                     )
                     task.depth = t_dict['depth'] + 1
                     root_graph.add(task)
@@ -368,7 +408,7 @@ class TaskDecompositionEngine:
                 role=role,
                 depends_on=deps,
                 priority=priority,
-                metadata={'parent_goal': goal[:100], 'template': task_type},
+                metadata={'parent_goal': goal, 'template': task_type},
             )
             task.depth = len(deps)
             graph.add(task)
@@ -379,7 +419,7 @@ class TaskDecompositionEngine:
         """Парсит список подзадач из ответа LLM."""
         import re
         subtasks = []
-        lines = [l.strip() for l in raw.splitlines() if l.strip()]
+        lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
         current = {}
 
         for line in lines:
@@ -535,3 +575,9 @@ class TaskDecompositionEngine:
             self.monitoring.info(message, source='task_decomposition')
         else:
             print(f"[TaskDecomposition] {message}")
+
+    def _trace(self, action: str, **ctx):
+        """Structured traceability: почему была выбрана именно эта декомпозиция."""
+        entry = {'ts': time.time(), 'layer': 30, 'component': 'TaskDecomposition',
+                 'action': action, **ctx}
+        self._log(f"[TRACE] {entry}")

@@ -8,6 +8,7 @@ import tempfile
 import threading
 import types
 import unittest
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -64,6 +65,9 @@ class _Mon:
 
     def info(self, msg, source=''):
         self.events.append(('info', str(msg), source))
+
+    def warning(self, msg, source=''):
+        self.events.append(('warning', str(msg), source))
 
     def error(self, msg, source=''):
         self.events.append(('error', str(msg), source))
@@ -131,7 +135,7 @@ class TelegramBotCoverageTests(unittest.TestCase):
 
     def test_request_approval_no_allowed_ids(self):
         bot = TelegramBot(token='tok', allowed_chat_ids=[])
-        self.assertTrue(bot.request_approval('x', {'a': 1}))
+        self.assertFalse(bot.request_approval('x', {'a': 1}))
 
     def test_request_approval_timeout_and_answered(self):
         bot = self.make_bot()
@@ -167,9 +171,9 @@ class TelegramBotCoverageTests(unittest.TestCase):
         self.assertEqual(len(ups), 1)
         self.assertEqual(bot._offset, 6)
 
+        # ok=false → теперь возвращает [] и логирует, а не бросает
         bot._session.post_queue = [_Resp({'ok': False, 'description': 'bad'})]
-        with self.assertRaises(RuntimeError):
-            bot._get_updates()
+        self.assertEqual(bot._get_updates(), [])
 
         bot._session.post_queue = [ValueError('boom')]
         self.assertEqual(bot._get_updates(), [])
@@ -678,7 +682,7 @@ class TelegramBotCoverageTests(unittest.TestCase):
         self.assertIn('Команды', bot._help_text())
         self.assertIn('Привет', bot._welcome_text())
         bot.personality = 'p'
-        self.assertIn('conv:', bot._welcome_text())
+        self.assertIn('infer:', bot._welcome_text())
 
     def test_status_budget_goal_run_stop_search_verify(self):
         mon = SimpleNamespace(summary=lambda: {'total_logs': 1, 'errors': 0, 'core_smoke': {'passed': 1, 'failed': 0, 'last_event': {'message': 'ok'}}})
@@ -831,7 +835,7 @@ class TelegramBotCoverageTests(unittest.TestCase):
         bot.send = MagicMock(return_value=True)
         bot._handle_document(1, {'file_id': 'd', 'file_name': 'a.txt', 'mime_type': 'text/plain'}, '', 'a', 'u')
 
-        txt = bot._format_document_chat_input('f.txt', 'preview', 'cap', 2)
+        txt = bot._format_document_chat_input('f.txt', 'preview', 'оцени', 2)
         self.assertIn('Не проси прислать файл заново', txt)
 
         bot._handle_sticker(1, {'emoji': '🙂'}, 'a')
@@ -988,6 +992,179 @@ class TelegramBotCoverageTests(unittest.TestCase):
         with patch('builtins.print') as p:
             bot3._log('hello')
         p.assert_called()
+
+
+class TelegramBotBehaviorTests(unittest.TestCase):
+    """Сценарные/поведенческие тесты — проверяют смысл поведения, а не ветки."""
+
+    def make_bot(self, **kwargs):
+        bot = TelegramBot(token='tok', allowed_chat_ids=[1], **kwargs)
+        bot._session = _Session()
+        return bot
+
+    # ── HTML escaping ─────────────────────────────────────────────────────────
+
+    def test_escape_html_special_chars(self):
+        bot = self.make_bot()
+        self.assertEqual(bot._escape('<script>alert(1)</script>'),
+                         '&lt;script&gt;alert(1)&lt;/script&gt;')
+        self.assertEqual(bot._escape('a & b < c > d'),
+                         'a &amp; b &lt; c &gt; d')
+
+    # ── _detect_file_intent: default=analyze ──────────────────────────────────
+
+    def test_file_intent_empty_caption_is_analyze(self):
+        """Пустая подпись → analyze (безопасный режим по умолчанию)."""
+        self.assertEqual(TelegramBot._detect_file_intent(''), 'analyze')
+        self.assertEqual(TelegramBot._detect_file_intent(None), 'analyze')
+
+    def test_file_intent_analyze_keywords(self):
+        self.assertEqual(TelegramBot._detect_file_intent('оцени'), 'analyze')
+        self.assertEqual(TelegramBot._detect_file_intent('что думаешь'), 'analyze')
+        self.assertEqual(TelegramBot._detect_file_intent('проверь'), 'analyze')
+
+    def test_file_intent_execute_only_explicit(self):
+        self.assertEqual(TelegramBot._detect_file_intent('выполни'), 'execute')
+        self.assertEqual(TelegramBot._detect_file_intent('сделай как написано'), 'execute')
+
+    def test_file_intent_ambiguous_is_analyze(self):
+        """Неясная подпись → analyze (fail-safe)."""
+        self.assertEqual(TelegramBot._detect_file_intent('вот файлик'), 'analyze')
+        self.assertEqual(TelegramBot._detect_file_intent('для тебя'), 'analyze')
+
+    # ── send() split ──────────────────────────────────────────────────────────
+
+    def test_send_short_message_single_api_call(self):
+        bot = self.make_bot()
+        bot._api = MagicMock(return_value=True)
+        bot.send(1, 'short text')
+        bot._api.assert_called_once()
+
+    def test_send_long_message_splits(self):
+        bot = self.make_bot()
+        calls = []
+        bot._api = lambda method, payload: (calls.append(payload), True)[-1]
+        long_text = 'line\n' * 1200  # ~6000 chars > 4096
+        bot.send(1, long_text)
+        self.assertGreaterEqual(len(calls), 2)
+        for c in calls:
+            self.assertLessEqual(len(c['text']), 4096)
+
+    # ── _get_updates contract: never raises ───────────────────────────────────
+
+    def test_get_updates_ok_false_returns_empty(self):
+        bot = self.make_bot()
+        bot._session.post_queue = [_Resp({'ok': False, 'description': 'Unauthorized'})]
+        result = bot._get_updates()
+        self.assertEqual(result, [])
+
+    def test_get_updates_network_error_returns_empty(self):
+        bot = self.make_bot()
+        bot._session.post_queue = [requests.RequestException('timeout')]
+        result = bot._get_updates()
+        self.assertEqual(result, [])
+
+    # ── approval: double-resolve protection ───────────────────────────────────
+
+    def test_resolve_approval_double_resolve_ignored(self):
+        bot = self.make_bot()
+        ev = threading.Event()
+        with bot._approvals_lock:
+            bot._pending_approvals['a1'] = {'event': ev, 'result': False}
+        bot._resolve_approval('a1', True)
+        self.assertTrue(ev.is_set())
+        # Второй вызов — ignored, result не меняется
+        bot._resolve_approval('a1', False)
+        with bot._approvals_lock:
+            entry = bot._pending_approvals.get('a1')
+        self.assertTrue(entry['result'])  # остался True от первого вызова
+
+    def test_resolve_approval_unknown_id_noop(self):
+        bot = self.make_bot()
+        # Не должен падать
+        bot._resolve_approval('nonexistent', True)
+
+    # ── monitoring fix: uses self.monitoring, not self._monitoring ─────────────
+
+    def test_request_approval_empty_chats_uses_monitoring(self):
+        mon = _Mon()
+        bot = TelegramBot(token='tok', allowed_chat_ids=[], monitoring=mon)
+        result = bot.request_approval('test', 'payload')
+        self.assertFalse(result)
+        # Теперь monitoring.warning реально вызывается
+        self.assertTrue(any('request_approval' in str(e) for e in mon.events))
+
+    # ── log data privacy ──────────────────────────────────────────────────────
+
+    def test_log_masks_token(self):
+        mon = _Mon()
+        bot = self.make_bot(monitoring=mon)
+        bot._log('Error at https://api.telegram.org/bottok/getMe')
+        last_msg = mon.events[-1][1]
+        self.assertNotIn('tok', last_msg.replace('***TOKEN***', ''))
+
+
+class TelegramSinkTests(unittest.TestCase):
+    """Тесты для telegram_sink.py."""
+
+    def test_escape_html(self):
+        from llm.telegram_sink import TelegramSink
+        self.assertEqual(TelegramSink._escape_html('<b>test</b>'),
+                         '&lt;b&gt;test&lt;/b&gt;')
+
+    def test_format_escapes_source_and_message(self):
+        from llm.telegram_sink import TelegramSink
+        sink = TelegramSink.__new__(TelegramSink)
+        sink.token = 'test_token'
+        entry = {'level': 'ERROR', 'source': '<xss>', 'message': 'a & b', 'time_str': '12:00'}
+        text = sink._format(entry)
+        self.assertNotIn('<xss>', text)
+        self.assertIn('&lt;xss&gt;', text)
+        self.assertIn('a &amp; b', text)
+
+    def test_send_returns_false_when_no_requests(self):
+        from llm.telegram_sink import TelegramSink
+        sink = TelegramSink.__new__(TelegramSink)
+        sink.token = 'test'
+        sink._lock = threading.Lock()
+        sink._error_count = 0
+        # Simulate requests=None
+        import llm.telegram_sink as _mod
+        orig = _mod.requests
+        try:
+            _mod.requests = None
+            result = sink._send('test')
+            self.assertFalse(result)
+        finally:
+            _mod.requests = orig
+
+    def test_write_tracks_evictions(self):
+        from llm.telegram_sink import TelegramSink
+        sink = TelegramSink.__new__(TelegramSink)
+        sink.token = 'test'
+        sink.chat_id = '1'
+        sink.min_level = 'ERROR'
+        sink._lock = threading.Lock()
+        sink._queue = deque(maxlen=2)
+        sink._dropped_count = 0
+        sink._stop_event = threading.Event()
+        sink._last_send = 0.0
+        # Fill queue to max
+        sink.write({'level': 'ERROR', 'message': 'a'})
+        sink.write({'level': 'ERROR', 'message': 'b'})
+        self.assertEqual(sink._dropped_count, 0)
+        # This one evicts 'a'
+        sink.write({'level': 'ERROR', 'message': 'c'})
+        self.assertEqual(sink._dropped_count, 1)
+
+    def test_should_send_filters_by_level(self):
+        from llm.telegram_sink import TelegramSink
+        sink = TelegramSink.__new__(TelegramSink)
+        sink.min_level = 'WARNING'
+        self.assertTrue(sink._should_send('ERROR'))
+        self.assertTrue(sink._should_send('WARNING'))
+        self.assertFalse(sink._should_send('INFO'))
+        self.assertFalse(sink._should_send('UNKNOWN'))
 
 
 if __name__ == '__main__':

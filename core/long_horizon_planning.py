@@ -47,6 +47,19 @@ class HorizonScale(Enum):
     QUARTER = 'quarter' # 1–3 месяца
     YEAR   = 'year'     # > 3 месяца
 
+    @property
+    def days(self) -> int:
+        return _HORIZON_DAYS[self]
+
+
+_HORIZON_DAYS: dict['HorizonScale', int] = {
+    HorizonScale.DAY: 1,
+    HorizonScale.WEEK: 7,
+    HorizonScale.MONTH: 30,
+    HorizonScale.QUARTER: 90,
+    HorizonScale.YEAR: 365,
+}
+
 
 class Milestone:
     """Контрольная точка в долгосрочном плане."""
@@ -80,6 +93,9 @@ class Milestone:
 class Roadmap:
     """Дорожная карта — долгосрочный план достижения цели."""
 
+    # TTL по умолчанию зависит от горизонта (horizon_days * 2, но не менее 1 дня)
+    _HORIZON_TTL_MULTIPLIER = 2
+
     def __init__(self, roadmap_id: str, title: str, goal: str,
                  horizon: HorizonScale, start_date: float | None = None):
         self.roadmap_id = roadmap_id
@@ -94,6 +110,11 @@ class Roadmap:
         self.status = 'active'
         self.created_at = time.time()
         self.metrics = PlanMetrics()
+
+        self.ttl_sec: float = max(86400, horizon.days * 86400 * self._HORIZON_TTL_MULTIPLIER)
+
+    def is_stale(self) -> bool:
+        return time.time() - self.created_at > self.ttl_sec
 
     @property
     def overall_progress(self) -> float:
@@ -140,6 +161,12 @@ class LongHorizonPlanning:
         - Autonomous Loop (Слой 20)      — проверяет дедлайны в каждом цикле
         - Reflection System (Слой 10)    — обновляет прогресс
         - Knowledge System (Слой 2)      — сохраняет планы
+
+    OWNERSHIP CONTRACT:
+        Владеет: _roadmaps (дорожные карты, milestones, metrics).
+        НЕ владеет: Goal-объектами (GoalManager), TaskGraph-ами (TaskDecomposition).
+        Может предложить roadmap через offer_promotion() → GoalManager.promote_advisory().
+        НЕ может напрямую создавать Goal или менять _active_goal_id.
     """
 
     def __init__(self, cognitive_core=None, goal_manager=None,
@@ -151,12 +178,40 @@ class LongHorizonPlanning:
 
         self._roadmaps: dict[str, Roadmap] = {}
         self._counter = 0
+    # ── Сталость и очистка ─────────────────────────────────────────
 
+    def invalidate_stale_roadmaps(self) -> int:
+        """Архивирует дорожные карты, у которых истёк TTL. Возвращает количество архивированных."""
+        stale_ids = [
+            rm_id for rm_id, rm in self._roadmaps.items()
+            if rm.status == 'active' and rm.is_stale()
+        ]
+        for rm_id in stale_ids:
+            rm = self._roadmaps[rm_id]
+            rm.status = 'stale'
+            self._trace('invalidate_stale', roadmap_id=rm_id,
+                        goal=rm.goal[:80], age_sec=round(time.time() - rm.created_at),
+                        ttl_sec=round(rm.ttl_sec))
+            self._log(f"Roadmap [{rm_id}] помечен как stale (TTL истёк)")
+        return len(stale_ids)
+
+    def invalidate_for_goal(self, old_goal: str) -> int:
+        """Архивирует все активные roadmaps, привязанные к сменившейся цели."""
+        invalidated = 0
+        for rm in self._roadmaps.values():
+            if rm.status == 'active' and rm.goal == old_goal:
+                rm.status = 'invalidated'
+                invalidated += 1
+                self._trace('invalidate_goal_switch', roadmap_id=rm.roadmap_id,
+                            old_goal=old_goal[:80])
+                self._log(f"Roadmap [{rm.roadmap_id}] инвалидирован (цель изменилась)")
+        return invalidated
     # ── Создание дорожных карт ────────────────────────────────────────────────
 
     def create_roadmap(self, title: str, goal: str,
                        horizon: HorizonScale = HorizonScale.MONTH) -> Roadmap:
-        """Создаёт пустую дорожную карту."""
+        """Создаёт пустую дорожную карту. Перед созданием чистит stale-карты."""
+        self.invalidate_stale_roadmaps()
         self._counter += 1
         rm_id = f"rm{self._counter:04d}"
         rm = Roadmap(roadmap_id=rm_id, title=title, goal=goal, horizon=horizon)
@@ -180,11 +235,7 @@ class LongHorizonPlanning:
         )
 
         if not self.cognitive_core:
-            horizon_days = {
-                HorizonScale.DAY: 1, HorizonScale.WEEK: 7, HorizonScale.MONTH: 30,
-                HorizonScale.QUARTER: 90, HorizonScale.YEAR: 365,
-            }[horizon]
-            rm.phases = self._plan_deterministic(goal, horizon_days)
+            rm.phases = self._plan_deterministic(goal, horizon.days)
             for phase in rm.phases[:n_milestones]:
                 self.add_milestone(
                     rm.roadmap_id,
@@ -194,10 +245,7 @@ class LongHorizonPlanning:
                 )
             return rm
 
-        horizon_days = {
-            HorizonScale.DAY: 1, HorizonScale.WEEK: 7, HorizonScale.MONTH: 30,
-            HorizonScale.QUARTER: 90, HorizonScale.YEAR: 365,
-        }[horizon]
+        horizon_days = horizon.days
 
         is_strategic = self._is_strategic_goal(goal)
 
@@ -247,17 +295,10 @@ class LongHorizonPlanning:
         )
 
         if not self.cognitive_core:
-            rm.phases = self._plan_deterministic(
-                goal, {HorizonScale.DAY: 1, HorizonScale.WEEK: 7,
-                       HorizonScale.MONTH: 30, HorizonScale.QUARTER: 90,
-                       HorizonScale.YEAR: 365}[horizon]
-            )
+            rm.phases = self._plan_deterministic(goal, horizon.days)
             return rm
 
-        horizon_days = {
-            HorizonScale.DAY: 1, HorizonScale.WEEK: 7, HorizonScale.MONTH: 30,
-            HorizonScale.QUARTER: 90, HorizonScale.YEAR: 365,
-        }[horizon]
+        horizon_days = horizon.days
 
         prompt = (
             f"Ты — автономный агент. Тебе нужна формальная стратегия:\n\n"
@@ -483,14 +524,7 @@ class LongHorizonPlanning:
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _add_default_milestones(self, rm: Roadmap, n: int):
-        days_map = {
-            HorizonScale.DAY: 1,
-            HorizonScale.WEEK: 7,
-            HorizonScale.MONTH: 30,
-            HorizonScale.QUARTER: 90,
-            HorizonScale.YEAR: 365,
-        }
-        total_days = days_map.get(rm.horizon, 30)
+        total_days = rm.horizon.days
         for i in range(1, n + 1):
             days = total_days * i / n
             self.add_milestone(
@@ -693,6 +727,34 @@ class LongHorizonPlanning:
             self.monitoring.info(message, source='long_horizon_planning')
         else:
             print(f"[LongHorizonPlanning] {message}")
+
+    def _trace(self, action: str, **ctx):
+        """Structured traceability: почему было принято именно это решение."""
+        entry = {'ts': time.time(), 'layer': 38, 'component': 'LongHorizonPlanning',
+                 'action': action, **ctx}
+        self._log(f"[TRACE] {entry}")
+
+    def offer_promotion(self, roadmap_id: str) -> dict | None:
+        """
+        PROMOTION RULE: предлагает roadmap для промоушена в Goal.
+
+        НЕ создаёт Goal самостоятельно — возвращает dict для
+        GoalManager.promote_advisory().
+
+        Returns:
+            dict с полями roadmap если подходит, None если нет.
+        """
+        rm = self._roadmaps.get(roadmap_id)
+        if not rm or rm.status != 'active':
+            return None
+        if rm.is_stale():
+            rm.status = 'stale'
+            self._trace('offer_reject', roadmap_id=roadmap_id, reason='stale')
+            return None
+        eu = rm.metrics.expected_utility()
+        self._trace('offer_promotion', roadmap_id=roadmap_id, eu=eu,
+                    goal=rm.goal[:80])
+        return rm.to_dict()
 
 
 # Alias for compatibility

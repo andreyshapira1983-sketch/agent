@@ -90,17 +90,45 @@ class EvaluationSystem:
     def evaluate(self, name: str, output: str, criteria: list[str],
                  reference: str | None = None) -> EvalResult:
         """
-        Оценивает вывод агента по критериям через LLM-judge.
+        Оценивает вывод агента по критериям.
 
-        Args:
-            name      — имя теста
-            output    — что агент вернул
-            criteria  — список критериев ('точность', 'полнота', 'краткость', ...)
-            reference — эталонный ответ для сравнения (опционально)
+        Сначала — бесплатная локальная эвристика (длина, ключевые слова, структура).
+        Если локальная оценка уверена (score ≥ 0.8 или ≤ 0.2) — принимает решение БЕЗ LLM.
+        Если неуверена — вызывает LLM-judge (платный).
         """
+        # ── Этап 1: Локальная эвристика (бесплатно) ──────────────────────────
+        t_start = time.time()
+        local_score = self._local_heuristic_score(output, criteria, reference)
+        local_latency = round((time.time() - t_start) * 1000)
+
+        # Уверенный результат — не тратим деньги на LLM
+        if local_score is not None and (local_score >= 0.8 or local_score <= 0.2):
+            status = (EvalStatus.PASS if local_score >= self.pass_threshold
+                      else EvalStatus.PARTIAL if local_score >= 0.4
+                      else EvalStatus.FAIL)
+            result = EvalResult(name, status, score=local_score,
+                                details='local_heuristic (no LLM cost)',
+                                metadata={
+                                    'latency_ms': local_latency,
+                                    'score_method': 'local_heuristic',
+                                    'criteria_count': len(criteria),
+                                    'llm_saved': True,
+                                })
+            self._store(result)
+            self.record_kpi('eval.latency_ms', local_latency)
+            self.record_kpi('eval.call_count', 1)
+            self.record_kpi('eval.score', local_score)
+            self._log(f"Оценка '{name}': {status.value}, score={local_score:.2f}, "
+                      f"method=local_heuristic, latency={local_latency}ms (LLM не нужен)")
+            return result
+
+        # ── Этап 2: LLM-judge (только если локальная не уверена) ─────────────
         if not self.cognitive_core:
-            result = EvalResult(name, EvalStatus.PARTIAL, score=None,
-                                details='cognitive_core не подключён — оценка недоступна')
+            score = local_score if local_score is not None else None
+            status = (EvalStatus.PASS if score is not None and score >= self.pass_threshold
+                      else EvalStatus.PARTIAL)
+            result = EvalResult(name, status, score=score,
+                                details='cognitive_core не подключён — только локальная оценка')
             self._store(result)
             return result
 
@@ -359,6 +387,69 @@ class EvaluationSystem:
 
     def _store(self, result: EvalResult):
         self._results.append(result)
+
+    # ── Локальная эвристика: бесплатная оценка без LLM ───────────────────────
+
+    def _local_heuristic_score(self, output: str, criteria: list[str],
+                                reference: str | None = None) -> float | None:
+        """
+        Бесплатная локальная оценка качества ответа.
+
+        Проверяет: длину, наличие ключевых слов из критериев, структуру,
+        совпадение с эталоном. Возвращает 0.0–1.0 если уверена, иначе None.
+        """
+        if not output or not output.strip():
+            return 0.0  # пустой ответ — однозначно плохо
+
+        output_lower = output.lower().strip()
+        signals = []  # список (weight, passed_bool)
+
+        # 1. Минимальная длина — пустышки и отписки
+        signals.append((0.15, len(output_lower) >= 20))
+
+        # 2. Нет ли это отписка / заглушка
+        _STUB_PHRASES = (
+            'зависит от контекста', 'cannot provide', 'не могу предоставить',
+            'к сожалению', 'unfortunately', 'i apologize', 'as an ai',
+            'как языковая модель', 'placeholder', 'заглушка', 'todo',
+            'код выше', 'см. выше', 'пример ниже',
+        )
+        is_stub = any(p in output_lower for p in _STUB_PHRASES)
+        signals.append((0.2, not is_stub))
+
+        # 3. Ключевые слова из критериев встречаются в ответе
+        if criteria:
+            crit_words = set()
+            for c in criteria:
+                for w in c.lower().split():
+                    if len(w) > 3:
+                        crit_words.add(w)
+            if crit_words:
+                hits = sum(1 for w in crit_words if w in output_lower)
+                ratio = hits / len(crit_words)
+                signals.append((0.25, ratio >= 0.3))
+
+        # 4. Структура: есть кодовые блоки, списки, или подзаголовки
+        has_structure = bool(
+            '```' in output or '\n- ' in output or '\n* ' in output or
+            '\n1.' in output or '##' in output or 'import ' in output
+        )
+        signals.append((0.15, has_structure or len(output) < 200))
+
+        # 5. Совпадение с эталоном (если есть)
+        if reference and reference.strip():
+            ref_words = set(reference.lower().split())
+            out_words = set(output_lower.split())
+            if ref_words:
+                overlap = len(ref_words & out_words) / len(ref_words)
+                signals.append((0.25, overlap >= 0.3))
+
+        # Взвешенный score
+        if not signals:
+            return None
+        total_weight = sum(w for w, _ in signals)
+        weighted = sum(w for w, ok in signals if ok) / total_weight if total_weight else 0.0
+        return round(weighted, 2)
 
     def _parse_score(self, text: str) -> tuple[float | None, str]:
         """

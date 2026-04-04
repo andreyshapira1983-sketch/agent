@@ -597,7 +597,7 @@ class TelegramSinkCoverageTests(unittest.TestCase):
         self.assertTrue(sink._should_send("CRITICAL"))
         self.assertFalse(sink._should_send("UNKNOWN"))
 
-        fake_requests = types.SimpleNamespace(post=lambda *args, **kwargs: types.SimpleNamespace(status_code=200), RequestException=RuntimeError)
+        fake_requests = types.SimpleNamespace(post=lambda *args, **kwargs: types.SimpleNamespace(status_code=200, json=lambda: {'ok': True}), RequestException=RuntimeError)
         with patch("llm.telegram_sink.requests", fake_requests), \
              patch("llm.telegram_sink._REQUEST_EXCEPTIONS", (RuntimeError, OSError)):
             self.assertTrue(sink.send_message("hello"))

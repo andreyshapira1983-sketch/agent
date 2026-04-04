@@ -60,6 +60,7 @@ class CADTool(BaseTool):
     )
 
     def __init__(self, openscad_path: str | None = None):
+        super().__init__(name=self.name, description=self.description)
         path = openscad_path or os.environ.get('OPENSCAD_PATH')
         self._openscad = _find_openscad(path)
 
@@ -163,7 +164,7 @@ class CADTool(BaseTool):
             fe = Frontend(RenderContext(doc), backend)  # type: ignore[call-arg]
             fe.draw_layout(msp)
             with open(svg_path, 'w', encoding='utf-8') as f:
-                f.write(backend.get_string(page, Settings()))  # type: ignore[call-arg]
+                f.write(backend.get_string(page, settings=Settings()))  # pyright: ignore[reportCallIssue]
             return {'ok': True, 'output': svg_path}
         except Exception as e:
             return {'ok': False, 'error': str(e)}
@@ -193,9 +194,9 @@ class CADTool(BaseTool):
             f.write(scad_script)
             scad_file = f.name
         try:
-            r = subprocess.run(
+            r = subprocess.run(  # noqa: S603
                 [self._openscad, '-o', output, scad_file],
-                capture_output=True, text=True, timeout=timeout,
+                capture_output=True, text=True, timeout=timeout, check=False,
             )
             return {
                 'ok': r.returncode == 0, 'output': output,
@@ -214,9 +215,9 @@ class CADTool(BaseTool):
         if not self._openscad:
             return {'ok': False, 'error': 'OpenSCAD не найден. https://openscad.org/downloads.html'}
         try:
-            r = subprocess.run(
+            r = subprocess.run(  # noqa: S603
                 [self._openscad, '-o', output, scad_path],
-                capture_output=True, text=True, timeout=timeout,
+                capture_output=True, text=True, timeout=timeout, check=False,
             )
             return {
                 'ok': r.returncode == 0, 'output': output,
@@ -255,7 +256,7 @@ class CADTool(BaseTool):
 
     # ─── run() dispatcher ────────────────────────────────────────────────────
 
-    def run(self, action: str = 'read_dxf', **params) -> dict:
+    def run(self, *args, action: str = 'read_dxf', **params) -> dict:
         """
         action:
           create_dxf | read_dxf | dxf_to_svg |

@@ -1,6 +1,7 @@
 # State & Session Management (управление состоянием) — Слой 23
 # Архитектура автономного AI-агента
 # Хранение контекста сессии, checkpoint/resume, идемпотентность, восстановление после сбоев.
+# Формальная state machine с валидацией переходов (formal_contracts_spec §11).
 # pylint: disable=broad-except
 
 
@@ -8,6 +9,7 @@ import os
 import time
 import json
 import copy
+import threading
 from enum import Enum
 from typing import Callable
 
@@ -17,6 +19,160 @@ class SessionStatus(Enum):
     PAUSED    = 'paused'
     COMPLETED = 'completed'
     FAILED    = 'failed'
+
+
+class TaskState(Enum):
+    """Формальные статусы задачи (formal_contracts_spec §11)."""
+    CREATED            = 'created'
+    PLANNED            = 'planned'
+    AWAITING_APPROVAL  = 'awaiting_approval'
+    RUNNING            = 'running'
+    BLOCKED            = 'blocked'
+    FAILED             = 'failed'
+    COMPLETED          = 'completed'
+    CANCELLED          = 'cancelled'
+
+
+class InvalidTransitionError(Exception):
+    """Попытка недопустимого перехода в state machine."""
+
+
+# ── Формальная таблица допустимых переходов ───────────────────────────────────
+# Ключ: текущее состояние → множество допустимых целевых состояний.
+# Согласно formal_contracts_spec §11:
+#   - created → completed запрещён
+#   - awaiting_approval → running без approval запрещён
+#   - failed → completed без explicit recovery запрещён
+_VALID_TRANSITIONS: dict[TaskState, set[TaskState]] = {
+    TaskState.CREATED: {
+        TaskState.PLANNED,
+        TaskState.CANCELLED,
+        TaskState.BLOCKED,
+        TaskState.FAILED,
+        # created → completed ЗАПРЕЩЁН (spec §11)
+    },
+    TaskState.PLANNED: {
+        TaskState.AWAITING_APPROVAL,
+        TaskState.RUNNING,
+        TaskState.BLOCKED,
+        TaskState.CANCELLED,
+        TaskState.FAILED,
+    },
+    TaskState.AWAITING_APPROVAL: {
+        TaskState.RUNNING,     # только с valid approval (проверяется отдельно)
+        TaskState.CANCELLED,
+        TaskState.BLOCKED,
+        TaskState.FAILED,
+    },
+    TaskState.RUNNING: {
+        TaskState.COMPLETED,
+        TaskState.FAILED,
+        TaskState.BLOCKED,
+        TaskState.CANCELLED,
+    },
+    TaskState.BLOCKED: {
+        TaskState.RUNNING,
+        TaskState.PLANNED,     # replanning после разблокировки
+        TaskState.CANCELLED,
+        TaskState.FAILED,
+    },
+    TaskState.FAILED: {
+        # failed → completed запрещён без recovery (spec §11)
+        # failed → running через explicit recovery path
+        TaskState.RUNNING,     # recovery path
+        TaskState.PLANNED,     # replan recovery path
+        TaskState.CANCELLED,
+    },
+    TaskState.COMPLETED: set(),   # терминальное состояние — переходов нет
+    TaskState.CANCELLED: set(),    # терминальное состояние — переходов нет
+}
+
+
+class TaskStateMachine:
+    """Формальная state machine для задачи с валидацией переходов.
+
+    Отвечает за:
+    - отслеживание текущего состояния задачи
+    - блокировку невалидных переходов (InvalidTransitionError)
+    - иммутабельный лог всех переходов (transition_history)
+    - thread-safe мутации через lock
+    """
+
+    def __init__(self, task_id: str, initial_state: TaskState = TaskState.CREATED):
+        self.task_id = task_id
+        self._state = initial_state
+        self._lock = threading.Lock()
+        self._history: list[dict] = [{
+            'from': None,
+            'to': initial_state.value,
+            'ts': time.time(),
+            'reason': 'init',
+        }]
+
+    @property
+    def state(self) -> TaskState:
+        return self._state
+
+    def transition(self, target: TaskState, reason: str = '',
+                   approval_valid: bool = False) -> TaskState:
+        """Выполняет переход в целевое состояние.
+
+        Args:
+            target          — целевое состояние
+            reason          — причина перехода (для аудита)
+            approval_valid  — есть ли валидный approval token
+                              (требуется для awaiting_approval → running)
+
+        Raises:
+            InvalidTransitionError — если переход не допустим
+
+        Returns:
+            Новое состояние.
+        """
+        with self._lock:
+            old = self._state
+            allowed = _VALID_TRANSITIONS.get(old, set())
+
+            if target not in allowed:
+                raise InvalidTransitionError(
+                    f"Переход {old.value} → {target.value} запрещён для task '{self.task_id}'. "
+                    f"Допустимые переходы из {old.value}: "
+                    f"{', '.join(s.value for s in allowed) or 'нет (терминальное)'}"
+                )
+
+            # Специальные проверки по spec §11
+            if old == TaskState.AWAITING_APPROVAL and target == TaskState.RUNNING:
+                if not approval_valid:
+                    raise InvalidTransitionError(
+                        f"Переход awaiting_approval → running для task '{self.task_id}' "
+                        f"запрещён без valid approval token"
+                    )
+
+            self._state = target
+            self._history.append({
+                'from': old.value,
+                'to': target.value,
+                'ts': time.time(),
+                'reason': reason,
+            })
+            return target
+
+    @property
+    def transition_history(self) -> list[dict]:
+        """Иммутабельная копия истории переходов."""
+        return list(self._history)
+
+    def can_transition(self, target: TaskState) -> bool:
+        """Проверяет допустимость перехода без выполнения."""
+        allowed = _VALID_TRANSITIONS.get(self._state, set())
+        return target in allowed
+
+    def to_dict(self) -> dict:
+        return {
+            'task_id': self.task_id,
+            'current_state': self._state.value,
+            'history': list(self._history),
+        }
 
 
 class Checkpoint:
@@ -53,15 +209,17 @@ class Session:
         self.context: dict = {}           # текущий контекст
         self.checkpoints: list[Checkpoint] = []
         self.history: list[dict] = []     # лог всех шагов
+        self._step_lock = threading.Lock()  # защита от concurrent mutation
 
     def advance(self, step_data: dict | None = None):
-        """Переходит к следующему шагу."""
-        self.step += 1
-        self.updated_at = time.time()
-        entry = {'step': self.step, 'timestamp': self.updated_at, 'data': step_data or {}}
-        self.history.append(entry)
-        if step_data:
-            self.context.update(step_data)
+        """Переходит к следующему шагу (thread-safe)."""
+        with self._step_lock:
+            self.step += 1
+            self.updated_at = time.time()
+            entry = {'step': self.step, 'timestamp': self.updated_at, 'data': step_data or {}}
+            self.history.append(entry)
+            if step_data:
+                self.context.update(step_data)
 
     def to_dict(self):
         return {
@@ -108,6 +266,12 @@ class StateManager:
         self._sessions: dict[str, Session] = {}
         self._active_session_id: str | None = None
         self._completed_steps: set[str] = set()   # для идемпотентности
+        self._completed_steps_lock = threading.Lock()  # concurrent protection
+        self._session_lock = threading.Lock()
+
+        # Task state machines: task_id → TaskStateMachine
+        self._task_machines: dict[str, TaskStateMachine] = {}
+        self._task_machines_lock = threading.Lock()
 
         if persistence_path:
             self._load_from_disk()
@@ -119,8 +283,9 @@ class StateManager:
         import uuid
         session_id = str(uuid.uuid4())[:12]
         session = Session(session_id, goal=goal, metadata=metadata)
-        self._sessions[session_id] = session
-        self._active_session_id = session_id
+        with self._session_lock:
+            self._sessions[session_id] = session
+            self._active_session_id = session_id
         self._log(f"Сессия [{session_id}] создана. Цель: {goal or '—'}")
         return session
 
@@ -128,29 +293,32 @@ class StateManager:
         return self._sessions.get(session_id)
 
     def get_active(self) -> Session | None:
-        if not self._active_session_id:
-            return None
-        return self._sessions.get(self._active_session_id)
+        with self._session_lock:
+            if not self._active_session_id:
+                return None
+            return self._sessions.get(self._active_session_id)
 
     def set_active(self, session_id: str):
         """Переключает активную сессию."""
-        if session_id not in self._sessions:
-            raise KeyError(f"Сессия '{session_id}' не найдена")
-        self._active_session_id = session_id
+        with self._session_lock:
+            if session_id not in self._sessions:
+                raise KeyError(f"Сессия '{session_id}' не найдена")
+            self._active_session_id = session_id
         self._log(f"Активная сессия переключена на [{session_id}]")
 
     def close_session(self, session_id: str | None = None, success: bool = True):
         """Закрывает сессию."""
-        sid = session_id or self._active_session_id
-        if not sid:
-            return
-        session = self._sessions.get(sid)
-        if session:
-            session.status = SessionStatus.COMPLETED if success else SessionStatus.FAILED
-            session.updated_at = time.time()
-            self._log(f"Сессия [{sid}] закрыта: {session.status.value}")
-        if self._active_session_id == sid:
-            self._active_session_id = None
+        with self._session_lock:
+            sid = session_id or self._active_session_id
+            if not sid:
+                return
+            session = self._sessions.get(sid)
+            if session:
+                session.status = SessionStatus.COMPLETED if success else SessionStatus.FAILED
+                session.updated_at = time.time()
+                self._log(f"Сессия [{sid}] закрыта: {session.status.value}")
+            if self._active_session_id == sid:
+                self._active_session_id = None
 
     def list_sessions(self) -> list[dict]:
         return [s.to_dict() for s in self._sessions.values()]
@@ -220,21 +388,76 @@ class StateManager:
     # ── Идемпотентность ───────────────────────────────────────────────────────
 
     def mark_done(self, step_key: str):
-        """Помечает шаг как выполненный (защита от двойного запуска)."""
-        self._completed_steps.add(step_key)
+        """Помечает шаг как выполненный (защита от двойного запуска). Thread-safe."""
+        with self._completed_steps_lock:
+            self._completed_steps.add(step_key)
 
     def is_done(self, step_key: str) -> bool:
-        """Проверяет, был ли шаг уже выполнен."""
-        return step_key in self._completed_steps
+        """Проверяет, был ли шаг уже выполнен. Thread-safe."""
+        with self._completed_steps_lock:
+            return step_key in self._completed_steps
 
     def run_once(self, step_key: str, func: Callable, *args, **kwargs):
-        """Выполняет func только если шаг ещё не был выполнен."""
-        if self.is_done(step_key):
-            self._log(f"Шаг '{step_key}' уже выполнен — пропуск (идемпотентность)")
-            return None
-        result = func(*args, **kwargs)
-        self.mark_done(step_key)
-        return result
+        """Выполняет func только если шаг ещё не был выполнен. Thread-safe."""
+        with self._completed_steps_lock:
+            if step_key in self._completed_steps:
+                self._log(f"Шаг '{step_key}' уже выполнен — пропуск (идемпотентность)")
+                return None
+            # помечаем ДО выполнения (optimistic lock — предотвращает двойной запуск)
+            self._completed_steps.add(step_key)
+        try:
+            return func(*args, **kwargs)
+        except Exception:
+            # откатываем пометку при ошибке
+            with self._completed_steps_lock:
+                self._completed_steps.discard(step_key)
+            raise
+
+    # ── Task State Machine ────────────────────────────────────────────────────
+
+    def create_task_machine(self, task_id: str,
+                            initial_state: TaskState = TaskState.CREATED) -> TaskStateMachine:
+        """Создаёт state machine для задачи."""
+        with self._task_machines_lock:
+            if task_id in self._task_machines:
+                return self._task_machines[task_id]
+            machine = TaskStateMachine(task_id, initial_state)
+            self._task_machines[task_id] = machine
+            self._log(f"TaskStateMachine [{task_id}] создана в состоянии {initial_state.value}")
+            return machine
+
+    def get_task_machine(self, task_id: str) -> TaskStateMachine | None:
+        """Возвращает state machine задачи или None."""
+        return self._task_machines.get(task_id)
+
+    def transition_task(self, task_id: str, target: TaskState,
+                        reason: str = '', approval_valid: bool = False) -> TaskState:
+        """Выполняет переход состояния задачи. Создаёт machine если не существует.
+
+        Raises:
+            InvalidTransitionError — если переход не допустим.
+        """
+        with self._task_machines_lock:
+            machine = self._task_machines.get(task_id)
+            if not machine:
+                machine = TaskStateMachine(task_id)
+                self._task_machines[task_id] = machine
+        new_state = machine.transition(target, reason=reason,
+                                       approval_valid=approval_valid)
+        self._log(
+            f"Task [{task_id}] → {new_state.value}"
+            f"{f' ({reason})' if reason else ''}"
+        )
+        return new_state
+
+    def get_task_state(self, task_id: str) -> TaskState | None:
+        """Текущее состояние задачи."""
+        machine = self._task_machines.get(task_id)
+        return machine.state if machine else None
+
+    def list_task_machines(self) -> list[dict]:
+        """Возвращает состояние всех task machines."""
+        return [m.to_dict() for m in self._task_machines.values()]
 
     # ── Персистентность ───────────────────────────────────────────────────────
 

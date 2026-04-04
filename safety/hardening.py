@@ -36,10 +36,15 @@ class ContentSanitizer:
     # Опасные конструкции в Python-коде — AST-based (не обходятся обфускацией)
     _DANGEROUS_AST_CALLS = frozenset({
         'eval', 'exec', 'compile', 'execfile',
-        '__import__', 'getattr', 'setattr', 'delattr',
+        '__import__',
         'globals', 'locals', 'vars',
         # open — разрешён: PythonRuntimeTool подменяет open() на _safe_open (jail)
+        # getattr/setattr/delattr — проверяются отдельно: блокируются только
+        # при обращении к опасным атрибутам из _DANGEROUS_AST_ATTRS
     })
+
+    # Функции доступа к атрибутам — блокируем только если 2-й аргумент опасный
+    _ATTR_ACCESS_CALLS = frozenset({'getattr', 'setattr', 'delattr'})
 
     _DANGEROUS_AST_ATTRS = frozenset({
         '__class__', '__bases__', '__subclasses__', '__mro__',
@@ -60,6 +65,8 @@ class ContentSanitizer:
         re.compile(r'\bchmod\s+(777|\+s)\b', re.IGNORECASE),
         re.compile(r'(?:;|\||&&|`|\$\()', re.IGNORECASE),  # command chaining
         re.compile(r'\bbase64\s+-d\b|\bpython[23]?\s+-c\b', re.IGNORECASE),  # encoded exec
+        re.compile(r"\$'[^']*\\x[0-9a-fA-F]{2}", re.IGNORECASE),  # $'\xHH' hex-encoded args
+        re.compile(r'\\x[0-9a-fA-F]{2}', re.IGNORECASE),  # raw hex escape sequences
     ]
 
     @classmethod
@@ -82,6 +89,13 @@ class ContentSanitizer:
                 func_name = cls._get_call_name(node)
                 if func_name in cls._DANGEROUS_AST_CALLS:
                     return False, f'запрещённый вызов: {func_name}()'
+
+                # getattr/setattr/delattr — блокируем только если 2-й аргумент
+                # строковый литерал из _DANGEROUS_AST_ATTRS
+                if func_name in cls._ATTR_ACCESS_CALLS:
+                    attr_arg = cls._get_attr_arg(node)
+                    if attr_arg is not None and attr_arg in cls._DANGEROUS_AST_ATTRS:
+                        return False, f'запрещённый вызов: {func_name}(…, "{attr_arg}")' 
 
             # Проверяем доступ к опасным атрибутам
             if isinstance(node, ast.Attribute):
@@ -129,6 +143,19 @@ class ContentSanitizer:
         if isinstance(func, ast.Attribute):
             return func.attr
         return ''
+
+    @staticmethod
+    def _get_attr_arg(node: ast.Call) -> str | None:
+        """Извлекает 2-й аргумент (имя атрибута) из getattr/setattr/delattr.
+
+        Возвращает строку если аргумент — строковый литерал, иначе None.
+        """
+        # getattr(obj, 'name') / setattr(obj, 'name', val) — 2-й позиционный
+        if len(node.args) >= 2:
+            arg = node.args[1]
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                return arg.value
+        return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -280,24 +307,21 @@ class NetworkGuard:
         return True, 'OK'
 
     def _resolve(self, host: str, port: int | None = None) -> list[str]:
-        """DNS resolve с кэшем и таймаутом."""
+        """DNS resolve с кэшем и таймаутом (thread-safe, без глобального setdefaulttimeout)."""
         cache_key = f'{host}:{port or 80}'
         if cache_key in self._dns_cache:
             return self._dns_cache[cache_key]
 
-        old_timeout = socket.getdefaulttimeout()
-        socket.setdefaulttimeout(self._dns_timeout)
         try:
             infos = socket.getaddrinfo(
                 host, port or 80, proto=socket.IPPROTO_TCP,
             )
-            ips = list({info[4][0] for info in infos})
+            ips: list[str] = [str(info[4][0]) for info in infos]
+            ips = list(set(ips))
             self._dns_cache[cache_key] = ips
             return ips
         except (socket.gaierror, OSError):
             return []
-        finally:
-            socket.setdefaulttimeout(old_timeout)
 
     def clear_dns_cache(self):
         self._dns_cache.clear()
@@ -482,8 +506,9 @@ class ImmutableAuditLog:
     Файл — append-only, перезапись невозможна.
     """
 
-    def __init__(self, log_path: str):
+    def __init__(self, log_path: str, scrubber=None):
         self._path = log_path
+        self._scrubber = scrubber  # callable(str)->str — SecretsRedactor
         self._prev_hash: str = '0' * 64  # genesis
         os.makedirs(os.path.dirname(log_path) or '.', exist_ok=True)
 
@@ -504,11 +529,12 @@ class ImmutableAuditLog:
 
     def record(self, event_type: str, data: dict):
         """Записывает событие в immutable log."""
+        safe_data = self._scrub_data(data) if self._scrubber else data
         entry = {
             'ts': time.time(),
             'ts_iso': time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()),
             'type': event_type,
-            'data': data,
+            'data': safe_data,
             'prev_hash': self._prev_hash,
         }
         # Вычисляем hash этой записи
@@ -521,6 +547,23 @@ class ImmutableAuditLog:
                 f.write(json.dumps(entry, ensure_ascii=False) + '\n')
         except OSError:
             pass
+
+    def _scrub_data(self, data: dict) -> dict:
+        """Рекурсивно очищает data от секретов через scrubber."""
+        result = {}
+        for k, v in data.items():
+            if isinstance(v, str):
+                result[k] = self._scrubber(v)  # type: ignore[misc]
+            elif isinstance(v, dict):
+                result[k] = self._scrub_data(v)
+            elif isinstance(v, list):
+                result[k] = [
+                    self._scrubber(i) if isinstance(i, str) else i  # type: ignore[misc]
+                    for i in v
+                ]
+            else:
+                result[k] = v
+        return result
 
     def verify_integrity(self) -> tuple[bool, int, str]:
         """Проверяет целостность цепочки хешей.

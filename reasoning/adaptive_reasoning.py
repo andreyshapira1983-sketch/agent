@@ -15,7 +15,7 @@ from __future__ import annotations
 import time
 import re
 from enum import Enum
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -278,10 +278,11 @@ class IncompletenessDetector:
 
         # 2. Проверяем паттерны неопределённости в самой цели
         for pattern in self._VAGUE_PATTERNS:
-            if re.search(pattern, goal, re.IGNORECASE):
+            match = re.search(pattern, goal, re.IGNORECASE)
+            if match:
                 gaps.append(DataGap(
                     field='vague_reference',
-                    description=f'Неопределённая ссылка в цели: "{re.search(pattern, goal, re.IGNORECASE).group()}"',
+                    description=f'Неопределённая ссылка в цели: "{match.group()}"',
                     severity=0.6,
                     suggested_action='Уточни конкретное значение',
                 ))
@@ -342,7 +343,7 @@ class IncompletenessDetector:
         gaps = self.assess(goal, observation, analysis)
         return not any(g.severity >= severity_threshold for g in gaps)
 
-    def to_prompt_hint(self, gaps: list[DataGap], goal: str) -> str:
+    def to_prompt_hint(self, gaps: list[DataGap], _goal: str) -> str:
         """Формирует подсказку для LLM о пробелах в данных."""
         if not gaps:
             return ''
@@ -427,7 +428,7 @@ class DecisionRevisor:
         self,
         goal: str,
         current_plan: str | None,
-        analysis: str | None,
+        analysis: str | None,  # pylint: disable=unused-argument
         consecutive_failures: int,
         cycle_count: int,
         last_observation: dict | None = None,

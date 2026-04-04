@@ -96,7 +96,10 @@ class VoiceCallTool(BaseTool):
         message — текст, который робот произнесёт.
         """
         fr = from_number or self.twilio_from
-        twiml = f'<Response><Say language="{language}">{message}</Say></Response>'
+        import html as _html
+        safe_msg = _html.escape(str(message))
+        safe_lang = _html.escape(str(language))
+        twiml = f'<Response><Say language="{safe_lang}">{safe_msg}</Say></Response>'
         return self._twilio('/Calls.json', {'To': to, 'From': fr, 'Twiml': twiml})
 
     def twilio_sms(self, to: str, message: str,

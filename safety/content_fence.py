@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 
 # ── Паттерны indirect prompt injection ────────────────────────────────────────
 
@@ -66,9 +67,11 @@ def detect_injection(text: str) -> list[str]:
     """
     if not text:
         return []
+    # Нормализация Unicode — предотвращает обход через fullwidth/homoglyphs
+    normalized = unicodedata.normalize('NFKC', text)
     hits: list[str] = []
     for pattern in _INJECTION_PATTERNS:
-        m = pattern.search(text)
+        m = pattern.search(normalized)
         if m:
             hits.append(m.group(0)[:80])
     return hits

@@ -97,6 +97,7 @@ class TelegramBot:
         self.experience_replay: Any = None  # подключается позже через agent.py
         self.learning_system: Any = None    # подключается позже через agent.py
         self.reflection: Any = None         # подключается позже через agent.py
+        self.channel_bridge: Any = None     # кросс-канальный мост (подключается из agent.py)
 
         # TaskExecutor: прямое исполнение задач через tool_layer
         self._task_executor = None
@@ -114,11 +115,15 @@ class TelegramBot:
                     tool_layer=tool_layer,
                     working_dir=_working_dir,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                import logging as _init_log
+                _init_log.getLogger('telegram_bot').debug(
+                    'TaskExecutor init skipped: %s', exc,
+                )
         self.personality = personality or ""
         self._communication_style = communication_style
         self._chat_history: dict[str, list] = {}   # история диалога per chat_id (последние 20 шагов)
+        self._chat_history_lock = threading.Lock()
 
         self._offset = 0
         self._running = False
@@ -126,6 +131,7 @@ class TelegramBot:
         self._poll_backoff = 1.0
         self._poll_backoff_max = 60.0
         self._session = requests.Session()
+        # Таймауты гарантируются через self._request(), а не через атрибут сессии
         # Важно: не фиксируем глобальный Content-Type, иначе multipart upload
         # (sendVoice/sendAudio) ломается и Telegram не видит файл.
 
@@ -133,6 +139,10 @@ class TelegramBot:
         # {approval_id: {'event': threading.Event, 'result': bool}}
         self._pending_approvals: dict[str, dict] = {}
         self._approvals_lock = threading.Lock()
+
+    def __repr__(self) -> str:
+        """SECURITY: маскируем токен в repr/traceback."""
+        return f'<TelegramBot token=***masked*** chats={self.allowed_chat_ids}>'
 
     # ── Публичный интерфейс ───────────────────────────────────────────────────
 
@@ -151,12 +161,54 @@ class TelegramBot:
         self._log('Telegram Bot остановлен')
 
     def send(self, chat_id: int, text: str, parse_mode: str = 'HTML') -> bool:
-        """Отправляет сообщение в чат."""
-        return self._api('sendMessage', {
-            'chat_id': chat_id,
-            'text': text[:4096],
-            'parse_mode': parse_mode,
-        })
+        """Отправляет сообщение в чат. Длинные тексты разбиваются на части."""
+        _MAX = 4096
+        if len(text) <= _MAX:
+            return self._api('sendMessage', {
+                'chat_id': chat_id,
+                'text': text,
+                'parse_mode': parse_mode,
+            })
+        # Разбиваем по границам строк, чтобы не резать HTML-теги
+        ok = True
+        pos = 0
+        part_num = 0
+        while pos < len(text):
+            chunk_end = pos + _MAX
+            if chunk_end < len(text):
+                # Ищем последний перенос строки в пределах лимита
+                nl = text.rfind('\n', pos, chunk_end)
+                if nl > pos:
+                    chunk_end = nl + 1
+            chunk = text[pos:chunk_end]
+            part_num += 1
+            if not self._api('sendMessage', {
+                'chat_id': chat_id,
+                'text': chunk,
+                'parse_mode': parse_mode,
+            }):
+                ok = False
+            pos = chunk_end
+        return ok
+
+    def _on_bridge_event(self, event):
+        """Callback от ChannelBridge: событие из другого канала → уведомление в Telegram."""
+        allowed = self.allowed_chat_ids
+        if not isinstance(allowed, list) or not allowed:
+            return
+        chat_id: int = allowed[0]  # pylint: disable=unsubscriptable-object
+        source_label = {'web': '🌐 Web', 'loop': '🔄 Цикл',
+                        'system': '⚙️ Система'}.get(event.source, event.source)
+        type_label = {'task_received': '📥 Задача',
+                      'task_progress': '⏳',
+                      'task_done': '✅ Готово',
+                      'message': '💬',
+                      'reply': '🤖'}.get(event.type, event.type)
+        msg = f"{source_label} {type_label}: {event.text[:300]}"
+        try:
+            self.send(chat_id, self._escape(msg))
+        except Exception as exc:
+            self._log(f'bridge event send failed: {exc}', level='error')
 
     def broadcast(self, text: str):
         """Отправляет сообщение во все разрешённые чаты."""
@@ -174,8 +226,16 @@ class TelegramBot:
         """
         allowed_ids = self.allowed_chat_ids or []
         if not allowed_ids:
-            # Telegram не настроен — авто-разрешаем, чтобы не блокировать агента
-            return True
+            # Telegram не настроен — fail-closed: отказываем, чтобы не обходить human approval
+            if self.monitoring:
+                try:
+                    self.monitoring.warning(
+                        '[TelegramBot] request_approval отклонён: allowed_chat_ids пуст',
+                        source='telegram_bot',
+                    )
+                except Exception:
+                    pass
+            return False
 
         approval_id = str(uuid.uuid4())[:8]
         event = threading.Event()
@@ -222,13 +282,17 @@ class TelegramBot:
         return entry.get('result', False)
 
     def _resolve_approval(self, approval_id: str, approved: bool):
-        """Вызывается из обработчика callback_query — отмечает результат."""
-        event = None
+        """Вызывается из обработчика callback_query — отмечает результат.
+        Все операции под lock для предотвращения race condition."""
         with self._approvals_lock:
             entry = self._pending_approvals.get(approval_id)
-            if entry:
-                entry['result'] = approved
-                event = entry.get('event')
+            if not entry:
+                return
+            if entry.get('resolved'):
+                return   # уже обработан (защита от двойного подтверждения)
+            entry['result'] = approved
+            entry['resolved'] = True
+            event = entry.get('event')
         if event:
             event.set()
 
@@ -247,6 +311,11 @@ class TelegramBot:
                 self._poll_backoff = min(self._poll_backoff_max, self._poll_backoff * 2.0)
 
     def _get_updates(self) -> list[dict]:
+        """Получает обновления из Telegram API.
+        
+        Контракт: ВСЕГДА возвращает list[dict], никогда не бросает.
+        Ошибки логируются внутри.
+        """
         try:
             resp = self._session.post(
                 self._url('getUpdates'),
@@ -255,12 +324,17 @@ class TelegramBot:
             )
             data = resp.json()
             if not data.get('ok'):
-                raise RuntimeError(data.get('description', 'Telegram API вернул ok=false'))
+                self._log(
+                    f"getUpdates: Telegram вернул ok=false: {data.get('description', '?')[:200]}",
+                    level='error',
+                )
+                return []
             updates = data.get('result', [])
             if updates:
                 self._offset = updates[-1]['update_id'] + 1
             return updates
-        except (requests.RequestException, ValueError, KeyError, TypeError):
+        except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+            self._log(f'getUpdates network/parse error: {exc}', level='error')
             return []
 
     # ── Обработка сообщений ───────────────────────────────────────────────────
@@ -285,7 +359,7 @@ class TelegramBot:
 
         # Проверка доступа
         allowed_ids = self.allowed_chat_ids or []
-        if allowed_ids and chat_id not in allowed_ids:
+        if not allowed_ids or chat_id not in allowed_ids:
             self.send(chat_id, '⛔ Доступ запрещён.')
             return
 
@@ -353,11 +427,12 @@ class TelegramBot:
         arg = parts[1].strip() if len(parts) > 1 else ''
 
         if cmd == '/start':
+            # Сначала ставим флаг, чтобы ProactiveMind.greet() не отправил дубль
+            if self.proactive_mind:
+                self.proactive_mind.mark_startup_done()
             self.send(chat_id, self._welcome_text())
-            # Сообщаем ProactiveMind что пользователь уже поздоровался
             if self.proactive_mind:
                 self.proactive_mind.on_user_message(text)
-                self.proactive_mind.mark_startup_done()
 
         elif cmd == '/help':
             self.send(chat_id, self._help_text())
@@ -498,13 +573,39 @@ class TelegramBot:
         if not self.cognitive_core:
             self.send(chat_id, '⚠️ Cognitive Core не подключён.')
             return
+        # Ограничиваем длину входного текста — слишком длинный промпт
+        # может уронить LLM-бэкенд или вызвать OOM
+        _MAX_CHAT_TEXT = 4000
+        if len(text) > _MAX_CHAT_TEXT:
+            text = text[:_MAX_CHAT_TEXT] + '… [обрезано]'
 
         # Уведомляем ProactiveMind о сообщении пользователя
         if self.proactive_mind:
             self.proactive_mind.on_user_message(text)
 
+        # Уведомляем другие каналы (Web) что пришло сообщение из Telegram
+        if self.channel_bridge:
+            _preview = text[:200].replace('\n', ' ')
+            if not text.startswith('['):
+                self.channel_bridge.task_received('telegram', _preview)
+
+        # Документы / медиа (содержат тело файла или описание) — не пропускаем
+        # через action-path, иначе ключевые слова из ТЕЛА дают ложное срабатывание.
+        _ATTACHMENT_PREFIXES = (
+            '[Пользователь уже приложил документ',
+            '[Документ ',
+            '[Файл:',
+            '[Фото',
+            '[Стикер',
+            '[Геолокация',
+            '[Контакт',
+            '[Голос',
+            '[Видео',
+        )
+        _is_attachment = text.startswith(_ATTACHMENT_PREFIXES)
+
         # Action-first: если пользователь просит сделать задачу, сначала пробуем выполнить.
-        if self._is_actionable_request(text):
+        if not _is_attachment and self._is_actionable_request(text):
             exec_reply = self._execute_actionable_request(text, chat_id=chat_id)
             # None = ничего не сделано → продолжаем нормальный чат
             # ""   = файл уже отправлен (sendDocument/sendPhoto)
@@ -533,6 +634,11 @@ class TelegramBot:
 
         self.send(chat_id, self._escape(response))
 
+        # Уведомляем другие каналы об ответе
+        if self.channel_bridge:
+            _rp = response[:200].replace('\n', ' ')
+            self.channel_bridge.task_done('telegram', _rp)
+
     def _learn_from_interaction(self, user_text: str, response: str):
         """Записывает диалог как эпизод опыта для обучения агента."""
         # ExperienceReplay: записываем эпизод
@@ -545,8 +651,8 @@ class TelegramBot:
                     success=bool(response and not response.startswith('⚠️')),
                     context={'channel': 'telegram'},
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                self._log(f'experience_replay.add failed: {exc}', level='error')
 
         # LearningSystem: извлекаем знания из диалога
         if self.learning_system and user_text and response:
@@ -558,8 +664,8 @@ class TelegramBot:
                     source_name='telegram_chat',
                     tags=['telegram', 'dialog'],
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                self._log(f'learning_system.learn_from failed: {exc}', level='error')
 
     def _build_chat_knowledge_context(self, text: str, max_items: int = 5) -> str:
         """Собирает компактный контекст релевантных знаний для чат-ответа."""
@@ -703,8 +809,9 @@ class TelegramBot:
             )
 
         # Собираем историю диалога для этого chat_id (последние 20 обменов)
-        chat_history = self._chat_history.get(actor_id, [])
-        history_for_llm = chat_history[-20:] if chat_history else []
+        with self._chat_history_lock:
+            chat_history = self._chat_history.get(actor_id, [])
+            history_for_llm = chat_history[-20:] if chat_history else []
 
         try:
             response = str(self.cognitive_core.converse(text, system=system, history=history_for_llm))
@@ -720,9 +827,11 @@ class TelegramBot:
             response = str(self.cognitive_core.llm.infer(text, system=system))
 
         # Сохраняем этот обмен в историю
-        chat_history.append({'role': 'user', 'content': text})
-        chat_history.append({'role': 'assistant', 'content': response})
-        self._chat_history[actor_id] = chat_history[-40:]  # храним последние 20 обменов (40 сообщений)
+        with self._chat_history_lock:
+            chat_history = self._chat_history.get(actor_id, [])
+            chat_history.append({'role': 'user', 'content': text})
+            chat_history.append({'role': 'assistant', 'content': response})
+            self._chat_history[actor_id] = chat_history[-40:]  # храним последние 20 обменов (40 сообщений)
 
         # adapt_response переформулирует ответ — для small-talk это ломает естественный тон
         if self.social_model and not _is_small:
@@ -1203,7 +1312,7 @@ class TelegramBot:
             if caption:
                 user_text = f'[Фото с подписью "{caption}"]: {description}'
 
-            self._log(f'[{username}] Photo -> "{description[:80]}"')
+            self._log(f'[{username}] Photo -> recognized ({len(description)} chars)')
             self._handle_chat(chat_id, user_text, actor_id)
         finally:
             try:
@@ -1230,7 +1339,7 @@ class TelegramBot:
                     user_text = f'[{label} {duration}с]: {description}'
                     if caption:
                         user_text = f'[{label} {duration}с, подпись: "{caption}"]: {description}'
-                    self._log(f'[{username}] {label} thumbnail -> "{description[:80]}"')
+                    self._log(f'[{username}] {label} thumbnail -> recognized ({len(description)} chars)')
                     self._handle_chat(chat_id, user_text, actor_id)
                     return
                 finally:
@@ -1287,18 +1396,63 @@ class TelegramBot:
             except (FileNotFoundError, PermissionError, OSError, TypeError, ValueError):
                 pass
 
-    @staticmethod
-    def _format_document_chat_input(file_name: str, preview: str,
+    @classmethod
+    def _format_document_chat_input(cls, file_name: str, preview: str,
                                     caption: str = '', pages=None) -> str:
-        """Формирует явный текст-вход для LLM по уже приложенному документу."""
-        header = (
-            f'Пользователь уже приложил документ "{file_name}" '
-            f'({pages or "?"} стр.). Не проси прислать файл заново. '
-            'Работай сразу по содержимому ниже.'
-        )
+        """Формирует явный текст-вход для LLM по уже приложенному документу.
+
+        Если caption содержит ключевые слова запроса мнения — агент анализирует.
+        Иначе (пустой caption / команда действия) — агент исполняет как задание.
+        """
+        _intent = cls._detect_file_intent(caption)
+
+        if _intent == 'execute':
+            header = (
+                f'Пользователь передал документ "{file_name}" '
+                f'({pages or "?"} стр.) как РАБОЧЕЕ ЗАДАНИЕ. '
+                'Прими его как спецификацию/ТЗ и НЕМЕДЛЕННО приступай к выполнению. '
+                'НЕ пересказывай содержимое, НЕ анализируй структуру — ДЕЛАЙ то, '
+                'что описано в документе. Если несколько задач — начни с первой.'
+            )
+        else:
+            header = (
+                f'Пользователь уже приложил документ "{file_name}" '
+                f'({pages or "?"} стр.). Не проси прислать файл заново. '
+                'Проанализируй содержимое и дай свою оценку.'
+            )
         if caption:
             header += f' Подпись пользователя: "{caption}".'
         return f'[{header}]\n\nСОДЕРЖИМОЕ ДОКУМЕНТА:\n{preview}'
+
+    # Ключевые слова запроса анализа/мнения (а не исполнения)
+    _ANALYZE_KW = (
+        'проанализируй', 'анализ', 'что думаешь', 'твоё мнение', 'твое мнение',
+        'оцени', 'оценка', 'расскажи', 'объясни', 'вкратце', 'кратко',
+        'резюме', 'суммируй', 'суммарно', 'обзор', 'ревью', 'review',
+        'прочитай', 'покажи', 'опиши', 'перескажи', 'что здесь', 'что там',
+        'что в файле', 'что в документе', 'разбери', 'разбор', 'проверь',
+    )
+
+    @classmethod
+    def _detect_file_intent(cls, caption: str) -> str:
+        """Определяет намерение: 'analyze' (мнение) или 'execute' (задание).
+        
+        По умолчанию — analyze (безопаснее). Явное execute только при
+        наличии прямых команд действия в подписи.
+        """
+        msg = (caption or '').strip().lower()
+        if not msg:
+            return 'analyze'
+        if any(kw in msg for kw in cls._ANALYZE_KW):
+            return 'analyze'
+        # Только при явных командах действия переключаемся в execute
+        _EXECUTE_KW = (
+            'выполни', 'сделай', 'реализуй', 'запусти', 'примени',
+            'имплементируй', 'implement', 'execute', 'run', 'do it',
+        )
+        if any(kw in msg for kw in _EXECUTE_KW):
+            return 'execute'
+        return 'analyze'
 
     def _handle_sticker(self, chat_id: int, sticker: dict, actor_id: str):
         """Стикер → отвечаем в стиле агента."""
@@ -1371,7 +1525,7 @@ class TelegramBot:
             self.send(chat_id, '⚠️ Не удалось распознать речь.')
             return
 
-        self._log(f'[{username}] Voice -> "{text[:80]}"')
+        self._log(f'[{username}] Voice -> "{text[:30]}…" ({len(text)} chars)')
 
         # 3. Обрабатываем как обычный текст, перехватываем ответ
         if text.startswith('/'):
@@ -1533,7 +1687,9 @@ class TelegramBot:
             resp = self._session.post(self._url(method), json=payload, timeout=10)
             return resp.json().get('ok', False)
         except (requests.RequestException, ValueError, TypeError) as e:
-            self._log(f'API error ({method}): {e}', level='error')
+            # SECURITY: маскируем токен в сообщениях исключений requests
+            err_msg = str(e).replace(self.token, '***TOKEN***') if self.token else str(e)
+            self._log(f'API error ({method}): {err_msg}', level='error')
             return False
 
     @staticmethod

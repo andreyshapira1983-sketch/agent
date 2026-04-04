@@ -62,7 +62,7 @@ def _run_adb(adb: str | None, args: list, timeout: int = 30) -> dict:
     try:
         r = subprocess.run(
             [adb] + args,
-            capture_output=True, text=True, errors='replace', timeout=timeout,
+            capture_output=True, text=True, errors='replace', timeout=timeout, check=False,
         )
         return {
             'ok': r.returncode == 0,
@@ -84,6 +84,7 @@ class MobileTool(BaseTool):
     )
 
     def __init__(self, adb_path: str | None = None, appium_host: str | None = None):
+        super().__init__(name=self.name, description=self.description)
         path = adb_path or os.environ.get('ADB_PATH')
         self._adb = _find_adb(path)
         self._appium = appium_host or os.environ.get('APPIUM_HOST', 'http://localhost:4723')
@@ -97,7 +98,7 @@ class MobileTool(BaseTool):
         """Список подключённых Android устройств и эмуляторов."""
         r = _run_adb(self._adb, ['devices', '-l'])
         if r['ok']:
-            lines = [l for l in r['stdout'].split('\n')[1:] if l.strip() and 'offline' not in l]
+            lines = [ln for ln in r['stdout'].split('\n')[1:] if ln.strip() and 'offline' not in ln]
             r['devices'] = lines
             r['count'] = len(lines)
         return r
@@ -253,7 +254,7 @@ class MobileTool(BaseTool):
         try:
             r = subprocess.run(
                 ['xcrun', 'xctrace', 'list', 'devices'],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True, text=True, timeout=15, check=False,
             )
             return {'ok': r.returncode == 0, 'output': r.stdout}
         except Exception as e:
@@ -261,7 +262,7 @@ class MobileTool(BaseTool):
 
     # ─── run() dispatcher ────────────────────────────────────────────────────
 
-    def run(self, action: str = 'list_devices', **params) -> dict:
+    def run(self, *args, action: str = 'list_devices', **params) -> dict:
         """
         action:
           list_devices | install_apk | uninstall | launch_app | stop_app |

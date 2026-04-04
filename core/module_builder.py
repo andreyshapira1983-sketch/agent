@@ -21,6 +21,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import types
 
@@ -218,6 +219,7 @@ class ModuleBuilder:
 
         # История сборок этого сеанса
         self._builds: list[ModuleBuildResult] = []
+        self._builds_lock = threading.Lock()
 
     # ── Публичный API ─────────────────────────────────────────────────────────
 
@@ -833,7 +835,8 @@ class ModuleBuilder:
 
     def _finish(self, result: ModuleBuildResult, t0: float) -> ModuleBuildResult:
         result.duration = time.time() - t0
-        self._builds.append(result)
+        with self._builds_lock:
+            self._builds.append(result)
         if not result.ok:
             self._log(f"[build] ✗ '{result.name}': {result.error}")
 

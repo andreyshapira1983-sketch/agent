@@ -380,6 +380,40 @@ class TemporalReasoningSystem:
         else:
             print(f"[TemporalReasoning] {message}")
 
+    def export_state(self) -> dict:
+        """Возвращает полное состояние для персистентности."""
+        events_data = {}
+        for eid, ev in self._events.items():
+            events_data[eid] = {
+                "event_id": ev.event_id,
+                "description": ev.description,
+                "start": ev.start,
+                "end": ev.end,
+                "tags": getattr(ev, 'tags', []),
+                "relations": getattr(ev, 'relations', []),
+            }
+        return {
+            "counter": self._counter,
+            "timeline": list(self._timeline),
+            "events": events_data,
+        }
+
+    def import_state(self, data: dict):
+        """Восстанавливает состояние из персистентного хранилища."""
+        self._counter = data.get("counter", 0)
+        for eid, ed in data.get("events", {}).items():
+            ev = TemporalEvent(
+                event_id=ed["event_id"],
+                description=ed.get("description", ""),
+                start=ed.get("start"),
+                end=ed.get("end"),
+                tags=ed.get("tags", []),
+            )
+            ev.relations = ed.get("relations", [])
+            self._events[eid] = ev
+        loaded_timeline = data.get("timeline", [])
+        self._timeline = [eid for eid in loaded_timeline if eid in self._events]
+
 
 # Alias for compatibility
 TemporalReasoning = TemporalReasoningSystem

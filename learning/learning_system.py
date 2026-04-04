@@ -222,3 +222,21 @@ class LearningSystem:
             self.monitoring.info(message, source='learning')
         else:
             print(f"[Learning] {message}")
+
+    def export_state(self) -> dict:
+        """Возвращает полное состояние для персистентности."""
+        clean_queue = []
+        for item in self._queue:
+            clean = {k: v for k, v in item.items() if k != 'fetch_fn'}
+            clean_queue.append(clean)
+        return {
+            "learned": list(self._learned),
+            "queue": clean_queue,
+        }
+
+    def import_state(self, data: dict):
+        """Восстанавливает состояние из персистентного хранилища."""
+        if data.get("learned"):
+            self._learned.extend(data["learned"])
+        if data.get("queue"):
+            self._queue.extend(data["queue"])

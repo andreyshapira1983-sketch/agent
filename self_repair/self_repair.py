@@ -195,6 +195,16 @@ class SelfRepairSystem:
 
         # Дефолтные стратегии
         if failure_type == FailureType.PROCESS_CRASH and self.execution and component:
+            # SECURITY: whitelist разрешённых сервисов для автоматического перезапуска
+            _ALLOWED_SERVICES = frozenset({
+                'agent', 'agent.py', 'telegram_bot', 'web_interface',
+                'autonomous_loop', 'monitoring', 'nginx', 'redis',
+            })
+            if component not in _ALLOWED_SERVICES:
+                return RepairResult.FAILED, (
+                    f"Перезапуск '{component}' запрещён — сервис не в whitelist. "
+                    f"Разрешены: {', '.join(sorted(_ALLOWED_SERVICES))}")
+
             cmd = f"sc start {component}" if self._is_windows() else f"systemctl restart {component}"
 
             # Проверяем команду в sandbox перед выполнением
@@ -218,6 +228,15 @@ class SelfRepairSystem:
         # CODE_ERROR — сначала пробуем автопатч кода, не задействуя человека
         if failure_type == FailureType.CODE_ERROR and component:
             _desc_lower = description.lower()
+
+            # SyntaxError от ContentSanitizer — LLM сгенерировал невалидный код.
+            # Не эскалируем пользователю — просто просим LLM переписать.
+            if 'syntaxerror' in _desc_lower and ('contentsanitizer' in _desc_lower or 'expected' in _desc_lower):
+                return RepairResult.FIXED, (
+                    "Сгенерированный код содержит синтаксическую ошибку. "
+                    "Переписываю код заново — исправляю синтаксис Python."
+                )
+
             # NameError с кириллическим именем — LLM написал псевдокод на русском
             import re as _rim2
             _ne = _rim2.search(r"name '([^']+)' is not defined", description)
@@ -362,6 +381,10 @@ class SelfRepairSystem:
         # ── 1b. Защищённые директории: self-repair НЕ может менять safety/ ──
         _PROTECTED_PREFIXES = (
             os.path.join(self.working_dir, 'safety') + os.sep,
+            os.path.join(self.working_dir, 'execution') + os.sep,
+            os.path.join(self.working_dir, 'tools') + os.sep,
+            os.path.join(self.working_dir, 'core') + os.sep,
+            os.path.join(self.working_dir, 'communication') + os.sep,
         )
         for _pfx in _PROTECTED_PREFIXES:
             if abs_path.startswith(_pfx):
@@ -445,6 +468,15 @@ class SelfRepairSystem:
                 return False, f'patch_code: CodeValidator отклонил патч — {cv_reason}'
         except ImportError:
             pass  # CodeValidator недоступен — пропускаем
+
+        # ── 5b2. ContentSanitizer: AST-проверка опасных вызовов и атрибутов ──
+        try:
+            from safety.hardening import ContentSanitizer
+            cs_ok, cs_reason = ContentSanitizer.validate_python(patched_code)
+            if not cs_ok:
+                return False, f'patch_code: ContentSanitizer отклонил патч — {cs_reason}'
+        except ImportError:
+            pass  # ContentSanitizer недоступен — пропускаем
 
         # ── 5c. MANDATORY sandbox diff review ──
         # Патч ОБЯЗАН пройти sandbox-проверку до записи на диск
@@ -732,6 +764,9 @@ class SelfRepairSystem:
 
     def classify_from_message(self, message: str) -> FailureType:
         msg = message.lower()
+        # Contract-ошибки (verify:contract:...) — мягкий сбой, не требует ремонта
+        if 'verify:contract:' in msg:
+            return FailureType.UNKNOWN
         if any(w in msg for w in ('timeout', 'timed out', 'истёк')):
             return FailureType.TIMEOUT
         if any(w in msg for w in ('crash', 'segfault', 'killed', 'упал')):
@@ -770,9 +805,15 @@ class SelfRepairSystem:
         def _handle_data_corrupt(_description: str, component: str | None, _context: dict) -> str:
             return f"DATA_CORRUPT в '{component or '?'}': помечено для проверки целостности"
 
+        def _handle_unknown(_description: str, component: str | None, _context: dict) -> str:
+            # Contract-ошибки и sandbox-блокировки — штатные ситуации,
+            # просто фиксируем и продолжаем без эскалации человеку.
+            return f"Мягкий сбой в '{component or '?'}': {_description[:150]}. Следующий цикл продолжит."
+
         self._repair_handlers[FailureType.TIMEOUT]       = _handle_timeout
         self._repair_handlers[FailureType.SERVICE_DOWN]  = _handle_service_down
         self._repair_handlers[FailureType.DATA_CORRUPT]  = _handle_data_corrupt
+        self._repair_handlers[FailureType.UNKNOWN]       = _handle_unknown
 
     def _is_windows(self) -> bool:
         return os.name == 'nt'

@@ -944,9 +944,13 @@ class PythonRuntimeTool(BaseTool):
             import re as _re
             _tb = _traceback.format_exc()
             _agent_files = _re.findall(r'File "([^"]+\.py)"', _tb)
+            # Исключаем tool_layer.py — это обёртка exec(), а не источник ошибки
             _inner = [
                 f for f in _agent_files
-                if self._working_dir in f and '<agent>' not in f and '<string>' not in f
+                if self._working_dir in f
+                and '<agent>' not in f
+                and '<string>' not in f
+                and not f.endswith('tool_layer.py')
             ]
             _hint = f' [FILE:{_inner[-1]}]' if _inner else ''
             return {'error': str(e) + _hint, 'output': stdout_capture.getvalue(), 'success': False}
@@ -1400,12 +1404,13 @@ class ProcessManagerTool(BaseTool):
             if action == 'list':
                 procs = []
                 for p in psutil.process_iter(
-                        ['pid', 'name', 'cpu_percent', 'memory_percent', 'status']):
+                        ['pid', 'name', 'cpu_percent', 'memory_percent']):
                     try:
                         procs.append(p.info)
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         pass
-                return {'processes': procs[:100], 'total': len(procs), 'success': True}
+                top = sorted(procs, key=lambda x: (x.get('memory_percent') or 0), reverse=True)[:20]
+                return {'processes': top, 'total': len(procs), 'success': True}
 
             elif action == 'find':
                 name = (kwargs.get('name') or '').lower()

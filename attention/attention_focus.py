@@ -215,6 +215,30 @@ class AttentionFocusManager:
             return item.priority_score + overlap * 0.3
         return sorted(items, key=relevance, reverse=True)
 
+    def export_state(self) -> dict:
+        """Возвращает полное состояние для персистентности."""
+        mode = self._mode
+        if hasattr(mode, 'value'):
+            mode = mode.value
+        return {
+            "mode": mode,
+            "counter": self._counter,
+            "noise_keywords": list(self._noise_keywords),
+            "history": list(self._history),
+        }
+
+    def import_state(self, data: dict):
+        """Восстанавливает состояние из персистентного хранилища."""
+        mode_val = data.get("mode")
+        if mode_val:
+            mode_map = {e.value: e for e in AttentionMode}
+            self._mode = mode_map.get(mode_val, AttentionMode.IDLE)
+        self._counter = data.get("counter", 0)
+        if data.get("noise_keywords"):
+            self._noise_keywords = data["noise_keywords"]
+        if data.get("history"):
+            self._history.extend(data["history"])
+
     def _switch_mode(self, mode: AttentionMode):
         if self._mode != mode:
             self._log(f"Режим внимания: {self._mode.value} -> {mode.value}")

@@ -203,8 +203,16 @@ class DataValidator:
         if not isinstance(value, str):
             value = str(value)
         value = value[:max_length]
-        # Убираем null-байты
+        # Убираем null-байты и опасные управляющие символы (оставляем \t \n \r)
         value = value.replace('\x00', '')
+        value = ''.join(
+            ch for ch in value
+            if ch in '\t\n\r' or (ord(ch) >= 0x20 and ord(ch) != 0x7F
+                                    and ord(ch) not in range(0x200B, 0x200F + 1)
+                                    and ord(ch) not in (0x202A, 0x202B, 0x202C, 0x202D, 0x202E,
+                                                         0x2066, 0x2067, 0x2068, 0x2069,
+                                                         0xFEFF))
+        )
         return value.strip()
 
     # ── Встроенные схемы для слоёв системы ───────────────────────────────────

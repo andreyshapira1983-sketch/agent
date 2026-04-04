@@ -1,7 +1,6 @@
 # PersistentBrain — Полная персистентная память агента
 # Сохраняет и загружает ВСЁ состояние агента на диск.
 # Ни один бит опыта не теряется при перезапуске.
-# pylint: disable=protected-access
 
 from __future__ import annotations
 
@@ -109,6 +108,7 @@ class PersistentBrain:
         self._solver_cases: list[dict] = []
         self._exact_solver_journal: list[dict] = []
         self._pending_learning_quality: dict = {}
+        self._pending_failure_tracker: dict = {}
         self._stats = {
             "total_cycles": 0,
             "useful_cycles": 0,
@@ -122,7 +122,7 @@ class PersistentBrain:
             "boot_count": 0,
         }
 
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # RLock: предотвращаем deadlock при save→component→callback→brain
         self._autosave_thread: threading.Thread | None = None
         self._running = False
 
@@ -152,6 +152,7 @@ class PersistentBrain:
             self._load_reflections()
             self._load_thoughts()
             self._load_learning_quality()
+            self._load_failure_tracker()
             self._load_attention()
             self._load_temporal()
             self._load_causal()
@@ -205,6 +206,7 @@ class PersistentBrain:
             self._save_reflections()
             self._save_thoughts()
             self._save_learning_quality()
+            self._save_failure_tracker()
             self._save_attention()
             self._save_temporal()
             self._save_causal()
@@ -218,9 +220,10 @@ class PersistentBrain:
     # ═══════════════════════════════════════════════════════════════════════
 
     def start_autosave(self):
-        if self._running:
-            return
-        self._running = True
+        with self._lock:
+            if self._running:
+                return
+            self._running = True
         self._autosave_thread = threading.Thread(
             target=self._autosave_loop, daemon=True
         )
@@ -228,14 +231,39 @@ class PersistentBrain:
 
     def stop(self):
         self._running = False
+        if self._autosave_thread and self._autosave_thread.is_alive():
+            self._autosave_thread.join(timeout=self.AUTOSAVE_INTERVAL + 5)
         self.save()
+
+    def set_autonomous_loop(self, loop):
+        """Подключает autonomous_loop и применяет отложенные буферы."""
+        self.autonomous_loop = loop
+        self._apply_pending_buffers()
+
+    def _apply_pending_buffers(self):
+        """Применяет данные из _pending_* буферов, если loop уже подключён."""
+        if not self.autonomous_loop:
+            return
+        with self._lock:
+            if self._pending_learning_quality:
+                tracker = getattr(self.autonomous_loop, 'learning_quality', None)
+                if tracker and hasattr(tracker, 'load_from_dict'):
+                    tracker.load_from_dict(self._pending_learning_quality)
+                    self._log(f"Применён отложенный learning_quality ({len(self._pending_learning_quality)} стратегий)")
+                    self._pending_learning_quality = {}
+            if self._pending_failure_tracker:
+                ft = getattr(self.autonomous_loop, 'failure_tracker', None)
+                if ft and hasattr(ft, 'load_from_dict'):
+                    ft.load_from_dict(self._pending_failure_tracker)
+                    self._log(f"Применён отложенный failure_tracker ({len(self._pending_failure_tracker.get('history', []))} записей)")
+                    self._pending_failure_tracker = {}
 
     def _autosave_loop(self):
         while self._running:
             time.sleep(self.AUTOSAVE_INTERVAL)
             try:
                 self.save()
-            except (OSError, IOError, json.JSONDecodeError) as e:
+            except (OSError, IOError) as e:
                 self._log(f"Ошибка автосохранения: {e}", level="error")
 
     # ═══════════════════════════════════════════════════════════════════════
@@ -245,52 +273,54 @@ class PersistentBrain:
     def record_conversation(self, role: str, message: str, response: str = ""):
         msg_trunc = message[:2000]
         resp_trunc = response[:2000]
-        # Дедупликация: не записываем если точно такой же разговор уже в последних 10
-        recent = self._conversations[-10:] if len(self._conversations) >= 10 else self._conversations
-        for existing in recent:
-            if (existing.get('role') == role
-                    and existing.get('message') == msg_trunc
-                    and existing.get('response') == resp_trunc):
-                return  # дубликат — пропускаем
-        entry = {
-            "time": time.time(),
-            "time_str": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "role": role,
-            "message": msg_trunc,
-            "response": resp_trunc,
-        }
-        self._conversations.append(entry)
-        self._stats["total_conversations"] += 1
-        if len(self._conversations) > self.MAX_CONVERSATIONS:
-            self._conversations = self._conversations[-self.MAX_CONVERSATIONS:]
+        with self._lock:
+            # Дедупликация: не записываем если точно такой же разговор уже в последних 10
+            recent = self._conversations[-10:] if len(self._conversations) >= 10 else self._conversations
+            for existing in recent:
+                if (existing.get('role') == role
+                        and existing.get('message') == msg_trunc
+                        and existing.get('response') == resp_trunc):
+                    return  # дубликат — пропускаем
+            entry = {
+                "time": time.time(),
+                "time_str": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "role": role,
+                "message": msg_trunc,
+                "response": resp_trunc,
+            }
+            self._conversations.append(entry)
+            self._stats["total_conversations"] += 1
+            if len(self._conversations) > self.MAX_CONVERSATIONS:
+                self._conversations = self._conversations[-self.MAX_CONVERSATIONS:]
 
     def record_lesson(self, goal: str, success: bool, lesson: str, context: str = ""):
         goal_trunc = goal[:200]
         lesson_trunc = lesson[:500]
 
-        # Дедупликация: не записываем урок если точно такой же уже есть в последних 20
         with self._lock:
+            # Дедупликация: не записываем урок если точно такой же уже есть в последних 20
             recent = self._lessons[-20:] if len(self._lessons) >= 20 else self._lessons
             for existing in recent:
                 if (existing.get('goal', '')[:100] == goal_trunc[:100]
                         and existing.get('lesson', '')[:100] == lesson_trunc[:100]):
                     return  # дубликат — пропускаем
 
-        entry = {
-            "time": time.time(),
-            "time_str": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "goal": goal_trunc,
-            "success": success,
-            "lesson": lesson_trunc,
-            "context": context[:300],
-        }
-        with self._lock:
+            entry = {
+                "time": time.time(),
+                "time_str": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "goal": goal_trunc,
+                "success": success,
+                "lesson": lesson_trunc,
+                "context": context[:300],
+            }
             self._lessons.append(entry)
-        self._stats["total_lessons"] += 1
-        if success:
-            self._stats["successful_tasks"] += 1
-        else:
-            self._stats["failed_tasks"] += 1
+            self._stats["total_lessons"] += 1
+            if success:
+                self._stats["successful_tasks"] += 1
+            else:
+                self._stats["failed_tasks"] += 1
+            if len(self._lessons) > self.MAX_LESSONS:
+                self._lessons = self._lessons[-self.MAX_LESSONS:]
 
     def record_solver_case(self, task: str, solver: str,
                            optimality: str, verification: bool,
@@ -310,8 +340,8 @@ class PersistentBrain:
         }
         with self._lock:
             self._solver_cases.append(entry)
-            while len(self._solver_cases) > self.MAX_SOLVER_CASES:
-                self._solver_cases.pop(0)
+            if len(self._solver_cases) > self.MAX_SOLVER_CASES:
+                self._solver_cases = self._solver_cases[-self.MAX_SOLVER_CASES:]
 
     def record_exact_solver_journal(self, solver: str, challenger: str,
                                     decision: str, verification: bool,
@@ -331,21 +361,24 @@ class PersistentBrain:
         }
         with self._lock:
             self._exact_solver_journal.append(entry)
-            while len(self._exact_solver_journal) > self.MAX_SOLVER_JOURNAL:
-                self._exact_solver_journal.pop(0)
+            if len(self._exact_solver_journal) > self.MAX_SOLVER_JOURNAL:
+                self._exact_solver_journal = self._exact_solver_journal[-self.MAX_SOLVER_JOURNAL:]
 
     def get_recent_solver_cases(self, limit: int = 10) -> list[dict]:
-        return list(self._solver_cases[-max(0, int(limit)):])
+        with self._lock:
+            return list(self._solver_cases[-max(0, int(limit)):])
 
     def get_recent_exact_solver_journal(self, limit: int = 10) -> list[dict]:
-        return list(self._exact_solver_journal[-max(0, int(limit)):])
+        with self._lock:
+            return list(self._exact_solver_journal[-max(0, int(limit)):])
 
     def record_cycle(self, useful: bool = False):
-        self._stats["total_cycles"] += 1
-        if useful:
-            self._stats["useful_cycles"] += 1
-        else:
-            self._stats["weak_cycles"] += 1
+        with self._lock:
+            self._stats["total_cycles"] += 1
+            if useful:
+                self._stats["useful_cycles"] += 1
+            else:
+                self._stats["weak_cycles"] += 1
 
     def record_evolution(self, event: str, details: str = ""):
         """Записывает событие эволюции агента. Thread-safe."""
@@ -357,10 +390,9 @@ class PersistentBrain:
         }
         with self._lock:
             self._evolution_log.append(entry)
-            # Храним только последние 200 записей — обрезаем in-place без
-            # создания нового списка (pop(0) имеет стоимость O(n)).
-            while len(self._evolution_log) > self.MAX_EVOLUTION:
-                self._evolution_log.pop(0)
+            # Храним только последние MAX_EVOLUTION записей
+            if len(self._evolution_log) > self.MAX_EVOLUTION:
+                self._evolution_log = self._evolution_log[-self.MAX_EVOLUTION:]
 
     # ═══════════════════════════════════════════════════════════════════════
     # ЭПИЗОДИЧЕСКАЯ ПАМЯТЬ — поиск релевантных разговоров
@@ -373,15 +405,17 @@ class PersistentBrain:
         разговоре, нормализованный по длине. Возвращает top-N наиболее
         релевантных, отсортированных по убыванию score.
         """
-        if not self._conversations or not query:
-            return self._conversations[-limit:]
+        with self._lock:
+            conversations = list(self._conversations)
+        if not conversations or not query:
+            return conversations[-limit:]
 
         tokens = set(re.findall(r"[A-Za-zА-Яа-я0-9_]{3,}", query.lower()))
         if not tokens:
-            return self._conversations[-limit:]
+            return conversations[-limit:]
 
         scored: list[tuple[float, int, dict]] = []
-        for idx, conv in enumerate(self._conversations):
+        for idx, conv in enumerate(conversations):
             text = f"{conv.get('message', '')} {conv.get('response', '')}".lower()
             hits = sum(1 for t in tokens if t in text)
             if hits == 0:
@@ -394,15 +428,16 @@ class PersistentBrain:
 
         scored.sort(key=lambda x: x[0], reverse=True)
         results = [c for _, _, c in scored[:limit]]
-        return results if results else self._conversations[-limit:]
+        return results if results else conversations[-limit:]
 
     def restore_chat_history(self, actor_id: str = "user", limit: int = 20) -> list[dict]:
         """Восстанавливает историю чата для TelegramBot после перезапуска.
 
         Возвращает [{'role': 'user', 'content': ...}, {'role': 'assistant', ...}].
         """
+        with self._lock:
+            recent = list(self._conversations[-(limit * 2):])
         history: list[dict] = []
-        recent = self._conversations[-(limit * 2):]
         for conv in recent:
             role = conv.get('role', '')
             msg = conv.get('message', '')
@@ -418,17 +453,25 @@ class PersistentBrain:
     # ═══════════════════════════════════════════════════════════════════════
 
     def get_memory_context(self, _query: str = "") -> str:
+        # Снимок мутабельных полей под локом
+        with self._lock:
+            architecture = dict(self._architecture)
+            stats = dict(self._stats)
+            lessons_snap = list(self._lessons[-5:])
+            conversations_snap = list(self._conversations)
+            evolution_snap = list(self._evolution_log[-7:])
+
         parts = []
 
         # ── Архитектура агента (read-only системное знание) ──────────────
-        if self._architecture.get("compact_summary"):
+        if architecture.get("compact_summary"):
             parts.append(
-                f"[СИСТЕМНАЯ АРХИТЕКТУРА — только чтение, {self._architecture['layer_count']} слоёв]\n"
-                f"{self._architecture['compact_summary']}"
+                f"[СИСТЕМНАЯ АРХИТЕКТУРА — только чтение, {architecture['layer_count']} слоёв]\n"
+                f"{architecture['compact_summary']}"
             )
 
         # Статистика
-        s = self._stats
+        s = stats
         if s["boot_count"] > 1:
             parts.append(
                 f"Ты запускался {s['boot_count']} раз. "
@@ -437,16 +480,24 @@ class PersistentBrain:
             )
 
         # Последние уроки
-        recent_lessons = self._lessons[-5:]
+        recent_lessons = lessons_snap
         if recent_lessons:
-            lessons_text = "; ".join(lesson["lesson"][:80] for lesson in recent_lessons)
-            parts.append(f"Уроки: {lessons_text}")
+            # Фильтруем: пропускаем мусорные уроки (stringified dicts)
+            clean = [
+                entry["lesson"][:80] for entry in recent_lessons
+                if isinstance(entry.get("lesson"), str)
+                and not entry["lesson"].lstrip().startswith("{")
+                and len(entry["lesson"]) > 10
+            ]
+            if clean:
+                lessons_text = "; ".join(clean)
+                parts.append(f"Уроки: {lessons_text}")
 
         # Релевантные прошлые разговоры (поиск по ключевым словам запроса)
         if _query:
             relevant_convos = self.get_relevant_conversations(_query, limit=5)
         else:
-            relevant_convos = self._conversations[-5:]
+            relevant_convos = conversations_snap[-5:]
         if relevant_convos:
             convos_text = "; ".join(
                 f"{c['role']}: {c['message'][:80]}" for c in relevant_convos
@@ -455,7 +506,7 @@ class PersistentBrain:
 
         # Ключевые темы разговоров
         recent_user_messages = [
-            c.get('message', '') for c in self._conversations[-30:]
+            c.get('message', '') for c in conversations_snap[-30:]
             if c.get('role') == 'user'
         ]
         if recent_user_messages:
@@ -478,8 +529,7 @@ class PersistentBrain:
         # Предпочтения партнёра из social-профиля
         if self.social:
             try:
-                actors = getattr(self.social, '_actors', {})
-                partner = actors.get('user')
+                partner = self.social.get_actor('user')
                 if partner:
                     prefs = getattr(partner, 'preferences', {})
                     if isinstance(prefs, dict) and prefs:
@@ -498,7 +548,7 @@ class PersistentBrain:
         # Текущее настроение проактивного контура
         if self.proactive_mind:
             try:
-                mood = getattr(self.proactive_mind, '_mood', '')
+                mood = self.proactive_mind.mood
                 if mood:
                     parts.append(f"Текущее настроение: {mood}")
             except (AttributeError, TypeError):
@@ -506,7 +556,7 @@ class PersistentBrain:
 
         # Стратегии
         if self.self_improvement:
-            strategies = getattr(self.self_improvement, '_strategy_store', {})
+            strategies = self.self_improvement.strategies
             if strategies:
                 strat_text = "; ".join(
                     f"{k}: {v[:50]}" for k, v in list(strategies.items())[:3]
@@ -540,8 +590,7 @@ class PersistentBrain:
         # Навыки
         if self.identity:
             try:
-                caps = getattr(self.identity, '_capabilities', {})
-                top = sorted(caps.values(), key=lambda c: c.proficiency, reverse=True)[:3]
+                top = self.identity.top_capabilities(3)
                 if top:
                     caps_text = ", ".join(f"{c.name}({c.proficiency:.0%})" for c in top)
                     parts.append(f"Лучшие навыки: {caps_text}")
@@ -549,8 +598,7 @@ class PersistentBrain:
                 self._log("Ошибка чтения capabilities identity", level="warning")
 
         # История эволюции — последние значимые события
-        with self._lock:
-            recent_evolution = list(self._evolution_log[-7:])
+        recent_evolution = evolution_snap
         if recent_evolution:
             # Группируем по типу чтобы не дублировать однотипные события
             seen_events: dict[str, dict] = {}
@@ -589,10 +637,14 @@ class PersistentBrain:
                 max_challengers_per_solver=max_challengers_per_solver,
             )
 
+        with self._lock:
+            stats_snap = dict(self._stats)
+            conv_count = len(self._conversations)
+            lesson_count = len(self._lessons)
         return {
-            'stats': dict(self._stats),
-            'conversations': len(self._conversations),
-            'lessons': len(self._lessons),
+            'stats': stats_snap,
+            'conversations': conv_count,
+            'lessons': lesson_count,
             'solver_cases': len(solver_cases),
             'exact_solver_journal': len(journal),
             'solver_case_by_type': solver_case_by_type,
@@ -810,17 +862,19 @@ class PersistentBrain:
         return os.path.join(self.data_dir, name)
 
     @staticmethod
-    def _make_json_safe(obj):
+    def _make_json_safe(obj, _depth: int = 0):
         """Рекурсивно конвертирует ключи-не-строки (Enum, tuple и т.д.) в str."""
+        if _depth > 50:
+            return str(obj)
         from enum import Enum
         if isinstance(obj, dict):
             return {
                 (k.value if isinstance(k, Enum) else str(k) if not isinstance(k, (str, int, float, bool, type(None))) else k):
-                PersistentBrain._make_json_safe(v)
+                PersistentBrain._make_json_safe(v, _depth + 1)
                 for k, v in obj.items()
             }
         if isinstance(obj, (list, tuple)):
-            return [PersistentBrain._make_json_safe(i) for i in obj]
+            return [PersistentBrain._make_json_safe(i, _depth + 1) for i in obj]
         if isinstance(obj, Enum):
             return obj.value
         return obj
@@ -833,7 +887,7 @@ class PersistentBrain:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(safe_data, f, ensure_ascii=False, indent=2, default=str)
             os.replace(tmp, path)  # атомарная замена — файл не будет повреждён при сбое
-        except (OSError, IOError, json.JSONDecodeError, TypeError) as e:
+        except (OSError, IOError, TypeError) as e:
             self._log(f"Ошибка записи {name}: {e}", level="error")
 
     def _load_json(self, name: str, default=None):
@@ -850,30 +904,22 @@ class PersistentBrain:
     def _count_knowledge(self) -> int:
         if not self.knowledge:
             return 0
-        return (
-            len(getattr(self.knowledge, '_long_term', {}))
-            + len(getattr(self.knowledge, '_episodic', []))
-            + len(getattr(self.knowledge, '_semantic', {}))
-        )
+        return self.knowledge.knowledge_count()
 
     def disk_usage(self) -> dict:
-        """Возвращает сколько дискового бюджета уже занято агентом."""
+        """Возвращает сколько дискового бюджета уже занято памятью агента."""
         budget_bytes = self.DISK_BUDGET_GB * 1024 ** 3
         used_bytes = 0
-        agent_root = os.path.dirname(self.data_dir)
-        # Считаем всё что лежит в папке агента (память, ChromaDB, outputs, скачанные файлы)
-        for dirpath, _, filenames in os.walk(agent_root):
-            # Исключаем __pycache__ и .git
-            if '__pycache__' in dirpath or os.sep + '.git' in dirpath:
-                continue
+        # Считаем только data_dir (персистентная память), а не весь проект
+        for dirpath, _, filenames in os.walk(self.data_dir):
             for fname in filenames:
                 try:
                     used_bytes += os.path.getsize(os.path.join(dirpath, fname))
                 except OSError:
                     pass
         used_gb = used_bytes / 1024 ** 3
-        free_gb = (budget_bytes - used_bytes) / 1024 ** 3
-        pct = round(used_gb / self.DISK_BUDGET_GB * 100, 1)
+        free_gb = max(0.0, (budget_bytes - used_bytes) / 1024 ** 3)
+        pct = min(100.0, round(used_gb / self.DISK_BUDGET_GB * 100, 1))
         return {
             'budget_gb': self.DISK_BUDGET_GB,
             'used_gb': round(used_gb, 2),
@@ -889,11 +935,10 @@ class PersistentBrain:
     def _save_knowledge(self):
         if not self.knowledge:
             return
-        self._save_json("knowledge.json", {
-            "long_term": getattr(self.knowledge, '_long_term', {}),
-            "episodic": getattr(self.knowledge, '_episodic', [])[-self.MAX_EPISODIC_MEM:],
-            "semantic": getattr(self.knowledge, '_semantic', {}),
-        })
+        state = self.knowledge.export_state()
+        trimmed = dict(state)
+        trimmed["episodic"] = state.get("episodic", [])[-self.MAX_EPISODIC_MEM:]
+        self._save_json("knowledge.json", trimmed)
 
     def _load_architecture(self):
         """Читает файл архитектуры и строит read-only сводку слоёв.
@@ -902,9 +947,10 @@ class PersistentBrain:
         не связанная с _knowledge/_lessons. Метода для записи нет намеренно.
         """
         # Ищем файл рядом с agent.py / в корне проекта
+        project_root = os.path.dirname(os.path.dirname(__file__))
         candidates = [
-            os.path.join(os.path.dirname(os.path.dirname(__file__)),
-                         "архитектура автономного Агента.txt"),
+            os.path.join(project_root, "архитектура автономного Агента.txt"),
+            os.path.join(project_root, "architecture.txt"),
         ]
         arch_path = next((p for p in candidates if os.path.isfile(p)), None)
         if arch_path is None:
@@ -949,12 +995,8 @@ class PersistentBrain:
         if not self.knowledge:
             return
         data = self._load_json("knowledge.json", {})
-        if data.get("long_term"):
-            self.knowledge._long_term.update(data["long_term"])
-        if data.get("episodic"):
-            self.knowledge._episodic.extend(data["episodic"])
-        if data.get("semantic"):
-            self.knowledge._semantic.update(data["semantic"])
+        if data:
+            self.knowledge.import_state(data)
 
     # ═══════════════════════════════════════════════════════════════════════
     # 2. GOALS (GoalManager — Слой 37)
@@ -963,29 +1005,7 @@ class PersistentBrain:
     def _save_goals(self):
         if not self.goal_manager:
             return
-        goals = getattr(self.goal_manager, '_goals', {})
-        data = {
-            "counter": getattr(self.goal_manager, '_counter', 0),
-            "active_goal_id": getattr(self.goal_manager, '_active_goal_id', None),
-            "goals": {},
-        }
-        for gid, g in goals.items():
-            data["goals"][gid] = {
-                "goal_id": g.goal_id,
-                "description": g.description,
-                "priority": g.priority.value if hasattr(g.priority, 'value') else g.priority,
-                "status": g.status.value if hasattr(g.status, 'value') else g.status,
-                "parent_id": g.parent_id,
-                # GoalManager хранит дочерние цели в `sub_goals`; сохраняем оба ключа
-                # для обратной совместимости старых дампов.
-                "sub_goals": list(getattr(g, 'sub_goals', [])),
-                "sub_goal_ids": list(getattr(g, 'sub_goals', [])),
-                "deadline": g.deadline,
-                "success_criteria": g.success_criteria if hasattr(g, 'success_criteria') else "",
-                "notes": list(g.notes) if hasattr(g, 'notes') else [],
-                "created_at": g.created_at if hasattr(g, 'created_at') else None,
-            }
-        self._save_json("goals.json", data)
+        self._save_json("goals.json", self.goal_manager.export_state())
 
     def _load_goals(self):
         if not self.goal_manager:
@@ -994,29 +1014,7 @@ class PersistentBrain:
         if not data.get("goals"):
             return
         try:
-            from core.goal_manager import Goal, GoalStatus, GoalPriority
-            self.goal_manager._counter = data.get("counter", 0)
-            self.goal_manager._active_goal_id = data.get("active_goal_id")
-            for gid, gd in data["goals"].items():
-                goal = Goal(
-                    goal_id=gd["goal_id"],
-                    description=gd["description"],
-                    priority=GoalPriority(gd["priority"]) if gd.get("priority") else GoalPriority.MEDIUM,
-                )
-                goal.status = GoalStatus(gd["status"]) if gd.get("status") else GoalStatus.PENDING
-                goal.parent_id = gd.get("parent_id")
-                # Поддерживаем старый и новый формат хранения дочерних целей.
-                sub_goals = gd.get("sub_goals") or gd.get("sub_goal_ids") or []
-                if hasattr(goal, 'sub_goals'):
-                    goal.sub_goals = list(sub_goals)
-                goal.deadline = gd.get("deadline")
-                if hasattr(goal, 'success_criteria'):
-                    goal.success_criteria = gd.get("success_criteria", "")
-                if hasattr(goal, 'notes'):
-                    goal.notes = gd.get("notes", []) or []
-                if hasattr(goal, 'created_at') and gd.get("created_at"):
-                    goal.created_at = gd["created_at"]
-                self.goal_manager._goals[gid] = goal
+            self.goal_manager.import_state(data)
             self._log(f"Загружено {len(data['goals'])} целей")
         except (KeyError, TypeError, AttributeError, ValueError) as e:
             self._log(f"Ошибка загрузки целей: {e}", level="error")
@@ -1028,66 +1026,27 @@ class PersistentBrain:
     def _save_episodes(self):
         if not self.experience:
             return
-        buffer = getattr(self.experience, '_buffer', [])
-        episodes = []
-        for ep in list(buffer)[-self.MAX_EPISODES:]:
-            episodes.append({
-                "episode_id": ep.episode_id if hasattr(ep, 'episode_id') else "",
-                "goal": ep.goal if hasattr(ep, 'goal') else "",
-                "actions": ep.actions if hasattr(ep, 'actions') else [],
-                "outcome": ep.outcome if hasattr(ep, 'outcome') else "",
-                "success": ep.success if hasattr(ep, 'success') else False,
-                "context": ep.context if hasattr(ep, 'context') else {},
-                "replayed_count": getattr(ep, 'replayed_count', 0),
-                "lessons": getattr(ep, 'lessons', []),
-                "created_at": getattr(ep, 'created_at', None),
-            })
-        self._save_json("episodes.json", {
-            "episodes": episodes,
-            "patterns": getattr(self.experience, '_patterns', [])[-self.MAX_PATTERNS:],
-            "replay_stats": getattr(self.experience, '_replay_stats',
-                                    {'total': 0, 'patterns_found': 0}),
-        })
+        state = self.experience.export_state()
+        trimmed = dict(state)
+        trimmed["episodes"] = state.get("episodes", [])[-self.MAX_EPISODES:]
+        trimmed["patterns"] = state.get("patterns", [])[-self.MAX_PATTERNS:]
+        self._save_json("episodes.json", trimmed)
 
     def _load_episodes(self):
         if not self.experience:
             return
         raw = self._load_json("episodes.json", {})
-        # Обратная совместимость: старый формат — просто список
         if isinstance(raw, list):
-            data_list = raw
-            patterns = []
-            replay_stats = {}
+            data = raw
         else:
-            data_list = raw.get("episodes", [])
-            patterns = raw.get("patterns", [])
-            replay_stats = raw.get("replay_stats", {})
-        if not data_list:
+            data = raw
+        if not data:
             return
         try:
-            from learning.experience_replay import Episode
-            for ed in data_list:
-                ep = Episode(
-                    episode_id=ed.get("episode_id", ""),
-                    goal=ed.get("goal", ""),
-                    actions=ed.get("actions", []),
-                    outcome=ed.get("outcome", ""),
-                    success=ed.get("success", False),
-                    context=ed.get("context"),
-                )
-                ep.replayed_count = ed.get("replayed_count", 0)
-                ep.lessons = ed.get("lessons", [])
-                if ed.get("created_at"):
-                    ep.created_at = ed["created_at"]
-                self.experience._buffer.append(ep)
-                self.experience._index[ep.episode_id] = ep
-            # Восстанавливаем паттерны и статистику
-            if patterns:
-                self.experience._patterns.extend(patterns)
-            if replay_stats:
-                self.experience._replay_stats.update(replay_stats)
-            self._log(f"Загружено {len(data_list)} эпизодов, "
-                      f"{len(patterns)} паттернов")
+            self.experience.import_state(data)
+            count = len(raw) if isinstance(raw, list) else len(raw.get("episodes", []))
+            patterns = 0 if isinstance(raw, list) else len(raw.get("patterns", []))
+            self._log(f"Загружено {count} эпизодов, {patterns} паттернов")
         except (KeyError, TypeError, AttributeError, ValueError, IndexError) as e:
             self._log(f"Ошибка загрузки эпизодов: {e}", level="error")
 
@@ -1098,18 +1057,7 @@ class PersistentBrain:
     def _save_skills(self):
         if not self.skill_library:
             return
-        skills = getattr(self.skill_library, '_skills', {})
-        data = {}
-        for name, skill in skills.items():
-            data[name] = {
-                "name": skill.name,
-                "description": getattr(skill, 'description', ''),
-                "strategy": getattr(skill, 'strategy', ''),
-                "tags": list(getattr(skill, 'tags', [])),
-                "use_count": getattr(skill, 'use_count', 0),
-                "success_count": getattr(skill, 'success_count', 0),
-            }
-        self._save_json("skills.json", data)
+        self._save_json("skills.json", self.skill_library.export_state())
 
     def _load_skills(self):
         if not self.skill_library:
@@ -1118,18 +1066,9 @@ class PersistentBrain:
         if not data:
             return
         try:
-            skills = getattr(self.skill_library, '_skills', {})
-            for name, sd in data.items():
-                if name in skills:
-                    # Обновляем существующие навыки (статистику)
-                    skill = skills[name]
-                    if hasattr(skill, 'use_count'):
-                        skill.use_count = sd.get("use_count", 0)
-                    if hasattr(skill, 'success_count'):
-                        skill.success_count = sd.get("success_count", 0)
-                    if hasattr(skill, 'strategy') and sd.get("strategy"):
-                        skill.strategy = sd["strategy"]
-            self._log(f"Загружено {len(data)} навыков")
+            self.skill_library.import_state(data)
+            skills_count = len(data.get('skills', data) if isinstance(data, dict) else data)
+            self._log(f"Загружено {skills_count} навыков")
         except (KeyError, TypeError, AttributeError) as e:
             self._log(f"Ошибка загрузки навыков: {e}", level="error")
 
@@ -1140,19 +1079,10 @@ class PersistentBrain:
     def _save_identity(self):
         if not self.identity:
             return
-        caps = getattr(self.identity, '_capabilities', {})
-        perf = getattr(self.identity, '_performance_history', [])
-        data = {
-            "capabilities": {
-                name: {
-                    "proficiency": c.proficiency,
-                    "usage_count": c.usage_count,
-                }
-                for name, c in caps.items()
-            },
-            "performance_history": perf[-self.MAX_PERF_HISTORY:],
-        }
-        self._save_json("identity.json", data)
+        state = self.identity.export_state()
+        trimmed = dict(state)
+        trimmed["performance_history"] = state.get("performance_history", [])[-self.MAX_PERF_HISTORY:]
+        self._save_json("identity.json", trimmed)
 
     def _load_identity(self):
         if not self.identity:
@@ -1161,14 +1091,7 @@ class PersistentBrain:
         if not data:
             return
         try:
-            caps = getattr(self.identity, '_capabilities', {})
-            for name, cd in data.get("capabilities", {}).items():
-                if name in caps:
-                    caps[name].proficiency = cd.get("proficiency", 0.5)
-                    caps[name].usage_count = cd.get("usage_count", 0)
-            perf = data.get("performance_history", [])
-            if perf and hasattr(self.identity, '_performance_history'):
-                self.identity._performance_history.extend(perf)
+            self.identity.import_state(data)
             self._log(f"Загружено {len(data.get('capabilities', {}))} способностей")
         except (KeyError, TypeError, AttributeError) as e:
             self._log(f"Ошибка загрузки identity: {e}", level="error")
@@ -1180,32 +1103,7 @@ class PersistentBrain:
     def _save_social(self):
         if not self.social:
             return
-        actors = getattr(self.social, '_actors', {})
-        data = {}
-        for aid, actor in actors.items():
-            relation = getattr(actor, 'relation', None)
-            trust = getattr(actor, 'trust', None)
-            preferred_style = getattr(actor, 'preferred_style', None)
-            data[aid] = {
-                "name": getattr(actor, 'name', aid),
-                "relation": relation.value if (relation is not None and hasattr(relation, 'value')) else str(relation or 'unknown'),
-                "trust": trust.value if (trust is not None and hasattr(trust, 'value')) else int(trust or 1),
-                "preferred_style": (
-                    preferred_style.value
-                    if (preferred_style is not None and hasattr(preferred_style, 'value'))
-                    else str(preferred_style or 'friendly')
-                ),
-                "interaction_count": getattr(actor, 'interaction_count', 0),
-                "notes": getattr(actor, 'notes', []),
-                "last_interaction": getattr(actor, 'last_interaction', None),
-                "preferences": getattr(actor, 'preferences', {}),
-            }
-        self._save_json("social.json", data)
-
-        # Эмоциональное состояние агента
-        emotional = getattr(self.social, 'emotional_state', None)
-        if emotional and hasattr(emotional, 'to_dict'):
-            self._save_json("emotional_state.json", emotional.to_dict())
+        self._save_json("social.json", self.social.export_state())
 
     def _load_social(self):
         if not self.social:
@@ -1213,63 +1111,18 @@ class PersistentBrain:
         data = self._load_json("social.json", {})
         if not data:
             return
+        # Обратная совместимость: подтягиваем старый emotional_state.json
+        # в новый формат, если social.json не содержит emotional_state
+        if "emotional_state" not in data:
+            emo_data = self._load_json("emotional_state.json", {})
+            if emo_data:
+                data["emotional_state"] = emo_data
         try:
-            from social.social_model import (
-                SocialActor, RelationshipType, TrustLevel, CommunicationStyle
-            )
-            actors = getattr(self.social, '_actors', {})
-            relation_map = {e.value: e for e in RelationshipType}
-            trust_map = {e.value: e for e in TrustLevel}
-            trust_name_map = {e.name: e for e in TrustLevel}
-            style_map = {e.value: e for e in CommunicationStyle}
-
-            for aid, ad in data.items():
-                if aid in actors:
-                    # Обновляем существующего актора
-                    actor = actors[aid]
-                else:
-                    # Восстанавливаем динамического актора
-                    rel = relation_map.get(
-                        ad.get("relation", "unknown"), RelationshipType.UNKNOWN
-                    )
-                    trust_raw = ad.get("trust", 2)
-                    if isinstance(trust_raw, str):
-                        trust = trust_name_map.get(trust_raw, TrustLevel.MEDIUM)
-                    else:
-                        trust = trust_map.get(trust_raw, TrustLevel.MEDIUM)
-                    actor = SocialActor(aid, ad.get("name", aid), rel, trust)
-                    actors[aid] = actor
-
-                # Восстанавливаем все поля
-                actor.interaction_count = ad.get("interaction_count", 0)
-                notes = ad.get("notes", [])
-                actor.notes = notes if isinstance(notes, list) else []
-                actor.last_interaction = ad.get("last_interaction")
-                actor.preferences = ad.get("preferences", {})
-                style_val = ad.get("preferred_style", "friendly")
-                actor.preferred_style = style_map.get(
-                    style_val, CommunicationStyle.FRIENDLY
-                )
-                # Восстанавливаем trust для существующих тоже
-                trust_raw = ad.get("trust", 2)
-                if isinstance(trust_raw, str):
-                    actor.trust = trust_name_map.get(trust_raw, actor.trust)
-                elif isinstance(trust_raw, int):
-                    actor.trust = trust_map.get(trust_raw, actor.trust)
-
-            self._log(f"Загружено {len(data)} социальных профилей")
+            self.social.import_state(data)
+            actors_count = len(data.get("actors", data))
+            self._log(f"Загружено {actors_count} социальных профилей")
         except (KeyError, TypeError, AttributeError, ValueError) as e:
             self._log(f"Ошибка загрузки social: {e}", level="error")
-
-        # Восстановление эмоционального состояния
-        emo_data = self._load_json("emotional_state.json", {})
-        if emo_data and hasattr(self.social, 'emotional_state'):
-            try:
-                from social.emotional_state import EmotionalState
-                self.social.emotional_state = EmotionalState.from_dict(emo_data)
-                self._log(f"Эмоциональное состояние: {self.social.emotional_state.mood.value}")
-            except (ImportError, TypeError, ValueError) as e:
-                self._log(f"Ошибка загрузки emotional_state: {e}", level="error")
 
     # ═══════════════════════════════════════════════════════════════════════
     # 7. REFLECTIONS — инсайты (Слой 10)
@@ -1278,11 +1131,11 @@ class PersistentBrain:
     def _save_reflections(self):
         if not self.reflection:
             return
-        data = {
-            "reflections": getattr(self.reflection, '_reflections', [])[-100:],
-            "insights": getattr(self.reflection, '_insights', [])[-100:],
-        }
-        self._save_json("reflections.json", data)
+        state = self.reflection.export_state()
+        trimmed = dict(state)
+        trimmed["reflections"] = state.get("reflections", [])[-100:]
+        trimmed["insights"] = state.get("insights", [])[-100:]
+        self._save_json("reflections.json", trimmed)
 
     def _load_reflections(self):
         if not self.reflection:
@@ -1291,10 +1144,7 @@ class PersistentBrain:
         if not data:
             return
         try:
-            if data.get("reflections"):
-                self.reflection._reflections.extend(data["reflections"])
-            if data.get("insights"):
-                self.reflection._insights.extend(data["insights"])
+            self.reflection.import_state(data)
             self._log(
                 f"Загружено {len(data.get('reflections', []))} рефлексий, "
                 f"{len(data.get('insights', []))} инсайтов"
@@ -1309,51 +1159,22 @@ class PersistentBrain:
     def _save_strategies(self):
         if not self.self_improvement:
             return
-        # Сохраняем ВСЁ: стратегии, applied, И proposals
-        proposals_data = []
-        for p in getattr(self.self_improvement, '_proposals', [])[-100:]:
-            proposals_data.append({
-                "area": p.area,
-                "current_behavior": p.current_behavior[:200],
-                "proposed_change": p.proposed_change[:300],
-                "rationale": p.rationale[:200],
-                "priority": p.priority,
-                "status": p.status,
-                "created_at": p.created_at if hasattr(p, 'created_at') else None,
-            })
-        data = {
-            "strategies": getattr(self.self_improvement, '_strategy_store', {}),
-            "applied": getattr(self.self_improvement, '_applied', [])[-100:],
-            "proposals": proposals_data,
-        }
-        self._save_json("strategies.json", data)
+        state = self.self_improvement.export_state()
+        trimmed = dict(state)
+        trimmed["proposals"] = state.get("proposals", [])[-100:]
+        trimmed["applied"] = state.get("applied", [])[-100:]
+        self._save_json("strategies.json", trimmed)
 
     def _load_strategies(self):
         if not self.self_improvement:
             return
         data = self._load_json("strategies.json", {})
-        if data.get("strategies"):
-            self.self_improvement._strategy_store.update(data["strategies"])
-        if data.get("applied"):
-            self.self_improvement._applied.extend(data["applied"])
-        # Восстанавливаем proposals
-        if data.get("proposals"):
-            try:
-                from self_improvement.self_improvement import ImprovementProposal
-                for pd in data["proposals"]:
-                    p = ImprovementProposal(
-                        area=pd["area"],
-                        current_behavior=pd.get("current_behavior", ""),
-                        proposed_change=pd.get("proposed_change", ""),
-                        rationale=pd.get("rationale", ""),
-                        priority=pd.get("priority", 2),
-                    )
-                    p.status = pd.get("status", "proposed")
-                    if pd.get("created_at"):
-                        p.created_at = pd["created_at"]
-                    self.self_improvement._proposals.append(p)
-            except (KeyError, TypeError, AttributeError):
-                self._log("Ошибка восстановления proposals self_improvement", level="warning")
+        if not data:
+            return
+        try:
+            self.self_improvement.import_state(data)
+        except (KeyError, TypeError, AttributeError):
+            self._log("Ошибка восстановления strategies/proposals", level="warning")
 
     # ═══════════════════════════════════════════════════════════════════════
     # 9. PROACTIVE MIND — мысли, настроение (ProactiveMind)
@@ -1362,12 +1183,10 @@ class PersistentBrain:
     def _save_thoughts(self):
         if not self.proactive_mind:
             return
-        data = {
-            "thoughts": getattr(self.proactive_mind, '_thoughts', [])[-30:],
-            "mood": getattr(self.proactive_mind, '_mood', 'спокойный'),
-            "cycle_count": getattr(self.proactive_mind, '_cycle_count', 0),
-        }
-        self._save_json("thoughts.json", data)
+        state = self.proactive_mind.export_state()
+        trimmed = dict(state)
+        trimmed["thoughts"] = state.get("thoughts", [])[-30:]
+        self._save_json("thoughts.json", trimmed)
 
     def _load_thoughts(self):
         if not self.proactive_mind:
@@ -1376,12 +1195,7 @@ class PersistentBrain:
         if not data:
             return
         try:
-            if data.get("thoughts"):
-                self.proactive_mind._thoughts = data["thoughts"][-30:]
-            if data.get("mood"):
-                self.proactive_mind._mood = data["mood"]
-            if data.get("cycle_count"):
-                self.proactive_mind._cycle_count = data["cycle_count"]
+            self.proactive_mind.import_state(data)
         except (KeyError, TypeError, AttributeError) as e:
             self._log(f"Ошибка загрузки thoughts: {e}", level="error")
 
@@ -1413,22 +1227,42 @@ class PersistentBrain:
             self._log(f"Загружено: качество обучения ({len(data)} стратегий)")
 
     # ═══════════════════════════════════════════════════════════════════════
+    # 10b. FAILURE TRACKER (FailureTracker внутри AutonomousLoop)
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def _save_failure_tracker(self):
+        if not self.autonomous_loop:
+            return
+        ft = getattr(self.autonomous_loop, 'failure_tracker', None)
+        if not ft or not hasattr(ft, 'to_dict'):
+            return
+        self._save_json("failure_tracker.json", ft.to_dict())
+
+    def _load_failure_tracker(self):
+        data = self._load_json("failure_tracker.json", {})
+        if not data:
+            return
+        self._pending_failure_tracker = data
+        if not self.autonomous_loop:
+            return
+        ft = getattr(self.autonomous_loop, 'failure_tracker', None)
+        if not ft or not hasattr(ft, 'load_from_dict'):
+            return
+        ft.load_from_dict(data)
+        self._pending_failure_tracker = {}
+        self._log(f"Загружено: failure tracker ({len(data.get('history', []))} записей)")
+
+    # ═══════════════════════════════════════════════════════════════════════
     # 11. ATTENTION & FOCUS (Слой 39)
     # ═══════════════════════════════════════════════════════════════════════
 
     def _save_attention(self):
         if not self.attention:
             return
-        data = {
-            "mode": getattr(self.attention, '_mode', None),
-            "counter": getattr(self.attention, '_counter', 0),
-            "noise_keywords": getattr(self.attention, '_noise_keywords', []),
-            "history": getattr(self.attention, '_history', [])[-self.MAX_ATTENTION:],
-        }
-        # Сохраняем mode как строку
-        if hasattr(data["mode"], 'value'):
-            data["mode"] = data["mode"].value
-        self._save_json("attention.json", data)
+        state = self.attention.export_state()
+        trimmed = dict(state)
+        trimmed["history"] = state.get("history", [])[-self.MAX_ATTENTION:]
+        self._save_json("attention.json", trimmed)
 
     def _load_attention(self):
         if not self.attention:
@@ -1437,18 +1271,9 @@ class PersistentBrain:
         if not data:
             return
         try:
-            from attention.attention_focus import AttentionMode
-            mode_val = data.get("mode")
-            if mode_val:
-                mode_map = {e.value: e for e in AttentionMode}
-                self.attention._mode = mode_map.get(mode_val, AttentionMode.IDLE)
-            self.attention._counter = data.get("counter", 0)
-            if data.get("noise_keywords"):
-                self.attention._noise_keywords = data["noise_keywords"]
-            if data.get("history"):
-                self.attention._history.extend(data["history"])
-            self._log(f"Загружено: внимание (counter={self.attention._counter}, "
-                      f"noise_kw={len(self.attention._noise_keywords)})")
+            self.attention.import_state(data)
+            self._log(f"Загружено: внимание (counter={data.get('counter', 0)}, "
+                      f"noise_kw={len(data.get('noise_keywords', []))})")
         except (KeyError, TypeError, AttributeError, ValueError) as e:
             self._log(f"Ошибка загрузки attention: {e}", level="error")
 
@@ -1459,48 +1284,25 @@ class PersistentBrain:
     def _save_temporal(self):
         if not self.temporal:
             return
-        events = getattr(self.temporal, '_events', {})
-        data = {
-            "counter": getattr(self.temporal, '_counter', 0),
-            "timeline": getattr(self.temporal, '_timeline', [])[-self.MAX_TIMELINE:],
-            "events": {},
-        }
-        for eid, ev in list(events.items())[-500:]:
-            data["events"][eid] = {
-                "event_id": ev.event_id,
-                "description": ev.description,
-                "start": ev.start,
-                "end": ev.end,
-                "tags": getattr(ev, 'tags', []),
-                "relations": getattr(ev, 'relations', []),
-            }
-        self._save_json("temporal.json", data)
+        state = self.temporal.export_state()
+        trimmed = dict(state)
+        trimmed["timeline"] = state.get("timeline", [])[-self.MAX_TIMELINE:]
+        # Ограничиваем количество событий
+        events = state.get("events", {})
+        if len(events) > 500:
+            keys = list(events.keys())[-500:]
+            trimmed["events"] = {k: events[k] for k in keys}
+        self._save_json("temporal.json", trimmed)
 
     def _load_temporal(self):
         if not self.temporal:
             return
         data = self._load_json("temporal.json", {})
-        if not data or not data.get("events"):
+        if not data:
             return
         try:
-            from reasoning.temporal_reasoning import TemporalEvent
-            self.temporal._counter = data.get("counter", 0)
-            for eid, ed in data["events"].items():
-                ev = TemporalEvent(
-                    event_id=ed["event_id"],
-                    description=ed.get("description", ""),
-                    start=ed.get("start"),
-                    end=ed.get("end"),
-                    tags=ed.get("tags", []),
-                )
-                ev.relations = ed.get("relations", [])
-                self.temporal._events[eid] = ev
-            loaded_timeline = data.get("timeline", [])
-            # Убираем ID которых нет в восстановленных events (защита от KeyError)
-            self.temporal._timeline = [
-                eid for eid in loaded_timeline if eid in self.temporal._events
-            ]
-            self._log(f"Загружено {len(data['events'])} временных событий")
+            self.temporal.import_state(data)
+            self._log(f"Загружено {len(data.get('events', {}))} временных событий")
         except (KeyError, TypeError, AttributeError, ValueError) as e:
             self._log(f"Ошибка загрузки temporal: {e}", level="error")
 
@@ -1511,46 +1313,24 @@ class PersistentBrain:
     def _save_causal(self):
         if not self.causal:
             return
-        graph = getattr(self.causal, 'graph', None)
-        if not graph:
-            return
-        links = getattr(graph, '_links', [])
-        data = []
-        for link in links[-self.MAX_CAUSAL_LINKS:]:
-            data.append({
-                "cause": link.cause,
-                "effect": link.effect,
-                "confidence": link.confidence,
-                "mechanism": link.mechanism,
-                "context": link.context,
-                "observed_count": link.observed_count,
-                "created_at": getattr(link, 'created_at', None),
-            })
-        self._save_json("causal.json", data)
+        links = self.causal.export_state()
+        self._save_json("causal.json", {"links": links[-self.MAX_CAUSAL_LINKS:]})
 
     def _load_causal(self):
         if not self.causal:
             return
-        data = self._load_json("causal.json", [])
-        if not isinstance(data, list) or not data:
+        raw = self._load_json("causal.json", {})
+        # Обратная совместимость: старый формат — голый list
+        if isinstance(raw, list):
+            data = raw
+        elif isinstance(raw, dict):
+            data = raw.get("links", [])
+        else:
+            return
+        if not data:
             return
         try:
-            graph = getattr(self.causal, 'graph', None)
-            if not graph:
-                return
-            for ld in data:
-                link = graph.add(
-                    cause=ld["cause"],
-                    effect=ld["effect"],
-                    confidence=ld.get("confidence", 0.7),
-                    mechanism=ld.get("mechanism"),
-                    context=ld.get("context"),
-                )
-                # Восстанавливаем счётчик наблюдений
-                link.observed_count = ld.get("observed_count", 1)
-                link.confidence = ld.get("confidence", 0.7)
-                if ld.get("created_at"):
-                    link.created_at = ld["created_at"]
+            self.causal.import_state(data)
             self._log(f"Загружено {len(data)} каузальных связей")
         except (KeyError, TypeError, AttributeError, ValueError, IndexError) as e:
             self._log(f"Ошибка загрузки causal: {e}", level="error")
@@ -1562,13 +1342,10 @@ class PersistentBrain:
     def _save_environment(self):
         if not self.environment_model:
             return
-        data = {
-            "state": getattr(self.environment_model, '_state', {}),
-            "entities": getattr(self.environment_model, '_entities', {}),
-            "relations": getattr(self.environment_model, '_relations', [])[-self.MAX_RELATIONS:],
-            "constraints": getattr(self.environment_model, '_constraints', []),
-        }
-        self._save_json("environment.json", data)
+        state = self.environment_model.export_state()
+        trimmed = dict(state)
+        trimmed["relations"] = state.get("relations", [])[-self.MAX_RELATIONS:]
+        self._save_json("environment.json", trimmed)
 
     def _load_environment(self):
         if not self.environment_model:
@@ -1577,14 +1354,7 @@ class PersistentBrain:
         if not data:
             return
         try:
-            if data.get("state"):
-                self.environment_model._state.update(data["state"])
-            if data.get("entities"):
-                self.environment_model._entities.update(data["entities"])
-            if data.get("relations"):
-                self.environment_model._relations.extend(data["relations"])
-            if data.get("constraints"):
-                self.environment_model._constraints.extend(data["constraints"])
+            self.environment_model.import_state(data)
             self._log(f"Загружено: среда ({len(data.get('entities', {}))} сущностей, "
                       f"{len(data.get('relations', []))} связей)")
         except (KeyError, TypeError, AttributeError) as e:
@@ -1597,17 +1367,11 @@ class PersistentBrain:
     def _save_learning(self):
         if not self.learning:
             return
-        data = {
-            "learned": getattr(self.learning, '_learned', [])[-self.MAX_LEARNED:],
-            "queue": getattr(self.learning, '_queue', [])[-100:],
-        }
-        # Очищаем нежелательные объекты (fetch_fn не сериализуется)
-        clean_queue = []
-        for item in data["queue"]:
-            clean = {k: v for k, v in item.items() if k != 'fetch_fn'}
-            clean_queue.append(clean)
-        data["queue"] = clean_queue
-        self._save_json("learning.json", data)
+        state = self.learning.export_state()
+        trimmed = dict(state)
+        trimmed["learned"] = state.get("learned", [])[-self.MAX_LEARNED:]
+        trimmed["queue"] = state.get("queue", [])[-100:]
+        self._save_json("learning.json", trimmed)
 
     def _load_learning(self):
         if not self.learning:
@@ -1616,10 +1380,7 @@ class PersistentBrain:
         if not data:
             return
         try:
-            if data.get("learned"):
-                self.learning._learned.extend(data["learned"])
-            if data.get("queue"):
-                self.learning._queue.extend(data["queue"])
+            self.learning.import_state(data)
             self._log(f"Загружено: обучение ({len(data.get('learned', []))} записей, "
                       f"{len(data.get('queue', []))} в очереди)")
         except (KeyError, TypeError, AttributeError) as e:
@@ -1632,25 +1393,10 @@ class PersistentBrain:
     def _save_sandbox(self):
         if not self.sandbox:
             return
-        # Сохраняем последние 200 simulation runs через to_dict()
-        runs = getattr(self.sandbox, '_runs', [])
-        safe_runs = []
-        for r in runs[-self.MAX_SANDBOX_RUNS:]:
-            try:
-                d = r.to_dict() if hasattr(r, 'to_dict') else dict(r)
-                # Обрезаем тяжёлые поля чтобы не раздувать файл
-                safe_run = {
-                    'run_id':   str(d.get('run_id', ''))[:50],
-                    'action':   str(d.get('action', ''))[:500],
-                    'verdict':  str(d.get('verdict', 'safe')),
-                    'error':    str(d.get('error') or '')[:300],
-                    'duration': float(d.get('duration', 0.0)),
-                    'timestamp': float(d.get('timestamp', 0.0)),
-                }
-                safe_runs.append(safe_run)
-            except (OSError, IOError, TypeError, AttributeError, ValueError):
-                self._log("Ошибка сериализации sandbox run", level="warning")
-        self._save_json("sandbox.json", {'runs': safe_runs})
+        state = self.sandbox.export_state()
+        trimmed = dict(state)
+        trimmed["runs"] = state.get("runs", [])[-self.MAX_SANDBOX_RUNS:]
+        self._save_json("sandbox.json", trimmed)
 
     def _load_sandbox(self):
         if not self.sandbox:
@@ -1659,31 +1405,8 @@ class PersistentBrain:
         if not data:
             return
         try:
-            from environment.sandbox import SimulationRun, SandboxResult
-            runs_data = data.get('runs', [])
-            existing = getattr(self.sandbox, '_runs', None)
-            if existing is None:
-                self.sandbox._runs = []
-                existing = self.sandbox._runs
-            restored = []
-            for d in runs_data:
-                try:
-                    run = SimulationRun(
-                        run_id=d.get('run_id', ''),
-                        action=d.get('action', ''),
-                    )
-                    verdict_str = d.get('verdict', 'safe')
-                    run.verdict = SandboxResult(verdict_str) if verdict_str in [
-                        e.value for e in SandboxResult
-                    ] else SandboxResult.SAFE
-                    run.error = d.get('error') or None
-                    run.duration = float(d.get('duration', 0.0))
-                    run.timestamp = float(d.get('timestamp', 0.0))
-                    restored.append(run)
-                except (KeyError, TypeError, AttributeError, ValueError):
-                    self._log("Ошибка восстановления sandbox run", level="warning")
-            existing.extend(restored)
-            self._log(f"Загружено: sandbox ({len(restored)} симуляций)")
+            self.sandbox.import_state(data)
+            self._log(f"Загружено: sandbox ({len(data.get('runs', []))} симуляций)")
         except (KeyError, TypeError, AttributeError, ValueError) as e:
             self._log(f"Ошибка загрузки sandbox: {e}", level="error")
 
@@ -1694,10 +1417,10 @@ class PersistentBrain:
     def _save_capability_stats(self):
         if not self.capability_discovery:
             return
-        failure_log = getattr(self.capability_discovery, '_failure_log', {})
-        if not failure_log:
+        state = self.capability_discovery.export_state()
+        if not state:
             return
-        self._save_json("capability_stats.json", failure_log)
+        self._save_json("capability_stats.json", state)
 
     def _load_capability_stats(self):
         if not self.capability_discovery:
@@ -1706,17 +1429,7 @@ class PersistentBrain:
         if not data:
             return
         try:
-            existing = getattr(self.capability_discovery, '_failure_log', {})
-            for action_type, stats in data.items():
-                if action_type in existing:
-                    existing[action_type]['success'] += stats.get('success', 0)
-                    existing[action_type]['fail'] += stats.get('fail', 0)
-                else:
-                    existing[action_type] = {
-                        'success': stats.get('success', 0),
-                        'fail': stats.get('fail', 0),
-                    }
-            self.capability_discovery._failure_log = existing
+            self.capability_discovery.import_state(data)
             self._log(f"Загружено: capability_stats ({len(data)} типов действий)")
         except (KeyError, TypeError, AttributeError, ValueError) as e:
             self._log(f"Ошибка загрузки capability_stats: {e}", level="error")
@@ -1747,15 +1460,15 @@ class PersistentBrain:
     def _load_solver_cases(self):
         data = self._load_json("solver_cases.json", [])
         if isinstance(data, list):
-            self._solver_cases = data[-500:]
+            self._solver_cases = data[-self.MAX_SOLVER_CASES:]
 
     def _save_exact_solver_journal(self):
-        self._save_json("exact_solver_journal.json", self._exact_solver_journal[-500:])
+        self._save_json("exact_solver_journal.json", self._exact_solver_journal[-self.MAX_SOLVER_JOURNAL:])
 
     def _load_exact_solver_journal(self):
         data = self._load_json("exact_solver_journal.json", [])
         if isinstance(data, list):
-            self._exact_solver_journal = data[-500:]
+            self._exact_solver_journal = data[-self.MAX_SOLVER_JOURNAL:]
 
     def _save_evolution(self):
         # _lock уже захвачен в save() → просто сохраняем список как есть
@@ -1764,7 +1477,7 @@ class PersistentBrain:
     def _load_evolution(self):
         data = self._load_json("evolution.json", [])
         if isinstance(data, list):
-            self._evolution_log = data[-200:]
+            self._evolution_log = data[-self.MAX_EVOLUTION:]
 
     def _save_stats(self):
         self._save_json("stats.json", self._stats)

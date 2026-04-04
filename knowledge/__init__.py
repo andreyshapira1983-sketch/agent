@@ -10,6 +10,7 @@ from .data_lifecycle import DataLifecycleManager, DataAge
 from .knowledge_verification import (
     KnowledgeVerificationSystem, VerificationResult, VerificationStatus,
 )
+from .write_quarantine import WriteQuarantine, QuarantineRecord, TRUSTED_SOURCES
 
 __all__ = [
     'KnowledgeSystem',
@@ -17,4 +18,5 @@ __all__ = [
     'DataLifecycleManager', 'DataAge',
     'KnowledgeVerificationSystem', 'VerificationResult', 'VerificationStatus',
     'VectorStore', 'VectorDocument', 'SearchResult',
+    'WriteQuarantine', 'QuarantineRecord', 'TRUSTED_SOURCES',
 ]

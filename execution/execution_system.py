@@ -184,25 +184,40 @@ class ExecutionSystem:
         """Запускает системную команду. Короткий синтаксис."""
         return self.submit(command, task_type='command', timeout=timeout)
 
+    _SERVICE_NAME_RE = __import__('re').compile(r'^[A-Za-z0-9_.-]+$')
+
     def run_script(self, script_path, args=None, timeout=None) -> ExecutionTask:
         """Запускает скрипт (Python, bash и др.)."""
-        cmd = f"{script_path} {' '.join(args or [])}"
+        parts = [str(script_path)] + [str(a) for a in (args or [])]
+        cmd = shlex.join(parts)
         return self.submit(cmd, task_type='script', timeout=timeout)
 
     # ── Service Management ────────────────────────────────────────────────────
 
     def start_service(self, service_name) -> ExecutionTask:
         """Запускает системный сервис (требует Human Approval в safe_mode)."""
+        name = str(service_name).strip()
+        if not self._SERVICE_NAME_RE.match(name):
+            t = ExecutionTask('rejected', f'invalid service: {name[:60]}', task_type='service')
+            t.status = TaskStatus.REJECTED
+            t.error = f'Invalid service name: {name[:60]}'
+            return t
         return self.submit(
-            f"sc start {service_name}" if self._is_windows() else f"systemctl start {service_name}",
+            f"sc start {name}" if self._is_windows() else f"systemctl start {name}",
             task_type='service',
             require_approval=self.safe_mode,
         )
 
     def stop_service(self, service_name) -> ExecutionTask:
         """Останавливает системный сервис (требует Human Approval в safe_mode)."""
+        name = str(service_name).strip()
+        if not self._SERVICE_NAME_RE.match(name):
+            t = ExecutionTask('rejected', f'invalid service: {name[:60]}', task_type='service')
+            t.status = TaskStatus.REJECTED
+            t.error = f'Invalid service name: {name[:60]}'
+            return t
         return self.submit(
-            f"sc stop {service_name}" if self._is_windows() else f"systemctl stop {service_name}",
+            f"sc stop {name}" if self._is_windows() else f"systemctl stop {name}",
             task_type='service',
             require_approval=self.safe_mode,
         )

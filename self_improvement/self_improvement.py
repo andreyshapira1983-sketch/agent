@@ -341,6 +341,13 @@ class SelfImprovementSystem:
             return [p.to_dict() for p in self._proposals if p.status == status]
         return [p.to_dict() for p in self._proposals]
 
+    def pending_proposals(self, area: str | None = None) -> list:
+        """Возвращает ImprovementProposal со статусом 'proposed' (для apply)."""
+        result = [p for p in self._proposals if p.status == 'proposed']
+        if area:
+            result = [p for p in result if p.area == area]
+        return result
+
     def get_applied(self) -> list[dict]:
         return list(self._applied)
 
@@ -469,3 +476,47 @@ class SelfImprovementSystem:
             self.monitoring.info(message, source='self_improvement')
         else:
             print(f"[SelfImprovement] {message}")
+
+    @property
+    def strategies(self) -> dict:
+        """Возвращает копию хранилища стратегий."""
+        return dict(self._strategy_store)
+
+    def export_state(self) -> dict:
+        """Возвращает полное состояние для персистентности."""
+        proposals_data = []
+        for p in self._proposals:
+            proposals_data.append({
+                "area": p.area,
+                "current_behavior": p.current_behavior[:200],
+                "proposed_change": p.proposed_change[:300],
+                "rationale": p.rationale[:200],
+                "priority": p.priority,
+                "status": p.status,
+                "created_at": p.created_at if hasattr(p, 'created_at') else None,
+            })
+        return {
+            "strategies": dict(self._strategy_store),
+            "applied": list(self._applied),
+            "proposals": proposals_data,
+        }
+
+    def import_state(self, data: dict):
+        """Восстанавливает состояние из персистентного хранилища."""
+        if data.get("strategies"):
+            self._strategy_store.update(data["strategies"])
+        if data.get("applied"):
+            self._applied.extend(data["applied"])
+        if data.get("proposals"):
+            for pd in data["proposals"]:
+                p = ImprovementProposal(
+                    area=pd["area"],
+                    current_behavior=pd.get("current_behavior", ""),
+                    proposed_change=pd.get("proposed_change", ""),
+                    rationale=pd.get("rationale", ""),
+                    priority=pd.get("priority", 2),
+                )
+                p.status = pd.get("status", "proposed")
+                if pd.get("created_at"):
+                    p.created_at = pd["created_at"]
+                self._proposals.append(p)

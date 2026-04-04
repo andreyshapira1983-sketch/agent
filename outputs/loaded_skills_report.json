@@ -1,0 +1,150 @@
+{
+  "timestamp": "2026-04-02T17:58:42.992283",
+  "registered_tools": [
+    "terminal",
+    "filesystem",
+    "python_runtime",
+    "search",
+    "github",
+    "docker",
+    "database",
+    "package_manager",
+    "cloud_api",
+    "screenshot",
+    "mouse_keyboard",
+    "clipboard",
+    "window_manager",
+    "process_manager",
+    "git",
+    "network",
+    "cron_scheduler",
+    "http_client",
+    "image_generator",
+    "ocr",
+    "translate",
+    "spreadsheet",
+    "pdf_generator",
+    "powerpoint",
+    "data_viz",
+    "email",
+    "calendar",
+    "huggingface",
+    "upwork",
+    "figma",
+    "image_edit",
+    "video_edit",
+    "blender",
+    "cad",
+    "voice_call",
+    "mobile",
+    "archive",
+    "ssh",
+    "file_watcher",
+    "notification",
+    "encryption",
+    "nlp",
+    "embedding",
+    "code_analyzer",
+    "web_form",
+    "task_queue",
+    "self_monitor",
+    "gui_agent",
+    "reddit",
+    "browser"
+  ],
+  "core_capabilities": [
+    "reasoning",
+    "planning",
+    "code_generation",
+    "research",
+    "communication",
+    "tool_use",
+    "learning",
+    "self_reflection"
+  ],
+  "loaded_skills": {
+    "research": "Разбей тему → ищи источники → фильтруй → извлекай факты → синтезируй",
+    "write_article": "Исследование темы → структура → написание → сохранение",
+    "copywriting": "Анализ продукта → формула AIDA/PAS → создание текста",
+    "proofread": "Чтение → исправление → проверка → сохранение",
+    "translate": "Определение языка → перевод → проверка → сохранение"
+  },
+  "tool_categories": {
+    "file_operations": [
+      "filesystem",
+      "archive",
+      "file_watcher"
+    ],
+    "system_control": [
+      "terminal",
+      "process_manager",
+      "window_manager",
+      "mouse_keyboard"
+    ],
+    "development": [
+      "python_runtime",
+      "git",
+      "github",
+      "code_analyzer",
+      "docker"
+    ],
+    "data_processing": [
+      "spreadsheet",
+      "database",
+      "data_viz",
+      "nlp",
+      "embedding"
+    ],
+    "communication": [
+      "email",
+      "calendar",
+      "notification",
+      "voice_call",
+      "mobile"
+    ],
+    "content_creation": [
+      "pdf_generator",
+      "powerpoint",
+      "image_generator",
+      "image_edit",
+      "video_edit"
+    ],
+    "web_tools": [
+      "search",
+      "http_client",
+      "browser",
+      "web_form",
+      "reddit",
+      "huggingface"
+    ],
+    "cloud_services": [
+      "cloud_api",
+      "ssh",
+      "upwork",
+      "figma"
+    ],
+    "utilities": [
+      "screenshot",
+      "clipboard",
+      "translate",
+      "ocr",
+      "encryption",
+      "cron_scheduler"
+    ],
+    "monitoring": [
+      "self_monitor",
+      "network",
+      "task_queue"
+    ],
+    "automation": [
+      "gui_agent",
+      "blender",
+      "cad"
+    ]
+  },
+  "statistics": {
+    "total_tools": 48,
+    "total_categories": 12,
+    "average_tools_per_category": 4
+  }
+}

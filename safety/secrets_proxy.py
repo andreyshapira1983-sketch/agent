@@ -22,7 +22,7 @@ _SAFE_ENV_KEYS = frozenset({
 
 # Паттерн для «очевидно секретных» имён переменных
 _SECRET_NAME_RE = re.compile(
-    r'(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|SID)',
+    r'(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|SID|URL|DSN|CONNECTION)',
     re.IGNORECASE,
 )
 

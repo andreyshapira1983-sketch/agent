@@ -18,6 +18,10 @@ from .tool_layer import (
 )
 from .capability_discovery import CapabilityDiscovery, DiscoveredCapability
 from .browser_tool import BrowserTool, BrowserPage
+from .tool_broker import (
+    ToolBroker, ToolRequest, ToolResponse,
+    BrokerError, CapabilityDeniedError, ApprovalRequiredError, ProhibitedActionError,
+)
 
 __all__ = [
     'ToolLayer', 'BaseTool',
@@ -27,4 +31,6 @@ __all__ = [
     'build_tool_layer',
     'CapabilityDiscovery', 'DiscoveredCapability',
     'BrowserTool', 'BrowserPage',
+    'ToolBroker', 'ToolRequest', 'ToolResponse',
+    'BrokerError', 'CapabilityDeniedError', 'ApprovalRequiredError', 'ProhibitedActionError',
 ]

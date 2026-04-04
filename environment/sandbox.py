@@ -1,11 +1,18 @@
 # Simulation / Sandbox Testing Layer (песочница) — Слой 28
 # Архитектура автономного AI-агента
 # Тестирование действий до реального выполнения: код, стратегии, сценарии.
+# Контейнерная изоляция (Docker) + fallback на subprocess.
 
 
+import ast
+import json as _json
+import logging
 import re
+import shutil
+import subprocess as _subprocess
 import time
 import sys
+import uuid as _uuid
 from enum import Enum
 
 
@@ -43,6 +50,155 @@ class SimulationRun:
         }
 
 
+# ── Container Sandbox (runbook §10, security_behavior_hardening §2.5) ────────
+
+_SANDBOX_IMAGE = 'agent-sandbox'
+
+# Ограничения по умолчанию (из Dockerfile.sandbox comments + runbook §10)
+_DEFAULT_LIMITS = {
+    'memory':    '256m',
+    'cpus':      '1',
+    'pids_limit': '64',
+    'timeout':    30,      # секунды
+}
+
+
+class ContainerSandbox:
+    """Контейнерная песочница — каждый job в отдельном Docker-контейнере.
+
+    Enforcement (runbook §10):
+        - отдельный контейнер на каждый job
+        - CPU / RAM / PID limits
+        - read-only root FS
+        - /tmp → tmpfs (единственная writable area)
+        - сеть выключена по умолчанию (--network none)
+        - непривилегированный пользователь
+        - --no-new-privileges
+
+    Fallback: если Docker недоступен, возвращает (False, ...) — caller
+    использует subprocess-based sandbox.
+    """
+
+    def __init__(
+        self,
+        image: str = _SANDBOX_IMAGE,
+        memory: str = _DEFAULT_LIMITS['memory'],
+        cpus: str = _DEFAULT_LIMITS['cpus'],
+        pids_limit: str = _DEFAULT_LIMITS['pids_limit'],
+        default_timeout: int = _DEFAULT_LIMITS['timeout'],
+        network: bool = False,
+    ):
+        self.image = image
+        self.memory = memory
+        self.cpus = cpus
+        self.pids_limit = pids_limit
+        self.default_timeout = default_timeout
+        self.network = network
+        self._available: bool | None = None  # кэш проверки Docker
+
+    def is_available(self) -> bool:
+        """Проверяет, доступен ли Docker daemon и образ."""
+        if self._available is not None:
+            return self._available
+        try:
+            docker_bin = shutil.which('docker')
+            if not docker_bin:
+                self._available = False
+                return False
+            result = _subprocess.run(
+                ['docker', 'image', 'inspect', self.image],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+            self._available = result.returncode == 0
+        except (OSError, _subprocess.TimeoutExpired):
+            self._available = False
+        return self._available
+
+    def run(
+        self,
+        code: str,
+        context: dict | None = None,
+        timeout: int | None = None,
+    ) -> tuple[bool, str, str, float]:
+        """Выполняет Python-код в изолированном контейнере.
+
+        Args:
+            code    — Python-код
+            context — JSON-сериализуемый контекст (dict)
+            timeout — таймаут в секундах
+
+        Returns:
+            (success, stdout, stderr, duration_seconds)
+            success=False если timeout / nonzero exit / Docker error.
+        """
+        timeout = timeout or self.default_timeout
+
+        # Формируем runner-скрипт (передаём код через stdin)
+        safe_ctx = {}
+        if isinstance(context, dict):
+            for k, v in context.items():
+                if isinstance(v, (str, int, float, bool, list, dict, type(None))):
+                    safe_ctx[str(k)] = v
+
+        runner_code = (
+            "import sys, json\n"
+            "ctx = json.loads(sys.argv[1]) if len(sys.argv) > 1 else {}\n"
+            "safe_names = ['print','len','range','enumerate','zip','map','filter',"
+            "'sorted','reversed','list','dict','set','tuple','str','int','float',"
+            "'bool','isinstance','min','max','sum','abs','round','repr']\n"
+            "import builtins\n"
+            "safe = {n: getattr(builtins, n) for n in safe_names if hasattr(builtins, n)}\n"
+            "ns = {'__builtins__': safe, **ctx}\n"
+            "code = sys.stdin.read()\n"
+            "exec(compile(code, '<sandbox>', 'exec'), ns)\n"
+        )
+
+        ctx_json = _json.dumps(safe_ctx, ensure_ascii=True)
+
+        cmd = [
+            'docker', 'run', '--rm',
+            '--read-only',
+            '--network', 'none' if not self.network else 'bridge',
+            '--memory', self.memory,
+            '--cpus', self.cpus,
+            '--pids-limit', self.pids_limit,
+            '--no-new-privileges',
+            '--user', 'nobody',
+            '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m',
+            '-i',  # stdin
+            self.image,
+            'python', '-I', '-c', runner_code, ctx_json,
+        ]
+
+        t_start = time.time()
+        try:
+            proc = _subprocess.run(
+                cmd,
+                input=code,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+            duration = time.time() - t_start
+            return (
+                proc.returncode == 0,
+                proc.stdout or '',
+                proc.stderr or '',
+                duration,
+            )
+        except _subprocess.TimeoutExpired:
+            duration = time.time() - t_start
+            return (False, '', f'Container timeout ({timeout}s)', duration)
+        except OSError as e:
+            duration = time.time() - t_start
+            return (False, '', f'Docker error: {e}', duration)
+
+    def reset_cache(self):
+        """Сбрасывает кэш проверки Docker (для тестов)."""
+        self._available = None
+
+
 class SandboxLayer:
     """
     Simulation / Sandbox Testing Layer — Слой 28.
@@ -62,11 +218,17 @@ class SandboxLayer:
     """
 
     def __init__(self, environment_model=None, cognitive_core=None,
-                 governance=None, monitoring=None):
+                 governance=None, monitoring=None,
+                 container_sandbox: ContainerSandbox | None = None):
         self.environment_model = environment_model
         self.cognitive_core = cognitive_core
         self.governance = governance
         self.monitoring = monitoring
+
+        # Контейнерная песочница (runbook §10): если передана и доступна,
+        # run_code() будет выполнять код в Docker-контейнере.
+        # Fallback: subprocess на хосте (текущее поведение).
+        self.container_sandbox = container_sandbox or ContainerSandbox()
 
         self._runs: list[SimulationRun] = []
         self._allowed_modules = {
@@ -135,6 +297,68 @@ class SandboxLayer:
                 if isinstance(v, (str, int, float, bool, list, dict, type(None))):
                     safe_context[str(k)] = v
 
+        # SECURITY: AST-валидация — блокируем dunder-атрибуты для предотвращения
+        # побега из песочницы через ().__class__.__bases__[0].__subclasses__()
+        try:
+            tree = ast.parse(code)
+        except SyntaxError as e:
+            run.verdict = SandboxResult.ERROR
+            run.error = f"SyntaxError: {e}"
+            self._runs.append(run)
+            return run
+
+        _BLOCKED_DUNDERS = frozenset({
+            '__class__', '__bases__', '__subclasses__', '__mro__',
+            '__globals__', '__code__', '__closure__', '__func__',
+            '__self__', '__module__', '__dict__', '__weakref__',
+            '__init_subclass__', '__set_name__', '__del__',
+            '__builtins__', '__import__', '__loader__', '__spec__',
+        })
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr in _BLOCKED_DUNDERS:
+                run.verdict = SandboxResult.UNSAFE
+                run.error = f"Запрещённый доступ к '{node.attr}' (sandbox escape prevention)"
+                self._runs.append(run)
+                self._log(f"Sandbox BLOCKED [{run.run_id}]: dunder access '{node.attr}'")
+                return run
+            # Блокируем getattr/setattr/delattr — обход через строковые имена
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id in ('getattr', 'setattr', 'delattr', 'vars', 'dir',
+                                     'exec', 'eval', 'compile', '__import__', 'breakpoint'):
+                    run.verdict = SandboxResult.UNSAFE
+                    run.error = f"Запрещённый вызов '{node.func.id}()' в sandbox"
+                    self._runs.append(run)
+                    self._log(f"Sandbox BLOCKED [{run.run_id}]: call '{node.func.id}'")
+                    return run
+
+        # SECURITY: Ограничиваем размер кода
+        if len(code) > 100_000:
+            run.verdict = SandboxResult.UNSAFE
+            run.error = "Код слишком большой (>100KB)"
+            self._runs.append(run)
+            return run
+
+        # ── Container path (runbook §10): предпочтительный метод ──────────
+        if self.container_sandbox and self.container_sandbox.is_available():
+            success, stdout, stderr, duration = self.container_sandbox.run(
+                code, context=safe_context, timeout=timeout,
+            )
+            run.stdout = stdout
+            run.stderr = stderr
+            run.duration = duration
+            if not success:
+                run.verdict = SandboxResult.ERROR
+                run.error = stderr.strip() or 'Container execution failed'
+            else:
+                run.verdict = SandboxResult.SAFE
+                run.side_effects = side_effects
+                if run.side_effects:
+                    run.verdict = SandboxResult.RISKY
+            self._runs.append(run)
+            self._log(f"Sandbox container [{run.run_id}]: {run.verdict.value}, {run.duration:.2f}s")
+            return run
+
+        # ── Subprocess fallback (если Docker недоступен) ──────────────────
         encoded_code = base64.b64encode(code.encode('utf-8')).decode('ascii')
         encoded_ctx = base64.b64encode(
             json.dumps(safe_context, ensure_ascii=False).encode('utf-8')
@@ -160,7 +384,7 @@ class SandboxLayer:
                 [sys.executable, '-I', '-c', runner, encoded_code, encoded_ctx],
                 capture_output=True,
                 text=True,
-                timeout=max(1, int(timeout)),
+                timeout=min(max(1, int(timeout)), 300),
                 check=False,
                 env=safe_env(),
             )
@@ -356,19 +580,43 @@ class SandboxLayer:
                 if hasattr(builtins, name)}
 
     def _detect_side_effects(self, code: str) -> list[str]:
-        effects = []
-        dangerous = {
-            'open(': 'запись/чтение файлов',
-            'os.': 'операции ОС',
-            'subprocess': 'запуск процессов',
-            'requests': 'сетевые запросы',
-            'urllib': 'сетевые запросы',
-            'socket': 'сетевые соединения',
-            'shutil': 'операции с файловой системой',
+        """AST-based detection of potentially dangerous operations."""
+        effects: list[str] = []
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return effects
+        _DANGEROUS_MODULES = {
+            'os': 'операции ОС', 'subprocess': 'запуск процессов',
+            'requests': 'сетевые запросы', 'urllib': 'сетевые запросы',
+            'socket': 'сетевые соединения', 'shutil': 'операции с файловой системой',
+            'http': 'сетевые запросы',
         }
-        for pattern, description in dangerous.items():
-            if pattern in code:
-                effects.append(description)
+        seen: set[str] = set()
+        for node in ast.walk(tree):
+            # Import checks
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                mod = ''
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    mod = node.module.split('.')[0]
+                for alias in getattr(node, 'names', []):
+                    name = (alias.name or '').split('.')[0]
+                    for m in (mod, name):
+                        if m in _DANGEROUS_MODULES and m not in seen:
+                            seen.add(m)
+                            effects.append(_DANGEROUS_MODULES[m])
+            # open() call
+            if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name) and node.func.id == 'open':
+                    if 'файлов' not in seen:
+                        seen.add('файлов')
+                        effects.append('запись/чтение файлов')
+            # os.* attribute access
+            if isinstance(node, ast.Attribute):
+                if isinstance(node.value, ast.Name) and node.value.id == 'os':
+                    if 'os' not in seen:
+                        seen.add('os')
+                        effects.append('операции ОС')
         return effects
 
     def _parse_verdict(self, text: str) -> SandboxResult:
@@ -482,3 +730,40 @@ class SandboxLayer:
             self.monitoring.info(message, source='sandbox')
         else:
             print(f"[Sandbox] {message}")
+
+    def export_state(self) -> dict:
+        """Возвращает полное состояние для персистентности."""
+        safe_runs = []
+        for r in self._runs:
+            try:
+                d = r.to_dict()
+                safe_runs.append({
+                    'run_id':    str(d.get('run_id', ''))[:50],
+                    'action':    str(d.get('action', ''))[:500],
+                    'verdict':   str(d.get('verdict', 'safe')),
+                    'error':     str(d.get('error') or '')[:300],
+                    'duration':  float(d.get('duration', 0.0)),
+                    'timestamp': float(d.get('timestamp', 0.0)),
+                })
+            except (OSError, IOError, TypeError, AttributeError, ValueError):
+                pass
+        return {'runs': safe_runs}
+
+    def import_state(self, data: dict):
+        """Восстанавливает состояние из персистентного хранилища."""
+        for d in data.get('runs', []):
+            try:
+                run = SimulationRun(
+                    run_id=d.get('run_id', ''),
+                    action=d.get('action', ''),
+                )
+                verdict_str = d.get('verdict', 'safe')
+                run.verdict = SandboxResult(verdict_str) if verdict_str in [
+                    e.value for e in SandboxResult
+                ] else SandboxResult.SAFE
+                run.error = d.get('error') or None
+                run.duration = float(d.get('duration', 0.0))
+                run.timestamp = float(d.get('timestamp', 0.0))
+                self._runs.append(run)
+            except (KeyError, TypeError, AttributeError, ValueError):
+                pass

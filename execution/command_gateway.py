@@ -20,6 +20,7 @@ import shlex
 import subprocess
 import time
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,8 @@ class CommandGateway:
         self._audit_path = audit_log
         self._call_count = 0
         self._blocked_count = 0
+        self._counters_lock = threading.Lock()
+        self._scrubber: Callable[[str], str] | None = None
 
     @classmethod
     def get_instance(cls, **kwargs) -> CommandGateway:
@@ -146,12 +149,14 @@ class CommandGateway:
         Returns:
             GatewayResult
         """
-        self._call_count += 1
+        with self._counters_lock:
+            self._call_count += 1
         cmd_str = ' '.join(args) if args else ''
 
         # 1) Проверяем что args — список, не строка
         if isinstance(args, str):
-            self._blocked_count += 1
+            with self._counters_lock:
+                self._blocked_count += 1
             return self._reject(cmd_str, 'args должен быть списком, не строкой',
                                 caller=caller)
 
@@ -165,13 +170,15 @@ class CommandGateway:
 
         # 3) Blocklist
         if exe in BLOCKED_EXECUTABLES:
-            self._blocked_count += 1
+            with self._counters_lock:
+                self._blocked_count += 1
             return self._reject(cmd_str, f"'{exe}' в чёрном списке",
                                 exe=exe, caller=caller)
 
         # 4) Whitelist
         if exe not in ALLOWED_EXECUTABLES:
-            self._blocked_count += 1
+            with self._counters_lock:
+                self._blocked_count += 1
             return self._reject(cmd_str, f"'{exe}' не в белом списке",
                                 exe=exe, caller=caller)
 
@@ -179,7 +186,8 @@ class CommandGateway:
         args_joined = ' '.join(args[1:])
         for pat in _ARG_INJECTION_PATTERNS:
             if pat.search(args_joined):
-                self._blocked_count += 1
+                with self._counters_lock:
+                    self._blocked_count += 1
                 return self._reject(cmd_str,
                                     f"Инъекция в аргументах: {pat.pattern}",
                                     exe=exe, caller=caller)
@@ -193,7 +201,8 @@ class CommandGateway:
                         'httpx', 'aiohttp', 'urlopen')
                 for nk in _net:
                     if nk in inline:
-                        self._blocked_count += 1
+                        with self._counters_lock:
+                            self._blocked_count += 1
                         return self._reject(cmd_str,
                                             f"Сетевой код в python -c: '{nk}'",
                                             exe=exe, caller=caller)
@@ -303,7 +312,7 @@ class CommandGateway:
             docker_args += ['-v', f'{self._working_dir}:/workspace:ro',
                             '-w', '/workspace']
 
-        docker_args.append(self._docker_image)
+        docker_args.append(self._docker_image)  # type: ignore[arg-type]  # guarded by caller check
         docker_args.extend(args)
         return docker_args
 
@@ -333,11 +342,15 @@ class CommandGateway:
     def _audit(self, result: GatewayResult, caller: str):
         """Записывает аудит-запись в JSONL."""
         import json
+        _scrub = self._scrubber
+        _cmd = result.command[:500]
+        if _scrub is not None:
+            _cmd = _scrub(_cmd)
         entry = {
             'ts': time.time(),
             'caller': caller,
             'exe': result.exe,
-            'command': result.command[:500],
+            'command': _cmd,
             'allowed': result.allowed,
             'returncode': result.returncode,
             'duration': round(result.duration, 3),
@@ -347,10 +360,14 @@ class CommandGateway:
 
         try:
             os.makedirs(os.path.dirname(self._audit_path), exist_ok=True)
-            with open(self._audit_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + '\n')
-        except OSError:
-            pass
+            with self._lock:
+                with open(self._audit_path, 'a', encoding='utf-8') as f:
+                    f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+        except OSError as _audit_err:
+            if self._monitoring:
+                self._monitoring.warning(
+                    f"Ошибка записи аудит-лога: {_audit_err}", source="command_gateway"
+                )
 
         if self._monitoring:
             try:

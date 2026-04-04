@@ -88,6 +88,12 @@ class BlenderTool(BaseTool):
         """Версия установленного Blender."""
         return _run_blender(self._exe, ['--version'], timeout=15)
 
+    @staticmethod
+    def _safe_str(value: str) -> str:
+        """Экранирует строку для безопасной подстановки в Python-скрипт."""
+        import json as _json
+        return _json.dumps(str(value))
+
     def render(self, blend_file: str, output: str,
                frame_start: int = 1, frame_end: int = 1,
                engine: str = 'CYCLES') -> dict:
@@ -96,12 +102,14 @@ class BlenderTool(BaseTool):
         engine: CYCLES (фотореализм, медленно) | BLENDER_EEVEE (быстро).
         output — путь без расширения (Blender добавит номер кадра + расширение).
         """
+        s_engine = self._safe_str(engine)
+        s_output = self._safe_str(output)
         script = (
             f"import bpy\n"
-            f"bpy.context.scene.render.engine = '{engine}'\n"
-            f"bpy.context.scene.render.filepath = r'{output}'\n"
-            f"bpy.context.scene.frame_start = {frame_start}\n"
-            f"bpy.context.scene.frame_end = {frame_end}\n"
+            f"bpy.context.scene.render.engine = {s_engine}\n"
+            f"bpy.context.scene.render.filepath = {s_output}\n"
+            f"bpy.context.scene.frame_start = {int(frame_start)}\n"
+            f"bpy.context.scene.frame_end = {int(frame_end)}\n"
             f"bpy.ops.render.render(animation=True)\n"
         )
         return self._script(blend_file, script)
@@ -111,13 +119,14 @@ class BlenderTool(BaseTool):
         Экспорт сцены в 3D формат.
         fmt: obj | fbx | gltf | stl | dae | ply
         """
+        s_output = self._safe_str(output)
         ops = {
-            'obj':  f"bpy.ops.export_scene.obj(filepath=r'{output}')",
-            'fbx':  f"bpy.ops.export_scene.fbx(filepath=r'{output}')",
-            'gltf': f"bpy.ops.export_scene.gltf(filepath=r'{output}')",
-            'stl':  f"bpy.ops.export_mesh.stl(filepath=r'{output}')",
-            'dae':  f"bpy.ops.wm.collada_export(filepath=r'{output}')",
-            'ply':  f"bpy.ops.export_mesh.ply(filepath=r'{output}')",
+            'obj':  f"bpy.ops.export_scene.obj(filepath={s_output})",
+            'fbx':  f"bpy.ops.export_scene.fbx(filepath={s_output})",
+            'gltf': f"bpy.ops.export_scene.gltf(filepath={s_output})",
+            'stl':  f"bpy.ops.export_mesh.stl(filepath={s_output})",
+            'dae':  f"bpy.ops.wm.collada_export(filepath={s_output})",
+            'ply':  f"bpy.ops.export_mesh.ply(filepath={s_output})",
         }
         op = ops.get(fmt.lower())
         if not op:
@@ -131,21 +140,23 @@ class BlenderTool(BaseTool):
         """
         in_ext = os.path.splitext(input_path)[1].lstrip('.').lower()
         out_ext = os.path.splitext(output_path)[1].lstrip('.').lower()
+        s_input = self._safe_str(input_path)
+        s_output = self._safe_str(output_path)
         imports = {
-            'obj':  f"bpy.ops.import_scene.obj(filepath=r'{input_path}')",
-            'fbx':  f"bpy.ops.import_scene.fbx(filepath=r'{input_path}')",
-            'stl':  f"bpy.ops.import_mesh.stl(filepath=r'{input_path}')",
-            'dae':  f"bpy.ops.wm.collada_import(filepath=r'{input_path}')",
-            'gltf': f"bpy.ops.import_scene.gltf(filepath=r'{input_path}')",
-            'glb':  f"bpy.ops.import_scene.gltf(filepath=r'{input_path}')",
+            'obj':  f"bpy.ops.import_scene.obj(filepath={s_input})",
+            'fbx':  f"bpy.ops.import_scene.fbx(filepath={s_input})",
+            'stl':  f"bpy.ops.import_mesh.stl(filepath={s_input})",
+            'dae':  f"bpy.ops.wm.collada_import(filepath={s_input})",
+            'gltf': f"bpy.ops.import_scene.gltf(filepath={s_input})",
+            'glb':  f"bpy.ops.import_scene.gltf(filepath={s_input})",
         }
         exports = {
-            'obj':  f"bpy.ops.export_scene.obj(filepath=r'{output_path}')",
-            'fbx':  f"bpy.ops.export_scene.fbx(filepath=r'{output_path}')",
-            'gltf': f"bpy.ops.export_scene.gltf(filepath=r'{output_path}')",
-            'stl':  f"bpy.ops.export_mesh.stl(filepath=r'{output_path}')",
-            'dae':  f"bpy.ops.wm.collada_export(filepath=r'{output_path}')",
-            'ply':  f"bpy.ops.export_mesh.ply(filepath=r'{output_path}')",
+            'obj':  f"bpy.ops.export_scene.obj(filepath={s_output})",
+            'fbx':  f"bpy.ops.export_scene.fbx(filepath={s_output})",
+            'gltf': f"bpy.ops.export_scene.gltf(filepath={s_output})",
+            'stl':  f"bpy.ops.export_mesh.stl(filepath={s_output})",
+            'dae':  f"bpy.ops.wm.collada_export(filepath={s_output})",
+            'ply':  f"bpy.ops.export_mesh.ply(filepath={s_output})",
         }
         imp = imports.get(in_ext)
         exp = exports.get(out_ext)

@@ -3,6 +3,14 @@
 
 import importlib
 
+try:
+    from safety.content_fence import sanitize_external
+except ImportError:
+    def sanitize_external(text: str, source: str = 'unknown',
+                          max_len: int = 5000,
+                          strip_injections: bool = True) -> tuple[str, list[str]]:
+        return text, []
+
 
 class DuckDuckGoBackend:
     """
@@ -36,14 +44,18 @@ class DuckDuckGoBackend:
         try:
             with DDGS() as ddgs:
                 raw = list(ddgs.text(query, max_results=num_results))
-            return [
-                {
-                    "title":   r.get("title", ""),
+            results = []
+            for r in raw:
+                snippet = r.get("body", "")
+                title = r.get("title", "")
+                fenced_snippet, _ = sanitize_external(snippet, source='duckduckgo_search')
+                fenced_title, _ = sanitize_external(title, source='duckduckgo_search')
+                results.append({
+                    "title":   fenced_title,
                     "url":     r.get("href", ""),
-                    "snippet": r.get("body", ""),
-                }
-                for r in raw
-            ]
+                    "snippet": fenced_snippet,
+                })
+            return results
         except (ValueError, TimeoutError, RuntimeError) as e:
             return [{"error": str(e), "title": "", "url": "", "snippet": ""}]
 
@@ -55,16 +67,18 @@ class DuckDuckGoBackend:
                 return [{"error": "ddgs не установлен"}]
             with DDGS() as ddgs:
                 raw = list(ddgs.news(query, max_results=num_results))
-            return [
-                {
-                    "title":   r.get("title", ""),
+            results = []
+            for r in raw:
+                fenced_title, _ = sanitize_external(r.get("title", ""), source='duckduckgo_news')
+                fenced_snippet, _ = sanitize_external(r.get("body", ""), source='duckduckgo_news')
+                results.append({
+                    "title":   fenced_title,
                     "url":     r.get("url", ""),
-                    "snippet": r.get("body", ""),
+                    "snippet": fenced_snippet,
                     "date":    r.get("date", ""),
                     "source":  r.get("source", ""),
-                }
-                for r in raw
-            ]
+                })
+            return results
         except (ValueError, TimeoutError, RuntimeError) as e:
             return [{"error": str(e)}]
 

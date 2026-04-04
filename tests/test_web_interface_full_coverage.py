@@ -306,6 +306,7 @@ class WebInterfaceCoverageTests(unittest.TestCase):
         h._redirect_login()
 
         # login post branches
+        h.client_address = ('127.0.0.1', 0)
         h.headers = {'Content-Length': 'NaN'}
         h.rfile = io.BytesIO(b'')
         h._handle_login_post()
@@ -641,7 +642,11 @@ class WebInterfaceCoverageTests(unittest.TestCase):
         wi.monitoring = types.SimpleNamespace(get_stats=lambda: {'a': 1})
         self.assertTrue(wi._handle_status().get('ok'))
 
-        wi.monitoring = types.SimpleNamespace(summary=lambda: (_ for _ in ()).throw(RuntimeError('x')))
+        wi.monitoring = types.SimpleNamespace(
+            summary=lambda: (_ for _ in ()).throw(RuntimeError('x')),
+            info=lambda *a, **k: None,
+            warning=lambda *a, **k: None,
+        )
         self.assertIn('error', wi._handle_status())
 
         # goal branches

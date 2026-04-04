@@ -33,9 +33,14 @@ import secrets
 import threading
 import time
 import uuid
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse, unquote_plus
+
+if TYPE_CHECKING:
+    from communication.channel_bridge import ChannelBridge
 
 # ── HTML-страница чата ────────────────────────────────────────────────────────
 
@@ -61,12 +66,14 @@ _HTML = r"""<!DOCTYPE html>
   #input-row { display: flex; gap: 10px; align-items: flex-end; }
   #attach-btn { background: #1e1e2e; border: 1px solid #2a2a4a; color: #999; border-radius: 10px; padding: 10px 13px; cursor: pointer; font-size: 16px; flex-shrink: 0; line-height: 1; }
   #attach-btn:hover { border-color: #2563eb; color: #e8e8f0; }
-  #file-badge { display: none; align-items: center; gap: 8px; background: #1e1e2e; border: 1px solid #2563eb44; border-radius: 8px; padding: 5px 10px; font-size: 12px; color: #aaa; }
-  #file-badge span.icon { flex-shrink: 0; }
-  #file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; color: #c8c8e8; }
-  #file-size { color: #666; flex-shrink: 0; }
-  #file-clear { background: none; border: none; color: #666; cursor: pointer; font-size: 15px; padding: 0 2px; line-height: 1; }
-  #file-clear:hover { color: #f87171; }
+  #files-area { display: none; flex-wrap: wrap; gap: 6px; }
+  #files-area.visible { display: flex; }
+  .file-badge { display: flex; align-items: center; gap: 6px; background: #1e1e2e; border: 1px solid #2563eb44; border-radius: 8px; padding: 5px 10px; font-size: 12px; color: #aaa; max-width: 320px; }
+  .file-badge .icon { flex-shrink: 0; }
+  .file-badge .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c8c8e8; }
+  .file-badge .fsize { color: #666; flex-shrink: 0; }
+  .file-badge .fclear { background: none; border: none; color: #666; cursor: pointer; font-size: 15px; padding: 0 2px; line-height: 1; }
+  .file-badge .fclear:hover { color: #f87171; }
   #msg-input { flex: 1; background: #0f0f20; border: 1px solid #2a2a4a; color: #e8e8f0; border-radius: 10px; padding: 10px 14px; font-size: 14px; outline: none; resize: none; max-height: 120px; }
   #msg-input:focus { border-color: #2563eb; }
   #send-btn { background: #2563eb; color: white; border: none; border-radius: 10px; padding: 10px 20px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap; }
@@ -101,6 +108,30 @@ _HTML = r"""<!DOCTYPE html>
   }
   #scroll-down-btn:hover { background: #1d4ed8; transform: translateY(2px); }
   #scroll-down-btn.visible { display: flex; }
+  /* ── Activity panel ── */
+  #activity-panel { display: none; position: fixed; top: 56px; right: 16px; width: 320px;
+    max-height: 50vh; background: #16162a; border: 1px solid #2a2a4a; border-radius: 12px;
+    z-index: 1000; overflow: hidden; box-shadow: 0 8px 32px #0006; font-size: 13px; }
+  #activity-panel.visible { display: flex; flex-direction: column; }
+  #activity-header { padding: 10px 14px; border-bottom: 1px solid #2a2a4a; display: flex;
+    align-items: center; justify-content: space-between; }
+  #activity-header h3 { font-size: 13px; font-weight: 600; }
+  #activity-toggle { background: none; border: none; color: #888; cursor: pointer; font-size: 16px; }
+  #activity-toggle:hover { color: #e8e8f0; }
+  #activity-log { overflow-y: auto; padding: 8px 12px; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+  .act-item { color: #aaa; line-height: 1.4; padding: 3px 0; border-bottom: 1px solid #1e1e30; }
+  .act-item .act-time { color: #555; font-size: 11px; margin-right: 6px; }
+  .act-item .act-icon { margin-right: 4px; }
+  .act-item.done { color: #4ade80; }
+  .act-item.error { color: #f87171; }
+  .act-item.progress { color: #60a5fa; }
+  #activity-btn { position: fixed; top: 60px; right: 16px; z-index: 999; background: #1e1e2e;
+    border: 1px solid #2a2a4a; color: #aaa; border-radius: 10px; padding: 6px 12px;
+    font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  #activity-btn:hover { border-color: #2563eb; color: #e8e8f0; }
+  #activity-btn .badge { background: #2563eb; color: #fff; border-radius: 10px;
+    padding: 0 6px; font-size: 11px; min-width: 18px; text-align: center; display: none; }
+  #activity-btn .badge.visible { display: inline; }
 </style>
 </head>
 <body>
@@ -108,6 +139,11 @@ _HTML = r"""<!DOCTYPE html>
   <div class="dot" id="status-dot"></div>
   <h1>AI Agent</h1>
   <span id="status-text">подключение...</span>
+</div>
+<button id="activity-btn" title="Действия агента">⚡ <span>Действия</span><span class="badge" id="act-badge">0</span></button>
+<div id="activity-panel">
+  <div id="activity-header"><h3>⚡ Что делает агент</h3><button id="activity-toggle" title="Закрыть">✕</button></div>
+  <div id="activity-log"></div>
 </div>
 <div id="messages">
   <div class="msg agent" style="max-width:90%;align-self:flex-start;">
@@ -123,7 +159,7 @@ _HTML = r"""<!DOCTYPE html>
 </div>
 <div class="typing" id="typing"><span></span><span></span><span></span></div>
 <button id="scroll-down-btn" title="Прокрутить вниз">↓</button>
-<input type="file" id="file-input" style="display:none">
+<input type="file" id="file-input" style="display:none" multiple>
 <div id="input-area">
   <div id="quick-btns">
     <button class="quick-cmd" data-cmd="/status">📊 Статус</button>
@@ -132,7 +168,7 @@ _HTML = r"""<!DOCTYPE html>
     <button class="quick-cmd" data-cmd="проверь состояние системы CPU и RAM">🖥 Система</button>
     <button class="quick-cmd" data-cmd="/help">❓ Помощь</button>
   </div>
-  <div id="file-badge"><span class="icon">📎</span><span id="file-name"></span><span id="file-size"></span><button id="file-clear" title="Убрать файл">×</button></div>
+  <div id="files-area"></div>
   <div id="input-row">
     <button id="attach-btn" title="Прикрепить файл">📎</button>
     <textarea id="msg-input" rows="1" placeholder="Напишите задачу агенту..."></textarea>
@@ -147,7 +183,28 @@ const typingEl = document.getElementById('typing');
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
 
-let attachedFile = null;
+let attachedFiles = [];
+const filesArea = document.getElementById('files-area');
+
+function renderFileBadges() {
+  filesArea.innerHTML = '';
+  if (attachedFiles.length === 0) { filesArea.classList.remove('visible'); return; }
+  filesArea.classList.add('visible');
+  attachedFiles.forEach((f, idx) => {
+    const badge = document.createElement('div');
+    badge.className = 'file-badge';
+    const kb = (f.size / 1024).toFixed(0);
+    const sz = kb < 1024 ? kb + ' KB' : (f.size/1048576).toFixed(1) + ' MB';
+    badge.innerHTML = '<span class="icon">📎</span><span class="fname">' + f.name.replace(/</g,'&lt;') + '</span><span class="fsize">' + sz + '</span>';
+    const btn = document.createElement('button');
+    btn.className = 'fclear';
+    btn.title = 'Убрать файл';
+    btn.textContent = '×';
+    btn.addEventListener('click', () => { attachedFiles.splice(idx, 1); renderFileBadges(); });
+    badge.appendChild(btn);
+    filesArea.appendChild(badge);
+  });
+}
 
 // ── Умный скрол: не мешать пользователю читать историю ───────────────────────
 let userScrolledUp = false;
@@ -182,18 +239,11 @@ document.getElementById('attach-btn').addEventListener('click', () => {
   document.getElementById('file-input').click();
 });
 document.getElementById('file-input').addEventListener('change', e => {
-  const file = e.target.files[0];
-  if (!file) return;
-  attachedFile = file;
-  document.getElementById('file-name').textContent = file.name;
-  const kb = (file.size / 1024).toFixed(0);
-  document.getElementById('file-size').textContent = kb < 1024 ? kb + ' KB' : (file.size/1048576).toFixed(1) + ' MB';
-  document.getElementById('file-badge').style.display = 'flex';
-});
-document.getElementById('file-clear').addEventListener('click', () => {
-  attachedFile = null;
-  document.getElementById('file-input').value = '';
-  document.getElementById('file-badge').style.display = 'none';
+  const files = Array.from(e.target.files);
+  if (!files.length) return;
+  for (const f of files) attachedFiles.push(f);
+  renderFileBadges();
+  e.target.value = '';
 });
 
 function fmtFileMsg(filename, content) {
@@ -270,11 +320,27 @@ checkStatus();
 setInterval(checkStatus, 10000);
 
 async function readFileText(file) {
+  const textExts = ['txt','md','py','js','ts','css','html','htm','json','csv',
+                    'xml','yaml','yml','toml','ini','cfg','log','sh','bat','sql',
+                    'c','cpp','h','java','go','rs','rb','php','pl','r','swift','kt'];
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  if (textExts.includes(ext)) {
+    return new Promise((resolve) => {
+      const r = new FileReader();
+      r.onload = e => resolve(e.target.result || '');
+      r.onerror = () => resolve('[не удалось прочитать файл]');
+      r.readAsText(file, 'utf-8');
+    });
+  }
+  // Бинарные файлы (PDF, DOCX, XLSX, архивы и т.д.) → base64
   return new Promise((resolve) => {
     const r = new FileReader();
-    r.onload = e => resolve(e.target.result || '');
+    r.onload = e => {
+      const b64 = e.target.result.split(',')[1] || '';
+      resolve('__base64__' + b64);
+    };
     r.onerror = () => resolve('[не удалось прочитать файл]');
-    r.readAsText(file, 'utf-8');
+    r.readAsDataURL(file);
   });
 }
 
@@ -356,14 +422,14 @@ async function runQueue(tasks) {
 
 async function send() {
   const text = inputEl.value.trim();
-  const hasFile = !!attachedFile;
-  if (!text && !hasFile) return;
+  const hasFiles = attachedFiles.length > 0;
+  if (!text && !hasFiles) return;
   inputEl.value = '';
   inputEl.style.height = 'auto';
 
     // Если пользователь отправил список задач — выполняем их по очереди
     // с промежуточным прогрессом, а не одним длинным запросом.
-    if (!hasFile) {
+    if (!hasFiles) {
         const queue = parseTaskQueue(text);
         if (queue.length >= 2) {
             await runQueue(queue);
@@ -371,17 +437,20 @@ async function send() {
         }
     }
 
-  let fileContent = null;
-  let fileName = null;
-  if (hasFile) {
-    fileName = attachedFile.name;
-    fileContent = await readFileText(attachedFile);
-    // Trim very large files to 200KB of text
-    if (fileContent.length > 200000) fileContent = fileContent.slice(0, 200000) + '...[обрезано]';
-    fmtFileMsg(fileName, text);
-    attachedFile = null;
+  let filesPayload = null;
+  if (hasFiles) {
+    filesPayload = [];
+    const names = [];
+    for (const f of attachedFiles) {
+      const content = await readFileText(f);
+      const trimmed = (content.length > 200000) ? content.slice(0, 200000) + '...[обрезано]' : content;
+      filesPayload.push({ name: f.name, content: trimmed });
+      names.push(f.name);
+    }
+    fmtFileMsg(names.join(', '), text);
+    attachedFiles = [];
     document.getElementById('file-input').value = '';
-    document.getElementById('file-badge').style.display = 'none';
+    renderFileBadges();
   } else {
     addMsg(text, 'user');
   }
@@ -393,7 +462,17 @@ async function send() {
   messagesEl.appendChild(typingEl);
   smartScroll();
     try {
-        const d = await requestChat({ message: text, filename: fileName, file_content: fileContent });
+        const payload = { message: text };
+        if (filesPayload) {
+            if (filesPayload.length === 1) {
+                // Обратная совместимость: один файл — старый формат
+                payload.filename = filesPayload[0].name;
+                payload.file_content = filesPayload[0].content;
+            } else {
+                payload.files = filesPayload;
+            }
+        }
+        const d = await requestChat(payload);
         stopTicker();
     typingEl.classList.remove('visible');
         live.textContent = '✅ Готово';
@@ -439,9 +518,66 @@ document.querySelectorAll('.quick-cmd').forEach(btn => {
     }
   });
 });
+
+// ── SSE: кросс-канальные уведомления (Telegram ↔ Web) ─────────────────
+const actLog = document.getElementById('activity-log');
+const actPanel = document.getElementById('activity-panel');
+const actBtn = document.getElementById('activity-btn');
+const actBadge = document.getElementById('act-badge');
+const actToggle = document.getElementById('activity-toggle');
+let actCount = 0;
+let actPanelOpen = false;
+
+actBtn.addEventListener('click', () => { actPanelOpen = !actPanelOpen; actPanel.classList.toggle('visible', actPanelOpen); if (actPanelOpen) { actCount = 0; actBadge.textContent = '0'; actBadge.classList.remove('visible'); } });
+actToggle.addEventListener('click', () => { actPanelOpen = false; actPanel.classList.remove('visible'); });
+
+function addActivity(icon, text, cls) {
+  const d = document.createElement('div');
+  d.className = 'act-item' + (cls ? ' ' + cls : '');
+  const now = new Date();
+  const t = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0') + ':' + now.getSeconds().toString().padStart(2,'0');
+  const safeText = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const safeIcon = icon.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  d.innerHTML = '<span class="act-time">' + t + '</span><span class="act-icon">' + safeIcon + '</span>' + safeText;
+  actLog.appendChild(d);
+  actLog.scrollTop = actLog.scrollHeight;
+  // Keep last 100
+  while (actLog.children.length > 100) actLog.removeChild(actLog.firstChild);
+  if (!actPanelOpen) { actCount++; actBadge.textContent = actCount; actBadge.classList.add('visible'); }
+}
+
+(function() {
+  const src = new EventSource('/events');
+  const icons = {task_received:'📥',task_progress:'⏳',task_done:'✅',message:'💬',reply:'🤖'};
+  const sources = {telegram:'📱 Telegram',loop:'🔄 Цикл',system:'⚙️ Система',web:'🌐 Web'};
+  src.onmessage = function(e) {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.type === 'activity') {
+        const cls = d.status === 'done' ? 'done' : d.status === 'error' ? 'error' : 'progress';
+        addActivity(d.icon || '⚙️', d.text || '', cls);
+        return;
+      }
+      const ico = icons[d.type] || '🔔';
+      const ch = sources[d.source] || d.source;
+      const txt = d.text || '';
+      addMsg(`${ico} [${ch}] ${txt}`, 'system');
+      addActivity(ico, `[${ch}] ${txt}`, d.type === 'task_done' ? 'done' : 'progress');
+    } catch(err) {}
+  };
+  src.onerror = function() { /* reconnect automatic */ };
+})();
 </script>
 </body>
 </html>"""
+
+# Переопределяем _HTML из внешнего файла (удобнее поддерживать)
+_HTML_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '..', 'resources', 'chat.html'
+)
+if os.path.isfile(_HTML_FILE):
+    with open(_HTML_FILE, encoding='utf-8') as _fh:
+        _HTML = _fh.read()
 
 _LOGIN_HTML = r"""<!DOCTYPE html>
 <html lang="ru">
@@ -451,24 +587,33 @@ _LOGIN_HTML = r"""<!DOCTYPE html>
 <title>AI Agent — Вход</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: system-ui, sans-serif; background: #0f0f13; color: #e8e8f0;
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+         background: #212121; color: #ececec;
          height: 100vh; display: flex; align-items: center; justify-content: center; }
-  .card { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 16px;
-          padding: 40px 36px; width: 360px; display: flex; flex-direction: column; gap: 20px; }
-  h1 { font-size: 20px; font-weight: 700; text-align: center; }
+  .card { background: #2f2f2f; border: 1px solid #3e3e3e; border-radius: 20px;
+          padding: 44px 36px; width: 380px; display: flex; flex-direction: column; gap: 20px;
+          box-shadow: 0 8px 32px #0004; }
+  .logo { width: 48px; height: 48px; border-radius: 14px;
+          background: linear-gradient(135deg, #7c3aed, #a855f7);
+          display: flex; align-items: center; justify-content: center;
+          font-size: 22px; color: #fff; margin: 0 auto 4px; }
+  h1 { font-size: 22px; font-weight: 700; text-align: center; }
   p  { font-size: 13px; color: #888; text-align: center; }
-  input { background: #0f0f20; border: 1px solid #2a2a4a; color: #e8e8f0;
-          border-radius: 10px; padding: 12px 14px; font-size: 15px; width: 100%; outline: none; }
-  input:focus { border-color: #2563eb; }
-  button { background: #2563eb; color: white; border: none; border-radius: 10px;
-           padding: 12px; font-size: 15px; font-weight: 600; cursor: pointer; width: 100%; }
-  button:hover { background: #1d4ed8; }
+  input { background: #171717; border: 1px solid #3e3e3e; color: #ececec;
+          border-radius: 12px; padding: 13px 16px; font-size: 15px; width: 100%; outline: none;
+          font-family: inherit; }
+  input:focus { border-color: #7c3aed; }
+  button[type="submit"] { background: #7c3aed; color: white; border: none; border-radius: 12px;
+           padding: 13px; font-size: 15px; font-weight: 600; cursor: pointer; width: 100%;
+           transition: background .15s; }
+  button[type="submit"]:hover { background: #6d28d9; }
   .err { color: #f87171; font-size: 13px; text-align: center; display: none; }
   .err.show { display: block; }
 </style>
 </head>
 <body>
 <div class="card">
+  <div class="logo">✦</div>
   <h1>AI Agent</h1>
   <p>Введите токен доступа</p>
   <form method="POST" action="/login" id="form">
@@ -495,7 +640,7 @@ class WebInterface:
     Запускается в фоновом потоке, не блокирует основной процесс.
 
     Параметры:
-        host            — адрес привязки (по умолчанию '0.0.0.0' — все интерфейсы)
+        host            — адрес привязки (по умолчанию '127.0.0.1' — только localhost)
         port            — порт (по умолчанию 8000)
         cognitive_core  — для ответов в чате (метод converse)
         autonomous_loop — для статуса и управления
@@ -557,6 +702,51 @@ class WebInterface:
         self._token_hash = hashlib.sha256(self._token.encode()).digest()
         self.max_body_bytes = 12 * 1024 * 1024  # 12 MB — поддержка загрузки файлов
 
+        # ── Rate limiting для /login ──────────────────────────────────────────
+        self._login_attempts: dict[str, list[float]] = {}  # ip → [timestamps]
+        self._login_lock = threading.Lock()
+
+        # ── Cross-channel bridge (подключается из agent.py) ───────────────────
+        self.channel_bridge: ChannelBridge | None = None
+        # SSE-подписчики: list of threading.Event + deque<dict>
+        self._sse_clients: list[tuple[threading.Event, deque]] = []
+        self._sse_lock = threading.Lock()
+
+    # ── SSE push ───────────────────────────────────────────────────────────────
+
+    def _push_sse(self, event_data: dict):
+        """Рассылает событие всем подключённым SSE-клиентам."""
+        with self._sse_lock:
+            clients = list(self._sse_clients)
+        for ev, q in clients:
+            q.append(event_data)
+            ev.set()
+
+    def _push_activity(self, icon: str, text: str, status: str = 'progress'):
+        """Отправляет SSE-событие активности — видно в панели действий браузера."""
+        self._push_sse({
+            'type': 'activity',
+            'icon': icon,
+            'text': text,
+            'status': status,  # 'progress' | 'done' | 'error'
+        })
+
+    def _on_bridge_event(self, event):
+        """Callback от ChannelBridge: событие из другого канала → SSE + web history."""
+        data = event.to_dict()
+        # Добавляем в web-историю как системное сообщение
+        source_label = {'telegram': '📱 Telegram', 'loop': '🔄 Цикл',
+                        'system': '⚙️ Система'}.get(event.source, event.source)
+        type_label = {'task_received': '📥 Задача принята',
+                      'task_progress': '⏳ Выполняется',
+                      'task_done': '✅ Завершено',
+                      'message': '💬 Сообщение',
+                      'reply': '🤖 Ответ'}.get(event.type, event.type)
+        text = f"[{source_label}] {type_label}: {event.text}"
+        self._add_history('system', text)
+        # Push в SSE
+        self._push_sse(data)
+
     # ── Проверка токена ───────────────────────────────────────────────────────
 
     def _check_token(self, provided: str) -> bool:
@@ -565,6 +755,27 @@ class WebInterface:
             return False
         provided_hash = hashlib.sha256(provided.encode()).digest()
         return secrets.compare_digest(self._token_hash, provided_hash)
+
+    def _is_login_rate_limited(self, ip: str) -> bool:
+        """Проверяет rate-limit для попыток входа. Max 5 за 60 секунд."""
+        now = time.time()
+        window = 60.0
+        max_attempts = 5
+        with self._login_lock:
+            attempts = self._login_attempts.get(ip, [])
+            # Убираем старые попытки за пределами окна
+            attempts = [t for t in attempts if now - t < window]
+            self._login_attempts[ip] = attempts
+            if len(attempts) >= max_attempts:
+                return True
+            return False
+
+    def _record_login_attempt(self, ip: str):
+        """Записывает неудачную попытку входа."""
+        with self._login_lock:
+            if ip not in self._login_attempts:
+                self._login_attempts[ip] = []
+            self._login_attempts[ip].append(time.time())
 
     def _token_from_request(self, handler) -> str:
         """Извлекает токен из заголовка X-Agent-Token или cookie agent_token."""
@@ -628,15 +839,18 @@ class WebInterface:
 
             def _allowed_origin(self) -> str:
                 origin = self.headers.get('Origin', '').strip()
-                allowed = (
-                    'http://localhost',
-                    'http://127.0.0.1',
-                    'http://[::1]',
-                    'https://localhost',
-                    'https://127.0.0.1',
-                    'https://[::1]',
-                )
-                if any(origin.startswith(prefix) for prefix in allowed):
+                if not origin:
+                    return ''
+                try:
+                    parsed = urlparse(origin)
+                    hostname = parsed.hostname or ''
+                    scheme = parsed.scheme or ''
+                except Exception:
+                    return ''
+                if scheme not in ('http', 'https'):
+                    return ''
+                allowed_hosts = {'localhost', '127.0.0.1', '::1'}
+                if hostname in allowed_hosts:
                     return origin
                 return ''
 
@@ -673,9 +887,9 @@ class WebInterface:
                 self.end_headers()
                 self.wfile.write(body)
 
-            def _send_html(self, html: str):
+            def _send_html(self, html: str, status: int = 200):
                 body = html.encode()
-                self.send_response(200)
+                self.send_response(status)
                 self.send_header('Content-Type', 'text/html; charset=utf-8')
                 self.send_header('Content-Length', str(len(body)))
                 self._set_security_headers()
@@ -690,6 +904,11 @@ class WebInterface:
                 if length == 0:
                     return {}
                 if length > interface.max_body_bytes:
+                    # SECURITY: drain the buffer to prevent request smuggling
+                    try:
+                        self.rfile.read(min(length, interface.max_body_bytes + 1))
+                    except Exception:
+                        pass
                     return {}
                 raw = self.rfile.read(length)
                 try:
@@ -720,6 +939,47 @@ class WebInterface:
                 self._set_security_headers()
                 self.end_headers()
 
+            def _handle_sse(self):
+                """Server-Sent Events: push кросс-канальных событий в браузер."""
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/event-stream')
+                self.send_header('Cache-Control', 'no-cache')
+                self.send_header('Connection', 'keep-alive')
+                self.send_header('X-Accel-Buffering', 'no')
+                self._set_security_headers()
+                self.end_headers()
+
+                ev = threading.Event()
+                q: deque = deque(maxlen=100)
+                client = (ev, q)
+                with interface._sse_lock:
+                    interface._sse_clients.append(client)
+                try:
+                    # Отправляем heartbeat и ждём событий
+                    self.wfile.write(b': connected\n\n')
+                    self.wfile.flush()
+                    while True:
+                        ev.wait(timeout=25)
+                        ev.clear()
+                        # Отправляем все накопленные события
+                        if q:
+                            while q:
+                                data = q.popleft()
+                                payload = json.dumps(data, ensure_ascii=False)
+                                self.wfile.write(f'data: {payload}\n\n'.encode())
+                        else:
+                            # Heartbeat — предотвращает таймаут прокси/браузера
+                            self.wfile.write(b': heartbeat\n\n')
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    pass
+                finally:
+                    with interface._sse_lock:
+                        try:
+                            interface._sse_clients.remove(client)
+                        except ValueError:
+                            pass
+
             def do_GET(self):
                 path = urlparse(self.path).path.rstrip('/')
                 if path == '/login':
@@ -740,6 +1000,8 @@ class WebInterface:
                 elif path == '/history':
                     with interface._lock:
                         self._send_json({'history': interface._history[-50:]})
+                elif path == '/events':
+                    self._handle_sse()
                 else:
                     self._send_json({'error': 'not found'}, 404)
 
@@ -748,6 +1010,9 @@ class WebInterface:
 
                 # Логин — не требует токена
                 if path == '/login':
+                    if not self._is_same_origin_or_local():
+                        self._send_json({'error': 'Forbidden origin'}, 403)
+                        return
                     self._handle_login_post()
                     return
 
@@ -772,6 +1037,13 @@ class WebInterface:
 
             def _handle_login_post(self):
                 """Обрабатывает форму входа (application/x-www-form-urlencoded)."""
+                # Rate limiting
+                client_ip = self.client_address[0]
+                if interface._is_login_rate_limited(client_ip):
+                    html = _LOGIN_HTML.replace('__ERROR__', 'Слишком много попыток. Подождите минуту.')
+                    self._send_html(html, status=429)
+                    return
+
                 try:
                     length = int(self.headers.get('Content-Length', 0))
                 except (TypeError, ValueError):
@@ -790,8 +1062,8 @@ class WebInterface:
                             break
 
                 if interface._check_token(token):
-                    # Устанавливаем cookie на 7 дней и редиректим на чат
-                    max_age = 7 * 24 * 3600
+                    # Устанавливаем cookie на 24 часа и редиректим на чат
+                    max_age = 24 * 3600
                     secure = ''
                     if self.headers.get('X-Forwarded-Proto', '').lower() == 'https':
                         secure = '; Secure'
@@ -804,6 +1076,7 @@ class WebInterface:
                     self._set_security_headers()
                     self.end_headers()
                 else:
+                    interface._record_login_attempt(client_ip)
                     html = _LOGIN_HTML.replace('__ERROR__', 'Неверный токен. Попробуйте снова.')
                     self._send_html(html)
 
@@ -816,6 +1089,38 @@ class WebInterface:
         if loop is None:
             return None
         return getattr(loop, 'tool_layer', None)
+
+    # ── Определение намерения при загрузке файла ──────────────────────────────
+
+    # Ключевые слова, указывающие на запрос анализа/мнения (а не исполнения)
+    _ANALYZE_KW = (
+        'проанализируй', 'анализ', 'что думаешь', 'твоё мнение', 'твое мнение',
+        'оцени', 'оценка', 'расскажи', 'объясни', 'вкратце', 'кратко',
+        'резюме', 'суммируй', 'суммарно', 'обзор', 'ревью', 'review',
+        'прочитай', 'покажи', 'опиши', 'перескажи', 'что здесь', 'что там',
+        'что в файле', 'что в документе', 'разбери', 'разбор',
+    )
+
+    @classmethod
+    def _detect_file_intent(cls, user_message: str, _file_body: str | None) -> str:
+        """Определяет намерение пользователя при загрузке файла.
+
+        Returns:
+            'analyze' — пользователь хочет анализ/мнение по файлу.
+            'execute' — файл является рабочим заданием, агент должен исполнять.
+        """
+        msg = (user_message or '').strip().lower()
+
+        # Нет сообщения от пользователя → файл = задание
+        if not msg:
+            return 'execute'
+
+        # Явные маркеры анализа
+        if any(kw in msg for kw in cls._ANALYZE_KW):
+            return 'analyze'
+
+        # По умолчанию: файл = задание (агент работает, а не пересказывает)
+        return 'execute'
 
     def _handle_quick_task(self, message: str) -> dict | None:
         """Детерминированные быстрые задачи для web-очереди (без LLM-кода)."""
@@ -1375,20 +1680,103 @@ class WebInterface:
             return {'ok': True, 'reply': f"Неизвестная команда: {message}\nВведи /help для справки."}
 
         if filename and file_content is not None:
-            # Сохраняем файл на диск
-            try:
-                _uploads = os.path.join(
-                    os.path.dirname(os.path.abspath(__file__)), '..', 'outputs', 'uploads'
+            # Обратная совместимость: один файл → оборачиваем в массив
+            files_list = [{'name': filename, 'content': file_content}]
+        elif data.get('files'):
+            files_list = data['files']
+        else:
+            files_list = []
+
+        if files_list:
+            all_prefixes = []
+            all_bodies = []
+            for _fitem in files_list:
+                _fname = str(_fitem.get('name', 'file')).strip()[:200]
+                _fcontent = _fitem.get('content')
+                self._push_activity('📎', f'Получен файл: {_fname}', 'progress')
+                _fcontent = _fcontent or ''
+                _is_binary = isinstance(_fcontent, str) and _fcontent.startswith('__base64__')
+                # Сохраняем файл на диск
+                _saved_path = None
+                try:
+                    _uploads = os.path.join(
+                        os.path.dirname(os.path.abspath(__file__)), '..', 'outputs', 'uploads'
+                    )
+                    os.makedirs(_uploads, exist_ok=True)
+                    _safe = ''.join(c for c in _fname if c.isalnum() or c in '._- ')[:120]
+                    _saved_path = os.path.join(_uploads, _safe)
+                    if _is_binary:
+                        import base64
+                        _raw = base64.b64decode(_fcontent[10:])  # skip '__base64__'
+                        with open(_saved_path, 'wb') as _f:
+                            _f.write(_raw)
+                    else:
+                        with open(_saved_path, 'w', encoding='utf-8', errors='replace') as _f:
+                            _f.write(str(_fcontent))
+                except Exception:
+                    _saved_path = None
+
+                # Для бинарных файлов — парсим через DocumentParser
+                _body = None
+                if _is_binary and _saved_path:
+                    try:
+                        from perception.document_parser import DocumentParser
+                        _dp = DocumentParser(monitoring=self.monitoring)
+                        _parsed = _dp.parse(_saved_path)
+                        if _parsed and _parsed.text and _parsed.text.strip():
+                            _pages = getattr(_parsed, 'pages', None)
+                            _page_info = f', {_pages} стр.' if _pages else ''
+                            _body = _parsed.text[:100_000]
+                            _prefix = (
+                                f"[Пользователь загрузил файл \"{_fname}\"{_page_info}. "
+                                f"Работай по содержимому ниже.]\n{'─' * 40}\n{_body}\n{'─' * 40}\n"
+                            )
+                        else:
+                            _ext = os.path.splitext(_fname)[1].lower()
+                            _media_exts = ('.mp4', '.avi', '.mov', '.mkv', '.webm', '.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac',
+                                           '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.tiff')
+                            if _ext in _media_exts:
+                                _prefix = (
+                                    f"[Файл: {_fname} — это медиа-файл ({_ext}), сохранён на диск: {_saved_path}. "
+                                    f"Ты НЕ МОЖЕШЬ просмотреть/прослушать его напрямую. "
+                                    f"Если пользователь приложил его как пример/образец — работай по ТЕКСТОВОМУ ОПИСАНИЮ задания, "
+                                    f"а не пытайся открыть или декодировать файл. НЕ ПОКАЗЫВАЙ код для обработки файла.]\n"
+                                )
+                            else:
+                                _prefix = f"[Файл: {_fname} — бинарный файл, сохранён: {_saved_path}. Текст не извлечён.]\n"
+                    except Exception:
+                        _prefix = f"[Файл: {_fname} — ошибка при разборе]\n"
+                else:
+                    _body = str(_fcontent)[:100_000]
+                    _prefix = f"[Файл: {_fname}]\n{'─' * 40}\n{_body}\n{'─' * 40}\n"
+
+                all_prefixes.append(_prefix)
+                if _body:
+                    all_bodies.append(_body)
+
+            # ── Определяем намерение: анализ/мнение или рабочее задание ────
+            _combined_body = '\n'.join(all_bodies)
+            _intent = self._detect_file_intent(message, _combined_body)
+            _file_names = ', '.join(f.get('name', 'file') for f in files_list)
+            file_prefix = ''
+            if _intent == 'execute':
+                _action_header = (
+                    f"[Пользователь передал {len(files_list)} файл(ов): {_file_names} — "
+                    "это РАБОЧЕЕ ЗАДАНИЕ. "
+                    "СТРОГИЕ ПРАВИЛА:\n"
+                    "1. НЕМЕДЛЕННО приступай к выполнению. НЕ задавай уточняющих вопросов.\n"
+                    "2. НЕ пересказывай содержимое файлов, НЕ анализируй структуру.\n"
+                    "3. НЕ показывай Python-код для обработки/декодирования файлов.\n"
+                    "4. Если приложены медиа-файлы (видео, аудио, фото) как примеры — "
+                    "работай по ТЕКСТОВОМУ ОПИСАНИЮ задания, не пытайся их открыть.\n"
+                    "5. Если в задании несколько задач — начни с первой и двигайся по порядку.\n"
+                    "6. Если не можешь что-то сделать технически — скажи ЧТО КОНКРЕТНО ты сделал, "
+                    "а не предлагай варианты действий.]\n\n"
                 )
-                os.makedirs(_uploads, exist_ok=True)
-                _safe = ''.join(c for c in filename if c.isalnum() or c in '._- ')[:120]
-                with open(os.path.join(_uploads, _safe), 'w', encoding='utf-8', errors='replace') as _f:
-                    _f.write(str(file_content))
-            except Exception:
-                pass
-            # Прикрепляем содержимое к сообщению
-            _body = str(file_content)[:100_000]
-            file_prefix = f"[Файл: {filename}]\n{'─' * 40}\n{_body}\n{'─' * 40}\n"
+                file_prefix = _action_header
+            file_prefix += '\n'.join(all_prefixes)
+            # Для 'analyze' оставляем file_prefix как есть — агент проанализирует
+
             message = (file_prefix + message) if message else file_prefix.rstrip()
 
         if not message:
@@ -1439,7 +1827,7 @@ class WebInterface:
             'открой docx', 'прочитай docx', 'открой word',
         )
         _has_file_path = bool(re.search(r'[\w\-\/\\]+\.\w{2,5}', message))
-        if not filename and any(kw in _msg_lower for kw in _file_op_kw) and not _has_file_path:
+        if not filename and not files_list and any(kw in _msg_lower for kw in _file_op_kw) and not _has_file_path:
             _op_reply = (
                 "❌ Для этой операции нужен конкретный файл, но путь не указан.\n\n"
                 "Как указать файл:\n"
@@ -1452,13 +1840,24 @@ class WebInterface:
             return {'ok': False, 'reply': _op_reply}
 
         # Быстрый детерминированный путь для типовых web-задач
-        quick = self._handle_quick_task(message)
-        if quick is not None:
-            self._add_history('user', message)
-            self._add_history('agent', quick.get('reply', ''))
-            return quick
+        # Если к сообщению приложены файлы — не перехватываем: ключевые слова
+        # из тела файла/action_header дают ложное срабатывание.
+        if not filename and not files_list:
+            quick = self._handle_quick_task(message)
+            if quick is not None:
+                self._add_history('user', message)
+                self._add_history('agent', quick.get('reply', ''))
+                return quick
 
         self._add_history('user', message)
+
+        # Уведомляем другие каналы (Telegram) что пришла задача из web
+        if self.channel_bridge:
+            _preview = message[:200].replace('\n', ' ')
+            self.channel_bridge.task_received('web', _preview)
+
+        # Активность: задача получена
+        self._push_activity('📨', 'Получил задачу — начинаю обработку...', 'progress')
 
         # Строим историю последних 10 обменов для LLM (исключаем текущее сообщение)
         history = []
@@ -1481,10 +1880,18 @@ class WebInterface:
             "Для любых реальных данных (курсы валют, погода, цены, новости) ты ИСПОЛЬЗУЕШЬ "
             "инструменты: http_client для API, search для поиска. "
             "Если не можешь выполнить сам — скажи КОНКРЕТНО что нужно сделать, а не отказывай.\n"
+            "ВАЖНО ПРО ВЫПОЛНЕНИЕ ЗАДАНИЙ:\n"
+            "- Когда получаешь задание — СРАЗУ ВЫПОЛНЯЙ. НЕ задавай уточняющих вопросов.\n"
+            "- НЕ предлагай 'варианты действий' и 'хотите ли вы...'. Просто ДЕЛАЙ.\n"
+            "- НЕ показывай Python-код пользователю, если он не просил код. Выполняй код ВНУТРИ.\n"
+            "- Медиа-файлы (видео, аудио) приложенные к заданию — это ПРИМЕРЫ/ОБРАЗЦЫ. "
+            "Работай по текстовому описанию задания, не пытайся декодировать медиа.\n"
             "Это браузерный интерфейс — можно давать развёрнутые технические объяснения: "
-            "почему и как ты сделал, что не получилось и почему, код, логи, детали решения. "
+            "почему и как ты сделал, что не получилось и почему, детали решения. "
             "Но не выводи сырые внутренние метрики агента (success rate, score, vector search, циклы, debug)."
         )
+
+        self._push_activity('🧠', 'Думаю над ответом...', 'progress')
 
         reply = ''
         try:
@@ -1506,15 +1913,27 @@ class WebInterface:
                 f'Таймаут /chat после {self._chat_timeout_sec:.0f}с: запрос слишком долгий.',
                 level='warning',
             )
+            self._push_activity('⏰', 'Таймаут — ответ занял слишком много времени', 'error')
             reply = (
                 f'Ответ занял слишком много времени (>{self._chat_timeout_sec:.0f}с) и был прерван. '
                 'Попробуй разбить задачу на 1-2 шага или увеличь WEB_CHAT_TIMEOUT_SEC в .env.'
             )
         except Exception:
             self._log('Ошибка обработки чата в cognitive_core.converse', level='error')
+            self._push_activity('❌', 'Ошибка при обработке запроса', 'error')
             reply = 'Внутренняя ошибка обработки запроса.'
 
         self._add_history('agent', reply)
+
+        # Активность: ответ готов
+        _act_preview = reply[:120].replace('\n', ' ')
+        self._push_activity('✅', f'Ответ готов: {_act_preview}', 'done')
+
+        # Уведомляем другие каналы что ответ готов
+        if self.channel_bridge:
+            _reply_preview = reply[:200].replace('\n', ' ')
+            self.channel_bridge.task_done('web', _reply_preview)
+
         if self.persistent_brain:
             try:
                 self.persistent_brain.record_conversation(
@@ -1582,7 +2001,8 @@ class WebInterface:
                     max_chars=320,
                 )
         except Exception as e:
-            status['error'] = str(e)
+            self._log(f"status error: {e}", level='warning')
+            status['error'] = 'internal error'
         return status
 
     def _handle_goal(self, data: dict) -> dict:
@@ -1595,7 +2015,8 @@ class WebInterface:
                 return {'ok': True, 'message': f'Цель установлена: {goal[:80]}'}
             return {'ok': False, 'error': 'Autonomous Loop не подключён.'}
         except Exception as e:
-            return {'ok': False, 'error': str(e)}
+            self._log(f"goal error: {e}", level='warning')
+            return {'ok': False, 'error': 'Не удалось установить цель.'}
 
     # ── Вспомогательные ───────────────────────────────────────────────────────
 

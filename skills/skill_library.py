@@ -582,3 +582,29 @@ class SkillLibrary:
             self.monitoring.info(message, source='skill_library')
         else:
             print(f"[SkillLibrary] {message}")
+
+    def export_state(self) -> dict:
+        """Возвращает полное состояние для персистентности."""
+        data = {}
+        for name, skill in self._skills.items():
+            data[name] = {
+                "name": skill.name,
+                "description": getattr(skill, 'description', ''),
+                "strategy": getattr(skill, 'strategy', ''),
+                "tags": list(getattr(skill, 'tags', [])),
+                "use_count": getattr(skill, 'use_count', 0),
+                "success_count": getattr(skill, 'success_count', 0),
+            }
+        return data
+
+    def import_state(self, data: dict):
+        """Восстанавливает состояние из персистентного хранилища."""
+        for name, sd in data.items():
+            if name in self._skills:
+                skill = self._skills[name]
+                if hasattr(skill, 'use_count'):
+                    skill.use_count = sd.get("use_count", 0)
+                if hasattr(skill, 'success_count'):
+                    skill.success_count = sd.get("success_count", 0)
+                if hasattr(skill, 'strategy') and sd.get("strategy"):
+                    skill.strategy = sd["strategy"]

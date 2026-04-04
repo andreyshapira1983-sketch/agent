@@ -84,23 +84,26 @@ class BrowserAgent:
     """
 
     def __init__(self, browser_tool=None, llm=None,
-                 telegram_bot=None, telegram_chat_id=None, monitoring=None):
+                 telegram_bot=None, telegram_chat_id=None, monitoring=None,
+                 storage_state_path: str | None = None):
         self.llm = llm
         self.telegram_bot = telegram_bot
         self.telegram_chat_id = telegram_chat_id
         self.monitoring = monitoring
         self._browser_tool = browser_tool
+        self.storage_state_path = storage_state_path or 'state/browser_storage.json'
 
     # ── Публичные методы ──────────────────────────────────────────────────────
 
-    def browse(self, task: str) -> str:
+    def browse(self, task: str, headless: bool = True) -> str:
         """
         Выполняет задачу через браузер.
         Возвращает итоговый ответ (текст для пользователя).
+        headless=False для визуального debug-режима.
         """
         self._log(f"[browser_agent] Задача: {task}")
 
-        browser = self._get_browser(headless=True)
+        browser = self._get_browser(headless=headless)
         try:
             result = self._execute_task(browser, task)
         except Exception as e:
@@ -150,7 +153,7 @@ class BrowserAgent:
 
             page = browser.navigate(url, wait_until='networkidle')
             if not page.success:
-                self._log(f"[browser_agent] Не удалось открыть поиск Upwork", level='warning')
+                self._log("[browser_agent] Не удалось открыть поиск Upwork", level='warning')
                 return []
 
             # Извлекаем ссылки на вакансии с поисковой страницы
@@ -192,7 +195,7 @@ class BrowserAgent:
         start_url = self._plan_start_url(task)
         self._log(f"[browser_agent] Начальный URL: {start_url}")
 
-        page = browser.navigate(start_url, wait_until='domcontentloaded')
+        browser.navigate(start_url, wait_until='domcontentloaded')
         time.sleep(1.5)
 
         history: list[dict] = []   # история шагов для контекста LLM
@@ -200,6 +203,24 @@ class BrowserAgent:
         for step in range(_MAX_STEPS):
             page_text = (browser.get_text() or '')[:_PAGE_TEXT_LIMIT]
             current_url = browser.current_url
+
+            # ── CAPTCHA detection ──
+            captcha = browser.detect_captcha()
+            if captcha.get('detected'):
+                cap_type = captcha.get('type', 'unknown')
+                self._log(f"[browser_agent] CAPTCHA detected: {cap_type}", level='warning')
+                self._send_telegram(
+                    f"⚠️ <b>CAPTCHA обнаружена</b>\n"
+                    f"Тип: {cap_type}\nURL: {current_url}\n"
+                    f"Задача приостановлена — требуется ручное решение."
+                )
+                history.append({
+                    'step': step + 1,
+                    'url': current_url,
+                    'action': 'captcha_blocked',
+                    'note': f'CAPTCHA: {cap_type}',
+                })
+                break
 
             # LLM анализирует текущую страницу и решает что делать
             decision = self._think(task, current_url, page_text, history, step)
@@ -239,7 +260,7 @@ class BrowserAgent:
                 text = decision.get('text', '')
                 if text:
                     # Ищем ссылку по тексту через JS
-                    clicked = browser.evaluate(
+                    browser.evaluate(
                         f'() => {{ const els = [...document.querySelectorAll("a,button")];'
                         f'const el = els.find(e => e.innerText.includes({json.dumps(text)}));'
                         f'if(el){{ el.click(); return true; }} return false; }}'
@@ -249,8 +270,67 @@ class BrowserAgent:
                     browser.click(selector)
                     time.sleep(2)
 
+            elif action == 'fill':
+                # Заполнение форм — логин, поиск, фильтры
+                selector = decision.get('selector', '')
+                value = decision.get('value', '')
+                if selector and value:
+                    browser.fill(selector, value)
+                    time.sleep(0.5)
+                    # Автоматический Enter если поле поиска
+                    if decision.get('submit'):
+                        browser.press(selector, 'Enter')
+                        time.sleep(1.5)
+
+            elif action == 'type':
+                # Посимвольный ввод (для полей с autocomplete/JS)
+                selector = decision.get('selector', '')
+                value = decision.get('value', '')
+                if selector and value and browser._page:
+                    browser._page.locator(selector).first.type(value, delay=50)
+                    time.sleep(0.5)
+
+            elif action == 'select':
+                # Выбор опции в dropdown
+                selector = decision.get('selector', '')
+                value = decision.get('value', '')
+                label = decision.get('label', '')
+                if selector:
+                    browser.select_option(selector, value=value or None,
+                                          label=label or None)
+                    time.sleep(0.5)
+
+            elif action == 'hover':
+                selector = decision.get('selector', '')
+                if selector:
+                    browser.hover(selector)
+                    time.sleep(0.5)
+
+            elif action == 'upload':
+                selector = decision.get('selector', '')
+                filepath = decision.get('filepath', '')
+                # SECURITY: ограничиваем upload только файлами из outputs/
+                if selector and filepath:
+                    abs_fp = os.path.realpath(os.path.abspath(filepath))
+                    allowed_dir = os.path.realpath(os.path.join(
+                        os.path.dirname(os.path.dirname(__file__)), 'outputs'))
+                    if abs_fp.startswith(allowed_dir + os.sep):
+                        browser.set_input_files(selector, filepath)
+                        time.sleep(1)
+                    else:
+                        self._log(
+                            f"[browser_agent] Upload заблокирован: {filepath} вне outputs/",
+                            level='warning'
+                        )
+
+            elif action == 'screenshot':
+                # LLM может запросить скриншот для debug
+                browser.screenshot(path=f'outputs/browser_step_{step+1}.png')
+
             elif action == 'scroll':
-                browser.scroll(0, 800)
+                direction = decision.get('direction', 'down')
+                amount = 800 if direction == 'down' else -800
+                browser.scroll(0, amount)
                 time.sleep(0.5)
 
             elif action == 'search':
@@ -266,6 +346,17 @@ class BrowserAgent:
                 if best_link:
                     browser.navigate(best_link, wait_until='domcontentloaded')
                     time.sleep(1.5)
+
+            elif action == 'wait':
+                selector = decision.get('selector', '')
+                if selector:
+                    browser.wait_for(selector, timeout=5000)
+
+            elif action == 'press':
+                selector = decision.get('selector', 'body')
+                key = decision.get('key', 'Enter')
+                browser.press(selector, key)
+                time.sleep(0.5)
 
         # Превышен лимит шагов
         final_text = (browser.get_text() or '')[:_PAGE_TEXT_LIMIT]
@@ -366,17 +457,25 @@ Current page content (first {_PAGE_TEXT_LIMIT} chars):
 Based on the page content, decide the NEXT action to complete the task.
 
 Available actions:
-- done        → task is complete, provide the answer
-- navigate    → go to a specific URL (provide "url")
-- click       → click a link/button (provide "text" to match, or "selector")
-- scroll      → scroll down to load more content
-- search      → search on Upwork (provide "query")
-- read_links  → analyze all links on page and pick the best one to follow
+- done         → task is complete, provide the answer
+- navigate     → go to a specific URL (provide "url")
+- click        → click a link/button (provide "text" to match, or "selector")
+- fill         → fill a text field (provide "selector", "value"; set "submit":true to press Enter after)
+- type         → type slowly into a field with autocomplete (provide "selector", "value")
+- select       → choose dropdown option (provide "selector", "value" or "label")
+- hover        → hover over element (provide "selector")
+- upload       → upload a file (provide "selector", "filepath")
+- press        → press a key (provide "selector", "key" e.g. "Enter", "Tab")
+- scroll       → scroll page (provide "direction": "down" or "up")
+- search       → search on Upwork (provide "query")
+- read_links   → analyze all links on page and pick the best one to follow
+- wait         → wait for element to appear (provide "selector")
+- screenshot   → take debug screenshot
 
 If you found a job vacancy and it's relevant to the profile, return action=done with a full answer in Russian.
 
 Reply ONLY with valid JSON, no markdown:
-{{"action": "...", "url": "...", "text": "...", "selector": "...", "query": "...", "note": "one-line note in Russian", "answer": "full answer in Russian (only if action=done)"}}"""
+{{"action": "...", "url": "...", "text": "...", "selector": "...", "value": "...", "label": "...", "query": "...", "key": "...", "direction": "...", "filepath": "...", "submit": false, "note": "one-line note in Russian", "answer": "full answer in Russian (only if action=done)"}}"""
 
         try:
             raw = self.llm.infer(prompt, max_tokens=400, temperature=0.2)
@@ -487,9 +586,9 @@ Reply ONLY with valid JSON, no markdown:
         """Извлекает ссылки на вакансии Upwork с поисковой страницы."""
         links = page.links or browser.get_links()
         job_links = [
-            l for l in links
-            if '/jobs/' in l and 'upwork.com' in l
-            and '~' in l   # uid вакансии содержит ~
+            lnk for lnk in links
+            if '/jobs/' in lnk and 'upwork.com' in lnk
+            and '~' in lnk   # uid вакансии содержит ~
         ]
         return list(dict.fromkeys(job_links))   # дедупликация с сохранением порядка
 
@@ -567,9 +666,10 @@ Reply ONLY with valid JSON, no markdown:
         if self._browser_tool is not None:
             return self._browser_tool
         return BrowserTool(
-            headless=headless,   # True = фоновый режим (пользователь не видит)
+            headless=headless,
             timeout=30000,
             monitoring=self.monitoring,
+            storage_state_path=self.storage_state_path,
         )
 
     def _log(self, msg: str, level: str = 'info'):

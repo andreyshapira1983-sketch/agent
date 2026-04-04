@@ -540,3 +540,23 @@ class KnowledgeSystem:
 
     def get_recent_errors(self, limit: int = 5) -> list[str]:
         return list(self._last_errors[-max(0, int(limit)):])
+
+    def export_state(self) -> dict:
+        """Возвращает полное состояние для персистентности."""
+        return {
+            "long_term": dict(self._long_term),
+            "episodic": list(self._episodic),
+            "semantic": dict(self._semantic),
+        }
+
+    def import_state(self, data: dict):
+        """Восстанавливает состояние из персистентного хранилища."""
+        if data.get("long_term"):
+            self._long_term.update(data["long_term"])
+        if data.get("episodic"):
+            self._episodic.extend(data["episodic"])
+        if data.get("semantic"):
+            self._semantic.update(data["semantic"])
+
+    def knowledge_count(self) -> int:
+        return len(self._long_term) + len(self._episodic) + len(self._semantic)

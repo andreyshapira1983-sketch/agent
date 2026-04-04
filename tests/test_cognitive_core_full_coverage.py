@@ -262,7 +262,7 @@ class LocalBrainCoverageTests(unittest.TestCase):
         self.assertIn("ТОЛЬКО исполняемые действия", b.build_focused_prompt("task", TaskType.PLANNING, ctx, strategies))
         exec_prompt = b.build_focused_prompt("SEARCH: x", TaskType.PLANNING, ctx, strategies)
         self.assertTrue(exec_prompt.startswith("SEARCH: x"))
-        self.assertIn("Контекст знаний", exec_prompt)
+        self.assertIn("EXTERNAL CONTENT", exec_prompt)
         self.assertIn("Назови причину", b.build_focused_prompt("task", TaskType.DIAGNOSIS, ctx, strategies))
         self.assertIn("Структурированный ответ", b.build_focused_prompt("task", TaskType.RESEARCH, ctx, strategies))
         self.assertIn("Сравни варианты", b.build_focused_prompt("task", TaskType.DECISION, ctx, strategies))

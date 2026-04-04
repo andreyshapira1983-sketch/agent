@@ -4,6 +4,7 @@
 
 
 import uuid
+import time
 import threading
 from enum import Enum
 from collections import deque
@@ -32,6 +33,7 @@ class OrchestratedTask:
         self.result: Any = None
         self.error: str | None = None
         self.attempts = 0
+        self.created_at: float = time.time()
 
     def to_dict(self):
         return {
@@ -63,6 +65,16 @@ class OrchestrationSystem:
         - Autonomous Loop (Слой 20)  — подача задач из цикла
         - Agent System (Слой 4)      — исполнитель задач
         - Monitoring (Слой 17)       — логирование
+
+    OWNERSHIP CONTRACT:
+        Владеет: _queue, _tasks (очередь и реестр задач оркестрации).
+        НЕ владеет: Goal-объектами, Roadmap-ами, TaskGraph-ами.
+        Принимает goal (строку) через submit(), не мутирует внешние структуры.
+
+    BUDGET CAPS:
+        MAX_QUEUE_SIZE       — максимум задач в очереди (100).
+        TASK_MAX_AGE_SEC     — TTL pending-задачи (3600 сек).
+        BUDGET_CAP_SEC       — максимум суммарного времени выполнения за один цикл (300 сек).
     """
 
     def __init__(self, agent_system=None, monitoring=None, max_workers: int = 4):
@@ -76,6 +88,10 @@ class OrchestrationSystem:
         self.monitoring = monitoring
         self.max_workers = max_workers
 
+        self.MAX_QUEUE_SIZE = 100                              # лимит очереди
+        self.TASK_MAX_AGE_SEC = 3600                           # 1 час максимум жизни pending-задачи
+        self.BUDGET_CAP_SEC = 300.0                            # 5 мин макс времени выполнения за цикл
+        self._budget_spent: float = 0.0                        # потрачено в текущем цикле
         self._queue: deque[OrchestratedTask] = deque()
         self._tasks: dict[str, OrchestratedTask] = {}    # все задачи по ID
         self._lock = threading.Lock()
@@ -100,9 +116,20 @@ class OrchestrationSystem:
         task = OrchestratedTask(goal, role=role, priority=priority,
                                 depends_on=depends_on, metadata=metadata)
         with self._lock:
+            if len(self._queue) >= self.MAX_QUEUE_SIZE:
+                self._cleanup_stale()
+            if len(self._queue) >= self.MAX_QUEUE_SIZE:
+                self._log(f"Очередь полна ({self.MAX_QUEUE_SIZE}), задача отклонена: '{goal[:60]}'")
+                self._trace('submit_reject', goal=goal[:80],
+                            reason=f'queue full ({self.MAX_QUEUE_SIZE})')
+                task.status = 'rejected'
+                return task
             self._tasks[task.task_id] = task
             self._enqueue(task)
 
+        self._trace('submit_accept', task_id=task.task_id, goal=goal[:80],
+                    priority=priority.name, queue_size=len(self._queue),
+                    source_goal=((metadata or {}).get('source_goal_id', '?')))
         self._log(f"Задача [{task.task_id}] принята: '{goal[:60]}' (приоритет: {priority.name})")
         return task
 
@@ -117,6 +144,12 @@ class OrchestrationSystem:
 
     def run_next(self) -> OrchestratedTask | None:
         """Берёт следующую готовую задачу из очереди и выполняет синхронно."""
+        if self.budget_exhausted:
+            self._trace('run_next_skip', reason='budget exhausted',
+                        spent=round(self._budget_spent, 2))
+            return None
+        with self._lock:
+            self._cleanup_stale()
         task = self._dequeue()
         if not task:
             return None
@@ -193,7 +226,10 @@ class OrchestrationSystem:
     def _execute(self, task: OrchestratedTask):  # pylint: disable=broad-except
         task.attempts += 1
         task.status = 'running'
+        self._trace('execute_start', task_id=task.task_id, goal=task.goal[:80],
+                    priority=task.priority.name, attempt=task.attempts)
         self._log(f"Выполнение [{task.task_id}]: '{task.goal[:60]}'")
+        t_start = time.time()
         try:
             if self.agent_system:
                 result = self.agent_system.handle({
@@ -227,6 +263,12 @@ class OrchestrationSystem:
                 self._log(
                     f"Ретрай [{task.task_id}] попытка {task.attempts}/{max_retries + 1}"
                 )
+        finally:
+            elapsed = time.time() - t_start
+            self._budget_spent += elapsed
+            self._trace('execute_end', task_id=task.task_id,
+                        status=task.status, elapsed_sec=round(elapsed, 2),
+                        budget_spent=round(self._budget_spent, 2))
 
     def _enqueue(self, task: OrchestratedTask):
         """Вставляет задачу в очередь с учётом приоритета."""
@@ -284,8 +326,45 @@ class OrchestrationSystem:
                 return False
         return True
 
+    def reset_budget(self):
+        """Сброс бюджета в начале нового цикла. Вызывать из AutonomousLoop."""
+        self._budget_spent = 0.0
+
+    @property
+    def budget_remaining(self) -> float:
+        return max(0.0, self.BUDGET_CAP_SEC - self._budget_spent)
+
+    @property
+    def budget_exhausted(self) -> bool:
+        return self._budget_spent >= self.BUDGET_CAP_SEC
+
+    def _cleanup_stale(self):
+        """Удаляет из очереди задачи, которые просрочены (pending дольше TASK_MAX_AGE_SEC)."""
+        now = time.time()
+        fresh = deque()
+        expired = 0
+        for task in self._queue:
+            if task.status == 'pending' and (now - task.created_at) > self.TASK_MAX_AGE_SEC:
+                task.status = 'expired'
+                expired += 1
+                self._trace('task_expired', task_id=task.task_id,
+                            goal=task.goal[:80],
+                            age_sec=round(now - task.created_at),
+                            source_goal=task.metadata.get('source_goal_id', '?'))
+            else:
+                fresh.append(task)
+        self._queue = fresh
+        if expired:
+            self._log(f"Очистка: {expired} просроченных задач удалено из очереди")
+
     def _log(self, message: str):
         if self.monitoring:
             self.monitoring.info(message, source='orchestration')
         else:
             print(f"[Orchestration] {message}")
+
+    def _trace(self, action: str, **ctx):
+        """Structured traceability: почему задача была принята/отклонена/выполнена."""
+        entry = {'ts': time.time(), 'layer': 18, 'component': 'Orchestration',
+                 'action': action, **ctx}
+        self._log(f"[TRACE] {entry}")

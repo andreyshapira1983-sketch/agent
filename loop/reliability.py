@@ -1,14 +1,16 @@
 # Reliability System (система надёжности) — Слой 19
 # Архитектура автономного AI-агента
-# Retry, timeout, fallback, аварийное восстановление.
+# Retry, timeout, fallback, аварийное восстановление, DLQ, классификация ошибок.
 
 
 import time
 import functools
 import threading
 import multiprocessing
+from collections import deque
 from collections.abc import Callable
 from typing import Any
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -25,6 +27,71 @@ class RetryStrategy(Enum):
     FIXED       = 'fixed'        # фиксированная пауза между попытками
     EXPONENTIAL = 'exponential'  # экспоненциальный backoff
     LINEAR      = 'linear'       # линейный рост паузы
+
+
+class ErrorClass(Enum):
+    """Классификация ошибок для retry-решений."""
+    TRANSIENT  = 'transient'   # временная — retry имеет смысл (сеть, rate limit, timeout)
+    PERMANENT  = 'permanent'   # постоянная — retry бесполезен (логика, валидация, auth)
+    UNKNOWN    = 'unknown'     # не классифицирована — retry по умолчанию, но с осторожностью
+
+
+# Типы исключений, которые считаются transient по умолчанию
+_TRANSIENT_EXCEPTIONS: tuple[type[Exception], ...] = (
+    ConnectionError, TimeoutError, OSError,
+)
+
+# Подстроки в сообщениях ошибок, указывающие на transient
+_TRANSIENT_PATTERNS: tuple[str, ...] = (
+    'timeout', 'timed out', 'rate limit', 'too many requests',
+    'connection reset', 'connection refused', 'temporary',
+    'service unavailable', '503', '429', '502', '504',
+    'retry', 'overloaded',
+)
+
+# Подстроки, указывающие на permanent ошибку
+_PERMANENT_PATTERNS: tuple[str, ...] = (
+    'not found', '404', 'unauthorized', '401', 'forbidden', '403',
+    'invalid', 'validation', 'syntax error', 'permission denied',
+    'does not exist', 'unsupported', 'not allowed',
+)
+
+
+def classify_error(exc: Exception) -> ErrorClass:
+    """Классифицирует исключение как transient, permanent или unknown."""
+    if isinstance(exc, _TRANSIENT_EXCEPTIONS):
+        return ErrorClass.TRANSIENT
+    msg = str(exc).lower()
+    for pat in _TRANSIENT_PATTERNS:
+        if pat in msg:
+            return ErrorClass.TRANSIENT
+    for pat in _PERMANENT_PATTERNS:
+        if pat in msg:
+            return ErrorClass.PERMANENT
+    return ErrorClass.UNKNOWN
+
+
+@dataclass
+class DLQEntry:
+    """Запись в Dead Letter Queue — операция, исчерпавшая retry."""
+    func_name: str
+    args_repr: str
+    last_error: str
+    error_class: str
+    circuit_name: str
+    attempts: int
+    exhausted_at: float = field(default_factory=time.time)
+
+    def to_dict(self) -> dict:
+        return {
+            'func_name': self.func_name,
+            'args_repr': self.args_repr,
+            'last_error': self.last_error,
+            'error_class': self.error_class,
+            'circuit_name': self.circuit_name,
+            'attempts': self.attempts,
+            'exhausted_at': self.exhausted_at,
+        }
 
 
 class ReliabilitySystem:
@@ -50,6 +117,7 @@ class ReliabilitySystem:
         default_delay: float = 1.0,
         default_strategy: RetryStrategy = RetryStrategy.EXPONENTIAL,
         circuit_threshold: int = 5,
+        dlq_max_size: int = 1000,
         monitoring=None,
     ):
         """
@@ -58,6 +126,7 @@ class ReliabilitySystem:
             default_delay     — базовая пауза между попытками (сек)
             default_strategy  — стратегия паузы
             circuit_threshold — сколько ошибок подряд открывают circuit breaker
+            dlq_max_size      — максимальный размер Dead Letter Queue
             monitoring        — Monitoring (Слой 17) для логирования
         """
         self.default_retries = default_retries
@@ -69,6 +138,13 @@ class ReliabilitySystem:
         self._circuit_errors: dict[str, int] = {}    # circuit_name → счётчик ошибок
         self._circuit_open: dict[str, bool] = {}     # circuit_name → открыт?
         self._recovery_handlers: dict[str, Callable] = {}
+
+        # DLQ — операции, исчерпавшие retry
+        self._dlq: deque[DLQEntry] = deque(maxlen=dlq_max_size)
+        self._dlq_lock = threading.Lock()
+
+        # Callbacks при исчерпании retry (exhaustion notification)
+        self._exhaustion_callbacks: list[Callable[[DLQEntry], None]] = []
 
     # ── Retry ─────────────────────────────────────────────────────────────────
 
@@ -82,6 +158,7 @@ class ReliabilitySystem:
         fallback: Any = None,
         exceptions: tuple = (Exception,),
         circuit_name: str | None = None,
+        classify: bool = True,
         **kwargs,
     ):
         """
@@ -95,6 +172,8 @@ class ReliabilitySystem:
             fallback      — значение или callable, если все попытки провалились
             exceptions    — какие исключения перехватывать
             circuit_name  — имя circuit breaker (None = не использовать)
+            classify      — классифицировать ошибки (transient/permanent);
+                            permanent → не повторять
 
         Returns:
             Результат func или fallback.
@@ -109,6 +188,7 @@ class ReliabilitySystem:
             return self._resolve_fallback(fallback)
 
         last_exc = None
+        attempts_done = 0
         for attempt in range(1, retries + 1):
             try:
                 result = func(*args, **kwargs)
@@ -120,9 +200,21 @@ class ReliabilitySystem:
 
             except exceptions as e:
                 last_exc = e
+                attempts_done = attempt
+                err_class = classify_error(e) if classify else ErrorClass.UNKNOWN
                 self._log(
-                    f"[retry] Попытка {attempt}/{retries} провалилась: {type(e).__name__}: {e}"
+                    f"[retry] Попытка {attempt}/{retries} провалилась "
+                    f"({err_class.value}): {type(e).__name__}: {e}"
                 )
+
+                # Permanent ошибка — retry бесполезен, сразу в DLQ
+                if classify and err_class == ErrorClass.PERMANENT:
+                    self._log(
+                        f"[retry] Ошибка '{type(e).__name__}' классифицирована как permanent "
+                        f"— retry прекращён после {attempt} попыток"
+                    )
+                    break
+
                 # Обновляем circuit breaker
                 if circuit_name:
                     self._circuit_errors[circuit_name] = \
@@ -138,7 +230,17 @@ class ReliabilitySystem:
                     self._log(f"[retry] Ожидание {pause:.1f}s перед следующей попыткой...")
                     time.sleep(pause)
 
-        self._log(f"[retry] Все {retries} попыток провалились. Последняя ошибка: {last_exc}")
+        # Все попытки исчерпаны — отправляем в DLQ и нотифицируем
+        self._log(f"[retry] Все {attempts_done} попыток провалились. Последняя ошибка: {last_exc}")
+        err_cls = classify_error(last_exc) if (classify and last_exc) else ErrorClass.UNKNOWN
+        self._send_to_dlq(
+            func=func,
+            args=args,
+            last_exc=last_exc,
+            error_class=err_cls,
+            circuit_name=circuit_name or '',
+            attempts=attempts_done,
+        )
         return self._resolve_fallback(fallback)
 
     # ── Timeout ───────────────────────────────────────────────────────────────
@@ -215,6 +317,65 @@ class ReliabilitySystem:
                    'errors': self._circuit_errors.get(name, 0)}
             for name in set(list(self._circuit_errors.keys()) + list(self._circuit_open.keys()))
         }
+
+    # ── Dead Letter Queue ─────────────────────────────────────────────────────
+
+    def _send_to_dlq(self, func: Callable, args: tuple,
+                     last_exc: Exception | None, error_class: ErrorClass,
+                     circuit_name: str, attempts: int):
+        """Добавляет провалившуюся операцию в DLQ и уведомляет подписчиков."""
+        args_repr = repr(args[:3])[:200] if args else ''
+        entry = DLQEntry(
+            func_name=getattr(func, '__name__', str(func)),
+            args_repr=args_repr,
+            last_error=f"{type(last_exc).__name__}: {last_exc}" if last_exc else 'unknown',
+            error_class=error_class.value,
+            circuit_name=circuit_name,
+            attempts=attempts,
+        )
+        with self._dlq_lock:
+            self._dlq.append(entry)
+        self._log(
+            f"[dlq] Операция '{entry.func_name}' добавлена в DLQ "
+            f"(класс: {error_class.value}, попыток: {attempts}). "
+            f"Размер DLQ: {len(self._dlq)}"
+        )
+        # Уведомляем всех подписчиков об исчерпании retry
+        for cb in self._exhaustion_callbacks:
+            try:
+                cb(entry)
+            except Exception:  # pylint: disable=broad-except
+                pass
+
+    def on_exhaustion(self, callback: Callable[[DLQEntry], None]):
+        """Подписаться на событие исчерпания retry (exhaustion notification).
+
+        callback получает DLQEntry с информацией о провалившейся операции.
+        Используется для: Telegram-алертов, эскалации в human_approval, логирования.
+        """
+        self._exhaustion_callbacks.append(callback)
+
+    def get_dlq(self) -> list[dict]:
+        """Возвращает все записи DLQ (копия)."""
+        with self._dlq_lock:
+            return [e.to_dict() for e in self._dlq]
+
+    def dlq_size(self) -> int:
+        """Текущий размер DLQ."""
+        return len(self._dlq)
+
+    def dlq_pop(self) -> DLQEntry | None:
+        """Извлекает самую старую запись из DLQ (для ручной обработки)."""
+        with self._dlq_lock:
+            if self._dlq:
+                return self._dlq.popleft()
+        return None
+
+    def dlq_clear(self):
+        """Очищает DLQ (например, после ручного review)."""
+        with self._dlq_lock:
+            self._dlq.clear()
+        self._log("[dlq] DLQ очищена")
 
     # ── Recovery handlers ─────────────────────────────────────────────────────
 

@@ -580,14 +580,18 @@ class DocumentParser:
             parts.append(f'Таблицы ({len(tables)}): {", ".join(tables)}')
             metadata['tables'] = tables
             for tbl in tables[:10]:  # первые 10 таблиц
+                # Санитизация имени таблицы (SQL injection prevention)
+                safe_tbl = ''.join(c for c in tbl if c.isalnum() or c == '_')
+                if not safe_tbl or safe_tbl != tbl:
+                    continue
                 try:
-                    cur.execute(f'PRAGMA table_info("{tbl}")')
+                    cur.execute(f'PRAGMA table_info("{safe_tbl}")')
                     cols = [row[1] for row in cur.fetchall()]
-                    cur.execute(f'SELECT COUNT(*) FROM "{tbl}"')
+                    cur.execute(f'SELECT COUNT(*) FROM "{safe_tbl}"')
                     cnt = cur.fetchone()[0]
-                    parts.append(f'\nТаблица "{tbl}" ({cnt} строк): {", ".join(cols)}')
+                    parts.append(f'\nТаблица "{safe_tbl}" ({cnt} строк): {", ".join(cols)}')
                     # Первые 5 строк
-                    cur.execute(f'SELECT * FROM "{tbl}" LIMIT 5')
+                    cur.execute(f'SELECT * FROM "{safe_tbl}" LIMIT 5')
                     for row in cur.fetchall():
                         parts.append('\t'.join(str(v) for v in row))
                 except Exception:
@@ -661,8 +665,7 @@ class DocumentParser:
                 text_files = [n for n in names
                               if os.path.splitext(n)[1].lower() in _TEXT_EXTS]
                 if text_files:
-                    _read = getattr(z, 'read', None)
-                    read_data: dict = _read(text_files[:20]) if _read else {}
+                    read_data: dict = z.read(text_files[:20]) or {}
                     for name, bio in read_data.items():
                         content = bio.read(51_200).decode('utf-8', errors='replace')
                         parts.append(f'--- {name} ---')
@@ -829,6 +832,7 @@ class DocumentParser:
                     ['ffprobe', '-v', 'quiet', '-print_format', 'json',
                      '-show_format', '-show_streams', path],
                     capture_output=True, text=True, timeout=15,
+                    check=False,
                 )
                 if result.returncode == 0:
                     probe = _json.loads(result.stdout)

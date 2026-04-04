@@ -242,7 +242,7 @@ class StepEvaluator:
         search_results = [r for r in results_list if r.get('type') == 'search']
         irrelevant_count = sum(
             1 for r in search_results
-            if r.get('relevant') is False or r.get('error', '').startswith('IRRELEVANT')
+            if r.get('relevant') is False or (r.get('error') or '').startswith('IRRELEVANT')
         )
         if irrelevant_count and irrelevant_count == len(search_results):
             issues.append(

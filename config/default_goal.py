@@ -1,45 +1,33 @@
 """
-Default autonomous goal — выполняется каждый цикл агента.
-tool_layer уже доступен в sandbox — не нужно его импортировать.
+Default autonomous goal — начальная (seed) цель при запуске агента.
+После выполнения GoalGenerator автоматически генерирует следующие цели
+из рефлексии, инвентаря способностей и практики инструментов.
 """
 
-DEFAULT_GOAL = """Создай три файла и сохрани их в папку outputs/.
+DEFAULT_GOAL = """\
+Практическая тренировка инструментов — выполни каждый шаг РЕАЛЬНО, не просто пиши текст.
 
-Шаг 1:
-```python
-import datetime, psutil, json
-data = {
-    "cpu": psutil.cpu_percent(1),
-    "ram": psutil.virtual_memory().percent,
-    "disk": psutil.disk_usage("C:\\\\").percent,
-    "time": str(datetime.datetime.now())
-}
-with open("outputs/health.json", "w") as f:
-    json.dump(data, f, indent=2)
-print("health.json OK:", data["cpu"], "% CPU,", data["ram"], "% RAM")
-```
+Шаг 1: Используй web_search чтобы найти "top Python freelance projects 2026".
+Сохрани результаты поиска в outputs/search_results.json (реальные данные, не выдумка).
 
-Шаг 2:
-```python
-import datetime
-result = tool_layer.use("pdf_generator", action="from_text",
-    output="outputs/daily_report.pdf",
-    title=f"Daily Agent Report {datetime.date.today()}",
-    text=f"Autonomous AI Agent\\nDate: {datetime.date.today()}\\nStatus: Running\\nTools: 48 active\\nUpwork: https://www.upwork.com/services/product/2038909844504654059")
-print("PDF:", result.get("success"), result.get("path"))
-```
+Шаг 2: Используй web_crawler чтобы открыть первую ссылку из результатов поиска.
+Извлеки заголовок страницы и первые 500 символов текста.
+Сохрани в outputs/crawled_page.txt.
 
-Шаг 3:
-```python
-import datetime
-result = tool_layer.use("spreadsheet", action="write",
-    path="outputs/daily_log.xlsx",
-    rows=[{
-        "Date": str(datetime.date.today()),
-        "Time": datetime.datetime.now().strftime("%H:%M"),
-        "Status": "OK",
-        "Files": "health.json, daily_report.pdf, daily_log.xlsx"
-    }])
-print("Excel:", result.get("success"), result.get("path"))
-```
+Шаг 3: Напиши Python-скрипт outputs/data_processor.py, который:
+- Читает outputs/search_results.json
+- Извлекает заголовки и URL
+- Выводит форматированную таблицу
+Выполни этот скрипт через execute_code и сохрани вывод в outputs/processed.txt.
+
+Шаг 4: Создай структуру папок: outputs/project_template/src/, outputs/project_template/tests/
+Создай в них файлы: src/main.py (hello world), tests/test_main.py (простой тест).
+Выполни тест.
+
+Шаг 5: Добавь в GoalManager 3 новые цели через goal_manager.add_goal():
+- "Найти 5 актуальных вакансий на Upwork через web_search и проанализировать требования"
+- "Написать и протестировать утилиту для парсинга JSON/CSV файлов"
+- "Изучить новую тему через web_crawler: asyncio в Python — прочитать 3 статьи и сделать конспект"
+
+Каждый шаг должен РЕАЛЬНО выполнить действие с инструментом, а не описать его словами.
 """

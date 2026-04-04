@@ -85,3 +85,21 @@ def sanitize_user_response(text: str, user_text: str = "", style: str = "partner
         return _no_ask.get(style, _no_ask["partner"])
 
     return cleaned
+
+
+# ── Secrets scrubbing for user-facing responses ──────────────────────────
+
+_state: dict = {'redactor': None}  # module-level holder (avoids global statement)
+
+
+def set_response_redactor(redactor) -> None:
+    """Устанавливает SecretsRedactor для sanitize_user_response."""
+    _state['redactor'] = redactor
+
+
+def scrub_response(text: str) -> str:
+    """Пропускает текст через SecretsRedactor (если установлен)."""
+    r = _state.get('redactor')
+    if r and text and hasattr(r, '__call__'):
+        return r(text)  # type: ignore  # guarded by hasattr
+    return text

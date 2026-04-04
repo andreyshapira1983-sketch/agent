@@ -293,15 +293,16 @@ class CapabilityDiscovery:
         Returns:
             Список строк-описаний пробелов. Пустой список = пробелов нет.
         """
-        import importlib
+        import importlib.util
         gaps: list[str] = []
 
         # 1. Недостающие обязательные пакеты (самые конкретные пробелы)
         missing_pkgs: list[str] = []
         for import_name, pip_name in self.REQUIRED_PACKAGES:
-            try:
-                importlib.import_module(import_name.split('.')[0])
-            except ImportError:
+            # find_spec() проверяет наличие пакета БЕЗ фактического импорта —
+            # безопасно для пакетов с побочными эффектами (GUI, hardware).
+            spec = importlib.util.find_spec(import_name.split('.')[0])
+            if spec is None:
                 missing_pkgs.append(pip_name)
         for pkg in missing_pkgs:
             gaps.append(f"missing_package:{pkg}")
@@ -442,3 +443,19 @@ class CapabilityDiscovery:
             )
         else:
             print(f"[CapabilityDiscovery] {message}")
+
+    def export_state(self) -> dict:
+        """Возвращает состояние для персистентности."""
+        return dict(self._failure_log)
+
+    def import_state(self, data: dict):
+        """Восстанавливает состояние из персистентного хранилища."""
+        for action_type, stats in data.items():
+            if action_type in self._failure_log:
+                self._failure_log[action_type]['success'] += stats.get('success', 0)
+                self._failure_log[action_type]['fail'] += stats.get('fail', 0)
+            else:
+                self._failure_log[action_type] = {
+                    'success': stats.get('success', 0),
+                    'fail': stats.get('fail', 0),
+                }

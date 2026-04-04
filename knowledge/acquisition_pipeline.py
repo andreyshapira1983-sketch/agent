@@ -16,7 +16,7 @@ from perception.text_classifier import TextClassifier, TextType
 try:
     from safety.content_fence import detect_injection
 except ImportError:
-    def detect_injection(_text):  # type: ignore[misc]
+    def detect_injection(text):  # type: ignore[misc]  # pylint: disable=unused-argument
         return []
 
 
@@ -172,6 +172,17 @@ class KnowledgeAcquisitionPipeline:
         normalized = self._normalize_source(url_or_path)
         if not normalized:
             return None
+
+        # SECURITY: для web-источников — валидация URL (anti-SSRF)
+        if source_type == 'web' and normalized.startswith(('http://', 'https://')):
+            try:
+                from knowledge.source_backends import _is_safe_http_url
+                if not _is_safe_http_url(normalized):
+                    self._log(f"Источник отклонён (SSRF-защита): {url_or_path[:60]}")
+                    return None
+            except ImportError:
+                pass
+
         dedup_key = f"{source_type}:{normalized}"
         with self._lock:
             if dedup_key in self._seen_keys:

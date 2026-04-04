@@ -30,9 +30,11 @@ import time
 import ast
 import json
 import hashlib
+import threading
 
 from execution.task_router import TaskRouter as _TaskRouter, TaskIntent as _TaskIntent, TaskStatus as _TaskStatus
 from safety.hardening import ContentSanitizer as _ContentSanitizer, RateLimiter as _RateLimiter, InstructionClassifier as _InstructionClassifier
+from evaluation.action_contracts import contract_for_action_type as _contract_for_action_type, verify_contract as _verify_contract
 
 _TASK_ROUTER = _TaskRouter()
 
@@ -162,6 +164,7 @@ class ActionDispatcher:
         self.module_builder   = module_builder  # ModuleBuilder — создание новых .py модулей
         self._dedup_window_sec = self._read_int_env('ACTION_DEDUP_WINDOW_SEC', 1800)
         self._recent_action_seen: dict[str, float] = {}
+        self._dedup_lock = threading.Lock()
         # Текущая цель: скоупит dedup и relevance-check к конкретному goal
         self._current_goal: str = ''
         self._reject_memory_window_sec = self._read_int_env('WRITE_REJECT_MEMORY_SEC', 7 * 24 * 3600)
@@ -179,6 +182,10 @@ class ActionDispatcher:
     def reset_cycle_limits(self):
         """Сбрасывает per-cycle счётчики RateLimiter. Вызывается в начале каждого цикла."""
         self._rate_limiter.reset_cycle()
+
+    def check_kill_switch(self) -> tuple[bool, str]:
+        """Проверяет kill switch. Возвращает (ok, reason)."""
+        return self._rate_limiter.check_kill_switch()
 
     def dispatch(self, text: str, goal: str = '',
                  fail_closed_on_semantic_reject: bool = True) -> dict:
@@ -357,7 +364,21 @@ class ActionDispatcher:
                 }
 
         results = []
+        _py_blocked = False  # флаг: предыдущий python-блок заблокирован/упал
         for action in actions:
+            # ── Каскадная защита: если предыдущий python-блок упал,
+            #    последующие python-блоки пропускаем (namespace неполный) ──
+            if _py_blocked and action.get('type') == 'python':
+                self._log('[python] SKIP: предыдущий python-блок не выполнен, namespace неполный')
+                results.append({
+                    'type': 'python',
+                    'input': str(action.get('input', ''))[:200],
+                    'output': '', 'success': False,
+                    'error': 'Пропущен: предыдущий python-блок не выполнен (namespace неполный)',
+                    'latency_ms': 0,
+                })
+                continue
+
             # ── RateLimiter: per-action hard limit ─────────────────────────
             rate_ok, rate_reason = self._rate_limiter.check_action()
             if not rate_ok:
@@ -383,7 +404,49 @@ class ActionDispatcher:
                     'latency_ms': 0,
                 }
             r['latency_ms'] = round((time.time() - t_start) * 1000)
+
+            # ── Contract verification: локальная проверка результата (бесплатно) ──
+            if r.get('success'):
+                try:
+                    _contract = _contract_for_action_type(
+                        action_type=r.get('type', ''),
+                        action_input=str(r.get('input', '')),
+                        action_output=str(r.get('output', '')),
+                        action_success=r.get('success', False),
+                        action_stderr=str(r.get('stderr', '')),
+                    )
+                    if _contract:
+                        _vr = _verify_contract(_contract)
+                        r['contract_score'] = _vr.score
+                        _atype = r.get('type', '')
+                        if not _vr.passed and not _vr.partial:
+                            if _atype == 'search':
+                                # Пустой поиск — нормально, не ошибка
+                                self._log("[search] пустой результат (contract info, не ошибка)")
+                            else:
+                                r['success'] = False
+                                r['error'] = f"contract_failed: {', '.join(_vr.failed_checks)}"
+                                self._log(f"[{_atype}] CONTRACT FAIL: {_vr.failed_checks}")
+                        elif _vr.partial:
+                            self._log(f"[{_atype}] CONTRACT PARTIAL ({_vr.score:.0%}): "
+                                      f"pass={_vr.passed_checks}, fail={_vr.failed_checks}")
+                except Exception:
+                    pass  # контракт не должен ломать основной поток
+
             results.append(r)
+
+            # Обновляем флаг каскадной защиты:
+            # блокируем только при NameError (namespace сломан), не при FileNotFoundError/OSError
+            if action.get('type') == 'python' and not r.get('success'):
+                _err = str(r.get('error', ''))
+                _namespace_broken = (
+                    'NameError' in _err
+                    or 'UnboundLocalError' in _err
+                    or 'namespace' in _err.lower()
+                )
+                if _namespace_broken:
+                    _py_blocked = True
+
             if r['success'] and r.get('note'):
                 input_preview = (r.get('input') or '')[:60].replace('\n', ' ')
                 self._log(f"[{r['type']}] INFO: {r['note'][:80]}"
@@ -444,28 +507,29 @@ class ActionDispatcher:
         now = time.time()
         # Очистка старых ключей окна дедупликации
         stale_before = now - float(self._dedup_window_sec)
-        self._recent_action_seen = {
-            sig: ts for sig, ts in self._recent_action_seen.items()
-            if ts >= stale_before
-        }
+        with self._dedup_lock:
+            self._recent_action_seen = {
+                sig: ts for sig, ts in self._recent_action_seen.items()
+                if ts >= stale_before
+            }
 
-        unique_in_batch: set[str] = set()
-        filtered: list[dict] = []
-        skipped_batch = 0
-        skipped_recent = 0
+            unique_in_batch: set[str] = set()
+            filtered: list[dict] = []
+            skipped_batch = 0
+            skipped_recent = 0
 
-        for action in actions:
-            sig = self._action_signature(action)
-            if sig in unique_in_batch:
-                skipped_batch += 1
-                continue
-            last_ts = self._recent_action_seen.get(sig)
-            if last_ts is not None and (now - last_ts) < self._dedup_window_sec:
-                skipped_recent += 1
-                continue
-            unique_in_batch.add(sig)
-            filtered.append(action)
-            self._recent_action_seen[sig] = now
+            for action in actions:
+                sig = self._action_signature(action)
+                if sig in unique_in_batch:
+                    skipped_batch += 1
+                    continue
+                last_ts = self._recent_action_seen.get(sig)
+                if last_ts is not None and (now - last_ts) < self._dedup_window_sec:
+                    skipped_recent += 1
+                    continue
+                unique_in_batch.add(sig)
+                filtered.append(action)
+                self._recent_action_seen[sig] = now
 
         if skipped_batch or skipped_recent:
             self._log(
@@ -671,9 +735,26 @@ class ActionDispatcher:
         if t == 'python':
             ok, reason = _ContentSanitizer.validate_python(action['input'])
             if not ok:
-                self._log(f'[python] BLOCKED by ContentSanitizer: {reason}')
-                return self._fail('python', action['input'][:200],
-                                  f'ContentSanitizer: {reason}')
+                # SyntaxError — LLM сгенерировал невалидный Python.
+                # Если есть LLM — просим исправить код (одна попытка).
+                if 'SyntaxError' in reason and self._llm:
+                    fixed_code = self._retry_fix_syntax(action['input'], reason)
+                    if fixed_code:
+                        ok2, reason2 = _ContentSanitizer.validate_python(fixed_code)
+                        if ok2:
+                            self._log('[python] SyntaxError автоисправлен LLM-retry')
+                            action = {**action, 'input': fixed_code}
+                        else:
+                            self._log(f'[python] LLM-retry не помог: {reason2}')
+                            return self._fail('python', action['input'][:200],
+                                              f'ContentSanitizer: {reason}')
+                    else:
+                        return self._fail('python', action['input'][:200],
+                                          f'ContentSanitizer: {reason}')
+                else:
+                    self._log(f'[python] BLOCKED by ContentSanitizer: {reason}')
+                    return self._fail('python', action['input'][:200],
+                                      f'ContentSanitizer: {reason}')
         elif t == 'bash':
             ok, reason = _ContentSanitizer.validate_bash(action['input'])
             if not ok:
@@ -695,6 +776,36 @@ class ActionDispatcher:
             return self._run_write(action['input'], action.get('content', ''))
         else:
             return self._fail(t, action.get('input', ''), f"Неизвестный тип: {t}")
+
+    # ── Авто-исправление синтаксических ошибок через LLM ─────────────────────
+
+    def _retry_fix_syntax(self, broken_code: str, error_msg: str) -> str | None:
+        """Просит LLM исправить SyntaxError в коде. Возвращает исправленный код или None."""
+        if not self._llm:
+            return None
+        try:
+            prompt = (
+                "Следующий Python-код содержит синтаксическую ошибку:\n"
+                f"Ошибка: {error_msg}\n\n"
+                f"```python\n{broken_code[:3000]}\n```\n\n"
+                "Исправь синтаксическую ошибку и верни ТОЛЬКО исправленный Python-код "
+                "внутри ```python ... ```. Ничего не объясняй."
+            )
+            response = self._llm.infer(prompt)
+            if not response:
+                return None
+            # Извлекаем код из ответа
+            m = re.search(r'```python\n(.*?)```', str(response), re.DOTALL)
+            if m:
+                return m.group(1).strip()
+            # Если нет блока — берём весь ответ как код (если похоже на Python)
+            resp = str(response).strip()
+            if resp.startswith(('import ', 'from ', '#', 'def ', 'class ')):
+                return resp
+            return None
+        except Exception as e:
+            self._log(f'[python] LLM retry failed: {e}')
+            return None
 
     # ── Исполнители по типам ──────────────────────────────────────────────────
 
@@ -1150,31 +1261,32 @@ class ActionDispatcher:
                                 'error':   None,
                             }
 
-                # ── Авто-исправление 2: FileNotFoundError для outputs/ ──────
+                # ── Авто-исправление 2: FileNotFoundError — создаём недостающий файл ──
                 if not ok and 'No such file or directory' in err:
                     _fn = re.search(r"No such file or directory: '([^']+)'", err)
                     if _fn:
                         _missing = _fn.group(1).replace('\\\\', '\\')
-                        _norm = _missing.replace('\\', '/')
-                        if '/outputs/' in _norm or _norm.endswith('/outputs'):
-                            try:
-                                os.makedirs(os.path.dirname(_missing), exist_ok=True)
-                                # Создаём пустой файл с заголовком
-                                if not os.path.exists(_missing):
-                                    with open(_missing, 'w', encoding='utf-8') as _f:
-                                        _f.write('')
-                                raw2 = self.tool_layer.use('python_runtime', code=code)
-                                if isinstance(raw2, dict) and raw2.get('success'):
-                                    output2 = raw2.get('output', '') or str(raw2.get('result', ''))
-                                    return {
-                                        'type':    'python',
-                                        'input':   code,
-                                        'output':  output2,
-                                        'success': True,
-                                        'error':   None,
-                                    }
-                            except OSError:
-                                pass
+                        try:
+                            _dir = os.path.dirname(_missing)
+                            if _dir:
+                                os.makedirs(_dir, exist_ok=True)
+                            if not os.path.exists(_missing):
+                                # JSON-файлы инициализируем пустым массивом
+                                _init = '[]' if _missing.endswith('.json') else ''
+                                with open(_missing, 'w', encoding='utf-8') as _f:
+                                    _f.write(_init)
+                            raw2 = self.tool_layer.use('python_runtime', code=code)
+                            if isinstance(raw2, dict) and raw2.get('success'):
+                                output2 = raw2.get('output', '') or str(raw2.get('result', ''))
+                                return {
+                                    'type':    'python',
+                                    'input':   code,
+                                    'output':  output2,
+                                    'success': True,
+                                    'error':   None,
+                                }
+                        except OSError:
+                            pass
 
                 return {
                     'type':    'python',
@@ -1212,6 +1324,14 @@ class ActionDispatcher:
         Включает relevance gate: если все результаты нерелевантны цели — помечает
         success=False с reason='IRRELEVANT_RESULTS'.
         """
+        # ── Guard: не ищем в интернете очевидные локальные имена файлов ──────
+        _q = query.strip().strip('"\'')
+        if re.match(r'^[\w\-\.]+\.(txt|log|json|csv|py|md|yaml|yml|xml|ini|cfg|toml)$', _q, re.I):
+            self._log(f'[search] SKIP: "{_q}" — похоже на локальный файл, веб-поиск пропущен.')
+            return {
+                'type': 'search', 'input': query, 'output': '',
+                'success': False, 'error': f'LOCAL_FILENAME: "{_q}" — не ищем в интернете.',
+            }
         if self.tool_layer:
             raw = self.tool_layer.use('search', query=query, num_results=5)
             if isinstance(raw, dict):
@@ -1450,6 +1570,15 @@ class ActionDispatcher:
     def _run_write(self, path: str, content: str) -> dict:
         """Записывает файл через FileSystemTool."""
         write_path = self._normalize_write_path(path)
+
+        # ── Пустой контент для кодовых файлов отклоняется сразу ──────────
+        if not (content or '').strip():
+            ext = os.path.splitext(write_path)[1].lower()
+            if ext in _CODE_EXTENSIONS:
+                self._log(f"[write] EMPTY_REJECTED '{write_path}': пустой контент для кодового файла")
+                return self._fail('write', write_path,
+                                  "EMPTY_REJECTED: пустой контент для кодового файла")
+
         repeat_reject = self._find_recent_reject(write_path, content)
         if repeat_reject is not None:
             reason = str(repeat_reject.get('reason', 'previous rejection'))

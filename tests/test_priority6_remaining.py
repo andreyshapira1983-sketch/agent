@@ -426,6 +426,7 @@ class TestBrowserAgentBrowse:
         browser.navigate.return_value = page
         browser.get_text.return_value = 'some text'
         browser.current_url = 'https://www.upwork.com/search'
+        browser.detect_captcha.return_value = {'detected': False}
 
         llm = MagicMock()
         llm.infer.return_value = json.dumps({

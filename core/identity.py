@@ -604,3 +604,30 @@ class IdentityCore:
             self.monitoring.info(message, source='identity')
         else:
             print(f"[IdentityCore] {message}")
+
+    def export_state(self) -> dict:
+        """Возвращает полное состояние для персистентности."""
+        return {
+            "capabilities": {
+                name: {
+                    "proficiency": c.proficiency,
+                    "usage_count": c.usage_count,
+                }
+                for name, c in self._capabilities.items()
+            },
+            "performance_history": list(self._performance_history),
+        }
+
+    def import_state(self, data: dict):
+        """Восстанавливает состояние из персистентного хранилища."""
+        for name, cd in data.get("capabilities", {}).items():
+            if name in self._capabilities:
+                self._capabilities[name].proficiency = cd.get("proficiency", 0.5)
+                self._capabilities[name].usage_count = cd.get("usage_count", 0)
+        perf = data.get("performance_history", [])
+        if perf:
+            self._performance_history.extend(perf)
+
+    def top_capabilities(self, n: int = 3) -> list:
+        """Возвращает top-N наиболее развитых способностей."""
+        return sorted(self._capabilities.values(), key=lambda c: c.proficiency, reverse=True)[:n]

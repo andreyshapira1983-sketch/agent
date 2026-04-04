@@ -93,7 +93,17 @@ class GoalManager:
         - Task Decomposition (Слой 30)      — разбивает цель на задачи
         - Long-Horizon Planning (Слой 38)   — долгосрочное планирование
         - Reflection System (Слой 10)       — обновляет прогресс целей
+
+    OWNERSHIP CONTRACT:
+        Владеет: _goals (дерево целей), _active_goal_id
+        Только GoalManager может создавать / менять статус / удалять Goal.
+        LongHorizonPlanning НЕ пишет в _goals — только предлагает через
+        promote_advisory().  TaskDecomposition и Orchestration читают goal
+        описание, но не мутируют Goal-объекты.
     """
+
+    # Минимальный EU roadmap-а для автоматического промоушена в цель
+    PROMOTION_EU_THRESHOLD = 0.55
 
     def __init__(self, cognitive_core=None, knowledge_system=None,
                  monitoring=None):
@@ -191,26 +201,72 @@ class GoalManager:
                   f"(приоритет: {priority.name})")
         return goal
 
+    # ── Детектор спецификаций ──────────────────────────────────────────────
+
+    @staticmethod
+    def _is_specification(text: str) -> bool:
+        """Определяет, является ли текст спецификацией/архитектурой/ТЗ,
+        а не конкретной задачей для выполнения."""
+        t = text.lower()
+        # Ключевые маркеры спецификации
+        spec_markers = [
+            'архитектура', 'ключевые требования', 'модули', 'цикл работы',
+            'принципы', 'стратегии работы', 'обработка ошибок',
+            'формат итогового ответа', 'уровни автономности', 'ограничения',
+            'нефункциональные', 'функциональные', 'расширения',
+            'requirements', 'architecture', 'modules', 'specification',
+        ]
+        hits = sum(1 for m in spec_markers if m in t)
+        # Структурные маркеры: нумерованные разделы вида "1. ", "2.1 "
+        section_count = len(re.findall(r'^\d+\.\d*\s', text, re.MULTILINE))
+        # Если 4+ маркеров спецификации или 8+ пронумерованных разделов → спецификация
+        return hits >= 4 or section_count >= 8
+
     def decompose(self, goal_id: str) -> list[Goal]:
         """
         Декомпозирует цель на подцели через Cognitive Core.
+        Если цель — спецификация/ТЗ, создаёт мета-задачи по анализу, а не по секциям.
         Возвращает список созданных подцелей.
         """
         goal = self._goals.get(goal_id)
         if not goal or not self.cognitive_core:
             return []
 
-        raw = str(self.cognitive_core.reasoning(
-            f"Декомпозируй цель на 3–5 конкретных подцелей.\n"
-            f"Цель: {goal.description}\n\n"
-            f"ВАЖНО: Отвечай ТОЛЬКО строго в формате ниже. НЕ используй таблицы, НЕ используй markdown. "
-            f"Каждая подцель — одна строка с префиксом ПОДЦЕЛЬ:\n\n"
-            f"ПОДЦЕЛЬ: <краткое описание>\n"
-            f"КРИТЕРИЙ: <как понять что выполнена>\n\n"
-            f"ПОДЦЕЛЬ: <краткое описание>\n"
-            f"КРИТЕРИЙ: <как понять что выполнена>\n\n"
-            f"(повтори для каждой подцели, только текст без таблиц)"
-        ))
+        # ── Детектор спецификаций: не разбивать документ по секциям ────────
+        if self._is_specification(goal.description):
+            self._log(f"Цель [{goal_id}] распознана как СПЕЦИФИКАЦИЯ — "
+                      "применяю spec-mode: создание по ТЗ.")
+            raw = str(self.cognitive_core.reasoning(
+                f"Ты — автономный агент. Тебе дали документ-спецификацию (ТЗ/архитектуру).\n"
+                f"Твоя задача — СОЗДАТЬ то, что описано в документе.\n"
+                f"НЕ анализируй себя! НЕ проверяй свою структуру!\n"
+                f"Создай 3–5 ПРАКТИЧЕСКИХ подцелей для РЕАЛИЗАЦИИ проекта:\n\n"
+                f"Примеры правильных подцелей:\n"
+                f"- Создать основные модули (Interpreter, Planner, Executor, Validator)\n"
+                f"- Реализовать цикл работы агента (получение → анализ → план → выполнение → проверка)\n"
+                f"- Подключить инструменты и протестировать\n\n"
+                f"Примеры НЕПРАВИЛЬНЫХ подцелей (НЕ ДЕЛАЙ ТАК):\n"
+                f"- Проанализировать свою архитектуру ← НЕПРАВИЛЬНО\n"
+                f"- Сравнить с текущей реализацией ← НЕПРАВИЛЬНО\n"
+                f"- Проверить ExperienceReplay ← НЕПРАВИЛЬНО\n\n"
+                f"Документ:\n{goal.description[:3000]}\n\n"
+                f"ВАЖНО: Отвечай ТОЛЬКО в формате ниже (3–5 подцелей, НЕ больше).\n"
+                f"НЕ копируй разделы документа как подцели!\n\n"
+                f"ПОДЦЕЛЬ: <конкретное действие по созданию>\n"
+                f"КРИТЕРИЙ: <как понять что выполнена>\n"
+            ))
+        else:
+            raw = str(self.cognitive_core.reasoning(
+                f"Декомпозируй цель на 3–5 конкретных подцелей (МАКСИМУМ 7).\n"
+                f"Цель: {goal.description}\n\n"
+                f"ВАЖНО: Отвечай ТОЛЬКО строго в формате ниже. НЕ используй таблицы, НЕ используй markdown. "
+                f"Каждая подцель — одна строка с префиксом ПОДЦЕЛЬ:\n\n"
+                f"ПОДЦЕЛЬ: <краткое описание>\n"
+                f"КРИТЕРИЙ: <как понять что выполнена>\n\n"
+                f"ПОДЦЕЛЬ: <краткое описание>\n"
+                f"КРИТЕРИЙ: <как понять что выполнена>\n\n"
+                f"(повтори для каждой подцели, только текст без таблиц, МАКСИМУМ 7)"
+            ))
 
         sub_descs = re.findall(r'ПОДЦЕЛЬ[:\s]+(.+)', raw, re.IGNORECASE)
         criteria = re.findall(r'КРИТЕРИЙ[:\s]+(.+)', raw, re.IGNORECASE)
@@ -228,6 +284,14 @@ class GoalManager:
             return any(kw in dl for kw in _table_kw)
 
         sub_descs = [d for d in sub_descs if not _is_garbage(d)]
+
+        # Hard-cap: максимум 7 подцелей, даже если LLM проигнорировал ограничение
+        _MAX_SUBGOALS = 7
+        if len(sub_descs) > _MAX_SUBGOALS:
+            self._log(f"Цель [{goal_id}] LLM вернул {len(sub_descs)} подцелей — "
+                      f"обрезаю до {_MAX_SUBGOALS}")
+            sub_descs = sub_descs[:_MAX_SUBGOALS]
+            criteria = criteria[:_MAX_SUBGOALS]
 
         sub_goals = []
         for i, desc in enumerate(sub_descs):
@@ -284,6 +348,16 @@ class GoalManager:
             goal.status = GoalStatus.CANCELLED
             self._log(f"Цель отменена: [{goal_id}]")
 
+    def remove_goal_by_description(self, description: str) -> bool:
+        """Находит цель по описанию и отменяет её. Возвращает True если найдена."""
+        for goal_id, goal in self._goals.items():
+            if goal.description == description and goal.status not in (
+                GoalStatus.CANCELLED, GoalStatus.COMPLETED, GoalStatus.FAILED,
+            ):
+                self.cancel(goal_id)
+                return True
+        return False
+
     def activate(self, goal_id: str):
         """Помечает цель как активную (в работе)."""
         goal = self._goals.get(goal_id)
@@ -291,6 +365,59 @@ class GoalManager:
             goal.status = GoalStatus.ACTIVE
             goal.started_at = goal.started_at or time.time()
             self._active_goal_id = goal_id
+            self._trace('activate', goal_id=goal_id,
+                        reason='явная активация через activate()')
+
+    # ── Promotion: advisory → goal ────────────────────────────────────────────
+
+    def promote_advisory(self, roadmap_dict: dict) -> Goal | None:
+        """
+        PROMOTION RULE: LongHorizonPlanning может предложить roadmap как
+        кандидата в цель.  GoalManager решает, принять или отклонить.
+
+        Критерии принятия:
+          1. EU (expected_utility) >= PROMOTION_EU_THRESHOLD
+          2. roadmap не stale
+          3. Нет активной цели с тем же описанием
+
+        Returns:
+            Goal если промоушен принят, None если отклонён.
+        """
+        eu = roadmap_dict.get('expected_utility', 0.0)
+        if isinstance(roadmap_dict.get('metrics'), dict):
+            eu = roadmap_dict['metrics'].get('expected_utility', eu)
+        status = roadmap_dict.get('status', '')
+        goal_desc = roadmap_dict.get('goal', '')
+        rm_id = roadmap_dict.get('roadmap_id', '?')
+
+        if status in ('stale', 'invalidated'):
+            self._trace('promote_reject', roadmap_id=rm_id,
+                        reason=f'roadmap status={status}')
+            return None
+
+        if eu < self.PROMOTION_EU_THRESHOLD:
+            self._trace('promote_reject', roadmap_id=rm_id,
+                        reason=f'EU={eu:.3f} < порог {self.PROMOTION_EU_THRESHOLD}')
+            return None
+
+        if not goal_desc:
+            return None
+
+        duplicate = self._find_duplicate_goal(goal_desc, parent_id=None)
+        if duplicate:
+            self._trace('promote_reject', roadmap_id=rm_id,
+                        reason=f'дубликат цели [{duplicate.goal_id}]')
+            return None
+
+        new_goal = self.add(
+            description=goal_desc,
+            priority=GoalPriority.HIGH,
+            tags=['promoted_from_roadmap', rm_id],
+        )
+        self._trace('promote_accept', roadmap_id=rm_id,
+                    goal_id=new_goal.goal_id, eu=eu)
+        self._log(f"Advisory → Goal: roadmap [{rm_id}] промоутирован в [{new_goal.goal_id}] (EU={eu:.3f})")
+        return new_goal
 
     # ── Приоритизация ─────────────────────────────────────────────────────────
 
@@ -312,7 +439,11 @@ class GoalManager:
             ]
         if not candidates:
             return None
-        return max(candidates, key=lambda g: g.urgency_score)
+        chosen = max(candidates, key=lambda g: g.urgency_score)
+        self._trace('get_next', goal_id=chosen.goal_id,
+                    urgency=round(chosen.urgency_score, 3),
+                    reason=f'max urgency из {len(candidates)} кандидатов')
+        return chosen
 
     def get_active(self) -> Goal | None:
         if self._active_goal_id:
@@ -575,3 +706,58 @@ class GoalManager:
             log_fn(message, source='goal_manager')
         else:
             print(f"[GoalManager] {message}")
+
+    def _trace(self, action: str, **ctx):
+        """Structured traceability: почему было принято именно это решение."""
+        entry = {'ts': time.time(), 'layer': 37, 'component': 'GoalManager',
+                 'action': action, **ctx}
+        self._log(f"[TRACE] {entry}", level='debug')
+
+    def export_state(self) -> dict:
+        """Возвращает полное состояние для персистентности."""
+        goals_data = {}
+        for gid, g in self._goals.items():
+            goals_data[gid] = {
+                "goal_id": g.goal_id,
+                "description": g.description,
+                "priority": g.priority.value if hasattr(g.priority, 'value') else g.priority,
+                "status": g.status.value if hasattr(g.status, 'value') else g.status,
+                "parent_id": g.parent_id,
+                "sub_goals": list(getattr(g, 'sub_goals', [])),
+                "sub_goal_ids": list(getattr(g, 'sub_goals', [])),
+                "deadline": g.deadline,
+                "success_criteria": g.success_criteria if hasattr(g, 'success_criteria') else "",
+                "notes": list(g.notes) if hasattr(g, 'notes') else [],
+                "created_at": g.created_at if hasattr(g, 'created_at') else None,
+            }
+        return {
+            "counter": self._counter,
+            "active_goal_id": self._active_goal_id,
+            "goals": goals_data,
+        }
+
+    def import_state(self, data: dict):
+        """Восстанавливает состояние из персистентного хранилища."""
+        if not data.get("goals"):
+            return
+        self._counter = data.get("counter", 0)
+        self._active_goal_id = data.get("active_goal_id")
+        for gid, gd in data["goals"].items():
+            goal = Goal(
+                goal_id=gd["goal_id"],
+                description=gd["description"],
+                priority=GoalPriority(gd["priority"]) if gd.get("priority") else GoalPriority.MEDIUM,
+            )
+            goal.status = GoalStatus(gd["status"]) if gd.get("status") else GoalStatus.PENDING
+            goal.parent_id = gd.get("parent_id")
+            sub_goals = gd.get("sub_goals") or gd.get("sub_goal_ids") or []
+            if hasattr(goal, 'sub_goals'):
+                goal.sub_goals = list(sub_goals)
+            goal.deadline = gd.get("deadline")
+            if hasattr(goal, 'success_criteria'):
+                goal.success_criteria = gd.get("success_criteria", "")
+            if hasattr(goal, 'notes'):
+                goal.notes = gd.get("notes", []) or []
+            if hasattr(goal, 'created_at') and gd.get("created_at"):
+                goal.created_at = gd["created_at"]
+            self._goals[gid] = goal

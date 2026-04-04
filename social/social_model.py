@@ -461,6 +461,78 @@ class SocialInteractionModel:
         else:
             print(f"[SocialModel] {message}")
 
+    def export_state(self) -> dict:
+        """Возвращает состояние актёров + эмоционального состояния для персистентности."""
+        actors_data = {}
+        for aid, actor in self._actors.items():
+            relation = getattr(actor, 'relation', None)
+            trust = getattr(actor, 'trust', None)
+            preferred_style = getattr(actor, 'preferred_style', None)
+            actors_data[aid] = {
+                "name": getattr(actor, 'name', aid),
+                "relation": relation.value if (relation is not None and hasattr(relation, 'value')) else str(relation or 'unknown'),
+                "trust": trust.value if (trust is not None and hasattr(trust, 'value')) else int(trust or 1),
+                "preferred_style": (
+                    preferred_style.value
+                    if (preferred_style is not None and hasattr(preferred_style, 'value'))
+                    else str(preferred_style or 'friendly')
+                ),
+                "interaction_count": getattr(actor, 'interaction_count', 0),
+                "notes": getattr(actor, 'notes', []),
+                "last_interaction": getattr(actor, 'last_interaction', None),
+                "preferences": getattr(actor, 'preferences', {}),
+            }
+        state = {"actors": actors_data}
+        emotional = getattr(self, 'emotional_state', None)
+        if emotional and hasattr(emotional, 'to_dict'):
+            state["emotional_state"] = emotional.to_dict()
+        return state
+
+    def import_state(self, data: dict):
+        """Восстанавливает состояние актёров + эмоционального состояния из персистентного хранилища."""
+        if not isinstance(data, dict):
+            return
+        # Обратная совместимость: старый формат — плоский dict актёров
+        actors_data = data.get("actors", data) if "actors" in data else data
+        emo_data = data.get("emotional_state")
+        relation_map = {e.value: e for e in RelationshipType}
+        trust_map = {e.value: e for e in TrustLevel}
+        trust_name_map = {e.name: e for e in TrustLevel}
+        style_map = {e.value: e for e in CommunicationStyle}
+        for aid, ad in actors_data.items():
+            if aid in self._actors:
+                actor = self._actors[aid]
+            else:
+                rel = relation_map.get(
+                    ad.get("relation", "unknown"), RelationshipType.UNKNOWN
+                )
+                trust_raw = ad.get("trust", 2)
+                if isinstance(trust_raw, str):
+                    trust = trust_name_map.get(trust_raw, TrustLevel.MEDIUM)
+                else:
+                    trust = trust_map.get(trust_raw, TrustLevel.MEDIUM)
+                actor = SocialActor(aid, ad.get("name", aid), rel, trust)
+                self._actors[aid] = actor
+            actor.interaction_count = ad.get("interaction_count", 0)
+            notes = ad.get("notes", [])
+            actor.notes = notes if isinstance(notes, list) else []
+            actor.last_interaction = ad.get("last_interaction")
+            actor.preferences = ad.get("preferences", {})
+            style_val = ad.get("preferred_style", "friendly")
+            actor.preferred_style = style_map.get(style_val, CommunicationStyle.FRIENDLY)
+            trust_raw = ad.get("trust", 2)
+            if isinstance(trust_raw, str):
+                actor.trust = trust_name_map.get(trust_raw, actor.trust)
+            elif isinstance(trust_raw, int):
+                actor.trust = trust_map.get(trust_raw, actor.trust)
+
+        # Восстановление эмоционального состояния
+        if emo_data and hasattr(self, 'emotional_state'):
+            try:
+                self.emotional_state = EmotionalState.from_dict(emo_data)
+            except (TypeError, ValueError, KeyError):
+                pass
+
 
 # ── SocialModel: lightweight façade with rule-based adapt_response ─────────────
 

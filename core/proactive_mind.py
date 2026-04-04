@@ -8,6 +8,7 @@ import time
 import threading
 import random
 import os
+import json
 
 
 class ProactiveMind:
@@ -218,10 +219,20 @@ class ProactiveMind:
             # Сохраняем время приветствия, чтобы не слать снова при перезапуске
             try:
                 import json as _json
+                import tempfile as _tmpf
                 _ts_file = os.path.join('.agent_memory', '_last_greeting.json')
                 os.makedirs('.agent_memory', exist_ok=True)
-                with open(_ts_file, 'w', encoding='utf-8') as _f:
-                    _json.dump({'ts': time.time()}, _f)
+                _tmp_fd, _tmp_path = _tmpf.mkstemp(dir='.agent_memory', suffix='.tmp')
+                try:
+                    with os.fdopen(_tmp_fd, 'w', encoding='utf-8') as _f:
+                        _json.dump({'ts': time.time()}, _f)
+                    os.replace(_tmp_path, _ts_file)
+                except BaseException:
+                    try:
+                        os.unlink(_tmp_path)
+                    except OSError:
+                        pass
+                    raise
             except OSError:
                 pass
         except (AttributeError, TypeError, ValueError, RuntimeError, OSError) as e:
@@ -257,8 +268,11 @@ class ProactiveMind:
             try:
                 self._increment_cycle()
                 self._think_cycle()
-            except (AttributeError, TypeError, ValueError, RuntimeError, OSError) as e:
+            except (AttributeError, TypeError, ValueError, RuntimeError, OSError,
+                    KeyError, json.JSONDecodeError) as e:
                 self._log(f"Ошибка мышления: {e}", level="error")
+            except Exception as e:
+                self._log(f"Неожиданная ошибка мышления: {type(e).__name__}: {e}", level="error")
 
             # Интервал думания с небольшим рандомом
             sleep_time = self.THINK_INTERVAL + random.uniform(-5, 10)
@@ -600,3 +614,24 @@ class ProactiveMind:
             getattr(self.monitoring, level, self.monitoring.info)(
                 message, source="proactive_mind"
             )
+
+    @property
+    def mood(self) -> str:
+        return self._mood
+
+    def export_state(self) -> dict:
+        """Возвращает полное состояние для персистентности."""
+        return {
+            "thoughts": list(self._thoughts),
+            "mood": self._mood,
+            "cycle_count": self._cycle_count,
+        }
+
+    def import_state(self, data: dict):
+        """Восстанавливает состояние из персистентного хранилища."""
+        if data.get("thoughts"):
+            self._thoughts = data["thoughts"][-30:]
+        if data.get("mood"):
+            self._mood = data["mood"]
+        if data.get("cycle_count"):
+            self._cycle_count = data["cycle_count"]

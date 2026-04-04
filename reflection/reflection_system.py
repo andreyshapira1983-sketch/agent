@@ -654,3 +654,17 @@ class ReflectionSystem:
             'most_reliable':      most_reliable,
             'total_reflections':  len(self._reflections),
         }
+
+    def export_state(self) -> dict:
+        """Возвращает полное состояние для персистентности."""
+        return {
+            "reflections": list(self._reflections),
+            "insights": list(self._insights),
+        }
+
+    def import_state(self, data: dict):
+        """Восстанавливает состояние из персистентного хранилища."""
+        if data.get("reflections"):
+            self._reflections.extend(data["reflections"])
+        if data.get("insights"):
+            self._insights.extend(data["insights"])

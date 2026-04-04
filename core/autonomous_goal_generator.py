@@ -49,6 +49,8 @@ class AutonomousGoalGenerator:
         identity=None,
         governance=None,
         ethics=None,
+        tool_layer=None,
+        skill_library=None,
     ):
         self.cognitive_core = cognitive_core
         self.goal_manager   = goal_manager
@@ -59,11 +61,14 @@ class AutonomousGoalGenerator:
         self.identity       = identity  # Слой 45 — реальный инвентарь способностей
         self.governance     = governance
         self.ethics         = ethics
+        self.tool_layer     = tool_layer
+        self.skill_library  = skill_library
 
         # Антиспам: не генерировать цель с таким же текстом чаще чем раз в N секунд
         self._recent_goals: dict[str, float] = {}   # text-hash → timestamp
         self._seen_workdir_files: set[str] = set()
         self._cooldown_sec = 3600  # 1 час между одинаковыми целями
+        self._tool_practice_index = 0  # round-robin по инструментам
 
     # ── Основной API ──────────────────────────────────────────────────────────
 
@@ -187,6 +192,62 @@ class AutonomousGoalGenerator:
                 f"[goal_gen/inventory] Добавлено {len(added)} целей из инвентаря. "
                 f"Сводка: {inv.get('summary', '')[:60]}"
             )
+        return added
+
+    def generate_tool_practice_goals(self) -> list[str]:
+        """
+        Генерирует конкретные цели для практики с разными инструментами.
+
+        Round-robin: каждый вызов берёт следующий инструмент, которым агент
+        ещё не пользовался (или пользовался мало). Это не даёт зависать
+        на одном psutil.cpu_percent() вечно.
+        """
+        if not self.tool_layer:
+            return []
+
+        # Конкретные задачи для инструментов
+        _TOOL_TASKS: dict[str, str] = {
+            'search': 'Найди последние новости про AI agents 2026 через SEARCH и сохрани краткий обзор в outputs/ai_news.txt',
+            'github': 'Проверь свой GitHub репозиторий: список последних коммитов, открытые issues. Результат сохрани в outputs/github_status.json',
+            'filesystem': 'Просканируй рабочую папку и создай outputs/workspace_index.json со списком всех .py файлов и их размерами',
+            'python_runtime': 'Напиши и выполни Python-скрипт который анализирует logs/task_log.txt и выводит статистику задач',
+            'spreadsheet': 'Создай Excel-таблицу outputs/tool_usage_report.xlsx со статистикой использования инструментов',
+            'pdf_generator': 'Создай PDF отчёт outputs/agent_capabilities.pdf с описанием своих навыков и инструментов',
+            'data_viz': 'Построй график success rate за последние циклы и сохрани как outputs/success_chart.png',
+            'http_client': 'Сделай HTTP GET запрос к https://httpbin.org/json и сохрани ответ в outputs/http_test.json',
+            'git': 'Проверь статус git репозитория: ветки, последние коммиты, незакоммиченные изменения',
+            'nlp': 'Проанализируй тональность последних 10 записей из logs/task_log.txt через NLP',
+            'code_analyzer': 'Проанализируй качество кода одного модуля из папки core/ — найди потенциальные баги',
+            'translate': 'Переведи README или описание агента на английский и сохрани в outputs/agent_readme_en.txt',
+            'email': 'Подготовь черновик email-отчёта о работе агента за сегодня (сохрани в outputs/draft_email.txt)',
+            'archive': 'Создай архив outputs/logs_backup.zip с файлами из папки logs/',
+            'embedding': 'Создай векторные эмбеддинги для 5 последних уроков из памяти агента',
+            'image_generator': 'Сгенерируй простое изображение-логотип для агента и сохрани в outputs/',
+            'browser': 'Открой Hacker News и извлеки заголовки топ-5 статей, сохрани в outputs/hn_top5.txt',
+            'notification': 'Отправь тестовое уведомление о статусе агента через notification tool',
+            'network': 'Проверь сетевую доступность 3 популярных API (httpbin, github api, jsonplaceholder)',
+        }
+
+        tool_map = getattr(self.tool_layer, '_tools', {})
+        available = [name for name in _TOOL_TASKS if name in tool_map]
+
+        if not available:
+            return []
+
+        # Round-robin: берём следующий инструмент
+        idx = self._tool_practice_index % len(available)
+        tool_name = available[idx]
+        self._tool_practice_index = (self._tool_practice_index + 1) % len(available)
+
+        goal_desc = _TOOL_TASKS[tool_name]
+        added: list[str] = []
+
+        if not self._is_duplicate(goal_desc):
+            self._add_goal(goal_desc, priority=2, tags=[self._TAG, 'tool_practice', tool_name])
+            self._mark_recent(goal_desc)
+            added.append(goal_desc)
+            self._log(f"[goal_gen] Практика инструмента '{tool_name}': {goal_desc[:80]}")
+
         return added
 
     def propose_from_gap(self, gap_description: str) -> str | None:
@@ -389,38 +450,45 @@ class AutonomousGoalGenerator:
 
     def _is_duplicate(self, goal_desc: str) -> bool:
         """Проверяет не ставили ли мы уже такую цель недавно."""
-        key = str(hash(goal_desc[:80]))
+        import hashlib as _hl
+        key = _hl.md5(goal_desc[:80].encode('utf-8', errors='replace')).hexdigest()
         last = self._recent_goals.get(key)
         if last and (time.time() - last) < self._cooldown_sec:
             return True
-        # Дополнительно проверяем в GoalManager по тексту
+        # Проверяем в GoalManager по подстроке описания
         if self.goal_manager:
             try:
-                active: list = []
-                if hasattr(self.goal_manager, 'get_active_goals'):
-                    maybe_active = self.goal_manager.get_active_goals()
-                    if isinstance(maybe_active, list):
-                        active = maybe_active
-                    elif maybe_active:
-                        active = [maybe_active]
-                elif hasattr(self.goal_manager, 'get_all'):
-                    # Совместимость с текущим GoalManager: фильтруем active вручную.
-                    all_goals = self.goal_manager.get_all() or []
-                    active = [
-                        g for g in all_goals
-                        if str((g or {}).get('status', '')).lower() == 'active'
-                    ]
+                snippet = goal_desc[:80].casefold()
 
-                for g in active:
-                    existing = g.get('description', '') if isinstance(g, dict) else str(g)
-                    if goal_desc[:60].lower() in existing.lower():
+                all_goals: list = []
+
+                # Полный список целей (с фильтрацией по статусу)
+                if hasattr(self.goal_manager, 'get_all'):
+                    raw = self.goal_manager.get_all() or []
+                    if isinstance(raw, list):
+                        _live = {'pending', 'active', 'paused'}
+                        all_goals = [g for g in raw if isinstance(g, dict)
+                                     and str(g.get('status', '')).lower() in _live]
+
+                # Fallback: только активные цели
+                if not all_goals and hasattr(self.goal_manager, 'get_active_goals'):
+                    raw = self.goal_manager.get_active_goals()
+                    if isinstance(raw, list):
+                        all_goals = [g for g in raw if isinstance(g, dict)]
+                    elif isinstance(raw, dict):
+                        all_goals = [raw]
+
+                for g in all_goals:
+                    desc = g.get('description', '').casefold()
+                    if snippet in desc:
                         return True
             except Exception:
                 pass
         return False
 
     def _mark_recent(self, goal_desc: str):
-        key = str(hash(goal_desc[:80]))
+        import hashlib as _hl
+        key = _hl.md5(goal_desc[:80].encode('utf-8', errors='replace')).hexdigest()
         self._recent_goals[key] = time.time()
         # Чистим старые записи чтобы не росло бесконечно
         now = time.time()

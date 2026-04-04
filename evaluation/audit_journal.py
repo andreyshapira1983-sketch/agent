@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -124,12 +125,21 @@ class AuditEntry:
 # ──────────────────────────────────────────────────────────────────────────────
 
 class AuditJournal:
-    """Персистентный журнал аудит-результатов агента."""
+    """Персистентный журнал аудит-результатов агента.
+
+    Два потока данных:
+        1. ``record_task()`` — legacy AuditEntry (оценка шагов).
+        2. ``log()``         — structured audit events (§10 formal contracts).
+           Каждый event имеет event_id, trace_id, task_id, step_id, actor.
+           Хранятся в append-only JSONL-файле ``audit_events.jsonl``.
+    """
 
     def __init__(self, memory_dir: str = '.agent_memory'):
         self._path = Path(memory_dir) / 'audit_journal.json'
+        self._events_path = Path(memory_dir) / 'audit_events.jsonl'
         self._entries: list[AuditEntry] = []
         self._run_id: str = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self._lock = threading.Lock()
         self._load()
 
     # ── Persistence ──────────────────────────────────────────────────────────
@@ -276,6 +286,73 @@ class AuditJournal:
             'rate':     successes / len(entries) if entries else 0.0,
             'verdicts': verdicts,
         }
+
+    # ── Structured audit events (§10 formal_contracts_spec) ──────────────────
+
+    def log(self, event: object) -> None:
+        """Append structured audit event to JSONL log.
+
+        Принимает dict или объект с ``.to_dict()`` (StructuredAuditEvent).
+        Thread-safe; append-only.
+        """
+        if isinstance(event, dict):
+            data = event
+        elif hasattr(event, 'to_dict'):
+            data = event.to_dict()  # type: ignore[union-attr]
+        else:
+            return  # ignore unsupported types silently
+
+        with self._lock:
+            try:
+                self._events_path.parent.mkdir(parents=True, exist_ok=True)
+                line = json.dumps(data, ensure_ascii=False, default=str)
+                with open(self._events_path, 'a', encoding='utf-8') as f:
+                    f.write(line + '\n')
+            except (OSError, TypeError, ValueError):
+                pass  # audit не должен ронять агента
+
+    def get_events_by_trace_id(self, trace_id: str) -> list[dict]:
+        """Возвращает все structured events для данного trace_id.
+
+        Читает JSONL-файл и фильтрует по trace_id.
+        """
+        results: list[dict] = []
+        try:
+            if not self._events_path.exists():
+                return results
+            with open(self._events_path, encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        evt = json.loads(line)
+                        if evt.get('trace_id') == trace_id:
+                            results.append(evt)
+                    except (json.JSONDecodeError, AttributeError):
+                        continue
+        except OSError:
+            pass
+        return results
+
+    def get_events(self, max_count: int = 200) -> list[dict]:
+        """Возвращает последние ``max_count`` structured events."""
+        results: list[dict] = []
+        try:
+            if not self._events_path.exists():
+                return results
+            with open(self._events_path, encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        results.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        except OSError:
+            pass
+        return results[-max_count:]
 
 
 # ──────────────────────────────────────────────────────────────────────────────

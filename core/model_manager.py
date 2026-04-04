@@ -250,6 +250,10 @@ class ModelManager:
 
     def _register_defaults(self):
         """Предзагрузка актуальных моделей."""
+        self.register('claude-sonnet-4-6',  'Claude Sonnet 4.6',  ModelTier.STANDARD,
+                      'anthropic', cost_per_1k_tokens=0.003, context_window=200000,
+                      capabilities=['reasoning', 'coding', 'analysis', 'planning'])
+
         self.register('claude-opus-4',      'Claude Opus 4',      ModelTier.HEAVY,
                       'anthropic', cost_per_1k_tokens=0.015, context_window=200000,
                       capabilities=['reasoning', 'coding', 'analysis', 'planning'])
@@ -258,7 +262,15 @@ class ModelManager:
                       'openai', cost_per_1k_tokens=0.0025, context_window=1000000,
                       capabilities=['reasoning', 'coding', 'vision', 'analysis'])
 
-        self._active_model_id = 'gpt-5.1'
+        self.register('gpt-4o',              'GPT-4o',             ModelTier.STANDARD,
+                      'openai', cost_per_1k_tokens=0.005, context_window=128000,
+                      capabilities=['reasoning', 'coding', 'vision', 'analysis'])
+
+        self.register('gpt-4o-mini',         'GPT-4o Mini',        ModelTier.LIGHT,
+                      'openai', cost_per_1k_tokens=0.00015, context_window=128000,
+                      capabilities=['reasoning', 'coding'])
+
+        self._active_model_id = 'claude-sonnet-4-6'
 
     def _log(self, message: str):
         if self.monitoring:

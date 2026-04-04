@@ -106,6 +106,36 @@ class CausalGraph:
     def to_dict(self) -> list[dict]:
         return [link.to_dict() for link in self._links]
 
+    def export_state(self) -> list[dict]:
+        """Возвращает состояние графа для персистентности."""
+        data = []
+        for link in self._links:
+            data.append({
+                "cause": link.cause,
+                "effect": link.effect,
+                "confidence": link.confidence,
+                "mechanism": link.mechanism,
+                "context": link.context,
+                "observed_count": link.observed_count,
+                "created_at": getattr(link, 'created_at', None),
+            })
+        return data
+
+    def import_state(self, data: list[dict]):
+        """Восстанавливает граф из персистентного хранилища."""
+        for ld in data:
+            link = self.add(
+                cause=ld["cause"],
+                effect=ld["effect"],
+                confidence=ld.get("confidence", 0.7),
+                mechanism=ld.get("mechanism"),
+                context=ld.get("context"),
+            )
+            link.observed_count = ld.get("observed_count", 1)
+            link.confidence = ld.get("confidence", 0.7)
+            if ld.get("created_at"):
+                link.created_at = ld["created_at"]
+
 
 class CausalReasoningSystem:
     """
@@ -265,7 +295,7 @@ class CausalReasoningSystem:
     def root_cause(self, failure: str) -> str:
         """Находит корневую причину сбоя (используется в Self-Repair)."""
         result = self.explain(failure, depth=5)
-        if result['causal_chains']:
+        if result.get('causal_chains') and result['causal_chains'][0]:
             root = result['causal_chains'][0][0]   # начало самой длинной цепи
             return root
         return result.get('explanation', 'Корневая причина не найдена')
@@ -364,6 +394,17 @@ class CausalReasoningSystem:
             self.monitoring.info(message, source='causal_reasoning')
         else:
             print(f"[CausalReasoning] {message}")
+
+    def export_state(self) -> list[dict]:
+        """Возвращает состояние каузального графа для персистентности."""
+        if self.graph:
+            return self.graph.export_state()
+        return []
+
+    def import_state(self, data: list[dict]):
+        """Восстанавливает каузальный граф из персистентного хранилища."""
+        if self.graph and data:
+            self.graph.import_state(data)
 
 
 # Alias for compatibility

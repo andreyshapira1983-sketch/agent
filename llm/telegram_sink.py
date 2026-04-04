@@ -5,6 +5,7 @@
 import time
 import threading
 from collections import deque
+from collections.abc import Callable
 import random
 import importlib
 
@@ -75,11 +76,21 @@ class TelegramSink:
         self._stop_event = threading.Event()
 
         # Фоновый поток для отправки очереди
+        self._scrubber: Callable[[str], str] | None = None  # SecretsRedactor
+
         self._worker = threading.Thread(target=self._drain_loop, daemon=True)
         self._worker.start()
 
     def __repr__(self) -> str:
         return f"TelegramSink(chat_id={self.chat_id}, token=***)"
+
+    @staticmethod
+    def _escape_html(text: str) -> str:
+        """Экранирует HTML-спецсимволы для Telegram."""
+        return (text
+                .replace('&', '&amp;')
+                .replace('<', '&lt;')
+                .replace('>', '&gt;'))
 
     # ── Интерфейс sink ────────────────────────────────────────────────────────
 
@@ -89,11 +100,14 @@ class TelegramSink:
         if not self._should_send(level):
             return
         with self._lock:
+            was_full = len(self._queue) == (self._queue.maxlen or float('inf'))
             self._queue.append({
                 'entry': entry,
                 'attempt': 0,
                 'next_try_at': 0.0,
             })
+            if was_full:
+                self._dropped_count += 1
 
     # ── Отправка ──────────────────────────────────────────────────────────────
 
@@ -104,7 +118,7 @@ class TelegramSink:
     def send_alert(self, title: str, body: str, level: str = "WARNING") -> bool:
         """Форматирует и отправляет алерт."""
         emoji = self.LEVEL_EMOJI.get(level, "ℹ️")
-        text = f"{emoji} <b>{level}</b>\n<b>{title}</b>\n{body[:800]}"
+        text = f"{emoji} <b>{self._escape_html(level)}</b>\n<b>{self._escape_html(title)}</b>\n{self._escape_html(body[:800])}"
         return self._send(text)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -140,9 +154,9 @@ class TelegramSink:
 
     def _format(self, entry: dict) -> str:
         level = entry.get("level", "INFO")
-        source = entry.get("source", "")
-        message = entry.get("message", "")
-        time_str = entry.get("time_str", "")
+        source = self._escape_html(str(entry.get("source", "")))
+        message = self._escape_html(str(entry.get("message", "")))
+        time_str = self._escape_html(str(entry.get("time_str", "")))
         emoji = self.LEVEL_EMOJI.get(level, "ℹ️")
 
         parts = [f"{emoji} <b>[{level}]</b>  {time_str}"]
@@ -153,12 +167,15 @@ class TelegramSink:
         # SECURITY: убираем свой токен из текста, если он туда попал
         if self.token:
             text = text.replace(self.token, '***TOKEN***')
+        # SECURITY: SecretsRedactor — убираем все остальные секреты
+        if self._scrubber is not None:
+            text = self._scrubber(text)
         return text
 
     def _send(self, text: str) -> bool:
         try:
             if requests is None:
-                raise ImportError("requests library not installed")
+                return False
             resp = requests.post(
                 f"https://api.telegram.org/bot{self.token}/sendMessage",
                 json={
@@ -171,7 +188,11 @@ class TelegramSink:
             )
             with self._lock:
                 self._last_send = time.time()
-            return resp.status_code == 200
+            try:
+                body = resp.json()
+            except (ValueError, TypeError):
+                body = {}
+            return resp.status_code == 200 and body.get('ok', False)
         except _REQUEST_EXCEPTIONS:
             self._error_count += 1
             return False
@@ -180,7 +201,7 @@ class TelegramSink:
         """Останавливает фоновый worker и даёт ему завершиться."""
         self._stop_event.set()
         if self._worker.is_alive():
-            self._worker.join(timeout=1.0)
+            self._worker.join(timeout=5.0)
 
     def _should_send(self, level: str) -> bool:
         try:

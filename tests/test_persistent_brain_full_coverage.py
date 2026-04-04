@@ -1,3 +1,4 @@
+# pyright: reportAttributeAccessIssue=false
 import json
 import importlib.util
 import os
@@ -12,8 +13,9 @@ from unittest.mock import patch
 
 _PB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "core", "persistent_brain.py")
 _PB_SPEC = importlib.util.spec_from_file_location("core.persistent_brain", _PB_PATH)
+assert _PB_SPEC is not None
 _PB_MOD = importlib.util.module_from_spec(_PB_SPEC)
-assert _PB_SPEC is not None and _PB_SPEC.loader is not None
+assert _PB_SPEC.loader is not None
 _PB_SPEC.loader.exec_module(_PB_MOD)
 sys.modules["core.persistent_brain"] = _PB_MOD
 PersistentBrain = _PB_MOD.PersistentBrain
@@ -217,6 +219,7 @@ class PersistentBrainTests(unittest.TestCase):
     def test_count_knowledge_and_disk_usage(self):
         self.assertEqual(self.pb._count_knowledge(), 0)
         k = types.SimpleNamespace(_long_term={"a": 1}, _episodic=[1], _semantic={"b": 2})
+        k.knowledge_count = lambda: len(k._long_term) + len(k._episodic) + len(k._semantic)
         self.pb.knowledge = k
         self.assertEqual(self.pb._count_knowledge(), 3)
         with open(os.path.join(self.tmp.name, "f.bin"), "wb") as f:
@@ -291,14 +294,16 @@ class PersistentBrainTests(unittest.TestCase):
             {"role": "user", "message": "focus module tests now"},
         ]
         partner = _Actor()
-        self.pb.social = types.SimpleNamespace(_actors={"user": partner})
-        self.pb.proactive_mind = types.SimpleNamespace(_mood="calm")
-        self.pb.self_improvement = types.SimpleNamespace(_strategy_store={"s1": "do it"})
+        self.pb.social = types.SimpleNamespace(_actors={"user": partner}, get_actor=lambda aid: partner if aid == "user" else None)
+        self.pb.proactive_mind = types.SimpleNamespace(mood="calm")
+        self.pb.self_improvement = types.SimpleNamespace(strategies={"s1": "do it"})
         gdict = {"description": "goal a", "status": "active"}
         gobj = types.SimpleNamespace(description="goal b", status="ACTIVE")
         self.pb.goal_manager = types.SimpleNamespace(get_all=lambda: [gdict, gobj])
+        caps = [_Cap("coding", 0.9), _Cap("reason", 0.8)]
         self.pb.identity = types.SimpleNamespace(
-            _capabilities={"c": _Cap("coding", 0.9), "r": _Cap("reason", 0.8)}
+            _capabilities={"c": caps[0], "r": caps[1]},
+            top_capabilities=lambda n=3: sorted(caps, key=lambda c: c.proficiency, reverse=True)[:n]
         )
         self.pb._evolution_log = [{"event": "ev", "details": "detail"}]
         ctx = self.pb.get_memory_context()
@@ -386,14 +391,32 @@ class PersistentBrainTests(unittest.TestCase):
             self.assertTrue(isinstance(self.pb._architecture, dict))
 
     def test_save_load_knowledge(self):
-        self.pb.knowledge = types.SimpleNamespace(_long_term={"k": 1}, _episodic=[1], _semantic={"s": 2})
+        kn = types.SimpleNamespace(_long_term={"k": 1}, _episodic=[1], _semantic={"s": 2})
+        kn.export_state = lambda: {"long_term": kn._long_term, "episodic": kn._episodic, "semantic": kn._semantic}
+        self.pb.knowledge = kn
         self.pb._save_knowledge()
-        self.pb.knowledge = types.SimpleNamespace(_long_term={}, _episodic=[], _semantic={})
+        kn2 = types.SimpleNamespace(_long_term={}, _episodic=[], _semantic={})
+        def _kn_import(data):
+            kn2._long_term = data.get("long_term", {})
+            kn2._episodic = data.get("episodic", [])
+            kn2._semantic = data.get("semantic", {})
+        kn2.import_state = _kn_import
+        self.pb.knowledge = kn2
         self.pb._load_knowledge()
         self.assertIn("k", self.pb.knowledge._long_term)
 
     def test_save_load_goals(self):
-        gm = types.SimpleNamespace(_goals={"g1": _GoalObj()}, _counter=2, _active_goal_id="g1")
+        g1 = _GoalObj()
+        gm = types.SimpleNamespace(_goals={"g1": g1}, _counter=2, _active_goal_id="g1")
+        gm.export_state = lambda: {
+            "counter": gm._counter, "active_goal_id": gm._active_goal_id,
+            "goals": {gid: {"goal_id": g.goal_id, "description": g.description,
+                            "priority": g.priority.value, "status": g.status.value,
+                            "parent_id": g.parent_id, "sub_goals": g.sub_goals,
+                            "deadline": g.deadline, "success_criteria": g.success_criteria,
+                            "notes": g.notes, "created_at": g.created_at}
+                      for gid, g in gm._goals.items()}
+        }
         self.pb.goal_manager = gm
         self.pb._save_goals()
 
@@ -425,7 +448,13 @@ class PersistentBrainTests(unittest.TestCase):
         core_pkg = types.ModuleType("core")
         core_pkg.__path__ = []
         with patch.dict(sys.modules, {"core": core_pkg, "core.goal_manager": fake_mod}):
-            self.pb.goal_manager = types.SimpleNamespace(_goals={})
+            gm2 = types.SimpleNamespace(_goals={})
+            def _gm_import(data):
+                for gid, gd in data.get("goals", {}).items():
+                    gm2._goals[gid] = Goal(gid, gd.get("description", ""),
+                                            GoalPriority(gd.get("priority", "medium")))
+            gm2.import_state = _gm_import
+            self.pb.goal_manager = gm2
             self.pb._load_goals()
             self.assertIn("g1", self.pb.goal_manager._goals)
 
@@ -437,6 +466,14 @@ class PersistentBrainTests(unittest.TestCase):
         exp = types.SimpleNamespace(
             _buffer=[_EpisodeObj()], _patterns=[{"p": 1}], _replay_stats={"total": 1}, _index={}
         )
+        exp.export_state = lambda: {
+            "episodes": [{"episode_id": e.episode_id, "goal": e.goal, "actions": e.actions,
+                          "outcome": e.outcome, "success": e.success, "context": e.context,
+                          "replayed_count": e.replayed_count, "lessons": e.lessons,
+                          "created_at": e.created_at} for e in exp._buffer],
+            "patterns": list(exp._patterns),
+            "replay_stats": dict(exp._replay_stats),
+        }
         self.pb.experience = exp
         self.pb._save_episodes()
 
@@ -455,7 +492,19 @@ class PersistentBrainTests(unittest.TestCase):
         fake = types.ModuleType("learning.experience_replay")
         fake.Episode = Episode
         with patch.dict("sys.modules", {"learning.experience_replay": fake}):
-            self.pb.experience = types.SimpleNamespace(_buffer=[], _patterns=[], _replay_stats={}, _index={})
+            exp2 = types.SimpleNamespace(_buffer=[], _patterns=[], _replay_stats={}, _index={})
+            def _ep_import(data):
+                data_list = data.get("episodes", []) if isinstance(data, dict) else data
+                for ed in data_list:
+                    ep = Episode(episode_id=ed.get("episode_id",""), goal=ed.get("goal",""),
+                                 actions=ed.get("actions",[]), outcome=ed.get("outcome",""),
+                                 success=ed.get("success",False), context=ed.get("context"))
+                    ep.replayed_count = ed.get("replayed_count", 0)
+                    ep.lessons = ed.get("lessons", [])
+                    exp2._buffer.append(ep)
+                exp2._patterns.extend(data.get("patterns", []) if isinstance(data, dict) else [])
+            exp2.import_state = _ep_import
+            self.pb.experience = exp2
             self.pb._load_episodes()
             self.assertEqual(len(self.pb.experience._buffer), 1)
 
@@ -468,26 +517,53 @@ class PersistentBrainTests(unittest.TestCase):
                 self.pb._load_episodes()
 
     def test_save_load_skills_identity_reflections(self):
-        self.pb.skill_library = types.SimpleNamespace(_skills={"s": _Skill("s")})
+        sl = types.SimpleNamespace(_skills={"s": _Skill("s")})
+        sl.export_state = lambda: {
+            n: {"name": s.name, "description": s.description, "strategy": s.strategy,
+                "tags": s.tags, "use_count": s.use_count, "success_count": s.success_count}
+            for n, s in sl._skills.items()}
+        self.pb.skill_library = sl
         self.pb._save_skills()
-        self.pb.skill_library = types.SimpleNamespace(_skills={"s": _Skill("s")})
+        sl2 = types.SimpleNamespace(_skills={"s": _Skill("s")})
+        sl2.import_state = lambda data: None
+        self.pb.skill_library = sl2
         self.pb._load_skills()
 
-        self.pb.identity = types.SimpleNamespace(_capabilities={"c": _Cap("c")}, _performance_history=[1, 2])
+        idn = types.SimpleNamespace(_capabilities={"c": _Cap("c")}, _performance_history=[1, 2])
+        idn.export_state = lambda: {
+            "capabilities": {n: {"proficiency": c.proficiency, "usage_count": c.usage_count}
+                             for n, c in idn._capabilities.items()},
+            "performance_history": list(idn._performance_history)}
+        self.pb.identity = idn
         self.pb._save_identity()
-        self.pb.identity = types.SimpleNamespace(_capabilities={"c": _Cap("c")}, _performance_history=[])
+        idn2 = types.SimpleNamespace(_capabilities={"c": _Cap("c")}, _performance_history=[])
+        idn2.import_state = lambda data: None
+        self.pb.identity = idn2
         self.pb._load_identity()
 
-        self.pb.reflection = types.SimpleNamespace(_reflections=[1], _insights=[2])
+        ref = types.SimpleNamespace(_reflections=[1], _insights=[2])
+        ref.export_state = lambda: {"reflections": list(ref._reflections), "insights": list(ref._insights)}
+        self.pb.reflection = ref
         self.pb._save_reflections()
-        self.pb.reflection = types.SimpleNamespace(_reflections=[], _insights=[])
+        ref2 = types.SimpleNamespace(_reflections=[], _insights=[])
+        ref2.import_state = lambda data: None
+        self.pb.reflection = ref2
         self.pb._load_reflections()
 
         with patch.object(self.pb, "_load_json", return_value={"capabilities": {"x": {"proficiency": 1}}}):
             self.pb._load_identity()
 
     def test_save_load_social(self):
-        self.pb.social = types.SimpleNamespace(_actors={"user": _Actor()})
+        actor = _Actor()
+        soc = types.SimpleNamespace(_actors={"user": actor})
+        soc.export_state = lambda: {
+            "actors": {
+                aid: {"name": a.name, "relation": a.relation.value, "trust": a.trust.value,
+                      "preferred_style": a.preferred_style.value,
+                      "interaction_count": a.interaction_count, "notes": a.notes,
+                      "last_interaction": a.last_interaction, "preferences": a.preferences}
+                for aid, a in soc._actors.items()}}
+        self.pb.social = soc
         self.pb._save_social()
 
         class RelationshipType(Enum):
@@ -520,7 +596,17 @@ class PersistentBrainTests(unittest.TestCase):
         fake.CommunicationStyle = CommunicationStyle
 
         with patch.dict("sys.modules", {"social.social_model": fake}):
-            self.pb.social = types.SimpleNamespace(_actors={})
+            soc2 = types.SimpleNamespace(_actors={})
+            def _soc_import(data):
+                actors_data = data.get("actors", data) if isinstance(data, dict) else {}
+                for aid, ad in actors_data.items():
+                    if isinstance(ad, dict):
+                        soc2._actors[aid] = SocialActor(
+                            aid, ad.get("name", ""),
+                            RelationshipType(ad.get("relation", "unknown")),
+                            TrustLevel(ad.get("trust", 1)))
+            soc2.import_state = _soc_import
+            self.pb.social = soc2
             self.pb._load_social()
             self.assertIn("user", self.pb.social._actors)
 
@@ -529,9 +615,18 @@ class PersistentBrainTests(unittest.TestCase):
                 self.pb._load_social()
 
     def test_save_load_strategies_thoughts_learning_quality(self):
-        self.pb.self_improvement = types.SimpleNamespace(
+        si = types.SimpleNamespace(
             _strategy_store={"k": "v"}, _applied=["a"], _proposals=[_Proposal()]
         )
+        si.export_state = lambda: {
+            "strategies": dict(si._strategy_store),
+            "applied": list(si._applied),
+            "proposals": [{"area": p.area, "current_behavior": p.current_behavior,
+                           "proposed_change": p.proposed_change, "rationale": p.rationale,
+                           "priority": p.priority, "status": p.status,
+                           "created_at": p.created_at} for p in si._proposals],
+        }
+        self.pb.self_improvement = si
         self.pb._save_strategies()
 
         class ImprovementProposal:
@@ -548,13 +643,27 @@ class PersistentBrainTests(unittest.TestCase):
         fake.ImprovementProposal = ImprovementProposal
 
         with patch.dict("sys.modules", {"self_improvement.self_improvement": fake}):
-            self.pb.self_improvement = types.SimpleNamespace(_strategy_store={}, _applied=[], _proposals=[])
+            si2 = types.SimpleNamespace(_strategy_store={}, _applied=[], _proposals=[])
+            def _si_import(data):
+                si2._strategy_store.update(data.get("strategies", {}))
+                si2._applied.extend(data.get("applied", []))
+                for pd in data.get("proposals", []):
+                    si2._proposals.append(ImprovementProposal(
+                        pd.get("area",""), pd.get("current_behavior",""),
+                        pd.get("proposed_change",""), pd.get("rationale",""),
+                        pd.get("priority",0)))
+            si2.import_state = _si_import
+            self.pb.self_improvement = si2
             self.pb._load_strategies()
             self.assertTrue(self.pb.self_improvement._proposals)
 
-        self.pb.proactive_mind = types.SimpleNamespace(_thoughts=["t"], _mood="m", _cycle_count=3)
+        pm = types.SimpleNamespace(_thoughts=["t"], _mood="m", _cycle_count=3)
+        pm.export_state = lambda: {"thoughts": list(pm._thoughts), "mood": pm._mood, "cycle_count": pm._cycle_count}
+        self.pb.proactive_mind = pm
         self.pb._save_thoughts()
-        self.pb.proactive_mind = types.SimpleNamespace(_thoughts=[], _mood="", _cycle_count=0)
+        pm2 = types.SimpleNamespace(_thoughts=[], _mood="", _cycle_count=0)
+        pm2.import_state = lambda data: None
+        self.pb.proactive_mind = pm2
         self.pb._load_thoughts()
 
         tracker = _LRTracker()
@@ -571,23 +680,38 @@ class PersistentBrainTests(unittest.TestCase):
         fake_att = types.ModuleType("attention.attention_focus")
         fake_att.AttentionMode = _AttentionMode
 
-        self.pb.attention = types.SimpleNamespace(
+        att = types.SimpleNamespace(
             _mode=_AttentionMode.FOCUS,
             _counter=1,
             _noise_keywords=["n"],
             _history=[1],
         )
+        att.export_state = lambda: {
+            "mode": att._mode.value if att._mode else None, "counter": att._counter,
+            "noise_keywords": list(att._noise_keywords), "history": list(att._history)}
+        self.pb.attention = att
         self.pb._save_attention()
-        self.pb.attention = types.SimpleNamespace(_mode=None, _counter=0, _noise_keywords=[], _history=[])
+        att2 = types.SimpleNamespace(_mode=None, _counter=0, _noise_keywords=[], _history=[])
+        att2.import_state = lambda data: None
+        self.pb.attention = att2
         with patch.dict("sys.modules", {"attention.attention_focus": fake_att}):
             self.pb._load_attention()
 
         fake_tmp = types.ModuleType("reasoning.temporal_reasoning")
         fake_tmp.TemporalEvent = _TemporalEvent
         ev = types.SimpleNamespace(event_id="e", description="d", start=1, end=2, tags=["t"], relations=["r"])
-        self.pb.temporal = types.SimpleNamespace(_counter=1, _timeline=["e"], _events={"e": ev})
+        tmp = types.SimpleNamespace(_counter=1, _timeline=["e"], _events={"e": ev})
+        tmp.export_state = lambda: {
+            "counter": tmp._counter, "timeline": list(tmp._timeline),
+            "events": {eid: {"event_id": e.event_id, "description": e.description,
+                             "start": e.start, "end": e.end, "tags": e.tags,
+                             "relations": e.relations}
+                       for eid, e in tmp._events.items()}}
+        self.pb.temporal = tmp
         self.pb._save_temporal()
-        self.pb.temporal = types.SimpleNamespace(_counter=0, _timeline=[], _events={})
+        tmp2 = types.SimpleNamespace(_counter=0, _timeline=[], _events={})
+        tmp2.import_state = lambda data: None
+        self.pb.temporal = tmp2
         with patch.dict("sys.modules", {"reasoning.temporal_reasoning": fake_tmp}):
             self.pb._load_temporal()
 
@@ -595,23 +719,43 @@ class PersistentBrainTests(unittest.TestCase):
         graph._links = [
             _CausalLink("a", "b", 0.8, mechanism="m", context={"x": 1})
         ]
-        self.pb.causal = types.SimpleNamespace(graph=graph)
+        causal = types.SimpleNamespace(graph=graph)
+        causal.export_state = lambda: [
+            {"cause": lk.cause, "effect": lk.effect, "confidence": lk.confidence,
+             "mechanism": lk.mechanism, "context": lk.context,
+             "observed_count": lk.observed_count, "created_at": lk.created_at}
+            for lk in causal.graph._links]
+        self.pb.causal = causal
         self.pb._save_causal()
-        self.pb.causal = types.SimpleNamespace(graph=_CausalGraph())
+        causal2 = types.SimpleNamespace(graph=_CausalGraph())
+        causal2.import_state = lambda data: None
+        self.pb.causal = causal2
         self.pb._load_causal()
 
-        self.pb.environment_model = types.SimpleNamespace(
+        env = types.SimpleNamespace(
             _state={"s": 1}, _entities={"e": 1}, _relations=[1], _constraints=[2]
         )
+        env.export_state = lambda: {
+            "state": dict(env._state), "entities": dict(env._entities),
+            "relations": list(env._relations), "constraints": list(env._constraints)}
+        self.pb.environment_model = env
         self.pb._save_environment()
-        self.pb.environment_model = types.SimpleNamespace(_state={}, _entities={}, _relations=[], _constraints=[])
+        env2 = types.SimpleNamespace(_state={}, _entities={}, _relations=[], _constraints=[])
+        env2.import_state = lambda data: None
+        self.pb.environment_model = env2
         self.pb._load_environment()
 
-        self.pb.learning = types.SimpleNamespace(
+        lrn = types.SimpleNamespace(
             _learned=[{"a": 1}], _queue=[{"u": 1, "fetch_fn": object()}]
         )
+        lrn.export_state = lambda: {
+            "learned": list(lrn._learned),
+            "queue": [{k: v for k, v in q.items() if k != "fetch_fn"} for q in lrn._queue]}
+        self.pb.learning = lrn
         self.pb._save_learning()
-        self.pb.learning = types.SimpleNamespace(_learned=[], _queue=[])
+        lrn2 = types.SimpleNamespace(_learned=[], _queue=[])
+        lrn2.import_state = lambda data: None
+        self.pb.learning = lrn2
         self.pb._load_learning()
 
         with patch.dict("sys.modules", {"reasoning.temporal_reasoning": fake_tmp, "attention.attention_focus": fake_att}):
@@ -623,10 +767,22 @@ class PersistentBrainTests(unittest.TestCase):
         fake_sb.SimulationRun = _SimulationRun
         fake_sb.SandboxResult = _SandboxVerdict
 
-        self.pb.sandbox = types.SimpleNamespace(_runs=[_SimulationRun("r1", "a1"), _BrokenRun()])
+        sb = types.SimpleNamespace(_runs=[_SimulationRun("r1", "a1"), _BrokenRun()])
+        def _sb_export():
+            runs = []
+            for r in sb._runs:
+                try:
+                    runs.append(r.to_dict())
+                except Exception:
+                    pass
+            return {"runs": runs}
+        sb.export_state = _sb_export
+        self.pb.sandbox = sb
         self.pb._save_sandbox()
 
-        self.pb.sandbox = types.SimpleNamespace(_runs=[])
+        sb2 = types.SimpleNamespace(_runs=[])
+        sb2.import_state = lambda data: None
+        self.pb.sandbox = sb2
         with patch.dict("sys.modules", {"environment.sandbox": fake_sb}):
             self.pb._load_sandbox()
 
@@ -851,7 +1007,7 @@ class PersistentBrainTests(unittest.TestCase):
         class CommunicationStyle(Enum):
             FRIENDLY = "friendly"
         class SocialActor:
-            def __init__(self, aid, name, rel, trust):
+            def __init__(self, _aid, name, rel, trust):  # noqa: ARG004
                 self.name = name
                 self.relation = rel
                 self.trust = trust
@@ -923,7 +1079,7 @@ class PersistentBrainTests(unittest.TestCase):
             self.pb._load_temporal()
 
         # causal branches
-        self.pb.causal = types.SimpleNamespace(graph=None)
+        self.pb.causal = types.SimpleNamespace(graph=None, export_state=lambda: [])
         self.pb._save_causal()
         with patch.object(self.pb, "_load_json", return_value=[{"cause": "a", "effect": "b"}]):
             self.pb._load_causal()

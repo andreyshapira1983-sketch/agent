@@ -578,3 +578,23 @@ class EnvironmentModel:
             self.monitoring.info(message, source='environment_model')
         else:
             print(f"[EnvironmentModel] {message}")
+
+    def export_state(self) -> dict:
+        """Возвращает полное состояние для персистентности."""
+        return {
+            "state": dict(self._state),
+            "entities": dict(self._entities),
+            "relations": list(self._relations),
+            "constraints": list(self._constraints),
+        }
+
+    def import_state(self, data: dict):
+        """Восстанавливает состояние из персистентного хранилища."""
+        if data.get("state"):
+            self._state.update(data["state"])
+        if data.get("entities"):
+            self._entities.update(data["entities"])
+        if data.get("relations"):
+            self._relations.extend(data["relations"])
+        if data.get("constraints"):
+            self._constraints.extend(data["constraints"])

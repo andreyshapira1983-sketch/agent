@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Agent</title>
+<style>
+  :root {
+    --bg: #212121;
+    --bg-sidebar: #171717;
+    --bg-surface: #2f2f2f;
+    --bg-hover: #353535;
+    --border: #3e3e3e;
+    --text: #ececec;
+    --text-sec: #b4b4b4;
+    --text-dim: #777;
+    --accent: #7c3aed;
+    --accent-dim: #6d28d9;
+    --green: #4ade80;
+    --red: #f87171;
+    --blue: #60a5fa;
+    --sidebar-w: 260px;
+    --radius: 16px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg); color: var(--text);
+    height: 100vh; display: flex; overflow: hidden;
+  }
+
+  /* ── Sidebar ── */
+  #sidebar {
+    width: var(--sidebar-w); background: var(--bg-sidebar);
+    display: flex; flex-direction: column;
+    border-right: 1px solid var(--border);
+    flex-shrink: 0; z-index: 100;
+    transition: margin-left .25s ease;
+  }
+  #sidebar.collapsed { margin-left: calc(var(--sidebar-w) * -1); }
+  .sb-head {
+    padding: 14px 12px 8px; display: flex;
+    align-items: center; justify-content: space-between;
+  }
+  .sb-brand { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .sb-brand .logo {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), #a855f7);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; color: #fff;
+  }
+  .sb-toggle {
+    background: none; border: none; color: var(--text-dim);
+    cursor: pointer; font-size: 18px; padding: 4px 6px; border-radius: 6px;
+  }
+  .sb-toggle:hover { background: var(--bg-surface); color: var(--text); }
+  #new-chat-btn {
+    display: flex; align-items: center; gap: 8px;
+    margin: 4px 10px 6px; padding: 10px 14px;
+    background: none; border: 1px solid var(--border);
+    color: var(--text); border-radius: 10px;
+    cursor: pointer; font-size: 14px; width: calc(100% - 20px); text-align: left;
+  }
+  #new-chat-btn:hover { background: var(--bg-surface); }
+  .sb-nav {
+    flex: 1; overflow-y: auto; padding: 4px 8px;
+    display: flex; flex-direction: column; gap: 1px;
+  }
+  .sb-section {
+    padding: 12px 10px 4px; font-size: 11px; font-weight: 600;
+    color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px;
+  }
+  .sb-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; border-radius: 8px;
+    font-size: 14px; color: var(--text-sec);
+    cursor: pointer; border: none; background: none; width: 100%; text-align: left;
+  }
+  .sb-item:hover { background: var(--bg-surface); color: var(--text); }
+  .sb-item .ic { font-size: 16px; width: 20px; text-align: center; flex-shrink: 0; }
+  .sb-foot {
+    padding: 10px 12px; border-top: 1px solid #2a2a2a;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .sb-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); padding: 4px 6px; }
+  .sb-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+  .sb-user {
+    display: flex; align-items: center; gap: 10px; padding: 6px;
+    border-radius: 8px; cursor: default;
+  }
+  .sb-user .avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 600; color: #fff; flex-shrink: 0;
+  }
+  .sb-user .uname { font-size: 13px; }
+
+  /* ── Main ── */
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+  #main-head {
+    padding: 8px 16px; display: flex; align-items: center; gap: 10px;
+    min-height: 48px;
+  }
+  #menu-btn {
+    display: none; background: none; border: none;
+    color: var(--text-sec); cursor: pointer; font-size: 20px;
+    padding: 4px 8px; border-radius: 6px;
+  }
+  #menu-btn:hover { background: var(--bg-surface); color: var(--text); }
+  #sidebar.collapsed ~ #main #menu-btn { display: block; }
+  #agent-label { font-size: 15px; font-weight: 600; }
+
+  /* ── Welcome ── */
+  #welcome {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 28px; padding: 20px;
+  }
+  #welcome.hidden { display: none; }
+  #welcome h2 { font-size: 28px; font-weight: 700; }
+  #suggestions {
+    display: grid; grid-template-columns: repeat(2, 1fr);
+    gap: 10px; max-width: 560px; width: 100%;
+  }
+  .sug-card {
+    background: var(--bg-surface); border: 1px solid var(--border);
+    border-radius: 14px; padding: 16px; cursor: pointer;
+    font-size: 13px; color: var(--text-sec); line-height: 1.45;
+    transition: border-color .15s, background .15s;
+  }
+  .sug-card:hover { border-color: var(--text-dim); background: var(--bg-hover); color: var(--text); }
+  .sug-card .sc-icon { font-size: 18px; margin-bottom: 8px; display: block; }
+
+  /* ── Messages ── */
+  #messages {
+    flex: 1; overflow-y: auto; padding: 20px 20px 8px;
+    display: none; flex-direction: column; gap: 4px;
+  }
+  #messages.active { display: flex; }
+  .msg-row { display: flex; gap: 14px; max-width: 780px; width: 100%; margin: 0 auto; padding: 8px 0; }
+  .msg-row.user { justify-content: flex-end; }
+  .msg-row.system { justify-content: center; }
+  .msg-av {
+    width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; flex-shrink: 0; margin-top: 2px;
+  }
+  .msg-av.av-agent { background: var(--accent); color: #fff; font-weight: 600; }
+  .msg-av.av-user { display: none; }
+  .msg-bub {
+    padding: 12px 18px; line-height: 1.65; font-size: 14px;
+    white-space: pre-wrap; word-break: break-word; max-width: 85%;
+  }
+  .msg-row.user .msg-bub {
+    background: var(--bg-surface); border-radius: 20px 20px 4px 20px;
+  }
+  .msg-row.agent .msg-bub { border-radius: 4px 20px 20px 20px; }
+  .msg-row.system .msg-bub {
+    background: transparent; color: var(--text-dim);
+    font-size: 12px; text-align: center; max-width: 100%; padding: 4px 12px;
+  }
+  .msg-bub b { font-weight: 600; }
+  .msg-bub code {
+    background: #383838; padding: 2px 6px; border-radius: 4px; font-size: 13px;
+    font-family: 'Consolas', 'Menlo', monospace;
+  }
+  .msg-bub pre {
+    background: #1a1a1a; border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px; margin: 8px 0; overflow-x: auto; font-size: 13px;
+    font-family: 'Consolas', 'Menlo', monospace; line-height: 1.5;
+  }
+  .msg-bub pre code { background: transparent; padding: 0; font-size: inherit; }
+  .msg-bub a { color: var(--blue); text-decoration: underline; }
+  .msg-bub a:hover { color: var(--text); }
+
+  /* ── Typing indicator ── */
+  .typing { display: none; max-width: 780px; margin: 0 auto; width: 100%; padding: 4px 0; }
+  .typing.visible { display: flex; gap: 14px; align-items: flex-start; }
+  .typing .msg-av { background: var(--accent); color: #fff; }
+  .typing-dots { display: flex; gap: 5px; padding: 14px 18px; }
+  .typing-dots span {
+    width: 7px; height: 7px; background: var(--text-dim);
+    border-radius: 50%; animation: tbounce 1.2s infinite;
+  }
+  .typing-dots span:nth-child(2) { animation-delay: .2s; }
+  .typing-dots span:nth-child(3) { animation-delay: .4s; }
+  @keyframes tbounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }
+
+  /* ── Input ── */
+  #input-wrap { padding: 0 20px 16px; max-width: 820px; width: 100%; margin: 0 auto; }
+  #input-box {
+    background: var(--bg-surface); border: 1px solid var(--border);
+    border-radius: 26px; padding: 10px 12px 10px 18px;
+    display: flex; flex-direction: column; gap: 6px;
+    transition: border-color .2s;
+  }
+  #input-box:focus-within { border-color: var(--text-dim); }
+  #files-area { display: none; flex-wrap: wrap; gap: 6px; margin: 2px 0; }
+  #files-area.visible { display: flex; }
+  .file-badge {
+    display: flex; align-items: center; gap: 6px;
+    background: #383838; border-radius: 8px; padding: 5px 10px;
+    font-size: 12px; color: var(--text-sec); max-width: 320px;
+  }
+  .file-badge .icon { flex-shrink: 0; }
+  .file-badge .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+  .file-badge .fsize { color: var(--text-dim); flex-shrink: 0; }
+  .file-badge .fclear { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 15px; padding: 0 2px; line-height: 1; }
+  .file-badge .fclear:hover { color: var(--red); }
+  #input-row { display: flex; align-items: flex-end; gap: 8px; }
+  #attach-btn {
+    background: none; border: none; color: var(--text-dim);
+    cursor: pointer; font-size: 20px; padding: 4px; border-radius: 50%; flex-shrink: 0; line-height: 1;
+  }
+  #attach-btn:hover { color: var(--text); background: #444; }
+  #msg-input {
+    flex: 1; background: transparent; border: none; color: var(--text);
+    font-size: 15px; outline: none; resize: none; max-height: 160px;
+    line-height: 1.5; padding: 4px 0; font-family: inherit;
+  }
+  #msg-input::placeholder { color: var(--text-dim); }
+  #send-btn {
+    background: var(--accent); color: #fff; border: none; border-radius: 50%;
+    width: 34px; height: 34px; cursor: pointer; font-size: 18px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; transition: background .15s; line-height: 1;
+  }
+  #send-btn:hover { background: var(--accent-dim); }
+  #send-btn:disabled { background: #444; color: #666; cursor: default; }
+  #input-hint { text-align: center; font-size: 11px; color: var(--text-dim); padding: 8px 0 0; }
+
+  /* ── Scroll to bottom ── */
+  #scroll-down-btn {
+    display: none; position: fixed; bottom: 100px; right: 24px;
+    z-index: 99; width: 36px; height: 36px; border-radius: 50%;
+    background: var(--bg-surface); border: 1px solid var(--border);
+    color: var(--text-sec); font-size: 16px; cursor: pointer;
+    align-items: center; justify-content: center;
+  }
+  #scroll-down-btn:hover { background: #444; color: var(--text); }
+  #scroll-down-btn.visible { display: flex; }
+
+  /* ── Activity panel ── */
+  #activity-btn {
+    position: fixed; top: 10px; right: 16px; z-index: 999;
+    background: var(--bg-surface); border: 1px solid var(--border);
+    color: var(--text-sec); border-radius: 10px;
+    padding: 6px 12px; font-size: 13px; cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+  }
+  #activity-btn:hover { border-color: var(--text-dim); color: var(--text); }
+  #activity-btn .badge {
+    background: var(--accent); color: #fff; border-radius: 10px;
+    padding: 0 6px; font-size: 11px; min-width: 18px; text-align: center; display: none;
+  }
+  #activity-btn .badge.visible { display: inline; }
+  #activity-panel {
+    display: none; position: fixed; top: 50px; right: 16px; width: 320px;
+    max-height: 50vh; background: var(--bg-sidebar); border: 1px solid var(--border);
+    border-radius: 12px; z-index: 1000; overflow: hidden;
+    box-shadow: 0 8px 32px #0004; font-size: 13px;
+  }
+  #activity-panel.visible { display: flex; flex-direction: column; }
+  #activity-header {
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  #activity-header h3 { font-size: 13px; font-weight: 600; }
+  #activity-toggle {
+    background: none; border: none; color: var(--text-dim);
+    cursor: pointer; font-size: 16px;
+  }
+  #activity-toggle:hover { color: var(--text); }
+  #activity-log {
+    overflow-y: auto; padding: 8px 12px; flex: 1;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .act-item { color: var(--text-sec); line-height: 1.4; padding: 3px 0; border-bottom: 1px solid #222; }
+  .act-item .act-time { color: var(--text-dim); font-size: 11px; margin-right: 6px; }
+  .act-item .act-icon { margin-right: 4px; }
+  .act-item.done { color: var(--green); }
+  .act-item.error { color: var(--red); }
+  .act-item.progress { color: var(--blue); }
+
+  /* ── Mobile ── */
+  @media (max-width: 768px) {
+    #sidebar { position: fixed; top: 0; left: 0; bottom: 0; z-index: 200; }
+    #sidebar.collapsed { margin-left: calc(var(--sidebar-w) * -1); }
+    #menu-btn { display: block !important; }
+    #suggestions { grid-template-columns: 1fr; }
+    #welcome h2 { font-size: 22px; }
+    .msg-row { padding-left: 4px; padding-right: 4px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ══════ Sidebar ══════ -->
+<nav id="sidebar">
+  <div class="sb-head">
+    <div class="sb-brand"><div class="logo">✦</div> AI Agent</div>
+    <button class="sb-toggle" id="sidebar-toggle" title="Свернуть">☰</button>
+  </div>
+  <button id="new-chat-btn">✦ Новый чат</button>
+  <div class="sb-nav">
+    <div class="sb-section">Инструменты</div>
+    <button class="sb-item" data-cmd="/status"><span class="ic">📊</span> Статус агента</button>
+    <button class="sb-item" data-cmd="создай PDF отчёт о системе"><span class="ic">📄</span> PDF отчёт</button>
+    <button class="sb-item" data-cmd="сделай скриншот экрана"><span class="ic">📷</span> Скриншот</button>
+    <button class="sb-item" data-cmd="проверь состояние системы CPU и RAM"><span class="ic">🖥</span> Система</button>
+    <button class="sb-item" data-cmd="/help"><span class="ic">❓</span> Помощь</button>
+    <div class="sb-section">Возможности</div>
+    <button class="sb-item" data-cmd="найди свежие вакансии Python на Upwork"><span class="ic">🌐</span> Браузер-агент</button>
+    <button class="sb-item" data-cmd="поищи "><span class="ic">🔍</span> Поиск</button>
+    <button class="sb-item" data-cmd="переведи текст на английский: "><span class="ic">🌍</span> Перевод</button>
+    <button class="sb-item" data-cmd=""><span class="ic">💻</span> Код и скрипты</button>
+    <button class="sb-item" data-cmd=""><span class="ic">📁</span> Файлы</button>
+  </div>
+  <div class="sb-foot">
+    <div class="sb-status"><div class="dot" id="status-dot"></div><span id="status-text">подключение...</span></div>
+    <div class="sb-user"><div class="avatar">А</div><div class="uname">Андрей</div></div>
+  </div>
+</nav>
+
+<!-- ══════ Main ══════ -->
+<div id="main">
+  <div id="main-head">
+    <button id="menu-btn" title="Меню">☰</button>
+    <span id="agent-label">AI Agent</span>
+  </div>
+
+  <!-- Welcome (shown until first message) -->
+  <div id="welcome">
+    <h2>С чего начнём?</h2>
+    <div id="suggestions">
+      <div class="sug-card" data-cmd="найди свежие вакансии Python на Upwork">
+        <span class="sc-icon">🔍</span>Найди вакансии Python на&nbsp;Upwork
+      </div>
+      <div class="sug-card" data-cmd="создай PDF отчёт о состоянии системы">
+        <span class="sc-icon">📄</span>Создай PDF отчёт о&nbsp;системе
+      </div>
+      <div class="sug-card" data-cmd="проверь состояние системы CPU и RAM">
+        <span class="sc-icon">🖥</span>Проверь CPU и RAM
+      </div>
+      <div class="sug-card" data-cmd="переведи текст на английский: ">
+        <span class="sc-icon">🌍</span>Переведи текст на&nbsp;английский
+      </div>
+    </div>
+  </div>
+
+  <!-- Messages -->
+  <div id="messages"></div>
+  <div class="typing" id="typing">
+    <div class="msg-av av-agent">✦</div>
+    <div class="typing-dots"><span></span><span></span><span></span></div>
+  </div>
+  <button id="scroll-down-btn" title="Вниз">↓</button>
+  <input type="file" id="file-input" style="display:none" multiple>
+
+  <!-- Input -->
+  <div id="input-wrap">
+    <div id="input-box">
+      <div id="files-area"></div>
+      <div id="input-row">
+        <button id="attach-btn" title="Прикрепить файл">+</button>
+        <textarea id="msg-input" rows="1" placeholder="Напишите сообщение..."></textarea>
+        <button id="send-btn">↑</button>
+      </div>
+    </div>
+    <div id="input-hint">AI Agent — автономный помощник</div>
+  </div>
+</div>
+
+<!-- ══════ Activity panel ══════ -->
+<button id="activity-btn" title="Действия агента">⚡ <span>Действия</span><span class="badge" id="act-badge">0</span></button>
+<div id="activity-panel">
+  <div id="activity-header"><h3>⚡ Что делает агент</h3><button id="activity-toggle" title="Закрыть">✕</button></div>
+  <div id="activity-log"></div>
+</div>
+
+<!-- ══════ JavaScript ══════ -->
+<script>
+/* ── DOM refs ── */
+const messagesEl  = document.getElementById('messages');
+const inputEl     = document.getElementById('msg-input');
+const sendBtn     = document.getElementById('send-btn');
+const typingEl    = document.getElementById('typing');
+const statusDot   = document.getElementById('status-dot');
+const statusText  = document.getElementById('status-text');
+const welcomeEl   = document.getElementById('welcome');
+
+let attachedFiles = [];
+const filesArea = document.getElementById('files-area');
+
+function renderFileBadges() {
+  filesArea.innerHTML = '';
+  if (attachedFiles.length === 0) { filesArea.classList.remove('visible'); return; }
+  filesArea.classList.add('visible');
+  attachedFiles.forEach((f, idx) => {
+    const badge = document.createElement('div');
+    badge.className = 'file-badge';
+    const kb = (f.size / 1024).toFixed(0);
+    const sz = kb < 1024 ? kb + ' KB' : (f.size/1048576).toFixed(1) + ' MB';
+    badge.innerHTML = '<span class="icon">📎</span><span class="fname">' + f.name.replace(/</g,'&lt;') + '</span><span class="fsize">' + sz + '</span>';
+    const btn = document.createElement('button');
+    btn.className = 'fclear'; btn.title = 'Убрать файл'; btn.textContent = '×';
+    btn.addEventListener('click', () => { attachedFiles.splice(idx, 1); renderFileBadges(); });
+    badge.appendChild(btn);
+    filesArea.appendChild(badge);
+  });
+}
+
+/* ── Welcome ↔ Chat transition ── */
+function showChat() {
+  if (!welcomeEl.classList.contains('hidden')) {
+    welcomeEl.classList.add('hidden');
+    messagesEl.classList.add('active');
+  }
+}
+function showWelcome() {
+  messagesEl.innerHTML = '';
+  messagesEl.classList.remove('active');
+  welcomeEl.classList.remove('hidden');
+}
+
+/* ── Sidebar ── */
+document.getElementById('sidebar-toggle').addEventListener('click', () => {
+  document.getElementById('sidebar').classList.toggle('collapsed');
+});
+document.getElementById('menu-btn').addEventListener('click', () => {
+  document.getElementById('sidebar').classList.remove('collapsed');
+});
+document.getElementById('new-chat-btn').addEventListener('click', () => {
+  showWelcome();
+  inputEl.focus();
+});
+
+/* ── Smart scroll ── */
+let userScrolledUp = false;
+const scrollDownBtn = document.getElementById('scroll-down-btn');
+
+messagesEl.addEventListener('scroll', () => {
+  const atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 60;
+  userScrolledUp = !atBottom;
+  scrollDownBtn.classList.toggle('visible', userScrolledUp);
+});
+scrollDownBtn.addEventListener('click', () => {
+  userScrolledUp = false;
+  scrollDownBtn.classList.remove('visible');
+  smartScroll();
+});
+function smartScroll() {
+  if (!userScrolledUp) messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+/* ── File attach ── */
+document.getElementById('attach-btn').addEventListener('click', () => {
+  document.getElementById('file-input').click();
+});
+document.getElementById('file-input').addEventListener('change', e => {
+  const files = Array.from(e.target.files);
+  if (!files.length) return;
+  for (const f of files) attachedFiles.push(f);
+  renderFileBadges();
+  e.target.value = '';
+});
+
+/* ── Markdown renderer (basic) ── */
+function renderMd(text) {
+  return text
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/```(\w*)\n?([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/\*(.+?)\*/g, '<i>$1</i>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/\n/g,'<br>');
+}
+
+/* ── Add message ── */
+function addMsg(text, role, silent) {
+  showChat();
+  const row = document.createElement('div');
+  row.className = 'msg-row ' + role;
+
+  if (role === 'agent') {
+    const av = document.createElement('div');
+    av.className = 'msg-av av-agent';
+    av.textContent = '✦';
+    row.appendChild(av);
+  }
+
+  const bub = document.createElement('div');
+  bub.className = 'msg-bub';
+  if (role === 'agent') {
+    bub.innerHTML = renderMd(text);
+  } else {
+    bub.textContent = text;
+  }
+  row.appendChild(bub);
+  messagesEl.appendChild(row);
+  if (!silent) smartScroll();
+}
+
+function fmtFileMsg(filename, content) {
+  showChat();
+  const row = document.createElement('div');
+  row.className = 'msg-row user';
+  const bub = document.createElement('div');
+  bub.className = 'msg-bub';
+  const badge = document.createElement('div');
+  badge.style.cssText = 'font-size:11px;opacity:.7;margin-bottom:4px;';
+  badge.textContent = '📎 ' + filename;
+  bub.appendChild(badge);
+  if (content) { const t = document.createElement('span'); t.textContent = content; bub.appendChild(t); }
+  row.appendChild(bub);
+  messagesEl.appendChild(row);
+  smartScroll();
+}
+
+function addLiveSystemMsg(text) {
+  showChat();
+  const row = document.createElement('div');
+  row.className = 'msg-row system';
+  const bub = document.createElement('div');
+  bub.className = 'msg-bub';
+  bub.textContent = text;
+  row.appendChild(bub);
+  messagesEl.appendChild(row);
+  smartScroll();
+  return bub;
+}
+
+function startThinkingTicker(el, mode) {
+  const singleStages = [
+    'Размышляю над запросом...', 'Планирую шаги решения...',
+    'Проверяю инструменты...', 'Выполняю задачу...', 'Формирую ответ...',
+  ];
+  const queueStages = [
+    'Разбираю текущий шаг...', 'Планирую действие по шагу...',
+    'Выполняю шаг...', 'Проверяю результат шага...',
+  ];
+  const stages = mode === 'queue' ? queueStages : singleStages;
+  let i = 0;
+  el.textContent = '🧠 ' + stages[0];
+  const timer = setInterval(() => {
+    i = (i + 1) % stages.length;
+    el.textContent = '🧠 ' + stages[i];
+    smartScroll();
+  }, 1600);
+  return () => clearInterval(timer);
+}
+
+/* ── Status polling ── */
+async function checkStatus() {
+  try {
+    const r = await fetch('/status');
+    const d = await r.json();
+    statusDot.style.background = 'var(--green)';
+    statusText.textContent = 'онлайн · цикл #' + (d.cycle || 0);
+  } catch {
+    statusDot.style.background = 'var(--red)';
+    statusText.textContent = 'офлайн';
+  }
+}
+checkStatus();
+setInterval(checkStatus, 10000);
+
+/* ── Load history on page load ── */
+async function loadHistory() {
+  try {
+    const r = await fetch('/history');
+    const d = await r.json();
+    if (d.history && d.history.length > 0) {
+      d.history.forEach(h => {
+        if (h.role && h.text) addMsg(h.text, h.role, true);
+      });
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+  } catch(e) {}
+}
+loadHistory();
+
+/* ── File reader ── */
+async function readFileText(file) {
+  const textExts = ['txt','md','py','js','ts','css','html','htm','json','csv',
+                    'xml','yaml','yml','toml','ini','cfg','log','sh','bat','sql',
+                    'c','cpp','h','java','go','rs','rb','php','pl','r','swift','kt'];
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  if (textExts.includes(ext)) {
+    return new Promise((resolve) => {
+      const r = new FileReader();
+      r.onload = e => resolve(e.target.result || '');
+      r.onerror = () => resolve('[не удалось прочитать файл]');
+      r.readAsText(file, 'utf-8');
+    });
+  }
+  return new Promise((resolve) => {
+    const r = new FileReader();
+    r.onload = e => { const b64 = e.target.result.split(',')[1] || ''; resolve('__base64__' + b64); };
+    r.onerror = () => resolve('[не удалось прочитать файл]');
+    r.readAsDataURL(file);
+  });
+}
+
+/* ── Task queue parser ── */
+function parseTaskQueue(text) {
+  const lines = (text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length < 2) return [];
+  const items = [];
+  const headerPattern = /^(?:категори[яи]|category|раздел|section|блок|block|группа|group)[\s\d:.,]/i;
+  const endsWithColon = /[:\u2014\u2013-]\s*$/;
+  const actionVerb = /(?:^|[\s,.:;(])(?:создай|найди|поищи|провер|запусти|выполн|скачай|отправ|получи|напиши|сделай|открой|закрой|запиш|удали|переведи|переименуй|скопируй|вычисли|посчитай|покажи|собер|установ|обнов|протест|сохрани|прочитай|загрузи|конвертируй|\bcreate\b|\bfind\b|\bcheck\b|\brun\b|\bexecute\b|\bsearch\b|\bsend\b|\bget\b|\bwrite\b|\bopen\b|\bclose\b|\bdelete\b|\btranslate\b|\brename\b|\bcopy\b|\bcalculate\b|\bshow\b|\bcollect\b|\binstall\b|\bupdate\b|\btest\b|\bsave\b|\bread\b|\bdownload\b|\bconvert\b|\bping\b|\blist\b|\bscan\b|\banalyze\b|\bgenerate\b)/i;
+  for (const line of lines) {
+    const m = line.match(/^(?:\d+[\.)]|[-*\u2022])\s+(.+)$/);
+    if (!m || !m[1]) continue;
+    const item = m[1].trim();
+    if (headerPattern.test(item)) continue;
+    if (endsWithColon.test(item) && !actionVerb.test(item)) continue;
+    if (item.length < 8 && !actionVerb.test(item)) continue;
+    items.push(item);
+  }
+  if (items.length < 2) return [];
+  return items.slice(0, 40);
+}
+
+/* ── API helpers ── */
+async function requestChat(payload) {
+  const token = document.cookie.split(';').map(c=>c.trim()).find(c=>c.startsWith('agent_token='));
+  const tok = token ? token.split('=')[1] : '';
+  const r = await fetch('/chat', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-Agent-Token': tok},
+    body: JSON.stringify(payload),
+  });
+  if (r.status === 401) { window.location.href = '/login'; throw new Error('unauthorized'); }
+  return await r.json();
+}
+
+async function runQueue(tasks) {
+  sendBtn.disabled = true;
+  addMsg('Запускаю очередь задач: ' + tasks.length + ' пункт(ов).', 'system');
+  for (let i = 0; i < tasks.length; i++) {
+    const step = i + 1, t = tasks[i];
+    addMsg('[' + step + '/' + tasks.length + '] ' + t, 'user');
+    const live = addLiveSystemMsg('\u23F3 Шаг ' + step + '/' + tasks.length + ': запуск...');
+    const stopTicker = startThinkingTicker(live, 'queue');
+    typingEl.classList.add('visible');
+    messagesEl.appendChild(typingEl);
+    smartScroll();
+    try {
+      const d = await requestChat({message: t});
+      stopTicker();
+      typingEl.classList.remove('visible');
+      live.textContent = '\u2705 Шаг ' + step + '/' + tasks.length + ' завершён';
+      addMsg(d.reply || '(нет ответа)', 'agent');
+    } catch {
+      stopTicker();
+      typingEl.classList.remove('visible');
+      live.textContent = '\u274C Шаг ' + step + '/' + tasks.length + ': ошибка соединения';
+      break;
+    }
+  }
+  addMsg('Очередь задач завершена.', 'system');
+  sendBtn.disabled = false;
+  inputEl.focus();
+}
+
+/* ── Send message ── */
+async function send() {
+  const text = inputEl.value.trim();
+  const hasFiles = attachedFiles.length > 0;
+  if (!text && !hasFiles) return;
+  inputEl.value = '';
+  inputEl.style.height = 'auto';
+
+  if (!hasFiles) {
+    const queue = parseTaskQueue(text);
+    if (queue.length >= 2) { await runQueue(queue); return; }
+  }
+
+  let filesPayload = null;
+  if (hasFiles) {
+    filesPayload = [];
+    const names = [];
+    for (const f of attachedFiles) {
+      const content = await readFileText(f);
+      const trimmed = (content.length > 200000) ? content.slice(0, 200000) + '...[обрезано]' : content;
+      filesPayload.push({ name: f.name, content: trimmed });
+      names.push(f.name);
+    }
+    fmtFileMsg(names.join(', '), text);
+    attachedFiles = [];
+    document.getElementById('file-input').value = '';
+    renderFileBadges();
+  } else {
+    addMsg(text, 'user');
+  }
+
+  sendBtn.disabled = true;
+  const live = addLiveSystemMsg('\u23F3 Обработка запроса...');
+  const stopTicker = startThinkingTicker(live, 'single');
+  typingEl.classList.add('visible');
+  messagesEl.appendChild(typingEl);
+  smartScroll();
+
+  try {
+    const payload = { message: text };
+    if (filesPayload) {
+      if (filesPayload.length === 1) {
+        payload.filename = filesPayload[0].name;
+        payload.file_content = filesPayload[0].content;
+      } else {
+        payload.files = filesPayload;
+      }
+    }
+    const d = await requestChat(payload);
+    stopTicker();
+    typingEl.classList.remove('visible');
+    live.textContent = '\u2705 Готово';
+    addMsg(d.reply || '(нет ответа)', 'agent');
+  } catch(e) {
+    stopTicker();
+    typingEl.classList.remove('visible');
+    live.textContent = '\u274C Ошибка выполнения';
+    addMsg('Ошибка соединения с агентом.', 'system');
+  }
+  sendBtn.disabled = false;
+  inputEl.focus();
+}
+
+sendBtn.addEventListener('click', send);
+inputEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+inputEl.addEventListener('input', () => {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
+});
+
+/* ── Commands: sidebar + suggestions ── */
+function execCmd(cmd) {
+  if (!cmd) return;
+  if (cmd === '/status') {
+    fetch('/status').then(r => r.json()).then(d => {
+      const loop = d.cycle || 0;
+      const goal = (d.goal || '\u2014').slice(0, 120);
+      const mem = d.persistent_memory_text || '';
+      let txt = '\uD83D\uDCCA **Статус агента**\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\nЦиклов: ' + loop + '\nЦель: ' + goal;
+      if (mem) txt += '\n\n\uD83E\uDDE0 Память:\n' + mem;
+      addMsg('/status', 'user');
+      addMsg(txt, 'agent');
+    }).catch(() => addMsg('Ошибка получения статуса.', 'system'));
+  } else if (cmd === '/help') {
+    inputEl.value = '/help';
+    send();
+  } else {
+    inputEl.value = cmd;
+    inputEl.focus();
+  }
+}
+document.querySelectorAll('.sb-item, .sug-card').forEach(el => {
+  el.addEventListener('click', () => execCmd(el.dataset.cmd));
+});
+
+/* ── Activity panel ── */
+const actLog    = document.getElementById('activity-log');
+const actPanel  = document.getElementById('activity-panel');
+const actBtn    = document.getElementById('activity-btn');
+const actBadge  = document.getElementById('act-badge');
+const actToggle = document.getElementById('activity-toggle');
+let actCount = 0, actPanelOpen = false;
+
+actBtn.addEventListener('click', () => {
+  actPanelOpen = !actPanelOpen;
+  actPanel.classList.toggle('visible', actPanelOpen);
+  if (actPanelOpen) { actCount = 0; actBadge.textContent = '0'; actBadge.classList.remove('visible'); }
+});
+actToggle.addEventListener('click', () => { actPanelOpen = false; actPanel.classList.remove('visible'); });
+
+function addActivity(icon, text, cls) {
+  const d = document.createElement('div');
+  d.className = 'act-item' + (cls ? ' ' + cls : '');
+  const now = new Date();
+  const t = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0') + ':' + String(now.getSeconds()).padStart(2,'0');
+  d.innerHTML = '<span class="act-time">' + t + '</span><span class="act-icon">' + icon + '</span>' + text;
+  actLog.appendChild(d);
+  actLog.scrollTop = actLog.scrollHeight;
+  while (actLog.children.length > 100) actLog.removeChild(actLog.firstChild);
+  if (!actPanelOpen) { actCount++; actBadge.textContent = actCount; actBadge.classList.add('visible'); }
+}
+
+/* ── SSE: cross-channel events ── */
+(function() {
+  const src = new EventSource('/events');
+  const icons = {task_received:'\uD83D\uDCE5',task_progress:'\u23F3',task_done:'\u2705',message:'\uD83D\uDCAC',reply:'\uD83E\uDD16'};
+  const sources = {telegram:'\uD83D\uDCF1 Telegram',loop:'\uD83D\uDD04 Цикл',system:'\u2699\uFE0F Система',web:'\uD83C\uDF10 Web'};
+  src.onmessage = function(e) {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.type === 'activity') {
+        const cls = d.status === 'done' ? 'done' : d.status === 'error' ? 'error' : 'progress';
+        addActivity(d.icon || '\u2699\uFE0F', d.text || '', cls);
+        return;
+      }
+      const ico = icons[d.type] || '\uD83D\uDD14';
+      const ch = sources[d.source] || d.source;
+      const txt = d.text || '';
+      addMsg(ico + ' [' + ch + '] ' + txt, 'system');
+      addActivity(ico, '[' + ch + '] ' + txt, d.type === 'task_done' ? 'done' : 'progress');
+    } catch(err) {}
+  };
+  src.onerror = function() {};
+})();
+</script>
+</body>
+</html>

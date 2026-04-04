@@ -8,9 +8,10 @@ from perception.text_classifier import TextClassifier
 try:
     from safety.content_fence import sanitize_external, detect_injection
 except ImportError:
-    def sanitize_external(text, _source='', **_kw):  # type: ignore[misc]
+    def sanitize_external(text: str, source: str = 'unknown',  # type: ignore[misc]
+                          max_len: int = 5000, strip_injections: bool = True) -> tuple[str, list[str]]:
         return text, []
-    def detect_injection(_text):   # type: ignore[misc]
+    def detect_injection(text: str) -> list[str]:   # type: ignore[misc]
         return []
 
 
