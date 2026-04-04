@@ -235,7 +235,9 @@ class AutonomousGoalGeneratorCoverageTests(unittest.TestCase):
         # _is_duplicate
         g11 = AutonomousGoalGenerator(goal_manager=None)
         goal = 'abc'
-        g11._recent_goals[str(hash(goal[:80]))] = time_value = 123.0
+        import hashlib as _hl
+        _key = _hl.md5(goal[:80].encode('utf-8', errors='replace')).hexdigest()
+        g11._recent_goals[_key] = time_value = 123.0
         with patch('core.autonomous_goal_generator.time.time', return_value=time_value + 10):
             self.assertTrue(g11._is_duplicate(goal))
 

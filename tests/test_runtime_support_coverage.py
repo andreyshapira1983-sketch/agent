@@ -417,17 +417,18 @@ class LLMRouterCoverageTests(unittest.TestCase):
         with patch.dict("os.environ", {"LLM_ROUTER_MODE": "balanced"}):
             router = LLMRouter(light_client=light, heavy_client=heavy, local_client=local, monitoring=monitor)
 
-        self.assertTrue(router._is_heavy("архитектурный аудит всей системы", None))
+        # Короткий промпт с heavy-ключевыми словами НЕ тяжёлый (< HEAVY_KEYWORD_MIN_LENGTH)
+        self.assertFalse(router._is_heavy("архитектурный аудит всей системы", None))
+        # Но с маркером [HEAVY] в system — всегда тяжёлый
+        self.assertTrue(router._is_heavy("архитектурный аудит", "[HEAVY]"))
         self.assertFalse(router._is_heavy("короткий ответ", None))
         self.assertTrue(router._is_cheap("SEARCH: docs", None))
         self.assertTrue(router._is_cheap("hello", None))
         self.assertFalse(router._is_cheap("архитектурный аудит", "[HEAVY]"))
 
         self.assertEqual(router.infer("hello"), "local")
-        heavy_prompt = (
-            "архитектурный аудит всей системы с детальным планом рефакторинга, "
-            "долгосрочной стратегией, анализом рисков и оптимизацией всех подсистем"
-        )
+        # Длинный промпт > HEAVY_PROMPT_CHARS → тяжёлый
+        heavy_prompt = "x" * 13000
         self.assertEqual(router.infer(heavy_prompt), "heavy")
         stats = router.routing_stats()
         self.assertEqual(stats["total_calls"], 1)
@@ -459,7 +460,7 @@ class LLMRouterCoverageTests(unittest.TestCase):
             router = LLMRouter(light_client=light, heavy_client=heavy, local_client=local)
         self.assertFalse(router._heavy_available())
 
-        with patch("llm.llm_router.importlib.import_module", return_value=types.SimpleNamespace(virtual_memory=lambda: types.SimpleNamespace(percent=90.0))):
+        with patch("llm.llm_router.importlib.import_module", return_value=types.SimpleNamespace(virtual_memory=lambda: types.SimpleNamespace(percent=91.0))):
             self.assertFalse(router._local_available())
             self.assertTrue(local.unloaded)
 
@@ -469,7 +470,7 @@ class LLMRouterCoverageTests(unittest.TestCase):
         monitor = _Monitor()
         with patch.dict("os.environ", {"LLM_ROUTER_MODE": "llm-first"}):
             router2 = LLMRouter(light_client=light2, heavy_client=heavy2, local_client=local2, monitoring=monitor)
-        self.assertEqual(router2.infer("архитектурный анализ"), "light2")
+        self.assertEqual(router2.infer("x" * 13000), "light2")
         self.assertTrue(monitor.warning_calls)
 
         router3 = LLMRouter(light_client=_Client(exc=RuntimeError("l")), heavy_client=_Client(exc=RuntimeError("h")), local_client=_Client(exc=RuntimeError("q")))

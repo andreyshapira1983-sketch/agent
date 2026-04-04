@@ -140,6 +140,11 @@ class TelegramBot:
         self._pending_approvals: dict[str, dict] = {}
         self._approvals_lock = threading.Lock()
 
+    def set_chat_history(self, actor_id: str, history: list):
+        """Восстанавливает историю чата для заданного actor_id (потокобезопасно)."""
+        with self._chat_history_lock:
+            self._chat_history[actor_id] = history
+
     def __repr__(self) -> str:
         """SECURITY: маскируем токен в repr/traceback."""
         return f'<TelegramBot token=***masked*** chats={self.allowed_chat_ids}>'

@@ -1116,6 +1116,7 @@ class TelegramSinkTests(unittest.TestCase):
         from llm.telegram_sink import TelegramSink
         sink = TelegramSink.__new__(TelegramSink)
         sink.token = 'test_token'
+        sink._scrubber = None
         entry = {'level': 'ERROR', 'source': '<xss>', 'message': 'a & b', 'time_str': '12:00'}
         text = sink._format(entry)
         self.assertNotIn('<xss>', text)

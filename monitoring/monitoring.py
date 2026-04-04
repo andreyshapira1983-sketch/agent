@@ -131,6 +131,10 @@ class Monitoring:
         self._error_counts: dict[str, int] = defaultdict(int)
         self._active_traces: dict[str, list] = {}  # trace_id → список событий
 
+    def set_scrubber(self, scrubber):
+        """Устанавливает функцию маскировки секретов."""
+        self._scrubber = scrubber
+
     # ── Logging ───────────────────────────────────────────────────────────────
 
     def log(self, message: str, level: LogLevel = LogLevel.INFO, source: str | None = None, data: dict | None = None):

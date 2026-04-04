@@ -148,7 +148,7 @@ class OpenAIClient:
     def __init__(
         self,
         api_key: str,
-        model: str = "gpt-4o-mini",
+        model: str = "gpt-5.1",
         max_tokens: int = 2048,
         temperature: float = 0.7,
         monitoring=None,
@@ -172,7 +172,18 @@ class OpenAIClient:
         self._pricing = {
             "gpt-5.1":      (0.0025, 0.015),
         }
-          
+
+    def verify_model(self, model_name: str):
+        """Проверяет доступность модели через бесплатный models.retrieve().
+        Raises LookupError если модель не найдена."""
+        try:
+            self._client.models.retrieve(model_name)
+        except Exception as exc:
+            openai_mod = importlib.import_module('openai')
+            not_found = getattr(openai_mod, 'NotFoundError', None)
+            if not_found and isinstance(exc, not_found):
+                raise LookupError(f"Модель {model_name!r} не найдена") from exc
+            raise
 
     # ── Основной метод ────────────────────────────────────────────────────────
 

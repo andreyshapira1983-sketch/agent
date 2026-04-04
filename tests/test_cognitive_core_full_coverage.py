@@ -146,6 +146,7 @@ def _make_core(llm=None):
     core.last_problem_solution = None
     core.last_code = None
     core.persistent_brain = _PersistentBrainStub()  # type: ignore[assignment]
+    core.skill_library = None
     core._recent_user_requests = []
     core._duplicate_window_sec = 1800
     core._max_recent_requests = 50

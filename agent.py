@@ -74,10 +74,13 @@ _logging.getLogger('httpcore').setLevel(_logging.WARNING)
 
 # ── Автоматический перезапуск через venv Python ───────────────────────────────
 def _relaunch_in_venv_if_needed():
-    """Перезапускает процесс через .venv/Scripts/python.exe если текущий Python
+    """Перезапускает процесс через venv Python если текущий интерпретатор
     не является venv-интерпретатором данного проекта."""
     _here = os.path.dirname(os.path.abspath(__file__))
-    _venv_py = os.path.join(_here, '.venv', 'Scripts', 'python.exe')
+    if sys.platform == 'win32':
+        _venv_py = os.path.join(_here, '.venv', 'Scripts', 'python.exe')
+    else:
+        _venv_py = os.path.join(_here, '.venv', 'bin', 'python')
     if not os.path.exists(_venv_py):
         return  # venv не найден — продолжаем как есть
     _real_venv = os.path.normcase(os.path.realpath(_venv_py))
@@ -152,6 +155,17 @@ def _int_env(name: str, default: int) -> int:
     return default
 
 
+def _float_env(name: str, default: float) -> float:
+    """Безопасно читает float из env — возвращает default при нечисловом значении."""
+    raw = os.environ.get(name, '').strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return default
+
+
 # ── Построение агента ─────────────────────────────────────────────────────────
 
 def build_agent(
@@ -206,7 +220,11 @@ def build_agent(
     security = SecuritySystem(load_env=True)
 
     # SECURITY: подключаем авто-маскировку секретов в логах
-    monitoring._scrubber = security.scrub_text
+    monitoring.set_scrubber(security.scrub_text)
+
+    # IntegrityChecker — хеш-проверка файлов состояния + белый список пакетов
+    from safety.integrity_checker import IntegrityChecker
+    integrity_checker = IntegrityChecker(working_dir=working_dir, monitoring=monitoring)
 
     # ════════════════════════════════════════════════════════════════════════
     # Immutable Audit Log — append-only, hash-chain integrity
@@ -217,8 +235,8 @@ def build_agent(
 
     # ════════════════════════════════════════════════════════════════════════
     # LLM клиент (инструмент для Cognitive Core)
-    # OpenAI (gpt-4o) — по умолчанию для лёгких задач.
-    # Claude (Haiku/Sonnet) — только для тяжёлых (длинный промпт / ключевые слова).
+    # OpenAI (gpt-5.1) — по умолчанию для лёгких задач.
+    # Claude (Opus) — только для тяжёлых (длинный промпт / ключевые слова).
     # ════════════════════════════════════════════════════════════════════════
     _openai_client = None
     if openai_key:
@@ -236,42 +254,22 @@ def build_agent(
                     temperature=0.7,
                     monitoring=monitoring,
                 )
-                # Быстрая проверка: пробуем минимальный запрос
-                _test = _openai_client.infer("ping", max_tokens=10)
+                # Бесплатная проверка: models.retrieve() не тратит токены
+                _openai_client.verify_model(_candidate)
                 if _candidate != model:
                     monitoring.warning(
                         f"Модель {model!r} недоступна — использую {_candidate!r}",
                         source="agent",
                     )
                 break
+            except LookupError:
+                monitoring.warning(
+                    f"Модель {_candidate!r} не найдена — пробую следующую",
+                    source="agent",
+                )
+                _openai_client = None
+                continue
             except Exception as _model_err:
-                _err_str = str(_model_err).lower()
-                # "max_tokens reached" / "output limit" → модель ДОСТУПНА, просто мало токенов
-                _is_token_limit = (
-                    'max_tokens' in _err_str
-                    or 'output limit' in _err_str
-                    or 'finish' in _err_str and 'max_tokens' in _err_str
-                )
-                if _is_token_limit:
-                    # Модель есть, тест прошёл — просто игнорируем ошибку
-                    monitoring.info(
-                        f"Модель {_candidate!r} доступна (ответ обрезан при max_tokens=10, норма)",
-                        source="agent",
-                    )
-                    break
-                _is_model_missing = (
-                    'not found' in _err_str
-                    or 'does not exist' in _err_str
-                    or 'no such model' in _err_str
-                    or ('model' in _err_str and ('invalid' in _err_str or 'unsupported' in _err_str))
-                )
-                if _is_model_missing:
-                    monitoring.warning(
-                        f"Модель {_candidate!r} не найдена: {_model_err} — пробую следующую",
-                        source="agent",
-                    )
-                    _openai_client = None
-                    continue
                 # Другая ошибка (ключ, сеть) — не повторяем
                 monitoring.warning(f"OpenAI init ошибка: {_model_err}", source="agent")
                 break
@@ -304,7 +302,7 @@ def build_agent(
                     f"Local LLM недоступен: {_health.get('error', 'unknown error')}",
                     source="agent",
                 )
-        except Exception as e:
+        except (ImportError, RuntimeError, OSError) as e:
             monitoring.warning(f"Local LLM backend не инициализирован: {e}", source="agent")
 
     if not openai_key and not anthropic_key and _local_client is None:
@@ -361,7 +359,7 @@ def build_agent(
                 source='user', trust=1.0, verified=True,
             )
             monitoring.info("Меморандум партнёрства загружен в долгосрочную память.", source="agent")
-        except Exception as _e:
+        except (OSError, ValueError, RuntimeError) as _e:
             monitoring.warning(f"Не удалось загрузить меморандум: {_e}", source="agent")
 
     # ════════════════════════════════════════════════════════════════════════
@@ -396,9 +394,19 @@ def build_agent(
         'incident_escalation', 'budget_stop',
         'spawn_agent', 'patch_code', 'self_modify',
     })
+    def _default_approval(action_type: str, _payload) -> bool:
+        """До подключения Telegram: критичные действия отклоняются, остальные — ОК."""
+        if action_type in _CRITICAL_BEFORE_BOT:
+            monitoring.warning(
+                f"Действие {action_type!r} отклонено (Telegram ещё не подключён)",
+                source="human_approval",
+            )
+            return False
+        return True
+
     human_approval = HumanApprovalLayer(
         mode='auto_approve',
-        callback=lambda _t, _p: True,
+        callback=_default_approval,
     )
 
     def approval_callback(action_type: str, payload) -> bool:
@@ -406,6 +414,7 @@ def build_agent(
         critical_action_types = {
             'delete', 'deployment', 'ethical_review',
             'incident_escalation', 'budget_stop',
+            'spawn_agent', 'patch_code', 'self_modify',
         }
         if action_type in critical_action_types:
             return human_approval.request_approval(action_type, payload)
@@ -621,9 +630,9 @@ def build_agent(
     # ════════════════════════════════════════════════════════════════════════
     from resources.budget_control import BudgetControl
     budget = BudgetControl(monitoring=monitoring, human_approval=human_approval)
-    budget.set_money_limit(500.0)         # $500 лимит
-    budget.set_token_limit(5_000_000)     # 5M токенов на сессию (было 500K — слишком мало)
-    budget.set_request_limit(10_000)      # 10K запросов (было 1000)
+    budget.set_money_limit(_float_env('BUDGET_MONEY_LIMIT', 500.0))
+    budget.set_token_limit(_int_env('BUDGET_TOKEN_LIMIT', 5_000_000))
+    budget.set_request_limit(_int_env('BUDGET_REQUEST_LIMIT', 10_000))
 
     # Подключаем бюджет к LLM-клиенту — единственная точка API-вызовов
     llm.budget_control = budget
@@ -743,14 +752,15 @@ def build_agent(
                         items_count += len(legacy_items)
 
                     items_in_memory = items_count
-                    memory_is_cold = items_count < 100
+                    memory_is_cold = items_count < _int_env('COLD_START_THRESHOLD', 100)
         except (OSError, IOError, json.JSONDecodeError, UnicodeDecodeError, AttributeError, TypeError, ValueError):
             memory_is_cold = True
 
     # Логируем статус памяти
+    _cold_threshold = _int_env('COLD_START_THRESHOLD', 100)
     if memory_is_cold:
         monitoring.warning(
-            f"ХОЛОДНЫЙ СТАРТ: память почти пустая ({items_in_memory} < 100 элементов). "
+            f"ХОЛОДНЫЙ СТАРТ: память почти пустая ({items_in_memory} < {_cold_threshold} элементов). "
             f"Загружаю Wikipedia + Gutenberg + GitHub источники...",
             source="agent"
         )
@@ -991,7 +1001,7 @@ def build_agent(
     # ════════════════════════════════════════════════════════════════════════
     from hardware.hardware_layer import HardwareInteractionLayer
     hardware = HardwareInteractionLayer(monitoring=monitoring, poll_interval=60.0)
-    hardware.start_monitoring()
+    # hardware.start_monitoring() перенесён в конец build_agent
 
     # ════════════════════════════════════════════════════════════════════════
     # СЛОЙ 45: Identity
@@ -1008,6 +1018,10 @@ def build_agent(
     )
     # Подключаем identity к мозгу — теперь агент знает кто он при каждом ответе
     cognitive_core.identity = identity
+
+    # PromptGuard — защита от подмены идентичности / prompt drift
+    from safety.prompt_guard import PromptGuard
+    prompt_guard = PromptGuard(identity=identity, monitoring=monitoring)
 
     # ════════════════════════════════════════════════════════════════════════
     # СЛОЙ 46: Knowledge Verification
@@ -1236,17 +1250,17 @@ def build_agent(
             knowledge=knowledge,
             tool_layer=tools,
         )
-        telegram_bot.start()
-        monitoring.info("Telegram Bot запущен (слой 15)", source="agent")
+        # telegram_bot.start() перенесён в конец build_agent
         # Переключаем human_approval на Telegram: теперь критичные действия
         # будут приходить inline-кнопками Да/Нет, а не блокировать консоль.
         human_approval.callback = telegram_bot.request_approval
 
     # ── Web Interface (Слой 15) ───────────────────────────────────────────────
     from communication.web_interface import WebInterface
+    web_host = os.environ.get('WEB_HOST', '127.0.0.1')
     web_port = _int_env('WEB_PORT', 8000)
     web_interface = WebInterface(
-        host='0.0.0.0',
+        host=web_host,
         port=web_port,
         cognitive_core=cognitive_core,
         monitoring=monitoring,
@@ -1257,7 +1271,6 @@ def build_agent(
     # ПЕРСИСТЕНТНАЯ ПАМЯТЬ — мозг, который помнит между перезапусками
     # ════════════════════════════════════════════════════════════════════════
     from core.persistent_brain import PersistentBrain
-    brain_dir = os.path.join(working_dir, ".agent_memory")
     persistent_brain = PersistentBrain(
         data_dir=brain_dir,
         knowledge=knowledge,
@@ -1278,7 +1291,7 @@ def build_agent(
         monitoring=monitoring,
     )
     persistent_brain.load()
-    persistent_brain.start_autosave()
+    # persistent_brain.start_autosave() перенесён в конец build_agent
     cognitive_core.persistent_brain = persistent_brain  # type: ignore[assignment]
     cognitive_core.brain.persistent_brain = persistent_brain  # передаём опыт в LocalBrain
     web_interface.persistent_brain = persistent_brain  # type: ignore[assignment]
@@ -1330,7 +1343,7 @@ def build_agent(
             restored = persistent_brain.restore_chat_history(limit=20)
             if restored:
                 default_actor = str(tg_chat_int) if tg_chat_int else 'user'
-                telegram_bot._chat_history[default_actor] = restored
+                telegram_bot.set_chat_history(default_actor, restored)
                 monitoring.info(
                     f"Восстановлено {len(restored)} сообщений истории чата",
                     source="agent",
@@ -1518,20 +1531,43 @@ def build_agent(
     if telegram_bot:
         telegram_bot.loop = loop
 
-    # Подключаем loop и goal_manager к web_interface — теперь всё готово, стартуем
+    # Подключаем loop и goal_manager к web_interface
     web_interface.loop = loop
     web_interface.goal_manager = goal_manager
-    web_interface.start()
+    # web_interface.start() перенесён в блок запуска фоновых служб ниже
 
-    # Автоматически открываем браузер на чат через 1.5 сек (после старта сервера)
-    import webbrowser as _webbrowser
-    def _open_browser():
-        import time as _time
-        _time.sleep(1.5)
-        _webbrowser.open(f"http://localhost:{web_port}")
-    threading.Thread(target=_open_browser, daemon=True).start()
+    # ── Запуск фоновых служб (в самом конце, чтобы при ошибке выше
+    #    ни один поток не остался висеть без очистки) ──────────────────────
+    _started_services: list[tuple[str, object]] = []
+    try:
+        hardware.start_monitoring()
+        _started_services.append(('hardware', hardware))
+        if telegram_bot:
+            telegram_bot.start()
+            _started_services.append(('telegram_bot', telegram_bot))
+            monitoring.info("Telegram Bot запущен (слой 15)", source="agent")
+        persistent_brain.start_autosave()
+        _started_services.append(('persistent_brain', persistent_brain))
+        web_interface.start()
+        _started_services.append(('web_interface', web_interface))
+    except Exception as _start_err:
+        # Откат: останавливаем уже запущенные сервисы в обратном порядке
+        for _svc_name, _svc in reversed(_started_services):
+            _stop = getattr(_svc, 'stop', None)
+            if _stop:
+                try:
+                    _stop()
+                except (AttributeError, RuntimeError, OSError):
+                    pass
+            monitoring.warning(f"Откат: {_svc_name} остановлен", source="agent")
+        raise RuntimeError(
+            f"Не удалось запустить фоновые службы: {_start_err}"
+        ) from _start_err
 
     monitoring.info("Все 46 слоёв инициализированы.", source="agent")
+
+    # PromptGuard: фиксируем эталон identity после полной сборки
+    prompt_guard.seal()
 
     return {
         # Ключевые компоненты
@@ -1556,6 +1592,8 @@ def build_agent(
         "governance":         governance,
         "human_approval":     human_approval,
         "ethics":             ethics,
+        "prompt_guard":       prompt_guard,
+        "integrity_checker":  integrity_checker,
 
         # Loop
         "orchestration":      orchestration,
@@ -1743,7 +1781,7 @@ class Agent:
                     success=bool(response),
                     context={'channel': 'interactive', 'actor': actor_id},
                 )
-            except Exception:
+            except (AttributeError, TypeError, ValueError, RuntimeError):
                 pass
         if learning_sys and message and response:
             try:
@@ -1754,7 +1792,7 @@ class Agent:
                     source_name='interactive_chat',
                     tags=['interactive', 'dialog'],
                 )
-            except Exception:
+            except (AttributeError, TypeError, ValueError, RuntimeError):
                 pass
 
         return response
@@ -1808,7 +1846,7 @@ class Agent:
             if tg and chat_id:
                 try:
                     tg.send(chat_id, f"🚨 {msg}")
-                except Exception:
+                except (OSError, RuntimeError, ValueError):
                     pass
 
         wd = threading.Thread(target=_watchdog, daemon=True, name="loop-watchdog")
@@ -1996,7 +2034,7 @@ class AgentState:
             return {}
         try:
             return env.snapshot() if hasattr(env, 'snapshot') else vars(env)
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             return {}
 
     # ── Долгосрочные цели ─────────────────────────────────────────────────────
@@ -2012,7 +2050,7 @@ class AgentState:
             if isinstance(summary, dict):
                 return summary.get('goals', [])
             return []
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             return []
 
     # ── Текущий фокус внимания ────────────────────────────────────────────────
@@ -2025,7 +2063,7 @@ class AgentState:
             return ''
         try:
             return str(att.current_focus()) if hasattr(att, 'current_focus') else ''
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             return ''
 
     # ── Энергетический бюджет ─────────────────────────────────────────────────
@@ -2038,7 +2076,7 @@ class AgentState:
             return {}
         try:
             return budget.summary() if hasattr(budget, 'summary') else {}
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             return {}
 
     # ── Долгосрочная память ───────────────────────────────────────────────────
@@ -2051,7 +2089,7 @@ class AgentState:
             return {}
         try:
             return brain.summary(max_solver_types=3, max_challengers_per_solver=1)
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             return {}
 
     # ── Уверенность последнего цикла ─────────────────────────────────────────
@@ -2066,7 +2104,7 @@ class AgentState:
                 if isinstance(last, dict):
                     return float(last.get('overall_confidence', 1.0))
                 return float(getattr(last, 'overall_confidence', 1.0))
-        except Exception:
+        except (AttributeError, TypeError, ValueError, IndexError):
             pass
         return 1.0
 
@@ -2098,19 +2136,19 @@ def _graceful_shutdown(agent):
     """Корректное завершение: остановка loop, сохранение памяти."""
     try:
         agent.stop_loop()
-    except Exception:
+    except (RuntimeError, OSError, AttributeError):
         pass
     brain = agent.components.get("persistent_brain")
     if brain:
         try:
             brain.stop()  # sets _running=False + final save()
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             print(f"[shutdown] Ошибка при сохранении памяти: {e}")
     mind = agent.components.get("proactive_mind")
     if mind:
         try:
             mind.stop()
-        except Exception:
+        except (RuntimeError, AttributeError):
             pass
 
 
@@ -2196,7 +2234,7 @@ def main():
                     print(f"[agent] Цель загружена из {_goal_file}")
                 else:
                     print(f"[agent] DEFAULT_GOAL не найден (или не строковый литерал) в {_goal_file}")
-            except Exception as _ge:
+            except (OSError, SyntaxError, ValueError) as _ge:
                 print(f"[agent] Не удалось загрузить цель из файла: {_ge}")
         bot_delay = float(os.environ.get("BOT_LOOP_DELAY", "30"))
         agent.start_loop(bot_goal, cycle_delay=bot_delay, background=True)
@@ -2236,6 +2274,11 @@ def main():
         return
 
     # Интерактивный режим
+    # Открываем браузер на чат — только здесь, не в --bot/--loop
+    import webbrowser as _webbrowser
+    _web_port = os.environ.get('WEB_PORT', '8000')
+    _webbrowser.open(f"http://localhost:{_web_port}")
+
     print("\nАгент готов. Введи задачу или /quit для выхода.")
     print("Команды: /status  /search <запрос>  /verify <утверждение>  /quit\n")
 
