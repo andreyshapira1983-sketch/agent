@@ -262,9 +262,34 @@ class PersistentBrain:
         while self._running:
             time.sleep(self.AUTOSAVE_INTERVAL)
             try:
+                self._check_disk_budget()
                 self.save()
             except (OSError, IOError) as e:
                 self._log(f"Ошибка автосохранения: {e}", level="error")
+
+    def _check_disk_budget(self):
+        """Проверяет, не превышен ли дисковый бюджет DISK_BUDGET_GB."""
+        try:
+            total_bytes = 0
+            for dirpath, _dirnames, filenames in os.walk(self.data_dir):
+                for f in filenames:
+                    fp = os.path.join(dirpath, f)
+                    try:
+                        total_bytes += os.path.getsize(fp)
+                    except OSError:
+                        pass
+            total_gb = total_bytes / (1024 ** 3)
+            if total_gb > self.DISK_BUDGET_GB:
+                self._log(
+                    f"Дисковый бюджет превышен: {total_gb:.2f} GB > {self.DISK_BUDGET_GB} GB. "
+                    "Автосохранение пропущено.",
+                    level="error",
+                )
+                raise OSError("Disk budget exceeded")
+        except OSError:
+            raise
+        except Exception:
+            pass  # Не блокируем автосохранение из-за ошибки подсчёта
 
     # ═══════════════════════════════════════════════════════════════════════
     # ЗАПИСЬ СОБЫТИЙ (API для других компонентов)

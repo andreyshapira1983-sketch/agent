@@ -219,7 +219,7 @@ class NetworkGuard:
         self._allowlist = domain_allowlist or self.DEFAULT_DOMAIN_ALLOWLIST
         self._strict = strict_allowlist
         self._dns_timeout = dns_timeout
-        self._dns_cache: dict[str, list[str]] = {}
+        self._dns_cache: dict[str, tuple[list[str], float]] = {}
 
     def is_allowed(self, url: str) -> tuple[bool, str]:
         """Проверяет URL на безопасность.
@@ -306,19 +306,26 @@ class NetworkGuard:
 
         return True, 'OK'
 
+    _DNS_TTL_SEC = 300  # 5 минут TTL для DNS-кэша
+
     def _resolve(self, host: str, port: int | None = None) -> list[str]:
-        """DNS resolve с кэшем и таймаутом (thread-safe, без глобального setdefaulttimeout)."""
+        """DNS resolve с кэшем, TTL и таймаутом (thread-safe)."""
+        import time as _time
         cache_key = f'{host}:{port or 80}'
-        if cache_key in self._dns_cache:
-            return self._dns_cache[cache_key]
+        cached = self._dns_cache.get(cache_key)
+        if cached is not None:
+            ips, ts = cached
+            if (_time.monotonic() - ts) < self._DNS_TTL_SEC:
+                return ips
+            # TTL истёк — удаляем и перезапрашиваем
+            self._dns_cache.pop(cache_key, None)
 
         try:
             infos = socket.getaddrinfo(
                 host, port or 80, proto=socket.IPPROTO_TCP,
             )
-            ips: list[str] = [str(info[4][0]) for info in infos]
-            ips = list(set(ips))
-            self._dns_cache[cache_key] = ips
+            ips: list[str] = list(set(str(info[4][0]) for info in infos))
+            self._dns_cache[cache_key] = (ips, _time.monotonic())
             return ips
         except (socket.gaierror, OSError):
             return []

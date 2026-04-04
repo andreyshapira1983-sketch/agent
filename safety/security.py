@@ -153,13 +153,29 @@ class SecuritySystem:
 
     @staticmethod
     def hash_value(value: str, salt: str = '') -> str:
-        """Хэширует строку через SHA-256 с солью."""
+        """Хэширует строку через SHA-256 с солью.
+
+        Если соль не передана, генерируется случайная 16-байтная соль
+        и возвращается в формате salt_hex$hash_hex.
+        """
+        if not salt:
+            import secrets as _sec
+            salt = _sec.token_hex(16)
+            salted = (salt + value).encode('utf-8')
+            return f"{salt}${hashlib.sha256(salted).hexdigest()}"
         salted = (salt + value).encode('utf-8')
         return hashlib.sha256(salted).hexdigest()
 
     @staticmethod
     def verify_hash(value: str, hashed: str, salt: str = '') -> bool:
         """Проверяет соответствие строки хэшу."""
+        if not salt and '$' in hashed:
+            # Формат salt_hex$hash_hex (автосоль)
+            stored_salt, stored_hash = hashed.split('$', 1)
+            computed = (stored_salt + value).encode('utf-8')
+            return hmac.compare_digest(
+                hashlib.sha256(computed).hexdigest(), stored_hash
+            )
         return hmac.compare_digest(
             SecuritySystem.hash_value(value, salt), hashed
         )

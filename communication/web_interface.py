@@ -691,9 +691,10 @@ class WebInterface:
             self._token = env_token
         else:
             self._token = secrets.token_urlsafe(24)
-            token_preview = f"{self._token[:6]}...{self._token[-4:]}"
+            # Не логируем никакую часть токена — даже prefix+suffix
+            # позволяет сузить пространство брутфорса.
             self._log(
-                f"WEB_TOKEN не задан. Сгенерирован временный токен: {token_preview}\n"
+                "WEB_TOKEN не задан. Сгенерирован временный токен (сохранён в памяти).\n"
                 "  Добавьте WEB_TOKEN=<ваш_токен> в .env чтобы он сохранился между перезапусками.",
                 level='warning',
             )

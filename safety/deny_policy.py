@@ -129,11 +129,16 @@ class PolicyEnforcedToolLayer:
     # ── Proxy для прочих атрибутов ToolLayer ──────────────────────────────────
 
     def __getattr__(self, name: str) -> Any:
-        """Проксирует все прочие атрибуты к оригинальному ToolLayer.
+        """Проксирует публичные атрибуты к оригинальному ToolLayer.
 
         Это позволяет использовать PolicyEnforcedToolLayer как drop-in замену:
         tool_layer.get('terminal'), tool_layer.working_dir и т.д. работают.
+        Приватные атрибуты (_tool_layer и пр.) заблокированы от обхода политик.
         """
+        if name.startswith('_'):
+            raise AttributeError(
+                f"PolicyEnforcedToolLayer: доступ к приватному атрибуту {name!r} запрещён"
+            )
         return getattr(self._tool_layer, name)
 
     # ── Statistics ────────────────────────────────────────────────────────────

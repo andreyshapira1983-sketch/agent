@@ -6,10 +6,18 @@ import importlib
 try:
     from safety.content_fence import sanitize_external
 except ImportError:
+    import logging as _sb_log
+    _sb_log.getLogger(__name__).warning(
+        "safety.content_fence не доступен — sanitize_external будет обрезать текст без инъекционной фильтрации"
+    )
+
     def sanitize_external(text: str, source: str = 'unknown',
                           max_len: int = 5000,
                           strip_injections: bool = True) -> tuple[str, list[str]]:
-        return text, []
+        # Минимальная защита: ограничение длины, даже без полной фильтрации
+        truncated = text[:max_len] if len(text) > max_len else text
+        warnings = ['content_fence unavailable: only length-truncation applied']
+        return truncated, warnings
 
 
 class DuckDuckGoBackend:

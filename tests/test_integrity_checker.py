@@ -160,12 +160,13 @@ class IntegrityCheckerPackageTests(unittest.TestCase):
             f.write('\n'.join(lines))
         return path
 
-    def test_no_requirements_file_allows_all(self):
+    def test_no_requirements_file_blocks_all(self):
+        """Без requirements.txt — fail-closed: все пакеты заблокированы."""
         ic = self._make_checker()
         packages = [('requests', 'requests'), ('numpy', 'numpy')]
         allowed, blocked = ic.validate_packages(packages)
-        self.assertEqual(len(allowed), 2)
-        self.assertEqual(len(blocked), 0)
+        self.assertEqual(len(allowed), 0)
+        self.assertEqual(len(blocked), 2)
 
     def test_in_whitelist_allowed(self):
         self._write_requirements(['requests>=2.0', 'numpy==1.25'])

@@ -816,7 +816,8 @@ class ActionDispatcher:
         if self._is_windows():
             # Если WSL доступен и команда Linux-специфичная — запускаем через wsl
             if self._wsl_available and self._looks_unix_only(command):
-                command_to_run = f'wsl {command}'
+                import shlex
+                command_to_run = f'wsl -- {shlex.quote(command)}'
             else:
                 adapted = self._adapt_bash_for_windows(command)
                 mode = adapted.get('mode')

@@ -279,7 +279,10 @@ class SandboxLayer:
                            'signal', 'resource', 'pty',
                            'pickle', 'shelve', 'marshal',
                            'importlib', 'pkgutil',
-                           'builtins', 'code', 'webbrowser'}
+                           'builtins', 'code', 'webbrowser',
+                           'ftplib', 'telnetlib', 'paramiko', 'smtplib',
+                           'imaplib', 'poplib'}
+        # 1) Regex: ловит прямые import/from
         import_matches = re.findall(r'(?:^|\n)\s*(?:import|from)\s+([\w.]+)', code)
         for mod in import_matches:
             root = mod.split('.')[0]
@@ -289,6 +292,16 @@ class SandboxLayer:
                 self._runs.append(run)
                 self._log(f"Sandbox BLOCKED [{run.run_id}]: {run.error}")
                 return run
+        # 2) Ловим динамические обходы: __import__('x'), importlib.import_module('x')
+        _DYNAMIC_IMPORT_RE = re.compile(
+            r'__import__\s*\(|importlib\s*\.\s*import_module\s*\(',
+        )
+        if _DYNAMIC_IMPORT_RE.search(code):
+            run.verdict = SandboxResult.UNSAFE
+            run.error = "Запрещённый динамический импорт (sandbox escape prevention)"
+            self._runs.append(run)
+            self._log(f"Sandbox BLOCKED [{run.run_id}]: {run.error}")
+            return run
 
         # Приводим контекст к JSON-совместимому виду, чтобы безопасно передать в subprocess.
         safe_context = {}

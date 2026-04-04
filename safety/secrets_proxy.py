@@ -38,11 +38,9 @@ def safe_env() -> dict[str, str]:
         upper = key.upper()
         if upper in _SAFE_ENV_KEYS:
             result[key] = value
-        elif not _SECRET_NAME_RE.search(upper):
-            # Переменная не в whitelist, но и не выглядит как секрет —
-            # пропускаем для совместимости (BLENDER_PATH, OPENSCAD_PATH…).
-            # ОДНАКО если имя содержит KEY/TOKEN/SECRET/PASSWORD — блокируем.
-            result[key] = value
+        # Всё остальное отбрасываем — whitelist-only подход.
+        # Ранее пропускали переменные без KEY/TOKEN/SECRET в имени,
+        # но это позволяло утечку DATABASE_HOST, SERVICE_ENDPOINT и т.д.
     return result
 
 

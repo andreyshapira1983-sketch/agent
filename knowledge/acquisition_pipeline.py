@@ -181,7 +181,12 @@ class KnowledgeAcquisitionPipeline:
                     self._log(f"Источник отклонён (SSRF-защита): {url_or_path[:60]}")
                     return None
             except ImportError:
-                pass
+                # Fail-closed: без валидатора все web-URL заблокированы
+                self._log(
+                    f"SSRF-валидатор недоступен (ImportError) — URL заблокирован: "
+                    f"{url_or_path[:60]}"
+                )
+                return None
 
         dedup_key = f"{source_type}:{normalized}"
         with self._lock:

@@ -76,8 +76,13 @@ class IntegrityChecker:
         """
         whitelist = self._load_whitelist(requirements_path)
         if not whitelist:
-            # Нет requirements.txt — пропускаем все (обратная совместимость)
-            return [p[1] for p in packages], []
+            # Нет requirements.txt — fail-closed: блокируем все неизвестные пакеты
+            if self._monitoring:
+                self._monitoring.warning(
+                    "IntegrityChecker: requirements.txt не найден — все пакеты заблокированы (fail-closed)",
+                    source="integrity_checker",
+                )
+            return [], [p[1] for p in packages]
 
         allowed = []
         blocked = []

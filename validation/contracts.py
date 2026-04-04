@@ -55,9 +55,9 @@ class ErrorEnvelope(BaseModel):
     - retryable обязателен
     - details не должен содержать секреты (проверяется на уровне secrets_redaction)
     """
-    error_code: str = Field(..., min_length=1)
-    message: str = ''
-    trace_id: str = ''
+    error_code: str = Field(..., min_length=1, max_length=100, pattern=r'^[A-Z0-9_]+$')
+    message: str = Field(default='', max_length=2000)
+    trace_id: str = Field(default='', max_length=200)
     task_id: str = ''
     step_id: str = ''
     retryable: bool = False
