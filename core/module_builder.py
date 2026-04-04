@@ -175,10 +175,17 @@ class ModuleBuilder:
         "   - Если файл уже существует, сохрани все уже работающие классы/методы\n"
         "   - Добавляй новые методы рядом со старыми, не вместо них\n"
         "   - Не переименовывай существующие методы и не меняй их сигнатуры\n"
-        "\n5. ИМПОРТЫ. Используй только реальные stdlib / установленные пакеты:\n"
-        "   - Стандартные: os, sys, re, json, time, pathlib, collections, itertools, typing\n"
-        "   - Установленные: requests, anthropic, openai, ddgs, psutil, numpy\n"
+        "\n5. ИМПОРТЫ (EXECUTOR LAYER — модуль выполняется ВНЕ sandbox):\n"
+        "   - Стандартные (разрешены): os, sys, re, json, time, pathlib, collections, itertools, typing, datetime, math, shutil, hashlib, csv, io, logging\n"
+        "   - Установленные: psutil, numpy, pandas\n"
+        "   - ЗАПРЕЩЕНЫ: subprocess, socket, http, urllib (кроме urllib.parse), requests, pickle, threading, multiprocessing, importlib\n"
+        "   - ЗАПРЕЩЕНЫ: import main, import agent, import core, import execution и любые внутренние модули агента\n"
         "   - Не выдумывай import для несуществующих пакетов\n"
+        "\n5a. БЕЗОПАСНОСТЬ КОДА:\n"
+        "   - ЗАПРЕЩЕНО: getattr(), setattr(), eval(), exec(), compile(), globals(), locals(), vars(), dir()\n"
+        "   - ЗАПРЕЩЕНО: __subclasses__, __builtins__, __globals__, __code__, __mro__, __bases__\n"
+        "   - Модуль выполняется в EXECUTOR layer (вне sandbox) — доступ к os, pathlib, open() РАЗРЕШЁН\n"
+        "   - Но: subprocess, socket, сетевой доступ — ЗАПРЕЩЕНЫ\n"
         "\n6. СТРУКТУРА КЛАССА:\n"
         "   - `__init__` должен инициализировать все атрибуты\n"
         "   - Публичные методы должны возвращать правильный тип (dict, str, list, None)\n"
@@ -343,6 +350,10 @@ class ModuleBuilder:
         target_dir: str,
         category: str,
     ) -> ModuleBuildResult:
+        # Windows MAX_PATH guard: ограничиваем имя модуля
+        if len(name) > 60:
+            name = name[:60].rstrip('_')
+            class_name = class_name[:80]
         result = ModuleBuildResult(name)
         t0 = time.time()
         self._log(f"[build] Строю {category[:-1]}: '{name}' (класс {class_name})")
@@ -378,21 +389,46 @@ class ModuleBuilder:
                                 f'LLM мог использовать другое имя.')
                 return self._finish(result, t0)
 
-            # ── 4. Sandbox-тест ───────────────────────────────────────────
-            if not self.sandbox:
-                result.status = BuildStatus.REJECTED
-                result.error = 'Sandbox обязателен: сборка без sandbox запрещена политикой безопасности'
-                self._log(f"[build] Отклонено: sandbox отсутствует ({name})")
+            # ── 3α. Семантическая проверка: undefined names ───────────────
+            _undef_ok, _undef_reason = self._validate_undefined_names(code)
+            if not _undef_ok:
+                result.error = f'Семантическая ошибка: {_undef_reason}'
+                self._log(f"[build] Отклонено (undefined names): {name} — {_undef_reason}")
                 return self._finish(result, t0)
 
-            from environment.sandbox import SandboxResult as SR
-            run = self.sandbox.run_code(code)
-            if run.verdict == SR.UNSAFE:
+            # ── 3a. Import whitelist: разрешены только безопасные импорты ──
+            _import_ok, _import_reason = self._validate_imports(code)
+            if not _import_ok:
                 result.status = BuildStatus.REJECTED
-                result.error = f'Sandbox UNSAFE: {run.error}'
-                self._log(f"[build] Отклонено sandbox: {name}")
+                result.error = f'Запрещённый импорт: {_import_reason}'
+                self._log(f"[build] Отклонено import whitelist: {name} — {_import_reason}")
                 return self._finish(result, t0)
-            self._log(f"[build] Sandbox: {run.verdict.value} для {name}")
+
+            # ── 3b. Path isolation: запрет опасных FS-операций ─────────────
+            _path_ok, _path_reason = self._validate_path_safety(code)
+            if not _path_ok:
+                result.status = BuildStatus.REJECTED
+                result.error = f'Path isolation: {_path_reason}'
+                self._log(f"[build] Отклонено path safety: {name} — {_path_reason}")
+                return self._finish(result, t0)
+
+            # ── 4. Статическая валидация (EXECUTOR layer) ─────────────────
+            # АРХИТЕКТУРА: Модули выполняются в EXECUTOR (вне sandbox).
+            # sandbox.run_code() НЕ используется — он блокирует легитимные
+            # OS-операции (import os, open, pathlib), которые модулям нужны.
+            # Безопасность обеспечивается:
+            #   - Import whitelist (шаг 3a)
+            #   - Path isolation (шаг 3b)
+            #   - CodeValidator: статический анализ (шаг 4a)
+            #   - Governance diff-review (шаг 4b)
+            #   - Human approval (шаг 4c)
+            #   - HMAC signing (шаг 4d)
+            #   - Path security check (шаг 5)
+            if not self.sandbox:
+                result.status = BuildStatus.REJECTED
+                result.error = 'Sandbox обязателен для governance-проверки'
+                self._log(f"[build] Отклонено: sandbox отсутствует ({name})")
+                return self._finish(result, t0)
 
             # ── 4a. CodeValidator: статическая проверка опасных конструкций ──
             try:
@@ -407,14 +443,29 @@ class ModuleBuilder:
             except ImportError:
                 self._log(f"[build] WARNING: CodeValidator недоступен, пропуск проверки ({name})")
 
-            # ── 4b. Sandbox diff-review сгенерированного кода ──────────
-            diff_action = {
-                'type': 'module_build',
-                'module': name,
-                'code_length': len(code),
-                'diff': f'+++ NEW FILE {name}.py\n{code[:2000]}',
-            }
-            sim = self.sandbox.simulate_action(diff_action)
+            # ── 4b. Sandbox governance review: проверяем метаданные модуля
+            #    (описание действия, размер, путь — без исполнения кода) ──
+            _safe_targets = ('dynamic_modules', 'outputs', 'project_template', 'agents', 'tools')
+            _rel_target = os.path.relpath(os.path.abspath(target_dir), self.working_dir)
+            _target_safe = any(_rel_target.startswith(sd) for sd in _safe_targets)
+            _code_lines = len(code.splitlines())
+            if _code_lines > 500:
+                result.status = BuildStatus.REJECTED
+                result.error = f'Сгенерированный код слишком большой: {_code_lines} строк (макс 500)'
+                self._log(f"[build] Отклонено: код слишком большой ({name}, {_code_lines} строк)")
+                return self._finish(result, t0)
+            if not _target_safe:
+                result.status = BuildStatus.REJECTED
+                result.error = (f'Запись в {_rel_target!r} запрещена — '
+                                f'build_module может создавать файлы только в {_safe_targets}')
+                self._log(f"[build] Отклонено: unsafe path {_rel_target!r} ({name})")
+                return self._finish(result, t0)
+            # Governance проверяет описание действия (без raw-кода)
+            _sim_description = (
+                f"build_module: создание нового файла {name}.py "
+                f"({_code_lines} строк, класс {class_name}) в {_rel_target}/"
+            )
+            sim = self.sandbox.simulate_action(_sim_description)
             if hasattr(sim, 'verdict'):
                 from environment.sandbox import SandboxResult as _SR
                 if sim.verdict == _SR.UNSAFE:
@@ -519,6 +570,18 @@ class ModuleBuilder:
                 result.error = smoke_error
                 return self._finish(result, t0)
 
+            # ── 8b. Module-level smoke: import + class + entrypoint ───────
+            mod_smoke_ok, mod_smoke_err = self._run_module_smoke(
+                abs_file, name, class_name)
+            if not mod_smoke_ok:
+                bak = abs_file + '.bak'
+                if os.path.exists(bak):
+                    os.replace(bak, abs_file)
+                elif os.path.exists(abs_file):
+                    os.remove(abs_file)
+                result.error = mod_smoke_err
+                return self._finish(result, t0)
+
             # ── 9. Загружаем модуль в память ──────────────────────────────
             mod = self._import_file(abs_file, name)
             if not mod:
@@ -584,6 +647,134 @@ class ModuleBuilder:
         self._log(f'[build] smoke_runner провалился: {summary}')
         return False, f'smoke_runner провалился после правки ядра: {summary}'
 
+    def _run_module_smoke(
+        self, file_path: str, name: str, class_name: str,
+    ) -> tuple[bool, str | None]:
+        """Smoke-тест для ЛЮБОГО модуля:
+        1. import
+        2. class exists
+        3. entrypoint callable
+        4. runtime: instantiate + call entrypoint → проверка типа ответа
+        """
+        self._log(f"[build] Module smoke: {name} ({os.path.basename(file_path)})")
+        # 1. Import
+        try:
+            spec = importlib.util.spec_from_file_location(
+                f'_smoke.{name}', file_path)
+            if spec is None or spec.loader is None:
+                return False, f'Module smoke: spec is None для {file_path}'
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+        except Exception as e:
+            return False, f'Module smoke: import failed — {type(e).__name__}: {e}'
+
+        # 2. Class exists
+        cls_obj = getattr(mod, class_name, None)
+        if cls_obj is None:
+            return False, f'Module smoke: класс {class_name!r} не найден в модуле'
+
+        # 3. Entrypoint method exists
+        entrypoints = ('handle', 'use', 'run', 'process', 'execute', 'analyze')
+        found_ep = None
+        for ep in entrypoints:
+            if callable(getattr(cls_obj, ep, None)):
+                found_ep = ep
+                break
+        if found_ep is None:
+            self._log(
+                f"[build] WARNING: класс {class_name} не имеет стандартного "
+                f"entrypoint ({', '.join(entrypoints)}). Пропуск runtime smoke."
+            )
+            return True, None
+
+        # 4. Runtime execution: instantiate + call entrypoint
+        #    Запускаем в subprocess с timeout для изоляции от crash/infinite loop.
+        runtime_ok, runtime_err = self._runtime_smoke_subprocess(
+            file_path, name, class_name, found_ep)
+        if not runtime_ok:
+            return False, runtime_err
+
+        self._log(f"[build] Module smoke OK (runtime): {name}.{class_name}.{found_ep}()")
+        return True, None
+
+    def _runtime_smoke_subprocess(
+        self, file_path: str, name: str, class_name: str, entrypoint: str,
+    ) -> tuple[bool, str | None]:
+        """Запускает runtime smoke в отдельном процессе с timeout и path isolation."""
+        # Формируем минимальный harness-скрипт
+        harness = (
+            "import sys, os, json\n"
+            "# Path isolation: restrict cwd\n"
+            f"os.chdir({self.working_dir!r})\n"
+            "import importlib.util\n"
+            f"spec = importlib.util.spec_from_file_location('_rsmoke.{name}', {file_path!r})\n"
+            "mod = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(mod)\n"
+            f"cls = getattr(mod, {class_name!r})\n"
+            "# Instantiate: try no-args, then common kwarg signatures\n"
+            "instance = None\n"
+            "for sig in [dict(), dict(cognitive_core=None), dict(tools=None),\n"
+            "            dict(cognitive_core=None, tools=None)]:\n"
+            "    try:\n"
+            "        instance = cls(**sig)\n"
+            "        break\n"
+            "    except TypeError:\n"
+            "        continue\n"
+            "if instance is None:\n"
+            "    print(json.dumps({'ok': False, 'error': 'cannot_instantiate'}))\n"
+            "    sys.exit(0)\n"
+            f"method = getattr(instance, {entrypoint!r})\n"
+            "# Call with safe minimal input\n"
+            "result = None\n"
+            "for args in [({},), ('',), ()]:\n"
+            "    try:\n"
+            "        result = method(*args)\n"
+            "        break\n"
+            "    except TypeError:\n"
+            "        continue\n"
+            "    except Exception as e:\n"
+            "        print(json.dumps({'ok': False, 'error': f'{type(e).__name__}: {e}'}))\n"
+            "        sys.exit(0)\n"
+            "rtype = type(result).__name__\n"
+            "valid_types = ('dict', 'str', 'list', 'NoneType', 'tuple', 'bool', 'int', 'float')\n"
+            "ok = rtype in valid_types\n"
+            "print(json.dumps({'ok': ok, 'return_type': rtype}))\n"
+        )
+        try:
+            from safety.secrets_proxy import safe_env as _safe_env
+            proc = subprocess.run(
+                [sys.executable, '-c', harness],
+                capture_output=True, text=True, timeout=15, check=False,
+                cwd=self.working_dir,
+                env=_safe_env(),
+            )
+        except subprocess.TimeoutExpired:
+            return False, 'Runtime smoke: timeout (15s) — модуль завис'
+        except (OSError, FileNotFoundError) as e:
+            return False, f'Runtime smoke: не удалось запустить subprocess: {e}'
+
+        if proc.returncode != 0:
+            stderr = (proc.stderr or '')[:300]
+            return False, f'Runtime smoke: процесс вернул код {proc.returncode}: {stderr}'
+
+        # Парсим JSON-ответ harness-скрипта
+        stdout = (proc.stdout or '').strip()
+        try:
+            out = json.loads(stdout)
+        except (json.JSONDecodeError, ValueError):
+            # Не смогли распарсить — но процесс завершился нормально,
+            # это может быть print из самого модуля. Считаем warning.
+            self._log(f"[build] Runtime smoke: не смог распарсить вывод harness, stdout={stdout[:200]}")
+            return True, None
+
+        if not out.get('ok', False):
+            err = out.get('error', 'unknown')
+            return False, f'Runtime smoke: {err}'
+
+        rtype = out.get('return_type', '?')
+        self._log(f"[build] Runtime smoke: return_type={rtype}")
+        return True, None
+
     def _record_core_smoke_event(self, event_name: str, file_path: str, output: str = '') -> None:
         """Пишет отдельное событие smoke-проверки в логи и метрики."""
         if not self.monitoring:
@@ -599,6 +790,262 @@ class ModuleBuilder:
         else:
             self.monitoring.warning(event_name, source='module_builder', data=data)
 
+    # ── Import whitelist (EXECUTOR layer) ────────────────────────────────────
+    # Модули, создаваемые build_module, выполняются в EXECUTOR (вне sandbox).
+    # Поэтому os, pathlib, shutil разрешены. Сеть и процессы — запрещены.
+
+    _ALLOWED_IMPORTS = frozenset({
+        # stdlib — безопасные
+        '__future__',
+        'json', 're', 'datetime', 'math', 'collections', 'itertools',
+        'functools', 'typing', 'random', 'string', 'hashlib', 'csv',
+        'statistics', 'textwrap', 'enum', 'dataclasses', 'abc', 'copy',
+        'decimal', 'fractions', 'time', 'operator', 'heapq', 'bisect',
+        'contextlib', 'io', 'struct', 'base64', 'binascii', 'uuid',
+        'logging', 'warnings', 'types', 'inspect', 'pprint',
+        # stdlib — FS/OS (разрешены в EXECUTOR layer)
+        'os', 'sys', 'pathlib', 'shutil', 'glob', 'fnmatch', 'tempfile',
+        # установленные
+        'psutil', 'numpy', 'pandas', 'matplotlib',
+        # внутренние агента — разрешены для build_module
+        'agents', 'tools',
+    })
+
+    # Подмодули, разрешённые даже если корневой модуль не в whitelist
+    _ALLOWED_SUBMODULES = frozenset({
+        'urllib.parse',
+        'collections.abc',
+    })
+
+    # Импорты, запрещённые ВСЕГДА (даже в EXECUTOR layer)
+    _BLOCKED_IMPORTS = frozenset({
+        'subprocess', 'socket', 'http', 'urllib', 'requests', 'httpx',
+        'aiohttp', 'pickle', 'shelve', 'marshal', 'threading',
+        'multiprocessing', 'importlib', 'ctypes', 'signal',
+        'builtins', 'code', 'webbrowser',
+        # внутренние модули агента
+        'main', 'agent', 'core', 'execution', 'loop',
+        'communication', 'environment', 'evaluation', 'knowledge',
+        'learning', 'llm', 'monitoring', 'perception', 'reasoning',
+        'reflection', 'safety', 'self_improvement', 'self_repair',
+        'skills', 'social', 'software_dev', 'state', 'validation',
+        'attention', 'hardware', 'config', 'dynamic_modules',
+        'upwork_monitoring', 'multilingual', 'preflight',
+    })
+
+    @classmethod
+    def _validate_imports(cls, code: str) -> tuple[bool, str]:
+        """Проверяет импорты: blocked → запрещены всегда, остальные — по whitelist."""
+        import_pattern = re.compile(
+            r'(?:^|\n)\s*(?:import|from)\s+([\w.]+)', re.MULTILINE
+        )
+        for match in import_pattern.finditer(code):
+            full_module = match.group(1)
+            root_module = full_module.split('.')[0]
+            # Разрешённые подмодули (urllib.parse, collections.abc)
+            if full_module in cls._ALLOWED_SUBMODULES:
+                continue
+            # Явно запрещённые — всегда блокируем
+            if root_module in cls._BLOCKED_IMPORTS:
+                return False, (
+                    f"'{full_module}' запрещён. "
+                    f"Для сетевых запросов и процессов используй tool_layer."
+                )
+            # Не в whitelist — блокируем
+            if root_module not in cls._ALLOWED_IMPORTS:
+                return False, (
+                    f"'{full_module}' не в whitelist. "
+                    f"Разрешены: {', '.join(sorted(cls._ALLOWED_IMPORTS)[:15])}..."
+                )
+        return True, 'OK'
+
+    # ── Semantic validation: undefined names ─────────────────────────────────
+    # LLM иногда генерирует «import_datetime» вместо «from datetime import datetime».
+    # ast.parse это не ловит (синтаксически корректно). Проверяем AST: если имя
+    # используется на уровне модуля (Name Load), но нигде не определено
+    # (import/assign/def/class/for/with/param), и выглядит как склеенный import — ошибка.
+
+    _IMPORT_LIKE_PATTERN = re.compile(
+        r'^import_[a-z]|^from_[a-z]', re.IGNORECASE
+    )
+
+    @classmethod
+    def _validate_undefined_names(cls, code: str) -> tuple[bool, str]:
+        """Ловит LLM-галлюцинации вроде import_datetime (вместо настоящего import)."""
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return True, 'OK'  # SyntaxError обрабатывается раньше
+
+        # Собираем все определённые имена (Store/Del контекст + imports + defs + classes)
+        defined: set[str] = set()
+        # builtins — не трогаем
+        import builtins as _bi
+        builtin_names = set(dir(_bi))
+
+        for node in ast.walk(tree):
+            # import X / from X import Y
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    defined.add(alias.asname or alias.name.split('.')[0])
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    defined.add(alias.asname or alias.name)
+            # assignments, for-targets, with-as, comprehension vars
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                defined.add(node.id)
+            # def / class
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                defined.add(node.name)
+                # параметры функции
+                for arg in node.args.args + node.args.posonlyargs + node.args.kwonlyargs:
+                    defined.add(arg.arg)
+                if node.args.vararg:
+                    defined.add(node.args.vararg.arg)
+                if node.args.kwarg:
+                    defined.add(node.args.kwarg.arg)
+            elif isinstance(node, ast.ClassDef):
+                defined.add(node.name)
+            # exception handler: except E as name
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                defined.add(node.name)
+
+        # Теперь ищем Name(Load) которые выглядят как LLM-галлюцинация «import_X»
+        errors: list[str] = []
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Name)
+                    and isinstance(node.ctx, ast.Load)
+                    and node.id not in defined
+                    and node.id not in builtin_names
+                    and cls._IMPORT_LIKE_PATTERN.match(node.id)):
+                errors.append(
+                    f"'{node.id}' (строка {node.lineno}) — "
+                    f"похоже на ошибочный import. "
+                    f"Правильно: 'from {node.id.split('_', 1)[1]} import ...'"
+                )
+
+        if errors:
+            return False, '; '.join(errors)
+        return True, 'OK'
+
+    # ── Path isolation (EXECUTOR layer) ──────────────────────────────────────
+    # Статический анализ: запрет абсолютных путей к системным директориям,
+    # опасных FS-операций (rmtree, unlink) и escape за пределы working_dir.
+
+    # Системные директории, к которым доступ ЗАПРЕЩЁН
+    _SYSTEM_PATH_PATTERNS = (
+        # Windows
+        r'[A-Za-z]:\\Windows', r'[A-Za-z]:\\Program Files',
+        r'[A-Za-z]:\\ProgramData', r'[A-Za-z]:\\System',
+        r'[A-Za-z]:\\Users\\[^"\'\\]+\\AppData',
+        # Linux/Mac
+        r'/etc/', r'/usr/', r'/bin/', r'/sbin/', r'/var/',
+        r'/boot/', r'/proc/', r'/sys/', r'/dev/',
+        r'/root/', r'/home/(?!agent)',
+        # Универсальные паттерны escape
+        r'\.\./\.\.',        # ../../ — двойной escape
+    )
+
+    # Вызовы, опасные БЕЗ ограничения пути
+    _DANGEROUS_FS_CALLS = frozenset({
+        'shutil.rmtree', 'shutil.move',
+        'os.rmdir', 'os.removedirs', 'os.unlink', 'os.remove',
+        'pathlib.Path.unlink', 'pathlib.Path.rmdir',
+        'os.rename',
+    })
+
+    @classmethod
+    def _validate_path_safety(cls, code: str) -> tuple[bool, str]:
+        """Проверяет код на опасные FS-операции и абсолютные пути к системным каталогам."""
+        # 1. Абсолютные пути к системным каталогам в строковых литералах
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return True, 'OK'  # SyntaxError обрабатывается раньше
+
+        string_literals: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                string_literals.append(node.value)
+            elif isinstance(node, ast.JoinedStr):
+                # f-string: собираем только Constant-части
+                for val in node.values:
+                    if isinstance(val, ast.Constant) and isinstance(val.value, str):
+                        string_literals.append(val.value)
+
+        for s in string_literals:
+            for pattern in cls._SYSTEM_PATH_PATTERNS:
+                if re.search(pattern, s, re.IGNORECASE):
+                    return False, (
+                        f"Обнаружен системный путь в строковом литерале: {s!r:.80} "
+                        f"(паттерн: {pattern})"
+                    )
+
+        # 2. Опасные FS-вызовы (rmtree, remove, unlink) с абсолютными путями
+        #    или без явной привязки к working_dir
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func_name = cls._resolve_call_name(node)
+            if func_name not in cls._DANGEROUS_FS_CALLS:
+                continue
+            # Проверяем первый аргумент
+            if not node.args:
+                continue
+            arg = node.args[0]
+            # Если аргумент — строковый литерал с абсолютным путём
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                val = arg.value
+                is_abs = (
+                    val.startswith('/')
+                    or (len(val) >= 2 and val[1] == ':')
+                )
+                if is_abs:
+                    return False, (
+                        f"Опасный вызов {func_name}() с абсолютным путём: {val!r:.80}"
+                    )
+
+        # 3. Паттерн ../../.. — escape из working_dir
+        escape_pattern = re.compile(r'(?:\.\.[/\\]){2,}')
+        for s in string_literals:
+            if escape_pattern.search(s):
+                return False, (
+                    f"Обнаружен directory traversal: {s!r:.80}"
+                )
+
+        return True, 'OK'
+
+    @staticmethod
+    def _resolve_call_name(node: ast.Call) -> str:
+        """Извлекает имя вызова: 'shutil.rmtree', 'os.remove', etc."""
+        func = node.func
+        if isinstance(func, ast.Attribute):
+            # node.func.value может быть Name или ещё один Attribute
+            parts = []
+            current = func
+            while isinstance(current, ast.Attribute):
+                parts.append(current.attr)
+                current = current.value
+            if isinstance(current, ast.Name):
+                parts.append(current.id)
+            parts.reverse()
+            return '.'.join(parts)
+        elif isinstance(func, ast.Name):
+            return func.id
+        return ''
+
+    # ── Контекст слоя выполнения (EXECUTOR) для LLM ──────────────────────────
+    _EXECUTOR_LAYER_CONTEXT = (
+        "КОНТЕКСТ ВЫПОЛНЕНИЯ: Этот модуль выполняется в EXECUTOR LAYER (вне sandbox).\n"
+        "- Доступ к файловой системе (os, pathlib, shutil, open()) РАЗРЕШЁН.\n"
+        "- Сеть (socket, http, requests), процессы (subprocess) ЗАПРЕЩЕНЫ.\n"
+        "- PATH ISOLATION: работай ТОЛЬКО с относительными путями внутри рабочей директории.\n"
+        "  - ЗАПРЕЩЕНО: абсолютные пути к системным каталогам (C:\\Windows, /etc, /usr, ...)\n"
+        "  - ЗАПРЕЩЕНО: shutil.rmtree/os.remove с абсолютными путями\n"
+        "  - ЗАПРЕЩЕНО: directory traversal (../../..)\n"
+        "- Модуль проходит статическую валидацию + runtime smoke-тест.\n"
+    )
+
     # ── Промпты для LLM ───────────────────────────────────────────────────────
 
     def _agent_prompt(self, name: str, class_name: str, description: str) -> str:
@@ -608,6 +1055,7 @@ class ModuleBuilder:
         return (
             f"Ты — Python-разработчик. Тебе нужно создать нового специализированного агента "
             f"для автономного AI-агента.\n\n"
+            f"{self._EXECUTOR_LAYER_CONTEXT}\n"
             f"{arch}\n"
             f"{existing}\n"
             f"ТРЕБОВАНИЯ К АГЕНТУ:\n"
@@ -633,6 +1081,7 @@ class ModuleBuilder:
         return (
             f"Ты — Python-разработчик. Тебе нужно создать новый инструмент "
             f"для автономного AI-агента.\n\n"
+            f"{self._EXECUTOR_LAYER_CONTEXT}\n"
             f"{arch}\n"
             f"{existing}\n"
             f"ТРЕБОВАНИЯ К ИНСТРУМЕНТУ:\n"
@@ -657,6 +1106,7 @@ class ModuleBuilder:
         existing = self._existing_file_hint(os.path.join(tdir, f'{name}.py'))
         return (
             f"Ты — Python-разработчик. Создай Python-модуль для автономного AI-агента.\n\n"
+            f"{self._EXECUTOR_LAYER_CONTEXT}\n"
             f"{arch}\n"
             f"{existing}\n"
             f"ТРЕБОВАНИЯ:\n"

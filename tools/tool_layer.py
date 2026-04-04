@@ -273,6 +273,17 @@ class CodeValidator:
         'builtins', '__builtin__',
     })
 
+    # Внутренние модули агента — импорт из sandbox запрещён
+    _AGENT_INTERNAL_MODULES = frozenset({
+        'agent', 'agents', 'core', 'execution', 'loop', 'tools',
+        'communication', 'environment', 'evaluation', 'knowledge',
+        'learning', 'llm', 'monitoring', 'perception', 'reasoning',
+        'reflection', 'safety', 'self_improvement', 'self_repair',
+        'skills', 'social', 'software_dev', 'state', 'validation',
+        'attention', 'hardware', 'config', 'dynamic_modules',
+        'upwork_monitoring', 'multilingual', 'preflight', 'main',
+    })
+
     BLOCKED_CALLS = [
         re.compile(r'\bexec\s*\('),             # exec()
         re.compile(r'\beval\s*\('),             # eval()
@@ -366,6 +377,12 @@ class CodeValidator:
                     f"Запрещённый импорт: '{root_module}'. "
                     f"Для системных команд используй ```bash блок. "
                     f"Для информации о системе используй psutil (разрешён)."
+                )
+            if root_module in cls._AGENT_INTERNAL_MODULES:
+                return False, (
+                    f"Импорт внутреннего модуля агента '{full_module}' запрещён в sandbox. "
+                    f"Пиши автономный код без зависимостей от агента. "
+                    f"Допустимы: стандартная библиотека (json, os, datetime, re, math, pathlib) и psutil."
                 )
 
         # Проверяем опасные вызовы
@@ -790,6 +807,13 @@ class PythonRuntimeTool(BaseTool):
         try:
             # SECURITY: Ограниченные builtins + безопасные import/open
             safe_globals: dict[str, Any] = {'__builtins__': self._make_safe_builtins()}
+            # Pre-seed: часто используемые stdlib-модули доступны без import
+            for _mod_name in ('datetime', 'json', 'os', 're', 'math', 'time', 'pathlib'):
+                try:
+                    import importlib as _il
+                    safe_globals.setdefault(_mod_name, _il.import_module(_mod_name))
+                except ImportError:
+                    pass
             safe_globals.update(self._namespace)
             # Инжектируем tool_layer чтобы код мог вызывать инструменты напрямую
             if self._tool_layer is not None:

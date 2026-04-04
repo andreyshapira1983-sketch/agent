@@ -792,6 +792,8 @@ class AutonomousLoop:
         if not results:
             return
         for r in results:
+            if not isinstance(r, dict):
+                continue
             if not r.get('success'):
                 continue
             atype = str(r.get('type', '')).casefold()
@@ -827,7 +829,7 @@ class AutonomousLoop:
 
         # Пересчитываем общий success
         if results:
-            execution['success'] = all(r.get('success') for r in results)
+            execution['success'] = all(r.get('success') for r in results if isinstance(r, dict))
 
         # P2: ActionResultContract — типизированная верификация по контракту
         # ПРИМЕЧАНИЕ: action_dispatcher уже проверяет контракты inline.
@@ -836,6 +838,8 @@ class AutonomousLoop:
         try:
             from evaluation.action_contracts import contract_for_action_type, verify_contract
             for r in results:
+                if not isinstance(r, dict):
+                    continue
                 atype = str(r.get('type', '')).casefold()
                 # Пропускаем search — пустой результат не является ошибкой
                 if atype == 'search':
@@ -853,18 +857,19 @@ class AutonomousLoop:
                 if contract is None:
                     continue
                 vr = verify_contract(contract)
+                r['contract_score'] = vr.score
+                r['contract_passed'] = vr.passed
                 if not vr.passed:
-                    if vr.score < contract.partial_success_threshold:
-                        r['success'] = False
-                        r['error'] = f"Contract fail: {', '.join(vr.failed_checks[:3])}"
-                    else:
-                        self._log(
-                            f"[verify] Contract partial ({vr.score:.0%}): "
-                            f"{', '.join(vr.failed_checks[:2])}",
-                            level='warning',
-                        )
+                    r['success'] = False
+                    if vr.failed_checks:
+                        r['error'] = f"Contract fail ({vr.score:.0%}): {', '.join(vr.failed_checks[:3])}"
+                    self._log(
+                        f"[verify] Contract FAIL ({vr.score:.0%}): "
+                        f"{', '.join(vr.failed_checks[:3])}",
+                        level='warning',
+                    )
             # Ещё раз пересчитываем success после контрактов
-            execution['success'] = all(r.get('success') for r in results)
+            execution['success'] = all(r.get('success') for r in results if isinstance(r, dict))
         except Exception as _contract_err:
             self._log(
                 f"[verify] ActionResultContract warn: {_contract_err}",
@@ -916,7 +921,8 @@ class AutonomousLoop:
             return nested
         if 'actions_found' in action_result and 'results' in action_result:
             return action_result
-        return nested
+        # nested может быть list/str/None — не возвращаем мусор
+        return None
 
     def _has_goal_progress_signal(self, cycle: LoopCycle) -> bool:
         """Проверяет, есть ли сильный сигнал прогресса по подцели."""
@@ -941,6 +947,8 @@ class AutonomousLoop:
 
         progress_types = {'bash', 'python', 'write', 'build_module'}
         for item in execution.get('results', []):
+            if not isinstance(item, dict):
+                continue
             action_type = str(item.get('type', '')).casefold()
             if action_type not in progress_types:
                 continue
@@ -1272,10 +1280,28 @@ class AutonomousLoop:
 
             self._execute_cycle()
 
-            if self.cycle_delay > 0:
+            # ── Adaptive backpressure: увеличиваем паузу при высокой нагрузке ──
+            effective_delay = self.cycle_delay
+            try:
+                import psutil as _ps
+                _cpu = _ps.cpu_percent(interval=0)
+                _ram = _ps.virtual_memory().percent
+                if _cpu > 90 or _ram > 90:
+                    effective_delay = max(effective_delay, 15.0)
+                    self._log(
+                        f"[backpressure] CPU={_cpu:.0f}% RAM={_ram:.0f}% — "
+                        f"пауза {effective_delay:.0f}с",
+                        level='warning',
+                    )
+                elif _cpu > 75 or _ram > 80:
+                    effective_delay = max(effective_delay, 5.0)
+            except (ImportError, OSError, RuntimeError):
+                pass
+
+            if effective_delay > 0:
                 # Разбиваем на 1-секундные отрезки, чтобы stop() срабатывал быстро
                 elapsed = 0.0
-                while self._running and elapsed < self.cycle_delay:
+                while self._running and elapsed < effective_delay:
                     time.sleep(1)
                     elapsed += 1.0
 
@@ -3138,7 +3164,10 @@ else:
                     if gov.get('allowed') is False:
                         reason = gov.get('reason', 'политика запрещает')
                         self._log(f"[act/governance] ЗАБЛОКИРОВАНО: {reason}")
-                        # Governance-блокировка — штатный контроль, не ошибка для self_repair
+                        if self._current_cycle:
+                            self._current_cycle.errors.append(
+                                f'GOVERNANCE_BLOCKED: {reason}'
+                            )
                         return None
                 except Exception as _e:
                     self._log_exc("act/governance", _e)
@@ -3153,7 +3182,11 @@ else:
                             f"[act/ethics] ЗАБЛОКИРОВАНО (score={getattr(eth, 'score', '?')}): "
                             f"{getattr(eth, 'reasoning', '')[:80]}"
                         )
-                        # Ethics-блокировка — штатный контроль, не ошибка для self_repair
+                        if self._current_cycle:
+                            self._current_cycle.errors.append(
+                                f'ETHICS_BLOCKED: score={getattr(eth, "score", "?")}, '
+                                f'{getattr(eth, "reasoning", "")[:80]}'
+                            )
                         return None
                 except Exception as _e:
                     self._log_exc("act/ethics", _e)
@@ -3239,7 +3272,7 @@ else:
                         _rej = [
                             str(r.get('error', ''))
                             for r in exec_result.get('results', [])
-                            if str(r.get('error', '')).startswith('SEMANTIC_GATE_REJECTED')
+                            if isinstance(r, dict) and str(r.get('error', '')).startswith('SEMANTIC_GATE_REJECTED')
                         ][:3]
                         _rej_text = '\n'.join(f"- {x}" for x in _rej) if _rej else '- unknown'
 
@@ -3308,7 +3341,7 @@ else:
                         self._log_exc("act/validation", _e)
 
                 if exec_result['actions_found'] > 0:
-                    n_ok  = sum(1 for r in exec_result['results'] if r['success'])
+                    n_ok  = sum(1 for r in exec_result['results'] if isinstance(r, dict) and r.get('success'))
                     n_all = exec_result['actions_found']
                     if n_ok == n_all:
                         _act_verdict = "Все успешны."
@@ -3321,6 +3354,8 @@ else:
                     if self.identity:
                         _type_success: dict[str, list[bool]] = {}
                         for _r in exec_result.get('results', []):
+                            if not isinstance(_r, dict):
+                                continue
                             _t = str(_r.get('type', 'unknown')).casefold()
                             _type_success.setdefault(_t, []).append(bool(_r.get('success')))
                         for _t, _outcomes in _type_success.items():
@@ -3332,6 +3367,8 @@ else:
                     # ── Слой 35: CapabilityDiscovery — grounding для find_gaps() ──
                     if self.capability_discovery and hasattr(self.capability_discovery, 'record_action_result'):
                         for _r in exec_result.get('results', []):
+                            if not isinstance(_r, dict):
+                                continue
                             _t = str(_r.get('type', 'unknown')).casefold()
                             try:
                                 self.capability_discovery.record_action_result(_t, bool(_r.get('success')))
@@ -3340,6 +3377,8 @@ else:
                     # Пробрасываем ошибки действий в cycle.errors → self-repair их увидит
                     if not exec_result['success'] and self._current_cycle:
                         for _r in exec_result.get('results', []):
+                            if not isinstance(_r, dict):
+                                continue
                             if not _r.get('success') and _r.get('error'):
                                 self._current_cycle.errors.append(
                                     f"act:{_r.get('type','?')}: {_r['error']}"
@@ -3351,7 +3390,7 @@ else:
                         any(kw in str(_r.get('input', '')).lower() or kw in str(_r.get('error', '')).lower()
                             for kw in _upwork_kw)
                         for _r in exec_result.get('results', [])
-                        if not _r.get('success')
+                        if isinstance(_r, dict) and not _r.get('success')
                     )
                     if _upwork_fail:
                         self._upwork_fail_count += 1
@@ -4436,17 +4475,12 @@ else:
             )
             _dom_count = _goal_failures.get(_dom.value, 0)
             if _dom_count >= 5:
-                # Сбрасываем per-goal счётчик для этой категории,
-                # чтобы CATEGORY_REPEAT не срабатывал каждый цикл.
-                self.failure_tracker.reset_goal_category(
-                    str(self._goal or ''), _dom
-                )
                 cycle.errors.append(
                     f'STOP:CATEGORY_REPEAT — категория {_dom.value} '
                     f'повторилась {_dom_count}x подряд'
                 )
                 self._log(
-                    f'[stop] FTracker: {_dom.value} повторяется {_dom_count}x — эскалация (однократно, счётчик сброшен).',
+                    f'[stop] FTracker: {_dom.value} повторяется {_dom_count}x — эскалация.',
                     level='error',
                 )
 

@@ -356,6 +356,8 @@ class StepEvaluator:
             return set()
         types: set[str] = set()
         for item in exec_r.get('results', []):
+            if not isinstance(item, dict):
+                continue
             t = str(item.get('type', '')).lower()
             if t:
                 types.add(t)

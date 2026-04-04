@@ -787,6 +787,8 @@ class WeatherBackend:
             data = json.loads(raw)
         except (ValueError, TypeError, json.JSONDecodeError):
             return None
+        if not isinstance(data, dict):
+            return None
 
         cur = (data.get('current_condition') or [{}])[0]
 
@@ -1016,6 +1018,8 @@ class PyPIBackend:
         try:
             data = json.loads(raw)
         except (ValueError, TypeError, json.JSONDecodeError):
+            return None
+        if not isinstance(data, dict):
             return None
 
         info = data.get('info', {})

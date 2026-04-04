@@ -325,6 +325,8 @@ class UpworkTool(BaseTool):
             with _req.urlopen(request, timeout=20) as resp:
                 body = resp.read().decode('utf-8', errors='replace')
             result = json.loads(body)
+            if not isinstance(result, dict):
+                return {'error': f'Unexpected response type: {type(result).__name__}'}
             if 'errors' in result and not result.get('data'):
                 msgs = '; '.join(e.get('message', '') for e in result['errors'])
                 return {'error': f'GraphQL: {msgs}'}

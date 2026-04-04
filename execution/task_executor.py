@@ -308,6 +308,40 @@ class TaskExecutor:
 
     # ── Главный метод ─────────────────────────────────────────────────────────
 
+    def _verify_result_contract(self, result: dict) -> None:
+        """Проверяет результат TaskExecutor по контракту (если применимо)."""
+        try:
+            from evaluation.action_contracts import contract_for_action_type, verify_contract
+        except ImportError:
+            return
+
+        file_path = result.get('file', '')
+        action_type = result.get('intent', 'general')
+        success = result.get('success', False)
+
+        contract = contract_for_action_type(
+            action_type=action_type,
+            action_input=result.get('task', ''),
+            action_output=str(file_path),
+            action_success=success,
+        )
+
+        # Для файловых результатов: если нет типового контракта — проверяем наличие файла
+        if contract is None and file_path and success:
+            from evaluation.action_contracts import contract_file_created
+            contract = contract_file_created(file_path)
+
+        if contract is None:
+            return
+
+        vr = verify_contract(contract)
+        if not vr.passed:
+            result['success'] = False
+            result['status'] = 'failed'
+            result.setdefault('contract_errors', []).extend(
+                f'verify:contract:{d}' for d in vr.failed_checks
+            )
+
     def execute(self, task: str) -> dict:
         """
         Исполняет задачу напрямую через tool_layer.
@@ -369,6 +403,10 @@ class TaskExecutor:
         result.setdefault('intent', route.intent.value)
         result.setdefault('status', TaskStatus.SUCCESS.value if result.get('success') else TaskStatus.FAILED.value)
         result['task'] = task[:100]
+
+        # Contract verification: проверяем результат по контрактам
+        self._verify_result_contract(result)
+
         return result
 
     def _legacy_detect(self, task: str) -> str:

@@ -418,18 +418,16 @@ class ActionDispatcher:
                     if _contract:
                         _vr = _verify_contract(_contract)
                         r['contract_score'] = _vr.score
+                        r['contract_passed'] = _vr.passed
                         _atype = r.get('type', '')
-                        if not _vr.passed and not _vr.partial:
+                        if not _vr.passed:
                             if _atype == 'search':
                                 # Пустой поиск — нормально, не ошибка
                                 self._log("[search] пустой результат (contract info, не ошибка)")
                             else:
                                 r['success'] = False
-                                r['error'] = f"contract_failed: {', '.join(_vr.failed_checks)}"
-                                self._log(f"[{_atype}] CONTRACT FAIL: {_vr.failed_checks}")
-                        elif _vr.partial:
-                            self._log(f"[{_atype}] CONTRACT PARTIAL ({_vr.score:.0%}): "
-                                      f"pass={_vr.passed_checks}, fail={_vr.failed_checks}")
+                                r['error'] = f"contract_failed ({_vr.score:.0%}): {', '.join(_vr.failed_checks)}"
+                                self._log(f"[{_atype}] CONTRACT FAIL ({_vr.score:.0%}): {_vr.failed_checks}")
                 except Exception:
                     pass  # контракт не должен ломать основной поток
 
@@ -463,8 +461,8 @@ class ActionDispatcher:
 
         executed     = sum(1 for r in results if r['success'] is not None)
         ok_count     = sum(1 for r in results if r.get('success'))
-        # Пустой results или 0 выполненных → НЕ успех (раньше было True — врало)
-        success      = bool(results) and (ok_count / len(results) >= 0.5)
+        # Строгая логика: success только когда ВСЕ действия успешны
+        success      = bool(results) and ok_count == len(results)
         summary      = self._make_summary(results)
 
         return {
@@ -669,7 +667,7 @@ class ActionDispatcher:
             r'^BUILD_MODULE:\s*([\w\-]+)\s*\|\s*(.+)$', re.MULTILINE
         )
         for m in _RE_BUILD_MODULE.finditer(text):
-            name = m.group(1).strip()
+            name = m.group(1).strip()[:60]
             desc = m.group(2).strip()
             if name and desc:
                 actions.append({'type': 'build_module', 'input': name, 'description': desc})
@@ -868,8 +866,8 @@ class ActionDispatcher:
                         'type':    'bash',
                         'input':   command,
                         'output':  note_msg,
-                        'success': True,
-                        'error':   None,
+                        'success': False,
+                        'error':   note_msg,
                         'note':    'Bash-команда завершилась без вывода на Windows (пропущена)',
                     }
 
@@ -1255,9 +1253,25 @@ class ActionDispatcher:
                         raw2 = self.tool_layer.use('python_runtime', code=fixed)
                         if isinstance(raw2, dict) and raw2.get('success'):
                             output = raw2.get('output', '') or str(raw2.get('result', ''))
+                # ── Авто-исправление 1c: запрещённый импорт внутренних модулей агента ──
+                if not ok and 'запрещён в sandbox' in err:
+                    _stripped = re.sub(
+                        r'(?m)^\s*(?:import|from)\s+(?:agent|agents|core|execution|loop|tools|'
+                        r'communication|environment|evaluation|knowledge|learning|llm|'
+                        r'monitoring|perception|reasoning|reflection|safety|self_improvement|'
+                        r'self_repair|skills|social|software_dev|state|validation|attention|'
+                        r'hardware|config|dynamic_modules|upwork_monitoring|multilingual|'
+                        r'preflight|main)\b[^\n]*\n?',
+                        '',
+                        code,
+                    )
+                    if _stripped.strip() and _stripped != code:
+                        raw2 = self.tool_layer.use('python_runtime', code=_stripped)
+                        if isinstance(raw2, dict) and raw2.get('success'):
+                            output = raw2.get('output', '') or str(raw2.get('result', ''))
                             return {
                                 'type':    'python',
-                                'input':   fixed,
+                                'input':   _stripped,
                                 'output':  output,
                                 'success': True,
                                 'error':   None,
@@ -1371,6 +1385,19 @@ class ActionDispatcher:
                     )
                     # Сохраняем найденные URL в knowledge через acquisition_pipeline
                     self._queue_search_urls(relevant_results, query)
+                    # Авто-персистенция: сохраняем результаты в outputs/search_results.json
+                    try:
+                        _out_dir = os.path.join(os.path.abspath('.'), 'outputs')
+                        os.makedirs(_out_dir, exist_ok=True)
+                        _sr_path = os.path.join(_out_dir, 'search_results.json')
+                        _sr_data = [
+                            {k: v for k, v in r.items() if k in ('title', 'url', 'snippet')}
+                            for r in relevant_results[:5]
+                        ]
+                        with open(_sr_path, 'w', encoding='utf-8') as _sf:
+                            json.dump(_sr_data, _sf, ensure_ascii=False, indent=2)
+                    except OSError:
+                        pass
                     return {
                         'type':    'search',
                         'input':   query,

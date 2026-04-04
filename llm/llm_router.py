@@ -146,6 +146,24 @@ class LLMRouter:
               history: list | None = None,
               max_tokens: int | None = None) -> str:
         """Выбирает клиент и вызывает infer()."""
+        # ── Resource throttle: тормозим LLM-вызовы при высокой нагрузке ──────
+        try:
+            _psutil_mod = importlib.import_module('psutil')
+            _cpu_now = _psutil_mod.cpu_percent(interval=0)
+            _ram_now = _psutil_mod.virtual_memory().percent
+            if _cpu_now > 90 or _ram_now > 90:
+                time.sleep(5.0)
+                if self.monitoring:
+                    self.monitoring.warning(
+                        f"[router] THROTTLE: CPU={_cpu_now:.0f}% RAM={_ram_now:.0f}% "
+                        f"— задержка 5с перед LLM-вызовом",
+                        source="llm_router",
+                    )
+            elif _cpu_now > 75 or _ram_now > 80:
+                time.sleep(1.0)
+        except (ImportError, OSError, RuntimeError, AttributeError):
+            pass
+
         # ── Budget guard: дневной лимит расходов ─────────────────────────────
         # Автосброс: 24ч с момента старта «дня» → новый день
         if self._daily_budget_usd > 0:

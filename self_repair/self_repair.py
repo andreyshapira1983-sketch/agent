@@ -801,19 +801,19 @@ class SelfRepairSystem:
 
     def _register_defaults(self):
         """Регистрирует дефолтные обработчики для типичных сбоев."""
-        def _handle_timeout(_description: str, component: str | None, _context: dict) -> str:
+        def _handle_timeout(description: str, component: str | None, context: dict, **kwargs) -> str:
             return f"Таймаут в '{component or '?'}' зафиксирован, next цикл продолжит"
 
-        def _handle_service_down(_description: str, component: str | None, _context: dict) -> str:
+        def _handle_service_down(description: str, component: str | None, context: dict, **kwargs) -> str:
             return f"SERVICE_DOWN '{component or '?'}': ожидание восстановления (retry next cycle)"
 
-        def _handle_data_corrupt(_description: str, component: str | None, _context: dict) -> str:
+        def _handle_data_corrupt(description: str, component: str | None, context: dict, **kwargs) -> str:
             return f"DATA_CORRUPT в '{component or '?'}': помечено для проверки целостности"
 
-        def _handle_unknown(_description: str, component: str | None, _context: dict) -> str:
+        def _handle_unknown(description: str, component: str | None, context: dict, **kwargs) -> str:
             # Contract-ошибки и sandbox-блокировки — штатные ситуации,
             # просто фиксируем и продолжаем без эскалации человеку.
-            return f"Мягкий сбой в '{component or '?'}': {_description[:150]}. Следующий цикл продолжит."
+            return f"Мягкий сбой в '{component or '?'}': {description[:150]}. Следующий цикл продолжит."
 
         self._repair_handlers[FailureType.TIMEOUT]       = _handle_timeout
         self._repair_handlers[FailureType.SERVICE_DOWN]  = _handle_service_down

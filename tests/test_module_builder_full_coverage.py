@@ -1,3 +1,4 @@
+# pyright: reportArgumentType=false, reportOptionalSubscript=false, reportAttributeAccessIssue=false
 import json
 import os
 import sys
@@ -274,11 +275,12 @@ class TestModuleBuilderBuildFlow(unittest.TestCase):
             mb = ModuleBuilder(working_dir=td, sandbox=_SandboxStub(), cognitive_core=object())
             with patch.object(mb, "_generate_code", return_value="class A:\n    def run(self):\n        return 1\n"):
                 res = mb._build("m", "A", "p", out, "modules")
-                self.assertIn("вне working_dir", res.error)
+                self.assertFalse(res.ok)
+                self.assertIn("запрещена", res.error)
 
     def test_build_py_compile_fail_with_backup_restore(self):
         with tempfile.TemporaryDirectory() as td:
-            target = os.path.join(td, "modules")
+            target = os.path.join(td, "dynamic_modules")
             os.makedirs(target, exist_ok=True)
             existing_file = os.path.join(target, "m.py")
             with open(existing_file, "w", encoding="utf-8") as f:
@@ -293,7 +295,7 @@ class TestModuleBuilderBuildFlow(unittest.TestCase):
 
     def test_build_py_compile_fail_without_backup_removes_file(self):
         with tempfile.TemporaryDirectory() as td:
-            target = os.path.join(td, "modules")
+            target = os.path.join(td, "dynamic_modules")
             mb = ModuleBuilder(working_dir=td, sandbox=_SandboxStub(), cognitive_core=object())
             cp = types.SimpleNamespace(returncode=1, stderr="compile err")
             with patch.object(mb, "_generate_code", return_value="class A:\n    def run(self):\n        return 1\n"), \
@@ -304,7 +306,7 @@ class TestModuleBuilderBuildFlow(unittest.TestCase):
 
     def test_build_smoke_failed_restore(self):
         with tempfile.TemporaryDirectory() as td:
-            target = os.path.join(td, "modules")
+            target = os.path.join(td, "dynamic_modules")
             os.makedirs(target, exist_ok=True)
             existing_file = os.path.join(target, "m.py")
             with open(existing_file, "w", encoding="utf-8") as f:
@@ -320,7 +322,7 @@ class TestModuleBuilderBuildFlow(unittest.TestCase):
 
     def test_build_smoke_failed_without_backup_removes_file(self):
         with tempfile.TemporaryDirectory() as td:
-            target = os.path.join(td, "modules")
+            target = os.path.join(td, "dynamic_modules")
             mb = ModuleBuilder(working_dir=td, sandbox=_SandboxStub(), cognitive_core=object())
             cp = types.SimpleNamespace(returncode=0, stderr="")
             with patch.object(mb, "_generate_code", return_value="class A:\n    def run(self):\n        return 1\n"), \
@@ -332,7 +334,7 @@ class TestModuleBuilderBuildFlow(unittest.TestCase):
 
     def test_build_import_failed(self):
         with tempfile.TemporaryDirectory() as td:
-            target = os.path.join(td, "modules")
+            target = os.path.join(td, "dynamic_modules")
             mb = ModuleBuilder(working_dir=td, sandbox=_SandboxStub(), cognitive_core=object())
             cp = types.SimpleNamespace(returncode=0, stderr="")
             with patch.object(mb, "_generate_code", return_value="class A:\n    def run(self):\n        return 1\n"), \
@@ -344,7 +346,7 @@ class TestModuleBuilderBuildFlow(unittest.TestCase):
 
     def test_build_success_and_registry(self):
         with tempfile.TemporaryDirectory() as td:
-            target = os.path.join(td, "modules")
+            target = os.path.join(td, "dynamic_modules")
             mb = ModuleBuilder(working_dir=td, sandbox=_SandboxStub(), cognitive_core=object())
             cp = types.SimpleNamespace(returncode=0, stderr="")
             fake_mod = types.ModuleType("x")
@@ -634,3 +636,4 @@ class TestImportFinishLogAndUtils(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

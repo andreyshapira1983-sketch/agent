@@ -51,6 +51,17 @@ class ContentSanitizer:
         '__builtins__', '__globals__', '__code__', '__closure__',
     })
 
+    # Внутренние модули агента — импорт из sandbox запрещён
+    _AGENT_INTERNAL_MODULES = frozenset({
+        'agent', 'agents', 'core', 'execution', 'loop', 'tools',
+        'communication', 'environment', 'evaluation', 'knowledge',
+        'learning', 'llm', 'monitoring', 'perception', 'reasoning',
+        'reflection', 'safety', 'self_improvement', 'self_repair',
+        'skills', 'social', 'software_dev', 'state', 'validation',
+        'attention', 'hardware', 'config', 'dynamic_modules',
+        'upwork_monitoring', 'multilingual', 'preflight', 'main',
+    })
+
     # Опасные паттерны в bash/shell — regex (ловит обфускацию)
     _DANGEROUS_BASH_PATTERNS = [
         re.compile(r'\brm\s+(-[rfRF]+\s+)?/', re.IGNORECASE),
@@ -108,10 +119,20 @@ class ContentSanitizer:
                     mod = alias.name.split('.')[0] if alias.name else ''
                     if mod in {'ctypes', 'signal'}:
                         return False, f'запрещённый import: {mod}'
+                    if mod in cls._AGENT_INTERNAL_MODULES:
+                        return False, (
+                            f'импорт внутреннего модуля агента запрещён: {alias.name}. '
+                            f'Пиши автономный код (stdlib + psutil).'
+                        )
                 if isinstance(node, ast.ImportFrom) and node.module:
                     root_mod = node.module.split('.')[0]
                     if root_mod in {'ctypes', 'signal'}:
                         return False, f'запрещённый import from: {root_mod}'
+                    if root_mod in cls._AGENT_INTERNAL_MODULES:
+                        return False, (
+                            f'импорт внутреннего модуля агента запрещён: {node.module}. '
+                            f'Пиши автономный код (stdlib + psutil).'
+                        )
 
         return True, 'OK'
 

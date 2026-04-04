@@ -53,7 +53,7 @@ class ReflectionSystem:
                 'suggestions': str,
             }
         """
-        self._log(f"Рефлексия по задаче: '{str(goal)[:60]}'")
+        self._log(f"Рефлексия по задаче: '{goal}'")
 
         analysis = self._analyse(goal, result, context)
         achieved = self._check_goal(goal, result, analysis)
