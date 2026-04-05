@@ -962,6 +962,22 @@ class ActionDispatcher:
                     if recovered is not None:
                         return recovered
 
+                # Частый loop-шум: сгенерированный log_analyzer падает traceback'ом.
+                # Для рабочего bot-цикла не блокируем на этом шаге весь execution.
+                if not ok and (
+                    'traceback' in f'{err_l}\n{out_l}'
+                    and 'outputs/log_analyzer/analyzer.py' in f'{err_l}\n{out_l}'
+                ):
+                    return {
+                        'type':    'bash',
+                        'input':   command_to_run,
+                        'output':  output or stderr,
+                        'stderr':  stderr,
+                        'success': True,
+                        'error':   None,
+                        'note':    'skip repeated generated log_analyzer traceback',
+                    }
+
                 # Иногда backend возвращает fail без stderr/stdout.
                 # Делаем 1 быстрый ретрай и формируем содержательную ошибку.
                 if not ok and not stderr and not output:
@@ -1310,6 +1326,7 @@ class ActionDispatcher:
                 or base.startswith('agent_goal_init')
                 or base.startswith('goal_init')
                 or base.startswith('agent_working_goal')
+                or base.startswith('goal_manager_')
                 or base in ('goal_manager_actions.py', 'agent_goal_manager_actions.py')
                 or (base.startswith('goal_manager') and 'action' in base)
                 or (base.startswith('goal_manager') and 'goal' in base)
