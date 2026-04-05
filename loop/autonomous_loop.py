@@ -3715,6 +3715,40 @@ else:
                 if self.failure_tracker.consecutive_count(cf.category) == 1:
                     is_new_error_type = True
 
+            # ── Replan-action: при should_replan или repeated error → принудительный реплан
+            _needs_replan = False
+            _replan_reason = ''
+            if not is_success and cycle.errors:
+                # Берём последнюю записанную категорию
+                _last_cf = None
+                for err in cycle.errors:
+                    if not str(err).startswith('STOP:'):
+                        _last_cf = self.failure_tracker.classify(str(err))[0]
+                if _last_cf and self.failure_tracker.should_replan(_last_cf):
+                    _needs_replan = True
+                    _replan_reason = f'should_replan({_last_cf.value})'
+                if self.failure_tracker.is_repeated_error(threshold=3):
+                    _needs_replan = True
+                    _rep_n = self.failure_tracker.repeated_error_count()
+                    _replan_reason = f'repeated_error x{_rep_n}'
+
+            if _needs_replan:
+                # Сброс кэша плана — старый план не работает
+                self._plan_cache_value = None
+                self._plan_cache_reuse = 0
+                self._log(
+                    f"[learn/replan] ⚡ Принудительный реплан: {_replan_reason}. "
+                    f"Кэш плана сброшен, следующий цикл построит новый план.",
+                    level='warning',
+                )
+                # Записываем в operational_memory как constraint
+                self.operational_memory.record_failure(
+                    goal=goal_str,
+                    failed_step=plan_str[:100],
+                    category='replan_triggered',
+                    signature=_replan_reason,
+                )
+
             if is_success:
                 self.failure_tracker.record_success()
                 # Записываем успешную процедуру в operational_memory

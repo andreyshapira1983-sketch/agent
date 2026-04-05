@@ -153,6 +153,14 @@ class ModuleBuilder:
     """
 
     # ── Правила качества кода — внедряются в каждый промпт ─────────────────
+    _CODE_SIZE_RULES = (
+        "\nCRITICAL — РАЗМЕР КОДА (нарушение = автоматическое отклонение):\n"
+        "- Максимум 400 строк на файл. Если логика сложнее — разбей на несколько классов/файлов.\n"
+        "- Не дублируй доку в docstring'ах, пиши кратко: 1-2 строки на метод максимум.\n"
+        "- Не создавай утилитные функции, которые вызываются один раз.\n"
+        "- Если нужно больше 400 строк, создай базовый модуль, а расширения — отдельными файлами.\n"
+    )
+
     _CODE_QUALITY_RULES = (
         "CRITICAL — ПРАВИЛА КАЧЕСТВА (нарушение = отклонение файла):"
         "\n"
@@ -450,10 +458,26 @@ class ModuleBuilder:
             _target_safe = any(_rel_target.startswith(sd) for sd in _safe_targets)
             _code_lines = len(code.splitlines())
             if _code_lines > 500:
-                result.status = BuildStatus.REJECTED
-                result.error = f'Сгенерированный код слишком большой: {_code_lines} строк (макс 500)'
-                self._log(f"[build] Отклонено: код слишком большой ({name}, {_code_lines} строк)")
-                return self._finish(result, t0)
+                # Одна попытка: просим LLM сжать код до 400 строк
+                compressed = self._retry_compress_code(code, name, class_name, _code_lines)
+                if compressed:
+                    _new_lines = len(compressed.splitlines())
+                    if _new_lines <= 500:
+                        code = compressed
+                        result.generated_code = code
+                        _code_lines = _new_lines
+                        self._log(f"[build] Код сжат LLM: {_code_lines} строк ({name})")
+                    else:
+                        result.status = BuildStatus.REJECTED
+                        result.error = (f'Код слишком большой даже после сжатия: '
+                                        f'{_new_lines} строк (макс 500)')
+                        self._log(f"[build] Отклонено: код слишком большой после сжатия ({name})")
+                        return self._finish(result, t0)
+                else:
+                    result.status = BuildStatus.REJECTED
+                    result.error = f'Сгенерированный код слишком большой: {_code_lines} строк (макс 500)'
+                    self._log(f"[build] Отклонено: код слишком большой ({name}, {_code_lines} строк)")
+                    return self._finish(result, t0)
             if not _target_safe:
                 result.status = BuildStatus.REJECTED
                 result.error = (f'Запись в {_rel_target!r} запрещена — '
@@ -1068,6 +1092,7 @@ class ModuleBuilder:
             f"- Логика должна соответствовать описанию\n"
             f"- Не добавлять внешние зависимости кроме стандартных и уже установленных\n\n"
             f"{self._CODE_QUALITY_RULES}\n\n"
+            f"{self._CODE_SIZE_RULES}\n\n"
             f"ФОРМАТ ОТВЕТА:\n"
             f"- Верни ТОЛЬКО полный Python-файл в блоке ```python ... ```\n"
             f"- Никаких пояснений вне блока кода\n"
@@ -1091,6 +1116,7 @@ class ModuleBuilder:
             f"- Реализовать метод use(self, **kwargs) -> str | dict\n"
             f"- Все зависимости — только stdlib или уже установленные пакеты\n\n"
             f"{self._CODE_QUALITY_RULES}\n\n"
+            f"{self._CODE_SIZE_RULES}\n\n"
             f"ФОРМАТ ОТВЕТА:\n"
             f"- Верни ТОЛЬКО полный Python-файл в блоке ```python ... ```\n"
             f"- Никаких пояснений вне блока кода\n"
@@ -1114,6 +1140,7 @@ class ModuleBuilder:
             f"- Назначение модуля: {description}\n"
             f"{extra}\n\n"
             f"{self._CODE_QUALITY_RULES}\n\n"
+            f"{self._CODE_SIZE_RULES}\n\n"
             f"ФОРМАТ ОТВЕТА:\n"
             f"- Верни ТОЛЬКО полный Python-файл в блоке ```python ... ```\n"
             f"- Никаких пояснений вне блока кода\n"
@@ -1213,6 +1240,11 @@ class ModuleBuilder:
             except SyntaxError:
                 pass
 
+            # Если код уже слишком длинный — не продолжаем, дадим _build отклонить
+            if len(code.splitlines()) > 480:
+                self._log(f"[build] Продолжение остановлено: {len(code.splitlines())} строк > 480 (лимит 500)")
+                break
+
             # Последние 40 строк как контекст для продолжения
             tail = '\n'.join(code.splitlines()[-40:])
             cont_prompt = (
@@ -1233,6 +1265,74 @@ class ModuleBuilder:
                       f"итого {n_lines} строк ({name})")
 
         return code.strip()
+
+    def _retry_compress_code(self, code: str, name: str, class_name: str, current_lines: int) -> str | None:
+        """Просит LLM сжать слишком длинный код до 400 строк. Одна попытка."""
+        core = self.cognitive_core
+        llm = getattr(core, 'llm', None) if core is not None else None
+        if llm is None:
+            return None
+        try:
+            prompt = (
+                f"Следующий Python-модуль `{name}.py` содержит {current_lines} строк, "
+                f"а максимум допускается 400.\n\n"
+                f"ЗАДАЧА: Сожми код ДО 400 строк, сохранив ВСЮ функциональность.\n\n"
+                f"КАК СЖАТЬ:\n"
+                f"- Убери избыточные docstring'и (оставь 1 строку на метод максимум)\n"
+                f"- Убери дублирующуюся логику\n"
+                f"- Объедини однотипные методы\n"
+                f"- Убери пустые строки между простыми методами\n"
+                f"- НЕ удаляй функциональность, НЕ делай заглушки\n\n"
+                f"Класс: {class_name}\n\n"
+                f"```python\n{code}\n```\n\n"
+                f"Верни ТОЛЬКО сжатый Python-файл в ```python ... ```."
+            )
+            raw = llm.infer(prompt, max_tokens=self._CHUNK_TOKENS)
+            compressed = self._extract_python_partial(str(raw))
+            if not compressed or len(compressed.strip()) < 30:
+                return None
+            # Проверяем синтаксис
+            try:
+                ast.parse(compressed)
+            except SyntaxError:
+                return None
+            # Проверяем что класс не потерялся
+            if class_name and class_name not in compressed:
+                return None
+            # AST-diff: проверяем что публичные методы/функции/классы сохранились
+            lost = self._ast_diff_lost_symbols(code, compressed)
+            if lost:
+                self._log(
+                    f"[build] Сжатие отклонено: потеряны символы: {', '.join(sorted(lost))} ({name})"
+                )
+                return None
+            return compressed.strip()
+        except Exception:
+            return None
+
+    @staticmethod
+    def _ast_extract_public_symbols(source: str) -> set[str]:
+        """Извлекает имена публичных классов, методов и функций из исходного кода."""
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            return set()
+        symbols: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                if not node.name.startswith('_'):
+                    symbols.add(node.name)
+            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                if not node.name.startswith('_'):
+                    symbols.add(node.name)
+        return symbols
+
+    @staticmethod
+    def _ast_diff_lost_symbols(original: str, compressed: str) -> set[str]:
+        """Возвращает публичные символы оригинала, отсутствующие в сжатой версии."""
+        orig_syms = ModuleBuilder._ast_extract_public_symbols(original)
+        comp_syms = ModuleBuilder._ast_extract_public_symbols(compressed)
+        return orig_syms - comp_syms
 
     @staticmethod
     def _extract_python(text: str) -> str:

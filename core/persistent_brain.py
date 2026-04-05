@@ -214,6 +214,7 @@ class PersistentBrain:
             self._save_learning()
             self._save_sandbox()
             self._save_capability_stats()
+            self._save_partner_core()
 
     # ═══════════════════════════════════════════════════════════════════════
     # АВТОСОХРАНЕНИЕ
@@ -971,10 +972,12 @@ class PersistentBrain:
         Результат хранится в self._architecture — отдельная переменная,
         не связанная с _knowledge/_lessons. Метода для записи нет намеренно.
         """
-        # Ищем файл рядом с agent.py / в корне проекта
+        # Ищем файл рядом с agent.py / в корне проекта / в config/
         project_root = os.path.dirname(os.path.dirname(__file__))
         candidates = [
+            os.path.join(project_root, "config", "архитектура автономного Агента.txt"),
             os.path.join(project_root, "архитектура автономного Агента.txt"),
+            os.path.join(project_root, "config", "architecture.txt"),
             os.path.join(project_root, "architecture.txt"),
         ]
         arch_path = next((p for p in candidates if os.path.isfile(p)), None)
@@ -1361,6 +1364,35 @@ class PersistentBrain:
             self._log(f"Ошибка загрузки causal: {e}", level="error")
 
     # ═══════════════════════════════════════════════════════════════════════
+    # PARTNER CORE — сохранение trust_model, autonomy, decision_explainer
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def _save_partner_core(self):
+        """Сохраняет компоненты Partner Core."""
+        # Trust Model
+        trust = getattr(self, 'trust_model', None)
+        if trust and hasattr(trust, 'to_dict'):
+            self._save_json("trust_model.json", trust.to_dict())
+
+        # Autonomy Controller
+        auto = getattr(self, 'autonomy', None)
+        if auto and hasattr(auto, 'to_dict'):
+            self._save_json("autonomy.json", auto.to_dict())
+
+        # Decision Explainer
+        explainer = getattr(self, 'decision_explainer', None)
+        if explainer and hasattr(explainer, 'to_dict'):
+            self._save_json("decisions.json", explainer.to_dict())
+
+        # User Memory (сохраняется через свой собственный механизм)
+        umem = getattr(self, 'user_memory', None)
+        if umem and hasattr(umem, 'save_all'):
+            umem.save_all()
+
+        # Tenant Manager (сохраняется через свой собственный механизм)
+        tm = getattr(self, 'tenant_manager', None)
+        if tm and hasattr(tm, 'save_all'):
+            tm.save_all()
     # 13. ENVIRONMENT MODEL (Слой 27)
     # ═══════════════════════════════════════════════════════════════════════
 

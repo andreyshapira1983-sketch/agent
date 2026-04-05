@@ -1208,7 +1208,12 @@ class ActionDispatcher:
                 'error': 'module_builder не подключён к ActionDispatcher',
             }
         try:
-            result = self.module_builder.build_module(name=name, description=description)
+            # target_dir по умолчанию — dynamic_modules (а не working_dir='.',
+            # который отвергается path-валидацией в ModuleBuilder)
+            target_dir = os.path.join(self.module_builder.working_dir, 'dynamic_modules')
+            result = self.module_builder.build_module(
+                name=name, description=description, target_dir=target_dir,
+            )
             return {
                 'type': 'build_module',
                 'input': name,
@@ -1303,6 +1308,15 @@ class ActionDispatcher:
                                 }
                         except OSError:
                             pass
+
+                # ── Подсказка: TypeError при обращении к list строковым ключом ──
+                if not ok and 'list indices must be integers or slices, not str' in err:
+                    err += (
+                        ' | HINT: tool_layer.use("search") возвращает dict '
+                        '{"results": [list], "success": bool}. '
+                        'Элементы results — список dict, итерируй: '
+                        'for item in r.get("results", []): item["title"]'
+                    )
 
                 return {
                     'type':    'python',

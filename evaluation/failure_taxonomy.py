@@ -194,6 +194,9 @@ class FailureTracker:
         self._consecutive: dict[FailureCategory, int] = {}
         # goal_hash → {category → count} — провалы по конкретной цели
         self._per_goal: dict[str, dict[FailureCategory, int]] = {}
+        # error_hash → consecutive count (для детекции одинаковых ошибок)
+        self._error_hash_consecutive: dict[str, int] = {}
+        self._last_error_hash: str = ''
 
     # ── Классификация ─────────────────────────────────────────────────────────
 
@@ -226,6 +229,16 @@ class FailureTracker:
         # Обновляем consecutive count
         self._consecutive[category] = self._consecutive.get(category, 0) + 1
 
+        # Error-hash dedup: считаем подряд одинаковые ошибки
+        err_hash = self._compute_error_hash(error_msg)
+        if err_hash == self._last_error_hash:
+            self._error_hash_consecutive[err_hash] = (
+                self._error_hash_consecutive.get(err_hash, 1) + 1
+            )
+        else:
+            self._last_error_hash = err_hash
+            self._error_hash_consecutive[err_hash] = 1
+
         # Per-goal tracking
         goal_key = goal[:100].strip().lower()
         if goal_key:
@@ -240,6 +253,8 @@ class FailureTracker:
     def record_success(self):
         """Сбрасывает consecutive counters при успехе."""
         self._consecutive.clear()
+        self._error_hash_consecutive.clear()
+        self._last_error_hash = ''
 
     # ── Запросы ───────────────────────────────────────────────────────────────
 
@@ -289,6 +304,30 @@ class FailureTracker:
     def consecutive_count(self, category: FailureCategory) -> int:
         """Public accessor: количество подряд ошибок данной категории."""
         return self._consecutive.get(category, 0)
+
+    def is_repeated_error(self, threshold: int = 3) -> bool:
+        """Одна и та же ошибка повторилась >= threshold раз подряд."""
+        if not self._last_error_hash:
+            return False
+        return self._error_hash_consecutive.get(self._last_error_hash, 0) >= threshold
+
+    def repeated_error_count(self) -> int:
+        """Сколько раз подряд повторилась последняя ошибка."""
+        if not self._last_error_hash:
+            return 0
+        return self._error_hash_consecutive.get(self._last_error_hash, 0)
+
+    @staticmethod
+    def _compute_error_hash(error_msg: str) -> str:
+        """Нормализует и хэширует ошибку: числа, пути, id → placeholder."""
+        import hashlib
+        normalized = error_msg.strip().lower()
+        # Убираем переменные части: числа, UUID, пути
+        normalized = re.sub(r'0x[0-9a-f]+', '<addr>', normalized)
+        normalized = re.sub(r'[0-9a-f]{8,}', '<id>', normalized)
+        normalized = re.sub(r'\d+', '<N>', normalized)
+        normalized = re.sub(r'[/\\][^\s]+', '<path>', normalized)
+        return hashlib.md5(normalized.encode()).hexdigest()[:12]
 
     def reset_goal_category(self, goal: str, category: FailureCategory) -> None:
         """Public accessor: сброс счётчика категории для цели."""
