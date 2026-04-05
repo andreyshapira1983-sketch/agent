@@ -1272,6 +1272,7 @@ class ActionDispatcher:
                 or base.startswith('agent_working_goal')
                 or base in ('goal_manager_actions.py', 'agent_goal_manager_actions.py')
                 or (base.startswith('goal_manager') and 'action' in base)
+                or (base.startswith('goal_manager') and 'goal' in base)
                 or (base.startswith('agent_') and 'goal' in base)
                 or (
                     base.startswith(('confirm_', 'verify_', 'check_'))
