@@ -921,7 +921,8 @@ class ActionDispatcher:
             if isinstance(raw, dict):
                 output = raw.get('stdout', '') or raw.get('output', '')
                 stderr = raw.get('stderr', '')
-                ok     = raw.get('success', raw.get('returncode', 0) == 0)
+                returncode = raw.get('returncode', 0)
+                ok     = raw.get('success', returncode == 0)
 
                 if not ok and self._is_windows() and self._looks_unix_only(command_to_run):
                     return {
@@ -961,13 +962,44 @@ class ActionDispatcher:
                     if recovered is not None:
                         return recovered
 
+                # Иногда backend возвращает fail без stderr/stdout.
+                # Делаем 1 быстрый ретрай и формируем содержательную ошибку.
+                if not ok and not stderr and not output:
+                    raw_retry = self.tool_layer.use('terminal', command=command_to_run, timeout=30)
+                    if isinstance(raw_retry, dict):
+                        output2 = raw_retry.get('stdout', '') or raw_retry.get('output', '')
+                        stderr2 = raw_retry.get('stderr', '')
+                        returncode2 = raw_retry.get('returncode', returncode)
+                        ok2 = raw_retry.get('success', returncode2 == 0)
+                        if ok2:
+                            return {
+                                'type':    'bash',
+                                'input':   command_to_run,
+                                'output':  output2,
+                                'stderr':  stderr2,
+                                'success': True,
+                                'error':   None,
+                                'note':    'terminal empty-fail recovered by retry',
+                            }
+                        output = output2
+                        stderr = stderr2
+                        returncode = returncode2
+
+                error_msg = stderr if not ok else None
+                if not ok and not error_msg:
+                    backend_err = str(raw.get('error', '') or '').strip()
+                    if backend_err:
+                        error_msg = backend_err
+                    else:
+                        error_msg = f'terminal command failed (rc={returncode}) with empty stderr'
+
                 return {
                     'type':    'bash',
                     'input':   command_to_run,
                     'output':  output,
                     'stderr':  stderr,
                     'success': bool(ok),
-                    'error':   stderr if not ok else None,
+                    'error':   error_msg,
                 }
 
         # Fallback: ExecutionSystem
@@ -995,13 +1027,21 @@ class ActionDispatcher:
                 if recovered is not None:
                     return recovered
 
+            error_msg = task.error if not ok else None
+            if not ok and not error_msg:
+                stderr = task.stderr or ''
+                if stderr.strip():
+                    error_msg = stderr
+                else:
+                    error_msg = 'execution_system command failed with empty error'
+
             return {
                 'type':    'bash',
                 'input':   command_to_run,
                 'output':  task.stdout or '',
                 'stderr':  task.stderr or '',
                 'success': ok,
-                'error':   task.error if not ok else None,
+                'error':   error_msg,
             }
 
         return self._fail('bash', command, 'ни tool_layer, ни execution_system не подключены')
