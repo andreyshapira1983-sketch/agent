@@ -279,6 +279,7 @@ class CapabilityDiscovery:
         ('paramiko',             'paramiko'),
         ('sentence_transformers', 'sentence-transformers'),
         ('nltk',                 'nltk'),
+        ('pytest',               'pytest'),
     ]
 
     def find_gaps(self) -> list[str]:

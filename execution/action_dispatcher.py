@@ -952,6 +952,15 @@ class ActionDispatcher:
                         'note':    'Bash-команда завершилась без вывода на Windows (пропущена)',
                     }
 
+                # На Linux сервере pytest может быть не установлен в venv.
+                # Для боевого bot-run это не должно валить цикл.
+                err_l = (stderr or '').lower()
+                out_l = (output or '').lower()
+                if not ok and 'no module named pytest' in f'{err_l}\n{out_l}':
+                    recovered = self._attempt_pytest_recovery(command_to_run)
+                    if recovered is not None:
+                        return recovered
+
                 return {
                     'type':    'bash',
                     'input':   command_to_run,
@@ -978,6 +987,13 @@ class ActionDispatcher:
                     'error':   None,
                     'note':    'Пропущена Linux-only bash-команда на Windows',
                 }
+
+            err_l = (task.stderr or '').lower()
+            out_l = (task.stdout or '').lower()
+            if not ok and 'no module named pytest' in f'{err_l}\n{out_l}':
+                recovered = self._attempt_pytest_recovery(command_to_run)
+                if recovered is not None:
+                    return recovered
 
             return {
                 'type':    'bash',
@@ -1093,6 +1109,81 @@ class ActionDispatcher:
         except (OSError, Exception):
             return None
 
+    def _attempt_pytest_recovery(self, command_to_run: str) -> dict | None:
+        """Пытается авто-установить pytest и перезапустить исходную команду."""
+        if not command_to_run or 'pytest' not in command_to_run.lower():
+            return None
+        py_exec = self._infer_python_executable_for_pytest(command_to_run)
+        install_cmd = f'{py_exec} -m pip install -q pytest'
+        self._log(f"[bash] auto-repair: pytest missing, installing via: {install_cmd}")
+        try:
+            raw_install = self.tool_layer.use('terminal', command=install_cmd, timeout=120) if self.tool_layer else None
+            if not isinstance(raw_install, dict):
+                return {
+                    'type': 'bash',
+                    'input': command_to_run,
+                    'output': '',
+                    'success': False,
+                    'error': 'pytest missing and auto-install unavailable',
+                }
+            install_ok = raw_install.get('success', raw_install.get('returncode', 1) == 0)
+            if not install_ok:
+                stderr = raw_install.get('stderr', '') or ''
+                return {
+                    'type': 'bash',
+                    'input': command_to_run,
+                    'output': raw_install.get('stdout', '') or raw_install.get('output', ''),
+                    'stderr': stderr,
+                    'success': False,
+                    'error': f'pytest auto-install failed: {stderr[:200]}',
+                }
+
+            raw_retry = self.tool_layer.use('terminal', command=command_to_run, timeout=45) if self.tool_layer else None
+            if not isinstance(raw_retry, dict):
+                return {
+                    'type': 'bash',
+                    'input': command_to_run,
+                    'output': '',
+                    'success': False,
+                    'error': 'pytest installed but retry backend unavailable',
+                }
+            output = raw_retry.get('stdout', '') or raw_retry.get('output', '')
+            stderr = raw_retry.get('stderr', '')
+            ok = raw_retry.get('success', raw_retry.get('returncode', 0) == 0)
+            return {
+                'type': 'bash',
+                'input': command_to_run,
+                'output': output,
+                'stderr': stderr,
+                'success': bool(ok),
+                'error': stderr if not ok else None,
+                'note': 'auto-repair: pytest installed and command retried',
+            }
+        except Exception as e:
+            return {
+                'type': 'bash',
+                'input': command_to_run,
+                'output': '',
+                'success': False,
+                'error': f'pytest auto-repair exception: {type(e).__name__}: {e}',
+            }
+
+    @staticmethod
+    def _infer_python_executable_for_pytest(command: str) -> str:
+        """Извлекает python executable из '<python> -m pytest ...', иначе 'python'."""
+        cmd = (command or '').strip()
+        if not cmd:
+            return 'python'
+        low = cmd.lower()
+        marker = ' -m pytest'
+        idx = low.find(marker)
+        if idx > 0:
+            py = cmd[:idx].strip().strip('"').strip("'")
+            return py or 'python'
+        if low.startswith('pytest '):
+            return 'python'
+        return 'python'
+
     @staticmethod
     def _powershell_event_log(command: str) -> str | None:
         """Возвращает PowerShell-эквивалент для event log команд, иначе None."""
@@ -1179,6 +1270,8 @@ class ActionDispatcher:
                 or base.startswith('agent_goal_init')
                 or base.startswith('goal_init')
                 or base.startswith('agent_working_goal')
+                or base in ('goal_manager_actions.py', 'agent_goal_manager_actions.py')
+                or (base.startswith('goal_manager') and 'action' in base)
                 or (base.startswith('agent_') and 'goal' in base)
                 or (
                     base.startswith(('confirm_', 'verify_', 'check_'))
@@ -1516,7 +1609,7 @@ class ActionDispatcher:
                         r'monitoring|perception|reasoning|reflection|safety|self_improvement|'
                         r'self_repair|skills|social|software_dev|state|validation|attention|'
                         r'hardware|config|dynamic_modules|upwork_monitoring|multilingual|'
-                        r'preflight|main)\b[^\n]*\n?',
+                        r'preflight|main|goal_manager)\b[^\n]*\n?',
                         '',
                         code,
                     )
