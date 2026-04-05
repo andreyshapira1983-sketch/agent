@@ -380,6 +380,16 @@ class CapabilityDiscovery:
                 except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
                     result['failed'].append(pip_name)
                     self._log(f"Ошибка установки {pip_name}: {e}", level='error')
+            except Exception as e:
+                # Некоторые desktop-зависимости могут существовать как пакет, но быть
+                # неподдерживаемыми на текущей ОС (например pygetwindow на Linux).
+                # Это не должно блокировать запуск всего агента.
+                result['failed'].append(pip_name)
+                self._log(
+                    f"Пакет '{pip_name}' недоступен на этой платформе и пропущен: "
+                    f"{type(e).__name__}: {e}",
+                    level='warning',
+                )
 
         if result['installed']:
             self._log(

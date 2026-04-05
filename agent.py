@@ -1606,7 +1606,7 @@ def build_agent(
     # Подключаем loop к ProactiveMind (создан раньше loop)
     if proactive_mind:
         proactive_mind.loop = loop
-        proactive_mind.autonomy = autonomy  # Partner Core: режимы инициативы
+        proactive_mind.autonomy = autonomy  # type: ignore[assignment]  # Partner Core: режимы инициативы
 
     # Подключаем Partner Core к боту
     if telegram_bot:

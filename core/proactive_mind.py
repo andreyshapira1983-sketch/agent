@@ -9,6 +9,10 @@ import threading
 import random
 import os
 import json
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.autonomy_levels import AutonomyController
 
 
 class ProactiveMind:
@@ -85,7 +89,7 @@ class ProactiveMind:
         self.spec_policy_digest = ""
 
         # Partner Core: контроллер автономии (подключается из agent.py)
-        self.autonomy = None
+        self.autonomy: AutonomyController | None = None
 
         # Браузерный агент (подключается из agent.py после инициализации)
         self._browser_agent: object = None

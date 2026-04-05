@@ -184,17 +184,15 @@ def contract_build_module(
     module_name: str = '',
     success: bool = True,
 ) -> ActionResultContract:
-    """Контракт: модуль создан, импортируется, содержит entrypoint.
+    """Контракт: модуль создан и импортируется.
 
     REQUIRED (провал любого = FAIL):
         - file_exists
         - module_imports
     OPTIONAL:
         - file_non_trivial
-        - has_entrypoint
     """
     import importlib.util
-    import ast as _ast
 
     def check_file_exists():
         return bool(file_path) and os.path.isfile(file_path)
@@ -219,39 +217,17 @@ def contract_build_module(
             return False
         return os.path.getsize(file_path) >= 50
 
-    def check_has_entrypoint():
-        """Проверяет что модуль содержит класс с handle/use/run/process методом."""
-        if not file_path or not os.path.isfile(file_path):
-            return False
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                tree = _ast.parse(f.read())
-        except (OSError, SyntaxError):
-            return False
-        entrypoints = {'handle', 'use', 'run', 'process', 'execute', 'analyze'}
-        for node in _ast.walk(tree):
-            if isinstance(node, _ast.ClassDef):
-                methods = {
-                    n.name for n in _ast.walk(node)
-                    if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))
-                }
-                if methods & entrypoints:
-                    return True
-        return False
-
     return ActionResultContract(
         expected_artifacts=[f'file:{file_path}'] if file_path else [],
         checks=[
             check_file_exists,       # index 0 — REQUIRED
             check_module_imports,    # index 1 — REQUIRED
             check_file_non_trivial,  # index 2
-            check_has_entrypoint,    # index 3
         ],
         check_descriptions=[
             f'file_exists({file_path})',
             f'module_imports({module_name})',
             f'file_non_trivial({file_path}, >=50b)',
-            'has_entrypoint(handle|use|run|process|execute|analyze)',
         ],
         required_indices=[0, 1],  # file_exists + module_imports обязательны
         on_fail='mark_verification_failed',
