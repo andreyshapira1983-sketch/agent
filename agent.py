@@ -997,6 +997,47 @@ def build_agent(
     )
 
     # ════════════════════════════════════════════════════════════════════════
+    # PARTNER CORE: Trust Model — числовая модель доверия (0.0–1.0)
+    # ════════════════════════════════════════════════════════════════════════
+    from core.trust_model import TrustModel
+    trust_model = TrustModel()
+    monitoring.info("Trust Model инициализирован.", source="agent")
+
+    # ════════════════════════════════════════════════════════════════════════
+    # PARTNER CORE: User Memory Store — персональная память по пользователям
+    # ════════════════════════════════════════════════════════════════════════
+    from core.user_memory import UserMemoryStore
+    user_memory = UserMemoryStore(
+        data_dir=os.path.join(working_dir, ".agent_memory"),
+    )
+    monitoring.info(f"User Memory Store: {len(user_memory.list_users())} пользователей.", source="agent")
+
+    # ════════════════════════════════════════════════════════════════════════
+    # PARTNER CORE: Autonomy Controller — режимы инициативы/автономии
+    # ════════════════════════════════════════════════════════════════════════
+    from core.autonomy_levels import AutonomyController, AutonomyLevel
+    autonomy = AutonomyController(default_level=AutonomyLevel.PARTNER)
+    # Ночной режим: 23:00–07:00 (Меморандум Часть 4.7)
+    autonomy.add_schedule_rule(23, 7, AutonomyLevel.NIGHT)
+    monitoring.info(f"Autonomy Controller: уровень={autonomy.level.value}.", source="agent")
+
+    # ════════════════════════════════════════════════════════════════════════
+    # PARTNER CORE: Decision Explainer — объяснимость действий
+    # ════════════════════════════════════════════════════════════════════════
+    from core.decision_explainer import DecisionExplainer
+    decision_explainer = DecisionExplainer()
+    monitoring.info("Decision Explainer инициализирован.", source="agent")
+
+    # ════════════════════════════════════════════════════════════════════════
+    # PARTNER CORE: Tenant Isolation — мультитенантная изоляция
+    # ════════════════════════════════════════════════════════════════════════
+    from core.tenant_isolation import TenantManager
+    tenant_manager = TenantManager(
+        data_dir=os.path.join(working_dir, ".agent_memory"),
+    )
+    monitoring.info(f"Tenant Manager: {len(tenant_manager.list_tenants())} тенантов.", source="agent")
+
+    # ════════════════════════════════════════════════════════════════════════
     # СЛОЙ 44: Hardware Layer
     # ════════════════════════════════════════════════════════════════════════
     from hardware.hardware_layer import HardwareInteractionLayer
@@ -1297,6 +1338,45 @@ def build_agent(
     web_interface.persistent_brain = persistent_brain  # type: ignore[assignment]
     web_interface.experience_replay = experience_replay
     web_interface.learning_system = learning
+
+    # ── Partner Core → подключение к PersistentBrain и CognitiveCore ──────
+    persistent_brain.trust_model = trust_model            # type: ignore[assignment]
+    persistent_brain.user_memory = user_memory            # type: ignore[assignment]
+    persistent_brain.autonomy = autonomy                  # type: ignore[assignment]
+    persistent_brain.decision_explainer = decision_explainer  # type: ignore[assignment]
+    persistent_brain.tenant_manager = tenant_manager      # type: ignore[assignment]
+    cognitive_core.trust_model = trust_model               # type: ignore[assignment]
+    cognitive_core.user_memory = user_memory               # type: ignore[assignment]
+    cognitive_core.autonomy = autonomy                     # type: ignore[assignment]
+    cognitive_core.decision_explainer = decision_explainer  # type: ignore[assignment]
+
+    # Загружаем сохранённые данные Partner Core
+    _trust_path = os.path.join(brain_dir, 'trust_model.json')
+    if os.path.exists(_trust_path):
+        try:
+            with open(_trust_path, 'r', encoding='utf-8') as _f:
+                trust_model.load_from_dict(json.load(_f))
+            monitoring.info("Trust Model: данные восстановлены.", source="agent")
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    _autonomy_path = os.path.join(brain_dir, 'autonomy.json')
+    if os.path.exists(_autonomy_path):
+        try:
+            with open(_autonomy_path, 'r', encoding='utf-8') as _f:
+                autonomy.load_from_dict(json.load(_f))
+            monitoring.info(f"Autonomy Controller: уровень восстановлен={autonomy.level.value}.", source="agent")
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    _decisions_path = os.path.join(brain_dir, 'decisions.json')
+    if os.path.exists(_decisions_path):
+        try:
+            with open(_decisions_path, 'r', encoding='utf-8') as _f:
+                decision_explainer.load_from_list(json.load(_f))
+            monitoring.info("Decision Explainer: история восстановлена.", source="agent")
+        except (json.JSONDecodeError, OSError):
+            pass
     # ════════════════════════════════════════════════════════════════════════
     # ПРОАКТИВНОЕ МЫШЛЕНИЕ — живая душа агента
     # ════════════════════════════════════════════════════════════════════════
@@ -1526,10 +1606,16 @@ def build_agent(
     # Подключаем loop к ProactiveMind (создан раньше loop)
     if proactive_mind:
         proactive_mind.loop = loop
+        proactive_mind.autonomy = autonomy  # Partner Core: режимы инициативы
 
-    # Подключаем loop к боту (loop создаётся после бота)
+    # Подключаем Partner Core к боту
     if telegram_bot:
         telegram_bot.loop = loop
+        telegram_bot.trust_model = trust_model          # type: ignore[assignment]
+        telegram_bot.user_memory = user_memory          # type: ignore[assignment]
+        telegram_bot.autonomy = autonomy                # type: ignore[assignment]
+        telegram_bot.decision_explainer = decision_explainer  # type: ignore[assignment]
+        telegram_bot.tenant_manager = tenant_manager    # type: ignore[assignment]
 
     # Подключаем loop и goal_manager к web_interface
     web_interface.loop = loop
@@ -1655,6 +1741,13 @@ def build_agent(
         "module_builder":     module_builder,
         "agent_spawner":      agent_spawner,
         "goal_generator":     goal_generator,
+
+        # Partner Core
+        "trust_model":        trust_model,
+        "user_memory":        user_memory,
+        "autonomy":           autonomy,
+        "decision_explainer": decision_explainer,
+        "tenant_manager":     tenant_manager,
     }
 
 

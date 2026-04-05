@@ -1,0 +1,20 @@
+{
+  "agents": [],
+  "tools": [],
+  "modules": [
+    {
+      "name": "goal_tasks",
+      "class_name": "GoalTasks",
+      "file_path": "C:\\Users\\andre\\Downloads\\agent\\dynamic_modules\\goal_tasks.py",
+      "created_at": 1775344582.313866,
+      "description": "Ты — Python-разработчик. Создай Python-модуль для автономного AI-агента.\n\nКОНТЕКСТ ВЫПОЛНЕНИЯ: Этот модуль выполняется в EXECUTOR LAYER (вне sandbox)."
+    },
+    {
+      "name": "goal_manager_tasks",
+      "class_name": "GoalManagerTasks",
+      "file_path": "C:\\Users\\andre\\Downloads\\agent\\dynamic_modules\\goal_manager_tasks.py",
+      "created_at": 1775352346.2166233,
+      "description": "Ты — Python-разработчик. Создай Python-модуль для автономного AI-агента.\n\nКОНТЕКСТ ВЫПОЛНЕНИЯ: Этот модуль выполняется в EXECUTOR LAYER (вне sandbox)."
+    }
+  ]
+}

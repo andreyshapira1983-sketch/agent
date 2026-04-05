@@ -165,14 +165,19 @@ class StepEvaluator:
         obj_verdict = self._check_object_resolution(goal, issues)
         score += obj_verdict
 
+        # 8. Contract verification check — связывает contract_passed с verdict
+        contract_verdict = self._check_contract_results(execution_result, issues)
+        score += contract_verdict
+
         score = max(0.0, min(1.0, score))
         passed = score >= 0.5 and not any(
             kw in i for i in issues
-            for kw in ('WRONG_TOOL', 'SUBSTITUTION', 'ЛОЖНЫЙ_SUCCESS', 'IRRELEVANT')
+            for kw in ('WRONG_TOOL', 'SUBSTITUTION', 'ЛОЖНЫЙ_SUCCESS', 'IRRELEVANT',
+                       'CONTRACT_FAIL')
         )
 
         # Финальный verdict
-        _critical = ('WRONG_TOOL', 'SUBSTITUTION', 'ЛОЖНЫЙ', 'IRRELEVANT')
+        _critical = ('WRONG_TOOL', 'SUBSTITUTION', 'ЛОЖНЫЙ', 'IRRELEVANT', 'CONTRACT_FAIL')
         _has_critical = any(kw in i for i in issues for kw in _critical)
         if not issues:
             verdict = 'SUCCESS'
@@ -186,6 +191,8 @@ class StepEvaluator:
             verdict = 'FAILED_IRRELEVANT'
         elif any('SUBSTITUTION' in i for i in issues):
             verdict = 'FAILED_SUBSTITUTION'
+        elif any('CONTRACT_FAIL' in i for i in issues):
+            verdict = 'FAILED_CONTRACT'
         elif any('ЛОЖНЫЙ' in i for i in issues):
             verdict = 'FAILED_FALSE_STATUS'
         elif any('NOT_RESOLVED' in i for i in issues):
@@ -340,6 +347,58 @@ class StepEvaluator:
             return -0.2
 
         return 0.0
+
+    def _check_contract_results(
+        self, exec_r: dict | None, issues: list
+    ) -> float:
+        """Проверяет contract_passed/contract_score из результатов выполнения.
+
+        Если хотя бы одно действие (кроме search) провалило контракт,
+        это должно отражаться в итоговом verdict, а не скрываться.
+        """
+        if not exec_r:
+            return 0.0
+
+        results_list = exec_r.get('results', [])
+        if not results_list:
+            return 0.0
+
+        failed_contracts = 0
+        total_with_contract = 0
+        worst_score = 1.0
+
+        for r in results_list:
+            if not isinstance(r, dict):
+                continue
+            # search contract fails — информативные, не штрафуем
+            if str(r.get('type', '')).casefold() == 'search':
+                continue
+            if 'contract_passed' not in r:
+                continue
+            total_with_contract += 1
+            if not r.get('contract_passed', True):
+                failed_contracts += 1
+                c_score = r.get('contract_score', 0.0)
+                if c_score < worst_score:
+                    worst_score = c_score
+
+        if failed_contracts == 0:
+            return 0.0
+
+        # Все не-search контракты провалены — критическая ошибка
+        if total_with_contract > 0 and failed_contracts == total_with_contract:
+            issues.append(
+                f'CONTRACT_FAIL: все {failed_contracts} контрактов провалены '
+                f'(worst score={worst_score:.0%})'
+            )
+            return -0.4
+
+        # Часть контрактов провалена — частичная проблема
+        issues.append(
+            f'CONTRACT_PARTIAL: {failed_contracts}/{total_with_contract} контрактов '
+            f'провалены (worst score={worst_score:.0%})'
+        )
+        return -0.2
 
     # ── Утилиты ───────────────────────────────────────────────────────────────
 

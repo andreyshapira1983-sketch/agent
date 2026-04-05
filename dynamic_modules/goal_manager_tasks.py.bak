@@ -1,0 +1,212 @@
+import os
+import json
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+
+class GoalManagerTasks:
+    """
+    Управление целями для автономного агента через файловое хранилище.
+    """
+
+    def __init__(self, storage_dir: str = "goals_storage") -> None:
+        self._storage_dir = self._sanitize_relative_path(storage_dir)
+        self._storage_path = Path(self._storage_dir)
+        self._goals_file = self._storage_path / "goals.json"
+        self._storage_path.mkdir(parents=True, exist_ok=True)
+        if not self._goals_file.exists():
+            self._write_goals([])
+
+    # ------------------------ Публичные методы ------------------------ #
+
+    def add_goal(self, description: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Добавить новую цель и вернуть её структуру."""
+        description = description.strip()
+        if not description:
+            return {
+                "ok": False,
+                "error": "empty_description",
+                "message": "Описание цели не может быть пустым.",
+            }
+
+        goals = self._read_goals()
+        goal_id = self._generate_next_id(goals)
+        goal: Dict[str, Any] = {
+            "id": goal_id,
+            "description": description,
+            "status": "pending",
+        }
+        if metadata:
+            goal["metadata"] = self._safe_copy_jsonable(metadata)
+
+        goals.append(goal)
+        self._write_goals(goals)
+
+        return {
+            "ok": True,
+            "goal": goal,
+        }
+
+    def add_goals_batch(self, descriptions: List[str]) -> Dict[str, Any]:
+        """Добавить несколько целей списком описаний."""
+        valid_descriptions = [d.strip() for d in descriptions if isinstance(d, str) and d.strip()]
+        if not valid_descriptions:
+            return {
+                "ok": False,
+                "error": "no_valid_descriptions",
+                "message": "Не найдено ни одного валидного описания цели.",
+            }
+
+        goals = self._read_goals()
+        next_id = self._generate_next_id(goals)
+        created: List[Dict[str, Any]] = []
+
+        for desc in valid_descriptions:
+            goal = {
+                "id": next_id,
+                "description": desc,
+                "status": "pending",
+            }
+            goals.append(goal)
+            created.append(goal)
+            next_id += 1
+
+        self._write_goals(goals)
+        return {
+            "ok": True,
+            "created": created,
+            "count": len(created),
+        }
+
+    def list_goals(self, status: Optional[str] = None) -> Dict[str, Any]:
+        """Вернуть список всех целей, опционально отфильтрованных по статусу."""
+        goals = self._read_goals()
+        if status:
+            status = status.strip()
+            goals = [g for g in goals if str(g.get("status", "")).strip() == status]
+        return {
+            "ok": True,
+            "goals": goals,
+            "count": len(goals),
+        }
+
+    def update_goal_status(self, goal_id: int, status: str) -> Dict[str, Any]:
+        """Обновить статус цели по её ID."""
+        goals = self._read_goals()
+        updated = False
+        for goal in goals:
+            if goal.get("id") == goal_id:
+                goal["status"] = status
+                updated = True
+                break
+
+        if not updated:
+            return {
+                "ok": False,
+                "error": "goal_not_found",
+                "message": f"Цель с id={goal_id} не найдена.",
+            }
+
+        self._write_goals(goals)
+        return {
+            "ok": True,
+            "id": goal_id,
+            "status": status,
+        }
+
+    def get_goal(self, goal_id: int) -> Dict[str, Any]:
+        """Получить цель по ID."""
+        goals = self._read_goals()
+        for goal in goals:
+            if goal.get("id") == goal_id:
+                return {
+                    "ok": True,
+                    "goal": goal,
+                }
+        return {
+            "ok": False,
+            "error": "goal_not_found",
+            "message": f"Цель с id={goal_id} не найдена.",
+        }
+
+    def remove_goal(self, goal_id: int) -> Dict[str, Any]:
+        """Удалить цель по ID."""
+        goals = self._read_goals()
+        remaining: List[Dict[str, Any]] = []
+        removed_goal: Optional[Dict[str, Any]] = None
+
+        for goal in goals:
+            if goal.get("id") == goal_id:
+                removed_goal = goal
+            else:
+                remaining.append(goal)
+
+        if removed_goal is None:
+            return {
+                "ok": False,
+                "error": "goal_not_found",
+                "message": f"Цель с id={goal_id} не найдена.",
+            }
+
+        self._write_goals(remaining)
+        return {
+            "ok": True,
+            "removed": removed_goal,
+        }
+
+    # ------------------------ Вспомогательные методы ------------------------ #
+
+    def _sanitize_relative_path(self, raw: str) -> str:
+        """Гарантирует относительный путь без выхода из рабочей директории."""
+        raw_path = Path(raw)
+        parts = [p for p in raw_path.parts if p not in ("..", "/", "\\")]
+        if not parts:
+            return "."
+        safe_path = Path(*parts)
+        return os.fspath(safe_path)
+
+    def _read_goals(self) -> List[Dict[str, Any]]:
+        """Прочитать список целей из файла."""
+        if not self._goals_file.exists():
+            return []
+        try:
+            data = self._goals_file.read_text(encoding="utf-8")
+            if not data.strip():
+                return []
+            loaded = json.loads(data)
+            if isinstance(loaded, list):
+                return [g for g in loaded if isinstance(g, dict)]
+            return []
+        except (OSError, json.JSONDecodeError):
+            return []
+
+    def _write_goals(self, goals: List[Dict[str, Any]]) -> None:
+        """Записать список целей в файл."""
+        serialized = json.dumps(goals, ensure_ascii=False, indent=2)
+        self._goals_file.write_text(serialized, encoding="utf-8")
+
+    def _generate_next_id(self, goals: List[Dict[str, Any]]) -> int:
+        """Сгенерировать следующий числовой ID цели."""
+        max_id = 0
+        for goal in goals:
+            try:
+                gid = int(goal.get("id", 0))
+                if gid > max_id:
+                    max_id = gid
+            except (TypeError, ValueError):
+                continue
+        return max_id + 1
+
+    def _safe_copy_jsonable(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Сделать безопасную копию словаря, пригодную для JSON."""
+        result: Dict[str, Any] = {}
+        for key, value in data.items():
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                result[key] = value
+            else:
+                try:
+                    json.dumps(value)
+                    result[key] = value
+                except TypeError:
+                    result[key] = str(value)
+        return result

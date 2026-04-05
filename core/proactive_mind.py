@@ -84,6 +84,9 @@ class ProactiveMind:
         self.spec_docs: list[str] = []
         self.spec_policy_digest = ""
 
+        # Partner Core: контроллер автономии (подключается из agent.py)
+        self.autonomy = None
+
         # Браузерный агент (подключается из agent.py после инициализации)
         self._browser_agent: object = None
         self._portfolio_filler: object = None
