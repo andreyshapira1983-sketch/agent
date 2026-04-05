@@ -2047,6 +2047,11 @@ class ActionDispatcher:
                             existing_text = fh.read()
                         eh = hashlib.sha1(existing_text.strip().encode('utf-8', errors='ignore')).hexdigest()
                         if eh == new_hash:
+                            # ВАЖНО: если целевой файл ещё не существует, нельзя SKIP-ать запись,
+                            # иначе write-контракт (path_exists/file_size) закономерно провалится.
+                            # Разрешаем пропуск только когда target уже существует.
+                            if not os.path.isfile(write_path):
+                                continue
                             self._log(
                                 f"[write] DEDUP_SKIP '{write_path}': "
                                 f"идентичный контент уже есть в '{name}'"
