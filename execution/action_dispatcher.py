@@ -615,18 +615,28 @@ class ActionDispatcher:
         if a_type == 'read' and any(k in a_input for k in ('log', 'task_log', 'outputs', 'result')):
             return True, 'read diagnostics artifact'
 
-        # BASH/PYTHON — смягчаем доменную проверку, т.к. автоматизация часто кроссдоменна
-        # (bash может запускать тесты кода, python может манипулировать системой)
+        # BASH/PYTHON — строгий gate: не пропускаем кросс-домен "по умолчанию".
+        # Иначе агент начинает принимать случайные helper-шаги не по цели.
         if a_type in ('bash', 'python'):
-            # Пропускаем, если хотя бы одна из древних целей-действий в одном домене
-            if goal_domain == 'unknown' or action_domain == 'unknown':
-                return True, 'domain unknown, allow automation'
-            # Если обе известны, но совпадают — OK
             if goal_domain == action_domain:
                 return True, 'domain match'
-            # Если не совпадают но оба доменные (code-system, code-research и т.д.) — 
-            # всё равно пропускаем, т.к. автоматизация кроссдоменна
-            return True, 'allow cross-domain automation'
+
+            # Ограниченное исключение: кодовые задачи часто требуют системного запуска
+            # (python/pytest), даже если action_domain определился как system.
+            if goal_domain == 'code' and action_domain in ('code', 'system', 'unknown'):
+                execution_markers = (
+                    '.py', 'pytest', 'python ', 'python3 ', ' -m pytest',
+                    'outputs/', 'log_analyzer', 'test_', 'tests/',
+                )
+                if any(m in hay for m in execution_markers):
+                    return True, 'code execution exception'
+
+            # Инфраструктурное исключение: установка зависимости для дальнейших шагов.
+            if a_type == 'bash':
+                if any(x in hay for x in ('pip install', 'python -m pip', 'apt-get install', 'apk add')):
+                    return True, 'infra bootstrap exception'
+
+            return False, f'domain mismatch goal={goal_domain}, action={action_domain}'
 
         # SEARCH/WRITE строже: должны доменно совпадать
         if a_type in ('search', 'write'):
@@ -1153,6 +1163,24 @@ class ActionDispatcher:
         # Если файла нет, безопаснее запускать pytest напрямую.
         if script.lower().endswith('.py'):
             base = os.path.basename(script).lower()
+            if (
+                base in ('agent_goal_initializer.py', 'goal_initializer.py')
+                or base.startswith('agent_goal_init')
+                or base.startswith('goal_init')
+                or base.startswith('agent_working_goal')
+                or (base.startswith('agent_') and 'goal' in base)
+                or (
+                    base.startswith(('confirm_', 'verify_', 'check_'))
+                    and 'goal' in base
+                )
+            ):
+                fallback = (
+                    'python -c "print('
+                    '\'SKIP: missing helper script (goal helper) ; continuing cycle.\''
+                    ')"'
+                )
+                self._log(f"[bash] Авто-резолв (helper skip): '{script}' → '{fallback}'")
+                return fallback
             if ('smoke' in base or 'test' in base) and not os.path.isfile(script):
                 rest = command[m.end(2):] if m.end(2) <= len(command) else ''
                 fallback = f'python -m pytest -q{rest}'
