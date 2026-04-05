@@ -621,6 +621,17 @@ class ActionDispatcher:
             if goal_domain == action_domain:
                 return True, 'domain match'
 
+            # Неопределённая цель (cold-start/repair): разрешаем только безопасный
+            # поднабор execution-шагов, иначе будет ложный SEMANTIC_GATE reject.
+            if goal_domain == 'unknown':
+                unknown_goal_markers = (
+                    '.py', 'pytest', 'python ', 'python3 ', ' -m pytest',
+                    'outputs/', 'tests/', 'test_', 'agent_goal', 'working_goal',
+                    'pip install', 'python -m pip', 'mkdir ', 'ls ', 'pwd', 'echo ',
+                )
+                if any(m in hay for m in unknown_goal_markers):
+                    return True, 'unknown goal execution exception'
+
             # Ограниченное исключение: кодовые задачи часто требуют системного запуска
             # (python/pytest), даже если action_domain определился как system.
             if goal_domain == 'code' and action_domain in ('code', 'system', 'unknown'):

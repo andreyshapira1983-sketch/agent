@@ -262,10 +262,14 @@ class AutonomousGoalGenerator:
         if not gap_description or not gap_description.strip():
             return None
 
-        # Формулируем цель создать нужный модуль
-        goal_desc = self._gap_to_goal(gap_description)
+        # Для weak_action используем детерминированную формулировку без LLM:
+        # это снижает шум/стоимость и стабилизирует дедупликацию между циклами.
+        goal_desc = self._goal_from_gap_deterministic(gap_description)
         if not goal_desc:
-            goal_desc = f"Создать агента или инструмент для: {gap_description[:200]}"
+            # Формулируем цель создать нужный модуль
+            goal_desc = self._gap_to_goal(gap_description)
+            if not goal_desc:
+                goal_desc = f"Создать агента или инструмент для: {gap_description[:200]}"
 
         if self._is_duplicate(goal_desc):
             return None
@@ -274,6 +278,27 @@ class AutonomousGoalGenerator:
         self._mark_recent(goal_desc)
         self._log(f"[goal_gen] Цель из capability gap: {goal_desc[:100]}")
         return goal_desc
+
+    @staticmethod
+    def _goal_from_gap_deterministic(gap_description: str) -> str | None:
+        """Возвращает стабильную цель для типовых gap-паттернов."""
+        gap = str(gap_description or '').strip()
+        if not gap:
+            return None
+
+        lower = gap.casefold()
+        if lower.startswith('weak_action:'):
+            action_type = gap.split(':', 1)[1].split('—', 1)[0].strip()
+            if action_type:
+                return (
+                    f"Стабилизировать действие '{action_type}': "
+                    "добавить предвалидацию, постпроверку результата и безопасные ретраи"
+                )
+            return (
+                "Стабилизировать слабые действия: добавить предвалидацию, "
+                "постпроверку результата и безопасные ретраи"
+            )
+        return None
 
     def propose_new_agent(
         self,
