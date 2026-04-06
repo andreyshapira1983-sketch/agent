@@ -295,7 +295,9 @@ class ProactiveMind:
         observations = self._observe()
 
         # ── Исполняем очередную задачу через Автономный Цикл ──
-        if self.loop and not self.loop.is_running and self.loop.current_goal:
+        # Проверяем _is_running(): при shutdown proactive_mind останавливается первым,
+        # поэтому не должен запускать новый цикл после своего stop().
+        if self._is_running() and self.loop and not self.loop.is_running and self.loop.current_goal:
             try:
                 self._log("[think] Есть цель без активного цикла — запускаю loop.step()")
                 cycle = self.loop.step()

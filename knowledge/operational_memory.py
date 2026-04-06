@@ -206,10 +206,28 @@ class OperationalMemory:
             existing.recovery_that_worked = recovery
             self._save_failures()
 
+    # ── Decay: провалы не должны блокировать навсегда ──────────────────────
+    _DECAY_WINDOW_H = 24    # через 24ч count уменьшается вдвое
+    _DECAY_FLOOR    = 1     # минимальный effective count после decay
+
+    def _effective_failure_count(self, fr: 'FailureRecord') -> int:
+        """Возвращает occurrence_count с учётом временного распада (decay).
+
+        Каждые _DECAY_WINDOW_H часов с момента last_seen count делится на 2.
+        Это гарантирует, что старые провалы не блокируют агент навсегда.
+        """
+        age_h = (time.time() - fr.last_seen) / 3600.0
+        if age_h <= 0:
+            return fr.occurrence_count
+        halvings = int(age_h / self._DECAY_WINDOW_H)
+        effective = fr.occurrence_count >> halvings  # быстрое деление на 2^halvings
+        return max(effective, self._DECAY_FLOOR)
+
     def get_blocked_steps(self, goal: str, threshold: int = 3) -> list[dict]:
         """Возвращает шаги, которые проваливались >= threshold раз для похожей цели.
 
         Это фильтр: планировщик должен ИСКЛЮЧИТЬ эти шаги из плана.
+        Учитывается временной decay: старые провалы «забываются» (count/2 каждые 24ч).
         """
         pattern = self._normalize_goal(goal)
         goal_words = set(pattern.split())
@@ -219,11 +237,12 @@ class OperationalMemory:
             intersection = goal_words & fr_words
             union = goal_words | fr_words
             similarity = len(intersection) / len(union) if union else 0
-            if similarity >= 0.3 and fr.occurrence_count >= threshold:
+            effective_count = self._effective_failure_count(fr)
+            if similarity >= 0.3 and effective_count >= threshold:
                 blocked.append({
                     'step': fr.failed_step,
                     'category': fr.failure_category,
-                    'count': fr.occurrence_count,
+                    'count': effective_count,
                     'recovery': fr.recovery_that_worked,
                 })
         return blocked

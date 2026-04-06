@@ -2226,23 +2226,27 @@ class AgentState:
 # ── Graceful shutdown ─────────────────────────────────────────────────────────
 
 def _graceful_shutdown(agent):
-    """Корректное завершение: остановка loop, сохранение памяти."""
-    try:
-        agent.stop_loop()
-    except (RuntimeError, OSError, AttributeError):
-        pass
-    brain = agent.components.get("persistent_brain")
-    if brain:
-        try:
-            brain.stop()  # sets _running=False + final save()
-        except (OSError, RuntimeError) as e:
-            print(f"[shutdown] Ошибка при сохранении памяти: {e}")
+    """Корректное завершение: сначала proactive_mind, потом loop, потом brain."""
+    # 1. Сначала останавливаем proactive_mind — иначе он увидит
+    #    «цель без активного цикла» и запустит новый цикл после stop_loop().
     mind = agent.components.get("proactive_mind")
     if mind:
         try:
             mind.stop()
         except (RuntimeError, AttributeError):
             pass
+    # 2. Теперь безопасно останавливаем loop
+    try:
+        agent.stop_loop()
+    except (RuntimeError, OSError, AttributeError):
+        pass
+    # 3. Сохраняем память
+    brain = agent.components.get("persistent_brain")
+    if brain:
+        try:
+            brain.stop()  # sets _running=False + final save()
+        except (OSError, RuntimeError) as e:
+            print(f"[shutdown] Ошибка при сохранении памяти: {e}")
 
 
 # ── CLI точка входа ───────────────────────────────────────────────────────────

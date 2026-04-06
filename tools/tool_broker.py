@@ -248,9 +248,6 @@ class ToolBroker:
             trace_id=trace_id,
         )
 
-        # Pydantic contract validation (§5 formal_contracts_spec)
-        self._validate_request_contract(req)
-
         with self._lock:
             self._stats['total'] += 1
 
@@ -278,6 +275,11 @@ class ToolBroker:
             raise ApprovalRequiredError(
                 f"Dangerous tool '{tool_name}' requires approval token"
             )
+
+        # Pydantic contract validation (§5 formal_contracts_spec)
+        # Выполняем после проверки approval_missing, чтобы не засорять лог
+        # ожидаемым CONTRACT WARNING в auto-approve сценарии.
+        self._validate_request_contract(req)
 
         if risk_class == 'dangerous' and approval_token is not None:
             if self._approval_service is not None:
@@ -362,21 +364,75 @@ class ToolBroker:
             BrokerError при deny.
             KeyError если tool не найден.
         """
-        response = self.request(
-            task_id=task_id or f"task_{uuid.uuid4().hex[:8]}",
-            step_id=step_id or f"step_{uuid.uuid4().hex[:8]}",
-            worker_id=worker_id,
-            tool_name=tool_name,
-            parameters=kwargs,
-            approval_token=approval_token,
-            trace_id=trace_id,
-        )
+        task = task_id or f"task_{uuid.uuid4().hex[:8]}"
+        step = step_id or f"step_{uuid.uuid4().hex[:8]}"
+
+        try:
+            response = self.request(
+                task_id=task,
+                step_id=step,
+                worker_id=worker_id,
+                tool_name=tool_name,
+                parameters=kwargs,
+                approval_token=approval_token,
+                trace_id=trace_id,
+            )
+        except ApprovalRequiredError:
+            # Совместимость для legacy-вызовов broker.use(...):
+            # если dangerous tool вызван без токена, пробуем запросить approval token
+            # через ApprovalService (auto_approve/callback/interactive), затем повторяем.
+            token = self._issue_approval_token_for_use(
+                task_id=task,
+                step_id=step,
+                worker_id=worker_id,
+                tool_name=tool_name,
+                parameters=kwargs,
+            )
+            if token is None:
+                raise
+            response = self.request(
+                task_id=task,
+                step_id=step,
+                worker_id=worker_id,
+                tool_name=tool_name,
+                parameters=kwargs,
+                approval_token=token,
+                trace_id=trace_id,
+            )
 
         if response.status == 'error' and response.error:
             # Восстанавливаем оригинальное исключение для совместимости
             raise RuntimeError(response.error)
 
         return response.structured_result
+
+    def _issue_approval_token_for_use(
+        self,
+        *,
+        task_id: str,
+        step_id: str,
+        worker_id: str,
+        tool_name: str,
+        parameters: dict,
+    ):
+        """Запрашивает approval token для legacy broker.use() dangerous-вызовов."""
+        svc = self._approval_service
+        if svc is None:
+            return None
+        try:
+            req = svc.create_request(
+                task_id=task_id,
+                step_id=step_id,
+                action_type=tool_name,
+                parameters=parameters or {},
+                risk_class='dangerous',
+                summary=f'auto-approve: {tool_name} for {worker_id}',
+                impact_scope={'tool': tool_name},
+            )
+            return svc.request_and_issue(req, subject=worker_id)
+        except Exception as exc:
+            self._log(f"[broker] approval auto-issue failed: {type(exc).__name__}: {exc}")
+            return None
 
     # ── Capability management ─────────────────────────────────────────────────
 

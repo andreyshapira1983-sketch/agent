@@ -333,6 +333,20 @@ class TestUseProxy(unittest.TestCase):
         with self.assertRaises(CapabilityDeniedError):
             broker.use('terminal', worker_id='researcher')
 
+    def test_use_dangerous_auto_issues_token(self):
+        svc = ApprovalService(
+            human_approval=HumanApprovalLayer(mode='auto_approve'),
+            signing_key='broker-test-key',
+            default_ttl=60.0,
+        )
+        broker = _make_broker(approval_service=svc)
+        result = broker.use(
+            'terminal',
+            worker_id='coder',
+            command='echo hello',
+        )
+        self.assertEqual(result['tool'], 'terminal')
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Statistics & helpers

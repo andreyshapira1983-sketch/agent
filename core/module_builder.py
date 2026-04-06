@@ -185,7 +185,7 @@ class ModuleBuilder:
         "   - Не переименовывай существующие методы и не меняй их сигнатуры\n"
         "\n5. ИМПОРТЫ (EXECUTOR LAYER — модуль выполняется ВНЕ sandbox):\n"
         "   - Стандартные (разрешены): os, sys, re, json, time, pathlib, collections, itertools, typing, datetime, math, shutil, hashlib, csv, io, logging\n"
-        "   - Установленные: psutil, numpy, pandas\n"
+        "   - Установленные: psutil, numpy\n"
         "   - ЗАПРЕЩЕНЫ: subprocess, socket, http, urllib (кроме urllib.parse), requests, pickle, threading, multiprocessing, importlib\n"
         "   - ЗАПРЕЩЕНЫ: import main, import agent, import core, import execution и любые внутренние модули агента\n"
         "   - Не выдумывай import для несуществующих пакетов\n"
@@ -732,6 +732,9 @@ class ModuleBuilder:
             f"os.chdir({self.working_dir!r})\n"
             "import importlib.util\n"
             f"spec = importlib.util.spec_from_file_location('_rsmoke.{name}', {file_path!r})\n"
+            "if spec is None or spec.loader is None:\n"
+            "    print(json.dumps({'ok': False, 'error': 'spec_is_none: cannot load module'}))\n"
+            "    sys.exit(0)\n"
             "mod = importlib.util.module_from_spec(spec)\n"
             "spec.loader.exec_module(mod)\n"
             f"cls = getattr(mod, {class_name!r})\n"
@@ -830,7 +833,7 @@ class ModuleBuilder:
         # stdlib — FS/OS (разрешены в EXECUTOR layer)
         'os', 'sys', 'pathlib', 'shutil', 'glob', 'fnmatch', 'tempfile',
         # установленные
-        'psutil', 'numpy', 'pandas', 'matplotlib',
+        'psutil', 'numpy', 'matplotlib',
         # внутренние агента — разрешены для build_module
         'agents', 'tools',
     })

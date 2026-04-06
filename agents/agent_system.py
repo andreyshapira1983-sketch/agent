@@ -300,8 +300,9 @@ class PlanningAgent(BaseAgent):
                         "Используй ТОЛЬКО имена файлов без пути: open('log.txt'), READ: log.txt.\n"
                         "11. КРИТИЧНО: для WRITE с .py/.js/.ts/.sh/.bat файлами — CONTENT "
                         "ОБЯЗАН содержать ПОЛНЫЙ рабочий исходный код целиком. "
-                        "ЗАПРЕЩЕНО: 'код выше', 'см. выше', заглушки, описания, пустые блоки, "
-                        "ссылки на другие части ответа. Весь код — прямо в CONTENT.\n"
+                        "Нормальный модуль = 50-300 строк (1000-10000+ символов), а не 10 строк. "
+                        "ЗАПРЕЩЕНО: 'код выше', 'см. выше', заглушки, описания, пустые блоки, pass, TODO, '...'. "
+                        "Файлы короче 200 символов АВТОМАТИЧЕСКИ ОТКЛОНЯЮТСЯ. Весь код — прямо в CONTENT.\n"
                         "12. ЗАПРЕЩЕНО: import subprocess внутри ```python блоков — "
                         "заблокировано системой безопасности. "
                         "Для команд используй ```bash. Для системных данных — psutil (разрешён).\n"
@@ -429,6 +430,112 @@ class CommunicationAgent(BaseAgent):
         return outcome
 
 
+# ── Inter-Agent Communication Bus ─────────────────────────────────────────────
+
+import time as _time
+import uuid as _uuid
+import threading as _threading
+from collections import deque as _deque
+
+
+class AgentMessage:
+    """Единица обмена между агентами."""
+
+    __slots__ = ('msg_id', 'sender', 'recipient', 'content', 'msg_type',
+                 'reply_to', 'timestamp')
+
+    def __init__(self, sender: str, recipient: str, content,
+                 msg_type: str = 'info', reply_to: str | None = None):
+        self.msg_id = str(_uuid.uuid4())[:8]
+        self.sender = sender
+        self.recipient = recipient
+        self.content = content
+        self.msg_type = msg_type        # info | request | result | error
+        self.reply_to = reply_to
+        self.timestamp = _time.time()
+
+    def to_dict(self) -> dict:
+        return {
+            'msg_id': self.msg_id, 'sender': self.sender,
+            'recipient': self.recipient, 'content': self.content,
+            'msg_type': self.msg_type, 'reply_to': self.reply_to,
+        }
+
+
+class MessageBus:
+    """
+    Шина обмена сообщениями между агентами (Слой 4 — inter-agent communication).
+
+    Каждый агент имеет именованную почту (mailbox).
+    Шина также хранит shared blackboard — общую доску, куда агенты могут
+    постить промежуточные результаты для всех.
+    """
+
+    MAX_MAILBOX = 200        # макс. сообщений на агента
+    MAX_BLACKBOARD = 100     # макс. записей на доске
+
+    def __init__(self):
+        self._mailboxes: dict[str, _deque[AgentMessage]] = {}
+        self._blackboard: _deque[dict] = _deque(maxlen=self.MAX_BLACKBOARD)
+        self._lock = _threading.Lock()
+
+    # ── Почта ──
+
+    def send(self, message: AgentMessage):
+        """Отправить сообщение конкретному агенту."""
+        with self._lock:
+            box = self._mailboxes.setdefault(message.recipient,
+                                             _deque(maxlen=self.MAX_MAILBOX))
+            box.append(message)
+
+    def receive(self, agent_name: str, limit: int = 10) -> list[AgentMessage]:
+        """Забрать входящие сообщения для агента (FIFO)."""
+        with self._lock:
+            box = self._mailboxes.get(agent_name)
+            if not box:
+                return []
+            msgs = []
+            for _ in range(min(limit, len(box))):
+                msgs.append(box.popleft())
+            return msgs
+
+    def peek(self, agent_name: str) -> int:
+        """Количество непрочитанных сообщений."""
+        with self._lock:
+            box = self._mailboxes.get(agent_name)
+            return len(box) if box else 0
+
+    # ── Blackboard: общая доска для всех агентов ──
+
+    def post_to_blackboard(self, agent_name: str, tag: str, data):
+        """Опубликовать промежуточный результат на общей доске."""
+        with self._lock:
+            self._blackboard.append({
+                'posted_by': agent_name,
+                'tag': tag,
+                'data': data,
+                'timestamp': _time.time(),
+            })
+
+    def read_blackboard(self, tag: str | None = None, limit: int = 20) -> list[dict]:
+        """Прочитать записи с доски (опционально по тегу)."""
+        with self._lock:
+            entries = list(self._blackboard)
+        if tag:
+            entries = [e for e in entries if e.get('tag') == tag]
+        return entries[-limit:]
+
+    def clear_blackboard(self, tag: str | None = None):
+        """Очистить доску (или только записи с тегом)."""
+        with self._lock:
+            if tag is None:
+                self._blackboard.clear()
+            else:
+                keep = [e for e in self._blackboard if e.get('tag') != tag]
+                self._blackboard.clear()
+                self._blackboard.extend(keep)
+
+
 # ── Manager Agent ─────────────────────────────────────────────────────────────
 
 class ManagerAgent(BaseAgent):
@@ -437,13 +544,24 @@ class ManagerAgent(BaseAgent):
 
     Принимает задачу → определяет нужную роль → делегирует агенту → возвращает результат.
     Управляет реестром агентов, очередью задач и агрегацией результатов.
+
+    Расширенные возможности:
+        - Мульти-агентная делегация: одна цель → несколько подзадач разным агентам
+        - Параллельное выполнение: независимые подзадачи выполняются одновременно
+        - Агрегация результатов: объединение ответов нескольких агентов
+        - Inter-agent communication: агенты обмениваются сообщениями через MessageBus
+        - Blackboard: общая доска промежуточных результатов
     """
+
+    MAX_PARALLEL_AGENTS = 4       # макс. параллельных агентов
+    AGENT_TIMEOUT_SEC = 120       # таймаут исполнения одного агента
 
     def __init__(self, cognitive_core=None, tools=None, governance=None):
         super().__init__(AgentRole.MANAGER, cognitive_core, tools, name='manager')
         self._agents: dict[str, BaseAgent] = {}
         self._task_queue: list = []
         self.governance = governance
+        self.message_bus = MessageBus()
 
     def register(self, agent: BaseAgent):
         """Регистрирует агента в системе."""
@@ -459,66 +577,401 @@ class ManagerAgent(BaseAgent):
     def list_agents(self) -> list:
         return [{'name': a.name, 'role': a.role.value} for a in self._agents.values()]
 
-    def handle(self, task: dict) -> dict:
-        """
-        Координирует выполнение задачи:
-        1. Определяет роль (role) из задачи или через Cognitive Core
-        2. Делегирует нужному агенту
-        3. Возвращает результат
-        """
+    # ── Определение роли для задачи ──
+
+    def _resolve_role(self, task: dict) -> str:
+        """Определяет имя агента для задачи: из task['role'] или через Cognitive Core."""
         role = task.get('role')
 
-        # Если роль не указана — Cognitive Core выбирает агента
         if not role and self.cognitive_core:
             goal = task.get('goal', '')
             decision = self.cognitive_core.decision_making(
                 options=list(self._agents.keys()),
                 context_note=f"Выбери наиболее подходящего агента для задачи: {goal}",
             )
-            # Простейший парсинг: ищем имя агента в ответе
             for name in self._agents:
                 if name in str(decision).lower():
                     role = name
                     break
 
-        role_name = ''
         if isinstance(role, AgentRole):
-            role_name = role.value
-        elif isinstance(role, str):
-            role_name = role.strip().lower()
+            return role.value
+        if isinstance(role, str):
+            return role.strip().lower()
+        return 'communication' if 'communication' in self._agents else ''
 
-        if not role_name:
-            # Fail-safe: если роль не определилась, направляем в communication.
-            role_name = 'communication' if 'communication' in self._agents else ''
+    # ── Governance gate ──
 
+    def _check_governance(self, role_name: str, task: dict) -> dict | None:
+        """Проверяет задачу через Governance. Возвращает блокирующий ответ или None."""
+        if not self.governance:
+            return None
+        try:
+            gov = self.governance.check(
+                f"agent_task: {role_name}: {str(task.get('goal', ''))[:200]}",
+                context={'agent': role_name, 'task': str(task)[:300]},
+            )
+            if not gov.get('allowed', True):
+                return {
+                    'result': f"Governance заблокировал задачу для '{role_name}': "
+                              f"{gov.get('reason', 'запрещено политикой')}",
+                    'status': 'blocked',
+                    'agent': 'manager',
+                }
+        except Exception:
+            pass
+        return None
+
+    # ── Одиночная делегация (обратная совместимость) ──
+
+    def handle(self, task: dict) -> dict:
+        """
+        Координирует выполнение задачи:
+        1. Определяет роль (role) из задачи или через Cognitive Core
+        2. Делегирует нужному агенту
+        3. Возвращает результат
+
+        Если task содержит 'subtasks' — запускает мульти-агентную координацию.
+        """
+        # Мульти-агентный режим
+        if 'subtasks' in task:
+            return self.coordinate(task['subtasks'],
+                                   aggregate_goal=task.get('goal', ''))
+
+        role_name = self._resolve_role(task)
         agent = self._agents.get(role_name)
         if not agent:
             return {
-                'result': f"Агент '{role_name or role}' не найден. Доступны: {list(self._agents.keys())}",
+                'result': f"Агент '{role_name}' не найден. Доступны: {list(self._agents.keys())}",
                 'status': 'failed',
                 'agent': 'manager',
             }
 
-        # ── Governance gate: проверяем задачу до передачи агенту ──
-        if self.governance:
-            try:
-                gov = self.governance.check(
-                    f"agent_task: {role_name}: {str(task.get('goal', ''))[:200]}",
-                    context={'agent': role_name, 'task': str(task)[:300]},
-                )
-                if not gov.get('allowed', True):
-                    return {
-                        'result': f"Governance заблокировал задачу для '{role_name}': "
-                                  f"{gov.get('reason', 'запрещено политикой')}",
-                        'status': 'blocked',
-                        'agent': 'manager',
-                    }
-            except Exception:
-                pass  # governance не должен ломать выполнение
+        blocked = self._check_governance(role_name, task)
+        if blocked:
+            return blocked
 
         result = agent.handle(task)
         self._record(task, result)
         return result
+
+    # ── Мульти-агентная координация ──────────────────────────────────────────
+
+    def coordinate(self, subtasks: list[dict],
+                   aggregate_goal: str = '') -> dict:
+        """
+        Мульти-агентная координация.
+
+        Принимает список подзадач вида:
+            [
+                {'goal': '...', 'role': 'research', 'depends_on': []},
+                {'goal': '...', 'role': 'coding',   'depends_on': [0]},
+                {'goal': '...', 'role': 'analysis'},
+            ]
+
+        depends_on содержит индексы подзадач, от которых зависит текущая.
+        Независимые подзадачи выполняются параллельно (до MAX_PARALLEL_AGENTS).
+        Результаты зависимых подзадач передаются через blackboard.
+
+        Returns:
+            {'result': aggregated, 'status': 'success'|'partial'|'failed',
+             'agent': 'manager', 'subtask_results': [...]}
+        """
+        n = len(subtasks)
+        if n == 0:
+            return {'result': 'Нет подзадач', 'status': 'failed', 'agent': 'manager'}
+
+        results: list[dict | None] = [None] * n
+        completed = [False] * n
+        errors: list[str] = []
+
+        # Пометить зависимости
+        for i, st in enumerate(subtasks):
+            st.setdefault('depends_on', [])
+            st['_idx'] = i
+
+        def _ready(idx: int) -> bool:
+            deps = subtasks[idx].get('depends_on', [])
+            return all(completed[d] for d in deps if 0 <= d < n)
+
+        remaining = set(range(n))
+        max_waves = n + 1  # защита от бесконечного цикла
+
+        for _wave in range(max_waves):
+            if not remaining:
+                break
+
+            # Собираем готовые к выполнению
+            batch = [i for i in sorted(remaining) if _ready(i)]
+            if not batch:
+                # Все оставшиеся заблокированы нерешёнными зависимостями
+                for i in remaining:
+                    errors.append(f"Подзадача #{i} заблокирована невыполненной зависимостью")
+                break
+
+            # Ограничиваем параллелизм
+            batch = batch[:self.MAX_PARALLEL_AGENTS]
+
+            if len(batch) == 1:
+                # Один агент — выполняем синхронно (без лишних потоков)
+                idx = batch[0]
+                results[idx] = self._execute_subtask(subtasks[idx], results)
+                completed[idx] = True
+                remaining.discard(idx)
+            else:
+                # Параллельное выполнение
+                threads: list[_threading.Thread] = []
+                thread_results: dict[int, dict] = {}
+                par_lock = _threading.Lock()
+
+                def _make_runner(tr: dict, lk: _threading.Lock):
+                    def _run(idx: int):
+                        res = self._execute_subtask(subtasks[idx], results)
+                        with lk:
+                            tr[idx] = res
+                    return _run
+
+                runner = _make_runner(thread_results, par_lock)
+
+                for idx in batch:
+                    t = _threading.Thread(target=runner, args=(idx,), daemon=True)
+                    threads.append(t)
+                    t.start()
+
+                for t in threads:
+                    t.join(timeout=self.AGENT_TIMEOUT_SEC)
+
+                for idx in batch:
+                    if idx in thread_results:
+                        results[idx] = thread_results[idx]
+                        completed[idx] = True
+                    else:
+                        results[idx] = {
+                            'result': f'Таймаут ({self.AGENT_TIMEOUT_SEC}с)',
+                            'status': 'timeout',
+                            'agent': subtasks[idx].get('role', '?'),
+                        }
+                        errors.append(f"Подзадача #{idx}: таймаут")
+                        completed[idx] = True  # не блокируем цепочку
+                    remaining.discard(idx)
+
+        # Агрегация
+        aggregated = self._aggregate_results(results, aggregate_goal)
+        success_count = sum(1 for r in results if r and r.get('status') == 'success')
+
+        if success_count == n:
+            status = 'success'
+        elif success_count > 0:
+            status = 'partial'
+        else:
+            status = 'failed'
+
+        outcome = {
+            'result': aggregated,
+            'status': status,
+            'agent': 'manager',
+            'subtask_results': [r.get('result') if r else None for r in results],
+            'errors': errors if errors else None,
+        }
+        self._record({'subtasks': subtasks, 'goal': aggregate_goal}, outcome)
+        return outcome
+
+    def _execute_subtask(self, subtask: dict, all_results: list) -> dict:
+        """Выполняет одну подзадачу, обогащая контекст результатами зависимостей."""
+        role_name = self._resolve_role(subtask)
+        agent = self._agents.get(role_name)
+        if not agent:
+            return {
+                'result': f"Агент '{role_name}' не найден",
+                'status': 'failed',
+                'agent': 'manager',
+            }
+
+        blocked = self._check_governance(role_name, subtask)
+        if blocked:
+            return blocked
+
+        # Собираем контекст из зависимостей
+        deps = subtask.get('depends_on', [])
+        dep_context = []
+        for d in deps:
+            if 0 <= d < len(all_results) and all_results[d]:
+                dep_result = all_results[d].get('result', '')
+                dep_agent = all_results[d].get('agent', '?')
+                dep_context.append(f"[{dep_agent}]: {str(dep_result)[:500]}")
+
+        # Обогащаем задачу контекстом зависимостей
+        enriched = dict(subtask)
+        if dep_context:
+            existing_ctx = enriched.get('context', '')
+            dep_text = '\n'.join(dep_context)
+            enriched['context'] = (
+                f"{existing_ctx}\n\nРезультаты предыдущих агентов:\n{dep_text}"
+                if existing_ctx else
+                f"Результаты предыдущих агентов:\n{dep_text}"
+            )
+            enriched['goal'] = (
+                f"{enriched.get('goal', '')}\n\n"
+                f"Используй результаты предыдущих этапов:\n{dep_text}"
+            )
+
+        # Публикуем результат на blackboard для других агентов
+        try:
+            result = agent.handle(enriched)
+        except Exception as e:
+            result = {'result': f'Ошибка: {e}', 'status': 'failed', 'agent': role_name}
+
+        idx = subtask.get('_idx', -1)
+        self.message_bus.post_to_blackboard(
+            agent_name=role_name,
+            tag=f'subtask_{idx}',
+            data={'result': result.get('result', ''), 'status': result.get('status')},
+        )
+        return result
+
+    def _aggregate_results(self, results: list, goal: str) -> str:
+        """Агрегирует результаты нескольких агентов."""
+        parts = []
+        for i, r in enumerate(results):
+            if r is None:
+                continue
+            agent_name = r.get('agent', '?')
+            status = r.get('status', '?')
+            text = str(r.get('result', ''))[:1000]
+            parts.append(f"[{agent_name} #{i} — {status}]: {text}")
+
+        if not parts:
+            return 'Ни одна подзадача не выполнена'
+
+        # Если есть Cognitive Core — просим синтезировать
+        if self.cognitive_core and goal:
+            combined = '\n\n'.join(parts)
+            try:
+                synthesis = self.cognitive_core.reasoning(
+                    f"Объедини результаты работы нескольких агентов в единый ответ.\n"
+                    f"Цель: {goal}\n\n"
+                    f"Результаты агентов:\n{combined}\n\n"
+                    f"Дай единый чёткий ответ, без повторов."
+                )
+                return synthesis
+            except Exception:
+                pass
+
+        return '\n\n'.join(parts)
+
+    # ── Запрос помощи одного агента у другого (inter-agent collaboration) ──
+
+    def request_help(self, from_agent: str, to_agent: str,
+                     request: str, context: str = '') -> dict:
+        """
+        Агент from_agent просит помощи у to_agent.
+
+        Используется когда агент внутри handle() понимает, что ему нужна
+        информация или действие от другого агента.
+
+        Returns:
+            Результат работы to_agent (dict).
+        """
+        target = self._agents.get(to_agent)
+        if not target:
+            return {
+                'result': f"Агент '{to_agent}' не найден для помощи",
+                'status': 'failed',
+                'agent': 'manager',
+            }
+
+        # Отправляем сообщение в шину
+        msg = AgentMessage(
+            sender=from_agent,
+            recipient=to_agent,
+            content=request,
+            msg_type='request',
+        )
+        self.message_bus.send(msg)
+
+        # Выполняем задачу
+        help_task = {'goal': request, 'context': context, 'requested_by': from_agent}
+        result = target.handle(help_task)
+
+        # Ответное сообщение
+        reply = AgentMessage(
+            sender=to_agent,
+            recipient=from_agent,
+            content=result.get('result', ''),
+            msg_type='result',
+            reply_to=msg.msg_id,
+        )
+        self.message_bus.send(reply)
+
+        return result
+
+    # ── Декомпозиция цели в подзадачи через Cognitive Core ──
+
+    def decompose_and_coordinate(self, goal: str) -> dict:
+        """
+        Автоматическая декомпозиция цели на подзадачи для разных агентов.
+
+        1. Cognitive Core разбивает цель на подзадачи с ролями
+        2. Manager координирует параллельное исполнение
+        3. Результаты агрегируются
+
+        Если Cognitive Core недоступен — fallback на обычный handle().
+        """
+        if not self.cognitive_core:
+            return self.handle({'goal': goal})
+
+        agents_desc = ', '.join(
+            f"{a.name} ({a.role.value})" for a in self._agents.values()
+        )
+        decomposition = self.cognitive_core.reasoning(
+            f"Разбей задачу на подзадачи для разных агентов.\n"
+            f"Доступные агенты: {agents_desc}\n"
+            f"Задача: {goal}\n\n"
+            f"Ответь СТРОГО в формате (по одной подзадаче на строку):\n"
+            f"ROLE: goal_text | depends_on: N,M\n"
+            f"Пример:\n"
+            f"research: Найти информацию о Python asyncio\n"
+            f"coding: Написать пример кода | depends_on: 0\n"
+            f"analysis: Проанализировать производительность | depends_on: 1\n"
+        )
+
+        subtasks = self._parse_decomposition(str(decomposition))
+
+        if not subtasks:
+            # Не удалось распарсить — fallback
+            return self.handle({'goal': goal})
+
+        return self.coordinate(subtasks, aggregate_goal=goal)
+
+    def _parse_decomposition(self, text: str) -> list[dict]:
+        """Парсит текстовую декомпозицию в список подзадач."""
+        import re
+        lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
+        subtasks = []
+        for line in lines:
+            # формат: role: goal | depends_on: 0,1
+            m = re.match(r'^(\w+)\s*:\s*(.+?)(?:\|\s*depends_on\s*:\s*([\d,\s]+))?$',
+                         line, re.IGNORECASE)
+            if not m:
+                continue
+            role = m.group(1).strip().lower()
+            goal_text = m.group(2).strip()
+            deps_str = m.group(3)
+            deps = []
+            if deps_str:
+                for d in deps_str.split(','):
+                    d = d.strip()
+                    if d.isdigit():
+                        deps.append(int(d))
+            if role in self._agents:
+                subtasks.append({
+                    'goal': goal_text,
+                    'role': role,
+                    'depends_on': deps,
+                })
+        return subtasks
+
+    # ── Очередь задач (обратная совместимость) ──
 
     def run_queue(self) -> list:
         """Последовательно исполняет все задачи из очереди."""

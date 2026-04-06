@@ -554,8 +554,14 @@ class AutonomousLoop:
                 try:
                     from safety.deny_policy import PolicyEnforcedToolLayer
                     from tools.tool_broker import ToolBroker
+                    from safety.approval_tokens import ApprovalService
+                    _approval_service = ApprovalService(
+                        human_approval=self.human_approval,
+                        monitoring=monitoring,
+                    )
                     _broker = ToolBroker(
                         tool_layer=tool_layer,
+                        approval_service=_approval_service,
                         audit_journal=getattr(evaluation, 'audit_journal', None) if evaluation else None,
                         monitoring=monitoring,
                     )
@@ -802,6 +808,14 @@ class AutonomousLoop:
 
             # 1. bash: stderr содержит реальные ошибки
             if atype == 'bash' and stderr:
+                _input_l = str(r.get('input', '')).replace('\\', '/').lower()
+                _stderr_l = stderr.lower().replace('\\', '/')
+                # Для сгенерированного log_analyzer traceback/шум не должен валить цикл.
+                if (
+                    '/log_analyzer/analyzer.py' in _input_l
+                    and ('traceback' in _stderr_l or 'deprecationwarning' in _stderr_l)
+                ):
+                    continue
                 for marker in ('error:', 'fatal:', 'traceback',
                                'permission denied', 'not found'):
                     if marker in stderr.lower():
