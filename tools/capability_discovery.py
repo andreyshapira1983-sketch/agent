@@ -5,7 +5,15 @@
 
 from __future__ import annotations
 
+import importlib
+import importlib.metadata as _meta
+import importlib.util
+import re
+import subprocess
+import sys
 import time
+import urllib.request
+import json as _json
 
 
 class DiscoveredCapability:
@@ -33,7 +41,23 @@ class DiscoveredCapability:
             'tags': self.tags,
             'status': self.status,
             'score': self.score,
+            'discovered_at': self.discovered_at,
         }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> 'DiscoveredCapability':
+        cap = cls(
+            name=d['name'],
+            description=d.get('description', ''),
+            capability_type=d.get('capability_type', 'library'),
+            source=d.get('source'),
+            how_to_use=d.get('how_to_use'),
+            tags=d.get('tags', []),
+        )
+        cap.status = d.get('status', 'discovered')
+        cap.score = d.get('score')
+        cap.discovered_at = d.get('discovered_at', time.time())
+        return cap
 
 
 class CapabilityDiscovery:
@@ -89,6 +113,19 @@ class CapabilityDiscovery:
         )
 
         caps = self._parse_library_suggestions(str(raw), topic)
+
+        # Верификация: проверяем существование на PyPI
+        verified: list[DiscoveredCapability] = []
+        for cap in caps:
+            pypi = self.verify_on_pypi(cap.name)
+            if pypi:
+                cap.description = pypi.get('summary') or cap.description
+                cap.source = 'PyPI (verified)'
+                verified.append(cap)
+            else:
+                self._log(f"Пакет '{cap.name}' не найден на PyPI — пропущен")
+        caps = verified
+
         for cap in caps:
             self._discovered[cap.name] = cap
         self._log(f"Обнаружено {len(caps)} библиотек для '{topic}'")
@@ -120,24 +157,27 @@ class CapabilityDiscovery:
         return caps[:n]
 
     def scan_installed(self) -> list[DiscoveredCapability]:
-        """Сканирует установленные Python-пакеты и регистрирует их как возможности."""
+        """Сканирует все установленные Python-пакеты с описанием из metadata."""
         try:
-            import importlib.metadata as meta
-            packages = [d.metadata['Name'] for d in meta.distributions()]
+            distributions = list(_meta.distributions())
         except Exception:
             return []
 
         caps = []
-        for pkg in packages[:50]:   # первые 50 для примера
-            if pkg.lower() in self._discovered:
+        for dist in distributions:
+            name = (dist.metadata.get('Name') or '').strip()
+            if not name or name.lower() in self._discovered:
                 continue
+            summary = (dist.metadata.get('Summary') or '').strip()
+            desc = summary if summary else f"Установленный пакет: {name}"
             cap = DiscoveredCapability(
-                name=pkg.lower(),
-                description=f"Установленный пакет: {pkg}",
+                name=name.lower(),
+                description=desc[:300],
                 capability_type='library',
                 source='local',
                 tags=['installed'],
             )
+            cap.status = 'accepted'  # уже установлен
             self._discovered[cap.name] = cap
             caps.append(cap)
         self._log(f"Просканировано {len(caps)} установленных пакетов")
@@ -168,7 +208,6 @@ class CapabilityDiscovery:
             f"Критерии: полезность для агента, безопасность, простота интеграции.\n"
             f"Ответь одним числом от 0 до 1."
         )
-        import re
         m = re.search(r'([01]?\.\d+|\d)', str(raw))
         score = float(m.group(1)) if m else 0.5
         cap.score = max(0.0, min(1.0, score))
@@ -208,9 +247,13 @@ class CapabilityDiscovery:
         cap.status = 'accepted'
         self._accepted.append(name)
 
-        # Регистрируем в Tool Layer если возможно
-        if auto_register and self.tools and cap.how_to_use:
-            self._log(f"Возможность '{name}' принята и добавлена в очередь Tool Layer")
+        # Устанавливаем пакет если library и ещё не установлен
+        if cap.capability_type == 'library' and cap.source != 'local':
+            self._try_install_package(cap.name)
+
+        # Реально регистрируем в Tool Layer
+        if auto_register and self.tools:
+            self._auto_register_tool(cap)
 
         self._log(f"Возможность принята: '{name}'")
         return True
@@ -294,7 +337,6 @@ class CapabilityDiscovery:
         Returns:
             Список строк-описаний пробелов. Пустой список = пробелов нет.
         """
-        import importlib.util
         gaps: list[str] = []
 
         # 1. Недостающие обязательные пакеты (самые конкретные пробелы)
@@ -357,10 +399,6 @@ class CapabilityDiscovery:
         Returns:
             {'installed': [...], 'already_ok': [...], 'failed': [...]}
         """
-        import importlib
-        import subprocess
-        import sys
-
         result: dict[str, list[str]] = {'installed': [], 'already_ok': [], 'failed': []}
 
         for import_name, pip_name in self.REQUIRED_PACKAGES:
@@ -402,7 +440,6 @@ class CapabilityDiscovery:
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _parse_library_suggestions(self, raw: str, topic: str) -> list[DiscoveredCapability]:
-        import re
         caps = []
         blocks = re.split(r'\n(?=\d+[.)]\s+|\bНАЗВАНИЕ\b)', raw)
         for block in blocks:
@@ -421,7 +458,6 @@ class CapabilityDiscovery:
         return caps
 
     def _parse_api_suggestions(self, raw: str, domain: str) -> list[DiscoveredCapability]:
-        import re
         caps = []
         blocks = re.split(r'\n(?=\d+[.)]\s+|\bНАЗВАНИЕ\b|\bAPI\b)', raw)
         for block in blocks:
@@ -455,13 +491,122 @@ class CapabilityDiscovery:
         else:
             print(f"[CapabilityDiscovery] {message}")
 
+    # ── PyPI верификация ──────────────────────────────────────────────────
+
+    def verify_on_pypi(self, package_name: str, timeout: float = 5.0) -> dict | None:
+        """
+        Проверяет, что пакет реально существует на PyPI.
+
+        Returns:
+            dict с полями {name, version, summary, home_page} или None.
+        """
+        url = f"https://pypi.org/pypi/{package_name}/json"
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'agent/1.0'})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = _json.loads(resp.read())
+            info = data.get('info', {})
+            return {
+                'name': info.get('name', package_name),
+                'version': info.get('version', ''),
+                'summary': (info.get('summary') or '')[:300],
+                'home_page': info.get('home_page') or info.get('project_url', ''),
+            }
+        except Exception:
+            return None
+
+    # ── Автоустановка пакета ──────────────────────────────────────────────
+
+    def _try_install_package(self, pip_name: str) -> bool:
+        """Пытается установить пакет через pip."""
+        spec = importlib.util.find_spec(pip_name.split('-')[0].split('_')[0])
+        if spec is not None:
+            return True  # уже есть
+        try:
+            subprocess.run(
+                [sys.executable, '-m', 'pip', 'install', '--quiet', pip_name],
+                check=True, capture_output=True, timeout=120,
+            )
+            self._log(f"Установлен пакет: {pip_name}")
+            return True
+        except Exception as e:
+            self._log(f"Ошибка установки {pip_name}: {e}", level='error')
+            return False
+
+    # ── Автоматическая регистрация в ToolLayer ────────────────────────────
+
+    def _auto_register_tool(self, cap: DiscoveredCapability):
+        """
+        Создаёт runtime wrapper-инструмент из принятой возможности
+        и регистрирует его в ToolLayer.
+        """
+        if not self.tools:
+            return
+        if cap.name in [t for t in (self.tools.list() if hasattr(self.tools, 'list') else [])]:
+            return  # уже зарегистрирован
+
+        # Для библиотек — создаём PythonLibraryTool
+        if cap.capability_type == 'library':
+            tool = _LibraryWrapperTool(
+                name=f"lib_{cap.name}",
+                description=cap.description[:200],
+                package_name=cap.name,
+                how_to_use=cap.how_to_use or '',
+            )
+        elif cap.capability_type == 'api':
+            tool = _ApiWrapperTool(
+                name=f"api_{cap.name}",
+                description=cap.description[:200],
+                endpoint=cap.source or '',
+                how_to_use=cap.how_to_use or '',
+            )
+        else:
+            return  # skill/model — пока не auto-register
+
+        try:
+            self.tools.register(tool)
+            self._log(f"Зарегистрирован инструмент: {tool.name}")
+        except Exception as e:
+            self._log(f"Ошибка регистрации {tool.name}: {e}", level='error')
+
+    # ── Полная персистентность ────────────────────────────────────────────
+
     def export_state(self) -> dict:
-        """Возвращает состояние для персистентности."""
-        return dict(self._failure_log)
+        """Возвращает полное состояние для персистентности."""
+        return {
+            'failure_log': dict(self._failure_log),
+            'discovered': {n: c.to_dict() for n, c in self._discovered.items()},
+            'accepted': list(self._accepted),
+            'rejected': list(self._rejected),
+        }
 
     def import_state(self, data: dict):
         """Восстанавливает состояние из персистентного хранилища."""
-        for action_type, stats in data.items():
+        # Обратная совместимость: старый формат — просто failure_log
+        if data and not any(k in data for k in ('failure_log', 'discovered')):
+            # Старый формат: весь dict = failure_log
+            self._import_failure_log(data)
+            return
+
+        # Новый формат
+        self._import_failure_log(data.get('failure_log', {}))
+
+        for name, cap_dict in data.get('discovered', {}).items():
+            if name not in self._discovered:
+                try:
+                    self._discovered[name] = DiscoveredCapability.from_dict(cap_dict)
+                except (KeyError, TypeError):
+                    pass
+
+        for name in data.get('accepted', []):
+            if name not in self._accepted:
+                self._accepted.append(name)
+        for name in data.get('rejected', []):
+            if name not in self._rejected:
+                self._rejected.append(name)
+
+    def _import_failure_log(self, log_data: dict):
+        for action_type, stats in log_data.items():
             if action_type in self._failure_log:
                 self._failure_log[action_type]['success'] += stats.get('success', 0)
                 self._failure_log[action_type]['fail'] += stats.get('fail', 0)
@@ -470,3 +615,118 @@ class CapabilityDiscovery:
                     'success': stats.get('success', 0),
                     'fail': stats.get('fail', 0),
                 }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Runtime-wrapper инструменты для авто-подключённых возможностей
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class _DynamicBaseTool:
+    """Базовый класс-обёртка, совместимый с ToolLayer.register()."""
+
+    def __init__(self, name: str, description: str):
+        self.name = name
+        self.description = description
+        self._last_result = None
+
+    def run(self, *args, **kwargs) -> dict:
+        raise NotImplementedError
+
+    def __call__(self, *args, **kwargs):
+        result = self.run(*args, **kwargs)
+        self._last_result = result
+        return result
+
+    @property
+    def last_result(self):
+        return self._last_result
+
+
+class _LibraryWrapperTool(_DynamicBaseTool):
+    """
+    Обёртка для Python-библиотеки: позволяет LLM выполнять код
+    с помощью обнаруженной и принятой библиотеки.
+    """
+
+    def __init__(self, name: str, description: str, package_name: str,
+                 how_to_use: str = ''):
+        super().__init__(name, description)
+        self.package_name = package_name
+        self.how_to_use = how_to_use
+
+    def run(self, *args, code_snippet: str = '', **kwargs) -> dict:
+        """
+        Импортирует библиотеку и выполняет фрагмент кода.
+        Если code_snippet пуст — возвращает информацию о пакете.
+        """
+        if args:
+            code_snippet = str(args[0])
+        try:
+            mod = importlib.import_module(self.package_name.replace('-', '_'))
+        except ImportError as e:
+            return {'ok': False, 'error': f"Не удалось импортировать {self.package_name}: {e}"}
+
+        if not code_snippet:
+            attrs = [a for a in dir(mod) if not a.startswith('_')][:20]
+            return {
+                'ok': True,
+                'package': self.package_name,
+                'version': getattr(mod, '__version__', 'unknown'),
+                'public_attrs': attrs,
+                'how_to_use': self.how_to_use,
+            }
+
+        # Выполнение кода в изолированном namespace
+        ns = {'__builtins__': {}, self.package_name.replace('-', '_'): mod}
+        try:
+            exec(compile(code_snippet, '<capability>', 'exec'), ns)  # noqa: S102
+            result_var = ns.get('result', None)
+            return {'ok': True, 'result': str(result_var)[:2000] if result_var else 'executed'}
+        except Exception as e:
+            return {'ok': False, 'error': str(e)[:500]}
+
+
+class _ApiWrapperTool(_DynamicBaseTool):
+    """
+    Обёртка для обнаруженного API: выполняет HTTP-запросы
+    к принятому endpoint.
+    """
+
+    def __init__(self, name: str, description: str, endpoint: str,
+                 how_to_use: str = ''):
+        super().__init__(name, description)
+        self.endpoint = endpoint
+        self.how_to_use = how_to_use
+
+    def run(self, *args, path: str = '', method: str = 'GET',
+            params: dict | None = None, **kwargs) -> dict:
+        """
+        Выполняет HTTP-запрос к API.
+
+        Args:
+            path: путь, добавляемый к endpoint
+            method: GET или POST
+            params: параметры запроса (query string для GET, body для POST)
+        """
+        url = self.endpoint.rstrip('/') + '/' + path.lstrip('/') if path else self.endpoint
+        if not url.startswith(('http://', 'https://')):
+            return {'ok': False, 'error': f'Невалидный URL: {url}'}
+
+        try:
+            if method.upper() == 'POST' and params:
+                body = _json.dumps(params).encode('utf-8')
+                req = urllib.request.Request(
+                    url, data=body, method='POST',
+                    headers={'Content-Type': 'application/json', 'User-Agent': 'agent/1.0'},
+                )
+            else:
+                if params:
+                    from urllib.parse import urlencode
+                    url = f"{url}?{urlencode(params)}"
+                req = urllib.request.Request(url, headers={'User-Agent': 'agent/1.0'})
+
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = resp.read().decode('utf-8', errors='replace')[:5000]
+            return {'ok': True, 'status': resp.status, 'data': data}
+        except Exception as e:
+            return {'ok': False, 'error': str(e)[:500]}

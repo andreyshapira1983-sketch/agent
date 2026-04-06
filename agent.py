@@ -7,7 +7,7 @@ agent.py — Главный файл сборки автономного AI-аг
     3  Cognitive Core (OpenAI LLM)
     4  Agent System
     5  Tool Layer (terminal, fs, python, search, github, docker, db, browser)
-    6  OS Layer (встроен в Tool Layer)
+    6  OS Layer (выделенный модуль: файлы, процессы, пакеты, сеть, устройства, сервисы)
     7  Software Development (AST-анализ, генерация тестов, CI)
     8  Execution System
     9  Learning System
@@ -507,6 +507,22 @@ def build_agent(
         setattr(_py_tool, '_tool_layer', tools)
 
     # ════════════════════════════════════════════════════════════════════════
+    # СЛОЙ 6: Operating System Layer (файлы, процессы, пакеты, сеть, устройства)
+    # ════════════════════════════════════════════════════════════════════════
+    from environment.os_layer import OperatingSystemLayer
+    os_layer = OperatingSystemLayer(
+        tool_layer=tools,
+        hardware=None,          # будет подключен после СЛОЯ 44
+        monitoring=monitoring,
+        governance=None,        # будет подключен после СЛОЯ 21
+    )
+    monitoring.info(
+        f"OS Layer готов: {os_layer.get_os_info().platform.value} "
+        f"{os_layer.get_os_info().architecture}",
+        source="agent",
+    )
+
+    # ════════════════════════════════════════════════════════════════════════
     # СЛОЙ 4: Agent System
     # ════════════════════════════════════════════════════════════════════════
     from agents.agent_system import build_agent_system
@@ -590,6 +606,7 @@ def build_agent(
     knowledge.governance = governance  # VULN-FIX: governance gate на все записи в long-term
     # VULN-FIX: governance gate для мульти-агентной системы
     agent_system.governance = governance
+    os_layer.governance = governance  # Слой 6 — governance gate на OS-операции
 
     # ════════════════════════════════════════════════════════════════════════
     # СЛОЙ 42: Ethics
@@ -1042,6 +1059,7 @@ def build_agent(
     # ════════════════════════════════════════════════════════════════════════
     from hardware.hardware_layer import HardwareInteractionLayer
     hardware = HardwareInteractionLayer(monitoring=monitoring, poll_interval=60.0)
+    os_layer.hardware = hardware  # Слой 6 — подключаем аппаратные метрики
     # hardware.start_monitoring() перенесён в конец build_agent
 
     # ════════════════════════════════════════════════════════════════════════
@@ -1695,6 +1713,7 @@ def build_agent(
         # Environment
         "env_model":          env_model,
         "sandbox":            sandbox,
+        "os_layer":           os_layer,
 
         # Skills
         "skill_library":      skill_library,

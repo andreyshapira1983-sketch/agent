@@ -3725,6 +3725,15 @@ else:
                     category=cf.category.value,
                     signature=cf.signature_matched,
                 )
+                # ── Записываем в LLM Error Memory ───────
+                if self.persistent_brain:
+                    self.persistent_brain.record_llm_error(
+                        task=goal_str,
+                        error_type='cycle_error',
+                        what_went_wrong=str(err)[:300],
+                        correct_approach='',
+                        category=cf.category.value,
+                    )
                 # Новый тип ошибки = первое появление этой категории
                 if self.failure_tracker.consecutive_count(cf.category) == 1:
                     is_new_error_type = True
@@ -4165,6 +4174,15 @@ else:
                             failed_step=desc[:100],
                             category=ft,
                             recovery=action_taken,
+                        )
+                    # ── Обновляем LLM Error Memory: ошибка решена ───
+                    if self.persistent_brain and action_taken:
+                        self.persistent_brain.record_llm_error(
+                            task=str(self._goal or ''),
+                            error_type='cycle_error',
+                            what_went_wrong=desc,
+                            correct_approach=action_taken,
+                            category=ft,
                         )
                 else:
                     # Ремонт не удался → record в FTracker

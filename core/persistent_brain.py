@@ -54,10 +54,11 @@ class PersistentBrain:
     MAX_RELATIONS       = 50_000
     MAX_LEARNED         = 100_000
     MAX_SANDBOX_RUNS    = 50_000
+    MAX_LLM_ERRORS      = 50_000
 
     def __init__(
         self,
-        data_dir: str,
+        data_dir: str = ".agent_memory",
         knowledge=None,
         experience_replay=None,
         self_improvement=None,
@@ -104,6 +105,7 @@ class PersistentBrain:
 
         self._conversations: list[dict] = []
         self._lessons: list[dict] = []
+        self._llm_errors: list[dict] = []   # Память ошибок LLM
         self._evolution_log: list[dict] = []
         self._solver_cases: list[dict] = []
         self._exact_solver_journal: list[dict] = []
@@ -140,6 +142,7 @@ class PersistentBrain:
             self._load_knowledge()
             self._load_conversations()
             self._load_lessons()
+            self._load_llm_errors()
             self._load_solver_cases()
             self._load_exact_solver_journal()
             self._load_strategies()
@@ -172,6 +175,7 @@ class PersistentBrain:
                 f"{self._count_knowledge()} знаний, "
                 f"{len(self._conversations)} разговоров, "
                 f"{len(self._lessons)} уроков, "
+                f"{len(self._llm_errors)} ошибок LLM, "
                 f"загрузка #{self._stats['boot_count']}"
             )
             try:
@@ -194,6 +198,7 @@ class PersistentBrain:
             self._save_knowledge()
             self._save_conversations()
             self._save_lessons()
+            self._save_llm_errors()
             self._save_solver_cases()
             self._save_exact_solver_journal()
             self._save_strategies()
@@ -347,6 +352,143 @@ class PersistentBrain:
                 self._stats["failed_tasks"] += 1
             if len(self._lessons) > self.MAX_LESSONS:
                 self._lessons = self._lessons[-self.MAX_LESSONS:]
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # ПАМЯТЬ ОШИБОК LLM — LocalBrain запоминает и корректирует
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def record_llm_error(
+        self,
+        task: str,
+        error_type: str,
+        what_went_wrong: str,
+        correct_approach: str = "",
+        category: str = "",
+    ):
+        """
+        Записывает ошибку LLM. LocalBrain запомнит и в следующий раз
+        включит подсказку «не делай X, делай Y» в промпт.
+
+        Args:
+            task: задача, на которой LLM ошибся
+            error_type: тип ошибки (validation_fail, wrong_code, bad_plan,
+                        syntax_error, hallucination, repeat_mistake, cycle_error)
+            what_went_wrong: что именно LLM сделал неправильно
+            correct_approach: как правильно (заполняется при анализе или repair)
+            category: категория ошибки (для группировки)
+        """
+        task_norm = str(task)[:300].strip()
+        wrong_norm = str(what_went_wrong)[:500].strip()
+        if not wrong_norm:
+            return
+
+        with self._lock:
+            # Дедупликация: если такая же ошибка уже есть — увеличиваем счётчик
+            for existing in self._llm_errors[-50:]:
+                if (existing.get('what_went_wrong', '')[:100] == wrong_norm[:100]
+                        and existing.get('error_type') == error_type):
+                    existing['repeat_count'] = existing.get('repeat_count', 1) + 1
+                    existing['last_seen'] = time.time()
+                    # Если появилось исправление — обновляем
+                    if correct_approach and not existing.get('correct_approach'):
+                        existing['correct_approach'] = str(correct_approach)[:500]
+                    return
+
+            entry = {
+                "time": time.time(),
+                "time_str": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "task": task_norm,
+                "error_type": str(error_type)[:50],
+                "what_went_wrong": wrong_norm,
+                "correct_approach": str(correct_approach)[:500] if correct_approach else "",
+                "category": str(category)[:50] if category else "",
+                "repeat_count": 1,
+                "last_seen": time.time(),
+                "resolved": False,
+            }
+            self._llm_errors.append(entry)
+            if len(self._llm_errors) > self.MAX_LLM_ERRORS:
+                self._llm_errors = self._llm_errors[-self.MAX_LLM_ERRORS:]
+
+    def mark_llm_error_resolved(self, what_went_wrong_prefix: str):
+        """Помечает ошибку как решённую (больше не включать в hints)."""
+        prefix = str(what_went_wrong_prefix)[:100].lower()
+        with self._lock:
+            for entry in self._llm_errors:
+                if entry.get('what_went_wrong', '').lower().startswith(prefix):
+                    entry['resolved'] = True
+
+    def get_llm_error_hints(self, task: str = "", limit: int = 5) -> list[str]:
+        """
+        Возвращает подсказки для LLM на основе прошлых ошибок.
+        Формат: «НЕ ДЕЛАЙ: X. ПРАВИЛЬНО: Y.» (или «ИЗБЕГАЙ: X.»)
+
+        Приоритет: чаще повторяющиеся + свежие + релевантные задаче.
+        """
+        with self._lock:
+            # Только нерешённые ошибки
+            active = [e for e in self._llm_errors if not e.get('resolved')]
+            if not active:
+                return []
+
+        # Scoring: repeat_count * recency * relevance
+        task_tokens = set(re.findall(r'[A-Za-zА-Яа-яЁё0-9_]{3,}', task.lower())) if task else set()
+        now = time.time()
+        scored: list[tuple[float, dict]] = []
+        for entry in active:
+            repeat = entry.get('repeat_count', 1)
+            age_hours = (now - entry.get('last_seen', now)) / 3600.0
+            recency = 1.0 / (1.0 + age_hours * 0.02)  # медленное затухание
+            relevance = 1.0
+            if task_tokens:
+                err_text = f"{entry.get('task', '')} {entry.get('what_went_wrong', '')}".lower()
+                err_tokens = set(re.findall(r'[A-Za-zА-Яа-яЁё0-9_]{3,}', err_text))
+                overlap = len(task_tokens & err_tokens)
+                relevance = 1.0 + overlap * 0.5  # бонус за релевантность
+
+            score = repeat * recency * relevance
+            scored.append((score, entry))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top = scored[:limit]
+
+        hints: list[str] = []
+        for _score, entry in top:
+            wrong = entry['what_went_wrong']
+            correct = entry.get('correct_approach', '')
+            repeat = entry.get('repeat_count', 1)
+            prefix = f"(×{repeat}) " if repeat > 1 else ""
+            if correct:
+                hints.append(f"{prefix}НЕ ДЕЛАЙ: {wrong}. ПРАВИЛЬНО: {correct}")
+            else:
+                hints.append(f"{prefix}ИЗБЕГАЙ: {wrong}")
+        return hints
+
+    def get_llm_error_stats(self) -> dict:
+        """Статистика ошибок LLM для мониторинга."""
+        with self._lock:
+            total = len(self._llm_errors)
+            active = sum(1 for e in self._llm_errors if not e.get('resolved'))
+            resolved = total - active
+            by_type: dict[str, int] = {}
+            for e in self._llm_errors:
+                t = e.get('error_type', 'unknown')
+                by_type[t] = by_type.get(t, 0) + 1
+            top_repeats = sorted(
+                [e for e in self._llm_errors if e.get('repeat_count', 1) > 1],
+                key=lambda x: x.get('repeat_count', 0),
+                reverse=True,
+            )[:5]
+        return {
+            'total': total,
+            'active': active,
+            'resolved': resolved,
+            'by_type': by_type,
+            'top_repeating': [
+                {'what': e['what_went_wrong'][:80], 'count': e['repeat_count']}
+                for e in top_repeats
+            ],
+        }
 
     def record_solver_case(self, task: str, solver: str,
                            optimality: str, verification: bool,
@@ -518,6 +660,14 @@ class PersistentBrain:
             if clean:
                 lessons_text = "; ".join(clean)
                 parts.append(f"Уроки: {lessons_text}")
+
+        # Ошибки LLM — подсказки что НЕ повторять
+        error_hints = self.get_llm_error_hints(task=_query, limit=3)
+        if error_hints:
+            parts.append(
+                "⚠ Не повторяй эти ошибки:\n" +
+                "\n".join(f"  ✗ {h}" for h in error_hints)
+            )
 
         # Релевантные прошлые разговоры (поиск по ключевым словам запроса)
         if _query:
@@ -1510,6 +1660,14 @@ class PersistentBrain:
         data = self._load_json("lessons.json", [])
         if isinstance(data, list):
             self._lessons = data[-self.MAX_LESSONS:]
+
+    def _save_llm_errors(self):
+        self._save_json("llm_errors.json", self._llm_errors[-self.MAX_LLM_ERRORS:])
+
+    def _load_llm_errors(self):
+        data = self._load_json("llm_errors.json", [])
+        if isinstance(data, list):
+            self._llm_errors = data[-self.MAX_LLM_ERRORS:]
 
     def _save_solver_cases(self):
         self._save_json("solver_cases.json", self._solver_cases[-self.MAX_SOLVER_CASES:])

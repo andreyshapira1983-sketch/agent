@@ -376,6 +376,13 @@ class LocalBrain:
                     f"  — {lesson}" for lesson in past_lessons[-3:]
                 )
 
+            # Ошибки LLM — LocalBrain указывает что НЕ делать
+            llm_error_hints = context.get('llm_error_hints') or []
+            if llm_error_hints:
+                ctx_text += "\n⚠ ЗАПОМНИ — НЕ ПОВТОРЯЙ эти ошибки:\n" + "\n".join(
+                    f"  ✗ {hint}" for hint in llm_error_hints
+                )
+
             # Стратегия навыка из SkillLibrary
             skill_strat = context.get('skill_strategy')
             if skill_strat:
@@ -1822,6 +1829,14 @@ class CognitiveCore:
                     ]
             except (AttributeError, TypeError):
                 pass
+
+            # ── Ошибки LLM: LocalBrain подсказывает что НЕ повторять ──
+            try:
+                hints = self.persistent_brain.get_llm_error_hints(task=task, limit=5)
+                if hints:
+                    context['llm_error_hints'] = hints
+            except (AttributeError, TypeError):
+                pass
         # ── Стратегии навыков из SkillLibrary ──
         if self.skill_library is not None:
             try:
@@ -2004,6 +2019,14 @@ class CognitiveCore:
         # 6. Валидация
         ok, reason = self.brain.validate_response(result, task, t_type)
         if not ok:
+            # ── Записываем ошибку LLM в память LocalBrain ──
+            if self.persistent_brain:
+                self.persistent_brain.record_llm_error(
+                    task=task,
+                    error_type='validation_fail',
+                    what_went_wrong=f"{reason} — ответ: {result[:120]}",
+                    category=t_type.value if t_type else 'unknown',
+                )
             return f"[LocalBrain] Ответ LLM отклонён ({reason}). Повтори задачу точнее."
 
         return result
