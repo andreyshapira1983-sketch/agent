@@ -1,0 +1,111 @@
+# ─────────────────────────────────────────────────────────────────────
+# Profession: Python scripter
+#
+# Generates a single-file Python script from a brief. Deliverable is a
+# .py file written via `file_write`. Acceptance is intentionally
+# defensive: we don't execute the script (that's a future tool with its
+# own sandboxing); we check it parses and avoids dangerous patterns.
+# ─────────────────────────────────────────────────────────────────────
+
+id: python_scripter
+name: Python Scripter
+cluster: code
+language: en
+description: >
+  Write a single-file Python script that fulfils a client brief. The
+  agent outputs runnable Python that uses only stdlib unless the brief
+  explicitly approves third-party libraries.
+tags:
+  - python
+  - script
+  - automation
+  - code
+  - python-script
+  - py
+  - coding
+
+required_capabilities:
+  - llm_text_rewrite
+  - file_write
+
+system_prompt: |
+  You are an experienced Python engineer writing single-file scripts.
+
+  Given a client brief, output ONLY the Python source code — no
+  explanation, no markdown fences. The first line must be a module
+  docstring that summarises what the script does and how to run it.
+
+  Hard rules — never break:
+    1. Compatible with Python 3.10+. Use type hints throughout.
+    2. Stdlib only, unless the brief explicitly lists an allowed library.
+    3. No `os.system`, `subprocess.run` with shell=True, `eval`, `exec`,
+       `pickle.loads`, or `compile` — these are auto-rejected by the critic.
+    4. Read inputs via argparse with a clean `--help`. Print results to
+       stdout. Exit code 0 on success, non-zero on failure.
+    5. Wrap entry point in `if __name__ == "__main__": main()`.
+    6. Log to `logging` (not print) when reporting progress.
+
+  Style:
+    - Functions ≤ 40 lines. Pure where possible.
+    - No top-level side effects beyond `if __name__ == "__main__"`.
+    - Brief, useful docstrings on every public function.
+
+workflow:
+  - id: design
+    description: Plan the script structure mentally before writing code.
+    action: llm_rewrite
+    params:
+      output_format: python_source
+
+  - id: write
+    description: Write the script to disk inside the workspace.
+    action: tool_call
+    tool: file_write
+    params:
+      overwrite: true
+    depends_on: [design]
+
+  - id: verify
+    description: Critic checks for forbidden patterns and basic shape.
+    action: verify
+    depends_on: [write]
+
+  - id: deliver
+    description: Email the script as an attachment.
+    action: tool_call
+    tool: email
+    depends_on: [verify]
+
+acceptance_criteria:
+  # Critical: no dangerous patterns.
+  - kind: contains_no
+    params:
+      forbidden_substrings:
+        - "os.system("
+        - "shell=True"
+        - "eval("
+        - "exec("
+        - "pickle.loads"
+        - "__import__("
+    blocking: true
+
+  # Must have an entry point.
+  - kind: contains_all
+    params:
+      required_substrings:
+        - "if __name__"
+        - "def main"
+    blocking: true
+
+  # No leftover scaffolding.
+  - kind: contains_no
+    params:
+      forbidden_substrings:
+        - "TODO"
+        - "FIXME"
+        - "raise NotImplementedError"
+    blocking: false
+
+price_range_usd: [25, 300]
+autonomy_level_required: 3
+risk_class: medium

@@ -1,0 +1,96 @@
+# ─────────────────────────────────────────────────────────────────────
+# Profession: PowerPoint slide designer (brief → .pptx)
+#
+# Takes a client brief and produces a multi-slide deck. Different from
+# the text-editor pipeline: the LLM step doesn't rewrite a source text,
+# it expands a brief into a slide STRUCTURE (a list of slide dicts) that
+# the pptx_writer consumes.
+# ─────────────────────────────────────────────────────────────────────
+
+id: pptx_designer
+name: PowerPoint Designer
+cluster: design
+language: en
+description: >
+  Generate a complete .pptx presentation from a client brief. The agent
+  drafts a slide outline (title + bullet points per slide), then writes
+  it out as PowerPoint.
+tags:
+  - presentation
+  - powerpoint
+  - pptx
+  - slides
+  - deck
+  - design
+  - slide deck
+
+required_capabilities:
+  - llm_text_rewrite
+  - write_pptx
+
+system_prompt: |
+  You are a presentation designer.
+
+  Given a client brief, draft a slide-by-slide outline as a STRICT JSON
+  array. Each element is an object with keys:
+
+      title    (str, required)
+      subtitle (str, optional)   — only for cover or section dividers
+      bullets  (list[str], optional) — 3-6 short, parallel-structured bullets
+      body     (str, optional)   — for full-text slides (use sparingly)
+
+  Output ONLY the JSON array. No prose, no markdown fences.
+
+  Rules:
+    1. Open with a title slide (title + subtitle).
+    2. 5-9 content slides total — most slides are bullet-driven.
+    3. Each bullet ≤ 12 words. No nested bullets.
+    4. Close with a "Next steps" or "Q&A" slide.
+    5. Use the client's brand voice if any tone cues are in the brief.
+
+workflow:
+  - id: outline
+    description: Draft the slide outline from the client brief.
+    action: llm_rewrite
+    params:
+      output_format: json
+
+  - id: write
+    description: Render the outline into a .pptx file.
+    action: tool_call
+    tool: pptx_writer
+    params:
+      overwrite: true
+    depends_on: [outline]
+
+  - id: verify
+    description: Critic checks slide count and required slides.
+    action: verify
+    depends_on: [write]
+
+  - id: deliver
+    description: Email the deck back to the client.
+    action: tool_call
+    tool: email
+    depends_on: [verify]
+
+acceptance_criteria:
+  # Forbidden placeholders.
+  - kind: contains_no
+    params:
+      forbidden_substrings:
+        - "[REDACTED]"
+        - "TODO"
+        - "FIXME"
+        - "Lorem ipsum"
+    blocking: true
+
+  # Soft signal: the outline JSON should have at least 5 slides.
+  - kind: min_paragraphs
+    params:
+      limit: 4
+    blocking: false
+
+price_range_usd: [20, 200]
+autonomy_level_required: 3
+risk_class: low

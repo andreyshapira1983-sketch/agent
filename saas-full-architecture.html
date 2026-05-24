@@ -1,0 +1,1518 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Self-Architecting Autonomous System — Full Decomposition</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;600&family=Bebas+Neue&family=DM+Sans:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0a0f;
+  --bg2: #0f0f18;
+  --s0: #ffffff;
+  --s1: #00ffcc;
+  --s2: #ff6b35;
+  --s3: #ffd23f;
+  --s4: #a8ff78;
+  --s5: #7eb8f7;
+  --s6: #f77efe;
+  --s7: #ff4757;
+  --muted: rgba(255,255,255,0.35);
+  --border: rgba(255,255,255,0.07);
+  --mono: 'IBM Plex Mono', monospace;
+  --head: 'Bebas Neue', sans-serif;
+  --body: 'DM Sans', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--s0);
+  font-family: var(--body);
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+/* NOISE TEXTURE */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.6;
+}
+
+.wrap {
+  position: relative;
+  z-index: 1;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 0 28px 120px;
+}
+
+/* ── HEADER ── */
+.hero {
+  padding: 72px 0 56px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 64px;
+}
+
+.hero-eyebrow {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.35em;
+  color: var(--s1);
+  margin-bottom: 20px;
+  opacity: 0.8;
+  animation: fadeIn 0.5s ease both;
+}
+
+.hero-title {
+  font-family: var(--head);
+  font-size: clamp(48px, 8vw, 110px);
+  line-height: 0.92;
+  letter-spacing: 0.01em;
+  margin-bottom: 24px;
+  animation: fadeIn 0.6s 0.1s ease both;
+}
+
+.hero-title .t1 { color: var(--s0); }
+.hero-title .t2 { color: var(--s1); -webkit-text-stroke: 0px; }
+.hero-title .t3 { color: transparent; -webkit-text-stroke: 1px rgba(255,255,255,0.3); }
+
+.hero-sub {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.12em;
+  max-width: 700px;
+  animation: fadeIn 0.6s 0.2s ease both;
+}
+
+.hero-stats {
+  display: flex;
+  gap: 40px;
+  margin-top: 36px;
+  flex-wrap: wrap;
+  animation: fadeIn 0.6s 0.3s ease both;
+}
+
+.hstat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hstat-n {
+  font-family: var(--head);
+  font-size: 36px;
+  line-height: 1;
+}
+
+.hstat-l {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── SECTION ── */
+.section {
+  margin-bottom: 80px;
+  animation: fadeIn 0.7s ease both;
+}
+
+.section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 32px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.section-num {
+  font-family: var(--head);
+  font-size: 64px;
+  line-height: 1;
+  opacity: 0.12;
+  min-width: 70px;
+}
+
+.section-info { flex: 1; }
+
+.section-tag {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  color: var(--muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+.section-title {
+  font-family: var(--head);
+  font-size: clamp(26px, 3.5vw, 42px);
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.section-desc {
+  font-size: 13px;
+  color: var(--muted);
+  max-width: 600px;
+  margin-top: 4px;
+}
+
+/* ── SUBSYSTEM GRID ── */
+.sub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 2px;
+}
+
+/* ── SUBSYSTEM CARD ── */
+.sub {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  padding: 0;
+  overflow: hidden;
+  position: relative;
+  transition: border-color 0.25s;
+}
+
+.sub:hover { border-color: rgba(255,255,255,0.18); }
+
+.sub-head {
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.sub-icon {
+  font-size: 20px;
+  line-height: 1;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.sub-meta { flex: 1; }
+
+.sub-id {
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.25em;
+  color: var(--muted);
+  margin-bottom: 3px;
+}
+
+.sub-name {
+  font-family: var(--body);
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.sub-body { padding: 14px 20px 18px; }
+
+.sub-desc {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-bottom: 12px;
+  line-height: 1.6;
+}
+
+/* ── MODULE LIST ── */
+.mod-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mod {
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.02);
+  border-left: 2px solid rgba(255,255,255,0.08);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  position: relative;
+}
+
+.mod:hover { background: rgba(255,255,255,0.05); }
+
+.mod-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mod-name {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.mod-toggle {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--muted);
+  flex-shrink: 0;
+  transition: transform 0.2s;
+}
+
+.mod.open .mod-toggle { transform: rotate(90deg); }
+
+/* ── COMPONENTS (atoms) ── */
+.comp-list {
+  display: none;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.mod.open .comp-list { display: flex; }
+
+.comp {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 8px;
+  padding: 5px 8px;
+  background: rgba(0,0,0,0.3);
+  border-radius: 2px;
+}
+
+.comp-name {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--s0);
+  opacity: 0.75;
+}
+
+.comp-desc {
+  font-size: 9px;
+  color: var(--muted);
+  text-align: right;
+  font-family: var(--mono);
+}
+
+/* ── TAGS / STATUS ── */
+.tag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  padding: 2px 6px;
+  border-radius: 2px;
+  text-transform: uppercase;
+  margin-right: 4px;
+  margin-top: 6px;
+}
+
+.tag-ready  { background: rgba(168,255,120,0.1); color: var(--s4); border: 1px solid rgba(168,255,120,0.25); }
+.tag-soon   { background: rgba(255,210,63,0.1);  color: var(--s3); border: 1px solid rgba(255,210,63,0.25); }
+.tag-human  { background: rgba(255,71,87,0.1);   color: var(--s7); border: 1px solid rgba(255,71,87,0.25); }
+.tag-core   { background: rgba(0,255,204,0.1);   color: var(--s1); border: 1px solid rgba(0,255,204,0.25); }
+.tag-meta   { background: rgba(247,126,254,0.1); color: var(--s6); border: 1px solid rgba(247,126,254,0.25); }
+
+/* ── COLOR ACCENTS per section ── */
+.c1 .sub-head { border-bottom-color: rgba(0,255,204,0.15); }
+.c1 .mod { border-left-color: rgba(0,255,204,0.25); }
+.c1 .mod:hover { border-left-color: var(--s1); }
+.c1 .section-title { color: var(--s1); }
+.c1 .section-num { color: var(--s1); }
+
+.c2 .sub-head { border-bottom-color: rgba(255,107,53,0.15); }
+.c2 .mod { border-left-color: rgba(255,107,53,0.25); }
+.c2 .mod:hover { border-left-color: var(--s2); }
+.c2 .section-title { color: var(--s2); }
+.c2 .section-num { color: var(--s2); }
+
+.c3 .sub-head { border-bottom-color: rgba(255,210,63,0.15); }
+.c3 .mod { border-left-color: rgba(255,210,63,0.25); }
+.c3 .mod:hover { border-left-color: var(--s3); }
+.c3 .section-title { color: var(--s3); }
+.c3 .section-num { color: var(--s3); }
+
+.c4 .sub-head { border-bottom-color: rgba(168,255,120,0.15); }
+.c4 .mod { border-left-color: rgba(168,255,120,0.25); }
+.c4 .mod:hover { border-left-color: var(--s4); }
+.c4 .section-title { color: var(--s4); }
+.c4 .section-num { color: var(--s4); }
+
+.c5 .sub-head { border-bottom-color: rgba(126,184,247,0.15); }
+.c5 .mod { border-left-color: rgba(126,184,247,0.25); }
+.c5 .mod:hover { border-left-color: var(--s5); }
+.c5 .section-title { color: var(--s5); }
+.c5 .section-num { color: var(--s5); }
+
+.c6 .sub-head { border-bottom-color: rgba(247,126,254,0.15); }
+.c6 .mod { border-left-color: rgba(247,126,254,0.25); }
+.c6 .mod:hover { border-left-color: var(--s6); }
+.c6 .section-title { color: var(--s6); }
+.c6 .section-num { color: var(--s6); }
+
+.c7 .sub-head { border-bottom-color: rgba(255,71,87,0.15); }
+.c7 .mod { border-left-color: rgba(255,71,87,0.25); }
+.c7 .mod:hover { border-left-color: var(--s7); }
+.c7 .section-title { color: var(--s7); }
+.c7 .section-num { color: var(--s7); }
+
+.c8 .sub-head { border-bottom-color: rgba(255,255,255,0.1); }
+.c8 .mod { border-left-color: rgba(255,255,255,0.15); }
+.c8 .mod:hover { border-left-color: rgba(255,255,255,0.5); }
+.c8 .section-title { color: rgba(255,255,255,0.8); }
+.c8 .section-num { color: rgba(255,255,255,0.8); }
+
+/* ── FULL-WIDTH WIDE CARD ── */
+.sub.wide { grid-column: 1 / -1; }
+
+/* ── FLOW CONNECTOR ── */
+.flow-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: -16px 0 16px;
+  padding: 0 4px;
+}
+.flow-line::before,.flow-line::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.flow-text {
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.2em;
+  color: rgba(255,255,255,0.15);
+  white-space: nowrap;
+}
+
+/* ── LEGEND ── */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 80px;
+  padding-top: 28px;
+  border-top: 1px solid var(--border);
+  justify-content: center;
+}
+
+.leg { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 9px; color: var(--muted); }
+.leg-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+/* ── STAMP ── */
+.stamp {
+  text-align: center;
+  margin-top: 32px;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: rgba(255,255,255,0.1);
+  letter-spacing: 0.25em;
+}
+
+/* ── NAV ── */
+.nav {
+  position: fixed;
+  top: 50%;
+  right: 20px;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 100;
+}
+
+.nav-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.15);
+  cursor: pointer;
+  transition: background 0.2s, transform 0.2s;
+}
+
+.nav-dot:hover { background: rgba(255,255,255,0.6); transform: scale(1.5); }
+
+@media (max-width: 768px) {
+  .nav { display: none; }
+  .sub-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV DOTS -->
+<nav class="nav" id="nav"></nav>
+
+<div class="wrap">
+
+  <!-- HERO -->
+  <header class="hero">
+    <div class="hero-eyebrow">// SELF-ARCHITECTING AUTONOMOUS SYSTEM · FULL HIERARCHICAL DECOMPOSITION · 2026</div>
+    <div class="hero-title">
+      <div class="t1">AUTONOMOUS</div>
+      <div class="t2">META-AGENT</div>
+      <div class="t3">SYSTEM</div>
+    </div>
+    <p class="hero-sub">Система → Подсистема → Модуль → Компонент → Функция (атом). Кликни на любой модуль чтобы раскрыть атомы.</p>
+    <div class="hero-stats">
+      <div class="hstat"><div class="hstat-n" style="color:var(--s1)">9</div><div class="hstat-l">Систем</div></div>
+      <div class="hstat"><div class="hstat-n" style="color:var(--s2)">34</div><div class="hstat-l">Подсистем</div></div>
+      <div class="hstat"><div class="hstat-n" style="color:var(--s3)">100+</div><div class="hstat-l">Модулей</div></div>
+      <div class="hstat"><div class="hstat-n" style="color:var(--s4)">∞</div><div class="hstat-l">Атомов</div></div>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- S1 · PERCEPTION -->
+  <!-- ═══════════════════════════════════════════ -->
+  <section class="section c1" id="s1">
+    <div class="section-header">
+      <div class="section-num">01</div>
+      <div class="section-info">
+        <div class="section-tag">system · perception</div>
+        <div class="section-title">ВОСПРИЯТИЕ / PERCEPTION SYSTEM</div>
+        <div class="section-desc">Всё что агент воспринимает из внешнего мира. Унификация всех входных сигналов.</div>
+      </div>
+    </div>
+    <div class="sub-grid">
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">🎙️</div><div class="sub-meta"><div class="sub-id">S1.1 · INPUT INTERFACE</div><div class="sub-name">Интерфейсы ввода</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Все каналы по которым информация поступает в систему.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S1.1.1 · Text / Voice Input</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">speech_to_text()</span><span class="comp-desc">whisper / deepgram</span></div>
+                <div class="comp"><span class="comp-name">text_normalizer()</span><span class="comp-desc">очистка, unicode fix</span></div>
+                <div class="comp"><span class="comp-name">language_detector()</span><span class="comp-desc">langdetect</span></div>
+                <div class="comp"><span class="comp-name">intent_extractor()</span><span class="comp-desc">NLU классификатор</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S1.1.2 · Vision / Video Input</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">screenshot_capture()</span><span class="comp-desc">OS screen API</span></div>
+                <div class="comp"><span class="comp-name">video_frame_sampler()</span><span class="comp-desc">ffmpeg integration</span></div>
+                <div class="comp"><span class="comp-name">image_preprocessor()</span><span class="comp-desc">resize, normalize</span></div>
+                <div class="comp"><span class="comp-name">ocr_extractor()</span><span class="comp-desc">tesseract / easyocr</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S1.1.3 · Structured Data Input</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">json_parser()</span><span class="comp-desc">schema validation</span></div>
+                <div class="comp"><span class="comp-name">csv_reader()</span><span class="comp-desc">pandas adapter</span></div>
+                <div class="comp"><span class="comp-name">api_event_listener()</span><span class="comp-desc">webhooks, polling</span></div>
+                <div class="comp"><span class="comp-name">db_query_reader()</span><span class="comp-desc">SQL / NoSQL</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S1.1.4 · Agent Message Input</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">a2a_receiver()</span><span class="comp-desc">Agent-to-Agent protocol</span></div>
+                <div class="comp"><span class="comp-name">mcp_listener()</span><span class="comp-desc">Model Context Protocol</span></div>
+                <div class="comp"><span class="comp-name">message_validator()</span><span class="comp-desc">schema + auth check</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-ready">ready</span><span class="tag tag-core">core</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">🔮</div><div class="sub-meta"><div class="sub-id">S1.2 · MULTIMODAL ENCODER</div><div class="sub-name">Мультимодальный энкодер</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Преобразует все модальности в единое векторное пространство.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S1.2.1 · Text Encoder</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">tokenizer()</span><span class="comp-desc">BPE / SentencePiece</span></div>
+                <div class="comp"><span class="comp-name">text_embedder()</span><span class="comp-desc">text-embedding-3</span></div>
+                <div class="comp"><span class="comp-name">semantic_chunker()</span><span class="comp-desc">semantic split</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S1.2.2 · Vision Encoder</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">clip_encoder()</span><span class="comp-desc">CLIP / SigLIP</span></div>
+                <div class="comp"><span class="comp-name">image_captioner()</span><span class="comp-desc">описание изображения</span></div>
+                <div class="comp"><span class="comp-name">visual_embedder()</span><span class="comp-desc">joint embedding</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S1.2.3 · Fusion Layer</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">modality_merger()</span><span class="comp-desc">concat + projection</span></div>
+                <div class="comp"><span class="comp-name">cross_attention()</span><span class="comp-desc">cross-modal attention</span></div>
+                <div class="comp"><span class="comp-name">unified_repr()</span><span class="comp-desc">единый вектор</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-ready">ready</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">🧭</div><div class="sub-meta"><div class="sub-id">S1.3 · CONTEXT BUILDER</div><div class="sub-name">Сборщик контекста</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Формирует полный контекст для reasoning engine из всех доступных источников.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S1.3.1 · System Prompt Builder</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">role_injector()</span><span class="comp-desc">роль агента</span></div>
+                <div class="comp"><span class="comp-name">rules_loader()</span><span class="comp-desc">ограничения, политики</span></div>
+                <div class="comp"><span class="comp-name">goal_setter()</span><span class="comp-desc">текущие цели</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S1.3.2 · History Assembler</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">episode_loader()</span><span class="comp-desc">последние N шагов</span></div>
+                <div class="comp"><span class="comp-name">summary_compressor()</span><span class="comp-desc">сжатие старой истории</span></div>
+                <div class="comp"><span class="comp-name">token_budget_manager()</span><span class="comp-desc">контроль размера</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S1.3.3 · Intent Classifier</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">task_classifier()</span><span class="comp-desc">тип задачи</span></div>
+                <div class="comp"><span class="comp-name">urgency_scorer()</span><span class="comp-desc">приоритет 0-10</span></div>
+                <div class="comp"><span class="comp-name">ambiguity_gate()</span><span class="comp-desc">нужно ли уточнить?</span></div>
+                <div class="comp"><span class="comp-name">clarify_prompt_gen()</span><span class="comp-desc">генерация вопроса</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-core">core</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- S2 · REASONING ENGINE -->
+  <!-- ═══════════════════════════════════════════ -->
+  <section class="section c2" id="s2">
+    <div class="section-header">
+      <div class="section-num">02</div>
+      <div class="section-info">
+        <div class="section-tag">system · core</div>
+        <div class="section-title">REASONING ENGINE</div>
+        <div class="section-desc">Центральная языковая модель. Думает, рассуждает, планирует, принимает решения.</div>
+      </div>
+    </div>
+    <div class="sub-grid">
+
+      <div class="sub wide">
+        <div class="sub-head"><div class="sub-icon">🧠</div><div class="sub-meta"><div class="sub-id">S2.1 · CORE LLM</div><div class="sub-name">Центральная языковая модель</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Главный мозг системы. Все решения проходят через него.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S2.1.1 · Extended Thinking</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">scratchpad_allocator()</span><span class="comp-desc">выделение внутр. буфера</span></div>
+                <div class="comp"><span class="comp-name">chain_of_thought_runner()</span><span class="comp-desc">CoT шаги</span></div>
+                <div class="comp"><span class="comp-name">thought_pruner()</span><span class="comp-desc">удаление тупиков</span></div>
+                <div class="comp"><span class="comp-name">final_answer_extractor()</span><span class="comp-desc">вывод из размышлений</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S2.1.2 · Self-Reflection Loop</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">critic_self()</span><span class="comp-desc">само-критика ответа</span></div>
+                <div class="comp"><span class="comp-name">consistency_checker()</span><span class="comp-desc">проверка противоречий</span></div>
+                <div class="comp"><span class="comp-name">confidence_estimator()</span><span class="comp-desc">оценка уверенности</span></div>
+                <div class="comp"><span class="comp-name">retry_trigger()</span><span class="comp-desc">перезапуск при низкой уверенности</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S2.1.3 · Tree of Thought</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">branch_generator()</span><span class="comp-desc">генерация вариантов</span></div>
+                <div class="comp"><span class="comp-name">branch_evaluator()</span><span class="comp-desc">оценка каждого пути</span></div>
+                <div class="comp"><span class="comp-name">best_path_selector()</span><span class="comp-desc">выбор лучшей ветки</span></div>
+                <div class="comp"><span class="comp-name">backtrack_engine()</span><span class="comp-desc">откат при тупике</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S2.1.4 · Model Router</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">task_complexity_scorer()</span><span class="comp-desc">сложность 1-10</span></div>
+                <div class="comp"><span class="comp-name">model_selector()</span><span class="comp-desc">Opus / Sonnet / Haiku</span></div>
+                <div class="comp"><span class="comp-name">cost_optimizer()</span><span class="comp-desc">баланс цена/качество</span></div>
+                <div class="comp"><span class="comp-name">local_model_fallback()</span><span class="comp-desc">Ollama / llama.cpp</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-core">core</span><span class="tag tag-ready">ready</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- S3 · MEMORY SYSTEM -->
+  <!-- ═══════════════════════════════════════════ -->
+  <section class="section c3" id="s3">
+    <div class="section-header">
+      <div class="section-num">03</div>
+      <div class="section-info">
+        <div class="section-tag">system · memory</div>
+        <div class="section-title">СИСТЕМА ПАМЯТИ / MEMORY SYSTEM</div>
+        <div class="section-desc">4 уровня памяти. Агент помнит всё — от текущей задачи до навыков за годы работы.</div>
+      </div>
+    </div>
+    <div class="sub-grid">
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">⚡</div><div class="sub-meta"><div class="sub-id">S3.1 · WORKING MEMORY</div><div class="sub-name">Рабочая память</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Текущий контекст-окно. Живёт пока задача активна.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S3.1.1 · Context Window Manager</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">token_counter()</span><span class="comp-desc">подсчёт токенов</span></div>
+                <div class="comp"><span class="comp-name">sliding_window()</span><span class="comp-desc">скользящее окно</span></div>
+                <div class="comp"><span class="comp-name">importance_ranker()</span><span class="comp-desc">что оставить в окне</span></div>
+                <div class="comp"><span class="comp-name">kv_cache_manager()</span><span class="comp-desc">KV-cache оптимизация</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S3.1.2 · Scratchpad</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">scratch_write()</span><span class="comp-desc">запись промежуточного</span></div>
+                <div class="comp"><span class="comp-name">scratch_read()</span><span class="comp-desc">чтение результатов</span></div>
+                <div class="comp"><span class="comp-name">scratch_clear()</span><span class="comp-desc">очистка по завершении</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-ready">ready</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">📼</div><div class="sub-meta"><div class="sub-id">S3.2 · EPISODIC MEMORY</div><div class="sub-name">Эпизодическая память</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">История всех действий агента. Векторный поиск по прошлому.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S3.2.1 · Episode Recorder</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">trajectory_saver()</span><span class="comp-desc">сохранение шагов</span></div>
+                <div class="comp"><span class="comp-name">outcome_tagger()</span><span class="comp-desc">результат: успех/провал</span></div>
+                <div class="comp"><span class="comp-name">episode_embedder()</span><span class="comp-desc">векторизация эпизода</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S3.2.2 · Episode Retriever</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">semantic_search()</span><span class="comp-desc">qdrant / pgvector</span></div>
+                <div class="comp"><span class="comp-name">bm25_search()</span><span class="comp-desc">keyword поиск</span></div>
+                <div class="comp"><span class="comp-name">hybrid_ranker()</span><span class="comp-desc">слияние результатов</span></div>
+                <div class="comp"><span class="comp-name">relevance_filter()</span><span class="comp-desc">отсев нерелевантного</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S3.2.3 · Memory Decay</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">ttl_manager()</span><span class="comp-desc">время жизни записей</span></div>
+                <div class="comp"><span class="comp-name">importance_decay()</span><span class="comp-desc">снижение веса старого</span></div>
+                <div class="comp"><span class="comp-name">archive_compressor()</span><span class="comp-desc">сжатие в саммари</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-ready">ready</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">🗺️</div><div class="sub-meta"><div class="sub-id">S3.3 · SEMANTIC MEMORY</div><div class="sub-name">Семантическая память</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">База знаний. Факты, документы, domain knowledge. GraphRAG.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S3.3.1 · Knowledge Graph</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">entity_extractor()</span><span class="comp-desc">NER из документов</span></div>
+                <div class="comp"><span class="comp-name">relation_builder()</span><span class="comp-desc">связи между сущностями</span></div>
+                <div class="comp"><span class="comp-name">graph_query()</span><span class="comp-desc">Neo4j / NetworkX</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S3.3.2 · RAG Pipeline</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">document_indexer()</span><span class="comp-desc">чанкинг + embed</span></div>
+                <div class="comp"><span class="comp-name">retriever()</span><span class="comp-desc">top-k поиск</span></div>
+                <div class="comp"><span class="comp-name">reranker()</span><span class="comp-desc">cross-encoder rerank</span></div>
+                <div class="comp"><span class="comp-name">context_injector()</span><span class="comp-desc">вставка в промпт</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S3.3.3 · Auto-Update Pipeline</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">web_crawler()</span><span class="comp-desc">сбор новых знаний</span></div>
+                <div class="comp"><span class="comp-name">dedup_checker()</span><span class="comp-desc">дедупликация</span></div>
+                <div class="comp"><span class="comp-name">freshness_scorer()</span><span class="comp-desc">актуальность данных</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-ready">ready</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">🛠️</div><div class="sub-meta"><div class="sub-id">S3.4 · PROCEDURAL MEMORY</div><div class="sub-name">Процедурная память</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Выученные навыки. Шаблоны успешных действий. Skill library.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S3.4.1 · Skill Library</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">skill_registry()</span><span class="comp-desc">реестр навыков</span></div>
+                <div class="comp"><span class="comp-name">skill_matcher()</span><span class="comp-desc">подбор под задачу</span></div>
+                <div class="comp"><span class="comp-name">skill_executor()</span><span class="comp-desc">исполнение навыка</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S3.4.2 · Trajectory Store</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">success_saver()</span><span class="comp-desc">сохранение успехов</span></div>
+                <div class="comp"><span class="comp-name">failure_analyzer()</span><span class="comp-desc">разбор ошибок</span></div>
+                <div class="comp"><span class="comp-name">few_shot_builder()</span><span class="comp-desc">генерация примеров</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-core">core</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- S4 · PLANNING -->
+  <!-- ═══════════════════════════════════════════ -->
+  <section class="section c4" id="s4">
+    <div class="section-header">
+      <div class="section-num">04</div>
+      <div class="section-info">
+        <div class="section-tag">system · planning</div>
+        <div class="section-title">ПЛАНИРОВАНИЕ / PLANNING SYSTEM</div>
+        <div class="section-desc">Декомпозиция задач, построение плана, исполнение, реплан при ошибках.</div>
+      </div>
+    </div>
+    <div class="sub-grid">
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">📋</div><div class="sub-meta"><div class="sub-id">S4.1 · TASK DECOMPOSER</div><div class="sub-name">Декомпозитор задач</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Разбивает сложную задачу на конкретные выполнимые шаги.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S4.1.1 · Goal Decomposer</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">goal_parser()</span><span class="comp-desc">разбор высокоур. цели</span></div>
+                <div class="comp"><span class="comp-name">subtask_generator()</span><span class="comp-desc">генерация подзадач</span></div>
+                <div class="comp"><span class="comp-name">dependency_mapper()</span><span class="comp-desc">зависимости между шагами</span></div>
+                <div class="comp"><span class="comp-name">dag_builder()</span><span class="comp-desc">граф выполнения</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S4.1.2 · ReAct Executor</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">reason_step()</span><span class="comp-desc">думаем перед действием</span></div>
+                <div class="comp"><span class="comp-name">act_step()</span><span class="comp-desc">выполняем действие</span></div>
+                <div class="comp"><span class="comp-name">observe_step()</span><span class="comp-desc">наблюдаем результат</span></div>
+                <div class="comp"><span class="comp-name">loop_controller()</span><span class="comp-desc">контроль итераций</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S4.1.3 · Replanner</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">failure_detector()</span><span class="comp-desc">обнаружение ошибки</span></div>
+                <div class="comp"><span class="comp-name">root_cause_analyzer()</span><span class="comp-desc">причина провала</span></div>
+                <div class="comp"><span class="comp-name">plan_regenerator()</span><span class="comp-desc">новый план</span></div>
+                <div class="comp"><span class="comp-name">escalation_trigger()</span><span class="comp-desc">эскалация к человеку</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-core">core</span><span class="tag tag-ready">ready</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">🔧</div><div class="sub-meta"><div class="sub-id">S4.2 · TOOL ROUTER</div><div class="sub-name">Маршрутизатор инструментов</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Выбирает правильный инструмент, формирует вызов, обрабатывает ответ.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S4.2.1 · Tool Selector</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">tool_registry()</span><span class="comp-desc">реестр всех инструментов</span></div>
+                <div class="comp"><span class="comp-name">tool_matcher()</span><span class="comp-desc">задача → инструмент</span></div>
+                <div class="comp"><span class="comp-name">param_builder()</span><span class="comp-desc">формирование аргументов</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S4.2.2 · Tool Executor</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">tool_caller()</span><span class="comp-desc">вызов инструмента</span></div>
+                <div class="comp"><span class="comp-name">timeout_handler()</span><span class="comp-desc">таймаут и retry</span></div>
+                <div class="comp"><span class="comp-name">output_parser()</span><span class="comp-desc">парсинг ответа</span></div>
+                <div class="comp"><span class="comp-name">error_handler()</span><span class="comp-desc">обработка ошибок</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-ready">ready</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">🌐</div><div class="sub-meta"><div class="sub-id">S4.3 · TOOL UNIVERSE</div><div class="sub-name">Все инструменты</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Полный набор инструментов агента.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S4.3.1 · Web Tools</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">browser_agent()</span><span class="comp-desc">Playwright / Puppeteer</span></div>
+                <div class="comp"><span class="comp-name">search_engine()</span><span class="comp-desc">Google / Bing API</span></div>
+                <div class="comp"><span class="comp-name">web_fetcher()</span><span class="comp-desc">HTTP клиент</span></div>
+                <div class="comp"><span class="comp-name">scraper()</span><span class="comp-desc">BeautifulSoup / Scrapy</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S4.3.2 · Code Tools</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">code_interpreter()</span><span class="comp-desc">Python sandbox</span></div>
+                <div class="comp"><span class="comp-name">bash_executor()</span><span class="comp-desc">shell команды</span></div>
+                <div class="comp"><span class="comp-name">test_runner()</span><span class="comp-desc">pytest / jest</span></div>
+                <div class="comp"><span class="comp-name">git_client()</span><span class="comp-desc">git операции</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S4.3.3 · Communication Tools</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">email_client()</span><span class="comp-desc">Gmail / SMTP</span></div>
+                <div class="comp"><span class="comp-name">slack_bot()</span><span class="comp-desc">Slack API</span></div>
+                <div class="comp"><span class="comp-name">calendar_client()</span><span class="comp-desc">Google Calendar</span></div>
+                <div class="comp"><span class="comp-name">freelance_platform()</span><span class="comp-desc">Upwork / Fiverr API</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S4.3.4 · File & DB Tools</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">file_manager()</span><span class="comp-desc">чтение/запись файлов</span></div>
+                <div class="comp"><span class="comp-name">sql_client()</span><span class="comp-desc">PostgreSQL / SQLite</span></div>
+                <div class="comp"><span class="comp-name">vector_db_client()</span><span class="comp-desc">Qdrant / Chroma</span></div>
+                <div class="comp"><span class="comp-name">cloud_storage()</span><span class="comp-desc">S3 / GCS</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-ready">ready</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- S5 · UNIVERSAL FREELANCE -->
+  <!-- ═══════════════════════════════════════════ -->
+  <section class="section c5" id="s5">
+    <div class="section-header">
+      <div class="section-num">05</div>
+      <div class="section-info">
+        <div class="section-tag">system · freelance</div>
+        <div class="section-title">UNIVERSAL FREELANCE LAYER</div>
+        <div class="section-desc">Все профессии которые агент выполняет автономно. Каждая — отдельная подсистема.</div>
+      </div>
+    </div>
+    <div class="sub-grid">
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">✍️</div><div class="sub-meta"><div class="sub-id">S5.1 · CONTENT & TEXT</div><div class="sub-name">Тексты и контент</div></div></div>
+        <div class="sub-body">
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S5.1.1 · Copywriting Agent</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">brief_analyzer()</span><span class="comp-desc">разбор задания</span></div>
+                <div class="comp"><span class="comp-name">tone_detector()</span><span class="comp-desc">стиль бренда</span></div>
+                <div class="comp"><span class="comp-name">content_generator()</span><span class="comp-desc">генерация текста</span></div>
+                <div class="comp"><span class="comp-name">seo_optimizer()</span><span class="comp-desc">SEO доработка</span></div>
+                <div class="comp"><span class="comp-name">plagiarism_checker()</span><span class="comp-desc">проверка уникальности</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S5.1.2 · Translation Agent</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">lang_pair_selector()</span><span class="comp-desc">выбор языковой пары</span></div>
+                <div class="comp"><span class="comp-name">translator()</span><span class="comp-desc">перевод + DeepL API</span></div>
+                <div class="comp"><span class="comp-name">cultural_adapter()</span><span class="comp-desc">культурная адаптация</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-ready">ready</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">💻</div><div class="sub-meta"><div class="sub-id">S5.2 · CODE & DEV</div><div class="sub-name">Разработка</div></div></div>
+        <div class="sub-body">
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S5.2.1 · Dev Agent</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">spec_parser()</span><span class="comp-desc">разбор ТЗ</span></div>
+                <div class="comp"><span class="comp-name">code_generator()</span><span class="comp-desc">написание кода</span></div>
+                <div class="comp"><span class="comp-name">test_writer()</span><span class="comp-desc">написание тестов</span></div>
+                <div class="comp"><span class="comp-name">debugger()</span><span class="comp-desc">поиск и фикс багов</span></div>
+                <div class="comp"><span class="comp-name">code_reviewer()</span><span class="comp-desc">ревью кода</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S5.2.2 · Data Agent</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">data_cleaner()</span><span class="comp-desc">очистка данных</span></div>
+                <div class="comp"><span class="comp-name">analyst()</span><span class="comp-desc">анализ и инсайты</span></div>
+                <div class="comp"><span class="comp-name">viz_builder()</span><span class="comp-desc">графики и дашборды</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-ready">ready</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">🎨</div><div class="sub-meta"><div class="sub-id">S5.3 · DESIGN & MEDIA</div><div class="sub-name">Дизайн и медиа</div></div></div>
+        <div class="sub-body">
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S5.3.1 · Image Gen Agent</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">prompt_engineer()</span><span class="comp-desc">составление промпта</span></div>
+                <div class="comp"><span class="comp-name">image_generator()</span><span class="comp-desc">DALL-E / Midjourney API</span></div>
+                <div class="comp"><span class="comp-name">style_adapter()</span><span class="comp-desc">подстройка под бренд</span></div>
+                <div class="comp"><span class="comp-name">post_processor()</span><span class="comp-desc">доработка изображения</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S5.3.2 · Video Agent</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">video_editor()</span><span class="comp-desc">ffmpeg pipeline</span></div>
+                <div class="comp"><span class="comp-name">subtitle_gen()</span><span class="comp-desc">Whisper субтитры</span></div>
+                <div class="comp"><span class="comp-name">thumbnail_creator()</span><span class="comp-desc">превью для видео</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-soon">почти готово</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">📊</div><div class="sub-meta"><div class="sub-id">S5.4 · RESEARCH & ANALYSIS</div><div class="sub-name">Исследования</div></div></div>
+        <div class="sub-body">
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S5.4.1 · Research Agent</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">query_planner()</span><span class="comp-desc">план исследования</span></div>
+                <div class="comp"><span class="comp-name">multi_source_fetcher()</span><span class="comp-desc">сбор из источников</span></div>
+                <div class="comp"><span class="comp-name">fact_verifier()</span><span class="comp-desc">проверка фактов</span></div>
+                <div class="comp"><span class="comp-name">report_writer()</span><span class="comp-desc">написание отчёта</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-ready">ready</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">📱</div><div class="sub-meta"><div class="sub-id">S5.5 · SMM & MARKETING</div><div class="sub-name">SMM и маркетинг</div></div></div>
+        <div class="sub-body">
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S5.5.1 · SMM Agent</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">content_planner()</span><span class="comp-desc">контент-план</span></div>
+                <div class="comp"><span class="comp-name">post_creator()</span><span class="comp-desc">генерация постов</span></div>
+                <div class="comp"><span class="comp-name">scheduler()</span><span class="comp-desc">публикация по времени</span></div>
+                <div class="comp"><span class="comp-name">analytics_reader()</span><span class="comp-desc">анализ метрик</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-ready">ready</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">🤝</div><div class="sub-meta"><div class="sub-id">S5.6 · ADMIN & BUSINESS</div><div class="sub-name">Административное</div></div></div>
+        <div class="sub-body">
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S5.6.1 · Business Agent</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">email_writer()</span><span class="comp-desc">деловая переписка</span></div>
+                <div class="comp"><span class="comp-name">contract_generator()</span><span class="comp-desc">шаблоны договоров</span></div>
+                <div class="comp"><span class="comp-name">invoice_creator()</span><span class="comp-desc">выставление счетов</span></div>
+                <div class="comp"><span class="comp-name">crm_updater()</span><span class="comp-desc">обновление CRM</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-ready">ready</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- S6 · AGENT FACTORY -->
+  <!-- ═══════════════════════════════════════════ -->
+  <section class="section c6" id="s6">
+    <div class="section-header">
+      <div class="section-num">06</div>
+      <div class="section-info">
+        <div class="section-tag">system · meta · factory</div>
+        <div class="section-title">AGENT FACTORY — СОЗДАНИЕ АГЕНТОВ</div>
+        <div class="section-desc">Агент создаёт новых субагентов сам. Обнаруживает потребность → проектирует → деплоит → тестирует.</div>
+      </div>
+    </div>
+    <div class="sub-grid">
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">🔍</div><div class="sub-meta"><div class="sub-id">S6.1 · NEED DETECTOR</div><div class="sub-name">Детектор потребностей</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Агент замечает что не может выполнить задачу → инициирует создание нового субагента.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S6.1.1 · Gap Analyzer</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">capability_checker()</span><span class="comp-desc">есть ли нужный агент?</span></div>
+                <div class="comp"><span class="comp-name">task_failure_analyzer()</span><span class="comp-desc">почему не смог?</span></div>
+                <div class="comp"><span class="comp-name">new_agent_proposer()</span><span class="comp-desc">предложить новый агент</span></div>
+                <div class="comp"><span class="comp-name">priority_scorer()</span><span class="comp-desc">нужен ли он срочно?</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-meta">meta</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">🏗️</div><div class="sub-meta"><div class="sub-id">S6.2 · AGENT BUILDER</div><div class="sub-name">Строитель агентов</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Проектирует и собирает нового агента из компонентов.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S6.2.1 · Spec Generator</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">role_definer()</span><span class="comp-desc">роль нового агента</span></div>
+                <div class="comp"><span class="comp-name">tool_selector()</span><span class="comp-desc">какие инструменты нужны</span></div>
+                <div class="comp"><span class="comp-name">prompt_architect()</span><span class="comp-desc">системный промпт</span></div>
+                <div class="comp"><span class="comp-name">memory_configurator()</span><span class="comp-desc">настройка памяти</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S6.2.2 · Code Generator</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">agent_code_writer()</span><span class="comp-desc">пишет код агента</span></div>
+                <div class="comp"><span class="comp-name">config_builder()</span><span class="comp-desc">конфиг файлы</span></div>
+                <div class="comp"><span class="comp-name">dependency_installer()</span><span class="comp-desc">pip / npm install</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S6.2.3 · Deploy & Test</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">agent_deployer()</span><span class="comp-desc">запуск агента</span></div>
+                <div class="comp"><span class="comp-name">smoke_tester()</span><span class="comp-desc">базовые тесты</span></div>
+                <div class="comp"><span class="comp-name">registry_updater()</span><span class="comp-desc">регистрация в пуле</span></div>
+                <div class="comp"><span class="comp-name">rollback_manager()</span><span class="comp-desc">откат если сломал</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-meta">meta</span><span class="tag tag-soon">почти готово</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">🎛️</div><div class="sub-meta"><div class="sub-id">S6.3 · AGENT ORCHESTRATOR</div><div class="sub-name">Оркестратор агентов</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Управляет пулом субагентов. Раздаёт задачи, собирает результаты.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S6.3.1 · Task Dispatcher</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">agent_pool_manager()</span><span class="comp-desc">реестр активных агентов</span></div>
+                <div class="comp"><span class="comp-name">task_assigner()</span><span class="comp-desc">задача → агент</span></div>
+                <div class="comp"><span class="comp-name">parallel_executor()</span><span class="comp-desc">параллельный запуск</span></div>
+                <div class="comp"><span class="comp-name">result_collector()</span><span class="comp-desc">сбор результатов</span></div>
+                <div class="comp"><span class="comp-name">result_merger()</span><span class="comp-desc">слияние ответов</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-meta">meta</span><span class="tag tag-core">core</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- S7 · SELF-IMPROVEMENT -->
+  <!-- ═══════════════════════════════════════════ -->
+  <section class="section c2" id="s7">
+    <div class="section-header">
+      <div class="section-num">07</div>
+      <div class="section-info">
+        <div class="section-tag">system · meta · learning</div>
+        <div class="section-title">SELF-IMPROVEMENT — САМООБУЧЕНИЕ</div>
+        <div class="section-desc">Система анализирует результаты, обучает субагентов, улучшает саму себя.</div>
+      </div>
+    </div>
+    <div class="sub-grid">
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">📈</div><div class="sub-meta"><div class="sub-id">S7.1 · EVAL ENGINE</div><div class="sub-name">Движок оценки</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Оценивает качество каждого выполненного действия.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S7.1.1 · LLM-as-Judge</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">quality_scorer()</span><span class="comp-desc">оценка результата 1-10</span></div>
+                <div class="comp"><span class="comp-name">criteria_checker()</span><span class="comp-desc">соответствие критериям</span></div>
+                <div class="comp"><span class="comp-name">comparison_judge()</span><span class="comp-desc">A/B сравнение</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S7.1.2 · Feedback Collector</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">client_feedback_parser()</span><span class="comp-desc">отзывы клиентов</span></div>
+                <div class="comp"><span class="comp-name">implicit_signal_reader()</span><span class="comp-desc">неявные сигналы</span></div>
+                <div class="comp"><span class="comp-name">feedback_aggregator()</span><span class="comp-desc">сводная оценка</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-meta">meta</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">🎓</div><div class="sub-meta"><div class="sub-id">S7.2 · TRAINING PIPELINE</div><div class="sub-name">Пайплайн обучения</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Обучает субагентов на накопленном опыте.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S7.2.1 · Prompt Optimizer</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">prompt_analyzer()</span><span class="comp-desc">анализ промптов</span></div>
+                <div class="comp"><span class="comp-name">dspy_optimizer()</span><span class="comp-desc">DSPy / TextGrad</span></div>
+                <div class="comp"><span class="comp-name">ab_tester()</span><span class="comp-desc">тест вариантов</span></div>
+                <div class="comp"><span class="comp-name">prompt_deployer()</span><span class="comp-desc">обновление промпта</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S7.2.2 · Fine-Tune Pipeline</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">dataset_builder()</span><span class="comp-desc">сборка датасета</span></div>
+                <div class="comp"><span class="comp-name">quality_filter()</span><span class="comp-desc">фильтр плохих примеров</span></div>
+                <div class="comp"><span class="comp-name">finetune_launcher()</span><span class="comp-desc">запуск дообучения</span></div>
+                <div class="comp"><span class="comp-name">model_evaluator()</span><span class="comp-desc">проверка новой модели</span></div>
+                <div class="comp"><span class="comp-name">model_deployer()</span><span class="comp-desc">деплой если лучше</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S7.2.3 · Skill Distiller</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">success_harvester()</span><span class="comp-desc">сбор лучших траекторий</span></div>
+                <div class="comp"><span class="comp-name">skill_extractor()</span><span class="comp-desc">извлечение паттерна</span></div>
+                <div class="comp"><span class="comp-name">skill_registrar()</span><span class="comp-desc">добавление в library</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-meta">meta</span><span class="tag tag-soon">почти готово</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">🔬</div><div class="sub-meta"><div class="sub-id">S7.3 · CRITIC AGENT</div><div class="sub-name">Агент-критик</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Независимый наблюдатель. Следит за дрейфом качества всей системы.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S7.3.1 · System Health Monitor</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">drift_detector()</span><span class="comp-desc">обнаружение деградации</span></div>
+                <div class="comp"><span class="comp-name">benchmark_runner()</span><span class="comp-desc">регресс тесты</span></div>
+                <div class="comp"><span class="comp-name">anomaly_alerter()</span><span class="comp-desc">алерты при аномалиях</span></div>
+                <div class="comp"><span class="comp-name">report_to_human()</span><span class="comp-desc">дайджест для владельца</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-meta">meta</span><span class="tag tag-core">core</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- S8 · SAFETY -->
+  <!-- ═══════════════════════════════════════════ -->
+  <section class="section c7" id="s8">
+    <div class="section-header">
+      <div class="section-num">08</div>
+      <div class="section-info">
+        <div class="section-tag">system · safety</div>
+        <div class="section-title">SAFETY & CONTROL</div>
+        <div class="section-desc">Что агент никогда не делает без человека. Жёсткие границы на каждом уровне.</div>
+      </div>
+    </div>
+    <div class="sub-grid">
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">🛡️</div><div class="sub-meta"><div class="sub-id">S8.1 · ACTION GUARD</div><div class="sub-name">Страж действий</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Проверяет каждое действие перед исполнением.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S8.1.1 · Pre-Action Check</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">whitelist_checker()</span><span class="comp-desc">разрешено ли действие?</span></div>
+                <div class="comp"><span class="comp-name">reversibility_check()</span><span class="comp-desc">можно ли отменить?</span></div>
+                <div class="comp"><span class="comp-name">impact_estimator()</span><span class="comp-desc">масштаб последствий</span></div>
+                <div class="comp"><span class="comp-name">hitl_gate()</span><span class="comp-desc">нужен ли человек?</span></div>
+              </div>
+            </div>
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S8.1.2 · Resource Limiter</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">token_budget()</span><span class="comp-desc">лимит токенов</span></div>
+                <div class="comp"><span class="comp-name">api_cost_monitor()</span><span class="comp-desc">лимит расходов $</span></div>
+                <div class="comp"><span class="comp-name">time_budget()</span><span class="comp-desc">лимит времени</span></div>
+                <div class="comp"><span class="comp-name">rate_limiter()</span><span class="comp-desc">ограничение частоты</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-core">core</span><span class="tag tag-human">human gate</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">🚦</div><div class="sub-meta"><div class="sub-id">S8.2 · HUMAN-IN-THE-LOOP</div><div class="sub-name">Контроль человека</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Когда и как агент передаёт управление человеку.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S8.2.1 · Escalation Engine</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">trigger_detector()</span><span class="comp-desc">триггеры эскалации</span></div>
+                <div class="comp"><span class="comp-name">human_notifier()</span><span class="comp-desc">уведомление владельца</span></div>
+                <div class="comp"><span class="comp-name">context_packager()</span><span class="comp-desc">подготовка контекста</span></div>
+                <div class="comp"><span class="comp-name">wait_for_approval()</span><span class="comp-desc">ожидание решения</span></div>
+                <div class="comp"><span class="comp-name">resume_after_approval()</span><span class="comp-desc">продолжение работы</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-human">human gate</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">📜</div><div class="sub-meta"><div class="sub-id">S8.3 · HARD RULES</div><div class="sub-name">Жёсткие правила</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Что агент НИКОГДА не делает автономно.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S8.3.1 · Never-Do List</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">no_financial_transfer()</span><span class="comp-desc">никаких платежей без ОК</span></div>
+                <div class="comp"><span class="comp-name">no_legal_sign()</span><span class="comp-desc">никаких подписей</span></div>
+                <div class="comp"><span class="comp-name">no_delete_critical()</span><span class="comp-desc">нельзя удалять важное</span></div>
+                <div class="comp"><span class="comp-name">no_public_post()</span><span class="comp-desc">публикации — с одобрения</span></div>
+                <div class="comp"><span class="comp-name">no_new_contracts()</span><span class="comp-desc">договоры — человек</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-human">human gate</span><span class="tag tag-core">core</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- S9 · OBSERVABILITY -->
+  <!-- ═══════════════════════════════════════════ -->
+  <section class="section c8" id="s9">
+    <div class="section-header">
+      <div class="section-num">09</div>
+      <div class="section-info">
+        <div class="section-tag">system · observability</div>
+        <div class="section-title">OBSERVABILITY — ПРОЗРАЧНОСТЬ</div>
+        <div class="section-desc">Ты всегда видишь что происходит. Полный трейсинг каждого шага системы.</div>
+      </div>
+    </div>
+    <div class="sub-grid">
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">🔭</div><div class="sub-meta"><div class="sub-id">S9.1 · TRACING</div><div class="sub-name">Трейсинг и логи</div></div></div>
+        <div class="sub-body">
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S9.1.1 · Trace Recorder</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">span_recorder()</span><span class="comp-desc">запись каждого шага</span></div>
+                <div class="comp"><span class="comp-name">input_logger()</span><span class="comp-desc">что получил агент</span></div>
+                <div class="comp"><span class="comp-name">output_logger()</span><span class="comp-desc">что сделал агент</span></div>
+                <div class="comp"><span class="comp-name">tool_call_logger()</span><span class="comp-desc">какие инструменты вызвал</span></div>
+                <div class="comp"><span class="comp-name">latency_tracker()</span><span class="comp-desc">время каждого шага</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-ready">ready</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">📉</div><div class="sub-meta"><div class="sub-id">S9.2 · METRICS</div><div class="sub-name">Метрики системы</div></div></div>
+        <div class="sub-body">
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S9.2.1 · KPI Dashboard</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">task_success_rate()</span><span class="comp-desc">% успешных задач</span></div>
+                <div class="comp"><span class="comp-name">cost_per_task()</span><span class="comp-desc">$ на задачу</span></div>
+                <div class="comp"><span class="comp-name">agent_utilization()</span><span class="comp-desc">загрузка агентов</span></div>
+                <div class="comp"><span class="comp-name">quality_trend()</span><span class="comp-desc">динамика качества</span></div>
+                <div class="comp"><span class="comp-name">revenue_tracker()</span><span class="comp-desc">заработано системой</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-ready">ready</span>
+        </div>
+      </div>
+
+      <div class="sub">
+        <div class="sub-head"><div class="sub-icon">📬</div><div class="sub-meta"><div class="sub-id">S9.3 · OWNER REPORTS</div><div class="sub-name">Отчёты владельцу</div></div></div>
+        <div class="sub-body">
+          <div class="sub-desc">Ты получаешь дайджест. Система работает — ты наблюдаешь.</div>
+          <div class="mod-list">
+            <div class="mod" onclick="toggle(this)">
+              <div class="mod-top"><span class="mod-name">S9.3.1 · Digest Generator</span><span class="mod-toggle">▶</span></div>
+              <div class="comp-list">
+                <div class="comp"><span class="comp-name">daily_summary()</span><span class="comp-desc">что сделано за день</span></div>
+                <div class="comp"><span class="comp-name">anomaly_report()</span><span class="comp-desc">что пошло не так</span></div>
+                <div class="comp"><span class="comp-name">improvement_proposals()</span><span class="comp-desc">что система предлагает</span></div>
+                <div class="comp"><span class="comp-name">approval_requests()</span><span class="comp-desc">что ждёт твоего ОК</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="tag tag-ready">ready</span><span class="tag tag-core">core</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- LEGEND -->
+  <div class="legend">
+    <div class="leg"><div class="leg-dot" style="background:var(--s1)"></div> Система восприятия</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--s2)"></div> Reasoning Engine</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--s3)"></div> Память</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--s4)"></div> Планирование</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--s5)"></div> Фриланс-слой</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--s6)"></div> Фабрика агентов</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--s2)"></div> Самообучение</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--s7)"></div> Безопасность</div>
+    <div class="leg"><div class="leg-dot" style="background:#fff"></div> Наблюдаемость</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--s4)"></div><span class="tag tag-ready" style="margin:0">ready</span> — работает сейчас</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--s3)"></div><span class="tag tag-soon" style="margin:0">soon</span> — почти готово</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--s7)"></div><span class="tag tag-human" style="margin:0">human</span> — нужен человек</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--s6)"></div><span class="tag tag-meta" style="margin:0">meta</span> — мета-уровень</div>
+  </div>
+
+  <div class="stamp">SELF-ARCHITECTING AUTONOMOUS SYSTEM · FULL DECOMPOSITION · v1.0 · 2026</div>
+
+</div>
+
+<script>
+function toggle(el) {
+  el.classList.toggle('open');
+}
+
+// Build nav dots
+const sections = document.querySelectorAll('section[id]');
+const nav = document.getElementById('nav');
+sections.forEach(s => {
+  const dot = document.createElement('div');
+  dot.className = 'nav-dot';
+  dot.title = s.querySelector('.section-title')?.textContent || '';
+  dot.onclick = () => s.scrollIntoView({ behavior: 'smooth' });
+  nav.appendChild(dot);
+});
+
+// Highlight active nav dot
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      const idx = [...sections].indexOf(e.target);
+      document.querySelectorAll('.nav-dot').forEach((d, i) => {
+        d.style.background = i === idx ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.15)';
+        d.style.transform = i === idx ? 'scale(1.8)' : 'scale(1)';
+      });
+    }
+  });
+}, { threshold: 0.3 });
+
+sections.forEach(s => observer.observe(s));
+
+// Stagger section animations
+const allSections = document.querySelectorAll('.section');
+const sectionObserver = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.style.animationDelay = '0s';
+      e.target.style.opacity = '1';
+    }
+  });
+}, { threshold: 0.05 });
+
+allSections.forEach(s => {
+  s.style.opacity = '0';
+  sectionObserver.observe(s);
+});
+</script>
+</body>
+</html>

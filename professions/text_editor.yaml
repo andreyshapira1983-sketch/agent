@@ -1,0 +1,140 @@
+# ─────────────────────────────────────────────────────────────────────
+# Profession: Text Editor (English DOCX)
+#
+# The agent's first freelance role. Reads an English-language DOCX
+# document submitted by the client, improves the prose without changing
+# meaning, and returns the edited DOCX with a brief change summary.
+#
+# This file is the source of truth — adding new YAML files in this
+# directory adds new professions WITHOUT any Python changes.
+# ─────────────────────────────────────────────────────────────────────
+
+id: text_editor
+name: Text Editor (English DOCX)
+cluster: text
+language: en
+description: >
+  Professional copy-editing of English-language Word documents.
+  Improves clarity, flow, grammar, and word choice without adding
+  new facts or changing the author's voice.
+tags:
+  - edit
+  - editing
+  - editor
+  - proofread
+  - proofreading
+  - copyedit
+  - copyediting
+  - rewrite
+  - text
+  - english
+  - docx
+  - document
+
+# ─────────────────────────────────────────────────────────────────────
+# What the agent must be able to do
+# ─────────────────────────────────────────────────────────────────────
+required_capabilities:
+  - read_docx
+  - llm_text_rewrite
+  - write_docx
+
+# ─────────────────────────────────────────────────────────────────────
+# System prompt — defines the agent's voice while doing this job
+# ─────────────────────────────────────────────────────────────────────
+system_prompt: |
+  You are a professional English-language copy editor.
+
+  Your role:
+    - Improve clarity, grammar, punctuation, and flow.
+    - Cut filler words and awkward phrasing.
+    - Preserve the author's voice, intent, and factual claims.
+    - Keep the same paragraph structure unless a split clearly helps the reader.
+
+  Hard rules — never break:
+    1. NEVER add new facts, statistics, names, dates, or claims
+       that were not present in the original text.
+    2. NEVER remove substantive content. Trimming is fine; deleting
+       arguments is not.
+    3. Preserve quoted speech verbatim — never paraphrase quotes.
+    4. If a passage is technically incorrect but you are not certain,
+       FLAG it in a comment, do not "fix" it.
+    5. Output must remain in English. Never translate.
+
+  Working style:
+    - Make every word earn its place.
+    - Prefer active voice unless passive is clearer.
+    - Use Oxford comma. Match the original document's style (US vs UK
+      spelling) — do not switch.
+
+# ─────────────────────────────────────────────────────────────────────
+# Workflow template — Brain instantiates this when a Job matches
+# ─────────────────────────────────────────────────────────────────────
+workflow:
+  - id: read
+    description: Read the client's source DOCX into text.
+    action: tool_call
+    tool: docx_reader
+    params:
+      action: extract_text
+      max_chars: 80000
+
+  - id: edit
+    description: Rewrite the text per the system prompt.
+    action: llm_rewrite
+    depends_on: [read]
+
+  - id: write
+    description: Write the edited text back into a new DOCX.
+    action: tool_call
+    tool: docx_writer
+    params:
+      action: create
+      overwrite: true
+    depends_on: [edit]
+
+  - id: verify
+    description: Critic checks the deliverable against acceptance_criteria.
+    action: verify
+    depends_on: [write]
+
+  - id: deliver
+    description: Email the result back to the client.
+    action: tool_call
+    tool: email
+    depends_on: [verify]
+
+# ─────────────────────────────────────────────────────────────────────
+# Acceptance criteria — Critic blocks delivery if any blocking check fails
+# ─────────────────────────────────────────────────────────────────────
+acceptance_criteria:
+  # Allow the document to shrink up to 20% or grow up to 10%. Anything
+  # outside this range means the agent rewrote substantively, which is
+  # outside the editor's mandate.
+  - kind: word_count_delta
+    params:
+      range_pct: [-0.20, 0.10]
+    blocking: true
+
+  # Reject output that introduces brand-new statistics or claims.
+  # Implemented via LLM-based semantic-similarity check.
+  - kind: no_new_facts
+    params:
+      min_score: 0.85
+    blocking: true
+
+  # Output must remain English.
+  - kind: contains_no
+    params:
+      forbidden_substrings:
+        - "[REDACTED]"
+        - "TODO"
+        - "FIXME"
+    blocking: true
+
+# ─────────────────────────────────────────────────────────────────────
+# Commercials
+# ─────────────────────────────────────────────────────────────────────
+price_range_usd: [3, 25]      # per document
+autonomy_level_required: 2    # human is still in the approval loop initially
+risk_class: low

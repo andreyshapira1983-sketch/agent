@@ -1,0 +1,115 @@
+# ─────────────────────────────────────────────────────────────────────
+# Profession: English → Russian translator (DOCX)
+#
+# Separate role from the text editor: editing improves prose in-place,
+# translation produces a new document in a different language. The two
+# require different acceptance criteria — a translator MUST change every
+# sentence, an editor must NOT.
+# ─────────────────────────────────────────────────────────────────────
+
+id: translator_en_ru
+name: Translator (English → Russian)
+cluster: text
+language: ru
+description: >
+  Translate an English-language DOCX document into Russian, preserving
+  meaning, structure, and tone. The agent returns a new DOCX in Russian.
+tags:
+  - translate
+  - translation
+  - перевод
+  - en-ru
+  - english to russian
+  - english-to-russian
+  - docx
+
+required_capabilities:
+  - read_docx
+  - llm_text_rewrite
+  - write_docx
+
+system_prompt: |
+  You are a professional English → Russian translator.
+
+  Your role:
+    - Translate each sentence faithfully into idiomatic Russian.
+    - Preserve paragraph structure, lists, and formatting cues.
+    - Keep proper nouns and technical terms accurate; transliterate
+      only when there's no established Russian equivalent.
+
+  Hard rules — never break:
+    1. NEVER add facts, opinions, or content that aren't in the source.
+    2. Quoted material must be translated, but its position and source
+       attribution must remain identical.
+    3. Numerical values stay exact. Units may be localised
+       (miles → километры) but only with a parenthetical original.
+    4. If a passage is ambiguous, prefer the most literal translation
+       and FLAG it with a translator's note in [квадратных скобках].
+
+  Working style:
+    - Use formal "Вы" by default unless the source clearly uses informal
+      tone.
+    - Match the source register: technical text → technical Russian.
+    - Prefer active voice in Russian; English passive constructions
+      often translate better as active.
+
+workflow:
+  - id: read
+    description: Read the client's source DOCX into English text.
+    action: tool_call
+    tool: docx_reader
+    params:
+      action: extract_text
+      max_chars: 80000
+
+  - id: translate
+    description: Translate the text per the system prompt.
+    action: llm_rewrite
+    depends_on: [read]
+
+  - id: write
+    description: Write the Russian translation back into a new DOCX.
+    action: tool_call
+    tool: docx_writer
+    params:
+      action: create
+      overwrite: true
+    depends_on: [translate]
+
+  - id: verify
+    description: Critic checks the deliverable.
+    action: verify
+    depends_on: [write]
+
+  - id: deliver
+    description: Email the result back.
+    action: tool_call
+    tool: email
+    depends_on: [verify]
+
+acceptance_criteria:
+  # Russian text expansion: typically 110%-130% of English. Allow a wide
+  # band because technical translations compress.
+  - kind: word_count_delta
+    params:
+      range_pct: [-0.20, 0.50]
+    blocking: true
+
+  # Translation must keep the same factual content.
+  - kind: no_new_facts
+    params:
+      min_score: 0.80
+    blocking: true
+
+  # Output must not contain editor placeholders.
+  - kind: contains_no
+    params:
+      forbidden_substrings:
+        - "[REDACTED]"
+        - "TODO"
+        - "FIXME"
+    blocking: true
+
+price_range_usd: [10, 80]
+autonomy_level_required: 2
+risk_class: low

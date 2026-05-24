@@ -1,0 +1,148 @@
+1. Interface & Communication
+   - Communication Layer
+   - Multilingual Understanding
+   - Active Feedback Loop
+
+2. Perception & Input Processing
+   - Perception Layer
+   - Input Sanitization
+   - Adversarial Defense
+   - Multimodal Fusion
+
+3. Memory & Knowledge Governance
+   - Knowledge System
+   - Data Validation & Contracts
+   - Trust & Provenance Tracker
+   - Forgetting Policies
+   - Relevance Decay
+   - Deduplication
+
+4. Cognitive Core & Planning
+   - Cognitive Core
+   - Probabilistic Inference
+   - Uncertainty Quantification
+   - Explainability & Justification
+   - Goal & Planning
+   - Task Decomposition
+
+5. Agent Runtime & Orchestration
+   - Agent System
+   - Orchestration System
+   - Model Management
+   - Multi-Agent Conflict Resolution
+   - Resource Coordination
+   - Task Queues
+   - Attention Management
+
+6. Tool Protocol & Execution
+   - Tool Layer
+   - Execution System
+   - Software Development System
+   - Operating System Layer
+   - MCP / Tool Adapter Protocol
+
+7. Security, Policy & Permissions
+   - Security System
+   - Governance / Policy
+   - Human Approval
+   - Data Privacy Gateway
+   - Secrets Management
+   - Permission Control
+   - Compliance
+
+8. State, Sessions & Checkpoints
+   - State & Session Management
+   - Checkpoint / Resume
+   - Idempotency
+   - Recovery
+
+9. Evaluation, Monitoring & Tracing
+   - Monitoring & Logging
+   - Evaluation & Benchmarking
+   - Resource & Budget Control
+   - Calibration Metrics
+   - Tracing
+
+10. Sandbox, Simulation & Verification
+   - Environment Modeling
+   - Simulation / Sandbox Testing
+   - Formal Verification
+   - Pre-execution Risk Testing
+
+11. Learning, Reflection & Self-Improvement
+   - Learning System
+   - Reflection System
+   - Self-Repair
+   - Self-Improvement
+   - Skill / Capability Library
+   - RL Loop
+
+12. Identity, Self-Model & Autonomy Governance
+   - Identity & Self-Model
+   - Autonomy Governance
+   - Capability Awareness
+   - Limitation Awareness
+   - Autonomy Levels 0–5
+
+Я бы дописал уровни автономности так
+
+У тебя текст оборвался на Level 4. Я бы оформил полностью:
+
+Level 0 — только отвечает на запросы, без действий.
+
+Level 1 — предлагает действия, пользователь подтверждает каждое.
+
+Level 2 — выполняет безопасные действия автономно, опасные — только после подтверждения.
+
+Level 3 — работает по расписанию и сам инициирует задачи в рамках заданных политик.
+
+Level 4 — сам выбирает подзадачи для достижения целей, пользователь контролирует только ключевые решения.
+
+Level 5 — ведёт долгосрочные проекты почти автономно, но критические действия всё равно проходят через policy, budget limits, sandbox и Human Approval.
+
+Важно: Level 5 не означает “полная свобода”.
+Даже на Level 5 остаются:
+
+policy gates
+budget limits
+audit logs
+sandbox
+rollback
+HITL for critical actions
+permission boundaries
+Статус архитектуры после v2.1
+
+Я бы оценил так:
+
+Критерий	Оценка
+Полнота	Очень высокая
+Безопасность	Сильная
+Реализуемость	Хорошая, если делать поэтапно
+Чистота структуры	Уже хорошая, но нужна фиксация владельцев
+Готовность для MVP	Да, если выделить минимальный контур
+Готовность для “агента почти без тебя”	Да, как roadmap, не как первая версия
+Главное
+
+Теперь у тебя есть три уровня:
+
+Master Architecture = 12 систем / 37 слоёв
+Production Blueprint = 8–12 модулей для кода
+MVP Telegram Agent = первая рабочая версия
+
+v2.1 уже можно считать основной архитектурой.
+Дальше лучше не добавлять новые слои, а сделать отдельный документ:
+
+MVP v0.1 — минимальный автономный Telegram-агент
+
+И туда включить только:
+
+Telegram interface
+Agent Core
+Memory
+Tool Protocol
+Scheduler
+State
+Logs
+Security gates
+Human Approval
+OpenAI API
