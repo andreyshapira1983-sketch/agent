@@ -98,6 +98,19 @@ def test_conflict_resolver_marks_same_subject_different_values():
     assert all(c.conflict_source_ids for c in resolved.claims)
 
 
+def test_conflict_resolver_ignores_generic_this_subject():
+    registry = SourceRegistry()
+    a = registry.register_source(type="file", title="a", locator="a.txt", trust_level=0.9)
+    b = registry.register_source(type="file", title="b", locator="b.txt", trust_level=0.9)
+    registry.register_claim(source_id=a.id, text="This is the bridge between answer and learning.", confidence=0.9)
+    registry.register_claim(source_id=b.id, text="This is the control loop from the architecture.", confidence=0.9)
+
+    resolved, report = ConflictResolver().resolve(registry)
+
+    assert report.count == 0
+    assert {c.status for c in resolved.claims} == {"extracted"}
+
+
 def test_knowledge_write_policy_rejects_unverified_and_accepts_strong_claim():
     registry = SourceRegistry()
     source = registry.register_source(type="documentation", title="docs", locator="docs", trust_level=0.82)
@@ -160,4 +173,3 @@ def test_agent_loop_persists_sources_and_writes_verified_knowledge(tmp_path: Pat
     assert any(e["event"] == "knowledge_pipeline" for e in events)
     kp = [e for e in events if e["event"] == "knowledge_pipeline"][-1]["payload"]
     assert kp["memory_saved"] == 1
-

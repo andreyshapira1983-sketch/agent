@@ -75,6 +75,7 @@ plus full Control Loop integration. Run `python -m pytest -v`.
 | §14.3 Source Ranker / Evidence Trust Layer | [`core/source_ranker.py`](core/source_ranker.py) |
 | §14.3b Source Registry + extracted claims catalog | [`core/source_registry.py`](core/source_registry.py) |
 | §14.3c Knowledge Pipeline Integration | [`core/knowledge_pipeline.py`](core/knowledge_pipeline.py) + [`core/source_registry_store.py`](core/source_registry_store.py) |
+| §14.3c Conflict Review / Resolver UX | [`core/conflict_review.py`](core/conflict_review.py) + `:conflicts` |
 | §14.3d Controlled Source Ingestion (`:ingest-source`, `:ingest-project`) | [`core/ingestion.py`](core/ingestion.py) + [`main.py`](main.py) |
 | §14.3e Role Router / Knowledge Use / Learning Planner | [`core/role_router.py`](core/role_router.py), [`core/knowledge_use_policy.py`](core/knowledge_use_policy.py), [`core/learning_planner.py`](core/learning_planner.py) |
 | §6 Autonomous Runtime + Budget Governor + Circuit Breaker + Approval Inbox | [`core/autonomous_runtime.py`](core/autonomous_runtime.py), [`core/budget_governor.py`](core/budget_governor.py), [`core/circuit_breaker.py`](core/circuit_breaker.py), [`core/approval_inbox.py`](core/approval_inbox.py) |
@@ -1264,6 +1265,9 @@ What is wired:
     from Evidence excerpts and rejects secret-shaped claims.
   - `ConflictResolver` marks obvious same-subject/different-value
     contradictions as `conflicted`.
+  - `ConflictReview` turns conflicted claims into operator-visible
+    suggestions: competing claims, source trust, claim confidence,
+    suggested winner or `needs_review`.
   - `SourceRegistryStore` persists source records and extracted claims
     to `data/source_registry.jsonl` with duplicate suppression.
   - `KnowledgeWritePolicy` gates claims before they can become long-term
@@ -1275,6 +1279,14 @@ What is wired:
 
 By default, automatic memory writes are off. The source catalog still
 persists locally when a `SourceRegistryStore` is configured.
+
+Conflict review is read-only:
+
+```text
+:conflicts
+:conflicts --limit 5
+:conflict-status --json
+```
 
 ### 14.3d — Controlled Source Ingestion (`core/ingestion.py`)
 

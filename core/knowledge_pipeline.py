@@ -421,6 +421,8 @@ def _subject_value(text: str) -> tuple[str, str] | None:
             continue
         subject = _normalise_subject(match.group(1))
         value = _normalise_value(match.group(2))
+        if subject in _GENERIC_CONFLICT_SUBJECTS:
+            continue
         if subject and value:
             return subject, value
     return None
@@ -448,3 +450,21 @@ def _claim_id() -> str:
 
     return new_id("claim")
 
+
+_GENERIC_CONFLICT_SUBJECTS = {
+    "it",
+    "this",
+    "that",
+    "these",
+    "those",
+    "here",
+    "there",
+    "он",
+    "она",
+    "оно",
+    "это",
+    "этот",
+    "эта",
+    "эти",
+    "то",
+}

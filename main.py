@@ -80,6 +80,7 @@ from core.approval import ApprovalProvider, AutoApprover, CLIApprovalProvider
 from core.approval_inbox import ApprovalInbox
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
 from core.budget_governor import BudgetGovernor, BudgetLimits
+from core.conflict_review import ConflictReview
 from core.logger import TraceLogger
 from core.ingestion import DEFAULT_PROJECT_LIMIT, ingest_files, ingest_project, ingest_source
 from core.learning_planner import LearningPlanner
@@ -768,6 +769,54 @@ def _handle_auto_status(agent: AgentLoop, workspace: Path) -> bool:
     return True
 
 
+def _handle_conflicts(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    del workspace
+    tokens = _split_meta_args(rest)
+    limit = 10
+    as_json = False
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token == "--json":
+            as_json = True
+            i += 1
+            continue
+        if token == "--limit":
+            if i + 1 >= len(tokens):
+                print("Usage: --limit requires a number", file=sys.stderr)
+                return True
+            try:
+                limit = int(tokens[i + 1])
+            except ValueError:
+                print("Usage: --limit requires a number", file=sys.stderr)
+                return True
+            i += 2
+            continue
+        print(f"Usage: unknown :conflicts option {token}", file=sys.stderr)
+        return True
+    if limit < 1:
+        print("Usage: --limit must be >= 1", file=sys.stderr)
+        return True
+
+    registry = None
+    store = getattr(agent, "source_registry_store", None)
+    if store is not None:
+        registry = store.load_registry()
+    if registry is None or (not registry.sources and not registry.claims):
+        registry = getattr(agent, "last_source_registry", None)
+    if registry is None:
+        print("=== conflicts ===\n(no source registry available)", file=sys.stderr)
+        return True
+
+    report = ConflictReview().review(registry)
+    agent.log.log("conflict_review", report.to_dict())
+    if as_json:
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(report.user_summary(limit=limit), file=sys.stderr)
+    return True
+
+
 def _handle_budget_status(agent: AgentLoop, workspace: Path) -> bool:
     del agent, workspace
     snapshot = BudgetGovernor(BudgetLimits()).snapshot()
@@ -1293,6 +1342,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head == ":auto-status":
         return _handle_auto_status(agent, workspace)
 
+    if head in {":conflicts", ":conflict-status"}:
+        return _handle_conflicts(rest.strip(), agent, workspace)
+
     if head == ":budget-status":
         return _handle_budget_status(agent, workspace)
 
@@ -1365,6 +1417,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :auto-run [goal] [flags]        bounded autonomous health pass\n"
             "      flags: --dry-run  --allow-effects  --limit N  --learning-limit N  --no-tests\n"
             "  :auto-status                    inspect autonomous runtime inbox/status\n"
+            "  :conflicts [--limit N|--json]   inspect source claim conflicts and suggestions\n"
             "  :budget-status                  inspect default autonomous runtime budgets\n"
             "  :approval-list [status|all]     list pending/approved/denied approval items\n"
             "  :approval-approve <id>          mark an approval inbox item approved\n"
@@ -1476,7 +1529,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :learn  :auto-run  :budget-status  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:

@@ -24,6 +24,7 @@ from core.models import MemoryRecord
 from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
+from core.source_registry import SourceRegistry
 from core.source_registry_store import SourceRegistryStore
 from main import (
     _force_utf8_io,
@@ -310,6 +311,42 @@ class TestHandleMetaCommand:
         assert "autonomous budget defaults" in out.err
         assert "runtime task queue" in out.err
         assert "runtime scheduler" in out.err
+
+    def test_conflicts_command_lists_source_registry_conflicts(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+        registry = SourceRegistry()
+        docs = registry.register_source(
+            type="documentation",
+            title="docs",
+            locator="docs.md",
+            trust_level=0.90,
+        )
+        forum = registry.register_source(
+            type="forum",
+            title="forum",
+            locator="forum",
+            trust_level=0.35,
+        )
+        winner = registry.register_claim(
+            source_id=docs.id,
+            text="Agent mode is local.",
+            confidence=0.90,
+        )
+        registry.register_claim(
+            source_id=forum.id,
+            text="Agent mode is cloud.",
+            confidence=0.40,
+        )
+        agent.source_registry_store.save_registry(registry)
+
+        assert handle_meta_command(":conflicts --limit 1", agent, workspace) is True
+        assert handle_meta_command(":conflict-status --json", agent, workspace) is True
+
+        out = capsys.readouterr()
+        assert "=== conflicts ===" in out.err
+        assert "agent mode" in out.err
+        assert f"winner={winner.id}" in out.err
+        assert '"conflict_count": 1' in out.err
 
     def test_operator_control_plane_approval_list_approve_and_deny(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
