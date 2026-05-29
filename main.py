@@ -19,6 +19,8 @@ Usage examples:
     > :source-library books
     > :ingest-web "autonomous agent" --sources wikis,science --limit 3 --dry-run
     > :ingest-rss https://www.python.org/blogs/rss/ --limit 5 --dry-run
+    > :connectors
+    > :connector-plan "monitor Python releases"
     > :memory                             # inspect working + persistent memory
     > :forget mem_abc123                  # delete one persistent record
     > :forget                             # delete ALL persistent records
@@ -103,6 +105,11 @@ from core.planner import LLMPlanner
 from core.policy import PolicyGate
 from core.self_repair import RepairProposal
 from core.scheduler import SchedulerStore
+from core.source_connectors import (
+    SourceConnectorRegistry,
+    plan_source_connectors,
+    source_connector_payload,
+)
 from core.source_registry_store import SourceRegistryStore
 from core.source_library import list_source_library, source_library_payload
 from core.task_queue import TaskQueueStore
@@ -792,6 +799,87 @@ def _handle_ingest_rss(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         print(f"(ingest rss failed: {type(exc).__name__}: {exc})", file=sys.stderr)
         return True
     print(report.user_summary(), file=sys.stderr)
+    return True
+
+
+def _handle_connectors(rest: str) -> bool:
+    tokens = _split_meta_args(rest)
+    as_json = False
+    status = "all"
+    for token in tokens:
+        if token == "--json":
+            as_json = True
+            continue
+        if status != "all":
+            print("Usage: :connectors [all|wired|partial|planned] [--json]", file=sys.stderr)
+            return True
+        status = token.lower()
+    if status not in {"all", "wired", "partial", "planned"}:
+        print("Usage: :connectors [all|wired|partial|planned] [--json]", file=sys.stderr)
+        return True
+
+    registry = SourceConnectorRegistry()
+    if as_json:
+        payload = source_connector_payload()
+        if status != "all":
+            payload["connectors"] = [
+                item for item in payload["connectors"] if item["status"] == status
+            ]
+        print(json.dumps(payload, ensure_ascii=False, indent=2), file=sys.stderr)
+        return True
+
+    print("=== source connectors ===", file=sys.stderr)
+    for connector in registry.list(status=status):
+        cost = connector.cost.to_dict()
+        print(
+            f"  {connector.id} [{connector.status}] cost={cost['cost_class']} "
+            f"auth={connector.requires_auth} network={connector.network}",
+            file=sys.stderr,
+        )
+        print(
+            "    commands="
+            + (", ".join(connector.commands) if connector.commands else "-"),
+            file=sys.stderr,
+        )
+        print(f"    use: {'; '.join(connector.use_when)}", file=sys.stderr)
+    return True
+
+
+def _handle_connector_plan(rest: str) -> bool:
+    tokens = _split_meta_args(rest)
+    as_json = False
+    limit = 4
+    goal_parts: list[str] = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token == "--json":
+            as_json = True
+            i += 1
+            continue
+        if token == "--limit":
+            if i + 1 >= len(tokens):
+                print("Usage: --limit requires a number", file=sys.stderr)
+                return True
+            try:
+                limit = int(tokens[i + 1])
+            except ValueError:
+                print("Usage: --limit requires a number", file=sys.stderr)
+                return True
+            i += 2
+            continue
+        goal_parts.append(token)
+        i += 1
+
+    goal = " ".join(goal_parts).strip()
+    if not goal:
+        print("Usage: :connector-plan <goal> [--limit N] [--json]", file=sys.stderr)
+        return True
+    plan = plan_source_connectors(goal, limit=limit)
+    if as_json:
+        print(json.dumps(plan.to_dict(), ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(plan.user_summary(), file=sys.stderr)
     return True
 
 
@@ -1533,6 +1621,12 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head == ":ingest-rss":
         return _handle_ingest_rss(rest.strip(), agent, workspace)
 
+    if head == ":connectors":
+        return _handle_connectors(rest.strip())
+
+    if head == ":connector-plan":
+        return _handle_connector_plan(rest.strip())
+
     if head in {":learn", ":learn-project"}:
         return _handle_learn(rest.strip(), agent, workspace)
 
@@ -1616,6 +1710,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "      flags: --sources wikis|books|science|docs|all|id,id  --limit N  --per-source N\n"
             "  :ingest-rss <url> [flags]       fetch RSS/Atom feed entries into Source Registry\n"
             "      flags: --limit N  --dry-run  --write-memory  --no-memory\n"
+            "  :connectors [status] [--json]   list source connectors and rough costs\n"
+            "  :connector-plan <goal> [flags]  recommend source connectors for a task\n"
+            "      flags: --limit N  --json\n"
             "  :learn [goal] [flags]           plan sources, then ingest selected learning set\n"
             "  :learn-project [goal] [flags]   alias for :learn\n"
             "      flags: --dry-run  --write-memory  --no-memory  --limit N\n"
@@ -1734,7 +1831,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :connectors  :connector-plan  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:

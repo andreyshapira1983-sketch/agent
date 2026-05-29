@@ -403,6 +403,29 @@ class TestHandleMetaCommand:
         assert "ingest rss" in out.err
         assert "https://example.com/item-1" in out.err
 
+    def test_source_connector_registry_commands(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+
+        assert handle_meta_command(":connectors wired", agent, workspace) is True
+        assert handle_meta_command(":connectors --json", agent, workspace) is True
+        assert handle_meta_command(
+            ":connector-plan monitor Python releases --limit 2",
+            agent,
+            workspace,
+        ) is True
+        assert handle_meta_command(
+            ":connector-plan research papers about agents --json",
+            agent,
+            workspace,
+        ) is True
+
+        out = capsys.readouterr()
+        assert "source connectors" in out.err
+        assert "rss" in out.err
+        assert '"connectors"' in out.err
+        assert "connector plan" in out.err
+        assert "openalex" in out.err
+
     def test_learn_project_plans_then_ingests_selected_sources(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
         (workspace / "README.md").write_text(
