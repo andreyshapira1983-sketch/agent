@@ -36,7 +36,7 @@ from main import (
     handle_meta_command,
 )
 from tests.conftest import FakeLLM
-from tools.base import ToolRegistry
+from tools.base import Tool, ToolRegistry
 from tools.file_read import FileReadTool
 from tools.file_write import FileWriteTool
 
@@ -68,6 +68,65 @@ def _build_agent(workspace: Path) -> AgentLoop:
         approval_provider=AutoApprover(default="approve"),
         max_replan_attempts=1,
     )
+
+
+class FakeWebSearchTool(Tool):
+    name = "web_search"
+    description = "fake web search"
+    risk = "read_only"
+
+    def run(self, query: str, max_results: int = 3):
+        assert "site:wikipedia.org" in query
+        return [
+            {
+                "title": "Autonomous agent - Wikipedia",
+                "url": "https://en.wikipedia.org/wiki/Autonomous_agent",
+                "snippet": "An autonomous agent is an intelligent agent.",
+                "source": "fake",
+            },
+            {
+                "title": "Wrong domain",
+                "url": "https://example.com/Autonomous_agent",
+                "snippet": "Should be filtered.",
+                "source": "fake",
+            },
+        ][:max_results]
+
+    def validate_output(self, output):
+        return (isinstance(output, list), [])
+
+
+class FakeWebFetchTool(Tool):
+    name = "web_fetch"
+    description = "fake web fetch"
+    risk = "read_only"
+
+    def run(self, url: str):
+        assert url == "https://en.wikipedia.org/wiki/Autonomous_agent"
+        text = (
+            "Autonomous agent is a system situated in an environment. "
+            "Autonomous agent perceives that environment and acts on it."
+        )
+        return {
+            "url": url,
+            "status_code": 200,
+            "content_type": "text/html; charset=utf-8",
+            "fetched_at": "2026-05-29T17:30:00+00:00",
+            "content_hash": "a" * 64,
+            "text": text,
+            "text_truncated": False,
+            "bytes": len(text.encode("utf-8")),
+            "elapsed_ms": 1,
+            "compensation_plan": {
+                "id": "noop",
+                "actions": [{"kind": "noop", "description": "read only"}],
+                "tool_name": "web_fetch",
+                "description": "read only",
+            },
+        }
+
+    def validate_output(self, output):
+        return (isinstance(output, dict) and bool(output.get("text")), [])
 
 
 # ============================================================
@@ -254,6 +313,37 @@ class TestHandleMetaCommand:
         assert agent.last_source_registry.claims
         out = capsys.readouterr()
         assert "dry_run=True" in out.err
+
+    def test_source_library_command_lists_curated_sources(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+
+        assert handle_meta_command(":source-library wikis", agent, workspace) is True
+        assert handle_meta_command(":source-library --json", agent, workspace) is True
+
+        out = capsys.readouterr()
+        assert "source library" in out.err
+        assert "wikipedia" in out.err
+        assert '"groups"' in out.err
+
+    def test_ingest_web_fetches_curated_source_into_registry(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+        agent.registry.register(FakeWebSearchTool())
+        agent.registry.register(FakeWebFetchTool())
+
+        assert handle_meta_command(
+            ":ingest-web autonomous agent --sources wikipedia --limit 1",
+            agent,
+            workspace,
+        ) is True
+
+        assert agent.source_registry_store is not None
+        counts = agent.source_registry_store.count()
+        assert counts["sources"] >= 1
+        assert counts["claims"] >= 1
+        assert agent.last_provenance.by_kind("web_page")
+        out = capsys.readouterr()
+        assert "ingest web" in out.err
+        assert "https://en.wikipedia.org/wiki/Autonomous_agent" in out.err
 
     def test_learn_project_plans_then_ingests_selected_sources(self, workspace: Path, capsys):
         agent = _build_agent(workspace)

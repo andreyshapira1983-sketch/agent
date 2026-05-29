@@ -15,10 +15,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import urlparse
 
-from core.evidence import ProvenanceChain, make_evidence
+from core.evidence import ProvenanceChain, evidence_from_tool_result, make_evidence
 from core.knowledge_pipeline import KnowledgePipelineResult
 from core.source_ranker import rank_chain
+from core.source_library import SourceLibraryEntry, resolve_source_library
 from core.source_registry import SourceRegistry
 
 
@@ -125,6 +127,78 @@ class IngestReport:
         return "(" + "; ".join(parts) + ")"
 
 
+@dataclass
+class WebIngestReport:
+    mode: str
+    topic: str
+    source_ids: list[str] = field(default_factory=list)
+    searches: int = 0
+    search_results: int = 0
+    pages_fetched: int = 0
+    bytes_read: int = 0
+    chunks: int = 0
+    source_count: int = 0
+    claim_count: int = 0
+    source_store: dict[str, int] = field(default_factory=dict)
+    memory_saved: int = 0
+    memory_rejected: int = 0
+    memory_skipped: int = 0
+    conflicts: int = 0
+    dry_run: bool = False
+    auto_write_memory: bool = False
+    fetched_urls: list[str] = field(default_factory=list)
+    skipped_urls: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    def to_log_payload(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "topic": self.topic,
+            "source_ids": list(self.source_ids),
+            "searches": self.searches,
+            "search_results": self.search_results,
+            "pages_fetched": self.pages_fetched,
+            "bytes_read": self.bytes_read,
+            "chunks": self.chunks,
+            "source_count": self.source_count,
+            "claim_count": self.claim_count,
+            "source_store": dict(self.source_store),
+            "memory_saved": self.memory_saved,
+            "memory_rejected": self.memory_rejected,
+            "memory_skipped": self.memory_skipped,
+            "conflicts": self.conflicts,
+            "dry_run": self.dry_run,
+            "auto_write_memory": self.auto_write_memory,
+            "fetched_urls": list(self.fetched_urls),
+            "skipped_urls": list(self.skipped_urls[:20]),
+            "error_count": len(self.errors),
+            "errors": list(self.errors[:20]),
+        }
+
+    def user_summary(self) -> str:
+        store = self.source_store or {}
+        parts = [
+            f"ingest web: topic={self.topic!r}",
+            f"sources={','.join(self.source_ids) or '-'}",
+            f"searches={self.searches}",
+            f"results={self.search_results}",
+            f"pages={self.pages_fetched}",
+            f"claims={self.claim_count}",
+            f"saved_sources={store.get('sources_saved', 0)}",
+            f"saved_claims={store.get('claims_saved', 0)}",
+            f"memory_saved={self.memory_saved}",
+            f"memory_skipped={self.memory_skipped}",
+            f"conflicts={self.conflicts}",
+        ]
+        if self.dry_run:
+            parts.append("dry_run=True")
+        if self.errors:
+            parts.append(f"errors={len(self.errors)}")
+        if self.fetched_urls:
+            parts.append(f"fetched={self.fetched_urls[:5]}")
+        return "(" + "; ".join(parts) + ")"
+
+
 def ingest_source(
     *,
     agent: Any,
@@ -176,6 +250,155 @@ def ingest_project(
     return report
 
 
+def ingest_web_topic(
+    *,
+    agent: Any,
+    topic: str,
+    source_selection: str | Iterable[str] | None = None,
+    limit: int = 5,
+    per_source: int = 1,
+    dry_run: bool = False,
+    auto_write_memory: bool | None = None,
+) -> WebIngestReport:
+    topic = (topic or "").strip()
+    if not topic:
+        raise ValueError("topic is required")
+    if limit < 1:
+        raise ValueError("limit must be >= 1")
+    if per_source < 1:
+        raise ValueError("per_source must be >= 1")
+
+    entries = resolve_source_library(source_selection)
+    write_memory = bool(getattr(agent, "knowledge_auto_write", False))
+    if auto_write_memory is not None:
+        write_memory = bool(auto_write_memory)
+    if dry_run:
+        write_memory = False
+
+    report = WebIngestReport(
+        mode="web",
+        topic=topic,
+        source_ids=[entry.id for entry in entries],
+        dry_run=dry_run,
+        auto_write_memory=write_memory,
+    )
+    chain = ProvenanceChain()
+    seen_urls: set[str] = set()
+
+    registry = getattr(agent, "registry", None)
+    if registry is None:
+        raise ValueError("agent has no tool registry")
+    web_search = registry.get("web_search")
+    web_fetch = registry.get("web_fetch")
+
+    for entry in entries:
+        if report.pages_fetched >= limit:
+            break
+        query = entry.query(topic)
+        search_limit = max(3, per_source * 3)
+        report.searches += 1
+        try:
+            search_output = web_search.run(query=query, max_results=search_limit)
+            ok, issues = web_search.validate_output(search_output)
+            if not ok:
+                raise ValueError("; ".join(issues) or "web_search validation failed")
+            if issues:
+                report.errors.extend(f"{entry.id} search warning: {issue}" for issue in issues)
+            search_ev = evidence_from_tool_result(
+                tool_name="web_search",
+                arguments={"query": query, "max_results": search_limit},
+                output=search_output,
+                status="success",
+            )
+            if search_ev is not None:
+                chain.add(search_ev)
+            report.search_results += len(search_output) if isinstance(search_output, list) else 0
+        except Exception as exc:
+            report.errors.append(f"{entry.id} search failed: {type(exc).__name__}: {exc}")
+            continue
+
+        fetched_for_source = 0
+        for url in _candidate_urls(search_output, entry=entry):
+            if report.pages_fetched >= limit or fetched_for_source >= per_source:
+                break
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            try:
+                fetched = web_fetch.run(url=url)
+                ok, issues = web_fetch.validate_output(fetched)
+                if not ok:
+                    raise ValueError("; ".join(issues) or "web_fetch validation failed")
+                if issues:
+                    report.errors.extend(f"{url} fetch warning: {issue}" for issue in issues)
+                fetch_ev = evidence_from_tool_result(
+                    tool_name="web_fetch",
+                    arguments={"url": url},
+                    output=fetched,
+                    status="success",
+                )
+                if fetch_ev is None:
+                    report.skipped_urls.append(f"{url}: no evidence")
+                    continue
+                chain.add(fetch_ev)
+                fetched_for_source += 1
+                report.pages_fetched += 1
+                report.fetched_urls.append(url)
+                report.bytes_read += int(fetched.get("bytes", 0)) if isinstance(fetched, dict) else 0
+                text = fetched.get("text", "") if isinstance(fetched, dict) else ""
+                report.chunks += len(_chunk_text(str(text), max_chunks=SOURCE_MAX_CHUNKS))
+            except Exception as exc:
+                report.errors.append(f"{url} fetch failed: {type(exc).__name__}: {exc}")
+                report.skipped_urls.append(url)
+
+    ranking = rank_chain(chain, question="controlled online source library ingestion")
+    knowledge_result: KnowledgePipelineResult = agent.knowledge_pipeline.run(
+        chain,
+        ranking=ranking,
+        source_store=None if dry_run else getattr(agent, "source_registry_store", None),
+        remember=getattr(agent, "_remember_from_knowledge", None),
+        auto_write_memory=write_memory,
+    )
+
+    registry_out: SourceRegistry = knowledge_result.registry
+    report.source_count = len(registry_out.sources)
+    report.claim_count = len(registry_out.claims)
+    report.source_store = dict(knowledge_result.source_store)
+    report.memory_saved = knowledge_result.memory_saved
+    report.memory_rejected = knowledge_result.memory_rejected
+    report.memory_skipped = knowledge_result.memory_skipped
+    report.conflicts = knowledge_result.conflicts.count
+
+    agent.last_provenance = chain
+    agent.last_source_ranking = ranking
+    agent.last_source_registry = registry_out
+    agent.last_knowledge_pipeline = knowledge_result
+
+    log = getattr(agent, "log", None)
+    if log is not None:
+        log.log("ingest", report.to_log_payload())
+        log.log("evidence_collected", {
+            "count": len(chain),
+            "kinds": sorted({ev.kind for ev in chain.evidences}),
+            "chain": chain.to_log_payload(),
+            "mode": "ingest_web",
+        })
+        log.log("source_ranking", {
+            **ranking.to_log_payload(),
+            "mode": "ingest_web",
+        })
+        log.log("source_registry", {
+            **registry_out.to_log_payload(),
+            "mode": "ingest_web",
+        })
+        log.log("knowledge_pipeline", {
+            **knowledge_result.to_log_payload(),
+            "mode": "ingest_web",
+        })
+
+    return report
+
+
 def ingest_files(
     *,
     agent: Any,
@@ -195,6 +418,29 @@ def ingest_files(
         auto_write_memory=auto_write_memory,
         max_chunks_per_file=PROJECT_MAX_CHUNKS_PER_FILE,
     )
+
+
+def _candidate_urls(search_output: Any, *, entry: SourceLibraryEntry) -> list[str]:
+    if not isinstance(search_output, list):
+        return []
+    urls: list[str] = []
+    for item in search_output:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or item.get("href") or "").strip()
+        if not url:
+            continue
+        if not _is_http_url(url):
+            continue
+        if not entry.allows_url(url):
+            continue
+        urls.append(url)
+    return urls
+
+
+def _is_http_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
 def _ingest_paths(

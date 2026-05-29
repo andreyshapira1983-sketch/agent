@@ -400,6 +400,28 @@ def _web_source_type(source_id: str) -> SourceType:
     domain = _domain(locator)
     if domain.startswith(("docs.", "developer.", "api.", "help.", "support.")):
         return "documentation"
+    if domain in {
+        "docs.python.org",
+        "developer.mozilla.org",
+        "learn.microsoft.com",
+        "rfc-editor.org",
+    }:
+        return "documentation"
+    if any(domain == item or domain.endswith("." + item) for item in (
+        "wikipedia.org",
+        "arxiv.org",
+        "pubmed.ncbi.nlm.nih.gov",
+        "plato.stanford.edu",
+    )):
+        return "article"
+    if any(domain == item or domain.endswith("." + item) for item in (
+        "wikibooks.org",
+        "wikisource.org",
+        "gutenberg.org",
+        "archive.org",
+        "openlibrary.org",
+    )):
+        return "book"
     if domain.endswith(".gov") or domain.endswith(".edu"):
         return "official_site"
     if any(domain == item or domain.endswith("." + item) for item in ("reddit.com", "quora.com")):
@@ -410,7 +432,7 @@ def _web_source_type(source_id: str) -> SourceType:
 def _title_for_source(evidence: Evidence, *, source_type: SourceType, locator: str) -> str:
     if source_type == "file":
         return locator.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or locator
-    if source_type in {"documentation", "official_site", "web_page", "forum"}:
+    if source_type in {"documentation", "official_site", "web_page", "forum", "article", "book"}:
         host = _domain(locator)
         return host or locator
     if source_type == "memory":

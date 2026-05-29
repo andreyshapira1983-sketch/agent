@@ -81,6 +81,20 @@ _REPUTABLE_DOMAINS = frozenset({
     "coindesk.com",
     "coinmarketcap.com",
     "investing.com",
+    "wikipedia.org",
+    "wikibooks.org",
+    "wikisource.org",
+    "gutenberg.org",
+    "archive.org",
+    "openlibrary.org",
+    "arxiv.org",
+    "pubmed.ncbi.nlm.nih.gov",
+    "ncbi.nlm.nih.gov",
+    "plato.stanford.edu",
+    "developer.mozilla.org",
+    "learn.microsoft.com",
+    "rfc-editor.org",
+    "docs.python.org",
 })
 
 _BLOG_OR_FORUM_DOMAINS = frozenset({
@@ -355,6 +369,13 @@ def _domain_from_source_id(source_id: str) -> str:
 
 def _is_official_domain(domain: str) -> bool:
     if domain.endswith(".gov") or domain.endswith(".edu"):
+        return True
+    if domain in {
+        "docs.python.org",
+        "developer.mozilla.org",
+        "learn.microsoft.com",
+        "rfc-editor.org",
+    }:
         return True
     return domain.startswith(("docs.", "developer.", "api.", "help.", "support."))
 

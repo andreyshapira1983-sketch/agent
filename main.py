@@ -16,6 +16,8 @@ Usage examples:
     > :remember preference,fact I prefer concise answers in Russian
     > :ingest-source "архитектура автономного Агента.txt"
     > :ingest-project . --limit 40 --dry-run
+    > :source-library books
+    > :ingest-web "autonomous agent" --sources wikis,science --limit 3 --dry-run
     > :memory                             # inspect working + persistent memory
     > :forget mem_abc123                  # delete one persistent record
     > :forget                             # delete ALL persistent records
@@ -82,7 +84,13 @@ from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
 from core.budget_governor import BudgetGovernor, BudgetLimits
 from core.conflict_review import ConflictReview
 from core.logger import TraceLogger
-from core.ingestion import DEFAULT_PROJECT_LIMIT, ingest_files, ingest_project, ingest_source
+from core.ingestion import (
+    DEFAULT_PROJECT_LIMIT,
+    ingest_files,
+    ingest_project,
+    ingest_source,
+    ingest_web_topic,
+)
 from core.learning_planner import LearningPlanner
 from core.loop import AgentLoop, new_trace_id
 from core.memory import WorkingMemory
@@ -94,6 +102,7 @@ from core.policy import PolicyGate
 from core.self_repair import RepairProposal
 from core.scheduler import SchedulerStore
 from core.source_registry_store import SourceRegistryStore
+from core.source_library import list_source_library, source_library_payload
 from core.task_queue import TaskQueueStore
 from tools.base import ToolRegistry
 from tools.diff_file import DiffFileTool
@@ -599,6 +608,123 @@ def _handle_ingest_project(rest: str, agent: AgentLoop, workspace: Path) -> bool
         )
     except Exception as exc:
         print(f"(ingest failed: {type(exc).__name__}: {exc})", file=sys.stderr)
+        return True
+    print(report.user_summary(), file=sys.stderr)
+    return True
+
+
+def _handle_source_library(rest: str) -> bool:
+    tokens = _split_meta_args(rest)
+    as_json = False
+    group: str | None = None
+    for token in tokens:
+        if token == "--json":
+            as_json = True
+            continue
+        if group is not None:
+            print("Usage: :source-library [group|all] [--json]", file=sys.stderr)
+            return True
+        group = token
+
+    payload = source_library_payload()
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2), file=sys.stderr)
+        return True
+
+    entries = list_source_library()
+    if group and group != "all":
+        wanted = set(payload["groups"].get(group, [group]))
+        entries = tuple(entry for entry in entries if entry.id in wanted)
+    print("=== source library ===", file=sys.stderr)
+    print("groups: " + ", ".join(sorted(payload["groups"])), file=sys.stderr)
+    for entry in entries:
+        print(
+            f"  {entry.id} [{entry.category}] trust={entry.trust_level:.2f} "
+            f"domains={','.join(entry.allowed_domains)}",
+            file=sys.stderr,
+        )
+        print(f"    {entry.description}", file=sys.stderr)
+    return True
+
+
+def _handle_ingest_web(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    del workspace
+    tokens = _split_meta_args(rest)
+    dry_run = False
+    auto_write: bool | None = None
+    limit = 5
+    per_source = 1
+    source_selection: str | None = None
+    topic_parts: list[str] = []
+
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token == "--dry-run":
+            dry_run = True
+            i += 1
+            continue
+        if token == "--write-memory":
+            auto_write = True
+            i += 1
+            continue
+        if token == "--no-memory":
+            auto_write = False
+            i += 1
+            continue
+        if token == "--sources":
+            if i + 1 >= len(tokens):
+                print("Usage: --sources requires a comma-separated list or group", file=sys.stderr)
+                return True
+            source_selection = tokens[i + 1]
+            i += 2
+            continue
+        if token == "--limit":
+            if i + 1 >= len(tokens):
+                print("Usage: --limit requires a number", file=sys.stderr)
+                return True
+            try:
+                limit = int(tokens[i + 1])
+            except ValueError:
+                print("Usage: --limit requires a number", file=sys.stderr)
+                return True
+            i += 2
+            continue
+        if token == "--per-source":
+            if i + 1 >= len(tokens):
+                print("Usage: --per-source requires a number", file=sys.stderr)
+                return True
+            try:
+                per_source = int(tokens[i + 1])
+            except ValueError:
+                print("Usage: --per-source requires a number", file=sys.stderr)
+                return True
+            i += 2
+            continue
+        topic_parts.append(token)
+        i += 1
+
+    topic = " ".join(topic_parts).strip()
+    if not topic:
+        print(
+            "Usage: :ingest-web <topic> [--sources wikis|books|science|docs|all|id,id] "
+            "[--limit N] [--per-source N] [--dry-run] [--write-memory|--no-memory]",
+            file=sys.stderr,
+        )
+        return True
+
+    try:
+        report = ingest_web_topic(
+            agent=agent,
+            topic=topic,
+            source_selection=source_selection,
+            limit=limit,
+            per_source=per_source,
+            dry_run=dry_run,
+            auto_write_memory=auto_write,
+        )
+    except Exception as exc:
+        print(f"(ingest web failed: {type(exc).__name__}: {exc})", file=sys.stderr)
         return True
     print(report.user_summary(), file=sys.stderr)
     return True
@@ -1333,6 +1459,12 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head == ":ingest-project":
         return _handle_ingest_project(rest.strip(), agent, workspace)
 
+    if head == ":source-library":
+        return _handle_source_library(rest.strip())
+
+    if head == ":ingest-web":
+        return _handle_ingest_web(rest.strip(), agent, workspace)
+
     if head in {":learn", ":learn-project"}:
         return _handle_learn(rest.strip(), agent, workspace)
 
@@ -1411,6 +1543,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :forget [id|all]                delete persistent record(s)\n"
             "  :ingest-source <path> [flags]   ingest one UTF-8 text/code file into Source Registry\n"
             "  :ingest-project [path] [flags]  ingest project text/code files (default limit 80)\n"
+            "  :source-library [group|all]     list curated online source families\n"
+            "  :ingest-web <topic> [flags]     search/fetch curated web library sources\n"
+            "      flags: --sources wikis|books|science|docs|all|id,id  --limit N  --per-source N\n"
             "  :learn [goal] [flags]           plan sources, then ingest selected learning set\n"
             "  :learn-project [goal] [flags]   alias for :learn\n"
             "      flags: --dry-run  --write-memory  --no-memory  --limit N\n"
@@ -1529,7 +1664,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :ingest-web  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:
