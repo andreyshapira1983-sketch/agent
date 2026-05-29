@@ -15,9 +15,9 @@ from typing import Literal
 from core.ids import new_id
 
 
-ApprovalInboxStatus = Literal["pending", "approved", "denied", "aborted"]
+ApprovalInboxStatus = Literal["pending", "approved", "denied", "aborted", "executed"]
 ApprovalInboxRisk = Literal["read_only", "reversible", "irreversible", "external"]
-_VALID_STATUSES = {"pending", "approved", "denied", "aborted"}
+_VALID_STATUSES = {"pending", "approved", "denied", "aborted", "executed"}
 _VALID_RISKS = {"read_only", "reversible", "irreversible", "external"}
 
 
@@ -31,10 +31,13 @@ class ApprovalInboxItem:
     summary: str
     risk: ApprovalInboxRisk = "reversible"
     reasons: tuple[str, ...] = ()
+    payload: dict = field(default_factory=dict)
     requested_by: str = "autonomous_runtime"
+    expires_at: str | None = None
     id: str = field(default_factory=lambda: new_id("ain"))
     status: ApprovalInboxStatus = "pending"
     created_at: str = field(default_factory=_now_iso)
+    updated_at: str = field(default_factory=_now_iso)
 
     def to_dict(self) -> dict:
         return {
@@ -43,9 +46,12 @@ class ApprovalInboxItem:
             "summary": self.summary,
             "risk": self.risk,
             "reasons": list(self.reasons),
+            "payload": self.payload,
             "requested_by": self.requested_by,
+            "expires_at": self.expires_at,
             "status": self.status,
             "created_at": self.created_at,
+            "updated_at": self.updated_at,
         }
 
     @classmethod
@@ -59,15 +65,19 @@ class ApprovalInboxItem:
         reasons = data.get("reasons") or ()
         if not isinstance(reasons, (list, tuple)):
             reasons = (str(reasons),)
+        payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
         return cls(
             id=str(data.get("id") or new_id("ain")),
             operation=str(data.get("operation") or ""),
             summary=str(data.get("summary") or ""),
             risk=risk,  # type: ignore[arg-type]
             reasons=tuple(str(reason) for reason in reasons),
+            payload=payload,
             requested_by=str(data.get("requested_by") or "autonomous_runtime"),
+            expires_at=str(data.get("expires_at")) if data.get("expires_at") else None,
             status=status,  # type: ignore[arg-type]
             created_at=str(data.get("created_at") or _now_iso()),
+            updated_at=str(data.get("updated_at") or data.get("created_at") or _now_iso()),
         )
 
 
@@ -88,12 +98,16 @@ class ApprovalInbox:
         summary: str,
         risk: ApprovalInboxRisk = "reversible",
         reasons: tuple[str, ...] | list[str] = (),
+        payload: dict | None = None,
+        expires_at: str | None = None,
     ) -> ApprovalInboxItem:
         item = ApprovalInboxItem(
             operation=operation,
             summary=summary,
             risk=risk,
             reasons=tuple(reasons),
+            payload=dict(payload or {}),
+            expires_at=expires_at,
         )
         self.items.append(item)
         self._save()
@@ -113,6 +127,18 @@ class ApprovalInbox:
     def deny(self, item_id: str) -> ApprovalInboxItem:
         return self.set_status(item_id, "denied")
 
+    def abort(self, item_id: str) -> ApprovalInboxItem:
+        return self.set_status(item_id, "aborted")
+
+    def mark_executed(self, item_id: str) -> ApprovalInboxItem:
+        return self.set_status(item_id, "executed")
+
+    def get(self, item_id: str) -> ApprovalInboxItem | None:
+        for item in self.items:
+            if item.id == item_id:
+                return item
+        return None
+
     def set_status(self, item_id: str, status: ApprovalInboxStatus) -> ApprovalInboxItem:
         if status not in _VALID_STATUSES:
             raise ValueError(f"invalid approval status: {status}")
@@ -120,7 +146,7 @@ class ApprovalInbox:
         out: list[ApprovalInboxItem] = []
         for item in self.items:
             if item.id == item_id:
-                updated = replace(item, status=status)
+                updated = replace(item, status=status, updated_at=_now_iso())
                 out.append(updated)
             else:
                 out.append(item)

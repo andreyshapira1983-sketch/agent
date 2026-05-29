@@ -334,6 +334,60 @@ class TestHandleMetaCommand:
         assert "[approved]" in out.err
         assert "[denied]" in out.err
 
+    def test_operator_control_plane_approval_run_requires_approved_status(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+
+        assert _handle_auto_run("--allow-effects --no-tests --limit 2", agent, workspace) is True
+        inbox = getattr(agent, "approval_inbox")
+        item = inbox.pending()[0]
+
+        assert handle_meta_command(f":approval-run {item.id}", agent, workspace) is True
+        assert handle_meta_command(f":approval-deny {item.id}", agent, workspace) is True
+        assert handle_meta_command(f":approval-run {item.id}", agent, workspace) is True
+
+        out = capsys.readouterr()
+        assert "status=pending" in out.err
+        assert "status=denied" in out.err
+
+    def test_operator_control_plane_approval_run_rejects_unknown_operation(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+        assert _handle_auto_run("--allow-effects --no-tests --limit 2", agent, workspace) is True
+        inbox = getattr(agent, "approval_inbox")
+        unknown = inbox.add(operation="unknown.operation", summary="Unknown")
+
+        assert handle_meta_command(f":approval-approve {unknown.id}", agent, workspace) is True
+        assert handle_meta_command(f":approval-run {unknown.id}", agent, workspace) is True
+
+        out = capsys.readouterr()
+        assert "unsupported operation=unknown.operation" in out.err
+
+    def test_operator_control_plane_approval_run_executes_known_operation(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+        (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
+
+        assert _handle_auto_run("--allow-effects --no-tests --limit 2", agent, workspace) is True
+        inbox = getattr(agent, "approval_inbox")
+        item = inbox.pending()[0]
+
+        assert handle_meta_command(f":approval-approve {item.id}", agent, workspace) is True
+        assert handle_meta_command(f":approval-run {item.id}", agent, workspace) is True
+        assert inbox.get(item.id).status == "executed"
+
+        out = capsys.readouterr()
+        assert "auto-run status=completed dry_run=False" in out.err
+
+    def test_operator_control_plane_approval_abort(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+        assert _handle_auto_run("--allow-effects --no-tests --limit 2", agent, workspace) is True
+        inbox = getattr(agent, "approval_inbox")
+        item = inbox.pending()[0]
+
+        assert handle_meta_command(f":approval-abort {item.id}", agent, workspace) is True
+
+        out = capsys.readouterr()
+        assert "approval aborted" in out.err
+        assert inbox.get(item.id).status == "aborted"
+
     def test_task_add_list_and_run(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
         (workspace / "README.md").write_text(

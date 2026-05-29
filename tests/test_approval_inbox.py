@@ -37,11 +37,13 @@ def test_approval_inbox_persists_pending_items(workspace):
         operation="autonomous_runtime.allow_effects",
         summary="Allow non-dry-run autonomous mode",
         risk="irreversible",
+        payload={"goal": "project health", "include_tests": False},
     )
 
     reloaded = ApprovalInbox(path=path)
 
     assert reloaded.pending()[0].id == item.id
+    assert reloaded.pending()[0].payload["goal"] == "project health"
     assert reloaded.snapshot()["pending"] == 1
 
 
@@ -58,3 +60,17 @@ def test_approval_inbox_approve_and_deny_persist_status(workspace):
     assert reloaded.list(status="approved")[0].id == approved.id
     assert reloaded.list(status="denied")[0].id == denied.id
     assert reloaded.snapshot()["pending"] == 0
+
+
+def test_approval_inbox_abort_and_executed_statuses(workspace):
+    path = workspace / "data" / "approval_inbox.jsonl"
+    inbox = ApprovalInbox(path=path)
+    aborted = inbox.add(operation="abort-me", summary="Abort me")
+    executed = inbox.add(operation="execute-me", summary="Execute me")
+
+    assert inbox.abort(aborted.id).status == "aborted"
+    assert inbox.mark_executed(executed.id).status == "executed"
+
+    reloaded = ApprovalInbox(path=path)
+    assert reloaded.list(status="aborted")[0].id == aborted.id
+    assert reloaded.list(status="executed")[0].id == executed.id

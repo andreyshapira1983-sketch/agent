@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from core.approval import AutoApprover
+from core.approval_inbox import ApprovalInbox
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
 from core.budget_governor import BudgetLimits
 from core.logger import TraceLogger
@@ -97,12 +98,45 @@ def test_auto_runtime_blocks_non_dry_run_into_approval_inbox(workspace: Path):
     agent = _agent(workspace, with_tests=False)
 
     report = AutonomousRuntime(agent, workspace=workspace).run(
-        AutonomousRuntimeConfig(dry_run=False)
+        AutonomousRuntimeConfig(
+            goal="approved goal",
+            dry_run=False,
+            limit=2,
+            include_tests=False,
+            learning_limit=3,
+        )
     )
 
     assert report.status == "blocked"
     assert report.approvals["pending"] == 1
     assert "approval required" in report.stop_reason
+    item = report.approvals["items"][0]
+    assert item["operation"] == "autonomous_runtime.allow_effects"
+    assert item["payload"]["goal"] == "approved goal"
+    assert item["payload"]["dry_run"] is False
+    assert item["payload"]["limit"] == 2
+    assert item["payload"]["include_tests"] is False
+    assert item["payload"]["learning_limit"] == 3
+
+
+def test_auto_runtime_runs_non_dry_run_after_explicit_effects_approval(workspace: Path):
+    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
+    agent = _agent(workspace, with_tests=False)
+    inbox = ApprovalInbox()
+
+    report = AutonomousRuntime(agent, workspace=workspace, approval_inbox=inbox).run(
+        AutonomousRuntimeConfig(
+            dry_run=False,
+            effects_approved=True,
+            limit=2,
+            include_tests=False,
+        )
+    )
+
+    assert report.status == "completed"
+    assert report.dry_run is False
+    assert report.approvals["pending"] == 0
+    assert agent.source_registry_store.count()["sources"] >= 1
 
 
 def test_auto_runtime_stops_on_budget_denial(workspace: Path):

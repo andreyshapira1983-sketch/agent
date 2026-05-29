@@ -28,6 +28,7 @@ AutonomousRunStatus = Literal["completed", "stopped", "blocked"]
 class AutonomousRuntimeConfig:
     goal: str = "project health"
     dry_run: bool = True
+    effects_approved: bool = False
     limit: int = 5
     include_tests: bool = True
     learning_limit: int = 5
@@ -261,7 +262,7 @@ class AutonomousRuntime:
             "include_tests": config.include_tests,
         })
 
-        if not config.dry_run:
+        if not config.dry_run and not config.effects_approved:
             item = self.approval_inbox.add(
                 operation="autonomous_runtime.allow_effects",
                 summary=(
@@ -270,6 +271,13 @@ class AutonomousRuntime:
                 ),
                 risk="irreversible",
                 reasons=("non-dry-run autonomous mode is not enabled in this MVP",),
+                payload={
+                    "goal": config.goal,
+                    "dry_run": False,
+                    "limit": config.limit,
+                    "include_tests": config.include_tests,
+                    "learning_limit": config.learning_limit,
+                },
             )
             budget.reserve("approval_requests", reason="non-dry-run runtime approval")
             report = AutonomousRunReport(
@@ -386,7 +394,7 @@ class AutonomousRuntime:
             agent=self.agent,
             workspace=self.workspace,
             paths=plan.source_paths,
-            dry_run=True,
+            dry_run=config.dry_run,
             auto_write_memory=False,
         )
         return AutonomousTaskReport(

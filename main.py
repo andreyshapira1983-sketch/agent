@@ -822,6 +822,85 @@ def _handle_approval_decision(
     return True
 
 
+def _handle_approval_abort(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    item_id = rest.strip()
+    if not item_id:
+        print("Usage: :approval-abort <approval_id>", file=sys.stderr)
+        return True
+    inbox = _approval_inbox_for(agent, workspace)
+    try:
+        item = inbox.abort(item_id)
+    except KeyError as exc:
+        print(f"(approval abort failed: {exc})", file=sys.stderr)
+        return True
+    agent.log.log("approval_inbox_decision", item.to_dict())
+    print(f"(approval aborted: {item.id}; operation={item.operation})", file=sys.stderr)
+    return True
+
+
+def _payload_bool(value: object, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    raise ValueError(f"invalid boolean value: {value!r}")
+
+
+def _handle_approval_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    item_id = rest.strip()
+    if not item_id:
+        print("Usage: :approval-run <approval_id>", file=sys.stderr)
+        return True
+    inbox = _approval_inbox_for(agent, workspace)
+    item = inbox.get(item_id)
+    if item is None:
+        print(f"(approval run failed: approval not found: {item_id})", file=sys.stderr)
+        return True
+    if item.status != "approved":
+        print(
+            f"(approval run refused: {item.id} status={item.status}; approve it first)",
+            file=sys.stderr,
+        )
+        return True
+    if item.operation != "autonomous_runtime.allow_effects":
+        print(
+            f"(approval run refused: unsupported operation={item.operation})",
+            file=sys.stderr,
+        )
+        return True
+
+    payload = item.payload
+    try:
+        config = AutonomousRuntimeConfig(
+            goal=str(payload.get("goal") or "project health"),
+            dry_run=False,
+            effects_approved=True,
+            limit=max(1, int(payload.get("limit", 5))),
+            include_tests=_payload_bool(payload.get("include_tests"), default=True),
+            learning_limit=max(1, int(payload.get("learning_limit", 5))),
+        )
+    except (TypeError, ValueError) as exc:
+        print(f"(approval run failed: invalid payload: {exc})", file=sys.stderr)
+        return True
+
+    report = AutonomousRuntime(
+        agent,
+        workspace=workspace,
+        approval_inbox=inbox,
+    ).run(config)
+    if report.status == "completed":
+        executed = inbox.mark_executed(item.id)
+        agent.log.log("approval_inbox_executed", executed.to_dict())
+    print(report.user_summary(), file=sys.stderr)
+    return True
+
+
 def _handle_queue_status(agent: AgentLoop, workspace: Path) -> bool:
     summary = _task_queue_for(agent, workspace).summary()
     print("=== runtime task queue ===", file=sys.stderr)
@@ -1226,6 +1305,12 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head == ":approval-deny":
         return _handle_approval_decision(rest.strip(), agent, workspace, decision="deny")
 
+    if head == ":approval-run":
+        return _handle_approval_run(rest.strip(), agent, workspace)
+
+    if head == ":approval-abort":
+        return _handle_approval_abort(rest.strip(), agent, workspace)
+
     if head == ":queue-status":
         return _handle_queue_status(agent, workspace)
 
@@ -1284,6 +1369,8 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :approval-list [status|all]     list pending/approved/denied approval items\n"
             "  :approval-approve <id>          mark an approval inbox item approved\n"
             "  :approval-deny <id>             mark an approval inbox item denied\n"
+            "  :approval-run <id>              execute one approved whitelisted operation\n"
+            "  :approval-abort <id>            mark an approval inbox item aborted\n"
             "  :queue-status                   inspect runtime task queue summary\n"
             "  :scheduler-status               inspect scheduler summary\n"
             "  :task-add [goal] [flags]        enqueue persistent autonomous task\n"
@@ -1389,7 +1476,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :learn  :auto-run  :budget-status  :approval-list  :task-add  :schedule-tick  :auto-status  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :learn  :auto-run  :budget-status  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:
