@@ -525,8 +525,11 @@ class TestReplanIsBounded:
         assert len(respond_events) == 1
         assert respond_events[0]["payload"]["replan_exhausted"] is True
         assert respond_events[0]["payload"]["attempts_used"] == 3
-        # Sanity: the synth response is what the user sees.
-        assert answer == SYNTH_FAILED
+        # Sanity: the synth response reaches the user, then kernel output
+        # policy adds an explicit replan-budget warning under Unverified.
+        assert "Conclusion: could not gather evidence." in answer
+        assert "agent tried several plans, none worked" in answer
+        assert "replan budget was exhausted" in answer
 
 
 # ============================================================

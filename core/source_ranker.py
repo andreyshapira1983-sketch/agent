@@ -11,13 +11,13 @@ not fetch the network. It scores existing Evidence records by:
   - freshness for time-sensitive questions
   - whether the evidence class can support realtime claims at all
 
-The ranker is advisory. It does not yet drop claims from the final answer;
-it produces a structured report that the loop logs and later MVPs can use
-for confidence downgrades and conflict resolution.
+The ranker feeds the Ranker-to-Output policy, so support diagnostics can
+cap final confidence and move unsuitable realtime claims to Unverified.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -254,6 +254,12 @@ def _source_tier(evidence: Evidence) -> tuple[SourceTier, list[str]]:
     kind = evidence.kind
     if kind in {"user_explicit", "test_result"}:
         return "authoritative", [f"{kind} is authoritative for this run"]
+    if kind == "tool_output" and evidence.obtained_via in {
+        "market_price",
+        "finance",
+        "market_quote",
+    }:
+        return "primary", [f"{evidence.obtained_via} is structured market evidence"]
     if kind in {"file", "log_event", "shell_output"}:
         return "primary", [f"{kind} is primary local evidence"]
     if kind == "diff_preview":
@@ -345,12 +351,46 @@ def _confidence_ceiling(
 def _supports_realtime(evidence: Evidence) -> bool:
     if evidence.kind in {"test_result", "log_event", "shell_output"}:
         return True
+    if evidence.kind == "tool_output" and evidence.obtained_via in {
+        "market_price",
+        "finance",
+        "market_quote",
+    }:
+        return _has_realtime_timestamp(evidence)
     if evidence.kind != "web_page":
         return False
     domain = _domain_from_source_id(evidence.source_id)
     if not domain:
         return False
-    return _domain_matches(domain, _REALTIME_DOMAIN_HINTS)
+    return (
+        _domain_matches(domain, _REALTIME_DOMAIN_HINTS)
+        and _has_realtime_timestamp(evidence)
+    )
+
+
+def _has_realtime_timestamp(evidence: Evidence) -> bool:
+    text = f"{evidence.claim}\n{evidence.excerpt}".casefold()
+    timestamp_markers = (
+        "last updated",
+        "updated",
+        "as of",
+        "timestamp",
+        "utc",
+        "gmt",
+        "published_at",
+        "fetched_at",
+        "обновлено",
+        "по состоянию",
+        "время",
+    )
+    if any(marker in text for marker in timestamp_markers):
+        return True
+    # Common ISO/date-time shapes. A fetched page timestamp alone is handled
+    # by `fetched_at`; here we need the source/tool content itself to expose a
+    # timestamp for the market value.
+    if re.search(r"\b20\d{2}-\d{2}-\d{2}[t\s]\d{2}:\d{2}", text):
+        return True
+    return False
 
 
 def _domain_from_source_id(source_id: str) -> str:

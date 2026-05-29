@@ -73,6 +73,7 @@ plus full Control Loop integration. Run `python -m pytest -v`.
 | §12.4 Governance Modes (learning / repair / improvement approval boundaries) | [`core/governance.py`](core/governance.py) |
 | §14.1 Evidence + Provenance Chain | [`core/evidence.py`](core/evidence.py) |
 | §14.3 Source Ranker / Evidence Trust Layer | [`core/source_ranker.py`](core/source_ranker.py) |
+| §14.3x Ranker-to-Output Policy | [`core/output_policy.py`](core/output_policy.py) + [`core/loop.py`](core/loop.py) |
 | §14.3b Source Registry + extracted claims catalog | [`core/source_registry.py`](core/source_registry.py) |
 | §14.3c Knowledge Pipeline Integration | [`core/knowledge_pipeline.py`](core/knowledge_pipeline.py) + [`core/source_registry_store.py`](core/source_registry_store.py) |
 | §14.3c Conflict Review / Resolver UX | [`core/conflict_review.py`](core/conflict_review.py) + `:conflicts` |
@@ -1212,16 +1213,31 @@ First live slice:
   - Realtime questions are detected from market / weather / latest /
     "right now" language. Ordinary web pages and search snippets are
     capped as `insufficient_for_realtime`; market-data domains such as
-    CoinMarketCap / CoinGecko can support realtime claims when freshly
-    fetched.
+    CoinMarketCap / CoinGecko can support realtime claims only when the
+    source/tool content exposes a live value timestamp.
   - `AgentLoop` emits a `source_ranking` JSONL event after
     `evidence_collected` and exposes the latest report as
     `agent.last_source_ranking`.
 
-This layer is advisory today: it does not yet remove claims from the
-answer. MVP-14.6 will use the rank report to downgrade confidence,
-resolve conflicts, and move weak/realtime-unsafe claims into
-`Unverified`.
+### 14.3x — Ranker-to-Output Policy (`core/output_policy.py`)
+
+Verifier checks whether a citation matched evidence. Ranker-to-Output Policy
+checks whether matched evidence is strong enough for the question type before
+the answer reaches the user.
+
+Current rules:
+
+  - realtime question + no direct live source => final `Confidence` is capped
+    to `low`;
+  - realtime claims backed only by ordinary web/search evidence are rewritten
+    from `[verified:web:...]` / `[verified:search:...]` to
+    `[unverified:insufficient_for_realtime]`;
+  - the `Unverified` section receives an explicit warning instead of silently
+    saying `nothing`;
+  - `replan_exhausted=True` is also surfaced in `Unverified`, so audit state
+    and user-facing state stay aligned.
+
+The loop logs this as `output_policy` when it changes an answer.
 
 ### 14.3b — Source Registry (`core/source_registry.py`)
 
@@ -1782,7 +1798,7 @@ A real safety net lives in [`tests/`](tests/) and runs via `pytest`:
 python -m pytest -v
 ```
 
-What is covered today (**1424 tests, ≈ 15 s, zero network calls**):
+What is covered today (**1430 tests, ≈ 18 s, zero network calls**):
 
 | Layer | File | Cases |
 | --- | --- | --- |
@@ -1817,6 +1833,7 @@ What is covered today (**1424 tests, ≈ 15 s, zero network calls**):
 | Self-repair E2E hardening (MVP-13.4) | [`tests/test_self_repair_e2e.py`](tests/test_self_repair_e2e.py) | real pytest subprocess audit for success path / approval-deny no-write path / bad-patch auto-rollback path / low-confidence block before approval or write |
 | Evidence model (MVP-14.1) | [`tests/test_evidence.py`](tests/test_evidence.py) | **taxonomy**: every `EvidenceKind` has a `DEFAULT_CONFIDENCE` entry; values in `[0, 1]`; pinned hierarchy `user_explicit > test_result ≥ file > log_event > shell_output > diff_preview > web_page > tool_output > memory > web_search_hit > llm_claim > unknown` — **content_hash**: stable across calls, UTF-8 + surrogate-safe (no crash on `\ud800`), known sha256 hex for "hello" — **make_evidence**: fills `id`/`hash`/`fetched_at`/baseline confidence; unknown kind / `confidence ∉ [0, 1]` rejected; oversize excerpt truncated with `…[truncated]`; frozen dataclass; `to_dict ↔ from_dict` roundtrip — **ProvenanceChain**: empty / add / extend / `by_source_id` returns FIRST match / `by_kind` / `highest_confidence` / `to_log_payload` drops excerpt + reports `excerpt_len` — **factory dispatch**: `file_read` (path/empty/non-string), `web_search` (≤ 10 hits collapsed, empty → None, all-malformed → None), `run_tests` (passed/failed/timeout), `read_logs` (events / empty = weak), `shell_exec` (argv + stdout), `diff_file` (additions/deletions), `web_fetch` (uses tool's own content_hash + fetched_at), `file_write` → **None on purpose** (action, not a source), unknown tool falls back to `tool_output`, factory NEVER crashes on a `repr()`-throwing output — **failure contracts**: `status="error"` → None, empty `tool_name` → None, `arguments=None` safe — **non-tool constructors**: `evidence_from_user_directive` (top confidence), `evidence_from_memory_record` reduces confidence when source missing (with floor `0.25`), `evidence_from_llm_claim` strictly below memory |
 | Evidence loop integration (MVP-14.1) | [`tests/test_evidence_integration.py`](tests/test_evidence_integration.py) | **single step**: `file_read` adds `kind=file` evidence with right source_id / `diff_file` adds `kind=diff_preview` — **non-sources**: `file_write` produces ZERO evidence (action, not source) — **failed steps**: missing-file read produces ZERO evidence — **`evidence_collected` event**: emitted once per run with compact chain payload (no full excerpts); 0-step plan emits empty chain; multi-step preserves order — **memory → evidence**: persistent record retrieved via keyword overlap becomes `kind=memory` evidence with `mem_xxx` in source_id — **`agent.last_provenance`**: initialised empty, updated per `run()`, resets between runs — **robustness**: unknown tool falls back to `tool_output` kind; loop never crashes on factory edge cases |
+| Ranker-to-Output Policy (MVP-14.3x) | [`tests/test_source_ranker.py`](tests/test_source_ranker.py), [`tests/test_output_policy.py`](tests/test_output_policy.py), [`tests/test_output_policy_integration.py`](tests/test_output_policy_integration.py) | realtime detector / ordinary web pages and search pointers capped as `insufficient_for_realtime` / market domains require a live value timestamp / structured market tool evidence can support realtime / final answer downgrades high confidence to low when no live source exists / verified web/search tags become `[unverified:insufficient_for_realtime]` / `replan_exhausted` warnings are merged into `Unverified` |
 | Source Registry (MVP-14.3b) | [`tests/test_source_registry.py`](tests/test_source_registry.py) | manual book source stores page-level claim / core Evidence kinds map to source types (`file`, `test_result`, `log`, `memory`, `user`, docs, forum) / registry built from ProvenanceChain uses SourceRanker metadata and marks weak/realtime-unsafe claims unverified / `AgentLoop` logs `source_registry` and exposes `agent.last_source_registry` |
 | Knowledge Pipeline (MVP-14.3c) | [`tests/test_knowledge_pipeline.py`](tests/test_knowledge_pipeline.py) | SourceRegistryStore roundtrip + duplicate suppression / ClaimExtractor extracts sentence claims and rejects secret-shaped text / ConflictResolver marks same-subject different-value claims conflicted / KnowledgeWritePolicy rejects unverified claims and accepts strong source-backed claims / AgentLoop E2E persists source catalog and writes approved knowledge to persistent memory when enabled |
 | Controlled Ingestion (MVP-14.3d) | [`tests/test_cli.py`](tests/test_cli.py) | `:ingest-source` stores source-backed claims in SourceRegistry without memory writes by default / `--write-memory` saves approved verified claims through existing memory policy / `:ingest-project --dry-run` builds an in-memory registry report without persisting registry or memory |

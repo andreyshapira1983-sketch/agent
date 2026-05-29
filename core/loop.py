@@ -56,6 +56,7 @@ from core.models import (
     ToolCall,
     ToolResult,
 )
+from core.output_policy import apply_ranker_output_policy
 from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner, PlannerOutput
 from core.policy import PolicyGate
@@ -768,6 +769,7 @@ class AgentLoop:
                 )
 
                 if decision.action != "continue":
+                    replan_exhausted = True
                     self.log.log(
                         "replan_exhausted",
                         {
@@ -994,6 +996,16 @@ class AgentLoop:
         else:
             answer = draft_answer
             self.last_verification = None
+
+        policy_result = apply_ranker_output_policy(
+            answer=answer,
+            ranking=self.last_source_ranking,
+            question=user_question,
+            replan_exhausted=replan_exhausted,
+        )
+        if policy_result.applied:
+            answer = policy_result.answer
+            self.log.log("output_policy", policy_result.to_log_payload())
 
         # Defence-in-depth: redact once more on the way out so even an
         # LLM hallucinating a credential cannot bypass the kernel.

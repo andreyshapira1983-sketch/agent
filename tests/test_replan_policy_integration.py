@@ -382,8 +382,10 @@ class TestAcceptanceExhaustedHonest:
         )
         answer = agent.run(user_question="x", file_hint=None)
 
-        # Synthesizer still ran — user got a structured answer.
-        assert answer == SYNTH_FAILED
+        # Synthesizer still ran — user got a structured answer, then the
+        # kernel output policy made the exhausted replan state explicit.
+        assert "Nothing usable came back" in answer
+        assert "replan budget was exhausted" in answer
         events = _events(log_path)
         respond = [e for e in events if e["event"] == "respond"]
         assert len(respond) == 1
