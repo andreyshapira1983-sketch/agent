@@ -1,0 +1,523 @@
+Architecture Views (Meta / Preface — how to read this architecture)
+   - Logical View
+   - Runtime View
+   - Data View
+   - Security View
+   - Deployment View
+   - Failure / Recovery View
+
+1. Interface & Communication
+   - Communication Layer
+   - Multilingual Understanding
+   - Localization (timezone, culture, formats)
+   - Accessibility
+   - User Modeling & Personalization
+   - Consent & Telemetry Management
+   - Active Feedback Loop
+   - HITL Feedback Collection
+   - Async Notifications Channel
+   - Output Sanitization
+   - Output Contract
+      - Response Format
+      - Required Citations
+      - Confidence Disclosure
+      - Uncertainty Disclosure
+      - Action Summary
+      - Evidence Summary
+      - Next-Step Recommendation
+      - User-Facing Audit Trail
+
+2. Perception & Input Processing
+   - Perception Layer
+   - Multimodal Fusion
+   - Observation Model
+   - Input Sanitization
+   - Adversarial Defense
+   - Indirect Prompt Injection Defense
+   - Citation & Provenance Attribution
+
+3. Cognitive Core & Agent Cycle
+   - Cognitive Core
+   - Reasoning Subsystem
+   - Probabilistic Inference
+   - Uncertainty Quantification
+   - Explainability & Justification
+   - Context Window Management
+   - Prompt Registry & Versioning
+   - User Mental Model
+   - Curiosity & Bounded Exploration Policy
+   - Hypothesis Generation & Experiment Design
+   - Temporal Reasoning
+   - World Model
+   - Environment State Model
+      - Current External State
+      - Known Unknowns
+      - State Source
+      - State Freshness
+      - State Confidence
+      - State Change Detection
+      - State Synchronization
+   - Planning
+      - Goal & Planning
+      - Goal Analysis & Intent Extraction
+      - Task Decomposition
+      - Step Prioritization
+      - Completion Verification
+      - Cost-Aware Planning
+   - Planner / Executor / Verifier Architecture
+      - Planner
+      - Executor
+      - Verifier
+      - Critic
+      - Supervisor
+      - Escalation Manager
+      - Separation of Responsibilities
+   - Clarification Policy
+      - Ambiguity Detection
+      - Missing Parameter Detection
+      - Ask-vs-Act Decision
+      - Safe Default Selection
+      - Assumption Disclosure
+      - User Interruption Handling
+      - When Not to Ask
+   - Assumption Registry
+      - Assumption Text
+      - Source
+      - Confidence
+      - Expiration
+      - Validation Status
+      - Impact on Plan
+      - Required Verification
+   - Goal Conflict Resolution
+      - User Goal vs Policy
+      - Short-term Goal vs Long-term Preference
+      - Speed vs Safety
+      - Cost vs Quality
+      - Privacy vs Personalization
+      - Competing User Instructions
+      - Priority Arbitration
+   - Task Acceptance & Definition of Done
+      - User-Defined Acceptance Criteria
+      - System-Defined Completion Rules
+      - Evidence Requirements
+      - Quality Threshold
+      - Done / Not-Done Classifier
+      - User Confirmation Rules
+      - Failure Criteria
+   - Control Loop / Agent Cycle
+      - Loop Orchestrator
+      - Phases
+         - Observe (input ingestion, sensor read, event poll) -> produces Observation
+         - Interpret (parsing, intent recognition, world state update) -> updates World Model, Environment State Model; may emit Goal
+         - Plan (goal selection, task decomposition, action choice) -> produces Plan, Plan Step
+         - Act (tool invocation, side effects) -> produces Action, Tool Call; requires Policy Decision
+         - Observe Result (output capture, return values) -> produces Tool Result; on failure -> Error Object
+         - Verify (expected vs actual, success criteria check) -> produces Evaluation Result; may emit Error Object
+         - Replan / Stop (continue, adjust, escalate, terminate) -> updates Plan or triggers Exit Condition / Approval Request
+      - Loop Control
+         - Max Iteration Limit
+         - Timeout / Deadline
+         - Step Budget
+         - Recursion Depth Limit
+      - Interrupt Handling
+         - User Interrupt
+         - External Signal
+         - Error Pre-emption
+         - Approval Wait
+      - Exit Conditions
+         - Goal Achieved
+         - Unrecoverable Failure
+         - Human Handoff
+         - Budget Exhausted
+         - User Abort
+      - Phase Hooks (pre/post observability)
+      - State Machine Transitions
+      - Mode Switching (reactive / deliberative / reflective)
+
+4. Memory & Knowledge Governance
+   - Knowledge System
+   - Data Validation & Contracts
+   - Trust & Provenance Tracker
+   - Working Memory / Scratchpad
+   - Long-Term Memory
+   - Memory Taxonomy (Episodic / Semantic / Procedural)
+   - Event Log / Episodic Journal
+   - Knowledge Graph & Embedding Store
+   - Ingestion & ETL Pipeline
+   - Retrieval Strategy (RAG, reranking, hybrid)
+   - Source Conflict Resolution
+   - Fact-Checking Subsystem
+   - Fact Freshness Tracking
+   - Memory Write Policy
+      - What Can Be Stored
+      - What Must Not Be Stored
+      - User Consent Rules
+      - Sensitive Data Handling
+      - Memory Update Rules
+      - Memory Deletion Rules
+      - Memory Conflict Handling
+      - Memory TTL Rules
+   - Memory Retrieval Policy
+      - Retrieval Triggers
+      - Query Construction
+      - Relevance Threshold
+      - Recency Weighting
+      - User-Specific Memory Separation
+      - Global Knowledge Separation
+      - Retrieval Budget
+      - Context Injection Rules
+   - Forgetting Policies
+   - Relevance Decay
+   - Deduplication
+
+5. Tools, Actions & Execution
+   - Tool Layer
+   - Execution System
+   - MCP / Tool Adapter Protocol
+   - Shell / OS Operations
+   - Software Development System (optional)
+   - Capability Discovery & Negotiation
+   - Tool Schema Drift Detection
+   - Outbound Rate Limiting & Throttling
+   - Egress Control / Proxy Layer
+   - Tool Catalog
+      - Web Search
+      - File Read / Write
+      - Code Execution
+      - Database Operations
+         - Query
+         - Insert / Update / Delete
+         - Transaction Management
+         - Schema Introspection
+      - Email Integration
+         - Compose & Send
+         - Read Inbox
+         - Reply / Forward
+         - Attachment Handling
+      - Calendar Integration
+         - Find Event
+         - Create Event
+         - Modify Event
+         - Delete Event
+         - Respond to Invite
+      - External API Management
+         - REST / GraphQL Clients
+         - Authentication & Token Refresh
+         - Pagination & Streaming
+   - Tool Result Validation
+      - Schema Validation
+      - Semantic Validation
+      - Freshness Validation
+      - Empty Result Detection
+      - Partial Result Detection
+      - Cross-Source Verification
+      - Suspicious Result Detection
+      - Tool Error Normalization
+   - Action Risk & Reversibility
+      - Read-only Actions
+      - Reversible Actions
+      - Irreversible Actions
+      - External Side-Effect Actions
+      - Financial-Risk Actions
+      - Legal-Risk Actions
+      - Medical / Safety-Risk Actions
+      - Privacy-Risk Actions
+      - Approval Thresholds
+      - Auto-Execution Boundaries
+   - Undo / Compensation System
+      - Undo Action Registry
+      - Compensating Transactions
+      - Rollback Plan per Action Type
+      - Partial Failure Recovery
+      - External Side-Effect Reversal
+      - User-Visible Recovery Report
+      - Non-Reversible Action Marking
+
+6. Runtime, State & Orchestration
+   - Agent System
+   - Orchestration System
+   - Model Management
+   - Resource Coordination
+   - Task Queues
+   - Attention Management
+   - Multi-Agent Conflict Resolution
+   - Inter-Agent Communication Protocol (A2A)
+   - Negotiation & Coordination Protocols
+   - Agent Identity & Trust
+   - Clock & Time Awareness
+   - Scheduler / Triggers / Cron
+   - SLA & Deadline Management
+   - Runtime Budget Enforcement
+   - State & Session Management
+   - Checkpoint / Resume
+   - Idempotency
+   - Recovery
+   - Circuit Breaker
+   - Retry & Backoff Policy
+   - Failure Taxonomy
+   - Replay / Time-Travel Debugging
+   - Agent Runtime State
+      - Current Plan
+      - Recent Actions
+      - Errors & Failures
+      - Constraints & Limitations
+      - Available Tools
+      - Confidence Level
+      - Active Goal Stack
+      - Pending Approvals
+   - Event Bus & Triggers
+      - User Command Received
+      - Tool Returned Error
+      - New File Received
+      - New Data Available
+      - Human Approval Required
+      - Plan Step Completed
+      - Plan Step Failed
+      - Confidence Threshold Crossed
+      - Deadline Approaching
+      - External Webhook Received
+      - Schedule / Timer Fired
+      - Resource Budget Exhausted
+      - Policy Violation Detected
+      - Multi-Agent Message Received
+
+7. Security, Policy & Autonomy Governance
+   - Security System
+   - Instruction Hierarchy & Conflict Resolution
+      - System Instructions
+      - Developer Instructions
+      - Organization Policy
+      - User Instructions
+      - Tool Instructions
+      - Retrieved Document Instructions
+      - Memory-Derived Instructions
+      - Priority Rules
+      - Conflict Detection
+      - Conflict Resolution Policy
+      - Prompt-Injection Isolation
+   - Governance / Policy
+   - Permission Control
+   - Secrets Management
+   - Data Privacy Gateway
+   - Human Approval
+   - Human Escalation System
+      - Escalation Triggers
+      - Severity Levels
+      - User Handoff
+      - Operator Handoff
+      - Explanation Package
+      - Resume After Human Decision
+      - Escalation Audit Log
+   - Value Alignment / Ethics Layer
+   - Bias Detection & Fairness
+   - Harm / Refusal Classifier
+   - Compliance
+   - Immutable Audit Log
+   - Legal Hold & Right to be Forgotten
+   - Data Residency / Jurisdiction Routing
+   - Autonomy Governance
+      - Identity & Self-Model
+      - Autonomy Levels 0–5
+      - Capability Awareness
+      - Limitation Awareness
+      - Operational Design Domain
+         - Supported Task Types
+         - Unsupported Task Types
+         - Allowed Environments
+         - Required Supervision Level
+         - Allowed Tool Categories
+         - Domain Constraints
+         - Out-of-Domain Detection
+
+8. Evaluation, Monitoring & Verification
+   - Monitoring & Logging
+   - Tracing
+   - User Interaction Telemetry
+   - Cost Tracking
+   - Budget Metrics
+   - Evaluation & Benchmarking
+   - Calibration Metrics
+   - Hallucination Detection
+   - Factuality Evaluation
+   - Evidence Consistency Check
+   - Simulation Environment Modeling
+   - Simulation / Sandbox Testing
+   - Pre-execution Risk Testing
+   - Formal Verification
+   - Continuous Red-Teaming Harness
+
+9. Learning & Self-Improvement
+   - Learning System
+   - Reflection System
+   - Self-Repair
+   - Self-Improvement
+   - Skill / Capability Library
+   - RL Loop
+   - User Intent Inference & Preference Learning
+   - RLHF Dataset Collection
+
+10. Platform, Deployment & Reliability
+   - Versioning & Release Management
+   - Canary / A-B Rollout
+   - CI/CD Pipeline
+   - Feature Flags
+   - Configuration Management
+   - Migration & Rollback
+   - Backup & Restore
+   - Disaster Recovery Plan
+   - Region Failover
+   - Chaos Engineering
+   - Health Checks & Heartbeats
+
+11. External Surface, API & Edge
+   - Public API Surface
+   - SDK & Client Libraries
+   - Developer Documentation
+   - Changelog & Deprecation Policy
+   - Network Layer
+   - Proxy & VPN
+   - DNS & Service Discovery
+   - Webhooks (inbound / outbound)
+   - Optional: Embodiment & Edge Runtime
+      - Actuator / Motor Control
+      - Safety Stops & Interlocks
+      - Sensor Fusion
+      - Edge Runtime (on-device models)
+      - Offline Mode
+
+12. Cross-Cutting: Data Models, Flows & Contracts
+   12.1 Core Data Models
+   - Task (id, parent_goal_id, description, status, priority, deadline, dependencies, owner_agent, created_at)
+      - producer: §3 Cognitive Core (Task Decomposition)
+      - consumers: §3 (Executor), §6 (Task Queue, Scheduler)
+   - Goal (id, description, success_criteria, parent_goal_id, status, priority, deadline)
+      - producer: §3 (Goal Analysis & Intent Extraction, sub-goal decomposition)
+      - source: §1 (User Command / intent signal)
+      - consumers: §3 (Planner, Goal Conflict Resolution), §8 (Evaluation success criteria)
+   - Plan (id, goal_id, steps, version, status, strategy, created_at)
+      - producer: §3 (Planner)
+      - consumers: §3 (Executor, Verifier), §6 (Orchestration), §8 (Evaluation)
+   - Plan Step (id, plan_id, order, action_spec, preconditions, expected_outcome, status, retry_count)
+      - producer: §3 (Planner)
+      - consumers: §3 (Executor), §5 (Tool Layer), §6 (Retry/Backoff)
+   - Action (id, step_id, type, tool_name, parameters, side_effects, timestamp)
+      - producer: §3 (Executor)
+      - consumers: §5 (Tool Layer), §7 (Policy gate, Action Risk classification)
+   - Observation (id, source, modality, content, confidence, timestamp, provenance)
+      - producer: §2 (Perception)
+      - consumers: §3 (Interpret phase), §4 (Memory Write)
+   - Tool Call (id, action_id, tool_name, arguments, started_at, timeout, idempotency_key)
+      - producer: §3 (Act phase), §5 (Tool Adapter)
+      - consumers: §5 (Tool runtime, Egress Control), §8 (Cost Tracking)
+   - Tool Result (id, tool_call_id, status, output, error, latency_ms, cost, completed_at)
+      - producer: §5 (Tool runtime)
+      - consumers: §3 (Verifier), §5 (Tool Result Validation), §4 (Memory Write), §8 (Hallucination Detection)
+   - Memory Record (id, type, content, embedding, source, confidence, ttl, provenance, created_at)
+      - producer: §3 (writes from cycle), §4 (consolidation)
+      - consumers: §3 (Retrieval into context), §4 (Memory Retrieval Policy)
+   - User Profile (id, name, preferences, language, timezone, consent_flags, trust_level)
+      - producer: §1 (UX capture), §9 (Preference Learning)
+      - consumers: §1 (Personalization), §3 (User Mental Model, Planning), §7 (Consent, Permission)
+   - Policy Decision (id, policy_id, subject, action, decision, reasons, timestamp)
+      - producer: §7 (Governance / Policy)
+      - consumers: §5 (Tool gate), §3 (Plan validation), §1 (UX disclosure)
+   - Approval Request (id, action_id, requester, approver, status, justification, expires_at)
+      - producer: §7 (Human Approval, Escalation)
+      - consumers: §1 (UX surface), §7 (Escalation audit log)
+   - Error Object (id, source, code, message, severity, recoverable, context, stack_trace, timestamp)
+      - producer: all domains (on failure)
+      - consumers: §6 (Recovery, Failure Taxonomy), §9 (Reflection, Self-Repair), §1 (User-Facing Audit Trail)
+   - Evaluation Result (id, benchmark_id, metrics, score, baseline, regression_flag, timestamp)
+      - producer: §8 (Evaluation & Benchmarking)
+      - consumers: §9 (Learning, RLHF Dataset), §3 (Calibration update)
+   12.2 Model Relationships
+      - Goal 1..* Task
+      - Goal 1..1 Plan
+      - Plan 1..* Plan Step
+      - Plan Step 1..* Action
+      - Action 1..1 Tool Call
+      - Tool Call 1..1 Tool Result
+      - Observation -> Memory Record
+      - Action -> Policy Decision (pre-execution gate)
+      - Policy Decision -> Approval Request (when escalated)
+      - Tool Result / Plan Step -> Error Object (on failure)
+      - Plan / Plan Step -> Evaluation Result (post-execution)
+   12.3 Core Data Flows
+      - Happy Path
+         - User Input (§1) -> Observation (§2)
+         - Observation -> Cognitive Core Interpret (§3) -> Memory Write (§4, gated)
+         - Goal extraction (§3) -> Plan / Plan Step (§3 Planner)
+         - Plan Step -> Action (§3 Executor) -> Policy Decision gate (§7) -> Tool Call (§5)
+         - Tool Call -> Tool Result (§5) -> Tool Result Validation (§5)
+         - Validated Tool Result -> Verify (§3) -> Evaluation Result (§8)
+         - Verify (success) -> Memory Write (§4) -> Output (§1) per Output Contract
+      - Error Branches
+         - Schema fail at §2 -> Error Object -> §1 Clarification or §6 Recovery
+         - Policy denied at §7 -> Approval Request -> §1 (UX) -> human decision -> resume or abort
+         - Action Risk = irreversible -> mandatory Approval (§7) before Act
+         - Tool error at §5 -> Error Object -> §6 Retry/Backoff -> if exhausted -> Failure Taxonomy
+         - Tool Result Validation fail (§5) -> Replan back-edge to §3
+         - Hallucination Detection flag (§8) -> Replan or Escalation (§7)
+         - Verify fail at §3 -> Replan or Escalation (§7)
+         - Budget exhausted (§6 Runtime Budget Enforcement) -> Exit Condition or Escalation
+         - Out-of-Domain detected (§7 ODD) -> Refusal + User-Facing Audit Trail
+      - Back-Edges
+         - Verify -> Replan (within Control Loop §3)
+         - Replan -> updated Plan (§3 Planner)
+         - Reflection (§9) -> Skill Library (§9) -> richer Plan templates (§3)
+         - Evaluation Result (§8) -> Calibration Metrics (§8) -> Cognitive Core priors update (§3)
+         - User Feedback (§1 HITL) -> Preference Learning (§9) -> User Profile (§1)
+         - Failure Taxonomy (§6) -> Self-Repair (§9) -> Plan template fix (§3)
+         - Memory Conflict (§4) -> Source Conflict Resolution (§4) -> Fact-Checking (§4)
+      - Conditional Flows
+         - if confidence < threshold -> Clarification (§3) or Escalation (§7)
+         - if action.risk == irreversible -> mandatory Approval (§7)
+         - if memory.relevance > threshold -> context injection (§3) within Retrieval Budget (§4)
+         - if deadline approaching -> priority bump (§3) or work-shed (§6)
+         - if cost > budget -> Cost-Aware Replan (§3) or Escalation (§7)
+         - if multi-source conflict -> Source Conflict Resolution (§4) before use
+         - if instruction conflict -> Instruction Hierarchy resolution (§7) before Plan
+         - if event preempts cycle (§6 Event Bus) -> Interrupt Handler (§3) -> rescheduling
+   12.4 Policy Gates (cross-cutting checkpoints)
+      - Action -> Policy Decision (§7) -> if denied -> Approval Request -> §1 (UX surface)
+      - Action -> Action Risk Classification (§5) -> if irreversible / high-risk -> mandatory Approval (§7)
+      - Tool Call -> Permission Control (§7) -> Egress Control (§5) -> Outbound Rate Limit (§5)
+      - Tool Result -> Tool Result Validation (§5) -> Hallucination Detection (§8) -> if fail -> Replan (§3)
+      - Memory Write -> Memory Write Policy (§4) -> Consent Check (§1)
+      - Memory Read -> Memory Retrieval Policy (§4) -> User-Specific Separation -> Relevance Threshold
+      - Output -> Output Sanitization (§1) -> Output Contract enforcement (§1)
+      - Plan -> Instruction Hierarchy (§7) -> Goal Conflict Resolution (§3)
+      - Cycle Iteration -> Loop Control (§3) -> Runtime Budget Enforcement (§6)
+      - Out-of-Domain Request -> Operational Design Domain check (§7) -> Refusal or Escalation
+   12.5 Domain Interfaces
+      - Perception (§2) -> Cognitive Core (§3): Observation [sync, required; on schema fail -> Error Object -> §6 Recovery]
+      - Cognitive Core (§3) -> Memory (§4): Memory Record [sync write / sync read; gated by Memory Write/Retrieval Policy; on policy deny -> dropped + audit log]
+      - Cognitive Core (§3) -> Tools (§5): Action / Tool Call [sync, required; on policy deny -> Approval Request]
+      - Tools (§5) -> Cognitive Core (§3): Tool Result [sync or async; required; on timeout -> Error Object -> Retry/Backoff]
+      - Cognitive Core (§3) -> Verifier (§3): Plan / Plan Step + Tool Result [sync, required; on fail -> Replan back-edge]
+      - Runtime (§6) -> Event Bus (§6): Event [async fan-out; lossy allowed for low-priority]
+      - Event Bus (§6) -> Cognitive Core (§3): Event [async interrupt; preempts current phase via Interrupt Handler]
+      - Security (§7) -> All Actions (§5): Policy Decision [sync gate, required; on deny -> halt + Approval Request]
+      - Security (§7) -> Interface (§1): Approval Request [async; required for irreversible actions; on timeout -> escalate or abort]
+      - Evaluation (§8) -> Learning (§9): Evaluation Result [async batch; optional; on regression flag -> alert]
+      - Memory (§4) -> Cognitive Core (§3): retrieved context [sync pull; budget-limited via Retrieval Budget]
+      - Platform (§10) -> Runtime (§6): config / feature flags [async push; eventually consistent; on conflict -> last-write-wins with version]
+      - Interface (§1) -> Cognitive Core (§3): User Command [sync request; on ambiguous -> Clarification Policy]
+      - Cognitive Core (§3) -> Interface (§1): Output + Output Contract [sync response; on Output Sanitization fail -> regenerate or refuse]
+      - External API (§11) -> Runtime (§6): Webhook [async push; idempotency-keyed; on duplicate -> dedupe]
+   12.6 Control Flows (who triggers whom)
+      - User (§1) -> Cognitive Core (§3): new command -> start cycle
+      - Event Bus (§6) -> Cognitive Core (§3): event arrival -> interrupt current phase
+      - Scheduler (§6) -> Cognitive Core (§3): cron / deadline fire -> initiate cycle
+      - Interrupt Handler (§3) -> Loop Orchestrator (§3): preempt -> save state -> branch
+      - Cognitive Core (§3) -> Tools (§5): Act phase -> tool invocation
+      - Tools (§5) -> Cognitive Core (§3): tool completion -> resume cycle at Observe Result
+      - Security (§7) -> Interface (§1): policy escalation -> request human approval
+      - Human (§1) -> Security (§7): approval decision -> resume or abort cycle
+      - Evaluation (§8) -> Learning (§9): regression detected -> trigger retraining batch
+      - Reflection (§9) -> Cognitive Core (§3): new skill available -> Plan template refresh
+      - Platform (§10) -> Runtime (§6): config change -> hot reload or rolling restart
+      - Runtime (§6) -> All domains: shutdown signal -> graceful drain
+      - Circuit Breaker (§6) -> Tools (§5): trip -> halt outbound calls; reset -> resume
+      - Budget Enforcement (§6) -> Cognitive Core (§3): threshold crossed -> Cost-Aware Replan or Stop
+
