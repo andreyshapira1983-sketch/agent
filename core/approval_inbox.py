@@ -7,7 +7,7 @@ review later, while the unattended run stays stopped or dry-run only.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -101,6 +101,34 @@ class ApprovalInbox:
 
     def pending(self) -> list[ApprovalInboxItem]:
         return [item for item in self.items if item.status == "pending"]
+
+    def list(self, *, status: ApprovalInboxStatus | str | None = None) -> list[ApprovalInboxItem]:
+        if status in (None, "", "all"):
+            return list(self.items)
+        return [item for item in self.items if item.status == status]
+
+    def approve(self, item_id: str) -> ApprovalInboxItem:
+        return self.set_status(item_id, "approved")
+
+    def deny(self, item_id: str) -> ApprovalInboxItem:
+        return self.set_status(item_id, "denied")
+
+    def set_status(self, item_id: str, status: ApprovalInboxStatus) -> ApprovalInboxItem:
+        if status not in _VALID_STATUSES:
+            raise ValueError(f"invalid approval status: {status}")
+        updated: ApprovalInboxItem | None = None
+        out: list[ApprovalInboxItem] = []
+        for item in self.items:
+            if item.id == item_id:
+                updated = replace(item, status=status)
+                out.append(updated)
+            else:
+                out.append(item)
+        if updated is None:
+            raise KeyError(f"approval not found: {item_id}")
+        self.items = out
+        self._save()
+        return updated
 
     def snapshot(self) -> dict:
         pending = self.pending()

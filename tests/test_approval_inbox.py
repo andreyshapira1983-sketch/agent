@@ -43,3 +43,18 @@ def test_approval_inbox_persists_pending_items(workspace):
 
     assert reloaded.pending()[0].id == item.id
     assert reloaded.snapshot()["pending"] == 1
+
+
+def test_approval_inbox_approve_and_deny_persist_status(workspace):
+    path = workspace / "data" / "approval_inbox.jsonl"
+    inbox = ApprovalInbox(path=path)
+    approved = inbox.add(operation="approve-me", summary="Approve me")
+    denied = inbox.add(operation="deny-me", summary="Deny me")
+
+    assert inbox.approve(approved.id).status == "approved"
+    assert inbox.deny(denied.id).status == "denied"
+
+    reloaded = ApprovalInbox(path=path)
+    assert reloaded.list(status="approved")[0].id == approved.id
+    assert reloaded.list(status="denied")[0].id == denied.id
+    assert reloaded.snapshot()["pending"] == 0

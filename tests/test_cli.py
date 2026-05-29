@@ -299,6 +299,41 @@ class TestHandleMetaCommand:
         assert "auto-run status=blocked" in out.err
         assert '"pending": 1' in out.err
 
+    def test_operator_control_plane_status_commands(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+
+        assert handle_meta_command(":budget-status", agent, workspace) is True
+        assert handle_meta_command(":queue-status", agent, workspace) is True
+        assert handle_meta_command(":scheduler-status", agent, workspace) is True
+
+        out = capsys.readouterr()
+        assert "autonomous budget defaults" in out.err
+        assert "runtime task queue" in out.err
+        assert "runtime scheduler" in out.err
+
+    def test_operator_control_plane_approval_list_approve_and_deny(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+        inbox = getattr(agent, "approval_inbox", None)
+        assert inbox is None
+
+        assert _handle_auto_run("--allow-effects", agent, workspace) is True
+        inbox = getattr(agent, "approval_inbox")
+        first = inbox.pending()[0]
+
+        assert handle_meta_command(":approval-list", agent, workspace) is True
+        assert handle_meta_command(f":approval-approve {first.id}", agent, workspace) is True
+
+        second = inbox.add(operation="manual.check", summary="Manual check")
+        assert handle_meta_command(f":approval-deny {second.id}", agent, workspace) is True
+        assert handle_meta_command(":approval-list all", agent, workspace) is True
+
+        out = capsys.readouterr()
+        assert "approval inbox" in out.err
+        assert "approval approved" in out.err
+        assert "approval denied" in out.err
+        assert "[approved]" in out.err
+        assert "[denied]" in out.err
+
     def test_task_add_list_and_run(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
         (workspace / "README.md").write_text(

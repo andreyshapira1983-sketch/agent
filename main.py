@@ -79,6 +79,7 @@ if sys.platform == "win32":
 from core.approval import ApprovalProvider, AutoApprover, CLIApprovalProvider
 from core.approval_inbox import ApprovalInbox
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
+from core.budget_governor import BudgetGovernor, BudgetLimits
 from core.logger import TraceLogger
 from core.ingestion import DEFAULT_PROJECT_LIMIT, ingest_files, ingest_project, ingest_source
 from core.learning_planner import LearningPlanner
@@ -767,6 +768,74 @@ def _handle_auto_status(agent: AgentLoop, workspace: Path) -> bool:
     return True
 
 
+def _handle_budget_status(agent: AgentLoop, workspace: Path) -> bool:
+    del agent, workspace
+    snapshot = BudgetGovernor(BudgetLimits()).snapshot()
+    print("=== autonomous budget defaults ===", file=sys.stderr)
+    print(json.dumps(snapshot, ensure_ascii=False, indent=2), file=sys.stderr)
+    return True
+
+
+def _handle_approval_list(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    status = rest.strip().lower() or "pending"
+    items = _approval_inbox_for(agent, workspace).list(status=status)
+    if not items:
+        print(f"(no approvals: status={status})", file=sys.stderr)
+        return True
+    print(f"=== approval inbox ({len(items)}; status={status}) ===", file=sys.stderr)
+    for item in items:
+        print(
+            f"  {item.id} [{item.status}] risk={item.risk} "
+            f"operation={item.operation} summary={item.summary}",
+            file=sys.stderr,
+        )
+        if item.reasons:
+            print(f"    reasons={list(item.reasons)}", file=sys.stderr)
+    return True
+
+
+def _handle_approval_decision(
+    rest: str,
+    agent: AgentLoop,
+    workspace: Path,
+    *,
+    decision: str,
+) -> bool:
+    item_id = rest.strip()
+    if not item_id:
+        print(f"Usage: :approval-{decision} <approval_id>", file=sys.stderr)
+        return True
+    inbox = _approval_inbox_for(agent, workspace)
+    try:
+        if decision == "approve":
+            item = inbox.approve(item_id)
+        elif decision == "deny":
+            item = inbox.deny(item_id)
+        else:
+            raise ValueError(f"unknown approval decision: {decision}")
+    except KeyError as exc:
+        print(f"(approval {decision} failed: {exc})", file=sys.stderr)
+        return True
+    agent.log.log("approval_inbox_decision", item.to_dict())
+    past = "approved" if decision == "approve" else "denied"
+    print(f"(approval {past}: {item.id}; operation={item.operation})", file=sys.stderr)
+    return True
+
+
+def _handle_queue_status(agent: AgentLoop, workspace: Path) -> bool:
+    summary = _task_queue_for(agent, workspace).summary()
+    print("=== runtime task queue ===", file=sys.stderr)
+    print(json.dumps(summary, ensure_ascii=False, indent=2), file=sys.stderr)
+    return True
+
+
+def _handle_scheduler_status(agent: AgentLoop, workspace: Path) -> bool:
+    summary = _scheduler_for(agent, workspace).summary()
+    print("=== runtime scheduler ===", file=sys.stderr)
+    print(json.dumps(summary, ensure_ascii=False, indent=2), file=sys.stderr)
+    return True
+
+
 def _task_queue_for(agent: AgentLoop, workspace: Path) -> TaskQueueStore:
     queue = getattr(agent, "runtime_task_queue", None)
     if queue is None:
@@ -1145,6 +1214,24 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head == ":auto-status":
         return _handle_auto_status(agent, workspace)
 
+    if head == ":budget-status":
+        return _handle_budget_status(agent, workspace)
+
+    if head == ":approval-list":
+        return _handle_approval_list(rest.strip(), agent, workspace)
+
+    if head == ":approval-approve":
+        return _handle_approval_decision(rest.strip(), agent, workspace, decision="approve")
+
+    if head == ":approval-deny":
+        return _handle_approval_decision(rest.strip(), agent, workspace, decision="deny")
+
+    if head == ":queue-status":
+        return _handle_queue_status(agent, workspace)
+
+    if head == ":scheduler-status":
+        return _handle_scheduler_status(agent, workspace)
+
     if head == ":task-add":
         return _handle_task_add(rest.strip(), agent, workspace)
 
@@ -1193,6 +1280,12 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :auto-run [goal] [flags]        bounded autonomous health pass\n"
             "      flags: --dry-run  --allow-effects  --limit N  --learning-limit N  --no-tests\n"
             "  :auto-status                    inspect autonomous runtime inbox/status\n"
+            "  :budget-status                  inspect default autonomous runtime budgets\n"
+            "  :approval-list [status|all]     list pending/approved/denied approval items\n"
+            "  :approval-approve <id>          mark an approval inbox item approved\n"
+            "  :approval-deny <id>             mark an approval inbox item denied\n"
+            "  :queue-status                   inspect runtime task queue summary\n"
+            "  :scheduler-status               inspect scheduler summary\n"
             "  :task-add [goal] [flags]        enqueue persistent autonomous task\n"
             "  :task-list [status|all]         list runtime tasks\n"
             "  :task-run [--limit N]           run due pending runtime task(s)\n"
@@ -1296,7 +1389,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :learn  :auto-run  :task-add  :schedule-tick  :auto-status  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :learn  :auto-run  :budget-status  :approval-list  :task-add  :schedule-tick  :auto-status  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:
