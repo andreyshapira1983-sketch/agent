@@ -1748,7 +1748,7 @@ A real safety net lives in [`tests/`](tests/) and runs via `pytest`:
 python -m pytest -v
 ```
 
-What is covered today (**1395 tests, ≈ 16 s, zero network calls**):
+What is covered today (**1416 tests, ≈ 15 s, zero network calls**):
 
 | Layer | File | Cases |
 | --- | --- | --- |

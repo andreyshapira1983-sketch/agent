@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import gzip
 import io
+import urllib.error
 from typing import Any
 
 import pytest
@@ -40,12 +41,15 @@ class _StubResponse:
 
 
 class _StubOpener:
-    def __init__(self, response: _StubResponse):
+    def __init__(self, response: _StubResponse | None = None, raise_exc: BaseException | None = None):
         self.response = response
+        self.raise_exc = raise_exc
         self.last_request: Any = None
 
     def open(self, req, timeout=None):
         self.last_request = req
+        if self.raise_exc is not None:
+            raise self.raise_exc
         return self.response
 
 
@@ -96,6 +100,15 @@ def test_defaults_and_risk():
     assert tool.risk_for({}) == "read_only"
 
 
+@pytest.mark.parametrize("kwargs", [
+    {"max_bytes": 0},
+    {"timeout_seconds": 0},
+])
+def test_invalid_construction_rejected(kwargs: dict):
+    with pytest.raises(ValueError):
+        RssFetchTool(**kwargs)
+
+
 def test_rss_feed_parsed():
     opener = _opener(RSS)
     out = RssFetchTool(opener=opener).run(
@@ -131,6 +144,39 @@ def test_gzip_feed_decompressed():
     assert out["entries"][0]["title"] == "First item"
 
 
+def test_content_type_rejected():
+    with pytest.raises(PermissionError, match="content-type"):
+        RssFetchTool(opener=_opener(RSS, content_type="image/png")).run(
+            url="https://example.com/feed.xml",
+        )
+
+
+def test_malformed_xml_rejected():
+    with pytest.raises(ValueError, match="XML parse"):
+        RssFetchTool(opener=_opener(b"<rss><channel>")).run(
+            url="https://example.com/feed.xml",
+        )
+
+
+def test_http_and_url_errors_surface_cleanly():
+    http_error = urllib.error.HTTPError(
+        url="https://example.com/feed.xml",
+        code=404,
+        msg="Not Found",
+        hdrs=None,
+        fp=None,
+    )
+    with pytest.raises(ValueError, match="HTTP 404"):
+        RssFetchTool(opener=_StubOpener(raise_exc=http_error)).run(
+            url="https://example.com/feed.xml",
+        )
+
+    with pytest.raises(ValueError, match="URL error"):
+        RssFetchTool(opener=_StubOpener(raise_exc=urllib.error.URLError("dns fail"))).run(
+            url="https://example.com/feed.xml",
+        )
+
+
 @pytest.mark.parametrize("url", [
     "file:///etc/passwd",
     "http://localhost/feed.xml",
@@ -164,3 +210,24 @@ def test_validate_output():
     ok, issues = tool.validate_output(bad)
     assert not ok
     assert "entries" in issues[0]
+
+
+def test_validate_empty_feed_warns_not_fails():
+    empty = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>Empty</title></channel></rss>"""
+    out = RssFetchTool(opener=_opener(empty)).run(url="https://example.com/feed.xml")
+
+    ok, issues = RssFetchTool().validate_output(out)
+
+    assert ok
+    assert "no parsed entries" in issues[0]
+
+
+def test_validate_missing_key_fails():
+    tool = RssFetchTool(opener=_opener(RSS))
+    out = tool.run(url="https://example.com/feed.xml")
+    del out["content_hash"]
+
+    ok, issues = tool.validate_output(out)
+
+    assert not ok
+    assert "missing keys" in issues[0]

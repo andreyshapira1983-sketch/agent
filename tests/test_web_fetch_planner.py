@@ -12,6 +12,7 @@ from tools.diff_file import DiffFileTool
 from tools.file_read import FileReadTool
 from tools.file_write import FileWriteTool
 from tools.read_logs import ReadLogsTool
+from tools.rss_fetch import RssFetchTool
 from tools.run_tests import RunTestsTool
 from tools.shell_exec import ShellExecTool
 from tools.web_fetch import WebFetchTool
@@ -28,6 +29,7 @@ def _planner(workspace: Path) -> LLMPlanner:
     reg.register(ReadLogsTool(workspace_root=workspace))
     reg.register(DiffFileTool(workspace_root=workspace))
     reg.register(WebFetchTool())
+    reg.register(RssFetchTool())
 
     class _StubLLM:
         def complete(self, **_kw):
@@ -114,3 +116,57 @@ class TestWebFetchSanitizer:
         }])
         # Label cap at 60 chars after the "web_fetch:" prefix.
         assert len(sources[0]["label"]) <= len("web_fetch:") + 60
+
+
+class TestRssFetchSanitizer:
+    def test_well_formed_passes(self, workspace: Path):
+        sources, _ = _run(workspace, [{
+            "tool": "rss_fetch",
+            "arguments": {"url": "https://example.com/feed.xml", "max_entries": 7},
+        }])
+
+        assert len(sources) == 1
+        assert sources[0]["arguments"] == {
+            "url": "https://example.com/feed.xml",
+            "max_entries": 7,
+        }
+        assert sources[0]["label"].startswith("rss_fetch:https://example.com")
+
+    def test_missing_url_dropped(self, workspace: Path):
+        sources, warnings = _run(workspace, [{
+            "tool": "rss_fetch",
+            "arguments": {},
+        }])
+
+        assert sources == []
+        assert any("without url" in warning for warning in warnings)
+
+    @pytest.mark.parametrize("url", [
+        "file:///etc/passwd",
+        "https://пример.рф/feed.xml",
+        "http://localhost/feed.xml",
+        "http://169.254.169.254/latest",
+    ])
+    def test_unsafe_url_dropped(self, workspace: Path, url: str):
+        sources, warnings = _run(workspace, [{
+            "tool": "rss_fetch",
+            "arguments": {"url": url},
+        }])
+
+        assert sources == []
+        assert warnings
+
+    def test_max_entries_default_and_cap(self, workspace: Path):
+        sources, warnings = _run(workspace, [{
+            "tool": "rss_fetch",
+            "arguments": {"url": "https://example.com/feed.xml", "max_entries": "bad"},
+        }])
+
+        assert sources[0]["arguments"]["max_entries"] == 20
+        assert any("defaulting to 20" in warning for warning in warnings)
+
+        sources, _ = _run(workspace, [{
+            "tool": "rss_fetch",
+            "arguments": {"url": "https://example.com/feed.xml", "max_entries": 500},
+        }])
+        assert sources[0]["arguments"]["max_entries"] == 50

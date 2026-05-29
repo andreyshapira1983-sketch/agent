@@ -476,6 +476,47 @@ class TestFactoryWebFetchPlaceholder:
         ) is None
 
 
+class TestFactoryRssFetch:
+    def test_well_formed_feed_output(self):
+        out = {
+            "url": "https://example.com/feed.xml",
+            "fetched_at": "2026-05-29T10:00:00Z",
+            "content_hash": "rsshash",
+            "entries": [
+                {
+                    "title": "First entry",
+                    "url": "https://example.com/first",
+                    "published_at": "Fri, 29 May 2026 10:00:00 GMT",
+                }
+            ],
+        }
+
+        ev = evidence_from_tool_result(
+            tool_name="rss_fetch",
+            arguments={"url": "https://example.com/feed.xml"},
+            output=out,
+        )
+
+        assert ev is not None
+        assert ev.kind == "web_page"
+        assert ev.source_id == "web_page:https://example.com/feed.xml"
+        assert ev.obtained_via == "rss_fetch"
+        assert ev.content_hash == "rsshash"
+        assert "First entry" in ev.excerpt
+
+    def test_empty_or_malformed_entries_none(self):
+        assert evidence_from_tool_result(
+            tool_name="rss_fetch",
+            arguments={"url": "https://example.com/feed.xml"},
+            output={"url": "https://example.com/feed.xml", "entries": []},
+        ) is None
+        assert evidence_from_tool_result(
+            tool_name="rss_fetch",
+            arguments={"url": "https://example.com/feed.xml"},
+            output={"url": "https://example.com/feed.xml", "entries": "bad"},
+        ) is None
+
+
 class TestFactoryFileWriteNoEvidence:
     def test_file_write_never_emits_evidence(self):
         """An action is not a source. The audit event already records

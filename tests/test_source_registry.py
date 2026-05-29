@@ -81,6 +81,15 @@ def test_source_type_from_evidence_maps_core_evidence_kinds():
     assert source_type_from_evidence(docs) == "documentation"
     forum = _ev("web_page", "web_page:https://reddit.com/r/python/comments/1")
     assert source_type_from_evidence(forum) == "forum"
+    rss = make_evidence(
+        kind="web_page",
+        source_id="web_page:https://example.com/feed.xml",
+        obtained_via="rss_fetch",
+        claim="RSS feed",
+        excerpt="entry",
+        confidence=0.68,
+    )
+    assert source_type_from_evidence(rss) == "article"
 
 
 def test_registry_from_provenance_uses_ranking_metadata():
