@@ -199,6 +199,69 @@ class WebIngestReport:
         return "(" + "; ".join(parts) + ")"
 
 
+@dataclass
+class RssIngestReport:
+    mode: str
+    feed_url: str
+    entries_seen: int = 0
+    entries_ingested: int = 0
+    bytes_read: int = 0
+    source_count: int = 0
+    claim_count: int = 0
+    source_store: dict[str, int] = field(default_factory=dict)
+    memory_saved: int = 0
+    memory_rejected: int = 0
+    memory_skipped: int = 0
+    conflicts: int = 0
+    dry_run: bool = False
+    auto_write_memory: bool = False
+    feed_title: str = ""
+    entry_urls: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    def to_log_payload(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "feed_url": self.feed_url,
+            "entries_seen": self.entries_seen,
+            "entries_ingested": self.entries_ingested,
+            "bytes_read": self.bytes_read,
+            "source_count": self.source_count,
+            "claim_count": self.claim_count,
+            "source_store": dict(self.source_store),
+            "memory_saved": self.memory_saved,
+            "memory_rejected": self.memory_rejected,
+            "memory_skipped": self.memory_skipped,
+            "conflicts": self.conflicts,
+            "dry_run": self.dry_run,
+            "auto_write_memory": self.auto_write_memory,
+            "feed_title": self.feed_title,
+            "entry_urls": list(self.entry_urls),
+            "error_count": len(self.errors),
+            "errors": list(self.errors[:20]),
+        }
+
+    def user_summary(self) -> str:
+        store = self.source_store or {}
+        parts = [
+            f"ingest rss: url={self.feed_url}",
+            f"entries={self.entries_ingested}/{self.entries_seen}",
+            f"claims={self.claim_count}",
+            f"saved_sources={store.get('sources_saved', 0)}",
+            f"saved_claims={store.get('claims_saved', 0)}",
+            f"memory_saved={self.memory_saved}",
+            f"memory_skipped={self.memory_skipped}",
+            f"conflicts={self.conflicts}",
+        ]
+        if self.dry_run:
+            parts.append("dry_run=True")
+        if self.errors:
+            parts.append(f"errors={len(self.errors)}")
+        if self.entry_urls:
+            parts.append(f"entries={self.entry_urls[:5]}")
+        return "(" + "; ".join(parts) + ")"
+
+
 def ingest_source(
     *,
     agent: Any,
@@ -394,6 +457,131 @@ def ingest_web_topic(
         log.log("knowledge_pipeline", {
             **knowledge_result.to_log_payload(),
             "mode": "ingest_web",
+        })
+
+    return report
+
+
+def ingest_rss_feed(
+    *,
+    agent: Any,
+    url: str,
+    limit: int = 10,
+    dry_run: bool = False,
+    auto_write_memory: bool | None = None,
+) -> RssIngestReport:
+    url = (url or "").strip()
+    if not url:
+        raise ValueError("url is required")
+    if limit < 1:
+        raise ValueError("limit must be >= 1")
+
+    write_memory = bool(getattr(agent, "knowledge_auto_write", False))
+    if auto_write_memory is not None:
+        write_memory = bool(auto_write_memory)
+    if dry_run:
+        write_memory = False
+
+    report = RssIngestReport(
+        mode="rss",
+        feed_url=url,
+        dry_run=dry_run,
+        auto_write_memory=write_memory,
+    )
+    chain = ProvenanceChain()
+
+    registry = getattr(agent, "registry", None)
+    if registry is None:
+        raise ValueError("agent has no tool registry")
+    rss_fetch = registry.get("rss_fetch")
+    output = rss_fetch.run(url=url, max_entries=limit)
+    ok, issues = rss_fetch.validate_output(output)
+    if not ok:
+        raise ValueError("; ".join(issues) or "rss_fetch validation failed")
+    if issues:
+        report.errors.extend(f"rss warning: {issue}" for issue in issues)
+
+    entries = output.get("entries", []) if isinstance(output, dict) else []
+    report.feed_title = str(output.get("title") or "") if isinstance(output, dict) else ""
+    report.entries_seen = len(entries) if isinstance(entries, list) else 0
+    report.bytes_read = int(output.get("bytes", 0)) if isinstance(output, dict) else 0
+    fetched_at = str(output.get("fetched_at") or "") if isinstance(output, dict) else ""
+
+    if isinstance(entries, list):
+        for idx, entry in enumerate(entries[:limit], start=1):
+            if not isinstance(entry, dict):
+                continue
+            title = str(entry.get("title") or "").strip()
+            entry_url = str(entry.get("url") or "").strip() or f"{url}#entry-{idx}"
+            summary = str(entry.get("summary") or "").strip()
+            published_at = str(entry.get("published_at") or "").strip()
+            text = "\n".join(
+                part
+                for part in (
+                    title,
+                    f"URL: {entry_url}",
+                    f"Published: {published_at}" if published_at else "",
+                    summary,
+                )
+                if part
+            )
+            if not text.strip():
+                continue
+            chain.add(make_evidence(
+                kind="web_page",
+                source_id=f"web_page:{entry_url}",
+                obtained_via="rss_fetch",
+                claim=f"RSS entry from {url}: {title or entry_url}",
+                excerpt=text,
+                fetched_at=fetched_at or None,
+                confidence=0.68,
+            ))
+            report.entries_ingested += 1
+            report.entry_urls.append(entry_url)
+
+    ranking = rank_chain(chain, question="controlled rss feed ingestion")
+    knowledge_result: KnowledgePipelineResult = agent.knowledge_pipeline.run(
+        chain,
+        ranking=ranking,
+        source_store=None if dry_run else getattr(agent, "source_registry_store", None),
+        remember=getattr(agent, "_remember_from_knowledge", None),
+        auto_write_memory=write_memory,
+    )
+
+    registry_out: SourceRegistry = knowledge_result.registry
+    report.source_count = len(registry_out.sources)
+    report.claim_count = len(registry_out.claims)
+    report.source_store = dict(knowledge_result.source_store)
+    report.memory_saved = knowledge_result.memory_saved
+    report.memory_rejected = knowledge_result.memory_rejected
+    report.memory_skipped = knowledge_result.memory_skipped
+    report.conflicts = knowledge_result.conflicts.count
+
+    agent.last_provenance = chain
+    agent.last_source_ranking = ranking
+    agent.last_source_registry = registry_out
+    agent.last_knowledge_pipeline = knowledge_result
+
+    log = getattr(agent, "log", None)
+    if log is not None:
+        log.log("ingest", report.to_log_payload())
+        log.log("evidence_collected", {
+            "count": len(chain),
+            "kinds": sorted({ev.kind for ev in chain.evidences}),
+            "chain": chain.to_log_payload(),
+            "mode": "ingest_rss",
+        })
+        log.log("source_ranking", {
+            **ranking.to_log_payload(),
+            "mode": "ingest_rss",
+        })
+        log.log("source_registry", {
+            **registry_out.to_log_payload(),
+            "mode": "ingest_rss",
+        })
+        log.log("knowledge_pipeline", {
+            **knowledge_result.to_log_payload(),
+            "mode": "ingest_rss",
         })
 
     return report

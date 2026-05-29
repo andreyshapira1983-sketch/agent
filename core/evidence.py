@@ -354,6 +354,49 @@ def evidence_from_tool_result(
             )
         return ev
 
+    # ---- rss_fetch --------------------------------------------------------
+    if tool_name == "rss_fetch":
+        if not isinstance(output, dict):
+            return None
+        url = str(output.get("url") or args.get("url", "<unknown>"))
+        entries = output.get("entries", [])
+        if not isinstance(entries, list) or not entries:
+            return None
+        lines: list[str] = []
+        for item in entries[:10]:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title", "")).strip()
+            link = str(item.get("url", "")).strip()
+            published = str(item.get("published_at", "")).strip()
+            if title or link:
+                bits = [title]
+                if link:
+                    bits.append(f"<{link}>")
+                if published:
+                    bits.append(f"({published})")
+                lines.append(" ".join(part for part in bits if part))
+        if not lines:
+            return None
+        ev = make_evidence(
+            kind="web_page",
+            source_id=f"web_page:{url}",
+            obtained_via="rss_fetch",
+            claim=f"Fetched RSS/Atom feed {url}",
+            excerpt="\n".join(lines),
+            fetched_at=output.get("fetched_at"),
+            confidence=0.68,
+        )
+        ch = output.get("content_hash")
+        if isinstance(ch, str) and ch:
+            return Evidence(
+                id=ev.id, kind=ev.kind, source_id=ev.source_id,
+                obtained_via=ev.obtained_via, content_hash=ch,
+                fetched_at=ev.fetched_at, confidence=ev.confidence,
+                claim=ev.claim, excerpt=ev.excerpt,
+            )
+        return ev
+
     # ---- run_tests --------------------------------------------------------
     if tool_name == "run_tests":
         if not isinstance(output, dict):

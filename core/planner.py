@@ -104,6 +104,14 @@ Available tools:
     instead of `[web_search]` alone. URL must be ASCII, max 2048 chars,
     NOT pointed at localhost / private IPs / metadata endpoints.
 
+- rss_fetch(url: str, max_entries: int)
+    -> {url, title, feed_type, entries, fetched_at, content_hash, ...}
+    [read_only — no approval needed]
+    Fetch ONE RSS/Atom feed and return structured entries. Use only when
+    the user gives a feed URL or explicitly asks to inspect an RSS/Atom
+    feed. For broad research, prefer `:ingest-rss` / `:ingest-web` from
+    the operator command surface rather than inventing feed URLs.
+
 Decision rules:
 1. Question is about the hinted file's contents       -> [file_read]
 2. Question needs external / current information      -> [web_search]
@@ -113,6 +121,7 @@ Decision rules:
 6. User asked to RUN / VERIFY tests                   -> [run_tests]
 7. User asked to SHOW logs / errors / "what happened" -> [read_logs]
 8. User asked to PREVIEW / DIFF a proposed change     -> [diff_file]
+8b. User provided RSS/Atom feed URL to inspect        -> [rss_fetch]
 9. General-knowledge question, no fresh facts needed  -> []  (empty steps)
 10. Follow-up that can be answered FROM <conversation_history> alone -> []
     (do NOT re-call a tool to fetch information already present in history)
@@ -177,7 +186,8 @@ Output format - return ONLY a JSON object, no markdown fences, no preface:
   "steps": [
     {
       "tool": "file_read" | "web_search" | "file_write" | "shell_exec" |
-              "run_tests" | "read_logs" | "diff_file" | "web_fetch",
+              "run_tests" | "read_logs" | "diff_file" | "web_fetch" |
+              "rss_fetch",
       "arguments": { ... },
       "rationale": "<one sentence>"
     }
@@ -685,6 +695,54 @@ class LLMPlanner:
                 "expected_outcome": (
                     "Fetched page with content_hash + fetched_at; serves as "
                     "a verifiable web_page evidence source for the Verifier."
+                ),
+            }
+
+        if tool_name == "rss_fetch":
+            url = args.get("url")
+            if not isinstance(url, str) or not url.strip():
+                warnings.append(f"step[{idx}]: rss_fetch without url, dropped")
+                return None
+            if len(url) > 2048:
+                warnings.append(
+                    f"step[{idx}]: rss_fetch url too long ({len(url)} > 2048), dropped"
+                )
+                return None
+            if not url.isascii():
+                warnings.append(f"step[{idx}]: rss_fetch url not ASCII, dropped")
+                return None
+            url_lower = url.lower()
+            if not (url_lower.startswith("http://") or url_lower.startswith("https://")):
+                warnings.append(
+                    f"step[{idx}]: rss_fetch url must start with http:// or https://, dropped"
+                )
+                return None
+            for blocked in (
+                "://localhost", "://127.", "://0.0.0.0",
+                "://10.", "://192.168.", "://169.254.",
+                "://[::1]",
+            ):
+                if blocked in url_lower:
+                    warnings.append(
+                        f"step[{idx}]: rss_fetch url targets local network, dropped"
+                    )
+                    return None
+            requested = args.get("max_entries", 20)
+            try:
+                max_entries = int(requested)
+            except (TypeError, ValueError):
+                warnings.append(
+                    f"step[{idx}]: rss_fetch max_entries not an int ({requested!r}), defaulting to 20"
+                )
+                max_entries = 20
+            max_entries = max(1, min(max_entries, 50))
+            return {
+                "tool": "rss_fetch",
+                "arguments": {"url": url.strip(), "max_entries": max_entries},
+                "label": f"rss_fetch:{url[:60]}",
+                "expected_outcome": (
+                    "Parsed RSS/Atom entries with fetched_at + content_hash; "
+                    "used as structured feed evidence."
                 ),
             }
 

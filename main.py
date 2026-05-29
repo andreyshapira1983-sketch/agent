@@ -18,6 +18,7 @@ Usage examples:
     > :ingest-project . --limit 40 --dry-run
     > :source-library books
     > :ingest-web "autonomous agent" --sources wikis,science --limit 3 --dry-run
+    > :ingest-rss https://www.python.org/blogs/rss/ --limit 5 --dry-run
     > :memory                             # inspect working + persistent memory
     > :forget mem_abc123                  # delete one persistent record
     > :forget                             # delete ALL persistent records
@@ -88,6 +89,7 @@ from core.ingestion import (
     DEFAULT_PROJECT_LIMIT,
     ingest_files,
     ingest_project,
+    ingest_rss_feed,
     ingest_source,
     ingest_web_topic,
 )
@@ -109,6 +111,7 @@ from tools.diff_file import DiffFileTool
 from tools.file_read import FileReadTool
 from tools.file_write import FileWriteTool
 from tools.read_logs import ReadLogsTool
+from tools.rss_fetch import RssFetchTool
 from tools.run_tests import RunTestsTool
 from tools.shell_exec import ShellExecTool
 from tools.web_fetch import WebFetchTool
@@ -147,6 +150,7 @@ def build_agent(
     registry.register(DiffFileTool(workspace_root=workspace))
     # MVP-14.2 — evidence layer: turn web pointers into verifiable sources.
     registry.register(WebFetchTool())
+    registry.register(RssFetchTool())
 
     policy = PolicyGate(registry)
     model_router = ModelRouter.from_env()
@@ -725,6 +729,67 @@ def _handle_ingest_web(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         )
     except Exception as exc:
         print(f"(ingest web failed: {type(exc).__name__}: {exc})", file=sys.stderr)
+        return True
+    print(report.user_summary(), file=sys.stderr)
+    return True
+
+
+def _handle_ingest_rss(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    del workspace
+    tokens = _split_meta_args(rest)
+    dry_run = False
+    auto_write: bool | None = None
+    limit = 10
+    url_parts: list[str] = []
+
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token == "--dry-run":
+            dry_run = True
+            i += 1
+            continue
+        if token == "--write-memory":
+            auto_write = True
+            i += 1
+            continue
+        if token == "--no-memory":
+            auto_write = False
+            i += 1
+            continue
+        if token == "--limit":
+            if i + 1 >= len(tokens):
+                print("Usage: --limit requires a number", file=sys.stderr)
+                return True
+            try:
+                limit = int(tokens[i + 1])
+            except ValueError:
+                print("Usage: --limit requires a number", file=sys.stderr)
+                return True
+            i += 2
+            continue
+        url_parts.append(token)
+        i += 1
+
+    url = " ".join(url_parts).strip()
+    if not url:
+        print(
+            "Usage: :ingest-rss <feed_url> [--limit N] [--dry-run] "
+            "[--write-memory|--no-memory]",
+            file=sys.stderr,
+        )
+        return True
+
+    try:
+        report = ingest_rss_feed(
+            agent=agent,
+            url=url,
+            limit=limit,
+            dry_run=dry_run,
+            auto_write_memory=auto_write,
+        )
+    except Exception as exc:
+        print(f"(ingest rss failed: {type(exc).__name__}: {exc})", file=sys.stderr)
         return True
     print(report.user_summary(), file=sys.stderr)
     return True
@@ -1465,6 +1530,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head == ":ingest-web":
         return _handle_ingest_web(rest.strip(), agent, workspace)
 
+    if head == ":ingest-rss":
+        return _handle_ingest_rss(rest.strip(), agent, workspace)
+
     if head in {":learn", ":learn-project"}:
         return _handle_learn(rest.strip(), agent, workspace)
 
@@ -1546,6 +1614,8 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :source-library [group|all]     list curated online source families\n"
             "  :ingest-web <topic> [flags]     search/fetch curated web library sources\n"
             "      flags: --sources wikis|books|science|docs|all|id,id  --limit N  --per-source N\n"
+            "  :ingest-rss <url> [flags]       fetch RSS/Atom feed entries into Source Registry\n"
+            "      flags: --limit N  --dry-run  --write-memory  --no-memory\n"
             "  :learn [goal] [flags]           plan sources, then ingest selected learning set\n"
             "  :learn-project [goal] [flags]   alias for :learn\n"
             "      flags: --dry-run  --write-memory  --no-memory  --limit N\n"
@@ -1664,7 +1734,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :ingest-web  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:

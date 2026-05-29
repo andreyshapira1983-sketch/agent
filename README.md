@@ -78,6 +78,7 @@ plus full Control Loop integration. Run `python -m pytest -v`.
 | §14.3c Conflict Review / Resolver UX | [`core/conflict_review.py`](core/conflict_review.py) + `:conflicts` |
 | §14.3d Controlled Source Ingestion (`:ingest-source`, `:ingest-project`) | [`core/ingestion.py`](core/ingestion.py) + [`main.py`](main.py) |
 | §14.3f Online Source Library (`:source-library`, `:ingest-web`) | [`core/source_library.py`](core/source_library.py) + [`core/ingestion.py`](core/ingestion.py) |
+| §14.3g RSS / Atom Source Ingestion (`:ingest-rss`) | [`tools/rss_fetch.py`](tools/rss_fetch.py) + [`core/ingestion.py`](core/ingestion.py) |
 | §14.3e Role Router / Knowledge Use / Learning Planner | [`core/role_router.py`](core/role_router.py), [`core/knowledge_use_policy.py`](core/knowledge_use_policy.py), [`core/learning_planner.py`](core/learning_planner.py) |
 | §6 Autonomous Runtime + Budget Governor + Circuit Breaker + Approval Inbox | [`core/autonomous_runtime.py`](core/autonomous_runtime.py), [`core/budget_governor.py`](core/budget_governor.py), [`core/circuit_breaker.py`](core/circuit_breaker.py), [`core/approval_inbox.py`](core/approval_inbox.py) |
 | §6 Persistent Task Queue + Scheduler Tick | [`core/task_queue.py`](core/task_queue.py), [`core/scheduler.py`](core/scheduler.py), [`main.py`](main.py) |
@@ -1345,6 +1346,20 @@ source library entry -> web_search(site:...) -> domain filter
 Memory writes remain off by default. Use `--write-memory` only when the
 source-backed claims should become reusable long-term knowledge.
 
+### 14.3g — RSS / Atom Ingestion (`tools/rss_fetch.py`)
+
+RSS/Atom feeds let the agent watch sources without repeatedly spending web
+search calls. The tool fetches one feed URL, parses structured entries, and
+turns them into source-backed claims through the same Evidence pipeline.
+
+```text
+:ingest-rss https://www.python.org/blogs/rss/ --limit 5 --dry-run
+:ingest-rss https://github.blog/feed/ --limit 10
+```
+
+The fetch is read-only and guarded like `web_fetch`: http(s) only, ASCII URL,
+no localhost/private IPs, size cap, timeout, content hash, and redaction.
+
 ### 14.3e — Role Router / Knowledge Use / Learning Planner
 
 This slice stops memory and learning from being "one bucket for everything":
@@ -1733,7 +1748,7 @@ A real safety net lives in [`tests/`](tests/) and runs via `pytest`:
 python -m pytest -v
 ```
 
-What is covered today (**1384 tests, ≈ 15 s, zero network calls**):
+What is covered today (**1395 tests, ≈ 16 s, zero network calls**):
 
 | Layer | File | Cases |
 | --- | --- | --- |
@@ -1772,6 +1787,7 @@ What is covered today (**1384 tests, ≈ 15 s, zero network calls**):
 | Knowledge Pipeline (MVP-14.3c) | [`tests/test_knowledge_pipeline.py`](tests/test_knowledge_pipeline.py) | SourceRegistryStore roundtrip + duplicate suppression / ClaimExtractor extracts sentence claims and rejects secret-shaped text / ConflictResolver marks same-subject different-value claims conflicted / KnowledgeWritePolicy rejects unverified claims and accepts strong source-backed claims / AgentLoop E2E persists source catalog and writes approved knowledge to persistent memory when enabled |
 | Controlled Ingestion (MVP-14.3d) | [`tests/test_cli.py`](tests/test_cli.py) | `:ingest-source` stores source-backed claims in SourceRegistry without memory writes by default / `--write-memory` saves approved verified claims through existing memory policy / `:ingest-project --dry-run` builds an in-memory registry report without persisting registry or memory |
 | Online Source Library (MVP-14.3f) | [`tests/test_source_library.py`](tests/test_source_library.py), [`tests/test_cli.py`](tests/test_cli.py) | source groups (`wikis`, `books`, `science`, `docs`) / domain filtering / `:source-library` listing / `:ingest-web` search -> fetch -> Source Registry with no network in tests |
+| RSS / Atom Source Ingestion (MVP-14.3g) | [`tests/test_rss_fetch.py`](tests/test_rss_fetch.py), [`tests/test_cli.py`](tests/test_cli.py) | RSS + Atom parsing / URL safety / gzip / schema validation / `:ingest-rss` entries -> Evidence -> Source Registry with no network in tests |
 | Role Router (MVP-14.3e) | [`tests/test_role_router.py`](tests/test_role_router.py) | repair / learning / default operator-chat routing; each route carries tone, output style, knowledge scopes and allowed memory tags |
 | Knowledge Use Policy (MVP-14.3e) | [`tests/test_knowledge_use_policy.py`](tests/test_knowledge_use_policy.py) | role-tag filtering, question-overlap admission, quarantined/obsolete memory rejection before keyword retrieval |
 | Learning Planner (MVP-14.3e) | [`tests/test_learning_planner.py`](tests/test_learning_planner.py) + [`tests/test_cli.py`](tests/test_cli.py) | README / architecture / core/test prioritisation, goal-specific self-repair source selection, workspace-escape rejection, `:learn-project` plan -> dry-run ingestion |

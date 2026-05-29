@@ -129,6 +129,45 @@ class FakeWebFetchTool(Tool):
         return (isinstance(output, dict) and bool(output.get("text")), [])
 
 
+class FakeRssFetchTool(Tool):
+    name = "rss_fetch"
+    description = "fake rss fetch"
+    risk = "read_only"
+
+    def run(self, url: str, max_entries: int = 10):
+        assert url == "https://example.com/feed.xml"
+        return {
+            "url": url,
+            "status_code": 200,
+            "content_type": "application/rss+xml",
+            "fetched_at": "2026-05-29T17:40:00+00:00",
+            "content_hash": "b" * 64,
+            "title": "Example Feed",
+            "feed_type": "rss",
+            "entries": [
+                {
+                    "title": "First RSS item",
+                    "url": "https://example.com/item-1",
+                    "summary": "RSS item summary.",
+                    "published_at": "Fri, 29 May 2026 10:00:00 GMT",
+                    "id": "item-1",
+                }
+            ][:max_entries],
+            "text_truncated": False,
+            "bytes": 120,
+            "elapsed_ms": 1,
+            "compensation_plan": {
+                "id": "noop",
+                "actions": [{"kind": "noop", "description": "read only"}],
+                "tool_name": "rss_fetch",
+                "description": "read only",
+            },
+        }
+
+    def validate_output(self, output):
+        return (isinstance(output, dict) and isinstance(output.get("entries"), list), [])
+
+
 # ============================================================
 # _parse_remember — content / tag parsing
 # ============================================================
@@ -344,6 +383,25 @@ class TestHandleMetaCommand:
         out = capsys.readouterr()
         assert "ingest web" in out.err
         assert "https://en.wikipedia.org/wiki/Autonomous_agent" in out.err
+
+    def test_ingest_rss_fetches_entries_into_registry(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+        agent.registry.register(FakeRssFetchTool())
+
+        assert handle_meta_command(
+            ":ingest-rss https://example.com/feed.xml --limit 1",
+            agent,
+            workspace,
+        ) is True
+
+        assert agent.source_registry_store is not None
+        counts = agent.source_registry_store.count()
+        assert counts["sources"] == 1
+        assert counts["claims"] >= 1
+        assert agent.last_provenance.by_kind("web_page")
+        out = capsys.readouterr()
+        assert "ingest rss" in out.err
+        assert "https://example.com/item-1" in out.err
 
     def test_learn_project_plans_then_ingests_selected_sources(self, workspace: Path, capsys):
         agent = _build_agent(workspace)

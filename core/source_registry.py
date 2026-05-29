@@ -378,6 +378,8 @@ def source_type_from_evidence(evidence: Evidence) -> SourceType:
     kind = evidence.kind
     if kind == "file":
         return "file"
+    if evidence.obtained_via == "rss_fetch":
+        return "article"
     if kind == "web_page":
         return _web_source_type(evidence.source_id)
     if kind == "web_search_hit":
