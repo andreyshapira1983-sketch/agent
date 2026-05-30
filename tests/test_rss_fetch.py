@@ -158,6 +158,18 @@ def test_gzip_feed_decompressed():
     assert out["entries"][0]["title"] == "First item"
 
 
+def test_gzip_decompression_is_capped_after_inflate():
+    raw = gzip.compress(RSS + b" " * 200)
+
+    out = RssFetchTool(
+        max_bytes=len(RSS) + 5,
+        opener=_opener(raw, content_encoding="gzip"),
+    ).run(url="https://example.com/feed.xml")
+
+    assert out["text_truncated"] is True
+    assert out["entries"][0]["title"] == "First item"
+
+
 def test_content_type_rejected():
     with pytest.raises(PermissionError, match="content-type"):
         RssFetchTool(opener=_opener(RSS, content_type="image/png")).run(
@@ -202,6 +214,20 @@ def test_unsafe_urls_rejected(url: str):
         RssFetchTool(opener=_opener(RSS)).run(url=url)
 
 
+def test_plain_http_rejected_by_default():
+    with pytest.raises(PermissionError, match="plain HTTP"):
+        RssFetchTool(opener=_opener(RSS)).run(url="http://example.com/feed.xml")
+
+
+def test_plain_http_allowed_for_explicit_host():
+    out = RssFetchTool(
+        opener=_opener(RSS),
+        allow_http_hosts=("example.com",),
+    ).run(url="http://example.com/feed.xml")
+
+    assert out["requested_url"] == "http://example.com/feed.xml"
+
+
 def test_hostname_resolving_to_private_ip_rejected():
     tool = RssFetchTool(
         opener=_opener(RSS),
@@ -217,7 +243,17 @@ def test_final_redirect_url_revalidated():
         opener=_opener(RSS, final_url="http://127.0.0.1/feed.xml"),
     )
 
-    with pytest.raises(PermissionError, match="public global"):
+    with pytest.raises(PermissionError):
+        tool.run(url="https://example.com/feed.xml")
+
+
+def test_egress_allow_policy_blocks_unlisted_host():
+    tool = RssFetchTool(
+        opener=_opener(RSS),
+        egress_allow_hosts=("*.python.org",),
+    )
+
+    with pytest.raises(PermissionError, match="not allowed by egress policy"):
         tool.run(url="https://example.com/feed.xml")
 
 

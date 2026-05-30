@@ -7,7 +7,10 @@ resolve to a private address. This module centralizes those checks so
 """
 from __future__ import annotations
 
+import gzip
+import io
 import ipaddress
+import os
 import socket
 import urllib.parse
 import urllib.request
@@ -40,6 +43,9 @@ class NetworkSafetyPolicy:
     max_url_len: int = DEFAULT_MAX_URL_LEN
     resolver: Resolver | None = None
     resolve_dns: bool = True
+    allow_http_hosts: tuple[str, ...] = ()
+    egress_allow_hosts: tuple[str, ...] = ()
+    egress_deny_hosts: tuple[str, ...] = ()
 
     def validate_url(self, url: Any, *, role: str | None = None) -> urllib.parse.SplitResult:
         if not isinstance(url, str) or not url.strip():
@@ -55,18 +61,34 @@ class NetworkSafetyPolicy:
             )
         if not parsed.hostname:
             raise ValueError(f"url {url!r} has no hostname")
+        host = _normalize_hostname(parsed.hostname)
+        if _matches_host(host, self.egress_deny_hosts):
+            raise PermissionError(f"hostname {parsed.hostname!r} is denied by egress policy")
+        if self.egress_allow_hosts and not _matches_host(host, self.egress_allow_hosts):
+            raise PermissionError(
+                f"hostname {parsed.hostname!r} is not allowed by egress policy"
+            )
+        if parsed.scheme == "http" and not _matches_host(host, self.allow_http_hosts):
+            raise PermissionError(
+                "plain HTTP is disabled by default; add the host to the explicit "
+                "HTTP allowlist or use HTTPS"
+            )
         self.validate_host(parsed.hostname, parsed.port)
         return parsed
 
     def validate_redirect(self, from_url: str, to_url: str) -> str:
         absolute = urllib.parse.urljoin(from_url, to_url)
+        old = urllib.parse.urlsplit(from_url)
+        new = urllib.parse.urlsplit(absolute)
+        if old.scheme == "https" and new.scheme == "http":
+            raise PermissionError("mixed-mode redirect from HTTPS to HTTP is refused")
         self.validate_url(absolute, role=f"{self.tool_name} redirect url")
         return absolute
 
     def validate_host(self, hostname: str | None, port: int | None = None) -> None:
         if hostname is None:
             raise ValueError("url has no hostname")
-        host_lower = hostname.rstrip(".").lower()
+        host_lower = _normalize_hostname(hostname)
         if host_lower in BLOCKED_HOSTNAMES:
             raise PermissionError(
                 f"hostname {hostname!r} resolves to a local-only target; refused"
@@ -122,6 +144,25 @@ def build_safe_opener(policy: NetworkSafetyPolicy):
     return urllib.request.build_opener(SafeRedirectHandler(policy))
 
 
+def decompress_gzip_limited(raw: bytes, max_bytes: int) -> tuple[bytes, bool]:
+    """Return at most `max_bytes` decompressed bytes plus a truncation flag."""
+
+    if max_bytes <= 0:
+        raise ValueError("max_bytes must be > 0")
+    with gzip.GzipFile(fileobj=io.BytesIO(raw)) as fh:
+        data = fh.read(max_bytes + 1)
+    return data[:max_bytes], len(data) > max_bytes
+
+
+def host_patterns_from_env(name: str) -> tuple[str, ...]:
+    value = os.getenv(name, "")
+    return tuple(
+        item.strip().lower()
+        for item in value.split(",")
+        if item.strip()
+    )
+
+
 def _parse_ip_literal(hostname: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
     try:
         return ipaddress.ip_address(hostname)
@@ -138,3 +179,27 @@ def _require_public_ip(
         raise PermissionError(
             f"IP {ip} is not a public global address; {tool_name} refuses local/private targets"
         )
+
+
+def _normalize_hostname(hostname: str) -> str:
+    return hostname.rstrip(".").lower()
+
+
+def _matches_host(hostname: str, patterns: tuple[str, ...]) -> bool:
+    host = _normalize_hostname(hostname)
+    for raw in patterns:
+        pattern = raw.strip().rstrip(".").lower()
+        if not pattern:
+            continue
+        if pattern == "*":
+            return True
+        if pattern == host:
+            return True
+        if pattern.startswith("*."):
+            suffix = pattern[1:]
+            if host.endswith(suffix) and host != pattern[2:]:
+                return True
+        elif pattern.startswith("."):
+            if host == pattern[1:] or host.endswith(pattern):
+                return True
+    return False

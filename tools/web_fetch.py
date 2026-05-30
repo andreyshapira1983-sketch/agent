@@ -14,16 +14,18 @@ at T with sha256(content)=H".
 
 Safety model (defence in depth):
 
-  - **scheme allow-list**: only `http` and `https`. No `file://`,
-    no `data:`, no `ftp:`.
+  - **scheme allow-list**: only `https` by default; plain `http` is
+    accepted only for explicitly allowlisted hosts. No `file://`, no
+    `data:`, no `ftp:`.
   - **ASCII URL**: the planner sanitiser enforces this earlier, but the
     tool re-checks because tests bypass the planner.
-  - **local-network block-list**: localhost, 127.0.0.0/8, 0.0.0.0,
-    10/8, 192.168/16, 172.16-31/12, link-local 169.254/16, and IPv6
-    loopback / unique-local. Stops the agent from being abused into a
-    SSRF tool against internal services.
-  - **size cap**: read at most `max_bytes` (default 1 MiB). Larger
-    bodies are truncated with a marker.
+  - **egress policy + local-network block-list**: optional allow/deny host
+    patterns, DNS resolution checks, redirect re-validation, localhost,
+    127.0.0.0/8, 0.0.0.0, 10/8, 192.168/16, 172.16-31/12, link-local
+    169.254/16, and IPv6 loopback / unique-local are refused. Stops the
+    agent from being abused into a SSRF tool against internal services.
+  - **size cap**: read at most `max_bytes` (default 1 MiB), and cap again
+    after gzip decompression. Larger bodies are truncated with a marker.
   - **timeout**: short (default 10 s); the loop's overall budget is
     finite.
   - **content-type allow-list**: text/html, text/plain, application/json
@@ -35,7 +37,6 @@ Risk: read_only. No file or process side effect.
 """
 from __future__ import annotations
 
-import gzip
 import hashlib
 import re
 import socket
@@ -46,7 +47,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from tools.base import Risk, Tool
-from tools.network_safety import NetworkSafetyPolicy, build_safe_opener
+from tools.network_safety import (
+    NetworkSafetyPolicy,
+    build_safe_opener,
+    decompress_gzip_limited,
+    host_patterns_from_env,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -88,11 +94,12 @@ class WebFetchTool(Tool):
 
     name = "web_fetch"
     description = (
-        "Fetch a single web URL (http/https) and return its plain-text "
+        "Fetch a single HTTPS web URL and return its plain-text "
         "content with a content_hash and fetched_at timestamp. Use this "
         "AFTER `web_search` to turn a search hit (a pointer) into a "
-        "verifiable source the Verifier can cite. Refuses local network "
-        "targets, non-text content types, and any URL > 2048 chars. "
+        "verifiable source the Verifier can cite. Plain HTTP requires an "
+        "explicit host allowlist. Refuses local network targets, blocked "
+        "egress hosts, non-text content types, and any URL > 2048 chars. "
         "Risk: read_only."
     )
     risk: Risk = "read_only"
@@ -104,6 +111,9 @@ class WebFetchTool(Tool):
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         opener: Any | None = None,
         resolver: Any | None = None,
+        allow_http_hosts: tuple[str, ...] | None = None,
+        egress_allow_hosts: tuple[str, ...] | None = None,
+        egress_deny_hosts: tuple[str, ...] | None = None,
     ):
         if max_bytes <= 0:
             raise ValueError(f"max_bytes must be > 0, got {max_bytes}")
@@ -122,6 +132,21 @@ class WebFetchTool(Tool):
             # Stub openers in unit tests should not do real DNS. Production
             # fetches and resolver-injected tests do.
             resolve_dns=opener is None or resolver is not None,
+            allow_http_hosts=(
+                allow_http_hosts
+                if allow_http_hosts is not None
+                else host_patterns_from_env("AGENT_FETCH_ALLOW_HTTP_HOSTS")
+            ),
+            egress_allow_hosts=(
+                egress_allow_hosts
+                if egress_allow_hosts is not None
+                else host_patterns_from_env("AGENT_FETCH_ALLOW_HOSTS")
+            ),
+            egress_deny_hosts=(
+                egress_deny_hosts
+                if egress_deny_hosts is not None
+                else host_patterns_from_env("AGENT_FETCH_DENY_HOSTS")
+            ),
         )
 
     def risk_for(self, arguments: dict[str, Any]) -> Risk:  # noqa: ARG002
@@ -173,7 +198,8 @@ class WebFetchTool(Tool):
         # Decompress gzip if needed.
         if content_encoding == "gzip":
             try:
-                raw = gzip.decompress(raw)
+                raw, decompressed_truncated = decompress_gzip_limited(raw, self.max_bytes)
+                truncated = truncated or decompressed_truncated
             except OSError:
                 # Truncated gzip; fall back to raw bytes — the strip
                 # below still produces SOME text.

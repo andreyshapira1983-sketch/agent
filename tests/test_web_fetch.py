@@ -163,8 +163,27 @@ class TestLocalNetworkBlock:
         """1.1.1.1 is public — should not be refused at the SSRF gate.
         We use a stub opener so no real call goes out."""
         opener = _opener_with(b"<html><body>hello</body></html>")
-        out = WebFetchTool(opener=opener).run(url="http://1.1.1.1/")
+        out = WebFetchTool(
+            opener=opener,
+            allow_http_hosts=("1.1.1.1",),
+        ).run(url="http://1.1.1.1/")
         assert out["status_code"] == 200
+
+    def test_plain_http_rejected_by_default(self):
+        opener = _opener_with(b"<html><body>hello</body></html>")
+
+        with pytest.raises(PermissionError, match="plain HTTP"):
+            WebFetchTool(opener=opener).run(url="http://example.com/")
+
+    def test_plain_http_allowed_for_explicit_host(self):
+        opener = _opener_with(b"<html><body>hello</body></html>")
+
+        out = WebFetchTool(
+            opener=opener,
+            allow_http_hosts=("example.com",),
+        ).run(url="http://example.com/")
+
+        assert out["url"] == "https://example.com/"
 
     def test_hostname_resolving_to_private_ip_rejected(self):
         opener = _opener_with(b"<html><body>hello</body></html>")
@@ -179,8 +198,17 @@ class TestLocalNetworkBlock:
             final_url="http://127.0.0.1/admin",
         )
 
-        with pytest.raises(PermissionError, match="public global"):
+        with pytest.raises(PermissionError):
             WebFetchTool(opener=opener).run(url="https://example.com/")
+
+    def test_egress_allow_policy_blocks_unlisted_host(self):
+        opener = _opener_with(b"<html><body>hello</body></html>")
+
+        with pytest.raises(PermissionError, match="not allowed by egress policy"):
+            WebFetchTool(
+                opener=opener,
+                egress_allow_hosts=("*.python.org",),
+            ).run(url="https://example.com/")
 
 
 # ============================================================
@@ -318,6 +346,16 @@ class TestGzipDecompression:
         opener = _opener_with(gz, content_encoding="gzip")
         out = WebFetchTool(opener=opener).run(url="https://example.com/")
         assert "hello compressed world" in out["text"]
+
+    def test_gzip_decompression_is_capped_after_inflate(self):
+        plaintext = b"<p>" + b"a" * 200 + b"</p>"
+        gz = gzip.compress(plaintext)
+        opener = _opener_with(gz, content_encoding="gzip")
+
+        out = WebFetchTool(max_bytes=20, opener=opener).run(url="https://example.com/")
+
+        assert out["text_truncated"] is True
+        assert out["bytes"] == 20
 
 
 # ============================================================

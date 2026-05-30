@@ -1316,8 +1316,13 @@ and refuses to let any claim through without a verifiable source.
 
 Turns a `web_search` pointer into a verifiable source.
 
-  - HTTP/HTTPS only — `file://`, `data:`, `ftp:`, `javascript:`
-    all rejected at the planner AND the tool layer.
+  - HTTPS by default. Plain HTTP is rejected unless the host is explicitly
+    listed in `AGENT_FETCH_ALLOW_HTTP_HOSTS` or passed as an allowlist to the
+    tool. `file://`, `data:`, `ftp:`, `javascript:` are rejected at the
+    planner AND the tool layer.
+  - Egress policy: optional `AGENT_FETCH_ALLOW_HOSTS` and
+    `AGENT_FETCH_DENY_HOSTS`, DNS resolution checks, redirect re-validation,
+    and `https -> http` downgrade redirects are refused.
   - Local-network block-list: `localhost`, `127.0.0.0/8`, `0.0.0.0`,
     `10/8`, `192.168/16`, `172.16-31/12`, `169.254/16`
     (AWS metadata!), IPv6 loopback. Defends against SSRF.
@@ -1327,8 +1332,8 @@ Turns a `web_search` pointer into a verifiable source.
   - Returns `{url, status_code, content_type, fetched_at,
     content_hash, text, text_truncated, bytes, elapsed_ms,
     compensation_plan}` — same shape every other tool follows.
-  - Gzip auto-decompressed; HTML stripped to plain text by a
-    dependency-free regex pipeline; charset honoured from the
+  - Gzip auto-decompressed with a second post-inflate size cap; HTML stripped
+    to plain text by a dependency-free regex pipeline; charset honoured from the
     `Content-Type` header; redaction applied to the returned text.
   - Risk: `read_only` — no approval required.
 

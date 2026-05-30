@@ -2,12 +2,12 @@
 
 RSS is a good no-key source for autonomous agents: cheap, structured, and
 schedule-friendly. The tool is read-only and follows the same network safety
-shape as `web_fetch`: http(s) only, ASCII URL, no local-network targets, size
-cap, timeout, and redaction before output.
+shape as `web_fetch`: HTTPS by default, plain HTTP only by explicit host
+allowlist, ASCII URL, DNS/IP/redirect checks, egress allow/deny policy,
+post-gzip size cap, timeout, and redaction before output.
 """
 from __future__ import annotations
 
-import gzip
 import hashlib
 import socket
 import time
@@ -19,7 +19,12 @@ from typing import Any
 
 from core.redaction import redact_text
 from tools.base import Risk, Tool
-from tools.network_safety import NetworkSafetyPolicy, build_safe_opener
+from tools.network_safety import (
+    NetworkSafetyPolicy,
+    build_safe_opener,
+    decompress_gzip_limited,
+    host_patterns_from_env,
+)
 
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -40,12 +45,14 @@ ALLOWED_CONTENT_TYPES = (
     "text/plain",
 )
 
+
 class RssFetchTool(Tool):
     name = "rss_fetch"
     description = (
         "Fetch one RSS/Atom feed URL and return parsed entries with title, "
         "url, summary, published_at, fetched_at, and content_hash. "
-        "Read-only; refuses local/private network targets."
+        "Read-only; HTTPS by default; refuses local/private network targets "
+        "and egress-denied hosts."
     )
     risk: Risk = "read_only"
 
@@ -56,6 +63,9 @@ class RssFetchTool(Tool):
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         opener: Any | None = None,
         resolver: Any | None = None,
+        allow_http_hosts: tuple[str, ...] | None = None,
+        egress_allow_hosts: tuple[str, ...] | None = None,
+        egress_deny_hosts: tuple[str, ...] | None = None,
     ):
         if max_bytes <= 0:
             raise ValueError(f"max_bytes must be > 0, got {max_bytes}")
@@ -70,6 +80,21 @@ class RssFetchTool(Tool):
             max_url_len=MAX_URL_LEN,
             resolver=resolver,
             resolve_dns=opener is None or resolver is not None,
+            allow_http_hosts=(
+                allow_http_hosts
+                if allow_http_hosts is not None
+                else host_patterns_from_env("AGENT_FETCH_ALLOW_HTTP_HOSTS")
+            ),
+            egress_allow_hosts=(
+                egress_allow_hosts
+                if egress_allow_hosts is not None
+                else host_patterns_from_env("AGENT_FETCH_ALLOW_HOSTS")
+            ),
+            egress_deny_hosts=(
+                egress_deny_hosts
+                if egress_deny_hosts is not None
+                else host_patterns_from_env("AGENT_FETCH_DENY_HOSTS")
+            ),
         )
 
     def risk_for(self, arguments: dict[str, Any]) -> Risk:  # noqa: ARG002
@@ -114,7 +139,8 @@ class RssFetchTool(Tool):
             raw = raw[: self.max_bytes]
         if content_encoding == "gzip":
             try:
-                raw = gzip.decompress(raw)
+                raw, decompressed_truncated = decompress_gzip_limited(raw, self.max_bytes)
+                truncated = truncated or decompressed_truncated
             except OSError:
                 pass
 
