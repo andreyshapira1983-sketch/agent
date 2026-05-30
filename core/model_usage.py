@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.budget_ledger import BudgetLedger
+
 
 _COST_UNITS_PER_1K_TOKENS = {
     "free": 0,
@@ -119,6 +121,7 @@ class ModelUsageLedger:
     path: Path | None = None
     limits: ModelUsageLimits = field(default_factory=ModelUsageLimits)
     logger: Any | None = None
+    budget_ledger: BudgetLedger | None = None
     records: list[ModelUsageRecord] = field(default_factory=list)
 
     @classmethod
@@ -127,8 +130,14 @@ class ModelUsageLedger:
         *,
         path: Path | None = None,
         logger: Any | None = None,
+        budget_ledger: BudgetLedger | None = None,
     ) -> "ModelUsageLedger":
-        return cls(path=path, limits=ModelUsageLimits.from_env(), logger=logger)
+        return cls(
+            path=path,
+            limits=ModelUsageLimits.from_env(),
+            logger=logger,
+            budget_ledger=budget_ledger,
+        )
 
     def assert_can_start(self, *, role: str, provider: str, model: str) -> None:
         totals = _totals(self.records)
@@ -153,6 +162,18 @@ class ModelUsageLedger:
                 f"model cost budget exhausted: {totals['cost_units']}/"
                 f"{self.limits.max_cost_units} before {role}:{provider}/{model}"
             )
+        if self.budget_ledger is not None:
+            decision = self.budget_ledger.reserve(
+                "llm_calls",
+                amount=1,
+                reason=f"model call: {role}:{provider}/{model}",
+                scope="model_usage",
+            )
+            if not decision.allowed:
+                raise ModelBudgetExceeded(
+                    f"persistent {decision.window} model call budget exhausted: "
+                    f"{decision.used}/{decision.limit} before {role}:{provider}/{model}"
+                )
 
     def log_start(
         self,
@@ -214,6 +235,21 @@ class ModelUsageLedger:
             error=error,
         )
         self.records.append(record)
+        if self.budget_ledger is not None:
+            if record.total_tokens > 0:
+                self.budget_ledger.record(
+                    "model_tokens",
+                    amount=record.total_tokens,
+                    reason=f"model tokens: {role}:{provider}/{model}",
+                    scope="model_usage",
+                )
+            if record.cost_units > 0:
+                self.budget_ledger.record(
+                    "model_cost_units",
+                    amount=record.cost_units,
+                    reason=f"model cost units: {role}:{provider}/{model}",
+                    scope="model_usage",
+                )
         if self.path is not None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a", encoding="utf-8") as fh:
@@ -266,6 +302,9 @@ class ModelUsageLedger:
             "by_role": by_role,
             "by_model": by_model,
             "recent": [r.to_dict() for r in records[-10:]],
+            "persistent_budget_windows": (
+                self.budget_ledger.snapshot() if self.budget_ledger is not None else None
+            ),
         }
 
 

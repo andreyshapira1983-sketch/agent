@@ -20,6 +20,7 @@ from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.memory import WorkingMemory
 from core.memory_policy import MemoryRetrievalPolicy, MemoryWritePolicy
+from core.model_usage import ModelBudgetExceeded
 from core.models import MemoryRecord
 from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner
@@ -33,6 +34,7 @@ from main import (
     _handle_rollback,
     _parse_remember,
     _print_persistent,
+    _run_agent_with_budget_guard,
     handle_meta_command,
 )
 from tests.conftest import FakeLLM
@@ -68,6 +70,28 @@ def _build_agent(workspace: Path) -> AgentLoop:
         approval_provider=AutoApprover(default="approve"),
         max_replan_attempts=1,
     )
+
+
+def test_run_agent_with_budget_guard_returns_clean_budget_message(
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    agent = _build_agent(workspace)
+
+    def raise_budget_error(*args, **kwargs):
+        raise ModelBudgetExceeded(
+            "model call budget exhausted: 1/1 before synthesizer:fake/fake-1"
+        )
+
+    monkeypatch.setattr(agent, "run", raise_budget_error)
+
+    answer = _run_agent_with_budget_guard(agent, user_question="hello")
+
+    assert answer == (
+        "Model budget exceeded: model call budget exhausted: "
+        "1/1 before synthesizer:fake/fake-1"
+    )
+    assert "model_budget_blocked" in agent.log.path.read_text(encoding="utf-8")
 
 
 class FakeWebSearchTool(Tool):
@@ -431,18 +455,29 @@ class TestHandleMetaCommand:
 
         assert handle_meta_command(":models", agent, workspace) is True
         assert handle_meta_command(":models --json", agent, workspace) is True
+        assert handle_meta_command(":model-registry-audit", agent, workspace) is True
+        assert handle_meta_command(":architecture-audit --json", agent, workspace) is True
         assert handle_meta_command(":model-usage", agent, workspace) is True
         assert handle_meta_command(":team-plan news business architecture --json", agent, workspace) is True
+        assert handle_meta_command(
+            ":team-run news business architecture --max-model-calls 20 --max-cost-units 30",
+            agent,
+            workspace,
+        ) is True
 
         out = capsys.readouterr()
         assert "model routes" in out.err
         assert "model selection policy" in out.err
+        assert "model registry audit" in out.err
         assert "planner" in out.err
         assert '"routes"' in out.err
         assert '"selection_policy"' in out.err
+        assert '"multi_agent_state"' in out.err
         assert "model usage ledger is not enabled" in out.err
         assert '"contracts"' in out.err
         assert "NewsSignalAgent" in out.err
+        assert "team execution dry-run" in out.err
+        assert "verifier handoffs" in out.err
 
     def test_learn_project_plans_then_ingests_selected_sources(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
@@ -493,11 +528,16 @@ class TestHandleMetaCommand:
         agent = _build_agent(workspace)
 
         assert handle_meta_command(":budget-status", agent, workspace) is True
+        assert handle_meta_command(":budget-window-status", agent, workspace) is True
+        assert handle_meta_command(":budget-window-status --json", agent, workspace) is True
+        assert handle_meta_command(":release-audit", agent, workspace) is True
         assert handle_meta_command(":queue-status", agent, workspace) is True
         assert handle_meta_command(":scheduler-status", agent, workspace) is True
 
         out = capsys.readouterr()
         assert "autonomous budget defaults" in out.err
+        assert "persistent budget ledger is not enabled" in out.err
+        assert "release hygiene" in out.err
         assert "runtime task queue" in out.err
         assert "runtime scheduler" in out.err
 

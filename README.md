@@ -55,6 +55,8 @@ plus full Control Loop integration. Run `python -m pytest -v`.
 | §3 Cognitive Core: LLM-driven Planning | [`core/planner.py`](core/planner.py) |
 | §3 Model Router — role-based model selection | [`core/model_router.py`](core/model_router.py) |
 | §3 Model Usage Ledger — calls / tokens / rough cost units | [`core/model_usage.py`](core/model_usage.py) + `:model-usage` |
+| §3 Model Registry Audit — active routes vs candidate catalog | [`core/model_registry_audit.py`](core/model_registry_audit.py) + `:model-registry-audit` |
+| §6 Persistent Budget Windows — hour/day spend caps across sessions | [`core/budget_ledger.py`](core/budget_ledger.py) + `:budget-window-status` |
 | §4 Memory: Working Memory + artifact cache | [`core/memory.py`](core/memory.py) |
 | §4 Memory: Persistent Long-Term Store (JSONL) | [`core/persistent_memory.py`](core/persistent_memory.py) |
 | §4 + §12.4 Memory Write Policy + Retrieval Policy | [`core/memory_policy.py`](core/memory_policy.py) |
@@ -63,6 +65,7 @@ plus full Control Loop integration. Run `python -m pytest -v`.
 | §7 Secret Scanner (single source of truth) | [`core/secret_scanner.py`](core/secret_scanner.py) |
 | §7 Universal Redaction (logs, prompts, output) | [`core/redaction.py`](core/redaction.py) |
 | §7 Data Classifier (public / private / sensitive / secret) | [`core/data_classifier.py`](core/data_classifier.py) |
+| §7 Release Hygiene Guard — excludes `.env`, `.git`, `.venv`, caches | [`core/release_hygiene.py`](core/release_hygiene.py) + `:release-audit` |
 | §3 Re-planning (`ReplanTrigger`, attempt counter, exhaustion error) | [`core/loop.py`](core/loop.py) |
 | §3 Re-planning policy (MVP-12: `FailureType`, `FailureBudget`, `ReplanPolicy.decide()`, `forbidden_actions`) | [`core/replan.py`](core/replan.py) |
 | §12.1 Core Data Models (11 of 14, incl. MemoryRecord + ApprovalRequest + ApprovalDecision) | [`core/models.py`](core/models.py) |
@@ -86,6 +89,8 @@ plus full Control Loop integration. Run `python -m pytest -v`.
 | §6 Autonomous Runtime + Budget Governor + Circuit Breaker + Approval Inbox | [`core/autonomous_runtime.py`](core/autonomous_runtime.py), [`core/budget_governor.py`](core/budget_governor.py), [`core/circuit_breaker.py`](core/circuit_breaker.py), [`core/approval_inbox.py`](core/approval_inbox.py) |
 | §6 Persistent Task Queue + Scheduler Tick | [`core/task_queue.py`](core/task_queue.py), [`core/scheduler.py`](core/scheduler.py), [`main.py`](main.py) |
 | §15 Multi-Agent Organization: dry-run Team Plan + subagent contracts | [`core/team_plan.py`](core/team_plan.py) + `:team-plan` |
+| §15.1 Team Executor Dry-Run — contract walk / budget / verifier handoff | [`core/team_executor.py`](core/team_executor.py) + `:team-run` |
+| Operator Architecture Audit — implemented layers vs multi-agent gaps | [`core/architecture_audit.py`](core/architecture_audit.py) + `:architecture-audit` |
 | §13.2 Self-Repair Controller (diagnose -> diff -> approval -> write -> tests -> rollback) | [`core/self_repair.py`](core/self_repair.py) + `AgentLoop.repair()` |
 | §13.3 Repair Proposal Generator (tests/logs/code -> validated proposal) | [`core/repair_proposal.py`](core/repair_proposal.py) + `AgentLoop.propose_repair()` |
 | §13.4 Self-Repair E2E Hardening (success / deny / rollback / low confidence) | [`tests/test_self_repair_e2e.py`](tests/test_self_repair_e2e.py) |
@@ -133,6 +138,10 @@ edge — explicitly **not yet**.
    Registry entries are selectable only when their provider is supported and
    the required key is present (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `HF_TOKEN`).
    Use `:models` to see the active routes, policy, availability and registry.
+   Use `:model-registry-audit` when the route list looks "too small": it
+   explains that routes are selected per role, while the registry is the wider
+   candidate catalog. It also lists unavailable models, unsupported providers
+   and available candidates that were not selected by the current policy.
 
    Built-in model names are safe defaults, not a live provider catalog. To keep
    model names fresh without editing Python code, copy the example registry:
@@ -195,14 +204,51 @@ edge — explicitly **not yet**.
    can be added through JSON without a code change.
 
    Model usage is recorded locally in `data/model_usage.jsonl`. Use
-   `:model-usage` to inspect calls, tokens and rough `cost_units` by role/model.
+  `:model-usage` to inspect calls, tokens and rough `cost_units` by role/model.
    These are budget-control estimates, not provider billing numbers. Optional
-   per-session caps stop the next model call before it is sent:
+  per-session caps stop the next model call before it is sent:
    ```powershell
    $env:AGENT_MODEL_MAX_CALLS_PER_SESSION="20"
    $env:AGENT_MODEL_MAX_TOKENS_PER_SESSION="100000"
    $env:AGENT_MODEL_MAX_COST_UNITS_PER_SESSION="300"
    ```
+
+   Persistent budget windows protect across CLI restarts and long work
+   sessions. They are stored in `data/budget_ledger.jsonl`; zero means
+   "not enforced":
+   ```powershell
+   $env:AGENT_BUDGET_HOUR_LLM_CALLS="20"
+   $env:AGENT_BUDGET_DAY_LLM_CALLS="100"
+   $env:AGENT_BUDGET_DAY_MODEL_TOKENS="300000"
+   $env:AGENT_BUDGET_DAY_MODEL_COST_UNITS="500"
+   ```
+
+   Inspect them with:
+   ```text
+   :budget-window-status
+   :budget-window-status --json
+   ```
+
+   Release hygiene checks the package boundary before sharing an artifact:
+   ```text
+   :release-audit
+   :release-audit --json
+   ```
+   The release manifest excludes local-only artifacts such as `.env`, `.git`,
+   `.venv`, `.pytest_cache`, `logs/`, `data/`, `credentials.json`,
+   `token.json`, `client_secret.json`, `*.pem` and `*.key`. If these exist
+   locally, the report lists them as present-but-excluded so packaging cannot
+   silently leak developer state.
+
+   Architecture drift can be inspected without asking the LLM:
+   ```text
+   :architecture-audit
+   :architecture-audit --json
+   ```
+   This command checks concrete code/test evidence for major layers and marks
+   the current multi-agent state. Today the project has dry-run team contracts
+   and a dry-run executor. Real multi-agent execution still needs long work
+   session mode, persistent budget windows and subagent memory scopes.
 
 ## Usage
 
@@ -216,7 +262,8 @@ Two modes:
   any long-term records that share keywords with the question. Identical
   tool calls are served from the artifact cache. Type `:memory`,
   `:ingest-source`, `:ingest-project`, `:clear`, `:remember`, `:forget`,
-  `:models`, `:hygiene`, `:rollback`, `:help`, `:quit` for control.
+  `:models`, `:model-registry-audit`, `:architecture-audit`, `:hygiene`,
+  `:rollback`, `:help`, `:quit` for control.
 
 One-shot examples:
 ```powershell
@@ -256,9 +303,13 @@ python main.py
 > :rollback                           # undo the most recent shell_exec / file_write mutation
 > :rollback list                      # show registered compensation plans
 > :models                             # inspect active model routes + registry
+> :model-registry-audit               # explain selected routes vs available candidates
 > :model-usage                        # inspect LLM calls/tokens/cost units
+> :architecture-audit                 # inspect implemented layers and multi-agent gaps
 > :team-plan "AI news and business opportunity radar"
                                       # dry-run subagent contracts; does not run agents
+> :team-run "AI news and business opportunity radar"
+                                      # dry-run contract walk; no subagents/tools/models executed
 > :propose-repair core/foo.py tests/test_foo.py
                                       # generate a validated RepairProposal without writing
 > :repair core/foo.py tmp/foo.proposed.py tests/test_foo.py
@@ -1591,6 +1642,19 @@ tools, model role, max iterations, max model calls, cost budget, verifier and
 stop conditions. This prevents a "zoo" of uncontrolled agents: no subagent is
 run merely because it sounds useful.
 
+`:team-run <goal>` is the next dry-run bridge. It builds the same plan, then
+walks the contracts in order without launching subagents, tools or model calls.
+It reserves planned model calls/cost units, stops before a contract that would
+exceed the team budget, marks approval-required contracts, and creates verifier
+handoffs. Useful flags:
+
+```text
+:team-run "AI news and business opportunity radar" --max-model-calls 10 --max-cost-units 20
+:team-run "AI news business code architecture" --limit 4 --json
+```
+
+This proves sequencing and budgets before any real delegation is allowed.
+
 ### 14.4 — Verifier (`core/verifier.py`)
 
 The Verifier runs AFTER `_synthesize` and BEFORE the final
@@ -1951,7 +2015,12 @@ What is covered today (**1449 tests, ≈ 23 s, zero network calls**):
 | Autonomous Runtime (MVP-16.1) | [`tests/test_autonomous_runtime.py`](tests/test_autonomous_runtime.py), [`tests/test_budget_governor.py`](tests/test_budget_governor.py), [`tests/test_circuit_breaker.py`](tests/test_circuit_breaker.py), [`tests/test_approval_inbox.py`](tests/test_approval_inbox.py), [`tests/test_cli.py`](tests/test_cli.py) | bounded dry-run health pass / status + learning + tests tasks / non-dry-run blocked into approval inbox / cycle budget denial opens circuit / CLI `:auto-run` and `:auto-status` |
 | Persistent Task Queue + Scheduler (MVP-16.2) | [`tests/test_task_queue.py`](tests/test_task_queue.py), [`tests/test_scheduler.py`](tests/test_scheduler.py), [`tests/test_autonomous_runtime.py`](tests/test_autonomous_runtime.py), [`tests/test_cli.py`](tests/test_cli.py) | JSONL task persistence / pending due filtering / task state transitions / schedule persistence / scheduler tick enqueues due tasks / queued tasks run through `AutonomousRuntime` / CLI `:task-*` and `:schedule-*` |
 | Model Usage Ledger (MVP-16.3) | [`tests/test_model_usage.py`](tests/test_model_usage.py), [`tests/test_cli.py`](tests/test_cli.py) | role/model token ledger / JSONL persistence / historical vs current-session totals / session call-budget block / estimated token fallback / CLI `:model-usage` and `:budget-status` integration |
+| Persistent Budget Windows (MVP-16.5) | [`tests/test_budget_ledger.py`](tests/test_budget_ledger.py), [`tests/test_model_usage.py`](tests/test_model_usage.py), [`tests/test_cli.py`](tests/test_cli.py) | hour/day JSONL budget windows / malformed budget records skipped / model call blocking across sessions / model tokens + cost units recorded / CLI `:budget-window-status` |
+| Model Registry Audit (MVP-16.4) | [`tests/test_model_registry_audit.py`](tests/test_model_registry_audit.py), [`tests/test_cli.py`](tests/test_cli.py) | active routes are explained separately from the wider local registry / unavailable models flagged by missing env / unsupported providers flagged / CLI `:model-registry-audit` |
+| Release Hygiene Guard (P0 audit blocker) | [`tests/test_release_hygiene.py`](tests/test_release_hygiene.py), [`tests/test_cli.py`](tests/test_cli.py) | release manifest excludes `.env`, `.git`, `.venv`, caches, credential/token/key files, `logs/` and `data/` / forbidden local artifacts reported as present-but-excluded / CLI `:release-audit` |
 | Team Plan (MVP-15.0 dry-run) | [`tests/test_team_plan.py`](tests/test_team_plan.py), [`tests/test_cli.py`](tests/test_cli.py) | simple tasks avoid subagents / multi-concern goals emit bounded contracts / `--limit` truncation warning / tool allow/deny validation / stable JSON shape / CLI `:team-plan` |
+| Team Executor Dry-Run (MVP-15.1) | [`tests/test_team_executor.py`](tests/test_team_executor.py), [`tests/test_cli.py`](tests/test_cli.py) | contract order walk / budget aggregation / stops before budget overflow / approval-required contracts marked but not run / verifier handoffs / CLI `:team-run` |
+| Architecture Audit (operator control plane) | [`tests/test_architecture_audit.py`](tests/test_architecture_audit.py), [`tests/test_cli.py`](tests/test_cli.py) | layer checklist / current multi-agent state / priority gaps before real subagent execution / CLI `:architecture-audit` |
 | `web_fetch` unit (MVP-14.2) | [`tests/test_web_fetch.py`](tests/test_web_fetch.py) | **construction**: defaults pinned (1 MiB, 10 s, `risk=read_only`); zero / negative `max_bytes` and `timeout_seconds` rejected — **URL validation**: non-string / empty / > 2048 chars / non-ASCII (`https://пример.рф`) / `file://` / `data:` / `ftp://` / `javascript:` / `ws://` rejected; missing hostname rejected — **local-network block**: localhost, 127.0.0.1, 10.0.0.1, 192.168.1.1, 172.16.0.1, **169.254.169.254 (AWS metadata!)**, 0.0.0.0, `[::1]` IPv6 loopback all refused; public IP (1.1.1.1) passes — **happy path**: HTML stripped to text, `<script>` and `<style>` blocks removed (content too), HTML entities decoded (`&amp;`/`&lt;`/`&gt;`/`&quot;`/`&#39;`/`&apos;`/`&nbsp;`), plain text passes through, JSON passes through, User-Agent set, `fetched_at` ISO-8601 — **content-type policy**: `application/octet-stream` refused, `image/png` refused, all 6 allow-list types pass (`text/html`, `text/plain`, `text/xml`, `application/json`, `application/xml`, `application/xhtml+xml`), `text/html; charset=utf-8` accepted, empty content-type accepted — **truncation**: oversize body capped, exact-size NOT truncated — **gzip**: `Content-Encoding: gzip` decompressed transparently — **errors**: `HTTPError(404)` and `URLError("dns fail")` surface as clean `ValueError` — **charset**: UTF-8 default, cp1251 honoured from header — **redaction**: secret in body redacted before return — **content_hash**: same body → same hash, different body → different hash — **validate_output**: well-formed passes, non-dict / missing key / short hash / negative bytes rejected, empty text warns (not fails) |
 | `web_fetch` planner sanitiser (MVP-14.2) | [`tests/test_web_fetch_planner.py`](tests/test_web_fetch_planner.py) | well-formed passes / missing url dropped / non-string url dropped / > 2048 chars dropped / non-ASCII dropped / all 5 disallowed schemes dropped (`file://`, `ftp://`, `data:`, `javascript:`, `ws://`) / all 7 SSRF targets dropped (localhost, 127.x, 10.x, 192.168.x, 169.254.x, 0.0.0.0, `[::1]`) / label truncated at 60 chars |
 | Verifier (MVP-14.4) | [`tests/test_verifier.py`](tests/test_verifier.py) | **citation parsing**: file/web/user/all 9 prefixes, multiple per chunk, URL with `?q=1`, command with colons (`python -m pytest -k memory`), `[unknown:foo]` NOT parsed, nested brackets safe — **sentence splitting**: period / question / exclamation / newline / empty chunks dropped / markdown list of 3 items — **match_citation**: file→file evidence, wrong-kind no match (web_page with `foo.txt` in url DOESN'T match `[file:foo.txt]`), `[user]` no-body matches user_explicit, partial substring match, empty chain none, first match returned for empty body — **verify**: single verified claim (citation rewritten to `[verified:file:foo.txt]`, no disclaimer); no citations → `[unverified]` tag + `DISCLAIMER_FULLY_UNVERIFIED`; mixed verified+unverified → no disclaimer; cited-but-unmatched flagged separately (raw citation stays, no `[verified:]` prefix); empty chain + uncited → `DISCLAIMER_NO_CHAIN`; empty answer → 0 chunks + `fully_unverified=True` — **multi-citation chunk**: two valid citations → both rewritten, one matched + one unmatched → still verified verdict — **log_payload**: shape pinned, large strings excluded — **kind affinity**: `[search:python]` matches `web_search_hit` NOT `web_page`, `[web:python]` matches `web_page` NOT `web_search_hit` — **robustness**: 1000-sentence answer processed |

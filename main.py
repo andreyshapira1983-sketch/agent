@@ -83,6 +83,8 @@ if sys.platform == "win32":
 
 from core.approval import ApprovalProvider, AutoApprover, CLIApprovalProvider
 from core.approval_inbox import ApprovalInbox
+from core.architecture_audit import audit_architecture
+from core.budget_ledger import BudgetLedger
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
 from core.budget_governor import BudgetGovernor, BudgetLimits
 from core.conflict_review import ConflictReview
@@ -101,9 +103,11 @@ from core.memory import WorkingMemory
 from core.memory_policy import MemoryRetrievalPolicy, MemoryWritePolicy
 from core.model_usage import ModelBudgetExceeded, ModelUsageLedger
 from core.model_router import ModelRole, ModelRouter
+from core.model_registry_audit import audit_model_registry
 from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
+from core.release_hygiene import build_release_manifest
 from core.self_repair import RepairProposal
 from core.scheduler import SchedulerStore
 from core.source_connectors import (
@@ -114,6 +118,7 @@ from core.source_connectors import (
 from core.source_registry_store import SourceRegistryStore
 from core.source_library import list_source_library, source_library_payload
 from core.task_queue import TaskQueueStore
+from core.team_executor import TeamBudget, TeamExecutor
 from core.team_plan import TeamPlanner
 from tools.base import ToolRegistry
 from tools.diff_file import DiffFileTool
@@ -133,6 +138,7 @@ DEFAULT_RUNTIME_TASKS_PATH = Path("data") / "runtime_tasks.jsonl"
 DEFAULT_RUNTIME_SCHEDULES_PATH = Path("data") / "runtime_schedules.jsonl"
 DEFAULT_APPROVAL_INBOX_PATH = Path("data") / "approval_inbox.jsonl"
 DEFAULT_MODEL_USAGE_PATH = Path("data") / "model_usage.jsonl"
+DEFAULT_BUDGET_LEDGER_PATH = Path("data") / "budget_ledger.jsonl"
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -166,9 +172,14 @@ def build_agent(
     logger = TraceLogger(trace_id=trace_id, log_dir=workspace / "logs", verbose=True)
 
     policy = PolicyGate(registry)
+    budget_ledger = BudgetLedger.from_env(
+        path=workspace / DEFAULT_BUDGET_LEDGER_PATH,
+        logger=logger,
+    )
     model_usage_ledger = ModelUsageLedger.from_env(
         path=workspace / DEFAULT_MODEL_USAGE_PATH,
         logger=logger,
+        budget_ledger=budget_ledger,
     )
     model_router = ModelRouter.from_env(usage_ledger=model_usage_ledger)
     llm = model_router.for_role(ModelRole.SYNTHESIZER)
@@ -203,6 +214,7 @@ def build_agent(
                 str(source_registry_store.path) if source_registry_store else None
             ),
             "model_usage_path": str(workspace / DEFAULT_MODEL_USAGE_PATH),
+            "budget_ledger_path": str(workspace / DEFAULT_BUDGET_LEDGER_PATH),
             "knowledge_auto_write": _env_bool("AGENT_KNOWLEDGE_AUTO_WRITE", False),
             "approval": type(approval_provider).__name__ if approval_provider else None,
         },
@@ -948,6 +960,57 @@ def _handle_models(rest: str, agent: AgentLoop) -> bool:
     return True
 
 
+def _handle_model_registry_audit(rest: str, agent: AgentLoop) -> bool:
+    tokens = _split_meta_args(rest)
+    as_json = "--json" in tokens
+    if any(token != "--json" for token in tokens):
+        print("Usage: :model-registry-audit [--json]", file=sys.stderr)
+        return True
+    audit = audit_model_registry(agent.model_router)
+    agent.log.log("model_registry_audit", audit.to_dict())
+    if as_json:
+        print(json.dumps(audit.to_dict(), ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(audit.user_summary(), file=sys.stderr)
+    return True
+
+
+def _handle_architecture_audit(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    tokens = _split_meta_args(rest)
+    as_json = False
+    limit = 8
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token == "--json":
+            as_json = True
+            i += 1
+            continue
+        if token == "--limit":
+            if i + 1 >= len(tokens):
+                print("Usage: --limit requires a number", file=sys.stderr)
+                return True
+            try:
+                limit = int(tokens[i + 1])
+            except ValueError:
+                print("Usage: --limit requires a number", file=sys.stderr)
+                return True
+            i += 2
+            continue
+        print(f"Usage: unknown :architecture-audit option {token}", file=sys.stderr)
+        return True
+    if limit < 1:
+        print("Usage: --limit must be >= 1", file=sys.stderr)
+        return True
+    audit = audit_architecture(workspace)
+    agent.log.log("architecture_audit", audit.to_dict())
+    if as_json:
+        print(json.dumps(audit.to_dict(), ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(audit.user_summary(limit=limit), file=sys.stderr)
+    return True
+
+
 def _handle_learn(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     tokens = _split_meta_args(rest)
     dry_run = False
@@ -1110,6 +1173,7 @@ def _handle_auto_status(agent: AgentLoop, workspace: Path) -> bool:
     status["task_queue"] = _task_queue_for(agent, workspace).summary()
     status["scheduler"] = _scheduler_for(agent, workspace).summary()
     status["model_usage"] = agent.model_router.usage_snapshot()
+    status["persistent_budget_windows"] = _budget_ledger_snapshot(agent)
     print(json.dumps(status, ensure_ascii=False, indent=2), file=sys.stderr)
     return True
 
@@ -1166,8 +1230,53 @@ def _handle_budget_status(agent: AgentLoop, workspace: Path) -> bool:
     del workspace
     snapshot = BudgetGovernor(BudgetLimits()).snapshot()
     snapshot["model_usage"] = agent.model_router.usage_snapshot()
+    snapshot["persistent_budget_windows"] = _budget_ledger_snapshot(agent)
     print("=== autonomous budget defaults ===", file=sys.stderr)
     print(json.dumps(snapshot, ensure_ascii=False, indent=2), file=sys.stderr)
+    return True
+
+
+def _budget_ledger_for(agent: AgentLoop) -> BudgetLedger | None:
+    usage_ledger = getattr(agent.model_router, "usage_ledger", None)
+    return getattr(usage_ledger, "budget_ledger", None)
+
+
+def _budget_ledger_snapshot(agent: AgentLoop) -> dict | None:
+    ledger = _budget_ledger_for(agent)
+    if ledger is None:
+        return None
+    return ledger.snapshot()
+
+
+def _handle_budget_window_status(rest: str, agent: AgentLoop) -> bool:
+    tokens = _split_meta_args(rest)
+    as_json = "--json" in tokens
+    if any(token != "--json" for token in tokens):
+        print("Usage: :budget-window-status [--json]", file=sys.stderr)
+        return True
+    ledger = _budget_ledger_for(agent)
+    if ledger is None:
+        print("(persistent budget ledger is not enabled)", file=sys.stderr)
+        return True
+    if as_json:
+        print(json.dumps(ledger.snapshot(), ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(ledger.user_summary(), file=sys.stderr)
+    return True
+
+
+def _handle_release_audit(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    tokens = _split_meta_args(rest)
+    as_json = "--json" in tokens
+    if any(token != "--json" for token in tokens):
+        print("Usage: :release-audit [--json]", file=sys.stderr)
+        return True
+    report = build_release_manifest(workspace).report()
+    agent.log.log("release_hygiene", report.to_dict())
+    if as_json:
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(report.user_summary(), file=sys.stderr)
     return True
 
 
@@ -1257,6 +1366,87 @@ def _handle_team_plan(rest: str, agent: AgentLoop) -> bool:
         print(json.dumps(plan.to_dict(), ensure_ascii=False, indent=2), file=sys.stderr)
     else:
         print(plan.user_summary(), file=sys.stderr)
+    return True
+
+
+def _handle_team_run(rest: str, agent: AgentLoop) -> bool:
+    tokens = _split_meta_args(rest)
+    as_json = False
+    limit = 5
+    max_model_calls = 10
+    max_cost_units = 20
+    goal_parts: list[str] = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token == "--json":
+            as_json = True
+            i += 1
+            continue
+        if token == "--limit":
+            if i + 1 >= len(tokens):
+                print("Usage: --limit requires a number", file=sys.stderr)
+                return True
+            try:
+                limit = int(tokens[i + 1])
+            except ValueError:
+                print("Usage: --limit requires a number", file=sys.stderr)
+                return True
+            i += 2
+            continue
+        if token == "--max-model-calls":
+            if i + 1 >= len(tokens):
+                print("Usage: --max-model-calls requires a number", file=sys.stderr)
+                return True
+            try:
+                max_model_calls = int(tokens[i + 1])
+            except ValueError:
+                print("Usage: --max-model-calls requires a number", file=sys.stderr)
+                return True
+            i += 2
+            continue
+        if token == "--max-cost-units":
+            if i + 1 >= len(tokens):
+                print("Usage: --max-cost-units requires a number", file=sys.stderr)
+                return True
+            try:
+                max_cost_units = int(tokens[i + 1])
+            except ValueError:
+                print("Usage: --max-cost-units requires a number", file=sys.stderr)
+                return True
+            i += 2
+            continue
+        if token == "--dry-run":
+            i += 1
+            continue
+        goal_parts.append(token)
+        i += 1
+    goal = " ".join(goal_parts).strip()
+    if not goal:
+        print(
+            "Usage: :team-run <goal> [--limit N] [--max-model-calls N] "
+            "[--max-cost-units N] [--json]",
+            file=sys.stderr,
+        )
+        return True
+    try:
+        plan = TeamPlanner().plan(goal, limit=limit)
+        report = TeamExecutor().run(
+            plan,
+            dry_run=True,
+            budget=TeamBudget(
+                max_model_calls=max_model_calls,
+                max_cost_units=max_cost_units,
+            ),
+        )
+    except ValueError as exc:
+        print(f"Usage: {exc}", file=sys.stderr)
+        return True
+    agent.log.log("team_execution_dry_run", report.to_dict())
+    if as_json:
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(report.user_summary(), file=sys.stderr)
     return True
 
 
@@ -1786,6 +1976,12 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head in {":models", ":model-routes"}:
         return _handle_models(rest.strip(), agent)
 
+    if head in {":model-registry-audit", ":model-audit", ":model-refresh"}:
+        return _handle_model_registry_audit(rest.strip(), agent)
+
+    if head in {":architecture-audit", ":arch-audit", ":roadmap-audit"}:
+        return _handle_architecture_audit(rest.strip(), agent, workspace)
+
     if head in {":learn", ":learn-project"}:
         return _handle_learn(rest.strip(), agent, workspace)
 
@@ -1801,11 +1997,20 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head == ":budget-status":
         return _handle_budget_status(agent, workspace)
 
+    if head in {":budget-window-status", ":budget-windows", ":budget-ledger"}:
+        return _handle_budget_window_status(rest.strip(), agent)
+
+    if head in {":release-audit", ":release-hygiene"}:
+        return _handle_release_audit(rest.strip(), agent, workspace)
+
     if head in {":model-usage", ":usage-models"}:
         return _handle_model_usage(rest.strip(), agent)
 
     if head in {":team-plan", ":agent-team", ":subagents"}:
         return _handle_team_plan(rest.strip(), agent)
+
+    if head in {":team-run", ":team-execute", ":subagents-run"}:
+        return _handle_team_run(rest.strip(), agent)
 
     if head == ":approval-list":
         return _handle_approval_list(rest.strip(), agent, workspace)
@@ -1879,8 +2084,11 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :connector-plan <goal> [flags]  recommend source connectors for a task\n"
             "      flags: --limit N  --json\n"
             "  :models [--json]                inspect model routes and registry\n"
+            "  :model-registry-audit [--json] inspect selected vs available model candidates\n"
+            "  :architecture-audit [--json]   inspect layers and multi-agent gaps\n"
             "  :model-usage [--json]           inspect model calls/tokens/cost units\n"
             "  :team-plan <goal> [--json]      dry-run bounded subagent contracts\n"
+            "  :team-run <goal> [--json]       dry-run execution walk over subagent contracts\n"
             "  :learn [goal] [flags]           plan sources, then ingest selected learning set\n"
             "  :learn-project [goal] [flags]   alias for :learn\n"
             "      flags: --dry-run  --write-memory  --no-memory  --limit N\n"
@@ -1889,6 +2097,8 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :auto-status                    inspect autonomous runtime inbox/status\n"
             "  :conflicts [--limit N|--json]   inspect source claim conflicts and suggestions\n"
             "  :budget-status                  inspect default autonomous runtime budgets\n"
+            "  :budget-window-status [--json] inspect persistent hour/day budget windows\n"
+            "  :release-audit [--json]         inspect release artifact hygiene exclusions\n"
             "  :approval-list [status|all]     list pending/approved/denied approval items\n"
             "  :approval-approve <id>          mark an approval inbox item approved\n"
             "  :approval-deny <id>             mark an approval inbox item denied\n"
@@ -2003,7 +2213,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :model-usage  :team-plan  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :budget-window-status  :release-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:

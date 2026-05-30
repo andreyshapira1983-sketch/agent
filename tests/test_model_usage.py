@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from core.budget_ledger import BudgetLedger, BudgetWindow
 from core.model_router import ModelRole, ModelRouter
 from core.model_usage import ModelBudgetExceeded, ModelUsageLedger, ModelUsageLimits
 from tests.conftest import FakeLLM
@@ -132,3 +133,61 @@ def test_model_usage_ledger_estimates_tokens_when_provider_has_no_usage(tmp_path
     assert snapshot["totals"]["calls"] == 1
     assert snapshot["recent"][0]["estimated"] is True
     assert snapshot["totals"]["total_tokens"] > 0
+
+
+def test_model_usage_ledger_enforces_persistent_call_window_across_sessions(tmp_path: Path):
+    budget_path = tmp_path / "budget.jsonl"
+    usage_path = tmp_path / "usage.jsonl"
+    first_budget = BudgetLedger(
+        path=budget_path,
+        windows=(BudgetWindow("day", 86400, {"llm_calls": 1}),),
+    )
+    first_ledger = ModelUsageLedger(
+        path=usage_path,
+        budget_ledger=first_budget,
+    )
+    router = ModelRouter(
+        default_provider="fake",
+        default_model="fake-1",
+        llm_factory=lambda provider, model: UsageLLM("ok"),
+        usage_ledger=first_ledger,
+    )
+    router.for_role(ModelRole.PLANNER).complete(system="s", user="u")
+
+    second_budget = BudgetLedger(
+        path=budget_path,
+        windows=(BudgetWindow("day", 86400, {"llm_calls": 1}),),
+    )
+    second_ledger = ModelUsageLedger(
+        path=usage_path,
+        budget_ledger=second_budget,
+    )
+    second_router = ModelRouter(
+        default_provider="fake",
+        default_model="fake-1",
+        llm_factory=lambda provider, model: UsageLLM("ok"),
+        usage_ledger=second_ledger,
+    )
+
+    with pytest.raises(ModelBudgetExceeded, match="persistent day model call budget"):
+        second_router.for_role(ModelRole.SYNTHESIZER).complete(system="s", user="u")
+
+
+def test_model_usage_records_tokens_and_cost_units_to_persistent_budget(tmp_path: Path):
+    budget = BudgetLedger(
+        path=tmp_path / "budget.jsonl",
+        windows=(BudgetWindow("day", 86400, {"model_tokens": 100, "model_cost_units": 10}),),
+    )
+    ledger = ModelUsageLedger(path=tmp_path / "usage.jsonl", budget_ledger=budget)
+    router = ModelRouter(
+        default_provider="fake",
+        default_model="fake-1",
+        llm_factory=lambda provider, model: UsageLLM("ok"),
+        usage_ledger=ledger,
+    )
+
+    router.for_role(ModelRole.SYNTHESIZER).complete(system="s", user="u")
+    snapshot = budget.snapshot()
+
+    assert snapshot["totals"]["model_tokens"] == 18
+    assert snapshot["totals"]["model_cost_units"] >= 1
