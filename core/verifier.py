@@ -104,7 +104,9 @@ _OUTPUT_CONTRACT_HEADERS: frozenset[str] = frozenset({
 _MD_HEADING_RE = re.compile(r"^#{1,6}\s+\S.*$")
 _BARE_LIST_MARKER_RE = re.compile(r"^([-*+]|\d+[\.\)])\s*$")
 _OUTPUT_CONTRACT_HEADER_RE = re.compile(
-    r"^(?:#{1,6}\s+)?(" + "|".join(_OUTPUT_CONTRACT_HEADERS) + r")\s*:?\s*$",
+    r"^(?:#{1,6}\s+)?(?:\*\*)?("
+    + "|".join(_OUTPUT_CONTRACT_HEADERS)
+    + r")\s*:?(?:\*\*)?\s*$",
     re.IGNORECASE,
 )
 _NON_CLAIM_SECTIONS: frozenset[str] = frozenset({

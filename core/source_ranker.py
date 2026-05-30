@@ -122,6 +122,39 @@ _REALTIME_TERMS = (
     "цена", "курс", "котиров", "погода", "биткоин", "bitcoin", "btc",
 )
 
+_REALTIME_WORD_TERMS = frozenset({
+    "current",
+    "currently",
+    "latest",
+    "today",
+    "now",
+    "price",
+    "market",
+    "stock",
+    "quote",
+    "weather",
+    "bitcoin",
+    "btc",
+})
+
+_REALTIME_PHRASE_TERMS = frozenset({
+    "right now",
+    "exchange rate",
+    "прямо сейчас",
+})
+
+_REALTIME_FRAGMENT_TERMS = frozenset({
+    "сейчас",
+    "текущ",
+    "последн",
+    "сегодня",
+    "цена",
+    "курс",
+    "котиров",
+    "погода",
+    "биткоин",
+})
+
 
 @dataclass(frozen=True)
 class SourceRank:
@@ -189,7 +222,14 @@ class SourceRankingReport:
 def is_realtime_question(question: str) -> bool:
     """Return True when a question asks for current/fresh data."""
     lowered = (question or "").casefold()
-    return any(term in lowered for term in _REALTIME_TERMS)
+    if any(term in lowered for term in _REALTIME_PHRASE_TERMS):
+        return True
+    if any(term in lowered for term in _REALTIME_FRAGMENT_TERMS):
+        return True
+    return any(
+        re.search(rf"(?<![a-z0-9_]){re.escape(term)}(?![a-z0-9_])", lowered)
+        for term in _REALTIME_WORD_TERMS
+    )
 
 
 def rank_chain(

@@ -75,8 +75,8 @@ def test_router_reads_default_and_role_specific_env(monkeypatch):
     def factory(provider: str | None, model: str | None) -> FakeLLM:
         created.append((provider, model))
         llm = FakeLLM()
-        llm.provider = provider or "unset"
-        llm.model = model or "unset"
+        llm.provider = provider or "anthropic"
+        llm.model = model or "claude-sonnet-4-5"
         return llm
 
     router = ModelRouter.from_env(llm_factory=factory)
@@ -115,6 +115,78 @@ def test_router_reuses_one_model_instance_for_identical_routes():
     assert router.for_role(ModelRole.PLANNER) is router.for_role(ModelRole.SYNTHESIZER)
     assert router.for_role(ModelRole.REPAIR_PROPOSAL) is router.for_role(ModelRole.PLANNER)
     assert created == 1
+
+
+def test_router_can_select_new_model_from_registry_json(monkeypatch):
+    monkeypatch.delenv("AGENT_PROVIDER", raising=False)
+    monkeypatch.delenv("AGENT_MODEL", raising=False)
+    monkeypatch.setenv(
+        "AGENT_MODEL_REGISTRY_JSON",
+        json.dumps([
+            {
+                "id": "future-coder",
+                "provider": "openai",
+                "model": "gpt-future-coder",
+                "roles": ["planner", "repair_proposal"],
+                "quality_tier": "frontier",
+                "cost_tier": "medium",
+                "context_window": 256000,
+            }
+        ]),
+    )
+
+    created: list[tuple[str | None, str | None]] = []
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        created.append((provider, model))
+        llm = FakeLLM()
+        llm.provider = provider or "anthropic"
+        llm.model = model or "claude-sonnet-4-5"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+
+    planner = router.for_role(ModelRole.PLANNER)
+    synth = router.for_role(ModelRole.SYNTHESIZER)
+    summary = router.routing_summary()
+
+    assert (planner.provider, planner.model) == ("openai", "gpt-future-coder")
+    assert summary["planner"]["reason"] == "registry:future-coder"
+    # No custom synthesizer route exists, so the router keeps the normal LLM
+    # default path instead of guessing.
+    assert synth.provider == "anthropic"
+    assert created[0] == ("openai", "gpt-future-coder")
+
+
+def test_role_env_override_wins_over_model_registry(monkeypatch):
+    monkeypatch.setenv("AGENT_PROVIDER", "mock")
+    monkeypatch.setenv("AGENT_MODEL", "base")
+    monkeypatch.setenv("AGENT_PLANNER_PROVIDER", "openai")
+    monkeypatch.setenv("AGENT_PLANNER_MODEL", "explicit-planner")
+    monkeypatch.setenv(
+        "AGENT_MODEL_REGISTRY_JSON",
+        json.dumps([
+            {
+                "id": "registry-planner",
+                "provider": "anthropic",
+                "model": "registry-model",
+                "roles": ["planner"],
+                "quality_tier": "frontier",
+            }
+        ]),
+    )
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        llm = FakeLLM()
+        llm.provider = provider or "unset"
+        llm.model = model or "unset"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+    planner = router.for_role(ModelRole.PLANNER)
+
+    assert (planner.provider, planner.model) == ("openai", "explicit-planner")
+    assert router.routing_summary()["planner"]["reason"] == "env:AGENT_PLANNER"
 
 
 def test_agent_loop_uses_repair_proposal_route(tmp_path: Path, monkeypatch):
@@ -175,4 +247,3 @@ def test_agent_loop_uses_repair_proposal_route(tmp_path: Path, monkeypatch):
     assert len(repair_llm.calls) == 1
     assert synth_llm.calls == []
     assert planner_llm.calls == []
-

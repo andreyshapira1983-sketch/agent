@@ -459,6 +459,7 @@ class TestIsStructuralChunk:
         "Conclusion", "Facts",            # colon optional
         "  Conclusion:  ",                # whitespace tolerant
         "# Conclusion", "## Facts:",      # markdown-prefixed
+        "**Conclusion:**", "**Facts:**",  # markdown-bold headers
     ])
     def test_output_contract_headers_are_structural(self, header: str):
         assert is_structural_chunk(header)

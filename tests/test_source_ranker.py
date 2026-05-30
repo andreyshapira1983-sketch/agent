@@ -39,6 +39,7 @@ def test_realtime_question_detector_handles_market_language():
     assert is_realtime_question("Какая цена Bitcoin прямо сейчас?")
     assert is_realtime_question("latest BTC price today")
     assert not is_realtime_question("Кто написал README проекта?")
+    assert not is_realtime_question("Use no general knowledge; fetch Python downloads")
 
 
 def test_search_hit_is_weak_pointer():

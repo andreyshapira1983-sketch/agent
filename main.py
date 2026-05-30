@@ -187,6 +187,7 @@ def build_agent(
             "llm_provider": llm.provider,
             "llm_model": llm.model,
             "model_routes": model_router.routing_summary(),
+            "model_registry": model_router.registry_summary(),
             "tools": [t.name for t in registry.list()],
             "memory": memory.session_id if memory else None,
             "persistent_path": str(persistent_store.path) if persistent_store else None,
@@ -880,6 +881,39 @@ def _handle_connector_plan(rest: str) -> bool:
         print(json.dumps(plan.to_dict(), ensure_ascii=False, indent=2), file=sys.stderr)
     else:
         print(plan.user_summary(), file=sys.stderr)
+    return True
+
+
+def _handle_models(rest: str, agent: AgentLoop) -> bool:
+    tokens = _split_meta_args(rest)
+    as_json = "--json" in tokens
+    if any(token != "--json" for token in tokens):
+        print("Usage: :models [--json]", file=sys.stderr)
+        return True
+    payload = {
+        "routes": agent.model_router.routing_summary(),
+        "registry": agent.model_router.registry_summary(),
+    }
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2), file=sys.stderr)
+        return True
+
+    print("=== model routes ===", file=sys.stderr)
+    for role, route in payload["routes"].items():
+        print(
+            f"  {role}: provider={route.get('provider')} "
+            f"model={route.get('model')} reason={route.get('reason')}",
+            file=sys.stderr,
+        )
+    print("=== model registry ===", file=sys.stderr)
+    for spec in payload["registry"]["models"]:
+        print(
+            f"  {spec['id']} provider={spec['provider']} model={spec['model']} "
+            f"roles={','.join(spec['roles'])} cost={spec['cost_tier']} "
+            f"quality={spec['quality_tier']} supported={spec['provider_supported']} "
+            f"source={spec['source']}",
+            file=sys.stderr,
+        )
     return True
 
 
@@ -1627,6 +1661,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head == ":connector-plan":
         return _handle_connector_plan(rest.strip())
 
+    if head in {":models", ":model-routes"}:
+        return _handle_models(rest.strip(), agent)
+
     if head in {":learn", ":learn-project"}:
         return _handle_learn(rest.strip(), agent, workspace)
 
@@ -1713,6 +1750,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :connectors [status] [--json]   list source connectors and rough costs\n"
             "  :connector-plan <goal> [flags]  recommend source connectors for a task\n"
             "      flags: --limit N  --json\n"
+            "  :models [--json]                inspect model routes and registry\n"
             "  :learn [goal] [flags]           plan sources, then ingest selected learning set\n"
             "  :learn-project [goal] [flags]   alias for :learn\n"
             "      flags: --dry-run  --write-memory  --no-memory  --limit N\n"
@@ -1831,7 +1869,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :connectors  :connector-plan  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:

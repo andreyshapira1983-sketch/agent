@@ -426,6 +426,17 @@ class TestHandleMetaCommand:
         assert "connector plan" in out.err
         assert "openalex" in out.err
 
+    def test_model_routes_command(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+
+        assert handle_meta_command(":models", agent, workspace) is True
+        assert handle_meta_command(":models --json", agent, workspace) is True
+
+        out = capsys.readouterr()
+        assert "model routes" in out.err
+        assert "planner" in out.err
+        assert '"routes"' in out.err
+
     def test_learn_project_plans_then_ingests_selected_sources(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
         (workspace / "README.md").write_text(

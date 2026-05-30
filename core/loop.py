@@ -214,6 +214,9 @@ Hard rules:
 - If the evidence does not answer the question, say so in Conclusion AND list
   the unanswered parts under Unverified.
 - Quote URLs and file paths verbatim from the evidence `source` attributes.
+- If an <allowed_citations> block is present, cite ONLY those exact bracketed
+  citation tokens. Do not cite raw <evidence source="..."> labels unless they
+  also appear in <allowed_citations>.
 - NEVER reproduce any [REDACTED:*] token's underlying value, even if you
   can guess it; treat the token as the actual content.
 """
@@ -345,9 +348,9 @@ class AgentLoop:
         from core.verifier import VerificationReport as _VR
 
         self.last_verification: _VR | None = None
-        # MVP-14.3 — advisory trust metadata over the Evidence chain.
-        # Source ranking is logged and exposed, but does not yet change
-        # verifier verdicts or final text.
+        # MVP-14.3/14.3x — trust metadata over the Evidence chain.
+        # Source ranking is logged/exposed, and Ranker-to-Output Policy uses
+        # it to cap confidence for unsuitable realtime sources.
         self.last_source_ranking: SourceRankingReport | None = None
         # Source registry is the catalog view over the same chain:
         # source records plus first-pass claims extracted from Evidence.
@@ -2016,6 +2019,9 @@ class AgentLoop:
                 formatted = self._format_artifact(art["tool"], art["output"])
                 blocks.append(f'<evidence source="{label}">\n{formatted}\n</evidence>')
             evidence = "\n\n".join(blocks)
+            allowed_citations_block = self._format_allowed_citations_block(
+                self.last_provenance
+            )
 
             warnings = [
                 f"{label}: {'; '.join(art['issues'])}"
@@ -2033,6 +2039,7 @@ class AgentLoop:
                 f"{role_block}"
                 f"{long_term_block}"
                 f"{history_block}"
+                f"{allowed_citations_block}"
                 f"{evidence}\n\n"
                 f"{warnings_block}"
                 f"planner_reasoning: {planner_reasoning}\n\n"
@@ -2079,6 +2086,53 @@ class AgentLoop:
         # (e.g. a secret hiding in planner_reasoning).
         safe_user_prompt, _ = redact_text(user_prompt)
         return self.llm.complete(system=SYSTEM_ANSWER, user=safe_user_prompt, temperature=0.5)
+
+    @staticmethod
+    def _citation_for_evidence(ev: Evidence) -> str | None:
+        source_id = ev.source_id
+        if ev.kind == "file" and source_id.startswith("file:"):
+            body = source_id[len("file:"):]
+            return f"[file:{body}]"
+        if ev.kind == "web_page" and source_id.startswith("web_page:"):
+            body = source_id[len("web_page:"):]
+            return f"[web:{body}]"
+        if ev.kind == "web_search_hit" and source_id.startswith("web_search:"):
+            body = source_id[len("web_search:"):]
+            return f"[search:{body}]"
+        if ev.kind == "test_result" and source_id.startswith("test_result:"):
+            body = source_id[len("test_result:"):]
+            return f"[test:{body}]"
+        if ev.kind == "log_event" and source_id.startswith("log_event:"):
+            body = source_id[len("log_event:"):]
+            return f"[log:{body}]"
+        if ev.kind == "shell_output" and source_id.startswith("shell_output:"):
+            body = source_id[len("shell_output:"):]
+            return f"[shell:{body}]"
+        if ev.kind == "diff_preview" and source_id.startswith("diff_preview:"):
+            body = source_id[len("diff_preview:"):]
+            return f"[diff:{body}]"
+        if ev.kind == "memory":
+            return f"[memory:{source_id}]"
+        if ev.kind == "user_explicit":
+            return "[user]"
+        return None
+
+    @classmethod
+    def _format_allowed_citations_block(cls, chain: ProvenanceChain) -> str:
+        if not chain.evidences:
+            return ""
+        lines = ["<allowed_citations>"]
+        seen: set[str] = set()
+        for ev in chain.evidences:
+            token = cls._citation_for_evidence(ev)
+            if token is None or token in seen:
+                continue
+            seen.add(token)
+            lines.append(
+                f"- {token} kind={ev.kind} source_id={ev.source_id}"
+            )
+        lines.append("</allowed_citations>")
+        return "\n".join(lines) + "\n\n" if len(lines) > 2 else ""
 
     @staticmethod
     def _format_artifact(tool_name: str | None, output: Any) -> str:

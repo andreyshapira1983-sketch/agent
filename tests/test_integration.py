@@ -99,6 +99,8 @@ def test_full_cycle_with_file(workspace: Path) -> None:
     assert planner_call["temperature"] == 0.0
     assert "Every factual sentence in Conclusion MUST end with a source label" in synth_call["system"]
     assert '<evidence source="file:doc.txt">' in synth_call["user"]
+    assert "<allowed_citations>" in synth_call["user"]
+    assert "[file:doc.txt]" in synth_call["user"]
     assert "alpha" in synth_call["user"] and "beta" in synth_call["user"]
 
     # --- 3) JSONL trace contains the full Control Loop sequence
