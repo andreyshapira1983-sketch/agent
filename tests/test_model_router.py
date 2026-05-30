@@ -159,6 +159,45 @@ def test_router_can_select_new_model_from_registry_json(monkeypatch):
     assert created[0] == ("openai", "gpt-future-coder")
 
 
+def test_router_can_select_new_model_from_registry_file(tmp_path: Path, monkeypatch):
+    registry_path = tmp_path / "model_registry.json"
+    registry_path.write_text(
+        json.dumps({
+            "models": [
+                {
+                    "id": "fresh-planner",
+                    "provider": "openai",
+                    "model": "gpt-fresh-planner",
+                    "roles": ["planner"],
+                    "quality_tier": "frontier",
+                    "cost_tier": "medium",
+                }
+            ]
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_MODEL_REGISTRY_PATH", str(registry_path))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        llm = FakeLLM()
+        llm.provider = provider or "anthropic"
+        llm.model = model or "claude-sonnet-4-5"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+    summary = router.routing_summary([ModelRole.PLANNER])
+    registry = router.registry_summary()
+
+    assert summary["planner"]["provider"] == "openai"
+    assert summary["planner"]["model"] == "gpt-fresh-planner"
+    assert summary["planner"]["reason"] == "policy:conservative:fresh-planner"
+    assert any(
+        spec["id"] == "fresh-planner" and spec["source"].startswith("file:")
+        for spec in registry["models"]
+    )
+
+
 def test_role_env_override_wins_over_model_registry(monkeypatch):
     monkeypatch.setenv("AGENT_PROVIDER", "mock")
     monkeypatch.setenv("AGENT_MODEL", "base")

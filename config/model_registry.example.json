@@ -1,0 +1,25 @@
+{
+  "models": [
+    {
+      "id": "my-current-planner",
+      "provider": "openai",
+      "model": "replace-with-current-openai-model",
+      "roles": ["planner", "repair_proposal"],
+      "quality_tier": "frontier",
+      "cost_tier": "medium",
+      "context_window": 256000,
+      "requires_env": ["OPENAI_API_KEY"],
+      "notes": "Copy this file to config/model_registry.json and replace model names after checking provider docs or API model list."
+    },
+    {
+      "id": "my-cheap-summary",
+      "provider": "openai",
+      "model": "replace-with-current-cheap-openai-model",
+      "roles": ["memory_summary", "verifier"],
+      "quality_tier": "standard",
+      "cost_tier": "low",
+      "requires_env": ["OPENAI_API_KEY"],
+      "notes": "Use low-cost models for summaries and verification when quality is sufficient."
+    }
+  ]
+}

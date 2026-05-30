@@ -10,6 +10,7 @@ import json
 import os
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from core.llm import LLM
@@ -213,6 +214,7 @@ class ModelRegistry:
     @classmethod
     def from_env(cls) -> "ModelRegistry":
         specs = list(_builtin_model_specs())
+        specs.extend(_custom_model_specs_from_path())
         specs.extend(_custom_model_specs_from_env())
         return cls(specs)
 
@@ -222,7 +224,7 @@ class ModelRegistry:
         return tuple(spec for spec in self._specs if spec.enabled)
 
     def custom_specs(self) -> tuple[ModelSpec, ...]:
-        return tuple(spec for spec in self._specs if spec.source.startswith("env"))
+        return tuple(spec for spec in self._specs if spec.source != "builtin")
 
     def best_for_role(
         self,
@@ -364,12 +366,42 @@ def _custom_model_specs_from_env() -> tuple[ModelSpec, ...]:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ValueError(f"AGENT_MODEL_REGISTRY_JSON is not valid JSON: {exc}") from exc
+    try:
+        return _model_specs_from_json_data(
+            data,
+            source="env:AGENT_MODEL_REGISTRY_JSON",
+        )
+    except ValueError as exc:
+        raise ValueError(f"AGENT_MODEL_REGISTRY_JSON: {exc}") from exc
+
+
+def _custom_model_specs_from_path() -> tuple[ModelSpec, ...]:
+    raw_path = _clean_env("AGENT_MODEL_REGISTRY_PATH")
+    explicit = raw_path is not None
+    path = Path(raw_path) if raw_path else Path("config") / "model_registry.json"
+    if not path.exists():
+        if explicit:
+            raise ValueError(f"AGENT_MODEL_REGISTRY_PATH does not exist: {path}")
+        return ()
+    if not path.is_file():
+        raise ValueError(f"model registry path is not a file: {path}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"model registry file is not valid JSON: {path}: {exc}") from exc
+    return _model_specs_from_json_data(
+        data,
+        source=f"file:{path}",
+    )
+
+
+def _model_specs_from_json_data(data: Any, *, source: str) -> tuple[ModelSpec, ...]:
     if isinstance(data, dict):
         items = data.get("models", [])
     else:
         items = data
     if not isinstance(items, list):
-        raise ValueError("AGENT_MODEL_REGISTRY_JSON must be a list or {'models': [...]}")
+        raise ValueError("model registry must be a list or {'models': [...]}")
     specs: list[ModelSpec] = []
     for idx, item in enumerate(items):
         if not isinstance(item, dict):
@@ -411,7 +443,7 @@ def _custom_model_specs_from_env() -> tuple[ModelSpec, ...]:
                 ),
                 enabled=bool(item.get("enabled", True)),
                 requires_env=requires_env,
-                source="env:AGENT_MODEL_REGISTRY_JSON",
+                source=source,
                 notes=str(item.get("notes") or ""),
             )
         )
@@ -444,7 +476,7 @@ def _model_score_for_policy(
     quality = _QUALITY_SCORE.get(spec.quality_tier, _QUALITY_SCORE["unknown"])
     cheapness = _COST_SCORE.get(spec.cost_tier, _COST_SCORE["unknown"])
     context = spec.context_window or 0
-    custom = 1 if spec.source.startswith("env") else 0
+    custom = 1 if spec.source != "builtin" else 0
 
     if policy_name == "cost":
         return (exact_role, cheapness, quality, custom, context, spec.id)

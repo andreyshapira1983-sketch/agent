@@ -37,7 +37,7 @@ ingested with `:ingest-source` / `:ingest-project`; useful facts can be saved
 across sessions with `:remember` or controlled knowledge writes. The Write
 Policy refuses secrets, blocked tags, and unconsented noise.
 
-A hermetic test suite (**1439 cases, zero network**) backs every layer:
+A hermetic test suite (**1440 cases, zero network**) backs every layer:
 tool safety, planner routing, policy gate enforcement, working memory,
 persistent memory + write policy + retrieval policy, human approval gate
 (escalate → approve / deny / abort), secret scanning + universal
@@ -132,6 +132,19 @@ edge — explicitly **not yet**.
    the required key is present (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `HF_TOKEN`).
    Use `:models` to see the active routes, policy, availability and registry.
 
+   Built-in model names are safe defaults, not a live provider catalog. To keep
+   model names fresh without editing Python code, copy the example registry:
+   ```powershell
+   Copy-Item .\config\model_registry.example.json .\config\model_registry.json
+   ```
+
+   Then replace the `model` values after checking the provider documentation
+   or API model list. The agent reads `config/model_registry.json`
+   automatically at startup. A different file can be selected with:
+   ```powershell
+   $env:AGENT_MODEL_REGISTRY_PATH="C:\path\to\model_registry.json"
+   ```
+
    Knowledge pipeline persistence is local. Source/claim catalog writes go
    to `data/source_registry.jsonl` when persistent storage is enabled.
    Automatic writes from approved claims into long-term memory are off by
@@ -172,10 +185,12 @@ edge — explicitly **not yet**.
    ]'
    ```
 
-   Explicit `AGENT_<ROLE>_MODEL` variables win over the registry. The
-   registry only selects providers that the local `LLM` adapter supports
-   today: `anthropic`, `openai`, `huggingface`, and `mock`. New model names
-   under those providers can be added through JSON without a code change.
+   Precedence is: explicit `AGENT_<ROLE>_MODEL` variables, then custom registry
+   entries from `config/model_registry.json` / `AGENT_MODEL_REGISTRY_PATH` /
+   `AGENT_MODEL_REGISTRY_JSON`, then built-in defaults. The registry only
+   selects providers that the local `LLM` adapter supports today: `anthropic`,
+   `openai`, `huggingface`, and `mock`. New model names under those providers
+   can be added through JSON without a code change.
 
 ## Usage
 
@@ -1837,7 +1852,7 @@ A real safety net lives in [`tests/`](tests/) and runs via `pytest`:
 python -m pytest -v
 ```
 
-What is covered today (**1439 tests, ≈ 20 s, zero network calls**):
+What is covered today (**1440 tests, ≈ 21 s, zero network calls**):
 
 | Layer | File | Cases |
 | --- | --- | --- |
@@ -1896,7 +1911,7 @@ What is covered today (**1439 tests, ≈ 20 s, zero network calls**):
 | Tool base + Registry (§5) | [`tests/test_tools_base.py`](tests/test_tools_base.py) | `Tool.invoke` wraps success / exceptions become `status=error` with type+message preserved / `KeyboardInterrupt` propagates, **NOT** swallowed / default `validate_output`: `None`/empty `str`/`list`/`dict` are hard fails, scalars / non-empty values pass / `ToolRegistry`: get unknown raises `KeyError`, double-register rejected, `list` / `describe` shape |
 | Web Search (§5 — validate_output) | [`tests/test_web_search.py`](tests/test_web_search.py) | non-list output hard-fail / all-malformed rows hard-fail / non-dict rows flagged / **empty list is OK with warning (not a `verify_failed`)** / well-formed row passes clean / missing snippet → warning / missing url → per-row skip / missing title skipped / cap-exceeded → warning / **bad-query types rejected BEFORE network** / contract: name=`web_search`, risk=`read_only`, default_max_results within cap |
 | LLM client + mock planner (§3) | [`tests/test_llm.py`](tests/test_llm.py) | construction with `mock` needs no API key / unknown provider rejected / explicit kwarg overrides env / `AGENT_MODEL` env overrides default / synthesis-mode echo shape (`[mock-llm response]`, `system_chars`, …) / user_preview truncated to 200 chars / **mock planner: every cue → right tool (file_read / web_search / both / empty plan), parametrised over EN+RU cues** / file-hint fallback for substantive questions / short questions don't trigger fallback / **scaffolding tokens (`current_date`, `registered tools`) do NOT leak into cue detection** (regression) / output is always valid JSON object |
-| Model Router (§3) | [`tests/test_model_router.py`](tests/test_model_router.py), [`tests/test_cli.py`](tests/test_cli.py) | legacy single-LLM mode / default + role-specific ENV routing / identical route instance reuse / repair proposal uses repair route / `AGENT_MODEL_REGISTRY_JSON` can introduce a new model without code changes / role ENV override wins over registry / model selection policies (`conservative`, `balanced`, `cost`, `offline`) / unavailable keys are not auto-selected / `:models` text + JSON output with policy + availability |
+| Model Router (§3) | [`tests/test_model_router.py`](tests/test_model_router.py), [`tests/test_cli.py`](tests/test_cli.py) | legacy single-LLM mode / default + role-specific ENV routing / identical route instance reuse / repair proposal uses repair route / `config/model_registry.json`, `AGENT_MODEL_REGISTRY_PATH`, or `AGENT_MODEL_REGISTRY_JSON` can introduce a new model without code changes / role ENV override wins over registry / model selection policies (`conservative`, `balanced`, `cost`, `offline`) / unavailable keys are not auto-selected / `:models` text + JSON output with policy + availability |
 | TraceLogger (§8 audit) | [`tests/test_logger.py`](tests/test_logger.py) | one line per `log()` call / `ts`/`trace_id`/`event` always present / no payload → no `payload` field / `extra` kwargs land in record / Pydantic `BaseModel` → nested JSON dict (not string) / nested list of models walked / **secret in string payload → redacted on disk** / **secret in nested payload → redacted** / **secret in `extra` kwargs → redacted** / **stderr pretty-print also sees redacted view (no back door)** / event markers: known events get short marker, unknown fall back to `event.upper()[:4]` / `close()` releases handle (Windows-safe round-trip) |
 | Core Data Models (§12.1) | [`tests/test_models.py`](tests/test_models.py) | every model auto-fills prefixed `id` / two instances get distinct ids / timestamps are timezone-aware / `status` Literals on Goal/PlanStep / `risk` Literal on ApprovalRequest / `decision` Literal on PolicyDecision (allow/deny/escalate) / `decision` Literal on ApprovalDecision (approve/deny/abort) / `status` Literal on ToolResult (success/error/timeout) + optional defaults / `type` + `side_effects` Literals on Action / MemoryRecord type Literal + defaults / ErrorObject severity Literal + recoverable default — every Literal rejects an unknown value with `ValidationError` |
 | ID factory | [`tests/test_ids.py`](tests/test_ids.py) | format = `prefix_<16 hex chars>` / prefix preserved / 2000 ids in a row are unique / empty prefix doesn't crash |
