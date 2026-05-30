@@ -99,7 +99,7 @@ from core.learning_planner import LearningPlanner
 from core.loop import AgentLoop, new_trace_id
 from core.memory import WorkingMemory
 from core.memory_policy import MemoryRetrievalPolicy, MemoryWritePolicy
-from core.model_usage import ModelUsageLedger
+from core.model_usage import ModelBudgetExceeded, ModelUsageLedger
 from core.model_router import ModelRole, ModelRouter
 from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner
@@ -114,6 +114,7 @@ from core.source_connectors import (
 from core.source_registry_store import SourceRegistryStore
 from core.source_library import list_source_library, source_library_payload
 from core.task_queue import TaskQueueStore
+from core.team_plan import TeamPlanner
 from tools.base import ToolRegistry
 from tools.diff_file import DiffFileTool
 from tools.file_read import FileReadTool
@@ -245,6 +246,20 @@ def build_agent(
         knowledge_auto_write=_env_bool("AGENT_KNOWLEDGE_AUTO_WRITE", False),
         approval_provider=approval_provider,
     )
+
+
+def _run_agent_with_budget_guard(
+    agent: AgentLoop,
+    *,
+    user_question: str,
+    file_hint: str | None = None,
+) -> str:
+    try:
+        return agent.run(user_question=user_question, file_hint=file_hint)
+    except ModelBudgetExceeded as exc:
+        message = f"Model budget exceeded: {exc}"
+        agent.log.log("model_budget_blocked", {"error": str(exc)})
+        return message
 
 
 def _parse_remember(rest: str) -> tuple[list[str], str]:
@@ -1203,6 +1218,48 @@ def _handle_model_usage(rest: str, agent: AgentLoop) -> bool:
     return True
 
 
+def _handle_team_plan(rest: str, agent: AgentLoop) -> bool:
+    del agent
+    tokens = _split_meta_args(rest)
+    as_json = False
+    limit = 5
+    goal_parts: list[str] = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token == "--json":
+            as_json = True
+            i += 1
+            continue
+        if token == "--limit":
+            if i + 1 >= len(tokens):
+                print("Usage: --limit requires a number", file=sys.stderr)
+                return True
+            try:
+                limit = int(tokens[i + 1])
+            except ValueError:
+                print("Usage: --limit requires a number", file=sys.stderr)
+                return True
+            i += 2
+            continue
+        goal_parts.append(token)
+        i += 1
+    goal = " ".join(goal_parts).strip()
+    if not goal:
+        print("Usage: :team-plan <goal> [--limit N] [--json]", file=sys.stderr)
+        return True
+    try:
+        plan = TeamPlanner().plan(goal, limit=limit)
+    except ValueError as exc:
+        print(f"Usage: {exc}", file=sys.stderr)
+        return True
+    if as_json:
+        print(json.dumps(plan.to_dict(), ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(plan.user_summary(), file=sys.stderr)
+    return True
+
+
 def _handle_approval_list(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     status = rest.strip().lower() or "pending"
     items = _approval_inbox_for(agent, workspace).list(status=status)
@@ -1747,6 +1804,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head in {":model-usage", ":usage-models"}:
         return _handle_model_usage(rest.strip(), agent)
 
+    if head in {":team-plan", ":agent-team", ":subagents"}:
+        return _handle_team_plan(rest.strip(), agent)
+
     if head == ":approval-list":
         return _handle_approval_list(rest.strip(), agent, workspace)
 
@@ -1820,6 +1880,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "      flags: --limit N  --json\n"
             "  :models [--json]                inspect model routes and registry\n"
             "  :model-usage [--json]           inspect model calls/tokens/cost units\n"
+            "  :team-plan <goal> [--json]      dry-run bounded subagent contracts\n"
             "  :learn [goal] [flags]           plan sources, then ingest selected learning set\n"
             "  :learn-project [goal] [flags]   alias for :learn\n"
             "      flags: --dry-run  --write-memory  --no-memory  --limit N\n"
@@ -1921,7 +1982,11 @@ def main() -> int:
             approval_provider = None
 
         agent = build_agent(workspace, with_memory=False, approval_provider=approval_provider)
-        answer = agent.run(user_question=args.ask, file_hint=args.file)
+        answer = _run_agent_with_budget_guard(
+            agent,
+            user_question=args.ask,
+            file_hint=args.file,
+        )
         print("\n" + answer + "\n")
         return 0
 
@@ -1938,7 +2003,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :model-usage  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :model-usage  :team-plan  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:
@@ -1954,7 +2019,11 @@ def main() -> int:
                 continue
             print(f"(unknown command: {q})", file=sys.stderr)
             continue
-        answer = agent.run(user_question=q, file_hint=args.file)
+        answer = _run_agent_with_budget_guard(
+            agent,
+            user_question=q,
+            file_hint=args.file,
+        )
         print("\n" + answer + "\n")
 
 

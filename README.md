@@ -54,6 +54,7 @@ plus full Control Loop integration. Run `python -m pytest -v`.
 | §3 Control Loop / Agent Cycle | [`core/loop.py`](core/loop.py) |
 | §3 Cognitive Core: LLM-driven Planning | [`core/planner.py`](core/planner.py) |
 | §3 Model Router — role-based model selection | [`core/model_router.py`](core/model_router.py) |
+| §3 Model Usage Ledger — calls / tokens / rough cost units | [`core/model_usage.py`](core/model_usage.py) + `:model-usage` |
 | §4 Memory: Working Memory + artifact cache | [`core/memory.py`](core/memory.py) |
 | §4 Memory: Persistent Long-Term Store (JSONL) | [`core/persistent_memory.py`](core/persistent_memory.py) |
 | §4 + §12.4 Memory Write Policy + Retrieval Policy | [`core/memory_policy.py`](core/memory_policy.py) |
@@ -84,6 +85,7 @@ plus full Control Loop integration. Run `python -m pytest -v`.
 | §14.3e Role Router / Knowledge Use / Learning Planner | [`core/role_router.py`](core/role_router.py), [`core/knowledge_use_policy.py`](core/knowledge_use_policy.py), [`core/learning_planner.py`](core/learning_planner.py) |
 | §6 Autonomous Runtime + Budget Governor + Circuit Breaker + Approval Inbox | [`core/autonomous_runtime.py`](core/autonomous_runtime.py), [`core/budget_governor.py`](core/budget_governor.py), [`core/circuit_breaker.py`](core/circuit_breaker.py), [`core/approval_inbox.py`](core/approval_inbox.py) |
 | §6 Persistent Task Queue + Scheduler Tick | [`core/task_queue.py`](core/task_queue.py), [`core/scheduler.py`](core/scheduler.py), [`main.py`](main.py) |
+| §15 Multi-Agent Organization: dry-run Team Plan + subagent contracts | [`core/team_plan.py`](core/team_plan.py) + `:team-plan` |
 | §13.2 Self-Repair Controller (diagnose -> diff -> approval -> write -> tests -> rollback) | [`core/self_repair.py`](core/self_repair.py) + `AgentLoop.repair()` |
 | §13.3 Repair Proposal Generator (tests/logs/code -> validated proposal) | [`core/repair_proposal.py`](core/repair_proposal.py) + `AgentLoop.propose_repair()` |
 | §13.4 Self-Repair E2E Hardening (success / deny / rollback / low confidence) | [`tests/test_self_repair_e2e.py`](tests/test_self_repair_e2e.py) |
@@ -192,6 +194,16 @@ edge — explicitly **not yet**.
    `openai`, `huggingface`, and `mock`. New model names under those providers
    can be added through JSON without a code change.
 
+   Model usage is recorded locally in `data/model_usage.jsonl`. Use
+   `:model-usage` to inspect calls, tokens and rough `cost_units` by role/model.
+   These are budget-control estimates, not provider billing numbers. Optional
+   per-session caps stop the next model call before it is sent:
+   ```powershell
+   $env:AGENT_MODEL_MAX_CALLS_PER_SESSION="20"
+   $env:AGENT_MODEL_MAX_TOKENS_PER_SESSION="100000"
+   $env:AGENT_MODEL_MAX_COST_UNITS_PER_SESSION="300"
+   ```
+
 ## Usage
 
 Two modes:
@@ -244,6 +256,9 @@ python main.py
 > :rollback                           # undo the most recent shell_exec / file_write mutation
 > :rollback list                      # show registered compensation plans
 > :models                             # inspect active model routes + registry
+> :model-usage                        # inspect LLM calls/tokens/cost units
+> :team-plan "AI news and business opportunity radar"
+                                      # dry-run subagent contracts; does not run agents
 > :propose-repair core/foo.py tests/test_foo.py
                                       # generate a validated RepairProposal without writing
 > :repair core/foo.py tmp/foo.proposed.py tests/test_foo.py
@@ -1198,9 +1213,9 @@ Roadmap beyond MVP-14:
    contradict each other, surface the conflict explicitly in the
    answer instead of silently picking one. (Renumbered: 14.5 is now
    taken by the unresolved-citation re-plan loop below.)
-9. **MVP-15 — Multi-agent**: delegating subtasks across specialised
-   agents (planner / executor / critic), with a budget gate and
-   message-passing audit trail.
+9. **MVP-15 — Multi-agent**: dry-run team planning now emits bounded
+   `SubagentContract`s before any delegation happens. Real delegation still
+   requires approval, budget gates and an audited message-passing runtime.
 
 ## MVP-14 — Evidence Layer
 
@@ -1540,6 +1555,42 @@ CLI surface:
 :schedule-tick --run --limit 1
 ```
 
+### 16.3 — Model Usage Ledger
+
+The model router wraps every role-specific `complete()` call with a local usage
+ledger:
+
+  - `model_call_start` and `model_call_end` events are emitted to the trace.
+  - `data/model_usage.jsonl` stores role, provider, model, route reason,
+    input/output/total tokens, rough `cost_units`, status and duration.
+  - `:model-usage` reports historical totals and current-session totals.
+  - `:budget-status` includes the same model usage snapshot.
+  - Session caps (`AGENT_MODEL_MAX_CALLS_PER_SESSION`,
+    `AGENT_MODEL_MAX_TOKENS_PER_SESSION`,
+    `AGENT_MODEL_MAX_COST_UNITS_PER_SESSION`) block the next LLM call before it
+    is sent. CLI entry points catch `ModelBudgetExceeded` and return a clean
+    user-facing stop message instead of a traceback.
+
+`cost_units` are deliberately approximate. They are for budget governance and
+route comparison, not billing.
+
+### MVP-15 — Multi-Agent Organization Layer
+
+This slice starts with team design, not delegation. `:team-plan <goal>` creates
+a bounded dry-run plan of subagent contracts:
+
+  - `BudgetWatchAgent` estimates and caps team spend.
+  - `NewsSignalAgent` collects read-only web/RSS signals.
+  - `BusinessOpportunityAgent` maps signals to client pain and MVP offers.
+  - `CoderSignalAgent` identifies candidate code/test work without writing.
+  - `ArchitectureImpactAgent` maps a goal to architecture layers.
+  - `VerifierAgent` checks outputs, evidence, conflicts and scope.
+
+Each `SubagentContract` defines objective, inputs, outputs, allowed/forbidden
+tools, model role, max iterations, max model calls, cost budget, verifier and
+stop conditions. This prevents a "zoo" of uncontrolled agents: no subagent is
+run merely because it sounds useful.
+
 ### 14.4 — Verifier (`core/verifier.py`)
 
 The Verifier runs AFTER `_synthesize` and BEFORE the final
@@ -1852,7 +1903,7 @@ A real safety net lives in [`tests/`](tests/) and runs via `pytest`:
 python -m pytest -v
 ```
 
-What is covered today (**1440 tests, ≈ 21 s, zero network calls**):
+What is covered today (**1449 tests, ≈ 23 s, zero network calls**):
 
 | Layer | File | Cases |
 | --- | --- | --- |
@@ -1899,6 +1950,8 @@ What is covered today (**1440 tests, ≈ 21 s, zero network calls**):
 | Learning Planner (MVP-14.3e) | [`tests/test_learning_planner.py`](tests/test_learning_planner.py) + [`tests/test_cli.py`](tests/test_cli.py) | README / architecture / core/test prioritisation, goal-specific self-repair source selection, workspace-escape rejection, `:learn-project` plan -> dry-run ingestion |
 | Autonomous Runtime (MVP-16.1) | [`tests/test_autonomous_runtime.py`](tests/test_autonomous_runtime.py), [`tests/test_budget_governor.py`](tests/test_budget_governor.py), [`tests/test_circuit_breaker.py`](tests/test_circuit_breaker.py), [`tests/test_approval_inbox.py`](tests/test_approval_inbox.py), [`tests/test_cli.py`](tests/test_cli.py) | bounded dry-run health pass / status + learning + tests tasks / non-dry-run blocked into approval inbox / cycle budget denial opens circuit / CLI `:auto-run` and `:auto-status` |
 | Persistent Task Queue + Scheduler (MVP-16.2) | [`tests/test_task_queue.py`](tests/test_task_queue.py), [`tests/test_scheduler.py`](tests/test_scheduler.py), [`tests/test_autonomous_runtime.py`](tests/test_autonomous_runtime.py), [`tests/test_cli.py`](tests/test_cli.py) | JSONL task persistence / pending due filtering / task state transitions / schedule persistence / scheduler tick enqueues due tasks / queued tasks run through `AutonomousRuntime` / CLI `:task-*` and `:schedule-*` |
+| Model Usage Ledger (MVP-16.3) | [`tests/test_model_usage.py`](tests/test_model_usage.py), [`tests/test_cli.py`](tests/test_cli.py) | role/model token ledger / JSONL persistence / historical vs current-session totals / session call-budget block / estimated token fallback / CLI `:model-usage` and `:budget-status` integration |
+| Team Plan (MVP-15.0 dry-run) | [`tests/test_team_plan.py`](tests/test_team_plan.py), [`tests/test_cli.py`](tests/test_cli.py) | simple tasks avoid subagents / multi-concern goals emit bounded contracts / `--limit` truncation warning / tool allow/deny validation / stable JSON shape / CLI `:team-plan` |
 | `web_fetch` unit (MVP-14.2) | [`tests/test_web_fetch.py`](tests/test_web_fetch.py) | **construction**: defaults pinned (1 MiB, 10 s, `risk=read_only`); zero / negative `max_bytes` and `timeout_seconds` rejected — **URL validation**: non-string / empty / > 2048 chars / non-ASCII (`https://пример.рф`) / `file://` / `data:` / `ftp://` / `javascript:` / `ws://` rejected; missing hostname rejected — **local-network block**: localhost, 127.0.0.1, 10.0.0.1, 192.168.1.1, 172.16.0.1, **169.254.169.254 (AWS metadata!)**, 0.0.0.0, `[::1]` IPv6 loopback all refused; public IP (1.1.1.1) passes — **happy path**: HTML stripped to text, `<script>` and `<style>` blocks removed (content too), HTML entities decoded (`&amp;`/`&lt;`/`&gt;`/`&quot;`/`&#39;`/`&apos;`/`&nbsp;`), plain text passes through, JSON passes through, User-Agent set, `fetched_at` ISO-8601 — **content-type policy**: `application/octet-stream` refused, `image/png` refused, all 6 allow-list types pass (`text/html`, `text/plain`, `text/xml`, `application/json`, `application/xml`, `application/xhtml+xml`), `text/html; charset=utf-8` accepted, empty content-type accepted — **truncation**: oversize body capped, exact-size NOT truncated — **gzip**: `Content-Encoding: gzip` decompressed transparently — **errors**: `HTTPError(404)` and `URLError("dns fail")` surface as clean `ValueError` — **charset**: UTF-8 default, cp1251 honoured from header — **redaction**: secret in body redacted before return — **content_hash**: same body → same hash, different body → different hash — **validate_output**: well-formed passes, non-dict / missing key / short hash / negative bytes rejected, empty text warns (not fails) |
 | `web_fetch` planner sanitiser (MVP-14.2) | [`tests/test_web_fetch_planner.py`](tests/test_web_fetch_planner.py) | well-formed passes / missing url dropped / non-string url dropped / > 2048 chars dropped / non-ASCII dropped / all 5 disallowed schemes dropped (`file://`, `ftp://`, `data:`, `javascript:`, `ws://`) / all 7 SSRF targets dropped (localhost, 127.x, 10.x, 192.168.x, 169.254.x, 0.0.0.0, `[::1]`) / label truncated at 60 chars |
 | Verifier (MVP-14.4) | [`tests/test_verifier.py`](tests/test_verifier.py) | **citation parsing**: file/web/user/all 9 prefixes, multiple per chunk, URL with `?q=1`, command with colons (`python -m pytest -k memory`), `[unknown:foo]` NOT parsed, nested brackets safe — **sentence splitting**: period / question / exclamation / newline / empty chunks dropped / markdown list of 3 items — **match_citation**: file→file evidence, wrong-kind no match (web_page with `foo.txt` in url DOESN'T match `[file:foo.txt]`), `[user]` no-body matches user_explicit, partial substring match, empty chain none, first match returned for empty body — **verify**: single verified claim (citation rewritten to `[verified:file:foo.txt]`, no disclaimer); no citations → `[unverified]` tag + `DISCLAIMER_FULLY_UNVERIFIED`; mixed verified+unverified → no disclaimer; cited-but-unmatched flagged separately (raw citation stays, no `[verified:]` prefix); empty chain + uncited → `DISCLAIMER_NO_CHAIN`; empty answer → 0 chunks + `fully_unverified=True` — **multi-citation chunk**: two valid citations → both rewritten, one matched + one unmatched → still verified verdict — **log_payload**: shape pinned, large strings excluded — **kind affinity**: `[search:python]` matches `web_search_hit` NOT `web_page`, `[web:python]` matches `web_page` NOT `web_search_hit` — **robustness**: 1000-sentence answer processed |
