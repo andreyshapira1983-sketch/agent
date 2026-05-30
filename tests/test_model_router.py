@@ -120,6 +120,7 @@ def test_router_reuses_one_model_instance_for_identical_routes():
 def test_router_can_select_new_model_from_registry_json(monkeypatch):
     monkeypatch.delenv("AGENT_PROVIDER", raising=False)
     monkeypatch.delenv("AGENT_MODEL", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv(
         "AGENT_MODEL_REGISTRY_JSON",
         json.dumps([
@@ -151,7 +152,7 @@ def test_router_can_select_new_model_from_registry_json(monkeypatch):
     summary = router.routing_summary()
 
     assert (planner.provider, planner.model) == ("openai", "gpt-future-coder")
-    assert summary["planner"]["reason"] == "registry:future-coder"
+    assert summary["planner"]["reason"] == "policy:conservative:future-coder"
     # No custom synthesizer route exists, so the router keeps the normal LLM
     # default path instead of guessing.
     assert synth.provider == "anthropic"
@@ -187,6 +188,107 @@ def test_role_env_override_wins_over_model_registry(monkeypatch):
 
     assert (planner.provider, planner.model) == ("openai", "explicit-planner")
     assert router.routing_summary()["planner"]["reason"] == "env:AGENT_PLANNER"
+
+
+def test_balanced_policy_uses_builtin_low_cost_routes_when_available(monkeypatch):
+    monkeypatch.setenv("AGENT_MODEL_POLICY", "balanced")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        llm = FakeLLM()
+        llm.provider = provider or "unset"
+        llm.model = model or "unset"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+    summary = router.routing_summary()
+
+    assert summary["planner"]["provider"] == "anthropic"
+    assert summary["planner"]["reason"] == "policy:balanced:anthropic-default"
+    assert summary["memory_summary"]["provider"] == "openai"
+    assert summary["memory_summary"]["model"] == "gpt-4o-mini"
+    assert summary["memory_summary"]["reason"] == "policy:balanced:openai-default-small"
+    assert summary["verifier"]["provider"] == "openai"
+
+
+def test_balanced_policy_can_fall_back_to_available_provider_for_planning(monkeypatch):
+    monkeypatch.setenv("AGENT_MODEL_POLICY", "balanced")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        llm = FakeLLM()
+        llm.provider = provider or "unset"
+        llm.model = model or "unset"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+    summary = router.routing_summary([ModelRole.PLANNER])
+
+    assert summary["planner"]["provider"] == "openai"
+    assert summary["planner"]["model"] == "gpt-4o-mini"
+    assert summary["planner"]["reason"] == "policy:balanced:openai-default-small"
+
+
+def test_cost_policy_respects_max_cost_and_model_availability(monkeypatch):
+    monkeypatch.setenv("AGENT_MODEL_POLICY", "cost")
+    monkeypatch.setenv("AGENT_MODEL_MAX_COST", "low")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv(
+        "AGENT_MODEL_REGISTRY_JSON",
+        json.dumps([
+            {
+                "id": "cheap-summary",
+                "provider": "openai",
+                "model": "gpt-cheap",
+                "roles": ["memory_summary"],
+                "quality_tier": "standard",
+                "cost_tier": "low",
+            },
+            {
+                "id": "local-summary",
+                "provider": "mock",
+                "model": "mock-1",
+                "roles": ["memory_summary"],
+                "quality_tier": "cheap",
+                "cost_tier": "free",
+            },
+        ]),
+    )
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        llm = FakeLLM()
+        llm.provider = provider or "anthropic"
+        llm.model = model or "claude-sonnet-4-5"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+    summary = router.routing_summary([ModelRole.MEMORY_SUMMARY])
+
+    # OpenAI is below the cost cap, but it is not selectable without its key.
+    # Mock is not selected in real policies unless explicitly allowed.
+    assert summary["memory_summary"]["reason"] == "default"
+    assert summary["memory_summary"]["provider"] == "anthropic"
+
+
+def test_offline_policy_can_select_mock_route(monkeypatch):
+    monkeypatch.setenv("AGENT_MODEL_POLICY", "offline")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        llm = FakeLLM()
+        llm.provider = provider or "fallback"
+        llm.model = model or "fallback"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+    summary = router.routing_summary([ModelRole.PLANNER, ModelRole.SYNTHESIZER])
+
+    assert summary["planner"]["provider"] == "mock"
+    assert summary["planner"]["reason"] == "policy:offline:mock"
+    assert summary["synthesizer"]["provider"] == "mock"
 
 
 def test_agent_loop_uses_repair_proposal_route(tmp_path: Path, monkeypatch):

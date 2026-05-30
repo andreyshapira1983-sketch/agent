@@ -905,13 +905,21 @@ def _handle_models(rest: str, agent: AgentLoop) -> bool:
             f"model={route.get('model')} reason={route.get('reason')}",
             file=sys.stderr,
         )
+    policy = payload["registry"].get("selection_policy", {})
+    print("=== model selection policy ===", file=sys.stderr)
+    print(
+        f"  name={policy.get('name')} max_cost={policy.get('max_cost_tier')} "
+        f"allow_mock={policy.get('allow_mock')} "
+        f"require_available={policy.get('require_available')}",
+        file=sys.stderr,
+    )
     print("=== model registry ===", file=sys.stderr)
     for spec in payload["registry"]["models"]:
         print(
             f"  {spec['id']} provider={spec['provider']} model={spec['model']} "
             f"roles={','.join(spec['roles'])} cost={spec['cost_tier']} "
             f"quality={spec['quality_tier']} supported={spec['provider_supported']} "
-            f"source={spec['source']}",
+            f"available={spec['available']} source={spec['source']}",
             file=sys.stderr,
         )
     return True

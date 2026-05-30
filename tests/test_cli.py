@@ -434,8 +434,10 @@ class TestHandleMetaCommand:
 
         out = capsys.readouterr()
         assert "model routes" in out.err
+        assert "model selection policy" in out.err
         assert "planner" in out.err
         assert '"routes"' in out.err
+        assert '"selection_policy"' in out.err
 
     def test_learn_project_plans_then_ingests_selected_sources(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
