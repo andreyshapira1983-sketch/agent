@@ -99,6 +99,7 @@ from core.learning_planner import LearningPlanner
 from core.loop import AgentLoop, new_trace_id
 from core.memory import WorkingMemory
 from core.memory_policy import MemoryRetrievalPolicy, MemoryWritePolicy
+from core.model_usage import ModelUsageLedger
 from core.model_router import ModelRole, ModelRouter
 from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner
@@ -130,6 +131,7 @@ DEFAULT_SOURCE_REGISTRY_PATH = Path("data") / "source_registry.jsonl"
 DEFAULT_RUNTIME_TASKS_PATH = Path("data") / "runtime_tasks.jsonl"
 DEFAULT_RUNTIME_SCHEDULES_PATH = Path("data") / "runtime_schedules.jsonl"
 DEFAULT_APPROVAL_INBOX_PATH = Path("data") / "approval_inbox.jsonl"
+DEFAULT_MODEL_USAGE_PATH = Path("data") / "model_usage.jsonl"
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -159,8 +161,15 @@ def build_agent(
     registry.register(WebFetchTool())
     registry.register(RssFetchTool())
 
+    trace_id = new_trace_id()
+    logger = TraceLogger(trace_id=trace_id, log_dir=workspace / "logs", verbose=True)
+
     policy = PolicyGate(registry)
-    model_router = ModelRouter.from_env()
+    model_usage_ledger = ModelUsageLedger.from_env(
+        path=workspace / DEFAULT_MODEL_USAGE_PATH,
+        logger=logger,
+    )
+    model_router = ModelRouter.from_env(usage_ledger=model_usage_ledger)
     llm = model_router.for_role(ModelRole.SYNTHESIZER)
     planner = LLMPlanner(
         llm=model_router.for_role(ModelRole.PLANNER),
@@ -177,8 +186,6 @@ def build_agent(
             workspace / DEFAULT_SOURCE_REGISTRY_PATH
         )
 
-    trace_id = new_trace_id()
-    logger = TraceLogger(trace_id=trace_id, log_dir=workspace / "logs", verbose=True)
     logger.log(
         "session_start",
         {
@@ -194,6 +201,7 @@ def build_agent(
             "source_registry_path": (
                 str(source_registry_store.path) if source_registry_store else None
             ),
+            "model_usage_path": str(workspace / DEFAULT_MODEL_USAGE_PATH),
             "knowledge_auto_write": _env_bool("AGENT_KNOWLEDGE_AUTO_WRITE", False),
             "approval": type(approval_provider).__name__ if approval_provider else None,
         },
@@ -1086,6 +1094,7 @@ def _handle_auto_status(agent: AgentLoop, workspace: Path) -> bool:
     ).status()
     status["task_queue"] = _task_queue_for(agent, workspace).summary()
     status["scheduler"] = _scheduler_for(agent, workspace).summary()
+    status["model_usage"] = agent.model_router.usage_snapshot()
     print(json.dumps(status, ensure_ascii=False, indent=2), file=sys.stderr)
     return True
 
@@ -1139,10 +1148,58 @@ def _handle_conflicts(rest: str, agent: AgentLoop, workspace: Path) -> bool:
 
 
 def _handle_budget_status(agent: AgentLoop, workspace: Path) -> bool:
-    del agent, workspace
+    del workspace
     snapshot = BudgetGovernor(BudgetLimits()).snapshot()
+    snapshot["model_usage"] = agent.model_router.usage_snapshot()
     print("=== autonomous budget defaults ===", file=sys.stderr)
     print(json.dumps(snapshot, ensure_ascii=False, indent=2), file=sys.stderr)
+    return True
+
+
+def _handle_model_usage(rest: str, agent: AgentLoop) -> bool:
+    tokens = _split_meta_args(rest)
+    as_json = "--json" in tokens
+    if any(token != "--json" for token in tokens):
+        print("Usage: :model-usage [--json]", file=sys.stderr)
+        return True
+    snapshot = agent.model_router.usage_snapshot()
+    if snapshot is None:
+        print("(model usage ledger is not enabled)", file=sys.stderr)
+        return True
+    if as_json:
+        print(json.dumps(snapshot, ensure_ascii=False, indent=2), file=sys.stderr)
+        return True
+    totals = snapshot.get("totals", {})
+    session_totals = snapshot.get("session_totals", {})
+    print("=== model usage ===", file=sys.stderr)
+    print(
+        f"  history_calls={totals.get('calls', 0)} "
+        f"history_tokens={totals.get('total_tokens', 0)} "
+        f"history_cost_units={totals.get('cost_units', 0)}",
+        file=sys.stderr,
+    )
+    print(
+        f"  session_calls={session_totals.get('calls', 0)} "
+        f"session_tokens={session_totals.get('total_tokens', 0)} "
+        f"session_cost_units={session_totals.get('cost_units', 0)}",
+        file=sys.stderr,
+    )
+    print("=== by role ===", file=sys.stderr)
+    for role, data in snapshot.get("by_role", {}).items():
+        print(
+            f"  {role}: calls={data.get('calls', 0)} "
+            f"tokens={data.get('total_tokens', 0)} "
+            f"cost_units={data.get('cost_units', 0)}",
+            file=sys.stderr,
+        )
+    print("=== by model ===", file=sys.stderr)
+    for model, data in snapshot.get("by_model", {}).items():
+        print(
+            f"  {model}: calls={data.get('calls', 0)} "
+            f"tokens={data.get('total_tokens', 0)} "
+            f"cost_units={data.get('cost_units', 0)}",
+            file=sys.stderr,
+        )
     return True
 
 
@@ -1687,6 +1744,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head == ":budget-status":
         return _handle_budget_status(agent, workspace)
 
+    if head in {":model-usage", ":usage-models"}:
+        return _handle_model_usage(rest.strip(), agent)
+
     if head == ":approval-list":
         return _handle_approval_list(rest.strip(), agent, workspace)
 
@@ -1759,6 +1819,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :connector-plan <goal> [flags]  recommend source connectors for a task\n"
             "      flags: --limit N  --json\n"
             "  :models [--json]                inspect model routes and registry\n"
+            "  :model-usage [--json]           inspect model calls/tokens/cost units\n"
             "  :learn [goal] [flags]           plan sources, then ingest selected learning set\n"
             "  :learn-project [goal] [flags]   alias for :learn\n"
             "      flags: --dry-run  --write-memory  --no-memory  --limit N\n"
@@ -1877,7 +1938,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :model-usage  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:

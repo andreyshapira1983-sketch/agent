@@ -431,6 +431,7 @@ class TestHandleMetaCommand:
 
         assert handle_meta_command(":models", agent, workspace) is True
         assert handle_meta_command(":models --json", agent, workspace) is True
+        assert handle_meta_command(":model-usage", agent, workspace) is True
 
         out = capsys.readouterr()
         assert "model routes" in out.err
@@ -438,6 +439,7 @@ class TestHandleMetaCommand:
         assert "planner" in out.err
         assert '"routes"' in out.err
         assert '"selection_policy"' in out.err
+        assert "model usage ledger is not enabled" in out.err
 
     def test_learn_project_plans_then_ingests_selected_sources(self, workspace: Path, capsys):
         agent = _build_agent(workspace)

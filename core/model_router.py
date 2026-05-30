@@ -8,12 +8,18 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from core.llm import LLM
+from core.model_usage import (
+    ModelUsageLedger,
+    usage_from_llm_or_estimate,
+    utc_now_iso,
+)
 
 
 class ModelRole(str, Enum):
@@ -274,6 +280,101 @@ _ROLE_ENV_PREFIXES: dict[ModelRole, tuple[str, ...]] = {
 }
 
 
+class UsageTrackedLLM:
+    """Small proxy that records one role-specific `complete()` call."""
+
+    def __init__(
+        self,
+        llm: Any,
+        *,
+        role: str,
+        route: ModelRoute,
+        cost_tier: str,
+        ledger: ModelUsageLedger,
+    ):
+        self._llm = llm
+        self.role = role
+        self.route = route
+        self.cost_tier = cost_tier
+        self.ledger = ledger
+        self.provider = getattr(llm, "provider", route.provider)
+        self.model = getattr(llm, "model", route.model)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._llm, name)
+
+    def complete(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 2048,
+        temperature: float = 0.7,
+    ) -> str:
+        provider = str(getattr(self._llm, "provider", self.route.provider) or "")
+        model = str(getattr(self._llm, "model", self.route.model) or "")
+        self.ledger.assert_can_start(
+            role=self.role,
+            provider=provider,
+            model=model,
+        )
+        self.ledger.log_start(
+            role=self.role,
+            provider=provider,
+            model=model,
+            route_reason=self.route.reason,
+            cost_tier=self.cost_tier,
+        )
+        started_at = utc_now_iso()
+        started = time.perf_counter()
+        try:
+            output = self._llm.complete(
+                system=system,
+                user=user,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+        except Exception as exc:
+            completed_at = utc_now_iso()
+            self.ledger.record(
+                role=self.role,
+                provider=provider,
+                model=model,
+                route_reason=self.route.reason,
+                cost_tier=self.cost_tier,
+                status="error",
+                input_tokens=0,
+                output_tokens=0,
+                estimated=True,
+                started_at=started_at,
+                completed_at=completed_at,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+        completed_at = utc_now_iso()
+        input_tokens, output_tokens, estimated = usage_from_llm_or_estimate(
+            self._llm,
+            system=system,
+            user=user,
+            output=output,
+        )
+        self.ledger.record(
+            role=self.role,
+            provider=provider,
+            model=model,
+            route_reason=self.route.reason,
+            cost_tier=self.cost_tier,
+            status="success",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            estimated=estimated,
+            started_at=started_at,
+            completed_at=completed_at,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+        return output
+
+
 def _clean_env(name: str) -> str | None:
     value = os.getenv(name)
     if value is None:
@@ -505,6 +606,7 @@ class ModelRouter:
         static_llm: Any | None = None,
         registry: ModelRegistry | None = None,
         selection_policy: ModelSelectionPolicy | None = None,
+        usage_ledger: ModelUsageLedger | None = None,
     ):
         self.default_provider = _normalise_provider(default_provider)
         self.default_model = default_model.strip() if isinstance(default_model, str) else default_model
@@ -520,8 +622,10 @@ class ModelRouter:
         self._llm_factory = llm_factory or _llm_factory
         self._static_llm = static_llm
         self._cache: dict[tuple[str | None, str | None], Any] = {}
+        self._tracked_cache: dict[str, Any] = {}
         self.registry = registry or ModelRegistry()
         self.selection_policy = selection_policy or ModelSelectionPolicy()
+        self.usage_ledger = usage_ledger
 
     @classmethod
     def single(cls, llm: Any) -> "ModelRouter":
@@ -530,7 +634,12 @@ class ModelRouter:
         return cls(static_llm=llm)
 
     @classmethod
-    def from_env(cls, *, llm_factory: LLMFactory | None = None) -> "ModelRouter":
+    def from_env(
+        cls,
+        *,
+        llm_factory: LLMFactory | None = None,
+        usage_ledger: ModelUsageLedger | None = None,
+    ) -> "ModelRouter":
         """Build a router from default and role-specific environment vars.
 
         Defaults:
@@ -570,6 +679,7 @@ class ModelRouter:
             llm_factory=llm_factory,
             registry=ModelRegistry.from_env(),
             selection_policy=ModelSelectionPolicy.from_env(),
+            usage_ledger=usage_ledger,
         )
 
     def route_for(self, role: ModelRole | str) -> ModelRoute:
@@ -600,13 +710,27 @@ class ModelRouter:
 
         if self._static_llm is not None:
             return self._static_llm
-        route = self.route_for(role)
+        role_key = _coerce_role(role)
+        if self.usage_ledger is not None and role_key in self._tracked_cache:
+            return self._tracked_cache[role_key]
+        route = self.route_for(role_key)
         provider = route.provider or self.default_provider
         model = route.model or self.default_model
         cache_key = (provider, model)
         if cache_key not in self._cache:
             self._cache[cache_key] = self._llm_factory(provider, model)
-        return self._cache[cache_key]
+        llm = self._cache[cache_key]
+        if self.usage_ledger is None:
+            return llm
+        tracked = UsageTrackedLLM(
+            llm,
+            role=role_key,
+            route=route,
+            cost_tier=self._cost_tier_for_route(route),
+            ledger=self.usage_ledger,
+        )
+        self._tracked_cache[role_key] = tracked
+        return tracked
 
     def routing_summary(
         self,
@@ -631,3 +755,16 @@ class ModelRouter:
         payload = self.registry.to_payload()
         payload["selection_policy"] = self.selection_policy.to_dict()
         return payload
+
+    def usage_snapshot(self) -> dict[str, Any] | None:
+        if self.usage_ledger is None:
+            return None
+        return self.usage_ledger.snapshot()
+
+    def _cost_tier_for_route(self, route: ModelRoute) -> str:
+        provider = _normalise_provider(route.provider or self.default_provider)
+        model = (route.model or self.default_model or "").strip()
+        for spec in self.registry.list():
+            if spec.provider == provider and spec.model == model:
+                return spec.cost_tier
+        return "unknown"
