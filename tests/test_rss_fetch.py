@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import gzip
 import io
+import socket
 import urllib.error
 from typing import Any
 
@@ -23,15 +24,20 @@ from tools.rss_fetch import (
 class _StubResponse:
     def __init__(self, *, body: bytes, status: int = 200,
                  content_type: str = "application/rss+xml",
-                 content_encoding: str | None = None):
+                 content_encoding: str | None = None,
+                 final_url: str | None = None):
         self.status = status
         self._buf = io.BytesIO(body)
+        self._final_url = final_url
         self.headers = {"Content-Type": content_type}
         if content_encoding:
             self.headers["Content-Encoding"] = content_encoding
 
     def read(self, n: int = -1) -> bytes:
         return self._buf.read(n)
+
+    def geturl(self) -> str:
+        return self._final_url or "https://example.com/feed.xml"
 
     def __enter__(self):
         return self
@@ -55,6 +61,13 @@ class _StubOpener:
 
 def _opener(body: bytes, **kwargs) -> _StubOpener:
     return _StubOpener(_StubResponse(body=body, **kwargs))
+
+
+def _resolver_for(ip: str):
+    def _resolver(host, port, family, socktype, proto, flags):  # noqa: ANN001, ARG001
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port or 443))]
+
+    return _resolver
 
 
 RSS = b"""<?xml version="1.0"?>
@@ -117,6 +130,7 @@ def test_rss_feed_parsed():
     )
 
     assert out["title"] == "Example Feed"
+    assert out["requested_url"] == "https://example.com/feed.xml"
     assert out["feed_type"] == "rss"
     assert len(out["entries"]) == 1
     assert out["entries"][0]["title"] == "First item"
@@ -186,6 +200,36 @@ def test_http_and_url_errors_surface_cleanly():
 def test_unsafe_urls_rejected(url: str):
     with pytest.raises((PermissionError, ValueError)):
         RssFetchTool(opener=_opener(RSS)).run(url=url)
+
+
+def test_hostname_resolving_to_private_ip_rejected():
+    tool = RssFetchTool(
+        opener=_opener(RSS),
+        resolver=_resolver_for("127.0.0.1"),
+    )
+
+    with pytest.raises(PermissionError, match="public global"):
+        tool.run(url="https://looks-public.example/feed.xml")
+
+
+def test_final_redirect_url_revalidated():
+    tool = RssFetchTool(
+        opener=_opener(RSS, final_url="http://127.0.0.1/feed.xml"),
+    )
+
+    with pytest.raises(PermissionError, match="public global"):
+        tool.run(url="https://example.com/feed.xml")
+
+
+def test_final_url_is_reported_after_redirect():
+    tool = RssFetchTool(
+        opener=_opener(RSS, final_url="https://example.com/final.xml"),
+    )
+
+    out = tool.run(url="https://example.com/feed.xml")
+
+    assert out["url"] == "https://example.com/final.xml"
+    assert out["requested_url"] == "https://example.com/feed.xml"
 
 
 def test_max_entries_capped():

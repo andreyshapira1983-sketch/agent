@@ -9,18 +9,17 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-import ipaddress
 import socket
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Any
 
 from core.redaction import redact_text
-from tools.base import Risk, Tool, require_ascii_identifier
+from tools.base import Risk, Tool
+from tools.network_safety import NetworkSafetyPolicy, build_safe_opener
 
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -41,11 +40,6 @@ ALLOWED_CONTENT_TYPES = (
     "text/plain",
 )
 
-_BLOCKED_HOSTNAMES = frozenset({
-    "localhost", "ip6-localhost", "ip6-loopback", "broadcasthost",
-})
-
-
 class RssFetchTool(Tool):
     name = "rss_fetch"
     description = (
@@ -61,6 +55,7 @@ class RssFetchTool(Tool):
         max_bytes: int = DEFAULT_MAX_BYTES,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         opener: Any | None = None,
+        resolver: Any | None = None,
     ):
         if max_bytes <= 0:
             raise ValueError(f"max_bytes must be > 0, got {max_bytes}")
@@ -69,14 +64,19 @@ class RssFetchTool(Tool):
         self.max_bytes = int(max_bytes)
         self.timeout_seconds = float(timeout_seconds)
         self._opener = opener
+        self._network_policy = NetworkSafetyPolicy(
+            tool_name=self.name,
+            allowed_schemes=ALLOWED_SCHEMES,
+            max_url_len=MAX_URL_LEN,
+            resolver=resolver,
+            resolve_dns=opener is None or resolver is not None,
+        )
 
     def risk_for(self, arguments: dict[str, Any]) -> Risk:  # noqa: ARG002
         return "read_only"
 
     def run(self, url: str, max_entries: int | None = None) -> dict[str, Any]:
-        self._validate_url(url)
-        parsed = urllib.parse.urlsplit(url)
-        self._check_host_not_local(parsed.hostname)
+        self._network_policy.validate_url(url, role="rss_fetch url")
         entry_limit = max(1, min(int(max_entries or DEFAULT_MAX_ENTRIES), MAX_ENTRIES_CAP))
 
         req = urllib.request.Request(
@@ -91,9 +91,12 @@ class RssFetchTool(Tool):
             },
         )
         started = time.monotonic()
-        opener = self._opener or urllib.request.build_opener()
+        opener = self._opener or build_safe_opener(self._network_policy)
+        final_url = url
         try:
             with opener.open(req, timeout=self.timeout_seconds) as resp:
+                final_url = str(getattr(resp, "geturl", lambda: url)())
+                self._network_policy.validate_url(final_url, role="rss_fetch final url")
                 status_code = int(getattr(resp, "status", 200))
                 content_type = resp.headers.get("Content-Type", "")
                 content_encoding = (resp.headers.get("Content-Encoding") or "").lower()
@@ -128,7 +131,8 @@ class RssFetchTool(Tool):
             safe_entries.append(safe_entry)
 
         return {
-            "url": url,
+            "url": final_url,
+            "requested_url": url,
             "status_code": status_code,
             "content_type": content_type,
             "fetched_at": datetime.now(timezone.utc).isoformat(),
@@ -186,44 +190,16 @@ class RssFetchTool(Tool):
 
     @staticmethod
     def _validate_url(url: Any) -> None:
-        if not isinstance(url, str) or not url.strip():
-            raise ValueError("url must be a non-empty string")
-        if len(url) > MAX_URL_LEN:
-            raise ValueError(f"url too long ({len(url)} > {MAX_URL_LEN})")
-        require_ascii_identifier(url, role="rss_fetch url")
-        parsed = urllib.parse.urlsplit(url)
-        if parsed.scheme not in ALLOWED_SCHEMES:
-            raise PermissionError(
-                f"scheme {parsed.scheme!r} not allowed; only "
-                f"{sorted(ALLOWED_SCHEMES)} are permitted"
-            )
-        if not parsed.hostname:
-            raise ValueError(f"url {url!r} has no hostname")
+        NetworkSafetyPolicy(
+            tool_name="rss_fetch",
+            allowed_schemes=ALLOWED_SCHEMES,
+            max_url_len=MAX_URL_LEN,
+            resolve_dns=False,
+        ).validate_url(url, role="rss_fetch url")
 
     @staticmethod
     def _check_host_not_local(hostname: str | None) -> None:
-        if hostname is None:
-            raise ValueError("url has no hostname")
-        host_lower = hostname.lower()
-        if host_lower in _BLOCKED_HOSTNAMES:
-            raise PermissionError(
-                f"hostname {hostname!r} resolves to a local-only target; refused"
-            )
-        try:
-            ip = ipaddress.ip_address(host_lower)
-        except ValueError:
-            return
-        if (
-            ip.is_loopback
-            or ip.is_private
-            or ip.is_link_local
-            or ip.is_multicast
-            or ip.is_unspecified
-            or ip.is_reserved
-        ):
-            raise PermissionError(
-                f"IP {ip} is in a non-public range; rss_fetch refuses local targets"
-            )
+        NetworkSafetyPolicy(tool_name="rss_fetch", resolve_dns=False).validate_host(hostname)
 
     @staticmethod
     def _check_content_type(content_type: str) -> None:

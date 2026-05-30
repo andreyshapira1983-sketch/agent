@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import gzip
 import io
+import socket
 import urllib.error
 from typing import Any
 
@@ -29,9 +30,11 @@ from tools.web_fetch import (
 class _StubResponse:
     def __init__(self, *, body: bytes, status: int = 200,
                  content_type: str = "text/html",
-                 content_encoding: str | None = None):
+                 content_encoding: str | None = None,
+                 final_url: str | None = None):
         self.status = status
         self._buf = io.BytesIO(body)
+        self._final_url = final_url
         headers = {"Content-Type": content_type}
         if content_encoding:
             headers["Content-Encoding"] = content_encoding
@@ -39,6 +42,9 @@ class _StubResponse:
 
     def read(self, n: int = -1) -> bytes:
         return self._buf.read(n)
+
+    def geturl(self) -> str:
+        return self._final_url or "https://example.com/"
 
     def __enter__(self):
         return self
@@ -66,6 +72,13 @@ class _StubOpener:
 
 def _opener_with(body: bytes, **kw) -> _StubOpener:
     return _StubOpener(response=_StubResponse(body=body, **kw))
+
+
+def _resolver_for(ip: str):
+    def _resolver(host, port, family, socktype, proto, flags):  # noqa: ANN001, ARG001
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port or 443))]
+
+    return _resolver
 
 
 # ============================================================
@@ -153,6 +166,22 @@ class TestLocalNetworkBlock:
         out = WebFetchTool(opener=opener).run(url="http://1.1.1.1/")
         assert out["status_code"] == 200
 
+    def test_hostname_resolving_to_private_ip_rejected(self):
+        opener = _opener_with(b"<html><body>hello</body></html>")
+        tool = WebFetchTool(opener=opener, resolver=_resolver_for("127.0.0.1"))
+
+        with pytest.raises(PermissionError, match="public global"):
+            tool.run(url="https://looks-public.example/")
+
+    def test_final_redirect_url_revalidated(self):
+        opener = _opener_with(
+            b"<html><body>hello</body></html>",
+            final_url="http://127.0.0.1/admin",
+        )
+
+        with pytest.raises(PermissionError, match="public global"):
+            WebFetchTool(opener=opener).run(url="https://example.com/")
+
 
 # ============================================================
 # Happy path
@@ -164,6 +193,7 @@ class TestHappyPath:
         opener = _opener_with(body)
         out = WebFetchTool(opener=opener).run(url="https://example.com/")
         assert out["url"] == "https://example.com/"
+        assert out["requested_url"] == "https://example.com/"
         assert out["status_code"] == 200
         assert "Title" in out["text"]
         assert "Para A" in out["text"]
@@ -213,6 +243,14 @@ class TestHappyPath:
         out = WebFetchTool(opener=opener).run(url="https://example.com/")
         assert "T" in out["fetched_at"]  # crude ISO check
         assert "+" in out["fetched_at"] or "Z" in out["fetched_at"]
+
+    def test_final_url_is_reported_after_redirect(self):
+        opener = _opener_with(b"<p>x</p>", final_url="https://example.com/final")
+
+        out = WebFetchTool(opener=opener).run(url="https://example.com/start")
+
+        assert out["url"] == "https://example.com/final"
+        assert out["requested_url"] == "https://example.com/start"
 
 
 # ============================================================
