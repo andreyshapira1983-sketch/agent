@@ -531,6 +531,7 @@ class TestHandleMetaCommand:
         assert handle_meta_command(":budget-window-status", agent, workspace) is True
         assert handle_meta_command(":budget-window-status --json", agent, workspace) is True
         assert handle_meta_command(":release-audit", agent, workspace) is True
+        assert handle_meta_command(":supply-chain-audit", agent, workspace) is True
         assert handle_meta_command(":queue-status", agent, workspace) is True
         assert handle_meta_command(":scheduler-status", agent, workspace) is True
 
@@ -538,6 +539,7 @@ class TestHandleMetaCommand:
         assert "autonomous budget defaults" in out.err
         assert "persistent budget ledger is not enabled" in out.err
         assert "release hygiene" in out.err
+        assert "supply-chain audit" in out.err
         assert "runtime task queue" in out.err
         assert "runtime scheduler" in out.err
 

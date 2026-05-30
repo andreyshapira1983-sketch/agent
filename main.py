@@ -117,6 +117,7 @@ from core.source_connectors import (
 )
 from core.source_registry_store import SourceRegistryStore
 from core.source_library import list_source_library, source_library_payload
+from core.supply_chain import audit_supply_chain
 from core.task_queue import TaskQueueStore
 from core.team_executor import TeamBudget, TeamExecutor
 from core.team_plan import TeamPlanner
@@ -1280,6 +1281,21 @@ def _handle_release_audit(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     return True
 
 
+def _handle_supply_chain_audit(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    tokens = _split_meta_args(rest)
+    as_json = "--json" in tokens
+    if any(token != "--json" for token in tokens):
+        print("Usage: :supply-chain-audit [--json]", file=sys.stderr)
+        return True
+    report = audit_supply_chain(workspace)
+    agent.log.log("supply_chain_audit", report.to_dict())
+    if as_json:
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(report.user_summary(), file=sys.stderr)
+    return True
+
+
 def _handle_model_usage(rest: str, agent: AgentLoop) -> bool:
     tokens = _split_meta_args(rest)
     as_json = "--json" in tokens
@@ -2003,6 +2019,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head in {":release-audit", ":release-hygiene"}:
         return _handle_release_audit(rest.strip(), agent, workspace)
 
+    if head in {":supply-chain-audit", ":supply-audit", ":ci-audit"}:
+        return _handle_supply_chain_audit(rest.strip(), agent, workspace)
+
     if head in {":model-usage", ":usage-models"}:
         return _handle_model_usage(rest.strip(), agent)
 
@@ -2099,6 +2118,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :budget-status                  inspect default autonomous runtime budgets\n"
             "  :budget-window-status [--json] inspect persistent hour/day budget windows\n"
             "  :release-audit [--json]         inspect release artifact hygiene exclusions\n"
+            "  :supply-chain-audit [--json]   inspect pinned deps and CI release gates\n"
             "  :approval-list [status|all]     list pending/approved/denied approval items\n"
             "  :approval-approve <id>          mark an approval inbox item approved\n"
             "  :approval-deny <id>             mark an approval inbox item denied\n"
@@ -2213,7 +2233,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :budget-window-status  :release-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :budget-window-status  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:

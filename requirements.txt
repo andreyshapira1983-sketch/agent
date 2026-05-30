@@ -1,6 +1,9 @@
-anthropic>=0.40.0
-openai>=1.0.0
-pydantic>=2.0.0
-python-dotenv>=1.0.0
-ddgs>=9.0.0
-pytest>=8.0.0
+# Pinned direct dependencies for reproducible local/CI installs.
+# Source intent lives in requirements.in.
+anthropic==0.102.0
+openai==2.36.0
+pydantic==2.13.4
+python-dotenv==1.2.2
+ddgs==9.14.4
+pytest==9.0.3
+coverage==7.14.0

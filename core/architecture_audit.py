@@ -156,11 +156,11 @@ def _build_checks(workspace: Path) -> list[ArchitectureLayerCheck]:
         _check(
             workspace,
             id="release_hygiene_guard",
-            title="Release Hygiene Guard",
-            evidence=("core/release_hygiene.py",),
-            tests=("tests/test_release_hygiene.py",),
-            summary="Release manifest excludes local secrets and developer artifacts.",
-            next_step="Add CI/pre-commit enforcement so unsafe artifacts fail before sharing.",
+            title="Release / Supply-Chain Guard",
+            evidence=("core/release_hygiene.py", "core/supply_chain.py", ".github/workflows/ci.yml"),
+            tests=("tests/test_release_hygiene.py", "tests/test_supply_chain.py"),
+            summary="Release manifest excludes local secrets and CI checks pinned direct dependencies.",
+            next_step="Add generated hash lock / SBOM after the direct dependency lock is stable.",
         ),
         _check(
             workspace,
