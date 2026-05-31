@@ -419,6 +419,57 @@ class TestHandleMetaCommand:
         assert '"sources": 1' in out.err
         assert '"claims": 1' in out.err
 
+    def test_conversational_source_review_plan_uses_registry_without_llm(
+        self,
+        workspace: Path,
+        capsys,
+    ):
+        agent = _build_agent(workspace)
+        registry = SourceRegistry()
+        task_source = registry.register_source(
+            type="file",
+            title="operator_task_layer_request.md",
+            locator="operator_task_layer_request.md",
+            trust_level=0.9,
+        )
+        registry.register_claim(
+            source_id=task_source.id,
+            text="Operator Task Layer needs cheap routing and budget-waste fixes.",
+            confidence=0.85,
+        )
+        intent_source = registry.register_source(
+            type="file",
+            title="operator_intent.py",
+            locator="core/operator_intent.py",
+            trust_level=0.9,
+        )
+        registry.register_claim(
+            source_id=intent_source.id,
+            text="Operator intent routing is deterministic and local.",
+            confidence=0.8,
+        )
+        assert agent.source_registry_store is not None
+        agent.source_registry_store.save_registry(registry)
+
+        handled = handle_conversational_operator_input(
+            "Сравни загруженные источники operator_task_layer_request.md, "
+            "main.py и core/operator_intent.py. Составь точный план реализации "
+            "Operator Task Layer.",
+            agent,
+            workspace,
+        )
+
+        out = capsys.readouterr()
+        assert handled is True
+        assert "operator intent: source_review_plan" in out.err
+        assert "source review plan" in out.err
+        assert "operator_task_layer_request.md" in out.err
+        assert "core/operator_intent.py" in out.err
+        assert "main.py" in out.err
+        assert "not verified from registry" in out.err
+        assert "tests to add" in out.err
+        assert agent.llm.calls == []
+
     def test_ingest_web_fetches_curated_source_into_registry(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
         agent.registry.register(FakeWebSearchTool())

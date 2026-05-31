@@ -78,7 +78,7 @@ def test_shell_commands_are_not_misrouted_to_operator_status():
         assert intent.command == "shell-command-hint"
 
 
-def test_implementation_planning_requests_do_not_become_project_health():
+def test_implementation_planning_requests_route_to_source_review_plan():
     samples = [
         "Составь точный план реализации Operator Task Layer",
         "Сравни загруженные источники operator_task_layer_request.md, main.py и core/operator_intent.py",
@@ -86,7 +86,10 @@ def test_implementation_planning_requests_do_not_become_project_health():
     ]
 
     for sample in samples:
-        assert route_operator_intent(sample) is None
+        intent = route_operator_intent(sample)
+        assert intent is not None
+        assert intent.kind == "source_review_plan"
+        assert intent.command == ":source-review-plan"
 
 
 def test_does_not_capture_normal_chat():

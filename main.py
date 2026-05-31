@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import sys
 from pathlib import Path
@@ -808,6 +809,266 @@ def _handle_source_registry(rest: str, agent: AgentLoop, workspace: Path) -> boo
                     file=sys.stderr,
                 )
     return True
+
+
+def _handle_source_review_plan(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    del workspace
+    tokens = _split_meta_args(rest)
+    as_json = False
+    limit = 8
+    goal_parts: list[str] = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token == "--json":
+            as_json = True
+            i += 1
+            continue
+        if token == "--limit":
+            if i + 1 >= len(tokens):
+                print("Usage: --limit requires a number", file=sys.stderr)
+                return True
+            try:
+                limit = int(tokens[i + 1])
+            except ValueError:
+                print("Usage: --limit requires a number", file=sys.stderr)
+                return True
+            i += 2
+            continue
+        goal_parts.append(token)
+        i += 1
+    if limit < 1:
+        print("Usage: --limit must be >= 1", file=sys.stderr)
+        return True
+    goal = " ".join(goal_parts).strip()
+    payload = _source_review_plan_payload(goal, agent, limit=limit)
+    agent.log.log("operator_source_review_plan", payload)
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(_format_source_review_plan(payload), file=sys.stderr)
+    return True
+
+
+def _source_review_plan_payload(goal: str, agent: AgentLoop, *, limit: int = 8) -> dict:
+    store = getattr(agent, "source_registry_store", None)
+    registry = store.load_registry() if store is not None else getattr(agent, "last_source_registry", None)
+    if registry is None:
+        sources = []
+        claims = []
+    else:
+        sources = list(registry.sources)
+        claims = list(registry.claims)
+    claims_by_source: dict[str, list] = {}
+    for claim in claims:
+        claims_by_source.setdefault(claim.source_id, []).append(claim)
+
+    mentions = _extract_source_review_mentions(goal)
+    matched_sources = _match_sources_to_mentions(sources, mentions)
+    if not mentions and sources:
+        matched_sources = sources[:limit]
+    if mentions:
+        matched_ids = {source.id for source in matched_sources}
+        missing_mentions = [
+            mention for mention in mentions
+            if not any(_mention_matches_source(mention, source) for source in matched_sources)
+        ]
+    else:
+        matched_ids = {source.id for source in matched_sources}
+        missing_mentions = []
+
+    items = []
+    for source in matched_sources[:limit]:
+        source_claims = claims_by_source.get(source.id, [])
+        items.append({
+            "id": source.id,
+            "type": source.type,
+            "title": source.title,
+            "locator": source.locator,
+            "claim_count": len(source_claims),
+            "sample_claims": [
+                {
+                    "status": claim.status,
+                    "confidence": claim.confidence,
+                    "text": claim.text,
+                }
+                for claim in source_claims[:2]
+            ],
+        })
+
+    suggested_files = _suggest_implementation_files(matched_sources, mentions)
+    return {
+        "goal": goal or "source review implementation plan",
+        "registry": {
+            "path": str(store.path) if store is not None else None,
+            "sources": len(sources),
+            "claims": len(claims),
+        },
+        "requested_mentions": mentions,
+        "matched_sources": items,
+        "missing_mentions": missing_mentions,
+        "suggested_files": suggested_files,
+        "plan": [
+            "Use only matched Source Registry entries as current evidence; inspect missing files explicitly before claiming they were reviewed.",
+            "Confirm the intended behavior from the task/source claims, then map each change to one small code surface.",
+            "Patch routing/handler code first, then add regression tests for positive routing and negative over-routing.",
+            "Run targeted tests for operator intent/CLI, then the full pytest suite before commit.",
+        ],
+        "tests_to_add": [
+            "source-review planning request routes to source_review_plan, not project_health",
+            "source review plan lists matched ingested sources and missing requested sources",
+            "handler does not call planner/LLM for this operator digest",
+            "existing project health and next-actions phrases still route correctly",
+        ],
+        "constraints": [
+            "read-only planning digest",
+            "no file writes",
+            "no shell execution",
+            "no autonomous allow-effects",
+            "no persistent memory promotion",
+        ],
+        "matched_source_ids": sorted(matched_ids),
+    }
+
+
+def _format_source_review_plan(payload: dict) -> str:
+    registry = payload.get("registry", {})
+    lines = [
+        "=== source review plan ===",
+        f"goal: {payload.get('goal')}",
+        (
+            "registry: "
+            f"sources={registry.get('sources', 0)} "
+            f"claims={registry.get('claims', 0)}"
+        ),
+    ]
+    mentions = payload.get("requested_mentions", [])
+    if mentions:
+        lines.append("requested sources:")
+        lines.extend(f"  - {item}" for item in mentions)
+    matched = payload.get("matched_sources", [])
+    if matched:
+        lines.append("matched ingested sources:")
+        for item in matched:
+            lines.append(
+                f"  - {item.get('id')} [{item.get('type')}] "
+                f"claims={item.get('claim_count', 0)}"
+            )
+            for claim in item.get("sample_claims", []):
+                lines.append(
+                    f"    claim[{claim.get('status')} {float(claim.get('confidence', 0)):.2f}]: "
+                    f"{claim.get('text')}"
+                )
+    else:
+        lines.append("matched ingested sources: none")
+    missing = payload.get("missing_mentions", [])
+    if missing:
+        lines.append("not verified from registry:")
+        lines.extend(f"  - {item}" for item in missing)
+    suggested = payload.get("suggested_files", [])
+    if suggested:
+        lines.append("likely files to inspect/change:")
+        lines.extend(f"  - {item}" for item in suggested)
+    lines.append("implementation plan:")
+    lines.extend(f"  {idx}. {step}" for idx, step in enumerate(payload.get("plan", []), start=1))
+    lines.append("tests to add:")
+    lines.extend(f"  - {item}" for item in payload.get("tests_to_add", []))
+    lines.append("constraints:")
+    lines.extend(f"  - {item}" for item in payload.get("constraints", []))
+    return "\n".join(lines)
+
+
+def _extract_source_review_mentions(text: str) -> list[str]:
+    pattern = re.compile(
+        r"(?P<path>"
+        r"(?:[A-Za-z]:[\\/])?"
+        r"(?:\.{1,2}[\\/])?"
+        r"(?:[A-Za-z0-9_.-]+[\\/])*"
+        r"[A-Za-z0-9_.-]+\."
+        r"(?:py|md|txt|json|yml|yaml|pdf)"
+        r")",
+        flags=re.IGNORECASE,
+    )
+    seen: set[str] = set()
+    mentions: list[str] = []
+    for match in pattern.finditer(text):
+        value = match.group("path").rstrip(".,;:!?)\"]}'")
+        key = _normalize_source_key(value)
+        if key in seen:
+            continue
+        seen.add(key)
+        mentions.append(value)
+    return mentions
+
+
+def _match_sources_to_mentions(sources: list, mentions: list[str]) -> list:
+    if not mentions:
+        return []
+    matched = []
+    seen: set[str] = set()
+    for source in sources:
+        if any(_mention_matches_source(mention, source) for mention in mentions):
+            key = _source_dedupe_key(source)
+            if key not in seen:
+                matched.append(source)
+                seen.add(key)
+    return matched
+
+
+def _mention_matches_source(mention: str, source) -> bool:
+    mention_key = _normalize_source_key(mention)
+    candidates = [
+        getattr(source, "id", ""),
+        getattr(source, "title", ""),
+        getattr(source, "locator", ""),
+    ]
+    for candidate in candidates:
+        key = _normalize_source_key(str(candidate))
+        if mention_key == key or mention_key in key or key.endswith(mention_key):
+            return True
+    return False
+
+
+def _normalize_source_key(value: str) -> str:
+    out = value.strip().strip("\"'")
+    if out.startswith("file:"):
+        out = out[len("file:"):]
+    out = out.replace("/", "\\")
+    while out.startswith(".\\"):
+        out = out[2:]
+    return out.casefold()
+
+
+def _source_dedupe_key(source) -> str:
+    for value in (
+        getattr(source, "locator", ""),
+        getattr(source, "title", ""),
+        getattr(source, "id", ""),
+    ):
+        key = _normalize_source_key(str(value))
+        if key:
+            return key
+    return str(getattr(source, "id", "")).casefold()
+
+
+def _suggest_implementation_files(sources: list, mentions: list[str]) -> list[str]:
+    names = {_normalize_source_key(item) for item in mentions}
+    for source in sources:
+        for value in (getattr(source, "id", ""), getattr(source, "locator", ""), getattr(source, "title", "")):
+            key = _normalize_source_key(str(value))
+            if key:
+                names.add(key)
+    suggestions: list[str] = []
+    if any("core\\operator_intent.py" in name or "operator_intent.py" == name for name in names):
+        suggestions.append("core/operator_intent.py - route source-review and implementation-plan language")
+    if any("main.py" in name for name in names):
+        suggestions.append("main.py - dispatch the operator source-review plan command")
+    if any("test" in name for name in names) or suggestions:
+        suggestions.append("tests/test_operator_intent.py - routing regressions")
+        suggestions.append("tests/test_cli.py - command/handler regressions")
+    if not suggestions:
+        suggestions.append("Use explicit multi-file review mode or :ingest-source to inspect the relevant files before patching.")
+    return suggestions
 
 
 def _handle_ingest_web(rest: str, agent: AgentLoop, workspace: Path) -> bool:
@@ -1680,10 +1941,16 @@ def handle_conversational_operator_input(text: str, agent: AgentLoop, workspace:
         f"(operator intent: {intent.kind}; internal={intent.command})",
         file=sys.stderr,
     )
-    return _dispatch_operator_intent(intent, agent, workspace)
+    return _dispatch_operator_intent(intent, agent, workspace, original_text=text)
 
 
-def _dispatch_operator_intent(intent: OperatorIntent, agent: AgentLoop, workspace: Path) -> bool:
+def _dispatch_operator_intent(
+    intent: OperatorIntent,
+    agent: AgentLoop,
+    workspace: Path,
+    *,
+    original_text: str = "",
+) -> bool:
     if intent.kind == "project_health":
         return _handle_operator_check("", agent, workspace)
     if intent.kind == "model_status":
@@ -1698,6 +1965,8 @@ def _dispatch_operator_intent(intent: OperatorIntent, agent: AgentLoop, workspac
         return _handle_next_actions("", agent, workspace)
     if intent.kind == "autonomy_readiness":
         return _handle_autonomy_readiness("", agent, workspace)
+    if intent.kind == "source_review_plan":
+        return _handle_source_review_plan(original_text, agent, workspace)
     return False
 
 
@@ -2519,6 +2788,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head in {":source-registry", ":source-status"}:
         return _handle_source_registry(rest.strip(), agent, workspace)
 
+    if head in {":source-review-plan", ":implementation-plan"}:
+        return _handle_source_review_plan(rest.strip(), agent, workspace)
+
     if head == ":ingest-web":
         return _handle_ingest_web(rest.strip(), agent, workspace)
 
@@ -2654,6 +2926,8 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :source-library [group|all]     list curated online source families\n"
             "  :source-registry [flags]        list ingested sources and claim counts\n"
             "      flags: --claims  --limit N  --json\n"
+            "  :source-review-plan <goal>      plan implementation from ingested sources\n"
+            "      flags: --limit N  --json\n"
             "  :ingest-web <topic> [flags]     search/fetch curated web library sources\n"
             "      flags: --sources wikis|books|science|docs|all|id,id  --limit N  --per-source N\n"
             "  :ingest-rss <url> [flags]       fetch RSS/Atom feed entries into Source Registry\n"
@@ -2813,7 +3087,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :learn  :auto-run  :operator-check  :operator-budget  :urgent-status  :next-actions  :autonomy-readiness  :conflicts  :budget-status  :budget-window-status  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :source-registry  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :learn  :auto-run  :operator-check  :operator-budget  :urgent-status  :next-actions  :autonomy-readiness  :conflicts  :budget-status  :budget-window-status  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:

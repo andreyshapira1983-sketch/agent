@@ -20,6 +20,7 @@ OperatorIntentKind = Literal[
     "urgent_status",
     "next_actions",
     "autonomy_readiness",
+    "source_review_plan",
 ]
 
 
@@ -48,10 +49,11 @@ def route_operator_intent(text: str) -> OperatorIntent | None:
             reason="shell/powershell command wording",
         )
     if _matches_implementation_or_source_review(normalized):
-        # These are task-planning/evidence requests, not cheap operator status
-        # digests. Let the normal planner path handle them instead of allowing
-        # broad project-health wording to capture the request.
-        return None
+        return OperatorIntent(
+            kind="source_review_plan",
+            command=":source-review-plan",
+            reason="implementation/source-review planning wording",
+        )
     if _matches_project_health(normalized):
         return OperatorIntent(
             kind="project_health",
