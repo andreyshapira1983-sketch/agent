@@ -390,6 +390,35 @@ class TestHandleMetaCommand:
         assert "wikipedia" in out.err
         assert '"groups"' in out.err
 
+    def test_source_registry_command_lists_ingested_sources(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+        registry = SourceRegistry()
+        source = registry.register_source(
+            type="file",
+            title="operator_task_layer_request.md",
+            locator="operator_task_layer_request.md",
+            trust_level=0.9,
+        )
+        registry.register_claim(
+            source_id=source.id,
+            text="Operator Task Layer needs safer routing.",
+            confidence=0.8,
+            status="extracted",
+        )
+        assert agent.source_registry_store is not None
+        agent.source_registry_store.save_registry(registry)
+
+        assert handle_meta_command(":source-registry --claims", agent, workspace) is True
+        assert handle_meta_command(":source-status --json", agent, workspace) is True
+
+        out = capsys.readouterr()
+        assert "source registry" in out.err
+        assert "operator_task_layer_request.md" in out.err
+        assert "claims=1" in out.err
+        assert "Operator Task Layer needs safer routing." in out.err
+        assert '"sources": 1' in out.err
+        assert '"claims": 1' in out.err
+
     def test_ingest_web_fetches_curated_source_into_registry(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
         agent.registry.register(FakeWebSearchTool())
