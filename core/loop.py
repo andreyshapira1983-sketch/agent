@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from typing import Literal as _Literal
@@ -75,6 +76,7 @@ from core.source_ranker import SourceRankingReport, rank_chain
 from core.source_registry import SourceRegistry
 from core.source_registry_store import SourceRegistryStore
 from tools.base import ToolRegistry
+from tools.file_read import MAX_BYTES as FILE_READ_MAX_BYTES
 
 
 # Maps tool names to data_classifier source hints. Drives the per-tool
@@ -468,6 +470,46 @@ class AgentLoop:
         planner_history = (
             f"{persistent_block}\n\n{history}".strip() if persistent_block else history
         )
+        multi_file = self._prepare_multi_file_review(user_question, file_hint=file_hint)
+        if multi_file["kind"] == "refusal":
+            answer = str(multi_file["message"])
+            self.log.log("multi_file_review_refused", multi_file)
+            self.log.log(
+                "respond",
+                {
+                    "chars": len(answer),
+                    "sources": [f"file:{file_hint}"] if file_hint else [],
+                    "redactions": len(self._cycle_findings or []),
+                    "attempts_used": 0,
+                    "replan_exhausted": False,
+                },
+            )
+            if self.memory is not None:
+                turn = self.memory.record_turn(
+                    question=user_question,
+                    planner_reasoning="kernel multi-file review refusal",
+                    tools_used=[],
+                    artifact_labels=[],
+                    answer=answer,
+                )
+                self.log.log(
+                    "memory_write",
+                    {
+                        "session_id": self.memory.session_id,
+                        "turn_id": turn.id,
+                        "turn_index": turn.index,
+                        "tools_used": turn.tools_used,
+                        "labels": turn.artifact_labels,
+                    },
+                )
+            return answer
+        forced_sources = (
+            list(multi_file["sources"])
+            if multi_file["kind"] == "forced"
+            else None
+        )
+        forced_reasoning = str(multi_file.get("reasoning") or "")
+        forced_warnings = list(multi_file.get("warnings") or [])
 
         # 3. Plan + 4. Act + 5. Observe Result + 6. Verify, wrapped in a
         # bounded re-planning loop. On every iteration:
@@ -523,18 +565,26 @@ class AgentLoop:
                 forbidden_actions=forbidden_actions,
             )
 
-            planner_out = self.planner.plan(
-                question=user_question,
-                file_hint=file_hint,
-                history=planner_history,
-                failure_context=failure_context,
-                forbidden_actions=forbidden_actions,
-            )
-            planner_out = self._force_file_hint_read_when_explicit(
-                planner_out,
-                question=user_question,
-                file_hint=file_hint,
-            )
+            if attempt == 1 and forced_sources is not None:
+                planner_out = PlannerOutput(
+                    reasoning=forced_reasoning,
+                    sources=forced_sources,
+                    raw_response="",
+                    warnings=forced_warnings,
+                )
+            else:
+                planner_out = self.planner.plan(
+                    question=user_question,
+                    file_hint=file_hint,
+                    history=planner_history,
+                    failure_context=failure_context,
+                    forbidden_actions=forbidden_actions,
+                )
+                planner_out = self._force_file_hint_read_when_explicit(
+                    planner_out,
+                    question=user_question,
+                    file_hint=file_hint,
+                )
             self.log.log(
                 "planner",
                 {
@@ -1651,6 +1701,211 @@ class AgentLoop:
             "arguments": {"path": file_hint},
             "label": f"file:{file_hint}",
             "expected_outcome": "Non-empty UTF-8 text from the hinted file.",
+        }
+
+    def _prepare_multi_file_review(
+        self,
+        question: str,
+        *,
+        file_hint: str | None,
+    ) -> dict[str, Any]:
+        requested_paths = self._extract_path_mentions(question)
+        if len(requested_paths) < 2 or not self._is_file_review_request(question):
+            return {"kind": "none"}
+
+        explicit_mode = self._is_explicit_multi_file_mode(question)
+        if file_hint and not explicit_mode:
+            hint_norm = self._normalize_path_mention(file_hint)
+            extra_paths = [
+                path
+                for path in requested_paths
+                if self._normalize_path_mention(path) != hint_norm
+            ]
+            if extra_paths:
+                available = file_hint
+                extras = ", ".join(extra_paths)
+                return {
+                    "kind": "refusal",
+                    "message": (
+                        "Regular --file mode only permits the hinted file. "
+                        f"Available evidence: {available}. "
+                        f"Requested additional files were not reviewed: {extras}. "
+                        "Use :ingest-source for additional files or explicit "
+                        "multi-file review mode."
+                    ),
+                    "requested_paths": requested_paths,
+                    "file_hint": file_hint,
+                    "extra_paths": extra_paths,
+                }
+            return {"kind": "none"}
+
+        if not explicit_mode and file_hint:
+            return {"kind": "none"}
+        if not explicit_mode and not self._looks_like_multi_file_review_without_hint(question):
+            return {"kind": "none"}
+
+        root = self._file_read_workspace_root()
+        if root is None:
+            return {
+                "kind": "refusal",
+                "message": (
+                    "Multi-file review is unavailable because file_read is not "
+                    "registered in this agent session."
+                ),
+                "requested_paths": requested_paths,
+            }
+
+        valid_sources: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        seen_targets: set[str] = set()
+        rejected: list[dict[str, str]] = []
+        for raw_path in requested_paths:
+            item = self._validate_user_file_path(raw_path, workspace=root)
+            if item["ok"] is not True:
+                rejected.append({
+                    "path": raw_path,
+                    "reason": str(item["reason"]),
+                })
+                warnings.append(f"{raw_path}: {item['reason']}")
+                continue
+            target_key = str(item["target"]).casefold()
+            if target_key in seen_targets:
+                warnings.append(f"{raw_path}: duplicate path skipped")
+                continue
+            seen_targets.add(target_key)
+            rel_path = str(item["relative_path"])
+            valid_sources.append({
+                "tool": "file_read",
+                "arguments": {"path": rel_path},
+                "label": f"file:{rel_path}",
+                "expected_outcome": "Non-empty UTF-8 text from the explicitly mentioned file.",
+            })
+
+        if not valid_sources:
+            details = "; ".join(
+                f"{item['path']}: {item['reason']}" for item in rejected
+            ) or "no valid files were mentioned"
+            return {
+                "kind": "refusal",
+                "message": (
+                    "Multi-file review could not start because no valid "
+                    f"workspace files passed preflight. {details}."
+                ),
+                "requested_paths": requested_paths,
+                "rejected": rejected,
+            }
+
+        self.log.log(
+            "multi_file_review_preflight",
+            {
+                "requested_paths": requested_paths,
+                "accepted_paths": [src["arguments"]["path"] for src in valid_sources],
+                "rejected": rejected,
+                "warnings": warnings,
+            },
+        )
+        return {
+            "kind": "forced",
+            "sources": valid_sources,
+            "warnings": warnings,
+            "rejected": rejected,
+            "reasoning": (
+                "Kernel explicit multi-file review: read only the user-mentioned "
+                "workspace files that passed strict path preflight. "
+                + ("Rejected/skipped: " + "; ".join(warnings) if warnings else "")
+            ),
+        }
+
+    @staticmethod
+    def _is_file_review_request(question: str) -> bool:
+        text = " ".join(question.casefold().split())
+        return any(
+            term in text
+            for term in (
+                "review",
+                "read",
+                "compare",
+                "check",
+                "проверь",
+                "проверить",
+                "прочитай",
+                "прочти",
+                "прочитать",
+                "сравни",
+                "сравнить",
+                "проанализируй",
+                "анализ",
+            )
+        )
+
+    @staticmethod
+    def _is_explicit_multi_file_mode(question: str) -> bool:
+        text = " ".join(question.casefold().split())
+        return any(
+            term in text
+            for term in (
+                "explicit multi-file",
+                "multi-file review",
+                "multi file review",
+                "multi-file read",
+                "multi file read",
+                "режим нескольких файлов",
+                "несколько файлов",
+                "многофайлов",
+            )
+        )
+
+    @staticmethod
+    def _looks_like_multi_file_review_without_hint(question: str) -> bool:
+        text = " ".join(question.casefold().split())
+        return any(
+            term in text
+            for term in (
+                "сравни",
+                "сравнить",
+                "compare",
+                "review these files",
+                "read these files",
+            )
+        )
+
+    def _file_read_workspace_root(self) -> Path | None:
+        try:
+            tool = self.registry.get("file_read")
+        except KeyError:
+            return None
+        root = getattr(tool, "workspace_root", None)
+        if root is None:
+            return None
+        return Path(root).resolve()
+
+    def _validate_user_file_path(self, raw_path: str, *, workspace: Path) -> dict[str, Any]:
+        cleaned = raw_path.strip().strip("\"'")
+        path = Path(cleaned)
+        if any(part == ".." for part in path.parts):
+            return {"ok": False, "reason": "path traversal is not allowed"}
+        target = path.resolve() if path.is_absolute() else (workspace / path).resolve()
+        try:
+            target.relative_to(workspace)
+        except ValueError:
+            return {"ok": False, "reason": "absolute path escapes workspace"}
+        if not target.exists():
+            return {"ok": False, "reason": "missing file"}
+        if target.is_dir():
+            return {"ok": False, "reason": "directories require explicit ingestion command"}
+        if not target.is_file():
+            return {"ok": False, "reason": "not a regular file"}
+        size = target.stat().st_size
+        if size > FILE_READ_MAX_BYTES:
+            return {
+                "ok": False,
+                "reason": f"file too large ({size} bytes > {FILE_READ_MAX_BYTES})",
+            }
+        rel_path = target.relative_to(workspace)
+        return {
+            "ok": True,
+            "target": target,
+            "relative_path": rel_path,
         }
 
     def _execute_step(self, step: PlanStep) -> dict[str, Any] | None:

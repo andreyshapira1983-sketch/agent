@@ -120,3 +120,145 @@ def test_file_scope_notice_separates_requested_path_from_actual_hint(workspace: 
 
     assert "Evidence scope: I only have evidence for .\\operator_task_layer_request.md." in answer
     assert "I did not verify .\\docs\\operator_task_layer_request.md." in answer
+
+
+def test_regular_file_hint_mode_refuses_multi_file_review(workspace: Path):
+    (workspace / "a.md").write_text("A", encoding="utf-8")
+    (workspace / "main.py").write_text("print('main')", encoding="utf-8")
+    (workspace / "core").mkdir()
+    (workspace / "core" / "operator_intent.py").write_text("ROUTES = {}", encoding="utf-8")
+    agent, planner, log_path = _agent(
+        workspace,
+        llm_responses=[],
+        sources=[],
+        memory=WorkingMemory(),
+    )
+
+    answer = agent.run(
+        r"Проверь .\a.md, .\main.py и .\core\operator_intent.py.",
+        file_hint=r".\a.md",
+    )
+
+    events = _events(log_path)
+    assert "Regular --file mode only permits the hinted file." in answer
+    assert r"Available evidence: .\a.md." in answer
+    assert r".\main.py" in answer
+    assert r".\core\operator_intent.py" in answer
+    assert "were not reviewed" in answer
+    assert planner.calls == []
+    assert agent.llm.calls == []
+    assert not [event for event in events if event["event"] == "memory_cache_hit"]
+    assert not [event for event in events if event["event"] == "tool_call"]
+
+
+def test_explicit_multi_file_review_reads_two_valid_relative_files(workspace: Path):
+    (workspace / "a.md").write_text("Alpha file.", encoding="utf-8")
+    (workspace / "b.md").write_text("Beta file.", encoding="utf-8")
+    agent, planner, log_path = _agent(
+        workspace,
+        llm_responses=[
+            "Conclusion: Alpha and Beta were reviewed [file:a.md] [file:b.md]."
+        ],
+        sources=[],
+    )
+
+    answer = agent.run(
+        r"Use explicit multi-file review mode: read .\a.md and .\b.md.",
+        file_hint=None,
+    )
+
+    events = _events(log_path)
+    assert planner.calls == []
+    assert "[verified:file:a.md]" in answer
+    assert "[verified:file:b.md]" in answer
+    assert {ev.source_id for ev in agent.last_provenance.evidences} == {
+        "file:a.md",
+        "file:b.md",
+    }
+    tool_names = [
+        event["payload"]["tool_name"]
+        for event in events
+        if event["event"] == "tool_call"
+    ]
+    assert tool_names == ["file_read", "file_read"]
+
+
+def test_multi_file_review_rejects_path_traversal_without_llm(workspace: Path):
+    agent, planner, _ = _agent(
+        workspace,
+        llm_responses=[],
+        sources=[],
+    )
+
+    answer = agent.run(
+        r"Use explicit multi-file review mode: read ..\secret.txt and ..\other.md.",
+        file_hint=None,
+    )
+
+    assert "Multi-file review could not start" in answer
+    assert "path traversal is not allowed" in answer
+    assert planner.calls == []
+    assert agent.llm.calls == []
+
+
+def test_multi_file_review_rejects_absolute_outside_workspace(workspace: Path):
+    (workspace / "a.md").write_text("Alpha file.", encoding="utf-8")
+    outside = workspace.parent / "outside.md"
+    outside.write_text("outside", encoding="utf-8")
+    agent, _, _ = _agent(
+        workspace,
+        llm_responses=["Conclusion: only Alpha was reviewed [file:a.md]."],
+        sources=[],
+    )
+
+    answer = agent.run(
+        f"Use explicit multi-file review mode: read .\\a.md and {outside}.",
+        file_hint=None,
+    )
+
+    assert "[verified:file:a.md]" in answer
+    assert f"I did not verify {outside}." in answer
+    assert {ev.source_id for ev in agent.last_provenance.evidences} == {"file:a.md"}
+
+
+def test_multi_file_review_dedupes_duplicate_paths(workspace: Path):
+    (workspace / "a.md").write_text("Alpha file.", encoding="utf-8")
+    agent, _, log_path = _agent(
+        workspace,
+        llm_responses=["Conclusion: Alpha was reviewed [file:a.md]."],
+        sources=[],
+    )
+
+    answer = agent.run(
+        r"Use explicit multi-file review mode: read .\a.md and a.md.",
+        file_hint=None,
+    )
+
+    events = _events(log_path)
+    file_reads = [
+        event for event in events
+        if event["event"] == "tool_call"
+        and event["payload"]["tool_name"] == "file_read"
+    ]
+    assert len(file_reads) == 1
+    assert "[verified:file:a.md]" in answer
+
+
+def test_multi_file_review_reports_missing_files_without_replan_waste(workspace: Path):
+    agent, planner, log_path = _agent(
+        workspace,
+        llm_responses=[],
+        sources=[],
+    )
+
+    answer = agent.run(
+        r"Use explicit multi-file review mode: read .\missing.md and .\absent.md.",
+        file_hint=None,
+    )
+
+    events = _events(log_path)
+    assert "Multi-file review could not start" in answer
+    assert "missing file" in answer
+    assert planner.calls == []
+    assert agent.llm.calls == []
+    assert not [event for event in events if event["event"] == "replan"]
