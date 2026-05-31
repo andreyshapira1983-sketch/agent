@@ -119,6 +119,7 @@ from core.source_connectors import (
 )
 from core.source_registry_store import SourceRegistryStore
 from core.source_library import list_source_library, source_library_payload
+from core.state_store_drill import run_state_store_drill
 from core.supply_chain import audit_supply_chain
 from core.task_queue import TaskQueueStore
 from core.team_executor import TeamBudget, TeamExecutor
@@ -2333,6 +2334,21 @@ def _handle_budget_window_status(rest: str, agent: AgentLoop) -> bool:
     return True
 
 
+def _handle_state_store_drill(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    tokens = _split_meta_args(rest)
+    as_json = "--json" in tokens
+    if any(token != "--json" for token in tokens):
+        print("Usage: :state-store-drill [--json]", file=sys.stderr)
+        return True
+    report = run_state_store_drill(workspace)
+    agent.log.log("state_store_recovery_drill", report.to_dict())
+    if as_json:
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(report.user_summary(), file=sys.stderr)
+    return True
+
+
 def _handle_release_audit(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     tokens = _split_meta_args(rest)
     as_json = "--json" in tokens
@@ -3107,6 +3123,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head in {":budget-window-status", ":budget-windows", ":budget-ledger"}:
         return _handle_budget_window_status(rest.strip(), agent)
 
+    if head in {":state-store-drill", ":state-drill", ":state-recovery-drill"}:
+        return _handle_state_store_drill(rest.strip(), agent, workspace)
+
     if head in {":release-audit", ":release-hygiene"}:
         return _handle_release_audit(rest.strip(), agent, workspace)
 
@@ -3218,6 +3237,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :conflicts [--limit N|--json]   inspect source claim conflicts and suggestions\n"
             "  :budget-status                  inspect default autonomous runtime budgets\n"
             "  :budget-window-status [--json] inspect persistent hour/day budget windows\n"
+            "  :state-store-drill [--json]    prove JSONL quarantine/recovery on an isolated file\n"
             "  :release-audit [--json]         inspect release artifact hygiene exclusions\n"
             "  :supply-chain-audit [--json]   inspect pinned deps and CI release gates\n"
             "  :approval-list [status|all]     list pending/approved/denied approval items\n"
@@ -3350,7 +3370,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :learn  :auto-run  :operator-check  :operator-budget  :urgent-status  :next-actions  :autonomy-readiness  :operator-task  :conflicts  :budget-status  :budget-window-status  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :learn  :auto-run  :operator-check  :operator-budget  :urgent-status  :next-actions  :autonomy-readiness  :operator-task  :conflicts  :budget-status  :budget-window-status  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:

@@ -836,6 +836,8 @@ class TestHandleMetaCommand:
         assert handle_meta_command(":budget-status", agent, workspace) is True
         assert handle_meta_command(":budget-window-status", agent, workspace) is True
         assert handle_meta_command(":budget-window-status --json", agent, workspace) is True
+        assert handle_meta_command(":state-store-drill", agent, workspace) is True
+        assert handle_meta_command(":state-store-drill --json", agent, workspace) is True
         assert handle_meta_command(":release-audit", agent, workspace) is True
         assert handle_meta_command(":supply-chain-audit", agent, workspace) is True
         assert handle_meta_command(":queue-status", agent, workspace) is True
@@ -844,6 +846,8 @@ class TestHandleMetaCommand:
         out = capsys.readouterr()
         assert "autonomous budget defaults" in out.err
         assert "persistent budget ledger is not enabled" in out.err
+        assert "state-store recovery drill" in out.err
+        assert "status=passed" in out.err
         assert "release hygiene" in out.err
         assert "supply-chain audit" in out.err
         assert "runtime task queue" in out.err
