@@ -17,11 +17,11 @@ both PII and secret markers, it returns `secret` (the strictest class).
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
 
+from core.dlp import pii_markers
 from core.secret_scanner import contains_secret
 
 
@@ -35,25 +35,6 @@ class DataClass(str, Enum):
 # Source hints carry the provenance of the text. They decide the default
 # class when no stronger evidence (secret / PII) is found.
 SourceHint = Literal["file", "web", "cli", "memory", "tool_output", "unknown"]
-
-
-# PII heuristics. Tight enough to avoid false positives on technical text.
-_EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]{2,}\b")
-_SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
-# International phone numbers tend to false-positive on version strings /
-# IDs, so we require a leading `+` for phone detection.
-_PHONE_RE = re.compile(r"\+\d[\d\s\-()]{7,}\d")
-
-
-def _has_pii(text: str) -> list[str]:
-    hits: list[str] = []
-    if _EMAIL_RE.search(text):
-        hits.append("email")
-    if _SSN_RE.search(text):
-        hits.append("ssn")
-    if _PHONE_RE.search(text):
-        hits.append("phone")
-    return hits
 
 
 @dataclass(frozen=True)
@@ -99,7 +80,7 @@ def classify(text: str, source: SourceHint = "unknown") -> ClassificationResult:
             source=source,
         )
 
-    pii = _has_pii(text)
+    pii = pii_markers(text)
     if pii:
         reasons.append(f"PII markers: {pii}")
         return ClassificationResult(

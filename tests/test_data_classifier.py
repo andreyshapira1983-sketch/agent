@@ -39,6 +39,11 @@ class TestSensitivePII:
         assert r.cls is DataClass.SENSITIVE
         assert any("PII markers" in reason for reason in r.reasons)
 
+    def test_multiple_pii_markers_are_reported_once(self):
+        r = classify("Email a@example.com and b@example.com or +1 415 555 1234")
+        assert r.cls is DataClass.SENSITIVE
+        assert "PII markers: ['email', 'phone']" in r.reasons
+
 
 class TestSourceDefaults:
     def test_clean_web_is_public(self):

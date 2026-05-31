@@ -27,6 +27,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Iterable, Literal
 
+from core.dlp import contains_pii
 from core.models import MemoryRecord
 from core.secret_scanner import contains_secret
 # Imported lazily inside `decide` to avoid an import cycle when
@@ -52,6 +53,7 @@ FIRST_PARTY_OWNERS: frozenset[str] = frozenset({"self", "user", "session"})
 # Cross-owner consent tag: required when owner is third-party. Without it
 # the agent is not allowed to persist data belonging to another person.
 CROSS_OWNER_CONSENT_TAG = "cross-owner-consent"
+SENSITIVE_DATA_CONSENT_TAG = "sensitive-data-consent"
 
 MIN_CONTENT_LEN = 4
 MAX_CONTENT_LEN = 4_000
@@ -108,6 +110,17 @@ class MemoryWritePolicy:
         is_secret, secret_reasons = contains_secret(text)
         if is_secret:
             return MemoryWriteDecision("reject", secret_reasons)
+
+        has_pii, pii_reasons = contains_pii(text)
+        if has_pii and SENSITIVE_DATA_CONSENT_TAG not in tags_set:
+            return MemoryWriteDecision(
+                "reject",
+                pii_reasons
+                + [
+                    "sensitive data requires explicit "
+                    f"'{SENSITIVE_DATA_CONSENT_TAG}' tag"
+                ],
+            )
 
         if _TOOL_DUMP_HINT.search(text):
             return MemoryWriteDecision(
@@ -174,6 +187,9 @@ class MemoryWritePolicy:
         reasons.append(f"owner={owner}")
         if tags_set:
             reasons.append(f"tags={sorted(tags_set)}")
+        if has_pii:
+            reasons.extend(pii_reasons)
+            reasons.append("sensitive data will be stored redacted")
         return MemoryWriteDecision("save", reasons)
 
 

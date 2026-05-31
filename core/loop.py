@@ -60,7 +60,12 @@ from core.output_policy import apply_ranker_output_policy
 from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner, PlannerOutput
 from core.policy import PolicyGate
-from core.redaction import redact_payload, redact_text, scan
+from core.redaction import (
+    collect_pii_findings,
+    redact_dlp_text,
+    redact_payload,
+    scan,
+)
 from core.model_router import ModelRole, ModelRouter
 from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult
 from core.knowledge_use_policy import KnowledgeUsePolicy
@@ -401,6 +406,21 @@ class AgentLoop:
             kinds = sorted({f.kind for f in q_findings})
             self.log.log(
                 "secret_detected",
+                {
+                    "label": "user_question",
+                    "kinds": kinds,
+                    "count": len(q_findings),
+                    "surface": "user_input",
+                },
+            )
+            self._cycle_findings.append(
+                {"label": "user_question", "kinds": kinds, "count": len(q_findings)}
+            )
+        elif q_cls.cls == DataClass.SENSITIVE:
+            q_findings = collect_pii_findings(user_question)
+            kinds = sorted({f"pii-{f.kind}" for f in q_findings})
+            self.log.log(
+                "sensitive_detected",
                 {
                     "label": "user_question",
                     "kinds": kinds,
@@ -1011,8 +1031,8 @@ class AgentLoop:
             self.log.log("output_policy", policy_result.to_log_payload())
 
         # Defence-in-depth: redact once more on the way out so even an
-        # LLM hallucinating a credential cannot bypass the kernel.
-        safe_answer, answer_findings = redact_text(answer)
+        # LLM hallucinating a credential or PII cannot bypass the kernel.
+        safe_answer, answer_findings, answer_pii_findings = redact_dlp_text(answer)
         if answer_findings:
             self.log.log(
                 "secret_detected",
@@ -1020,6 +1040,17 @@ class AgentLoop:
                     "label": "final_answer",
                     "kinds": sorted({f.kind for f in answer_findings}),
                     "count": len(answer_findings),
+                    "surface": "user_output",
+                },
+            )
+        if answer_pii_findings:
+            pii_kinds = sorted({f"pii-{f.kind}" for f in answer_pii_findings})
+            self.log.log(
+                "sensitive_detected",
+                {
+                    "label": "final_answer",
+                    "kinds": pii_kinds,
+                    "count": len(answer_pii_findings),
                     "surface": "user_output",
                 },
             )
@@ -1124,9 +1155,21 @@ class AgentLoop:
             )
             return decision, None
 
+        safe_content, _secret_findings, pii_findings = redact_dlp_text(content.strip())
+        if pii_findings:
+            self.log.log(
+                "sensitive_detected",
+                {
+                    "label": "persistent_memory_candidate",
+                    "kinds": sorted({f"pii-{f.kind}" for f in pii_findings}),
+                    "count": len(pii_findings),
+                    "surface": "persistent_memory",
+                },
+            )
+
         record = MemoryRecord(
             type=record_type,  # type: ignore[arg-type]
-            content=content.strip(),
+            content=safe_content.strip(),
             tags=tags,
             owner=owner,
         )
@@ -1795,6 +1838,23 @@ class AgentLoop:
                 self._cycle_findings.append(
                     {"label": source_label, "kinds": kinds, "count": len(findings)}
                 )
+        elif cls_result.cls == DataClass.SENSITIVE:
+            findings = collect_pii_findings(flat_output)
+            kinds = sorted({f"pii-{f.kind}" for f in findings})
+            self.log.log(
+                "sensitive_detected",
+                {
+                    "label": source_label,
+                    "tool": action.tool_name,
+                    "kinds": kinds,
+                    "count": len(findings),
+                    "surface": "tool_output",
+                },
+            )
+            if self._cycle_findings is not None:
+                self._cycle_findings.append(
+                    {"label": source_label, "kinds": kinds, "count": len(findings)}
+                )
 
         safe_output = redact_payload(result.output)
 
@@ -2009,9 +2069,9 @@ class AgentLoop:
             lines.append("</failure_context>")
             failure_block = "\n".join(lines) + "\n\n"
 
-        # The question travels into the LLM prompt verbatim; redact any
-        # credential the user pasted in.
-        safe_question, _q_findings = redact_text(question)
+        # The question travels into the LLM prompt; redact any credential
+        # or sensitive PII the user pasted in.
+        safe_question, _q_findings, _q_pii_findings = redact_dlp_text(question)
 
         if artifacts:
             blocks: list[str] = []
@@ -2083,8 +2143,8 @@ class AgentLoop:
 
         # Defence-in-depth: the prompt is now built from redacted artifacts
         # and a redacted question. One more pass catches anything we missed
-        # (e.g. a secret hiding in planner_reasoning).
-        safe_user_prompt, _ = redact_text(user_prompt)
+        # (e.g. a secret or PII hiding in planner_reasoning).
+        safe_user_prompt, _secret_findings, _pii_findings = redact_dlp_text(user_prompt)
         return self.llm.complete(system=SYSTEM_ANSWER, user=safe_user_prompt, temperature=0.5)
 
     @staticmethod

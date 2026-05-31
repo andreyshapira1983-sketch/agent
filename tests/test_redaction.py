@@ -8,7 +8,7 @@ Integration with logger / LLM / loop is exercised in `test_safety_integration.py
 """
 from __future__ import annotations
 
-from core.redaction import redact_payload, redact_text
+from core.redaction import redact_dlp_text, redact_payload, redact_text
 
 
 # ============================================================
@@ -71,6 +71,24 @@ class TestRedactText:
         assert redact_text(None) == (None, [])  # type: ignore[arg-type]
 
 
+class TestRedactDlpText:
+    def test_masks_pii_without_classifying_it_as_secret(self):
+        out, secrets, pii = redact_dlp_text("Contact andre@example.com")
+        assert "andre@example.com" not in out
+        assert "[REDACTED:pii-email]" in out
+        assert secrets == []
+        assert [finding.kind for finding in pii] == ["email"]
+
+    def test_masks_secret_and_pii_together(self):
+        text = "Email andre@example.com with key sk-abcdefghijklmnopqrstuvwxyz0123"
+        out, secrets, pii = redact_dlp_text(text)
+        assert "andre@example.com" not in out
+        assert "sk-abcdefghijklmnopqrstuvwxyz0123" not in out
+        assert "[REDACTED:pii-email]" in out
+        assert any(f.kind == "openai-key" for f in secrets)
+        assert any(f.kind == "email" for f in pii)
+
+
 # ============================================================
 # redact_payload (deep)
 # ============================================================
@@ -117,3 +135,10 @@ class TestRedactPayload:
         out = redact_payload({"api_key": "ghp_aaaaaaaaaaaaaaaaaaaaXXX"})
         assert "api_key" in out
         assert "[REDACTED" in out["api_key"]
+
+    def test_sensitive_pii_values_are_redacted(self):
+        out = redact_payload({"contact": "andre@example.com", "phone": "+1 415 555 1234"})
+        assert "andre@example.com" not in str(out)
+        assert "+1 415" not in str(out)
+        assert out["contact"] == "[REDACTED:pii-email]"
+        assert out["phone"] == "[REDACTED:pii-phone]"

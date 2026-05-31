@@ -271,11 +271,10 @@ class LLMPlanner:
         user_prompt = self._build_user_prompt(
             question, file_hint, history, failure_context
         )
-        # Kernel-side defense: redact any credential shape before it can
-        # reach the LLM provider. If the prompt cleanly contains no
-        # secrets, redaction is a no-op.
-        from core.redaction import redact_text  # local import: avoid cycles
-        safe_prompt, _findings = redact_text(user_prompt)
+        # Kernel-side defense: redact credentials and sensitive PII before
+        # either can reach the LLM provider. Clean prompts pass through.
+        from core.redaction import redact_dlp_text  # local import: avoid cycles
+        safe_prompt, _secret_findings, _pii_findings = redact_dlp_text(user_prompt)
         raw = self.llm.complete(
             system=PLANNER_SYSTEM,
             user=safe_prompt,

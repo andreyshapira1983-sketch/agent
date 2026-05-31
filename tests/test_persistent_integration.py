@@ -107,6 +107,35 @@ class TestRememberSaves:
         assert writes[0]["payload"]["decision"] == "save"
         assert writes[0]["payload"]["record_id"] == record.id
 
+    def test_sensitive_record_is_saved_redacted_with_explicit_consent(
+        self, workspace: Path
+    ):
+        path = workspace / "data" / "mem.jsonl"
+        agent, store, log_path = _build_agent(workspace, FakeLLM(), path)
+
+        decision, record = agent.remember(
+            content="User email is andre@example.com.",
+            tags=["fact", "sensitive-data-consent"],
+            source="user-explicit",
+        )
+
+        assert decision.decision == "save"
+        assert record is not None
+        assert "andre@example.com" not in str(record.content)
+        assert record.content == "User email is [REDACTED:pii-email]."
+
+        raw_disk = path.read_text(encoding="utf-8")
+        assert "andre@example.com" not in raw_disk
+        assert "[REDACTED:pii-email]" in raw_disk
+        assert store.load()[0].content == "User email is [REDACTED:pii-email]."
+
+        events = _events(log_path)
+        assert any(
+            e["event"] == "sensitive_detected"
+            and e["payload"]["surface"] == "persistent_memory"
+            for e in events
+        )
+
 
 # ============================================================
 # Acceptance #2: a fresh session reads records the previous one wrote
@@ -175,6 +204,26 @@ class TestRememberRejects:
         assert decision.decision == "reject"
         assert record is None
         assert store.count() == 0
+
+    def test_sensitive_without_explicit_sensitive_consent_no_disk_write(
+        self, workspace: Path
+    ):
+        path = workspace / "data" / "mem.jsonl"
+        agent, store, log_path = _build_agent(workspace, FakeLLM(), path)
+
+        decision, record = agent.remember(
+            content="User email is andre@example.com.",
+            tags=["fact"],
+            source="user-explicit",
+        )
+
+        assert decision.decision == "reject"
+        assert record is None
+        assert store.count() == 0
+        assert "andre@example.com" not in log_path.read_text(encoding="utf-8")
+        events = _events(log_path)
+        writes = [e for e in events if e["event"] == "persistent_memory_write"]
+        assert any("sensitive-data-consent" in r for r in writes[0]["payload"]["reasons"])
 
 
 # ============================================================

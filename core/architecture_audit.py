@@ -128,6 +128,15 @@ def _build_checks(workspace: Path) -> list[ArchitectureLayerCheck]:
         ),
         _check(
             workspace,
+            id="dlp_sensitive_data_boundary",
+            title="DLP Sensitive Data Boundary",
+            evidence=("core/dlp.py", "core/redaction.py", "core/data_classifier.py", "core/memory_policy.py"),
+            tests=("tests/test_dlp.py", "tests/test_redaction.py", "tests/test_logger.py", "tests/test_safety_integration.py", "tests/test_memory_policy.py"),
+            summary="PII is classified as sensitive, redacted at logs/prompts/output, and blocked or redacted before memory persistence.",
+            next_step="Add purpose/retention metadata and external DLP egress policy later.",
+        ),
+        _check(
+            workspace,
             id="evidence_truth_pipeline",
             title="Evidence / Source Ranker / Conflict Resolver / Output Policy",
             evidence=("core/evidence.py", "core/source_ranker.py", "core/conflict_review.py", "core/output_policy.py"),

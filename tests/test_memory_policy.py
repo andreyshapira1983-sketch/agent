@@ -49,6 +49,17 @@ class TestWritePolicyAccepts:
         )
         assert d.decision == "save"
 
+    def test_sensitive_data_consent_tag_passes_but_marks_redaction(self):
+        policy = MemoryWritePolicy()
+        d = policy.decide(
+            content="Contact email is andre@example.com.",
+            tags=["fact", "sensitive-data-consent"],
+            source="user-explicit",
+        )
+        assert d.decision == "save"
+        assert any("PII markers" in r for r in d.reasons)
+        assert any("stored redacted" in r for r in d.reasons)
+
 
 # ============================================================
 # Write Policy — rejects: secrets
@@ -87,6 +98,27 @@ class TestWritePolicyRejectsSecrets:
         d = policy.decide(content=phrase, tags=["fact"], source="user-explicit")
         assert d.decision == "reject"
         assert any("secret keyword" in r for r in d.reasons)
+
+
+# ============================================================
+# Write Policy — rejects: sensitive PII without explicit consent
+# ============================================================
+
+class TestWritePolicyRejectsSensitiveData:
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "Email: andre@example.com",
+            "SSN: 123-45-6789",
+            "Phone: +1 415 555 1234",
+        ],
+    )
+    def test_pii_rejected_without_sensitive_consent_tag(self, content):
+        policy = MemoryWritePolicy()
+        d = policy.decide(content=content, tags=["fact"], source="user-explicit")
+        assert d.decision == "reject"
+        assert any("PII markers" in r for r in d.reasons)
+        assert any("sensitive-data-consent" in r for r in d.reasons)
 
 
 # ============================================================

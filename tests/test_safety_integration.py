@@ -200,6 +200,71 @@ class TestSecretInQuestion:
         )
 
 
+class TestSensitivePiiDoesNotLeak:
+    def test_question_with_pii_is_classified_and_never_sent_to_llm(
+        self, workspace: Path
+    ):
+        llm = FakeLLM(responses=[PLAN_EMPTY, SYNTH_PLAIN])
+        agent, _memory, log_path = _build_agent(workspace, llm)
+
+        question = "My email is andre@example.com; what can you do?"
+        answer = agent.run(user_question=question, file_hint=None)
+
+        assert "andre@example.com" not in answer
+        assert "andre@example.com" not in log_path.read_text(encoding="utf-8")
+        for call in llm.calls:
+            assert "andre@example.com" not in call["user"]
+            assert "[REDACTED:pii-email]" in call["user"]
+
+        events = _events(log_path)
+        question_class = next(
+            e for e in events
+            if e["event"] == "data_classified"
+            and e["payload"].get("label") == "user_question"
+        )
+        assert question_class["payload"]["class"] == "sensitive"
+        sensitive_events = [e for e in events if e["event"] == "sensitive_detected"]
+        assert any(
+            e["payload"]["surface"] == "user_input" for e in sensitive_events
+        )
+
+    def test_tool_output_with_pii_is_redacted_before_log_llm_and_memory(
+        self, workspace: Path
+    ):
+        (workspace / "doc.txt").write_text(
+            "Client contact: andre@example.com\n",
+            encoding="utf-8",
+        )
+        llm = FakeLLM(responses=[PLAN_FILE_READ, SYNTH_OK])
+        agent, memory, log_path = _build_agent(workspace, llm, with_memory=True)
+
+        agent.run(user_question="summarise the file", file_hint="doc.txt")
+
+        log_text = log_path.read_text(encoding="utf-8")
+        assert "andre@example.com" not in log_text
+        assert "[REDACTED:pii-email]" in log_text
+        for call in llm.calls:
+            assert "andre@example.com" not in call["user"]
+        assert memory is not None
+        cached = memory.cache_lookup("file_read", {"path": "doc.txt"})
+        assert cached is not None
+        assert "andre@example.com" not in str(cached["output"])
+        assert "[REDACTED:pii-email]" in str(cached["output"])
+
+        events = _events(log_path)
+        tool_classifications = [
+            e for e in events
+            if e["event"] == "data_classified"
+            and e["payload"].get("tool") == "file_read"
+        ]
+        assert tool_classifications[0]["payload"]["class"] == "sensitive"
+        assert any(
+            e["event"] == "sensitive_detected"
+            and e["payload"]["surface"] == "tool_output"
+            for e in events
+        )
+
+
 # ============================================================
 # Defence in depth — LLM-side leak is also caught
 # ============================================================
@@ -232,6 +297,27 @@ class TestLLMHallucinatedLeakIsCaught:
         secret_events = [e for e in events if e["event"] == "secret_detected"]
         assert any(
             e["payload"]["surface"] == "user_output" for e in secret_events
+        )
+
+    def test_llm_echoing_pii_is_still_scrubbed_in_answer(self, workspace: Path):
+        leaking_answer = (
+            "Conclusion: trust me.\n"
+            "Facts:\n- contact andre@example.com [general-knowledge]\n"
+            "Sources:\n1. general-knowledge - general-knowledge\n"
+            "Confidence: medium\nUnverified: nothing\nSafety: nothing\n"
+        )
+        llm = FakeLLM(responses=[PLAN_EMPTY, leaking_answer])
+        agent, _memory, log_path = _build_agent(workspace, llm)
+
+        answer = agent.run(user_question="please be careful", file_hint=None)
+
+        assert "andre@example.com" not in answer
+        assert "[REDACTED:pii-email]" in answer
+        events = _events(log_path)
+        assert any(
+            e["event"] == "sensitive_detected"
+            and e["payload"]["surface"] == "user_output"
+            for e in events
         )
 
 

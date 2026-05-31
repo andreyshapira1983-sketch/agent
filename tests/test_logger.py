@@ -213,6 +213,32 @@ class TestLoggerRedaction:
         assert SECRET not in captured.err
         assert "[REDACTED" in captured.err
 
+    def test_pii_in_payload_is_redacted(self, workspace: Path):
+        logger = TraceLogger(
+            trace_id="pii", log_dir=workspace / "logs", verbose=False
+        )
+        try:
+            logger.log("observe", {"question": "email andre@example.com"})
+        finally:
+            logger.close()
+
+        text = (workspace / "logs" / "pii.jsonl").read_text(encoding="utf-8")
+        assert "andre@example.com" not in text
+        assert "[REDACTED:pii-email]" in text
+
+    def test_pii_pretty_print_to_stderr_is_redacted(self, workspace: Path, capsys):
+        logger = TraceLogger(
+            trace_id="pii_stderr", log_dir=workspace / "logs", verbose=True
+        )
+        try:
+            logger.log("observe", {"question": "phone +1 415 555 1234"})
+        finally:
+            logger.close()
+
+        captured = capsys.readouterr()
+        assert "+1 415" not in captured.err
+        assert "[REDACTED:pii-phone]" in captured.err
+
 
 # ============================================================
 # Event marker dispatch (pretty-print)

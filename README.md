@@ -632,30 +632,33 @@ Three kernel modules, all in `core/`:
 | Module | Job |
 | --- | --- |
 | [`secret_scanner.py`](core/secret_scanner.py) | Single source of truth for credential detection. Regex rules (OpenAI / Anthropic / GitHub / HuggingFace / AWS / Bearer / PEM / `KEY=VALUE` assignments) + keyword rules (`password`, `api_key`, `Authorization:`, …). Every consumer (Memory Write Policy, Redaction, Data Classifier, the loop) asks **this** module — nobody rolls their own patterns. |
-| [`redaction.py`](core/redaction.py) | `redact_text(s) → (safe, findings)` replaces each match with `[REDACTED:<kind>]`. `redact_payload(obj)` deep-walks dicts / lists / tuples for the logger. Handles overlapping matches and preserves shape. |
+| [`dlp.py`](core/dlp.py) | Detects sensitive PII markers (email, SSN, international `+phone`) and returns typed findings for logs, memory and prompt-boundary policy. |
+| [`redaction.py`](core/redaction.py) | `redact_text(s) → (safe, findings)` remains the credential-only primitive. `redact_dlp_text(s)` masks both credentials and PII; `redact_payload(obj)` deep-walks dicts / lists / tuples for the logger. Handles overlapping matches and preserves shape. |
 | [`data_classifier.py`](core/data_classifier.py) | Returns one of `public / private / sensitive / secret` for any text + source hint. SECRET signals beat everything; PII (email / SSN / `+phone`) → SENSITIVE; otherwise per-source default (`web` → public, `file` / `cli` → private). |
 
 **Hard invariants, proven end-to-end by the integration test:**
 
-1. **A raw secret in a `file_read` output never reaches the JSONL trace.**
+1. **A raw secret or sensitive PII in a `file_read` output never reaches the JSONL trace.**
    `TraceLogger` runs every payload (and `extra` kwargs) through
    `redact_payload` BEFORE serialisation. The stderr pretty-print sees
    the same redacted view.
-2. **A raw secret never reaches the LLM.** `LLMPlanner.plan` redacts the
+2. **A raw secret or sensitive PII never reaches the LLM.** `LLMPlanner.plan` redacts the
    `user` prompt; `AgentLoop._synthesize` redacts the synthesizer prompt
    (including the user question + planner reasoning + every evidence
-   block). FakeLLM tests assert no raw secret appears in `system` or
+   block). FakeLLM tests assert no raw secret or PII appears in `system` or
    `user` for any of the recorded calls.
-3. **Even an LLM hallucinating a credential gets scrubbed.** The final
-   answer goes through one more `redact_text` pass on the way out, and
-   the leak attempt is logged as `secret_detected` with
-   `surface=user_output`.
+3. **Even an LLM hallucinating a credential or PII gets scrubbed.** The final
+   answer goes through one more `redact_dlp_text` pass on the way out. Credential
+   leaks are logged as `secret_detected`; PII leaks are logged as
+   `sensitive_detected`, both with `surface=user_output`.
 4. **Working memory caches the REDACTED artifact**, so a cache hit on a
    future turn replays redacted text, not the raw value.
 5. **Persistent memory still refuses to save anything carrying secret
    signals** (regex OR keyword), even with explicit consent. This was
    already true in MVP-5; MVP-7 routes the check through the same
    single source of truth so adding a new pattern propagates everywhere.
+6. **Persistent memory rejects PII unless explicitly tagged with
+   `sensitive-data-consent`, and even then stores only the redacted form.**
 
 **Per-cycle events:**
 ```
@@ -664,6 +667,9 @@ data_classified    one per surface (user_question + each tool output).
 secret_detected    fires whenever the classifier returns SECRET.
                    payload: label, surface (user_input | tool_output | user_output),
                             kinds, count
+sensitive_detected fires whenever PII is found on a protected boundary.
+                   payload: label, surface (user_input | tool_output |
+                            user_output | persistent_memory), kinds, count
 respond            now also reports `redactions` count for the cycle
 ```
 
@@ -689,7 +695,7 @@ redacted N credentials of kind X from surface Y"). Clean cycles render
 **What's still TODO** (deliberately deferred to keep MVP-7 narrow):
 secret-vault integration / rotation, structured `data_owner` field on
 every Action + Observation, `allowed_purpose` and retention TTL fields,
-DLP-style content blocking for `web_search` egress.
+external DLP allow/deny rules for web-search egress.
 
 ## Re-planning (MVP-8)
 
@@ -1184,7 +1190,7 @@ The full acceptance suite is in
 > redaction + classification, argument-aware risk (`risk_for`),
 > a sandboxed reversible/irreversible write tool, a sandboxed
 > whitelisted shell tool with mandatory compensation + rollback,
-> 1508 hermetic tests covering every production module, and
+> 1527 hermetic tests covering every production module, and
 > zero-network determinism. The numbered slots below extend that foundation;
 > they are not the smallest possible thing.
 
@@ -1988,7 +1994,7 @@ A real safety net lives in [`tests/`](tests/) and runs via `pytest`:
 python -m pytest -v
 ```
 
-What is covered today (**1508 tests, ≈ 31 s, zero network calls**):
+What is covered today (**1527 tests, ≈ 30 s, zero network calls**):
 
 | Layer | File | Cases |
 | --- | --- | --- |
@@ -2000,15 +2006,16 @@ What is covered today (**1508 tests, ≈ 31 s, zero network calls**):
 | Working Memory (§4) | [`tests/test_memory.py`](tests/test_memory.py) | record turn / recent N turns / `max_turns` retention / context formatting / `max_context_chars` cap / answer truncation / cache key stability / cache miss / cache hit / per-tool isolation / clear / summary |
 | Full Control Loop | [`tests/test_integration.py`](tests/test_integration.py) | CLI → planner → policy → file_read → verify → response with `[file:...]` citation / no-tools / general-knowledge cycle |
 | Memory in the Loop | [`tests/test_memory_integration.py`](tests/test_memory_integration.py) | `memory_inject` fires only after turn 1 / `memory_cache_hit` short-circuits policy + tool / `memory_clear` resets state / **after `:clear` no `memory_inject`** / **after `:clear` no cache hit (real tool runs again)** / `memory=None` build emits no `memory_*` events |
-| Memory Write + Retrieval Policy (§4 + §12.4) | [`tests/test_memory_policy.py`](tests/test_memory_policy.py) | accept (user-explicit / consent tag / decision tag) / **secret regex reject** (OpenAI / Anthropic / GitHub / HF / AWS / PEM) / secret-keyword reject (`api_key`, `password`, `Authorization:`, …) / empty / too short / too long / tool-dump heuristic / no-consent reject / blocked-tag reject / retrieval: empty store / blank question / keyword pick / `max_records` cap / recency tiebreak / stopword filter / tag-overlap scoring / prompt truncation |
+| Memory Write + Retrieval Policy (§4 + §12.4) | [`tests/test_memory_policy.py`](tests/test_memory_policy.py) | accept (user-explicit / consent tag / decision tag) / **secret regex reject** (OpenAI / Anthropic / GitHub / HF / AWS / PEM) / secret-keyword reject (`api_key`, `password`, `Authorization:`, …) / **PII rejected unless `sensitive-data-consent` is present** / empty / too short / too long / tool-dump heuristic / no-consent reject / blocked-tag reject / retrieval: empty store / blank question / keyword pick / `max_records` cap / recency tiebreak / stopword filter / tag-overlap scoring / prompt truncation |
 | Persistent Store (JSONL) | [`tests/test_persistent_memory.py`](tests/test_persistent_memory.py) | empty-file load / save-then-load round trip / preserved insertion order / `save_many` / **new store instance sees previous records** / delete by id / unknown-id no-op / `delete_all` removes file / corrupted line skipped / blank lines skipped / `get` hit + miss |
-| Persistent in the Loop | [`tests/test_persistent_integration.py`](tests/test_persistent_integration.py) | **`agent.remember()` writes to disk + emits `persistent_memory_write`** / **fresh AgentLoop sees previous session's records** / secret rejected, no disk write / no-consent rejected, no disk write / `list_persistent` returns saved / `forget(id)` removes one + emits delete event / `forget()` wipes all / unknown id reports `deleted=0` / retrieval fires `persistent_memory_inject` and injects `<long_term_memory>` block / no records → no inject event, no block / no keyword overlap → `records_selected=0`, no block / no store wired → zero `persistent_memory_*` events + `remember()` rejects cleanly |
+| Persistent in the Loop | [`tests/test_persistent_integration.py`](tests/test_persistent_integration.py) | **`agent.remember()` writes to disk + emits `persistent_memory_write`** / **fresh AgentLoop sees previous session's records** / secret rejected, no disk write / no-consent rejected, no disk write / **PII without `sensitive-data-consent` rejected; with consent saved only as `[REDACTED:pii-*]`** / `list_persistent` returns saved / `forget(id)` removes one + emits delete event / `forget()` wipes all / unknown id reports `deleted=0` / retrieval fires `persistent_memory_inject` and injects `<long_term_memory>` block / no records → no inject event, no block / no keyword overlap → `records_selected=0`, no block / no store wired → zero `persistent_memory_*` events + `remember()` rejects cleanly |
 | Approval Providers (§7) | [`tests/test_approval.py`](tests/test_approval.py) | `_classify` maps EN/RU yes-tokens → `approve`, no-tokens → `deny`, empty/garbage/None → `abort` / `CLIApprovalProvider`: yes / no / empty / EOF / KeyboardInterrupt / request_id round-trip / `AutoApprover`: parametrised default + records calls |
 | Approval in the Loop (§7 acceptance) | [`tests/test_approval.py`](tests/test_approval.py) | read_only tool → no approval event, runs anyway / **irreversible + approve → tool runs, events ordered policy < request < decision < tool_call** / **irreversible + deny → tool MUST NOT run, `error.code=approval_deny`** / irreversible + abort → tool MUST NOT run, `error.code=approval_abort` / CLI provider with empty input → abort, responder=timeout / CLI provider with garbage input → abort / **no provider wired → tool MUST NOT run, `error.code=approval_unavailable`** / external risk also escalates |
 | Secret Scanner (§7) | [`tests/test_secret_scanner.py`](tests/test_secret_scanner.py) | parametrised regex hits for OpenAI / Anthropic / GitHub / HuggingFace / AWS / Bearer / PEM / `KEY=VALUE` assignment / span consistency / Anthropic-vs-OpenAI disambiguation / case-insensitive keywords / **combined regex+keyword signals both surface in audit reasons** |
-| Redaction (§7) | [`tests/test_redaction.py`](tests/test_redaction.py) | clean text unchanged / known shapes masked with kind labels / credential-assignment masks whole `key=value` span / multiple secrets all masked / overlapping `sk-ant-...` ⊂ `sk-...` matches don't corrupt output / `redact_payload` deep-walks dicts + lists + tuples / scalars untouched / **dict keys are never modified, only values** |
-| Data Classifier (§7) | [`tests/test_data_classifier.py`](tests/test_data_classifier.py) | secret signals win over PII / PII (email / SSN / international phone) → SENSITIVE / source defaults (web→public, file/cli→private, unknown→private) / empty text falls back to source default / result carries source + reasons |
-| Safety in the Loop — **hard invariants** | [`tests/test_safety_integration.py`](tests/test_safety_integration.py) | **secret in file → NEVER in JSONL, NEVER in any LLM call, NEVER in answer, cached artifact is `[REDACTED:openai-key]`** / `data_classified` + `secret_detected(surface=tool_output)` events fired / **secret pasted into the user question → NEVER in JSONL or LLM, `secret_detected(surface=user_input)`** / **LLM hallucinating a credential in its response is still scrubbed in the final answer**, `secret_detected(surface=user_output)` / clean inputs emit zero `secret_detected` / **third-party owner without `cross-owner-consent` is rejected; with the tag is saved; first-party owners (self / user / session, case-insensitive) always pass; default owner is first-party (backward-compat)** |
+| DLP PII Scanner (§7) | [`tests/test_dlp.py`](tests/test_dlp.py) | detects email / SSN / international `+phone`, reports unique sorted markers, and stays silent on normal technical text |
+| Redaction (§7) | [`tests/test_redaction.py`](tests/test_redaction.py) | clean text unchanged / known credential shapes masked with kind labels / credential-assignment masks whole `key=value` span / multiple secrets all masked / overlapping `sk-ant-...` ⊂ `sk-...` matches don't corrupt output / `redact_dlp_text` masks credentials + PII together / `redact_payload` deep-walks dicts + lists + tuples and masks PII values / scalars untouched / **dict keys are never modified, only values** |
+| Data Classifier (§7) | [`tests/test_data_classifier.py`](tests/test_data_classifier.py) | secret signals win over PII / PII (email / SSN / international phone) → SENSITIVE with unique markers / source defaults (web→public, file/cli→private, unknown→private) / empty text falls back to source default / result carries source + reasons |
+| Safety in the Loop — **hard invariants** | [`tests/test_safety_integration.py`](tests/test_safety_integration.py) | **secret in file → NEVER in JSONL, NEVER in any LLM call, NEVER in answer, cached artifact is `[REDACTED:openai-key]`** / **PII in user input or tool output → NEVER in JSONL/LLM/memory cache raw, emits `sensitive_detected`** / `data_classified` + `secret_detected(surface=tool_output)` events fired / **secret pasted into the user question → NEVER in JSONL or LLM, `secret_detected(surface=user_input)`** / **LLM hallucinating a credential or PII is scrubbed on output** / clean inputs emit zero `secret_detected` / **third-party owner without `cross-owner-consent` is rejected; with the tag is saved; first-party owners (self / user / session, case-insensitive) always pass; default owner is first-party (backward-compat)** |
 | Release / Supply-chain guard (§audit) | [`tests/test_release_hygiene.py`](tests/test_release_hygiene.py), [`tests/test_supply_chain.py`](tests/test_supply_chain.py), [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | release manifest excludes `.env`, `.git`, `.venv`, caches, credential/token/key files, `logs/` and `data/`; supply-chain audit requires pinned direct dependencies, `requirements.in`, `requirements.lock` with `sha256` hashes, SBOM sync via `scripts/generate_sbom.py --check`, CI `pip install --require-hashes`, `pip check`, release audit, pytest and branch coverage gate at 85% |
 | Re-planning (§3 / MVP-8) | [`tests/test_replan.py`](tests/test_replan.py) | clean first attempt fires zero `replan` events / 0-step plan is success / **`tool_error` → planner re-invoked → attempt 2 succeeds** / **`verify_failed` → planner re-invoked → attempt 2 succeeds** / **`approval_deny` → irreversible tool never runs, safer read-only tool runs on attempt 2** / **bounded: `max_replan_attempts=3` ⇒ exactly 2 `replan` events + 1 `replan_exhausted`** / `<replan_context>` block carries `attempt`, `code`, `tool`, `reason` for every prior failure / `planner` + `plan` events carry `attempt`, `respond` carries `attempts_used` + `replan_exhausted` / `max_replan_attempts=1` disables replan; `=0` rejected at construction |
 | Re-planning policy (MVP-12 unit) | [`tests/test_replan_policy.py`](tests/test_replan_policy.py) | `FailureBudget`: zero / negative max rejected, default `requires_different_action` correct for every type / `DEFAULT_BUDGETS` covers every `FailureType`, advice non-empty, recoverable types have `>=2` retries / `ReplanPolicy` construction: missing budget rejected, custom budget replaces default / `decide()`: empty history → continue / one `tool_error` → continue with advice / two `tool_error` → `abort_no_retry` / two `web_empty` → exhaust / two `timeout` → exhaust / one `approval_deny` → continue but populates `forbidden_actions` / two `approval_deny` → exhaust / `approval_unavailable` exhausts immediately / `policy_blocked` allows one alternative / `unknown` exhausts immediately / global cap stops before per-type budgets / `completed_attempts=0` rejected / forbidden-action JSON canonicalised (sorted keys) / duplicate forbidden deduped / recoverable failures populate empty forbidden list / un-JSON-able args silently dropped from forbidden / `to_log_payload()` shape pinned / typo `code` → coerced to `unknown` |
@@ -2154,12 +2161,12 @@ agent/
 ├── .github/workflows/ci.yml            # release/supply-chain/test/coverage gate
 ├── pytest.ini                        # pytest config (testpaths + pythonpath)
 ├── main.py                           # CLI entry point (+ :remember / :forget / :memory)
-├── tests/                            # 1508 hermetic tests (FakeLLM + FakePlanner)
+├── tests/                            # 1527 hermetic tests (FakeLLM + FakePlanner)
 │   ├── conftest.py                   # FakeLLM, FakePlanner, workspace fixture
 │   ├── test_ids.py                   # ID factory: 4 cases
 │   ├── test_models.py                # Pydantic Literal guards + defaults: 48 cases
 │   ├── test_llm.py                   # provider routing + mock planner: 23 cases
-│   ├── test_logger.py                # JSONL + redaction in audit log: 13 cases
+│   ├── test_logger.py                # JSONL + redaction in audit log: 15 cases
 │   ├── test_tools_base.py            # Tool.invoke + Registry + default validate_output: 22 cases
 │   ├── test_file_read.py             # tool safety: 7 cases
 │   ├── test_file_write.py            # MVP-9 unit: sandbox + secret + backup + risk_for: 42 cases
@@ -2175,14 +2182,15 @@ agent/
 │   ├── test_memory.py                # WorkingMemory + artifact cache: 14 cases
 │   ├── test_integration.py           # full Control Loop: 2 cases
 │   ├── test_memory_integration.py    # memory_inject / cache_hit / clear: 6 cases
-│   ├── test_memory_policy.py         # write + retrieval policy + owner + MVP-10 dedup gate: 52 cases
+│   ├── test_memory_policy.py         # write + retrieval policy + owner + DLP + MVP-10 dedup gate: 56 cases
 │   ├── test_persistent_memory.py     # JSONL store save/load/delete: 12 cases
-│   ├── test_persistent_integration.py  # :remember/:forget/inject in the loop: 13 cases
+│   ├── test_persistent_integration.py  # :remember/:forget/inject in the loop: 14 cases
 │   ├── test_approval.py              # approval gate (unit + 7 acceptance): 43 cases
 │   ├── test_secret_scanner.py        # regex + keyword detection: 17 cases
-│   ├── test_redaction.py             # redact_text + redact_payload: 14 cases
-│   ├── test_data_classifier.py      # public / private / sensitive / secret: 12 cases
-│   ├── test_safety_integration.py    # hard invariants: secret NEVER leaks: 16 cases
+│   ├── test_dlp.py                   # PII detection and marker reporting: 4 cases
+│   ├── test_redaction.py             # redact_text + redact_dlp_text + redact_payload: 17 cases
+│   ├── test_data_classifier.py       # public / private / sensitive / secret: 14 cases
+│   ├── test_safety_integration.py    # hard invariants: secret/PII NEVER leaks: 11 cases
 │   └── test_replan.py                # bounded re-planning: 11 cases
 ├── core/
 │   ├── __init__.py
@@ -2198,6 +2206,7 @@ agent/
 │   ├── policy.py                     # Policy Gate (§12.4)
 │   ├── approval.py                   # Approval Providers (§7 Human Approval)
 │   ├── secret_scanner.py             # Single source of truth — credential detection (§7)
+│   ├── dlp.py                        # Sensitive PII detection (§7)
 │   ├── redaction.py                  # Universal redactor: text + deep payload (§7)
 │   ├── data_classifier.py            # public / private / sensitive / secret (§7)
 │   ├── planner.py                    # LLM-driven Planner (§3 Cognitive Core) + replan context

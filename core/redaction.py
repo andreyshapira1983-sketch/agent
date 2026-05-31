@@ -1,10 +1,10 @@
 """Universal redaction layer (§7).
 
-Three surfaces MUST never receive raw secrets:
+Three surfaces MUST never receive raw secrets or sensitive PII:
 
   1. JSONL trace logs   — `TraceLogger` runs every payload through `redact_payload`.
-  2. LLM prompts        — `LLMPlanner` and `AgentLoop._synthesize` redact
-                          `user` text before calling `LLM.complete(...)`.
+  2. LLM prompts        — `LLMPlanner` and `AgentLoop._synthesize` run
+                          `redact_dlp_text` before calling `LLM.complete(...)`.
   3. User-facing output — `AgentLoop.run` redacts the final answer string.
 
 The redactor is intentionally NON-reversible: once a secret is replaced
@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.dlp import DlpFinding, pii_replacement, scan_pii
 from core.secret_scanner import SecretFinding, scan
 
 
@@ -63,6 +64,71 @@ def redact_text(text: str) -> tuple[str, list[SecretFinding]]:
     return out, kept
 
 
+def redact_dlp_text(
+    text: str,
+) -> tuple[str, list[SecretFinding], list[DlpFinding]]:
+    """Redact both credentials and sensitive PII from `text`.
+
+    `redact_text` remains the secret-only primitive for compatibility.
+    Boundary surfaces should call this function so email / phone / SSN
+    values do not reach logs, LLM prompts, output, or durable memory raw.
+    """
+    if not isinstance(text, str) or not text:
+        return text, [], []
+
+    secret_findings = scan(text)
+    pii_findings = scan_pii(text)
+    if not secret_findings and not pii_findings:
+        return text, [], []
+
+    replacements: list[tuple[int, int, str, str, Any]] = []
+    for finding in secret_findings:
+        replacements.append(
+            (
+                finding.start,
+                finding.end,
+                _replacement(finding.kind),
+                "secret",
+                finding,
+            )
+        )
+    for finding in pii_findings:
+        replacements.append(
+            (
+                finding.start,
+                finding.end,
+                pii_replacement(finding.kind),
+                "pii",
+                finding,
+            )
+        )
+
+    replacements.sort(key=lambda item: (item[0], -(item[1] - item[0])))
+    kept: list[tuple[int, int, str, str, Any]] = []
+    last_end = -1
+    for item in replacements:
+        start, end, _replacement_text, _category, _finding = item
+        if start < last_end:
+            continue
+        kept.append(item)
+        last_end = end
+
+    out = text
+    kept_secrets: list[SecretFinding] = []
+    kept_pii: list[DlpFinding] = []
+    for start, end, replacement_text, category, finding in sorted(
+        kept, key=lambda item: item[0], reverse=True
+    ):
+        out = out[:start] + replacement_text + out[end:]
+        if category == "secret":
+            kept_secrets.append(finding)
+        else:
+            kept_pii.append(finding)
+    kept_secrets.sort(key=lambda item: item.start)
+    kept_pii.sort(key=lambda item: item.start)
+    return out, kept_secrets, kept_pii
+
+
 def redact_payload(obj: Any) -> Any:
     """Deep-walk a logging payload, redacting every string field.
 
@@ -71,7 +137,7 @@ def redact_payload(obj: Any) -> Any:
     dumped first (logger already does that), then passed in here.
     """
     if isinstance(obj, str):
-        red, _ = redact_text(obj)
+        red, _secret_findings, _pii_findings = redact_dlp_text(obj)
         return red
     if isinstance(obj, dict):
         return {k: redact_payload(v) for k, v in obj.items()}
@@ -86,3 +152,10 @@ def collect_findings(text: str) -> list[SecretFinding]:
     if not isinstance(text, str):
         return []
     return scan(text)
+
+
+def collect_pii_findings(text: str) -> list[DlpFinding]:
+    """Convenience for callers that need PII findings without rewriting text."""
+    if not isinstance(text, str):
+        return []
+    return scan_pii(text)
