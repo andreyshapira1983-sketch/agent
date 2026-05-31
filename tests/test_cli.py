@@ -28,7 +28,11 @@ from core.policy import PolicyGate
 from core.source_registry import SourceRegistry
 from core.source_registry_store import SourceRegistryStore
 from main import (
+    _autonomy_readiness_payload,
+    _budget_enforcement_status,
     _force_utf8_io,
+    _format_next_actions,
+    _format_operator_budget_digest,
     _handle_auto_run,
     _handle_hygiene,
     _handle_rollback,
@@ -72,6 +76,34 @@ def _build_agent(workspace: Path) -> AgentLoop:
         approval_provider=AutoApprover(default="approve"),
         max_replan_attempts=1,
     )
+
+
+def _zero_limit_budget_snapshot() -> dict:
+    return {
+        "path": "data/budget_ledger.jsonl",
+        "windows": [
+            {
+                "name": "hour",
+                "seconds": 3600,
+                "counters": {
+                    "llm_calls": {"used": 2, "limit": 0},
+                    "model_tokens": {"used": 1200, "limit": 0},
+                    "model_cost_units": {"used": 4, "limit": 0},
+                },
+            },
+            {
+                "name": "day",
+                "seconds": 86400,
+                "counters": {
+                    "llm_calls": {"used": 3, "limit": 0},
+                    "model_tokens": {"used": 1800, "limit": 0},
+                    "model_cost_units": {"used": 6, "limit": 0},
+                },
+            },
+        ],
+        "totals": {"llm_calls": 3, "model_tokens": 1800, "model_cost_units": 6},
+        "recent": [],
+    }
 
 
 def test_run_agent_with_budget_guard_returns_clean_budget_message(
@@ -629,6 +661,73 @@ class TestHandleMetaCommand:
         assert "urgent status" in out.err
         assert "next actions" in out.err
         assert "autonomy readiness" in out.err
+
+    def test_budget_enforcement_status_warns_when_limits_are_zero(self):
+        status = _budget_enforcement_status(_zero_limit_budget_snapshot())
+
+        assert status["tracking_enabled"] is True
+        assert status["enforcement_enabled"] is False
+        assert status["usage_recorded"] is True
+        assert status["all_limits_zero"] is True
+        assert "cross-run enforcement is disabled" in status["warning"]
+
+    def test_operator_budget_digest_surfaces_zero_limit_warning(self):
+        text = _format_operator_budget_digest(
+            {
+                "model_usage": {
+                    "limits": {},
+                    "totals": {"calls": 3, "total_tokens": 1800, "cost_units": 6},
+                    "session_totals": {
+                        "calls": 1,
+                        "total_tokens": 500,
+                        "cost_units": 2,
+                    },
+                },
+                "persistent_budget_windows": _zero_limit_budget_snapshot(),
+            }
+        )
+
+        assert "persistent enforcement: tracking=True limits_configured=False" in text
+        assert "budget warning:" in text
+        assert "before long unattended sessions" in text
+
+    def test_autonomy_readiness_blocks_when_budget_enforcement_is_disabled(self):
+        readiness = _autonomy_readiness_payload(
+            {
+                "runtime": {"approval_inbox": {"pending": 0}},
+                "architecture": {"ready_for_multi_agent_execution": True},
+                "persistent_budget_windows": _zero_limit_budget_snapshot(),
+                "recommendations": [],
+            }
+        )
+
+        assert readiness["state"] == "limited"
+        assert readiness["persistent_budget_limits_configured"] is False
+        assert (
+            "persistent budget tracking is active but enforcement is disabled"
+            in readiness["blockers"]
+        )
+
+    def test_next_actions_puts_budget_prerequisites_before_long_session(self):
+        text = _format_next_actions(
+            {
+                "prerequisites": [
+                    "Persistent budget tracking is active, but all hour/day limits are 0.",
+                    "Run a live state-store recovery drill before enabling Long Work Session Mode.",
+                ],
+                "priority_gaps": [
+                    {
+                        "title": "Long Work Session Mode",
+                        "next_step": "Enable unattended work sessions.",
+                    }
+                ],
+                "recommendations": [],
+            }
+        )
+
+        budget_index = text.index("prerequisites before long work sessions")
+        long_session_index = text.index("Long Work Session Mode")
+        assert budget_index < long_session_index
 
     def test_conversational_operator_phrase_bypasses_llm(self, workspace: Path, capsys):
         agent = _build_agent(workspace)

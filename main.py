@@ -1573,6 +1573,7 @@ def _operator_digest_payload(agent: AgentLoop, workspace: Path) -> dict:
         "scheduler": scheduler,
         "model_usage": model_usage,
         "persistent_budget_windows": budget_windows,
+        "budget_policy": _budget_enforcement_status(budget_windows),
     }
     payload["recommendations"] = _operator_recommendations(payload)
     return payload
@@ -1580,6 +1581,13 @@ def _operator_digest_payload(agent: AgentLoop, workspace: Path) -> dict:
 
 def _operator_recommendations(payload: dict) -> list[str]:
     recommendations: list[str] = []
+    budget_policy = payload.get("budget_policy")
+    if not isinstance(budget_policy, dict):
+        budget_policy = _budget_enforcement_status(
+            payload.get("persistent_budget_windows")
+        )
+    if budget_policy.get("warning"):
+        recommendations.append(str(budget_policy["warning"]))
     approvals = payload.get("runtime", {}).get("approval_inbox", {})
     pending = int(approvals.get("pending", 0) or 0)
     if pending:
@@ -1598,16 +1606,6 @@ def _operator_recommendations(payload: dict) -> list[str]:
     if int(source_registry.get("claims", 0) or 0) and memory_records == 0:
         recommendations.append(
             "Promote only reviewed source-backed claims into persistent memory; auto-write is still off."
-        )
-    budget_windows = payload.get("persistent_budget_windows") or {}
-    windows = budget_windows.get("windows", []) if isinstance(budget_windows, dict) else []
-    if windows and all(
-        int(counter.get("limit", 0) or 0) == 0
-        for window in windows
-        for counter in window.get("counters", {}).values()
-    ):
-        recommendations.append(
-            "Configure persistent hour/day budget limits before long unattended sessions."
         )
     task_queue = payload.get("task_queue", {})
     scheduler = payload.get("scheduler", {})
@@ -1699,6 +1697,7 @@ def _handle_operator_budget(rest: str, agent: AgentLoop, workspace: Path) -> boo
     budget_payload = {
         "model_usage": payload.get("model_usage"),
         "persistent_budget_windows": payload.get("persistent_budget_windows"),
+        "budget_policy": payload.get("budget_policy"),
         "recommendations": [
             item for item in payload.get("recommendations", [])
             if any(
@@ -1722,6 +1721,9 @@ def _format_operator_budget_digest(payload: dict) -> str:
     session = model_usage.get("session_totals", {})
     windows_payload = payload.get("persistent_budget_windows") or {}
     windows = windows_payload.get("windows", []) if isinstance(windows_payload, dict) else []
+    budget_policy = payload.get("budget_policy") or _budget_enforcement_status(
+        windows_payload if isinstance(windows_payload, dict) else None
+    )
     lines = [
         "=== operator budget ===",
         (
@@ -1742,7 +1744,16 @@ def _format_operator_budget_digest(payload: dict) -> str:
             f"max_tokens={limits.get('max_tokens', 0)} "
             f"max_cost_units={limits.get('max_cost_units', 0)}"
         ),
+        (
+            "persistent enforcement: "
+            f"tracking={budget_policy.get('tracking_enabled')} "
+            f"limits_configured={budget_policy.get('enforcement_enabled')} "
+            f"usage_recorded={budget_policy.get('usage_recorded')}"
+        ),
     ]
+    if budget_policy.get("warning"):
+        lines.append("budget warning:")
+        lines.append(f"  - {budget_policy['warning']}")
     if windows:
         lines.append("persistent windows:")
         for window in windows:
@@ -1750,6 +1761,7 @@ def _format_operator_budget_digest(payload: dict) -> str:
             compact = ", ".join(
                 f"{name}={data.get('used', 0)}/{data.get('limit', 0)}"
                 for name, data in counters.items()
+                if isinstance(data, dict)
             )
             lines.append(f"  - {window.get('name')}: {compact}")
     else:
@@ -1819,6 +1831,7 @@ def _handle_next_actions(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         return True
     payload = _operator_digest_payload(agent, workspace)
     next_payload = {
+        "prerequisites": _next_action_prerequisites(payload),
         "priority_gaps": payload.get("architecture", {}).get("priority_gaps", []),
         "recommendations": payload.get("recommendations", []),
     }
@@ -1832,6 +1845,11 @@ def _handle_next_actions(rest: str, agent: AgentLoop, workspace: Path) -> bool:
 
 def _format_next_actions(payload: dict) -> str:
     lines = ["=== next actions ==="]
+    prerequisites = payload.get("prerequisites", [])
+    if prerequisites:
+        lines.append("prerequisites before long work sessions:")
+        for item in prerequisites[:5]:
+            lines.append(f"  - {item}")
     gaps = payload.get("priority_gaps", [])
     if gaps:
         lines.append("architecture priorities:")
@@ -1867,14 +1885,22 @@ def _autonomy_readiness_payload(payload: dict) -> dict:
     approvals = payload.get("runtime", {}).get("approval_inbox", {})
     architecture = payload.get("architecture", {})
     pending = int(approvals.get("pending", 0) or 0)
-    budget_limits_configured = _persistent_budget_limits_configured(
-        payload.get("persistent_budget_windows")
-    )
+    budget_policy = payload.get("budget_policy")
+    if not isinstance(budget_policy, dict):
+        budget_policy = _budget_enforcement_status(
+            payload.get("persistent_budget_windows")
+        )
+    budget_limits_configured = bool(budget_policy.get("enforcement_enabled"))
     blockers: list[str] = []
     if pending:
         blockers.append(f"{pending} approval item(s) pending")
     if not budget_limits_configured:
-        blockers.append("persistent hour/day budget limits are not configured")
+        if budget_policy.get("tracking_enabled"):
+            blockers.append(
+                "persistent budget tracking is active but enforcement is disabled"
+            )
+        else:
+            blockers.append("persistent hour/day budget windows are not enabled")
     if not architecture.get("ready_for_multi_agent_execution"):
         blockers.append("multi-agent/long-session readiness gaps remain")
     state = "ready" if not blockers else "limited"
@@ -1886,22 +1912,97 @@ def _autonomy_readiness_payload(payload: dict) -> dict:
         ),
         "approvals_pending": pending,
         "persistent_budget_limits_configured": budget_limits_configured,
+        "budget_policy": budget_policy,
         "blockers": blockers,
         "recommendations": payload.get("recommendations", []),
     }
 
 
-def _persistent_budget_limits_configured(snapshot: dict | None) -> bool:
+def _budget_enforcement_status(snapshot: dict | None) -> dict:
     if not isinstance(snapshot, dict):
-        return False
-    windows = snapshot.get("windows", [])
-    if not windows:
-        return False
-    for window in windows:
-        for counter in window.get("counters", {}).values():
-            if int(counter.get("limit", 0) or 0) > 0:
-                return True
-    return False
+        return {
+            "tracking_enabled": False,
+            "enforcement_enabled": False,
+            "usage_recorded": False,
+            "all_limits_zero": True,
+            "warning": (
+                "Persistent budget ledger is not enabled; long unattended "
+                "sessions have no cross-run spend stop."
+            ),
+        }
+    windows_raw = snapshot.get("windows", [])
+    windows = windows_raw if isinstance(windows_raw, list) else []
+    counters = [
+        counter
+        for window in windows
+        if isinstance(window, dict)
+        for counter in (window.get("counters", {}) or {}).values()
+        if isinstance(counter, dict)
+    ]
+    totals = snapshot.get("totals", {})
+    if not isinstance(totals, dict):
+        totals = {}
+    usage_recorded = any(
+        _budget_int(counter.get("used", 0)) > 0 for counter in counters
+    ) or any(_budget_int(value) > 0 for value in totals.values())
+    enforcement_enabled = any(
+        _budget_int(counter.get("limit", 0)) > 0 for counter in counters
+    )
+    tracking_enabled = bool(windows)
+    all_limits_zero = tracking_enabled and not enforcement_enabled
+    warning = ""
+    if all_limits_zero:
+        warning = (
+            "Persistent budget tracking is active, but all hour/day limits are 0, "
+            "so cross-run enforcement is disabled; set AGENT_BUDGET_HOUR_LLM_CALLS, "
+            "AGENT_BUDGET_DAY_MODEL_TOKENS, or AGENT_BUDGET_DAY_MODEL_COST_UNITS "
+            "before long unattended sessions."
+        )
+    elif not tracking_enabled:
+        warning = (
+            "Persistent budget ledger is not enabled; long unattended sessions "
+            "have no cross-run spend stop."
+        )
+    return {
+        "tracking_enabled": tracking_enabled,
+        "enforcement_enabled": enforcement_enabled,
+        "usage_recorded": usage_recorded,
+        "all_limits_zero": all_limits_zero,
+        "warning": warning,
+    }
+
+
+def _budget_int(value: object) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _persistent_budget_limits_configured(snapshot: dict | None) -> bool:
+    return bool(_budget_enforcement_status(snapshot).get("enforcement_enabled"))
+
+
+def _next_action_prerequisites(payload: dict) -> list[str]:
+    prerequisites: list[str] = []
+    budget_policy = payload.get("budget_policy")
+    if not isinstance(budget_policy, dict):
+        budget_policy = _budget_enforcement_status(
+            payload.get("persistent_budget_windows")
+        )
+    if budget_policy.get("warning"):
+        prerequisites.append(str(budget_policy["warning"]))
+
+    gaps = payload.get("architecture", {}).get("priority_gaps", [])
+    has_long_work_gap = any(
+        "long work session" in str(gap.get("title", "")).casefold()
+        for gap in gaps
+    )
+    if has_long_work_gap:
+        prerequisites.append(
+            "Run a live state-store recovery drill before enabling Long Work Session Mode."
+        )
+    return prerequisites
 
 
 def _format_autonomy_readiness(payload: dict) -> str:
@@ -1916,6 +2017,10 @@ def _format_autonomy_readiness(payload: dict) -> str:
             f"{payload.get('persistent_budget_limits_configured')}"
         ),
     ]
+    budget_policy = payload.get("budget_policy") or {}
+    if budget_policy.get("warning"):
+        lines.append("budget warning:")
+        lines.append(f"  - {budget_policy['warning']}")
     blockers = payload.get("blockers", [])
     if blockers:
         lines.append("blockers:")
