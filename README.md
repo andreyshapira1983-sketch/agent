@@ -105,7 +105,7 @@ edge — explicitly **not yet**.
 
 1. Install dependencies:
    ```powershell
-   python -m pip install -r requirements.txt
+   python -m pip install --require-hashes -r requirements.lock
    ```
 
 2. Ensure `.env` has at least one valid API key (or use `mock`).
@@ -248,10 +248,13 @@ edge — explicitly **not yet**.
    python scripts/audit_release.py
    ```
    `requirements.in` documents the direct dependency intent; `requirements.txt`
-   pins the reviewed versions used by local release smoke tests and GitHub
-   Actions. The CI workflow runs pinned install, `pip check`, release/supply
-   audit, pytest, and branch coverage with an 85% threshold. A generated hash
-   lock/SBOM is still a later hardening pass.
+   pins the reviewed direct versions; `requirements.lock` locks the complete
+   transitive environment with `sha256` hashes. `sbom.cdx.json` is generated
+   from the lock file by `scripts/generate_sbom.py`, and CI checks it with
+   `scripts/generate_sbom.py --check` before running the release audit. The CI
+   workflow installs with `pip install --require-hashes -r requirements.lock`,
+   runs `pip check`, release/supply audit, pytest, and branch coverage with an
+   85% threshold.
 
    Architecture drift can be inspected without asking the LLM:
    ```text
@@ -1181,7 +1184,7 @@ The full acceptance suite is in
 > redaction + classification, argument-aware risk (`risk_for`),
 > a sandboxed reversible/irreversible write tool, a sandboxed
 > whitelisted shell tool with mandatory compensation + rollback,
-> 1357 hermetic tests covering every production module, and
+> 1508 hermetic tests covering every production module, and
 > zero-network determinism. The numbered slots below extend that foundation;
 > they are not the smallest possible thing.
 
@@ -1985,7 +1988,7 @@ A real safety net lives in [`tests/`](tests/) and runs via `pytest`:
 python -m pytest -v
 ```
 
-What is covered today (**1449 tests, ≈ 23 s, zero network calls**):
+What is covered today (**1508 tests, ≈ 31 s, zero network calls**):
 
 | Layer | File | Cases |
 | --- | --- | --- |
@@ -2006,7 +2009,7 @@ What is covered today (**1449 tests, ≈ 23 s, zero network calls**):
 | Redaction (§7) | [`tests/test_redaction.py`](tests/test_redaction.py) | clean text unchanged / known shapes masked with kind labels / credential-assignment masks whole `key=value` span / multiple secrets all masked / overlapping `sk-ant-...` ⊂ `sk-...` matches don't corrupt output / `redact_payload` deep-walks dicts + lists + tuples / scalars untouched / **dict keys are never modified, only values** |
 | Data Classifier (§7) | [`tests/test_data_classifier.py`](tests/test_data_classifier.py) | secret signals win over PII / PII (email / SSN / international phone) → SENSITIVE / source defaults (web→public, file/cli→private, unknown→private) / empty text falls back to source default / result carries source + reasons |
 | Safety in the Loop — **hard invariants** | [`tests/test_safety_integration.py`](tests/test_safety_integration.py) | **secret in file → NEVER in JSONL, NEVER in any LLM call, NEVER in answer, cached artifact is `[REDACTED:openai-key]`** / `data_classified` + `secret_detected(surface=tool_output)` events fired / **secret pasted into the user question → NEVER in JSONL or LLM, `secret_detected(surface=user_input)`** / **LLM hallucinating a credential in its response is still scrubbed in the final answer**, `secret_detected(surface=user_output)` / clean inputs emit zero `secret_detected` / **third-party owner without `cross-owner-consent` is rejected; with the tag is saved; first-party owners (self / user / session, case-insensitive) always pass; default owner is first-party (backward-compat)** |
-| Release / Supply-chain guard (§audit) | [`tests/test_release_hygiene.py`](tests/test_release_hygiene.py), [`tests/test_supply_chain.py`](tests/test_supply_chain.py), [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | release manifest excludes `.env`, `.git`, `.venv`, caches, credential/token/key files, `logs/` and `data/`; supply-chain audit requires pinned direct dependencies, `requirements.in`, CI workflow, `pip check`, release audit, pytest and branch coverage gate at 85% |
+| Release / Supply-chain guard (§audit) | [`tests/test_release_hygiene.py`](tests/test_release_hygiene.py), [`tests/test_supply_chain.py`](tests/test_supply_chain.py), [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | release manifest excludes `.env`, `.git`, `.venv`, caches, credential/token/key files, `logs/` and `data/`; supply-chain audit requires pinned direct dependencies, `requirements.in`, `requirements.lock` with `sha256` hashes, SBOM sync via `scripts/generate_sbom.py --check`, CI `pip install --require-hashes`, `pip check`, release audit, pytest and branch coverage gate at 85% |
 | Re-planning (§3 / MVP-8) | [`tests/test_replan.py`](tests/test_replan.py) | clean first attempt fires zero `replan` events / 0-step plan is success / **`tool_error` → planner re-invoked → attempt 2 succeeds** / **`verify_failed` → planner re-invoked → attempt 2 succeeds** / **`approval_deny` → irreversible tool never runs, safer read-only tool runs on attempt 2** / **bounded: `max_replan_attempts=3` ⇒ exactly 2 `replan` events + 1 `replan_exhausted`** / `<replan_context>` block carries `attempt`, `code`, `tool`, `reason` for every prior failure / `planner` + `plan` events carry `attempt`, `respond` carries `attempts_used` + `replan_exhausted` / `max_replan_attempts=1` disables replan; `=0` rejected at construction |
 | Re-planning policy (MVP-12 unit) | [`tests/test_replan_policy.py`](tests/test_replan_policy.py) | `FailureBudget`: zero / negative max rejected, default `requires_different_action` correct for every type / `DEFAULT_BUDGETS` covers every `FailureType`, advice non-empty, recoverable types have `>=2` retries / `ReplanPolicy` construction: missing budget rejected, custom budget replaces default / `decide()`: empty history → continue / one `tool_error` → continue with advice / two `tool_error` → `abort_no_retry` / two `web_empty` → exhaust / two `timeout` → exhaust / one `approval_deny` → continue but populates `forbidden_actions` / two `approval_deny` → exhaust / `approval_unavailable` exhausts immediately / `policy_blocked` allows one alternative / `unknown` exhausts immediately / global cap stops before per-type budgets / `completed_attempts=0` rejected / forbidden-action JSON canonicalised (sorted keys) / duplicate forbidden deduped / recoverable failures populate empty forbidden list / un-JSON-able args silently dropped from forbidden / `to_log_payload()` shape pinned / typo `code` → coerced to `unknown` |
 | Re-planning policy (MVP-12 acceptance) | [`tests/test_replan_policy_integration.py`](tests/test_replan_policy_integration.py) | **acc#1 `web_empty` → planner advice contains REFORMULATE + second query runs** / **acc#2 two `tool_error` → bounded, exactly 2 tool invocations, `abort_no_retry`** / **acc#3 stubborn planner re-proposing denied step → `approval_request` fires exactly ONCE + dangerous tool never invoked** / **acc#4 `policy_blocked` → planner switches to registered safe tool** / **acc#5 `verify_failed` → second attempt uses different tool** / **acc#6 exhausted run still produces structured Output Contract answer with `respond.replan_exhausted=True`** / **acc#7 full audit trail: exactly 3 `planner`, 2 `replan`, 2 `replan_attempt`, 1 `replan_exhausted` events for a 3-attempt run** / **acc#8 no-infinite-loop: pathological `tool_error` + `verify_failed` patterns terminate with bounded tool invocations** |
@@ -2145,11 +2148,13 @@ agent/
 ├── .env                              # API keys (private)
 ├── архитектура автономного Агента.txt
 ├── requirements.in                     # direct dependency intent
-├── requirements.txt                    # pinned direct dependencies for CI/local rebuild
+├── requirements.txt                    # pinned direct dependencies
+├── requirements.lock                   # transitive dependency lock with hashes
+├── sbom.cdx.json                       # CycloneDX SBOM generated from the lock file
 ├── .github/workflows/ci.yml            # release/supply-chain/test/coverage gate
 ├── pytest.ini                        # pytest config (testpaths + pythonpath)
 ├── main.py                           # CLI entry point (+ :remember / :forget / :memory)
-├── tests/                            # 1357 hermetic tests (FakeLLM + FakePlanner)
+├── tests/                            # 1508 hermetic tests (FakeLLM + FakePlanner)
 │   ├── conftest.py                   # FakeLLM, FakePlanner, workspace fixture
 │   ├── test_ids.py                   # ID factory: 4 cases
 │   ├── test_models.py                # Pydantic Literal guards + defaults: 48 cases

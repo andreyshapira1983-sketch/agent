@@ -15,16 +15,18 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install pinned dependencies
+      - name: Install hash-locked dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python -m pip install --require-hashes -r requirements.lock
 
       - name: Verify dependency environment
         run: python -m pip check
 
       - name: Release and supply-chain audit
-        run: python scripts/audit_release.py
+        run: |
+          python scripts/generate_sbom.py --check
+          python scripts/audit_release.py
 
       - name: Run tests
         run: python -m pytest
