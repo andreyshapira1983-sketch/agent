@@ -33,6 +33,7 @@ from main import (
     _handle_hygiene,
     _handle_rollback,
     _parse_remember,
+    _preflight_file_hint,
     _print_persistent,
     _run_agent_with_budget_guard,
     handle_conversational_operator_input,
@@ -523,6 +524,38 @@ class TestHandleMetaCommand:
         assert "operator intent: autonomy_readiness" in out.err
         assert "operator digest" in out.err
         assert "attention:" in out.err
+
+    def test_shell_like_repl_input_bypasses_llm_with_hint(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+
+        handled = handle_conversational_operator_input(
+            r"py -3 .\main.py --auto-approve deny --file .\x.md",
+            agent,
+            workspace,
+        )
+
+        out = capsys.readouterr()
+        assert handled is True
+        assert "Run it in PowerShell, not inside the agent REPL" in out.err
+        assert agent.llm.calls == []
+
+    def test_file_hint_preflight_fails_before_agent_run(self, workspace: Path):
+        ok, message = _preflight_file_hint(r".\docs\missing.md", workspace)
+
+        assert ok is False
+        assert message is not None
+        assert "ERROR: file hint does not exist:" in message
+        assert str(workspace / "docs" / "missing.md") in message
+        assert "No model calls were made." in message
+
+    def test_file_hint_preflight_accepts_existing_relative_file(self, workspace: Path):
+        doc = workspace / "task.md"
+        doc.write_text("task", encoding="utf-8")
+
+        ok, message = _preflight_file_hint(r".\task.md", workspace)
+
+        assert ok is True
+        assert message is None
 
     def test_learn_project_plans_then_ingests_selected_sources(self, workspace: Path, capsys):
         agent = _build_agent(workspace)

@@ -1555,6 +1555,13 @@ def handle_conversational_operator_input(text: str, agent: AgentLoop, workspace:
     if intent is None:
         return False
     agent.log.log("operator_intent", intent.to_dict())
+    if intent.kind == "shell_command_hint":
+        print(
+            "This looks like a shell/PowerShell command. "
+            "Run it in PowerShell, not inside the agent REPL.",
+            file=sys.stderr,
+        )
+        return True
     print(
         f"(operator intent: {intent.kind}; internal={intent.command})",
         file=sys.stderr,
@@ -1578,6 +1585,23 @@ def _dispatch_operator_intent(intent: OperatorIntent, agent: AgentLoop, workspac
     if intent.kind == "autonomy_readiness":
         return _handle_autonomy_readiness("", agent, workspace)
     return False
+
+
+def _preflight_file_hint(file_hint: str | None, workspace: Path) -> tuple[bool, str | None]:
+    if not file_hint:
+        return True, None
+    path = Path(file_hint)
+    if not path.is_absolute():
+        path = workspace / path
+    path = path.resolve()
+    if path.exists():
+        return True, None
+    return (
+        False,
+        "ERROR: file hint does not exist:\n"
+        f"{path}\n\n"
+        "No model calls were made.",
+    )
 
 
 def _handle_conflicts(rest: str, agent: AgentLoop, workspace: Path) -> bool:
@@ -2629,6 +2653,10 @@ def main() -> int:
     load_dotenv()
 
     workspace = Path(args.workspace).resolve()
+    file_hint_ok, file_hint_error = _preflight_file_hint(args.file, workspace)
+    if not file_hint_ok:
+        print(file_hint_error, file=sys.stderr)
+        return 2
 
     # Approval provider selection. One-shot can't realistically prompt a
     # human, so it falls back to AutoApprover unless the user opted in via

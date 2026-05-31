@@ -12,6 +12,7 @@ from typing import Literal
 
 
 OperatorIntentKind = Literal[
+    "shell_command_hint",
     "project_health",
     "model_status",
     "budget_status",
@@ -39,6 +40,17 @@ class OperatorIntent:
 def route_operator_intent(text: str) -> OperatorIntent | None:
     normalized = _normalize(text)
     if not normalized:
+        return None
+    if _looks_like_shell_command(normalized):
+        return OperatorIntent(
+            kind="shell_command_hint",
+            command="shell-command-hint",
+            reason="shell/powershell command wording",
+        )
+    if _matches_implementation_or_source_review(normalized):
+        # These are task-planning/evidence requests, not cheap operator status
+        # digests. Let the normal planner path handle them instead of allowing
+        # broad project-health wording to capture the request.
         return None
     if _matches_project_health(normalized):
         return OperatorIntent(
@@ -91,6 +103,69 @@ def _normalize(text: str) -> str:
 
 def _has_any(text: str, terms: tuple[str, ...]) -> bool:
     return any(term in text for term in terms)
+
+
+def _looks_like_shell_command(text: str) -> bool:
+    command_prefixes = (
+        "py ",
+        "python ",
+        "pwsh",
+        "powershell",
+        "git ",
+        "pytest",
+        "pip ",
+        "test-path",
+        "get-childitem",
+        "new-item",
+        "move-item",
+        "set-content",
+        ".\\main.py",
+        "./main.py",
+    )
+    command_markers = (
+        " --auto-approve",
+        " --file",
+    )
+    stripped = text.strip()
+    if any(stripped.startswith(prefix) for prefix in command_prefixes):
+        return True
+    return _has_any(f" {stripped}", command_markers)
+
+
+def _matches_implementation_or_source_review(text: str) -> bool:
+    planning_terms = (
+        "implementation plan",
+        "план реализации",
+        "составь точный план",
+        "точный план реализации",
+        "какие файлы менять",
+        "какие тесты добавить",
+        "operator task layer",
+    )
+    source_review_terms = (
+        "сравни загруженные источники",
+        "сравнить загруженные источники",
+        "source review",
+        "review loaded sources",
+        "file comparison",
+        "сравни файлы",
+        "сравнить файлы",
+    )
+    filename_markers = (".py", ".md", ".txt", "\\", "/")
+    if _has_any(text, planning_terms) or _has_any(text, source_review_terms):
+        return True
+    return _has_any(text, filename_markers) and _has_any(
+        text,
+        (
+            "сравни",
+            "сравнить",
+            "план",
+            "реализац",
+            "implementation",
+            "review",
+            "compare",
+        ),
+    )
 
 
 def _matches_project_health(text: str) -> bool:
