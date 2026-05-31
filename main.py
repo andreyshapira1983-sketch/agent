@@ -1925,6 +1925,160 @@ def _format_autonomy_readiness(payload: dict) -> str:
     return "\n".join(lines)
 
 
+def _handle_operator_task(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    block = rest.strip()
+    if not block:
+        print("Usage: :operator-task <task text> or start a block and finish with :end", file=sys.stderr)
+        return True
+    payload = _operator_task_payload(block, agent, workspace)
+    agent.log.log("operator_task_report", payload)
+    print(_format_operator_task_report(payload), file=sys.stderr)
+    return True
+
+
+def _operator_task_payload(block: str, agent: AgentLoop, workspace: Path) -> dict:
+    digest = _operator_digest_payload(agent, workspace)
+    readiness = _autonomy_readiness_payload(digest)
+    text = block.casefold()
+    requested_checks = _extract_operator_task_checks(text)
+    constraints = _extract_operator_task_constraints(text)
+    if not constraints:
+        constraints = [
+            "no file/code changes",
+            "no external side effects",
+            "no repair",
+            "no allow-effects",
+            "no subagents",
+            "no automatic persistent memory writes",
+        ]
+    architecture = digest.get("architecture", {})
+    runtime = digest.get("runtime", {})
+    queue = digest.get("task_queue", {})
+    scheduler = digest.get("scheduler", {})
+    model_usage = digest.get("model_usage") or {}
+    windows = digest.get("persistent_budget_windows")
+    approvals = runtime.get("approval_inbox", {})
+    source_registry = runtime.get("source_registry", {})
+    working_normally = [
+        f"architecture audit loaded with status_counts={architecture.get('status_counts', {})}",
+        (
+            "source registry available: "
+            f"sources={source_registry.get('sources', 0)} claims={source_registry.get('claims', 0)}"
+        ),
+        (
+            "approvals queue visible: "
+            f"pending={approvals.get('pending', 0)} total={approvals.get('total', 0)}"
+        ),
+        (
+            "task queue/scheduler visible: "
+            f"pending_due={queue.get('pending_due', 0)} scheduler_due={scheduler.get('due', 0)}"
+        ),
+    ]
+    requires_attention = list(digest.get("recommendations", []))
+    if not _persistent_budget_limits_configured(windows):
+        requires_attention.append(
+            "Persistent hour/day budget limits are not configured; long unattended work should wait."
+        )
+    dangerous_now = list(readiness.get("blockers", []))
+    if not dangerous_now:
+        dangerous_now.append("No immediate blocker for dry-run operator checks; keep effects disabled.")
+    next_step = _operator_task_next_step(requires_attention, dangerous_now)
+    return {
+        "goal": "safe_system_check",
+        "raw_task": block,
+        "checks": requested_checks,
+        "constraints": constraints,
+        "output_contract": [
+            "what works normally",
+            "what requires attention",
+            "what is dangerous to run now",
+            "one safest next step",
+        ],
+        "what_works_normally": working_normally,
+        "what_requires_attention": requires_attention,
+        "what_is_dangerous_to_run_now": dangerous_now,
+        "one_safest_next_step": next_step,
+        "evidence": {
+            "model_usage": model_usage,
+            "persistent_budget_windows": windows,
+            "readiness": readiness,
+        },
+        "prohibited_actions": [
+            "file_write",
+            "shell_exec",
+            "repair",
+            "allow-effects",
+            "subagent execution",
+            "persistent memory write",
+        ],
+    }
+
+
+def _extract_operator_task_checks(text: str) -> list[str]:
+    mapping = (
+        ("architecture", ("architecture", "архитектур")),
+        ("runtime", ("runtime", "автоном", "рантайм")),
+        ("budget", ("budget", "бюджет", "лимит", "токен", "cost")),
+        ("model usage", ("model usage", "модел", "токен")),
+        ("approvals", ("approval", "approvals", "одобр", "разреш")),
+        ("source registry", ("source registry", "source-registry", "источник")),
+        ("scheduler", ("scheduler", "schedule", "распис")),
+        ("task queue", ("task queue", "queue", "очеред")),
+        ("tests", ("tests", "тест", "pytest")),
+    )
+    checks = [name for name, terms in mapping if any(term in text for term in terms)]
+    return checks or ["architecture", "runtime", "budget", "approvals", "source registry"]
+
+
+def _extract_operator_task_constraints(text: str) -> list[str]:
+    constraints: list[str] = []
+    if any(term in text for term in ("ничего не меняй", "no changes", "do not change")):
+        constraints.append("no file/code changes")
+    if any(term in text for term in ("ничего не запис", "no writes", "do not write")):
+        constraints.append("no writes except normal audit logs")
+    if "approval" in text or "одобр" in text:
+        constraints.append("require approval before any effect")
+    if any(term in text for term in ("без repair", "no repair", "не чини")):
+        constraints.append("no repair")
+    if any(term in text for term in ("без subagent", "no subagent", "не запускай sub")):
+        constraints.append("no subagents")
+    if any(term in text for term in ("без allow-effects", "no allow-effects", "не включай эффекты")):
+        constraints.append("no allow-effects")
+    return constraints
+
+
+def _operator_task_next_step(requires_attention: list[str], dangerous_now: list[str]) -> str:
+    for item in requires_attention + dangerous_now:
+        lowered = item.casefold()
+        if "budget" in lowered or "hour/day" in lowered or "лимит" in lowered:
+            return "Configure persistent budget limits before any long unattended operator session."
+    if requires_attention:
+        return requires_attention[0]
+    return "Run the same operator task again after the next code change to confirm the state stayed stable."
+
+
+def _format_operator_task_report(payload: dict) -> str:
+    lines = [
+        "=== operator task report ===",
+        f"goal: {payload.get('goal')}",
+        "constraints:",
+    ]
+    lines.extend(f"  - {item}" for item in payload.get("constraints", []))
+    lines.append("checks:")
+    lines.extend(f"  - {item}" for item in payload.get("checks", []))
+    lines.append("1. what works normally:")
+    lines.extend(f"  - {item}" for item in payload.get("what_works_normally", []))
+    lines.append("2. what requires attention:")
+    attention = payload.get("what_requires_attention", [])
+    lines.extend(f"  - {item}" for item in (attention or ["nothing urgent"]))
+    lines.append("3. what is dangerous to run now:")
+    dangerous = payload.get("what_is_dangerous_to_run_now", [])
+    lines.extend(f"  - {item}" for item in (dangerous or ["nothing identified"]))
+    lines.append("4. one safest next step:")
+    lines.append(f"  - {payload.get('one_safest_next_step')}")
+    return "\n".join(lines)
+
+
 def handle_conversational_operator_input(text: str, agent: AgentLoop, workspace: Path) -> bool:
     intent = route_operator_intent(text)
     if intent is None:
@@ -2827,6 +2981,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head in {":autonomy-readiness", ":operator-readiness"}:
         return _handle_autonomy_readiness(rest.strip(), agent, workspace)
 
+    if head == ":operator-task":
+        return _handle_operator_task(rest, agent, workspace)
+
     if head in {":learn", ":learn-project"}:
         return _handle_learn(rest.strip(), agent, workspace)
 
@@ -2943,6 +3100,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :urgent-status [--json]        approvals + queue + scheduler urgency digest\n"
             "  :next-actions [--json]         architecture priorities + recommendations\n"
             "  :autonomy-readiness [--json]   whether autonomy is safe to run now\n"
+            "  :operator-task ... :end        one safe multi-line operator task report\n"
             "  :model-usage [--json]           inspect model calls/tokens/cost units\n"
             "  :team-plan <goal> [--json]      dry-run bounded subagent contracts\n"
             "  :team-run <goal> [--json]       dry-run execution walk over subagent contracts\n"
@@ -3087,7 +3245,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :learn  :auto-run  :operator-check  :operator-budget  :urgent-status  :next-actions  :autonomy-readiness  :conflicts  :budget-status  :budget-window-status  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :learn  :auto-run  :operator-check  :operator-budget  :urgent-status  :next-actions  :autonomy-readiness  :operator-task  :conflicts  :budget-status  :budget-window-status  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:
@@ -3098,6 +3256,20 @@ def main() -> int:
             return 0
         if not q:
             return 0
+        if q == ":operator-task":
+            block_lines: list[str] = []
+            print("(operator task block started; finish with :end)", file=sys.stderr)
+            while True:
+                try:
+                    line = input("... ")
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    return 0
+                if line.strip().lower() == ":end":
+                    break
+                block_lines.append(line)
+            _handle_operator_task("\n".join(block_lines), agent, workspace)
+            continue
         if q.startswith(":") or q == "?":
             if handle_meta_command(q, agent, workspace):
                 continue

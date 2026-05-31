@@ -470,6 +470,55 @@ class TestHandleMetaCommand:
         assert "tests to add" in out.err
         assert agent.llm.calls == []
 
+    def test_operator_task_block_reports_once_without_effects(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+        before_memory = (
+            agent.persistent_store.count()
+            if agent.persistent_store is not None
+            else 0
+        )
+        block = """
+Проверь свою систему в безопасном режиме.
+Ничего не меняй и ничего не записывай без approval.
+Проверь архитектуру, runtime, budget, model usage, approvals, source registry, scheduler, task queue и тесты.
+В конце скажи человеческим языком:
+1. что работает нормально,
+2. что требует внимания,
+3. что опасно запускать сейчас,
+4. какой один следующий шаг самый правильный.
+""".strip()
+
+        assert handle_meta_command(f":operator-task {block}", agent, workspace) is True
+
+        out = capsys.readouterr()
+        assert "operator task report" in out.err
+        assert "goal: safe_system_check" in out.err
+        assert "constraints:" in out.err
+        assert "no file/code changes" in out.err
+        assert "require approval before any effect" in out.err
+        assert "checks:" in out.err
+        assert "architecture" in out.err
+        assert "runtime" in out.err
+        assert "budget" in out.err
+        assert "model usage" in out.err
+        assert "approvals" in out.err
+        assert "source registry" in out.err
+        assert "scheduler" in out.err
+        assert "task queue" in out.err
+        assert "tests" in out.err
+        assert "1. what works normally:" in out.err
+        assert "2. what requires attention:" in out.err
+        assert "3. what is dangerous to run now:" in out.err
+        assert "4. one safest next step:" in out.err
+        assert agent.llm.calls == []
+        assert agent.persistent_store is not None
+        assert agent.persistent_store.count() == before_memory
+        log_text = agent.log.path.read_text(encoding="utf-8")
+        assert "operator_task_report" in log_text
+        assert "autonomous_runtime_start" not in log_text
+        assert "team execution" not in log_text
+        assert "repair_start" not in log_text
+
     def test_ingest_web_fetches_curated_source_into_registry(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
         agent.registry.register(FakeWebSearchTool())
