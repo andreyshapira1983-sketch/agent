@@ -104,6 +104,7 @@ from core.memory_policy import MemoryRetrievalPolicy, MemoryWritePolicy
 from core.model_usage import ModelBudgetExceeded, ModelUsageLedger
 from core.model_router import ModelRole, ModelRouter
 from core.model_registry_audit import audit_model_registry
+from core.operator_intent import OperatorIntent, route_operator_intent
 from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
@@ -1179,6 +1180,164 @@ def _handle_auto_status(agent: AgentLoop, workspace: Path) -> bool:
     return True
 
 
+def _operator_digest_payload(agent: AgentLoop, workspace: Path) -> dict:
+    audit = audit_architecture(workspace)
+    runtime_status = AutonomousRuntime(
+        agent,
+        workspace=workspace,
+        approval_inbox=_approval_inbox_for(agent, workspace),
+    ).status()
+    task_queue = _task_queue_for(agent, workspace).summary()
+    scheduler = _scheduler_for(agent, workspace).summary()
+    model_usage = agent.model_router.usage_snapshot()
+    budget_windows = _budget_ledger_snapshot(agent)
+    payload = {
+        "architecture": audit.to_dict(),
+        "runtime": runtime_status,
+        "task_queue": task_queue,
+        "scheduler": scheduler,
+        "model_usage": model_usage,
+        "persistent_budget_windows": budget_windows,
+    }
+    payload["recommendations"] = _operator_recommendations(payload)
+    return payload
+
+
+def _operator_recommendations(payload: dict) -> list[str]:
+    recommendations: list[str] = []
+    approvals = payload.get("runtime", {}).get("approval_inbox", {})
+    pending = int(approvals.get("pending", 0) or 0)
+    if pending:
+        recommendations.append(
+            f"Review {pending} pending approval item(s) before allowing effects."
+        )
+    architecture = payload.get("architecture", {})
+    gaps = architecture.get("priority_gaps", [])
+    if gaps:
+        first = gaps[0]
+        recommendations.append(
+            f"Next architecture gap: {first.get('title')} - {first.get('next_step')}"
+        )
+    source_registry = payload.get("runtime", {}).get("source_registry", {})
+    memory_records = int(payload.get("runtime", {}).get("persistent_memory_records", 0) or 0)
+    if int(source_registry.get("claims", 0) or 0) and memory_records == 0:
+        recommendations.append(
+            "Promote only reviewed source-backed claims into persistent memory; auto-write is still off."
+        )
+    budget_windows = payload.get("persistent_budget_windows") or {}
+    windows = budget_windows.get("windows", []) if isinstance(budget_windows, dict) else []
+    if windows and all(
+        int(counter.get("limit", 0) or 0) == 0
+        for window in windows
+        for counter in window.get("counters", {}).values()
+    ):
+        recommendations.append(
+            "Configure persistent hour/day budget limits before long unattended sessions."
+        )
+    task_queue = payload.get("task_queue", {})
+    scheduler = payload.get("scheduler", {})
+    if not task_queue.get("pending_due") and not scheduler.get("due"):
+        recommendations.append(
+            "No due scheduled work is waiting; run a dry health pass when you want active verification."
+        )
+    return recommendations
+
+
+def _format_operator_digest(payload: dict) -> str:
+    architecture = payload.get("architecture", {})
+    runtime = payload.get("runtime", {})
+    source_registry = runtime.get("source_registry", {})
+    approvals = runtime.get("approval_inbox", {})
+    model_usage = payload.get("model_usage") or {}
+    totals = model_usage.get("totals", {})
+    session_totals = model_usage.get("session_totals", {})
+    task_queue = payload.get("task_queue", {})
+    scheduler = payload.get("scheduler", {})
+    lines = [
+        "=== operator digest ===",
+        (
+            "architecture: "
+            f"ready_for_multi_agent_execution={architecture.get('ready_for_multi_agent_execution')} "
+            f"status_counts={architecture.get('status_counts', {})}"
+        ),
+        (
+            "source registry: "
+            f"sources={source_registry.get('sources', 0)} "
+            f"claims={source_registry.get('claims', 0)}"
+        ),
+        f"persistent memory: records={runtime.get('persistent_memory_records', 0)}",
+        (
+            "approvals: "
+            f"pending={approvals.get('pending', 0)} total={approvals.get('total', 0)}"
+        ),
+        (
+            "queue/scheduler: "
+            f"pending_due={task_queue.get('pending_due', 0)} "
+            f"scheduled_due={scheduler.get('due', 0)}"
+        ),
+        (
+            "model usage: "
+            f"history_calls={totals.get('calls', 0)} "
+            f"history_tokens={totals.get('total_tokens', 0)} "
+            f"session_calls={session_totals.get('calls', 0)} "
+            f"session_tokens={session_totals.get('total_tokens', 0)}"
+        ),
+    ]
+    gaps = architecture.get("priority_gaps", [])
+    if gaps:
+        lines.append("attention:")
+        for gap in gaps[:3]:
+            lines.append(f"  - {gap.get('title')}: {gap.get('summary')}")
+            lines.append(f"    next: {gap.get('next_step')}")
+    else:
+        lines.append("attention: none")
+    recommendations = payload.get("recommendations", [])
+    if recommendations:
+        lines.append("recommended actions:")
+        for item in recommendations[:5]:
+            lines.append(f"  - {item}")
+    return "\n".join(lines)
+
+
+def _handle_operator_check(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    tokens = _split_meta_args(rest)
+    as_json = "--json" in tokens
+    if any(token != "--json" for token in tokens):
+        print("Usage: :operator-check [--json]", file=sys.stderr)
+        return True
+    payload = _operator_digest_payload(agent, workspace)
+    agent.log.log("operator_digest", payload)
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(_format_operator_digest(payload), file=sys.stderr)
+    return True
+
+
+def handle_conversational_operator_input(text: str, agent: AgentLoop, workspace: Path) -> bool:
+    intent = route_operator_intent(text)
+    if intent is None:
+        return False
+    agent.log.log("operator_intent", intent.to_dict())
+    print(
+        f"(operator intent: {intent.kind}; internal={intent.command})",
+        file=sys.stderr,
+    )
+    return _dispatch_operator_intent(intent, agent, workspace)
+
+
+def _dispatch_operator_intent(intent: OperatorIntent, agent: AgentLoop, workspace: Path) -> bool:
+    if intent.kind == "project_health":
+        return _handle_operator_check("", agent, workspace)
+    if intent.kind == "model_status":
+        return _handle_models("", agent)
+    if intent.kind == "budget_status":
+        return _handle_budget_status(agent, workspace)
+    if intent.kind == "approval_status":
+        return _handle_approval_list("all", agent, workspace)
+    return False
+
+
 def _handle_conflicts(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     del workspace
     tokens = _split_meta_args(rest)
@@ -1998,6 +2157,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head in {":architecture-audit", ":arch-audit", ":roadmap-audit"}:
         return _handle_architecture_audit(rest.strip(), agent, workspace)
 
+    if head in {":operator-check", ":project-check", ":project-status"}:
+        return _handle_operator_check(rest.strip(), agent, workspace)
+
     if head in {":learn", ":learn-project"}:
         return _handle_learn(rest.strip(), agent, workspace)
 
@@ -2105,6 +2267,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :models [--json]                inspect model routes and registry\n"
             "  :model-registry-audit [--json] inspect selected vs available model candidates\n"
             "  :architecture-audit [--json]   inspect layers and multi-agent gaps\n"
+            "  :operator-check [--json]       conversational project/status digest\n"
             "  :model-usage [--json]           inspect model calls/tokens/cost units\n"
             "  :team-plan <goal> [--json]      dry-run bounded subagent contracts\n"
             "  :team-run <goal> [--json]       dry-run execution walk over subagent contracts\n"
@@ -2148,6 +2311,14 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "                                  generate a RepairProposal without writing files\n"
             "  :quit | :exit                   exit\n"
             "  empty line                      exit",
+            file=sys.stderr,
+        )
+        print(
+            "\nConversational shortcuts:\n"
+            "  Проверь проект и скажи что требует внимания\n"
+            "  Покажи какие модели используются\n"
+            "  Сколько потрачено токенов и какой бюджет\n"
+            "  Есть ли ожидающие approval",
             file=sys.stderr,
         )
         return True
@@ -2212,6 +2383,8 @@ def main() -> int:
             approval_provider = None
 
         agent = build_agent(workspace, with_memory=False, approval_provider=approval_provider)
+        if handle_conversational_operator_input(args.ask, agent, workspace):
+            return 0
         answer = _run_agent_with_budget_guard(
             agent,
             user_question=args.ask,
@@ -2233,7 +2406,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :learn  :auto-run  :conflicts  :budget-status  :budget-window-status  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :learn  :auto-run  :operator-check  :conflicts  :budget-status  :budget-window-status  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:
@@ -2248,6 +2421,8 @@ def main() -> int:
             if handle_meta_command(q, agent, workspace):
                 continue
             print(f"(unknown command: {q})", file=sys.stderr)
+            continue
+        if handle_conversational_operator_input(q, agent, workspace):
             continue
         answer = _run_agent_with_budget_guard(
             agent,

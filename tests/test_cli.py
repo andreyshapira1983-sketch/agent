@@ -35,6 +35,7 @@ from main import (
     _parse_remember,
     _print_persistent,
     _run_agent_with_budget_guard,
+    handle_conversational_operator_input,
     handle_meta_command,
 )
 from tests.conftest import FakeLLM
@@ -478,6 +479,32 @@ class TestHandleMetaCommand:
         assert "NewsSignalAgent" in out.err
         assert "team execution dry-run" in out.err
         assert "verifier handoffs" in out.err
+
+    def test_operator_check_command_prints_digest(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+
+        assert handle_meta_command(":operator-check", agent, workspace) is True
+        assert handle_meta_command(":project-status --json", agent, workspace) is True
+
+        out = capsys.readouterr()
+        assert "operator digest" in out.err
+        assert "source registry" in out.err
+        assert "recommended actions" in out.err
+        assert '"architecture"' in out.err
+
+    def test_conversational_operator_phrase_bypasses_llm(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+
+        assert handle_conversational_operator_input(
+            "Проверь проект и скажи что требует внимания",
+            agent,
+            workspace,
+        ) is True
+
+        out = capsys.readouterr()
+        assert "operator intent: project_health" in out.err
+        assert "operator digest" in out.err
+        assert "attention:" in out.err
 
     def test_learn_project_plans_then_ingests_selected_sources(self, workspace: Path, capsys):
         agent = _build_agent(workspace)

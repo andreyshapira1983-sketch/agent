@@ -128,6 +128,15 @@ def _build_checks(workspace: Path) -> list[ArchitectureLayerCheck]:
         ),
         _check(
             workspace,
+            id="conversational_operator_layer",
+            title="Conversational Operator Layer",
+            evidence=("core/operator_intent.py", "main.py"),
+            tests=("tests/test_operator_intent.py", "tests/test_cli.py"),
+            summary="Natural-language operator requests route to local status/audit/budget handlers without an LLM call.",
+            next_step="Expand the digest into long work-session reports and approval-aware action proposals.",
+        ),
+        _check(
+            workspace,
             id="dlp_sensitive_data_boundary",
             title="DLP Sensitive Data Boundary",
             evidence=("core/dlp.py", "core/redaction.py", "core/data_classifier.py", "core/memory_policy.py"),

@@ -86,6 +86,7 @@ plus full Control Loop integration. Run `python -m pytest -v`.
 | §14.3g RSS / Atom Source Ingestion (`:ingest-rss`) | [`tools/rss_fetch.py`](tools/rss_fetch.py) + [`core/ingestion.py`](core/ingestion.py) |
 | §14.3h Source Connector Registry (`:connectors`, `:connector-plan`) | [`core/source_connectors.py`](core/source_connectors.py) + [`main.py`](main.py) |
 | §14.3e Role Router / Knowledge Use / Learning Planner | [`core/role_router.py`](core/role_router.py), [`core/knowledge_use_policy.py`](core/knowledge_use_policy.py), [`core/learning_planner.py`](core/learning_planner.py) |
+| §14.3i Conversational Operator Layer | [`core/operator_intent.py`](core/operator_intent.py) + `:operator-check` |
 | §6 Autonomous Runtime + Budget Governor + Circuit Breaker + Approval Inbox | [`core/autonomous_runtime.py`](core/autonomous_runtime.py), [`core/budget_governor.py`](core/budget_governor.py), [`core/circuit_breaker.py`](core/circuit_breaker.py), [`core/approval_inbox.py`](core/approval_inbox.py) |
 | §6 Persistent Task Queue + Scheduler Tick | [`core/task_queue.py`](core/task_queue.py), [`core/scheduler.py`](core/scheduler.py), [`main.py`](main.py) |
 | §15 Multi-Agent Organization: dry-run Team Plan + subagent contracts | [`core/team_plan.py`](core/team_plan.py) + `:team-plan` |
@@ -1190,7 +1191,7 @@ The full acceptance suite is in
 > redaction + classification, argument-aware risk (`risk_for`),
 > a sandboxed reversible/irreversible write tool, a sandboxed
 > whitelisted shell tool with mandatory compensation + rollback,
-> 1533 hermetic tests covering every production module, and
+> 1540 hermetic tests covering every production module, and
 > zero-network determinism. The numbered slots below extend that foundation;
 > they are not the smallest possible thing.
 
@@ -1576,6 +1577,22 @@ This slice stops memory and learning from being "one bucket for everything":
 `AgentLoop` now emits `role_route` and `knowledge_use_policy` audit events.
 The role context is injected into synthesis, but not disguised as conversation
 history, so old memory/cache contracts remain intact.
+
+### 14.3i — Conversational Operator Layer
+
+This slice starts replacing command memory with normal operator language.
+Common owner requests are routed locally before the LLM is called:
+
+  - "Проверь проект и скажи что требует внимания" runs an operator digest.
+  - "Покажи какие модели используются" routes to model status.
+  - "Сколько потрачено токенов и какой бюджет" routes to budget/model usage.
+  - "Есть ли ожидающие approval" routes to the approval inbox.
+
+The digest is intentionally read-only: it combines architecture audit,
+source registry counts, persistent memory count, approval status, queue /
+scheduler status, model usage and budget windows, then proposes next actions.
+This keeps the user-facing surface conversational while preserving the existing
+auditable command handlers underneath.
 
 ### 16.1 — Autonomous Runtime / Budget / Circuit / Approval Inbox
 
@@ -1994,7 +2011,7 @@ A real safety net lives in [`tests/`](tests/) and runs via `pytest`:
 python -m pytest -v
 ```
 
-What is covered today (**1533 tests, ≈ 30 s, zero network calls**):
+What is covered today (**1540 tests, ≈ 30 s, zero network calls**):
 
 | Layer | File | Cases |
 | --- | --- | --- |
@@ -2042,6 +2059,7 @@ What is covered today (**1533 tests, ≈ 30 s, zero network calls**):
 | Role Router (MVP-14.3e) | [`tests/test_role_router.py`](tests/test_role_router.py) | repair / learning / default operator-chat routing; each route carries tone, output style, knowledge scopes and allowed memory tags |
 | Knowledge Use Policy (MVP-14.3e) | [`tests/test_knowledge_use_policy.py`](tests/test_knowledge_use_policy.py) | role-tag filtering, question-overlap admission, quarantined/obsolete memory rejection before keyword retrieval |
 | Learning Planner (MVP-14.3e) | [`tests/test_learning_planner.py`](tests/test_learning_planner.py) + [`tests/test_cli.py`](tests/test_cli.py) | README / architecture / core/test prioritisation, goal-specific self-repair source selection, workspace-escape rejection, `:learn-project` plan -> dry-run ingestion |
+| Conversational Operator Layer (MVP-14.3i) | [`tests/test_operator_intent.py`](tests/test_operator_intent.py), [`tests/test_cli.py`](tests/test_cli.py) | natural-language project/model/budget/approval operator requests route to local handlers before LLM calls / `:operator-check` text + JSON digest |
 | Autonomous Runtime (MVP-16.1) | [`tests/test_autonomous_runtime.py`](tests/test_autonomous_runtime.py), [`tests/test_budget_governor.py`](tests/test_budget_governor.py), [`tests/test_circuit_breaker.py`](tests/test_circuit_breaker.py), [`tests/test_approval_inbox.py`](tests/test_approval_inbox.py), [`tests/test_cli.py`](tests/test_cli.py) | bounded dry-run health pass / status + learning + tests tasks / non-dry-run blocked into approval inbox / cycle budget denial opens circuit / CLI `:auto-run` and `:auto-status` |
 | Persistent Task Queue + Scheduler (MVP-16.2) | [`tests/test_task_queue.py`](tests/test_task_queue.py), [`tests/test_scheduler.py`](tests/test_scheduler.py), [`tests/test_autonomous_runtime.py`](tests/test_autonomous_runtime.py), [`tests/test_cli.py`](tests/test_cli.py) | JSONL task persistence / pending due filtering / task state transitions / schedule persistence / scheduler tick enqueues due tasks / queued tasks run through `AutonomousRuntime` / CLI `:task-*` and `:schedule-*` |
 | Model Usage Ledger (MVP-16.3) | [`tests/test_model_usage.py`](tests/test_model_usage.py), [`tests/test_cli.py`](tests/test_cli.py) | role/model token ledger / JSONL persistence / historical vs current-session totals / session call-budget block / estimated token fallback / CLI `:model-usage` and `:budget-status` integration |
@@ -2162,7 +2180,7 @@ agent/
 ├── .github/workflows/ci.yml            # release/supply-chain/test/coverage gate
 ├── pytest.ini                        # pytest config (testpaths + pythonpath)
 ├── main.py                           # CLI entry point (+ :remember / :forget / :memory)
-├── tests/                            # 1533 hermetic tests (FakeLLM + FakePlanner)
+├── tests/                            # 1540 hermetic tests (FakeLLM + FakePlanner)
 │   ├── conftest.py                   # FakeLLM, FakePlanner, workspace fixture
 │   ├── test_ids.py                   # ID factory: 4 cases
 │   ├── test_models.py                # Pydantic Literal guards + defaults: 48 cases
@@ -2183,6 +2201,7 @@ agent/
 │   ├── test_memory.py                # WorkingMemory + artifact cache: 14 cases
 │   ├── test_integration.py           # full Control Loop: 2 cases
 │   ├── test_memory_integration.py    # memory_inject / cache_hit / clear: 6 cases
+│   ├── test_operator_intent.py       # natural-language operator routing: 5 cases
 │   ├── test_memory_policy.py         # write + retrieval policy + owner + DLP + MVP-10 dedup gate: 56 cases
 │   ├── test_persistent_memory.py     # JSONL store save/load/delete: 12 cases
 │   ├── test_state_integrity.py       # checksummed JSONL state stores + quarantine: 6 cases
@@ -2212,6 +2231,7 @@ agent/
 │   ├── dlp.py                        # Sensitive PII detection (§7)
 │   ├── redaction.py                  # Universal redactor: text + deep payload (§7)
 │   ├── data_classifier.py            # public / private / sensitive / secret (§7)
+│   ├── operator_intent.py            # natural-language operator requests -> local handlers
 │   ├── planner.py                    # LLM-driven Planner (§3 Cognitive Core) + replan context
 │   └── loop.py                       # Control Loop (§3) + bounded re-planning + Output Contract + Safety pipeline
 ├── tools/
