@@ -7,7 +7,6 @@ safe for budgeting decisions rather than billing.
 """
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -15,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from core.budget_ledger import BudgetLedger
+from core.state_integrity import append_state_jsonl, read_state_jsonl
 
 
 _COST_UNITS_PER_1K_TOKENS = {
@@ -251,9 +251,7 @@ class ModelUsageLedger:
                     scope="model_usage",
                 )
         if self.path is not None:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self.path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
+            append_state_jsonl(self.path, [record.to_dict()])
         if self.logger is not None:
             self.logger.log("model_call_end", record.to_dict())
         return record
@@ -262,13 +260,10 @@ class ModelUsageLedger:
         if self.path is None or not self.path.exists():
             return list(self.records)
         loaded: list[ModelUsageRecord] = []
-        for line in self.path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
+        for data in read_state_jsonl(self.path):
             try:
-                data = json.loads(line)
                 loaded.append(ModelUsageRecord(**data))
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 continue
         return loaded
 

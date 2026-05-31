@@ -188,6 +188,26 @@ def _build_checks(workspace: Path) -> list[ArchitectureLayerCheck]:
         ),
         _check(
             workspace,
+            id="state_store_integrity",
+            title="State Store Integrity",
+            evidence=(
+                "core/state_integrity.py",
+                "core/persistent_memory.py",
+                "core/source_registry_store.py",
+                "core/task_queue.py",
+                "core/scheduler.py",
+            ),
+            tests=(
+                "tests/test_state_integrity.py",
+                "tests/test_persistent_memory.py",
+                "tests/test_task_queue.py",
+                "tests/test_scheduler.py",
+            ),
+            summary="JSONL state stores use locks, checksum envelopes, atomic rewrites and corrupt-row quarantine.",
+            next_step="Move high-write or relational stores to SQLite/WAL if JSONL becomes a bottleneck.",
+        ),
+        _check(
+            workspace,
             id="self_repair_governance",
             title="Self-Repair / Governance / Rollback",
             evidence=("core/self_repair.py", "core/governance.py", "core/compensation.py"),

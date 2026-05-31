@@ -6,13 +6,13 @@ review later, while the unattended run stays stopped or dry-run only.
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
 from core.ids import new_id
+from core.state_integrity import read_state_jsonl, rewrite_state_jsonl
 
 
 ApprovalInboxStatus = Literal["pending", "approved", "denied", "aborted", "executed"]
@@ -170,26 +170,15 @@ class ApprovalInbox:
         if not path.exists():
             return list(self.items)
         items: list[ApprovalInboxItem] = []
-        with path.open("r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    raw = json.loads(line)
-                    if isinstance(raw, dict):
-                        items.append(ApprovalInboxItem.from_dict(raw))
-                except (json.JSONDecodeError, TypeError, ValueError):
-                    continue
+        for raw in read_state_jsonl(path):
+            try:
+                items.append(ApprovalInboxItem.from_dict(raw))
+            except (TypeError, ValueError):
+                continue
         return items
 
     def _save(self) -> None:
         if self.path is None:
             return
         path = Path(self.path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        with tmp.open("w", encoding="utf-8") as fh:
-            for item in self.items:
-                fh.write(json.dumps(item.to_dict(), ensure_ascii=False, sort_keys=True) + "\n")
-        tmp.replace(path)
+        rewrite_state_jsonl(path, [item.to_dict() for item in self.items])

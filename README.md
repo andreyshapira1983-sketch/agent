@@ -1190,7 +1190,7 @@ The full acceptance suite is in
 > redaction + classification, argument-aware risk (`risk_for`),
 > a sandboxed reversible/irreversible write tool, a sandboxed
 > whitelisted shell tool with mandatory compensation + rollback,
-> 1527 hermetic tests covering every production module, and
+> 1533 hermetic tests covering every production module, and
 > zero-network determinism. The numbered slots below extend that foundation;
 > they are not the smallest possible thing.
 
@@ -1994,7 +1994,7 @@ A real safety net lives in [`tests/`](tests/) and runs via `pytest`:
 python -m pytest -v
 ```
 
-What is covered today (**1527 tests, ≈ 30 s, zero network calls**):
+What is covered today (**1533 tests, ≈ 30 s, zero network calls**):
 
 | Layer | File | Cases |
 | --- | --- | --- |
@@ -2008,6 +2008,7 @@ What is covered today (**1527 tests, ≈ 30 s, zero network calls**):
 | Memory in the Loop | [`tests/test_memory_integration.py`](tests/test_memory_integration.py) | `memory_inject` fires only after turn 1 / `memory_cache_hit` short-circuits policy + tool / `memory_clear` resets state / **after `:clear` no `memory_inject`** / **after `:clear` no cache hit (real tool runs again)** / `memory=None` build emits no `memory_*` events |
 | Memory Write + Retrieval Policy (§4 + §12.4) | [`tests/test_memory_policy.py`](tests/test_memory_policy.py) | accept (user-explicit / consent tag / decision tag) / **secret regex reject** (OpenAI / Anthropic / GitHub / HF / AWS / PEM) / secret-keyword reject (`api_key`, `password`, `Authorization:`, …) / **PII rejected unless `sensitive-data-consent` is present** / empty / too short / too long / tool-dump heuristic / no-consent reject / blocked-tag reject / retrieval: empty store / blank question / keyword pick / `max_records` cap / recency tiebreak / stopword filter / tag-overlap scoring / prompt truncation |
 | Persistent Store (JSONL) | [`tests/test_persistent_memory.py`](tests/test_persistent_memory.py) | empty-file load / save-then-load round trip / preserved insertion order / `save_many` / **new store instance sees previous records** / delete by id / unknown-id no-op / `delete_all` removes file / corrupted line skipped / blank lines skipped / `get` hit + miss |
+| State Store Integrity | [`tests/test_state_integrity.py`](tests/test_state_integrity.py) | checksummed JSONL envelope round trip / legacy rows accepted and upgraded / corrupt JSON rows quarantined and removed from active state / quarantine redacts sensitive raw rows / checksum mismatch quarantined / atomic rewrite emits only checksummed rows |
 | Persistent in the Loop | [`tests/test_persistent_integration.py`](tests/test_persistent_integration.py) | **`agent.remember()` writes to disk + emits `persistent_memory_write`** / **fresh AgentLoop sees previous session's records** / secret rejected, no disk write / no-consent rejected, no disk write / **PII without `sensitive-data-consent` rejected; with consent saved only as `[REDACTED:pii-*]`** / `list_persistent` returns saved / `forget(id)` removes one + emits delete event / `forget()` wipes all / unknown id reports `deleted=0` / retrieval fires `persistent_memory_inject` and injects `<long_term_memory>` block / no records → no inject event, no block / no keyword overlap → `records_selected=0`, no block / no store wired → zero `persistent_memory_*` events + `remember()` rejects cleanly |
 | Approval Providers (§7) | [`tests/test_approval.py`](tests/test_approval.py) | `_classify` maps EN/RU yes-tokens → `approve`, no-tokens → `deny`, empty/garbage/None → `abort` / `CLIApprovalProvider`: yes / no / empty / EOF / KeyboardInterrupt / request_id round-trip / `AutoApprover`: parametrised default + records calls |
 | Approval in the Loop (§7 acceptance) | [`tests/test_approval.py`](tests/test_approval.py) | read_only tool → no approval event, runs anyway / **irreversible + approve → tool runs, events ordered policy < request < decision < tool_call** / **irreversible + deny → tool MUST NOT run, `error.code=approval_deny`** / irreversible + abort → tool MUST NOT run, `error.code=approval_abort` / CLI provider with empty input → abort, responder=timeout / CLI provider with garbage input → abort / **no provider wired → tool MUST NOT run, `error.code=approval_unavailable`** / external risk also escalates |
@@ -2161,7 +2162,7 @@ agent/
 ├── .github/workflows/ci.yml            # release/supply-chain/test/coverage gate
 ├── pytest.ini                        # pytest config (testpaths + pythonpath)
 ├── main.py                           # CLI entry point (+ :remember / :forget / :memory)
-├── tests/                            # 1527 hermetic tests (FakeLLM + FakePlanner)
+├── tests/                            # 1533 hermetic tests (FakeLLM + FakePlanner)
 │   ├── conftest.py                   # FakeLLM, FakePlanner, workspace fixture
 │   ├── test_ids.py                   # ID factory: 4 cases
 │   ├── test_models.py                # Pydantic Literal guards + defaults: 48 cases
@@ -2184,6 +2185,7 @@ agent/
 │   ├── test_memory_integration.py    # memory_inject / cache_hit / clear: 6 cases
 │   ├── test_memory_policy.py         # write + retrieval policy + owner + DLP + MVP-10 dedup gate: 56 cases
 │   ├── test_persistent_memory.py     # JSONL store save/load/delete: 12 cases
+│   ├── test_state_integrity.py       # checksummed JSONL state stores + quarantine: 6 cases
 │   ├── test_persistent_integration.py  # :remember/:forget/inject in the loop: 14 cases
 │   ├── test_approval.py              # approval gate (unit + 7 acceptance): 43 cases
 │   ├── test_secret_scanner.py        # regex + keyword detection: 17 cases
@@ -2201,6 +2203,7 @@ agent/
 │   ├── memory.py                     # Working Memory + artifact cache (§4)
 │   ├── memory_policy.py              # Memory Write + Retrieval Policies (§4 + §12.4); MVP-10 dedup gate
 │   ├── persistent_memory.py          # Persistent Memory Record store (§4, JSONL)
+│   ├── state_integrity.py            # shared locks + checksums + quarantine for JSONL state stores
 │   ├── hygiene.py                    # Memory Hygiene (§4 MVP-10): backups + dedup + TTL + summarise
 │   ├── compensation.py               # Compensation / Undo system (§5 MVP-11): plan + apply + sandbox
 │   ├── policy.py                     # Policy Gate (§12.4)

@@ -6,11 +6,15 @@ audit/catalog trail: which sources were seen and which claims were extracted.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Iterable
 
 from core.source_registry import ClaimRecord, SourceRecord, SourceRegistry
+from core.state_integrity import (
+    append_state_jsonl_unlocked,
+    read_state_jsonl_unlocked,
+    state_file_lock,
+)
 
 
 class SourceRegistryStore:
@@ -21,16 +25,18 @@ class SourceRegistryStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def save_source(self, source: SourceRecord) -> bool:
-        if self.get_source(source.id) is not None:
-            return False
-        self._append("source", source.to_dict())
-        return True
+        with state_file_lock(self.path):
+            if any(existing.id == source.id for existing in self._load_sources_unlocked()):
+                return False
+            self._append_unlocked("source", source.to_dict())
+            return True
 
     def save_claim(self, claim: ClaimRecord) -> bool:
-        if self._has_claim_key(_claim_key(claim)):
-            return False
-        self._append("claim", claim.to_dict())
-        return True
+        with state_file_lock(self.path):
+            if self._has_claim_key_unlocked(_claim_key(claim)):
+                return False
+            self._append_unlocked("claim", claim.to_dict())
+            return True
 
     def save_registry(self, registry: SourceRegistry) -> dict[str, int]:
         source_saved = 0
@@ -49,8 +55,12 @@ class SourceRegistryStore:
         }
 
     def load_sources(self) -> list[SourceRecord]:
+        with state_file_lock(self.path):
+            return self._load_sources_unlocked()
+
+    def _load_sources_unlocked(self) -> list[SourceRecord]:
         sources: dict[str, SourceRecord] = {}
-        for kind, payload in self._iter_records():
+        for kind, payload in self._iter_records_unlocked():
             if kind != "source":
                 continue
             try:
@@ -61,9 +71,13 @@ class SourceRegistryStore:
         return list(sources.values())
 
     def load_claims(self) -> list[ClaimRecord]:
+        with state_file_lock(self.path):
+            return self._load_claims_unlocked()
+
+    def _load_claims_unlocked(self) -> list[ClaimRecord]:
         claims: dict[str, ClaimRecord] = {}
-        sources = {source.id for source in self.load_sources()}
-        for kind, payload in self._iter_records():
+        sources = {source.id for source in self._load_sources_unlocked()}
+        for kind, payload in self._iter_records_unlocked():
             if kind != "claim":
                 continue
             try:
@@ -94,35 +108,31 @@ class SourceRegistryStore:
 
     def delete_all(self) -> dict[str, int]:
         counts = self.count()
-        if self.path.exists():
-            self.path.unlink()
+        with state_file_lock(self.path):
+            if self.path.exists():
+                self.path.unlink()
         return counts
 
-    def _append(self, kind: str, payload: dict) -> None:
-        with self.path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"kind": kind, "payload": payload}, ensure_ascii=False) + "\n")
+    def _append_unlocked(self, kind: str, payload: dict) -> None:
+        append_state_jsonl_unlocked(self.path, [{"kind": kind, "payload": payload}])
 
-    def _iter_records(self) -> Iterable[tuple[str, dict]]:
+    def _iter_records_unlocked(self) -> Iterable[tuple[str, dict]]:
         if not self.path.exists():
             return
-        with self.path.open(encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(row, dict):
-                    continue
-                kind = row.get("kind")
-                payload = row.get("payload")
-                if isinstance(kind, str) and isinstance(payload, dict):
-                    yield kind, payload
+        for row in read_state_jsonl_unlocked(self.path):
+            kind = row.get("kind")
+            payload = row.get("payload")
+            if isinstance(kind, str) and isinstance(payload, dict):
+                yield kind, payload
 
     def _has_claim_key(self, key: str) -> bool:
         for claim in self.load_claims():
+            if _claim_key(claim) == key:
+                return True
+        return False
+
+    def _has_claim_key_unlocked(self, key: str) -> bool:
+        for claim in self._load_claims_unlocked():
             if _claim_key(claim) == key:
                 return True
         return False
@@ -134,4 +144,3 @@ def _claim_key(claim: ClaimRecord) -> str:
         claim.locator,
         " ".join(claim.text.casefold().split()),
     ])
-

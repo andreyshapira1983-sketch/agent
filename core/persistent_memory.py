@@ -11,11 +11,16 @@ TTL eviction. The store is dumb — the brain is the WritePolicy + RetrievalPoli
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Iterable
 
 from core.models import MemoryRecord
+from core.state_integrity import (
+    append_state_jsonl_unlocked,
+    read_state_jsonl_unlocked,
+    rewrite_state_jsonl_unlocked,
+    state_file_lock,
+)
 
 
 class PersistentMemoryStore:
@@ -29,16 +34,16 @@ class PersistentMemoryStore:
 
     def save(self, record: MemoryRecord) -> None:
         """Append one record. O(1) write."""
-        with self.path.open("a", encoding="utf-8") as fh:
-            fh.write(record.model_dump_json() + "\n")
+        with state_file_lock(self.path):
+            append_state_jsonl_unlocked(self.path, [record.model_dump(mode="json")])
 
     def save_many(self, records: Iterable[MemoryRecord]) -> int:
-        n = 0
-        with self.path.open("a", encoding="utf-8") as fh:
-            for r in records:
-                fh.write(r.model_dump_json() + "\n")
-                n += 1
-        return n
+        payloads: list[dict] = []
+        for r in records:
+            payloads.append(r.model_dump(mode="json"))
+        with state_file_lock(self.path):
+            append_state_jsonl_unlocked(self.path, payloads)
+        return len(payloads)
 
     # ---------- reads ----------
 
@@ -47,17 +52,16 @@ class PersistentMemoryStore:
         if not self.path.exists():
             return []
         out: list[MemoryRecord] = []
-        with self.path.open(encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    out.append(MemoryRecord.model_validate_json(line))
-                except (json.JSONDecodeError, ValueError):
-                    # Skip silently — corrupted line should not bring the
-                    # session down. A future MVP can quarantine these.
-                    continue
+        with state_file_lock(self.path):
+            rows = read_state_jsonl_unlocked(self.path)
+        for row in rows:
+            try:
+                out.append(MemoryRecord.model_validate(row))
+            except ValueError:
+                # Skip silently — corrupted semantic records should not bring
+                # the session down. The generic JSON/checksum layer has already
+                # quarantined syntactically corrupt or tampered rows.
+                continue
         return out
 
     def count(self) -> int:
@@ -82,15 +86,16 @@ class PersistentMemoryStore:
 
     def delete_all(self) -> int:
         n = self.count()
-        if self.path.exists():
-            self.path.unlink()
+        with state_file_lock(self.path):
+            if self.path.exists():
+                self.path.unlink()
         return n
 
     # ---------- helpers ----------
 
     def _rewrite(self, records: list[MemoryRecord]) -> None:
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        with tmp.open("w", encoding="utf-8") as fh:
-            for r in records:
-                fh.write(r.model_dump_json() + "\n")
-        tmp.replace(self.path)
+        with state_file_lock(self.path):
+            rewrite_state_jsonl_unlocked(
+                self.path,
+                [record.model_dump(mode="json") for record in records],
+            )

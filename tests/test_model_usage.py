@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -8,6 +7,7 @@ import pytest
 from core.budget_ledger import BudgetLedger, BudgetWindow
 from core.model_router import ModelRole, ModelRouter
 from core.model_usage import ModelBudgetExceeded, ModelUsageLedger, ModelUsageLimits
+from core.state_integrity import decode_state_row
 from tests.conftest import FakeLLM
 
 
@@ -55,7 +55,7 @@ def test_model_usage_ledger_records_role_model_tokens_and_file(tmp_path: Path):
     assert snapshot["by_model"]["fake/fake-1"]["calls"] == 1
     lines = (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
-    assert json.loads(lines[0])["role"] == "synthesizer"
+    assert decode_state_row(lines[0])["role"] == "synthesizer"
 
 
 def test_model_usage_ledger_blocks_when_call_budget_exhausted(tmp_path: Path):

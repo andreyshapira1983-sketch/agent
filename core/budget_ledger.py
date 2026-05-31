@@ -6,12 +6,13 @@ processes/sessions by writing JSONL records and checking time windows such as
 """
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+from core.state_integrity import append_state_jsonl, read_state_jsonl
 
 
 BudgetLedgerCounter = str
@@ -157,12 +158,10 @@ class BudgetLedger:
         if self.path is None or not self.path.exists():
             return list(self.records)
         loaded: list[BudgetLedgerRecord] = []
-        for line in self.path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
+        for data in read_state_jsonl(self.path):
             try:
-                loaded.append(BudgetLedgerRecord.from_dict(json.loads(line)))
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                loaded.append(BudgetLedgerRecord.from_dict(data))
+            except (KeyError, TypeError, ValueError):
                 continue
         return loaded
 
@@ -229,9 +228,7 @@ class BudgetLedger:
         )
         self.records.append(record)
         if self.path is not None:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self.path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
+            append_state_jsonl(self.path, [record.to_dict()])
         _log(self.logger, "budget_window_recorded", record.to_dict())
         return record
 

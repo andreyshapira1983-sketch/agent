@@ -7,7 +7,6 @@ pending task, run it, and record the result.
 """
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +14,7 @@ from typing import Literal
 
 from core.file_lock import exclusive_file_lock
 from core.ids import new_id
+from core.state_integrity import read_state_jsonl_unlocked, rewrite_state_jsonl_unlocked
 
 
 RuntimeTaskKind = Literal["auto_run"]
@@ -163,20 +163,11 @@ class TaskQueueStore:
         if not self.path.exists():
             return []
         tasks: list[RuntimeTask] = []
-        with self.path.open("r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    raw = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                try:
-                    if isinstance(raw, dict):
-                        tasks.append(RuntimeTask.from_dict(raw))
-                except (TypeError, ValueError):
-                    continue
+        for raw in read_state_jsonl_unlocked(self.path):
+            try:
+                tasks.append(RuntimeTask.from_dict(raw))
+            except (TypeError, ValueError):
+                continue
         return tasks
 
     def list(self, *, status: RuntimeTaskStatus | str | None = None) -> list[RuntimeTask]:
@@ -290,9 +281,4 @@ class TaskQueueStore:
         return self.path.with_suffix(self.path.suffix + ".lock")
 
     def _save_unlocked(self, tasks: list[RuntimeTask]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        with tmp.open("w", encoding="utf-8") as fh:
-            for task in tasks:
-                fh.write(json.dumps(task.to_dict(), ensure_ascii=False, sort_keys=True) + "\n")
-        tmp.replace(self.path)
+        rewrite_state_jsonl_unlocked(self.path, [task.to_dict() for task in tasks])
