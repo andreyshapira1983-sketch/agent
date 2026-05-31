@@ -1773,7 +1773,7 @@ class AgentLoop:
                 warnings.append(f"{raw_path}: duplicate path skipped")
                 continue
             seen_targets.add(target_key)
-            rel_path = str(item["relative_path"])
+            rel_path = item["relative_path"].as_posix()
             valid_sources.append({
                 "tool": "file_read",
                 "arguments": {"path": rel_path},
@@ -1881,7 +1881,10 @@ class AgentLoop:
 
     def _validate_user_file_path(self, raw_path: str, *, workspace: Path) -> dict[str, Any]:
         cleaned = raw_path.strip().strip("\"'")
-        path = Path(cleaned)
+        normalized = cleaned.replace("\\", "/")
+        if re.match(r"^[A-Za-z]:/", normalized):
+            return {"ok": False, "reason": "absolute path escapes workspace"}
+        path = Path(normalized)
         if any(part == ".." for part in path.parts):
             return {"ok": False, "reason": "path traversal is not allowed"}
         target = path.resolve() if path.is_absolute() else (workspace / path).resolve()

@@ -2233,7 +2233,7 @@ def _dispatch_operator_intent(
 def _preflight_file_hint(file_hint: str | None, workspace: Path) -> tuple[bool, str | None]:
     if not file_hint:
         return True, None
-    path = Path(file_hint)
+    path = Path(file_hint.strip().replace("\\", "/"))
     if not path.is_absolute():
         path = workspace / path
     path = path.resolve()

@@ -31,9 +31,8 @@ from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.planner import PlannerOutput
 from core.policy import PolicyGate
-from tools.base import ToolRegistry
+from tools.base import Tool, ToolRegistry
 from tools.web_fetch import WebFetchTool
-from tools.web_search import WebSearchTool
 from tests.conftest import FakeLLM
 
 
@@ -147,6 +146,24 @@ class _StubOpener:
         return _StubResponse(self.routes[url], url=url)
 
 
+class _StubWebSearchTool(Tool):
+    name = "web_search"
+    description = "deterministic web search test double"
+    risk = "read_only"
+
+    def run(self, query: str, max_results: int = 3) -> list[dict[str, str]]:
+        del max_results
+        return [{
+            "title": "Stub search result",
+            "url": "https://example.com/search-result",
+            "snippet": query,
+            "source": "stub",
+        }]
+
+    def validate_output(self, output: Any) -> tuple[bool, list[str]]:
+        return (isinstance(output, list), [])
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -178,7 +195,7 @@ def _build_agent(
     we keep the budget generous in tests.
     """
     reg = ToolRegistry()
-    reg.register(WebSearchTool())
+    reg.register(_StubWebSearchTool())
 
     opener = _StubOpener(url_routes or {})
     reg.register(WebFetchTool(opener=opener))

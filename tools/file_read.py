@@ -21,6 +21,16 @@ class FileReadTool(Tool):
     def __init__(self, workspace_root: Path | str):
         self.workspace_root = Path(workspace_root).resolve()
 
+    @staticmethod
+    def _local_path(raw_path: str) -> Path:
+        """Interpret CLI/user paths consistently on Windows and POSIX.
+
+        Users often type Windows-style relative paths such as ``.\\docs\\a.md``.
+        On POSIX runners a backslash is a literal filename character, so we
+        normalize separators before giving the path to ``pathlib``.
+        """
+        return Path(raw_path.strip().replace("\\", "/"))
+
     def run(self, path: str) -> str:
         # Read-only file access may target user-supplied local documents
         # with non-ASCII names. We still keep the sandbox boundary strict:
@@ -31,7 +41,12 @@ class FileReadTool(Tool):
             )
         if not path.strip():
             raise PermissionError("file_read path must be non-empty")
-        target = (self.workspace_root / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
+        local_path = self._local_path(path)
+        target = (
+            local_path.resolve()
+            if local_path.is_absolute()
+            else (self.workspace_root / local_path).resolve()
+        )
 
         try:
             target.relative_to(self.workspace_root)
