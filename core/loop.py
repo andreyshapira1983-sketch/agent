@@ -20,6 +20,7 @@ trace.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -529,6 +530,11 @@ class AgentLoop:
                 failure_context=failure_context,
                 forbidden_actions=forbidden_actions,
             )
+            planner_out = self._force_file_hint_read_when_explicit(
+                planner_out,
+                question=user_question,
+                file_hint=file_hint,
+            )
             self.log.log(
                 "planner",
                 {
@@ -878,6 +884,11 @@ class AgentLoop:
                     failure_context=failure_context,
                     forbidden_actions=decision.forbidden_actions,
                 )
+                planner_out = self._force_file_hint_read_when_explicit(
+                    planner_out,
+                    question=user_question,
+                    file_hint=file_hint,
+                )
                 self.log.log(
                     "planner",
                     {
@@ -1029,6 +1040,17 @@ class AgentLoop:
         if policy_result.applied:
             answer = policy_result.answer
             self.log.log("output_policy", policy_result.to_log_payload())
+
+        file_scope_notice = self._file_scope_notice(user_question, artifacts)
+        if file_scope_notice and file_scope_notice not in answer:
+            answer = f"{file_scope_notice}\n\n{answer}"
+            self.log.log(
+                "file_scope_notice",
+                {
+                    "notice": file_scope_notice,
+                    "artifact_labels": list(artifacts.keys()),
+                },
+            )
 
         # Defence-in-depth: redact once more on the way out so even an
         # LLM hallucinating a credential or PII cannot bypass the kernel.
@@ -1574,6 +1596,63 @@ class AgentLoop:
         plan.status = "in_progress"
         return plan
 
+    def _force_file_hint_read_when_explicit(
+        self,
+        planner_out: PlannerOutput,
+        *,
+        question: str,
+        file_hint: str | None,
+    ) -> PlannerOutput:
+        if not file_hint:
+            return planner_out
+        if any(src.get("tool") == "file_read" for src in planner_out.sources):
+            return planner_out
+        if not self._explicitly_requests_hinted_file(question):
+            return planner_out
+        sources = list(planner_out.sources)
+        sources.append(self._file_hint_source(file_hint))
+        warnings = list(planner_out.warnings)
+        warnings.append(
+            "explicit file-read request used --file hint because planner selected no file_read"
+        )
+        return PlannerOutput(
+            reasoning=(
+                f"{planner_out.reasoning} "
+                "Kernel added read-only file_read for explicit hinted-file request."
+            ).strip(),
+            sources=sources,
+            raw_response=planner_out.raw_response,
+            warnings=warnings,
+        )
+
+    @staticmethod
+    def _explicitly_requests_hinted_file(question: str) -> bool:
+        text = " ".join(question.casefold().split())
+        return any(
+            phrase in text
+            for phrase in (
+                "прочитай файл",
+                "прочти файл",
+                "прочитать файл",
+                "проанализируй файл",
+                "анализ файла",
+                "файл задания",
+                "task file",
+                "read the file",
+                "read this file",
+                "analyze the file",
+            )
+        )
+
+    @staticmethod
+    def _file_hint_source(file_hint: str) -> dict[str, Any]:
+        return {
+            "tool": "file_read",
+            "arguments": {"path": file_hint},
+            "label": f"file:{file_hint}",
+            "expected_outcome": "Non-empty UTF-8 text from the hinted file.",
+        }
+
     def _execute_step(self, step: PlanStep) -> dict[str, Any] | None:
         """Run a single PlanStep through Act -> Policy -> Tool -> Verify.
 
@@ -2082,6 +2161,15 @@ class AgentLoop:
             allowed_citations_block = self._format_allowed_citations_block(
                 self.last_provenance
             )
+            file_scope_notice = self._file_scope_notice(question, artifacts)
+            file_scope_block = (
+                "<file_scope_notice>\n"
+                f"{file_scope_notice}\n"
+                "Do not claim any unverified path exists or was read.\n"
+                "</file_scope_notice>\n\n"
+                if file_scope_notice
+                else ""
+            )
 
             warnings = [
                 f"{label}: {'; '.join(art['issues'])}"
@@ -2100,6 +2188,7 @@ class AgentLoop:
                 f"{long_term_block}"
                 f"{history_block}"
                 f"{allowed_citations_block}"
+                f"{file_scope_block}"
                 f"{evidence}\n\n"
                 f"{warnings_block}"
                 f"planner_reasoning: {planner_reasoning}\n\n"
@@ -2216,6 +2305,66 @@ class AgentLoop:
             return output
         # Fallback: stringify whatever came back.
         return str(output)
+
+    @classmethod
+    def _file_scope_notice(
+        cls,
+        question: str,
+        artifacts: dict[str, dict[str, Any]],
+    ) -> str:
+        actual_paths = [
+            label[len("file:"):]
+            for label, art in artifacts.items()
+            if label.startswith("file:") and art.get("tool") == "file_read"
+        ]
+        if not actual_paths:
+            return ""
+        actual_norms = {cls._normalize_path_mention(path) for path in actual_paths}
+        requested_paths = cls._extract_path_mentions(question)
+        missing = [
+            path
+            for path in requested_paths
+            if cls._normalize_path_mention(path) not in actual_norms
+        ]
+        if not missing:
+            return ""
+        actual = ", ".join(actual_paths)
+        unverified = ", ".join(missing)
+        return (
+            f"Evidence scope: I only have evidence for {actual}. "
+            f"I did not verify {unverified}."
+        )
+
+    @staticmethod
+    def _extract_path_mentions(text: str) -> list[str]:
+        pattern = re.compile(
+            r"(?P<path>"
+            r"(?:[A-Za-z]:[\\/])?"
+            r"(?:\.{1,2}[\\/])?"
+            r"(?:[A-Za-z0-9_.-]+[\\/])*"
+            r"[A-Za-z0-9_.-]+\."
+            r"(?:py|md|txt|json|yml|yaml|pdf)"
+            r")",
+            flags=re.IGNORECASE,
+        )
+        seen: set[str] = set()
+        paths: list[str] = []
+        for match in pattern.finditer(text):
+            path = match.group("path").rstrip(".,;:!?)\"]}'")
+            key = path.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            paths.append(path)
+        return paths
+
+    @staticmethod
+    def _normalize_path_mention(path: str) -> str:
+        out = path.strip().strip("\"'")
+        out = out.replace("/", "\\")
+        while out.startswith(".\\"):
+            out = out[2:]
+        return out.casefold()
 
 
 def new_trace_id() -> str:
