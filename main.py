@@ -1314,6 +1314,242 @@ def _handle_operator_check(rest: str, agent: AgentLoop, workspace: Path) -> bool
     return True
 
 
+def _handle_operator_budget(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    tokens = _split_meta_args(rest)
+    as_json = "--json" in tokens
+    if any(token != "--json" for token in tokens):
+        print("Usage: :operator-budget [--json]", file=sys.stderr)
+        return True
+    payload = _operator_digest_payload(agent, workspace)
+    budget_payload = {
+        "model_usage": payload.get("model_usage"),
+        "persistent_budget_windows": payload.get("persistent_budget_windows"),
+        "recommendations": [
+            item for item in payload.get("recommendations", [])
+            if any(
+                term in item.casefold()
+                for term in ("budget limits", "hour/day", "model", "token", "cost", "spend")
+            )
+        ],
+    }
+    agent.log.log("operator_budget_digest", budget_payload)
+    if as_json:
+        print(json.dumps(budget_payload, ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(_format_operator_budget_digest(budget_payload), file=sys.stderr)
+    return True
+
+
+def _format_operator_budget_digest(payload: dict) -> str:
+    model_usage = payload.get("model_usage") or {}
+    limits = model_usage.get("limits", {})
+    totals = model_usage.get("totals", {})
+    session = model_usage.get("session_totals", {})
+    windows_payload = payload.get("persistent_budget_windows") or {}
+    windows = windows_payload.get("windows", []) if isinstance(windows_payload, dict) else []
+    lines = [
+        "=== operator budget ===",
+        (
+            "model usage: "
+            f"history_calls={totals.get('calls', 0)} "
+            f"history_tokens={totals.get('total_tokens', 0)} "
+            f"history_cost_units={totals.get('cost_units', 0)}"
+        ),
+        (
+            "this session: "
+            f"calls={session.get('calls', 0)} "
+            f"tokens={session.get('total_tokens', 0)} "
+            f"cost_units={session.get('cost_units', 0)}"
+        ),
+        (
+            "session caps: "
+            f"max_calls={limits.get('max_calls', 0)} "
+            f"max_tokens={limits.get('max_tokens', 0)} "
+            f"max_cost_units={limits.get('max_cost_units', 0)}"
+        ),
+    ]
+    if windows:
+        lines.append("persistent windows:")
+        for window in windows:
+            counters = window.get("counters", {})
+            compact = ", ".join(
+                f"{name}={data.get('used', 0)}/{data.get('limit', 0)}"
+                for name, data in counters.items()
+            )
+            lines.append(f"  - {window.get('name')}: {compact}")
+    else:
+        lines.append("persistent windows: not enabled")
+    recommendations = payload.get("recommendations", [])
+    if recommendations:
+        lines.append("budget recommendations:")
+        for item in recommendations:
+            lines.append(f"  - {item}")
+    return "\n".join(lines)
+
+
+def _handle_urgent_status(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    tokens = _split_meta_args(rest)
+    as_json = "--json" in tokens
+    if any(token != "--json" for token in tokens):
+        print("Usage: :urgent-status [--json]", file=sys.stderr)
+        return True
+    payload = _operator_digest_payload(agent, workspace)
+    urgent_payload = {
+        "approval_inbox": payload.get("runtime", {}).get("approval_inbox", {}),
+        "task_queue": payload.get("task_queue", {}),
+        "scheduler": payload.get("scheduler", {}),
+        "runtime_recommendations": payload.get("recommendations", []),
+    }
+    agent.log.log("operator_urgent_status", urgent_payload)
+    if as_json:
+        print(json.dumps(urgent_payload, ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(_format_urgent_status(urgent_payload), file=sys.stderr)
+    return True
+
+
+def _format_urgent_status(payload: dict) -> str:
+    approvals = payload.get("approval_inbox", {})
+    queue = payload.get("task_queue", {})
+    scheduler = payload.get("scheduler", {})
+    urgent_items: list[str] = []
+    pending = int(approvals.get("pending", 0) or 0)
+    due_tasks = int(queue.get("pending_due", 0) or 0)
+    due_schedules = int(scheduler.get("due", 0) or 0)
+    if pending:
+        urgent_items.append(f"{pending} approval item(s) are waiting.")
+    if due_tasks:
+        urgent_items.append(f"{due_tasks} queued task(s) are due.")
+    if due_schedules:
+        urgent_items.append(f"{due_schedules} schedule item(s) are due.")
+    lines = [
+        "=== urgent status ===",
+        f"approvals_pending={pending}",
+        f"queue_pending_due={due_tasks}",
+        f"scheduler_due={due_schedules}",
+    ]
+    if urgent_items:
+        lines.append("urgent items:")
+        lines.extend(f"  - {item}" for item in urgent_items)
+    else:
+        lines.append("urgent items: none")
+    return "\n".join(lines)
+
+
+def _handle_next_actions(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    tokens = _split_meta_args(rest)
+    as_json = "--json" in tokens
+    if any(token != "--json" for token in tokens):
+        print("Usage: :next-actions [--json]", file=sys.stderr)
+        return True
+    payload = _operator_digest_payload(agent, workspace)
+    next_payload = {
+        "priority_gaps": payload.get("architecture", {}).get("priority_gaps", []),
+        "recommendations": payload.get("recommendations", []),
+    }
+    agent.log.log("operator_next_actions", next_payload)
+    if as_json:
+        print(json.dumps(next_payload, ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(_format_next_actions(next_payload), file=sys.stderr)
+    return True
+
+
+def _format_next_actions(payload: dict) -> str:
+    lines = ["=== next actions ==="]
+    gaps = payload.get("priority_gaps", [])
+    if gaps:
+        lines.append("architecture priorities:")
+        for gap in gaps[:3]:
+            lines.append(f"  - {gap.get('title')}: {gap.get('next_step')}")
+    else:
+        lines.append("architecture priorities: none")
+    recommendations = payload.get("recommendations", [])
+    if recommendations:
+        lines.append("recommended actions:")
+        for item in recommendations[:5]:
+            lines.append(f"  - {item}")
+    return "\n".join(lines)
+
+
+def _handle_autonomy_readiness(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    tokens = _split_meta_args(rest)
+    as_json = "--json" in tokens
+    if any(token != "--json" for token in tokens):
+        print("Usage: :autonomy-readiness [--json]", file=sys.stderr)
+        return True
+    payload = _operator_digest_payload(agent, workspace)
+    readiness_payload = _autonomy_readiness_payload(payload)
+    agent.log.log("operator_autonomy_readiness", readiness_payload)
+    if as_json:
+        print(json.dumps(readiness_payload, ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(_format_autonomy_readiness(readiness_payload), file=sys.stderr)
+    return True
+
+
+def _autonomy_readiness_payload(payload: dict) -> dict:
+    approvals = payload.get("runtime", {}).get("approval_inbox", {})
+    architecture = payload.get("architecture", {})
+    pending = int(approvals.get("pending", 0) or 0)
+    budget_limits_configured = _persistent_budget_limits_configured(
+        payload.get("persistent_budget_windows")
+    )
+    blockers: list[str] = []
+    if pending:
+        blockers.append(f"{pending} approval item(s) pending")
+    if not budget_limits_configured:
+        blockers.append("persistent hour/day budget limits are not configured")
+    if not architecture.get("ready_for_multi_agent_execution"):
+        blockers.append("multi-agent/long-session readiness gaps remain")
+    state = "ready" if not blockers else "limited"
+    return {
+        "state": state,
+        "dry_run_runtime_ready": True,
+        "ready_for_multi_agent_execution": bool(
+            architecture.get("ready_for_multi_agent_execution")
+        ),
+        "approvals_pending": pending,
+        "persistent_budget_limits_configured": budget_limits_configured,
+        "blockers": blockers,
+        "recommendations": payload.get("recommendations", []),
+    }
+
+
+def _persistent_budget_limits_configured(snapshot: dict | None) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    windows = snapshot.get("windows", [])
+    if not windows:
+        return False
+    for window in windows:
+        for counter in window.get("counters", {}).values():
+            if int(counter.get("limit", 0) or 0) > 0:
+                return True
+    return False
+
+
+def _format_autonomy_readiness(payload: dict) -> str:
+    lines = [
+        "=== autonomy readiness ===",
+        f"state={payload.get('state')}",
+        f"dry_run_runtime_ready={payload.get('dry_run_runtime_ready')}",
+        f"ready_for_multi_agent_execution={payload.get('ready_for_multi_agent_execution')}",
+        f"approvals_pending={payload.get('approvals_pending')}",
+        (
+            "persistent_budget_limits_configured="
+            f"{payload.get('persistent_budget_limits_configured')}"
+        ),
+    ]
+    blockers = payload.get("blockers", [])
+    if blockers:
+        lines.append("blockers:")
+        lines.extend(f"  - {item}" for item in blockers)
+    else:
+        lines.append("blockers: none")
+    return "\n".join(lines)
+
+
 def handle_conversational_operator_input(text: str, agent: AgentLoop, workspace: Path) -> bool:
     intent = route_operator_intent(text)
     if intent is None:
@@ -1332,9 +1568,15 @@ def _dispatch_operator_intent(intent: OperatorIntent, agent: AgentLoop, workspac
     if intent.kind == "model_status":
         return _handle_models("", agent)
     if intent.kind == "budget_status":
-        return _handle_budget_status(agent, workspace)
+        return _handle_operator_budget("", agent, workspace)
     if intent.kind == "approval_status":
         return _handle_approval_list("all", agent, workspace)
+    if intent.kind == "urgent_status":
+        return _handle_urgent_status("", agent, workspace)
+    if intent.kind == "next_actions":
+        return _handle_next_actions("", agent, workspace)
+    if intent.kind == "autonomy_readiness":
+        return _handle_autonomy_readiness("", agent, workspace)
     return False
 
 
@@ -2160,6 +2402,18 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head in {":operator-check", ":project-check", ":project-status"}:
         return _handle_operator_check(rest.strip(), agent, workspace)
 
+    if head in {":operator-budget", ":budget-digest"}:
+        return _handle_operator_budget(rest.strip(), agent, workspace)
+
+    if head in {":urgent-status", ":operator-urgent"}:
+        return _handle_urgent_status(rest.strip(), agent, workspace)
+
+    if head in {":next-actions", ":operator-next"}:
+        return _handle_next_actions(rest.strip(), agent, workspace)
+
+    if head in {":autonomy-readiness", ":operator-readiness"}:
+        return _handle_autonomy_readiness(rest.strip(), agent, workspace)
+
     if head in {":learn", ":learn-project"}:
         return _handle_learn(rest.strip(), agent, workspace)
 
@@ -2268,6 +2522,10 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :model-registry-audit [--json] inspect selected vs available model candidates\n"
             "  :architecture-audit [--json]   inspect layers and multi-agent gaps\n"
             "  :operator-check [--json]       conversational project/status digest\n"
+            "  :operator-budget [--json]      concise budget + model usage digest\n"
+            "  :urgent-status [--json]        approvals + queue + scheduler urgency digest\n"
+            "  :next-actions [--json]         architecture priorities + recommendations\n"
+            "  :autonomy-readiness [--json]   whether autonomy is safe to run now\n"
             "  :model-usage [--json]           inspect model calls/tokens/cost units\n"
             "  :team-plan <goal> [--json]      dry-run bounded subagent contracts\n"
             "  :team-run <goal> [--json]       dry-run execution walk over subagent contracts\n"
@@ -2318,7 +2576,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  Проверь проект и скажи что требует внимания\n"
             "  Покажи какие модели используются\n"
             "  Сколько потрачено токенов и какой бюджет\n"
-            "  Есть ли ожидающие approval",
+            "  Есть ли что-то срочное\n"
+            "  Что делать дальше\n"
+            "  Можно ли запускать автономность",
             file=sys.stderr,
         )
         return True
@@ -2406,7 +2666,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :learn  :auto-run  :operator-check  :conflicts  :budget-status  :budget-window-status  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :learn  :auto-run  :operator-check  :operator-budget  :urgent-status  :next-actions  :autonomy-readiness  :conflicts  :budget-status  :budget-window-status  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:

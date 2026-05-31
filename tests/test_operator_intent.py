@@ -27,7 +27,7 @@ def test_routes_budget_status_phrases():
 
     assert intent is not None
     assert intent.kind == "budget_status"
-    assert intent.command == ":budget-status"
+    assert intent.command == ":operator-budget"
 
 
 def test_routes_approval_status_phrases():
@@ -36,6 +36,30 @@ def test_routes_approval_status_phrases():
     assert intent is not None
     assert intent.kind == "approval_status"
     assert intent.command == ":approval-list all"
+
+
+def test_routes_urgent_status_phrases():
+    intent = route_operator_intent("Есть ли что-то срочное")
+
+    assert intent is not None
+    assert intent.kind == "urgent_status"
+    assert intent.command == ":urgent-status"
+
+
+def test_routes_next_actions_phrases():
+    intent = route_operator_intent("Что делать дальше")
+
+    assert intent is not None
+    assert intent.kind == "next_actions"
+    assert intent.command == ":next-actions"
+
+
+def test_routes_autonomy_readiness_phrases():
+    intent = route_operator_intent("Можно ли запускать автономность")
+
+    assert intent is not None
+    assert intent.kind == "autonomy_readiness"
+    assert intent.command == ":autonomy-readiness"
 
 
 def test_does_not_capture_normal_chat():

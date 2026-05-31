@@ -485,12 +485,20 @@ class TestHandleMetaCommand:
 
         assert handle_meta_command(":operator-check", agent, workspace) is True
         assert handle_meta_command(":project-status --json", agent, workspace) is True
+        assert handle_meta_command(":operator-budget", agent, workspace) is True
+        assert handle_meta_command(":urgent-status", agent, workspace) is True
+        assert handle_meta_command(":next-actions", agent, workspace) is True
+        assert handle_meta_command(":autonomy-readiness", agent, workspace) is True
 
         out = capsys.readouterr()
         assert "operator digest" in out.err
         assert "source registry" in out.err
         assert "recommended actions" in out.err
         assert '"architecture"' in out.err
+        assert "operator budget" in out.err
+        assert "urgent status" in out.err
+        assert "next actions" in out.err
+        assert "autonomy readiness" in out.err
 
     def test_conversational_operator_phrase_bypasses_llm(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
@@ -500,9 +508,19 @@ class TestHandleMetaCommand:
             agent,
             workspace,
         ) is True
+        assert handle_conversational_operator_input("Есть ли что-то срочное", agent, workspace) is True
+        assert handle_conversational_operator_input("Что делать дальше", agent, workspace) is True
+        assert handle_conversational_operator_input(
+            "Можно ли запускать автономность",
+            agent,
+            workspace,
+        ) is True
 
         out = capsys.readouterr()
         assert "operator intent: project_health" in out.err
+        assert "operator intent: urgent_status" in out.err
+        assert "operator intent: next_actions" in out.err
+        assert "operator intent: autonomy_readiness" in out.err
         assert "operator digest" in out.err
         assert "attention:" in out.err
 

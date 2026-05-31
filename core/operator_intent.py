@@ -16,6 +16,9 @@ OperatorIntentKind = Literal[
     "model_status",
     "budget_status",
     "approval_status",
+    "urgent_status",
+    "next_actions",
+    "autonomy_readiness",
 ]
 
 
@@ -43,6 +46,24 @@ def route_operator_intent(text: str) -> OperatorIntent | None:
             command=":operator-check",
             reason="project health/status wording",
         )
+    if _matches_urgent_status(normalized):
+        return OperatorIntent(
+            kind="urgent_status",
+            command=":urgent-status",
+            reason="urgent attention wording",
+        )
+    if _matches_next_actions(normalized):
+        return OperatorIntent(
+            kind="next_actions",
+            command=":next-actions",
+            reason="next-step wording",
+        )
+    if _matches_autonomy_readiness(normalized):
+        return OperatorIntent(
+            kind="autonomy_readiness",
+            command=":autonomy-readiness",
+            reason="autonomy readiness wording",
+        )
     if _matches_model_status(normalized):
         return OperatorIntent(
             kind="model_status",
@@ -52,7 +73,7 @@ def route_operator_intent(text: str) -> OperatorIntent | None:
     if _matches_budget_status(normalized):
         return OperatorIntent(
             kind="budget_status",
-            command=":budget-status",
+            command=":operator-budget",
             reason="budget/token/spend wording",
         )
     if _matches_approval_status(normalized):
@@ -120,6 +141,60 @@ def _matches_model_status(text: str) -> bool:
             "usage",
             "show",
             "which",
+        ),
+    )
+
+
+def _matches_urgent_status(text: str) -> bool:
+    direct_phrases = (
+        "что-то срочное",
+        "что нибудь срочное",
+        "есть ли срочное",
+        "есть ли что-то срочное",
+        "есть ли что нибудь срочное",
+        "urgent",
+        "anything urgent",
+        "needs immediate attention",
+        "requires immediate attention",
+    )
+    if _has_any(text, direct_phrases):
+        return True
+    return _has_any(text, ("сроч", "urgent", "immediate")) and _has_any(
+        text,
+        ("есть", "что", "anything", "attention"),
+    )
+
+
+def _matches_next_actions(text: str) -> bool:
+    direct_phrases = (
+        "что делать дальше",
+        "что дальше делать",
+        "следующий шаг",
+        "следующие шаги",
+        "куда дальше",
+        "what next",
+        "what should we do next",
+        "next action",
+        "next actions",
+        "next step",
+        "next steps",
+    )
+    return _has_any(text, direct_phrases)
+
+
+def _matches_autonomy_readiness(text: str) -> bool:
+    return _has_any(
+        text,
+        (
+            "можно ли запускать автономность",
+            "можно запускать автономность",
+            "готов ли автономный режим",
+            "готова ли автономность",
+            "can we run autonomy",
+            "is autonomy ready",
+            "autonomy readiness",
+            "ready for autonomy",
+            "autonomous readiness",
         ),
     )
 

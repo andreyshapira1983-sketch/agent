@@ -1191,7 +1191,7 @@ The full acceptance suite is in
 > redaction + classification, argument-aware risk (`risk_for`),
 > a sandboxed reversible/irreversible write tool, a sandboxed
 > whitelisted shell tool with mandatory compensation + rollback,
-> 1540 hermetic tests covering every production module, and
+> 1543 hermetic tests covering every production module, and
 > zero-network determinism. The numbered slots below extend that foundation;
 > they are not the smallest possible thing.
 
@@ -1586,7 +1586,9 @@ Common owner requests are routed locally before the LLM is called:
   - "Проверь проект и скажи что требует внимания" runs an operator digest.
   - "Покажи какие модели используются" routes to model status.
   - "Сколько потрачено токенов и какой бюджет" routes to budget/model usage.
-  - "Есть ли ожидающие approval" routes to the approval inbox.
+  - "Есть ли что-то срочное" routes to approvals, queue and scheduler status.
+  - "Что делать дальше" routes to architecture priorities and recommendations.
+  - "Можно ли запускать автономность" routes to runtime/budget/readiness checks.
 
 The digest is intentionally read-only: it combines architecture audit,
 source registry counts, persistent memory count, approval status, queue /
@@ -2011,7 +2013,7 @@ A real safety net lives in [`tests/`](tests/) and runs via `pytest`:
 python -m pytest -v
 ```
 
-What is covered today (**1540 tests, ≈ 30 s, zero network calls**):
+What is covered today (**1543 tests, ≈ 30 s, zero network calls**):
 
 | Layer | File | Cases |
 | --- | --- | --- |
@@ -2059,7 +2061,7 @@ What is covered today (**1540 tests, ≈ 30 s, zero network calls**):
 | Role Router (MVP-14.3e) | [`tests/test_role_router.py`](tests/test_role_router.py) | repair / learning / default operator-chat routing; each route carries tone, output style, knowledge scopes and allowed memory tags |
 | Knowledge Use Policy (MVP-14.3e) | [`tests/test_knowledge_use_policy.py`](tests/test_knowledge_use_policy.py) | role-tag filtering, question-overlap admission, quarantined/obsolete memory rejection before keyword retrieval |
 | Learning Planner (MVP-14.3e) | [`tests/test_learning_planner.py`](tests/test_learning_planner.py) + [`tests/test_cli.py`](tests/test_cli.py) | README / architecture / core/test prioritisation, goal-specific self-repair source selection, workspace-escape rejection, `:learn-project` plan -> dry-run ingestion |
-| Conversational Operator Layer (MVP-14.3i) | [`tests/test_operator_intent.py`](tests/test_operator_intent.py), [`tests/test_cli.py`](tests/test_cli.py) | natural-language project/model/budget/approval operator requests route to local handlers before LLM calls / `:operator-check` text + JSON digest |
+| Conversational Operator Layer (MVP-14.3i) | [`tests/test_operator_intent.py`](tests/test_operator_intent.py), [`tests/test_cli.py`](tests/test_cli.py) | natural-language project/model/budget/approval/urgent/next-action/autonomy-readiness operator requests route to local handlers before LLM calls / `:operator-check`, `:operator-budget`, `:urgent-status`, `:next-actions`, `:autonomy-readiness` text + JSON digests |
 | Autonomous Runtime (MVP-16.1) | [`tests/test_autonomous_runtime.py`](tests/test_autonomous_runtime.py), [`tests/test_budget_governor.py`](tests/test_budget_governor.py), [`tests/test_circuit_breaker.py`](tests/test_circuit_breaker.py), [`tests/test_approval_inbox.py`](tests/test_approval_inbox.py), [`tests/test_cli.py`](tests/test_cli.py) | bounded dry-run health pass / status + learning + tests tasks / non-dry-run blocked into approval inbox / cycle budget denial opens circuit / CLI `:auto-run` and `:auto-status` |
 | Persistent Task Queue + Scheduler (MVP-16.2) | [`tests/test_task_queue.py`](tests/test_task_queue.py), [`tests/test_scheduler.py`](tests/test_scheduler.py), [`tests/test_autonomous_runtime.py`](tests/test_autonomous_runtime.py), [`tests/test_cli.py`](tests/test_cli.py) | JSONL task persistence / pending due filtering / task state transitions / schedule persistence / scheduler tick enqueues due tasks / queued tasks run through `AutonomousRuntime` / CLI `:task-*` and `:schedule-*` |
 | Model Usage Ledger (MVP-16.3) | [`tests/test_model_usage.py`](tests/test_model_usage.py), [`tests/test_cli.py`](tests/test_cli.py) | role/model token ledger / JSONL persistence / historical vs current-session totals / session call-budget block / estimated token fallback / CLI `:model-usage` and `:budget-status` integration |
@@ -2180,7 +2182,7 @@ agent/
 ├── .github/workflows/ci.yml            # release/supply-chain/test/coverage gate
 ├── pytest.ini                        # pytest config (testpaths + pythonpath)
 ├── main.py                           # CLI entry point (+ :remember / :forget / :memory)
-├── tests/                            # 1540 hermetic tests (FakeLLM + FakePlanner)
+├── tests/                            # 1543 hermetic tests (FakeLLM + FakePlanner)
 │   ├── conftest.py                   # FakeLLM, FakePlanner, workspace fixture
 │   ├── test_ids.py                   # ID factory: 4 cases
 │   ├── test_models.py                # Pydantic Literal guards + defaults: 48 cases
@@ -2201,7 +2203,7 @@ agent/
 │   ├── test_memory.py                # WorkingMemory + artifact cache: 14 cases
 │   ├── test_integration.py           # full Control Loop: 2 cases
 │   ├── test_memory_integration.py    # memory_inject / cache_hit / clear: 6 cases
-│   ├── test_operator_intent.py       # natural-language operator routing: 5 cases
+│   ├── test_operator_intent.py       # natural-language operator routing: 8 cases
 │   ├── test_memory_policy.py         # write + retrieval policy + owner + DLP + MVP-10 dedup gate: 56 cases
 │   ├── test_persistent_memory.py     # JSONL store save/load/delete: 12 cases
 │   ├── test_state_integrity.py       # checksummed JSONL state stores + quarantine: 6 cases
