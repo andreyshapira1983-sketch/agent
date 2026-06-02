@@ -1,0 +1,11 @@
+# Direct project dependencies.
+# Regenerate requirements.txt intentionally after reviewing upgrades.
+anthropic
+openai
+pydantic
+python-dotenv
+ddgs
+pytest
+coverage
+fastapi
+uvicorn[standard]

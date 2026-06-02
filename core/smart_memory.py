@@ -1,0 +1,484 @@
+"""Episodic, procedural and consolidation memory for autonomous operation.
+
+This module is intentionally local, deterministic and auditable. It does not
+train a model. It stores what happened, turns successful tool workflows into
+small reusable procedures, and writes consolidation reports that link episodes
+to procedures and surface stale knowledge risks.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Iterable, Literal
+
+from core.ids import new_id
+from core.redaction import redact_dlp_text
+from core.state_integrity import (
+    append_state_jsonl_unlocked,
+    read_state_jsonl_unlocked,
+    rewrite_state_jsonl_unlocked,
+    state_file_lock,
+)
+
+
+EpisodeOutcome = Literal["success", "partial", "failed"]
+ProcedureStatus = Literal["active", "needs_review", "obsolete"]
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _clean_text(text: str, *, max_chars: int = 800) -> str:
+    redacted, _, _ = redact_dlp_text(str(text or "").strip())
+    redacted = " ".join(redacted.split())
+    if len(redacted) > max_chars:
+        return redacted[: max_chars - 1].rstrip() + "..."
+    return redacted
+
+
+def _tokens(text: str) -> set[str]:
+    normalized = (
+        str(text or "")
+        .replace("\\", " ")
+        .replace("/", " ")
+        .replace("_", " ")
+        .replace("-", " ")
+        .replace(".", " ")
+    )
+    return {
+        token.casefold()
+        for token in normalized.split()
+        if len(token.strip()) > 2
+    }
+
+
+@dataclass(frozen=True)
+class EpisodeRecord:
+    """A compact memory of one completed agent cycle or operator task."""
+
+    goal: str
+    question: str
+    outcome: EpisodeOutcome
+    summary: str
+    tools_used: tuple[str, ...] = ()
+    source_labels: tuple[str, ...] = ()
+    verified_chunks: int = 0
+    unverified_chunks: int = 0
+    replan_exhausted: bool = False
+    tags: tuple[str, ...] = ()
+    id: str = field(default_factory=lambda: new_id("ep"))
+    created_at: str = field(default_factory=_now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "goal": self.goal,
+            "question": self.question,
+            "outcome": self.outcome,
+            "summary": self.summary,
+            "tools_used": list(self.tools_used),
+            "source_labels": list(self.source_labels),
+            "verified_chunks": self.verified_chunks,
+            "unverified_chunks": self.unverified_chunks,
+            "replan_exhausted": self.replan_exhausted,
+            "tags": list(self.tags),
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "EpisodeRecord":
+        return cls(
+            id=str(data.get("id") or new_id("ep")),
+            goal=str(data.get("goal") or ""),
+            question=str(data.get("question") or ""),
+            outcome=_episode_outcome(str(data.get("outcome") or "partial")),
+            summary=str(data.get("summary") or ""),
+            tools_used=tuple(str(x) for x in data.get("tools_used") or ()),
+            source_labels=tuple(str(x) for x in data.get("source_labels") or ()),
+            verified_chunks=max(0, int(data.get("verified_chunks") or 0)),
+            unverified_chunks=max(0, int(data.get("unverified_chunks") or 0)),
+            replan_exhausted=bool(data.get("replan_exhausted", False)),
+            tags=tuple(str(x) for x in data.get("tags") or ()),
+            created_at=str(data.get("created_at") or _now_iso()),
+        )
+
+
+@dataclass(frozen=True)
+class ProcedureRecord:
+    """A reusable workflow distilled from successful episodes."""
+
+    name: str
+    workflow_key: str
+    trigger_tags: tuple[str, ...]
+    steps: tuple[str, ...]
+    source_episode_ids: tuple[str, ...] = ()
+    success_count: int = 0
+    failure_count: int = 0
+    confidence: float = 0.5
+    status: ProcedureStatus = "active"
+    id: str = field(default_factory=lambda: new_id("proc"))
+    created_at: str = field(default_factory=_now_iso)
+    updated_at: str = field(default_factory=_now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "workflow_key": self.workflow_key,
+            "trigger_tags": list(self.trigger_tags),
+            "steps": list(self.steps),
+            "source_episode_ids": list(self.source_episode_ids),
+            "success_count": self.success_count,
+            "failure_count": self.failure_count,
+            "confidence": self.confidence,
+            "status": self.status,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ProcedureRecord":
+        return cls(
+            id=str(data.get("id") or new_id("proc")),
+            name=str(data.get("name") or "workflow"),
+            workflow_key=str(data.get("workflow_key") or ""),
+            trigger_tags=tuple(str(x) for x in data.get("trigger_tags") or ()),
+            steps=tuple(str(x) for x in data.get("steps") or ()),
+            source_episode_ids=tuple(str(x) for x in data.get("source_episode_ids") or ()),
+            success_count=max(0, int(data.get("success_count") or 0)),
+            failure_count=max(0, int(data.get("failure_count") or 0)),
+            confidence=max(0.0, min(1.0, float(data.get("confidence") or 0.5))),
+            status=_procedure_status(str(data.get("status") or "active")),
+            created_at=str(data.get("created_at") or _now_iso()),
+            updated_at=str(data.get("updated_at") or _now_iso()),
+        )
+
+    def with_episode(self, episode: EpisodeRecord) -> "ProcedureRecord":
+        episode_ids = tuple(dict.fromkeys([*self.source_episode_ids, episode.id]))
+        success_count = self.success_count + (1 if episode.outcome == "success" else 0)
+        failure_count = self.failure_count + (1 if episode.outcome == "failed" else 0)
+        total = max(1, success_count + failure_count)
+        confidence = round(success_count / total, 3)
+        status: ProcedureStatus = "active" if confidence >= 0.6 else "needs_review"
+        return ProcedureRecord(
+            id=self.id,
+            name=self.name,
+            workflow_key=self.workflow_key,
+            trigger_tags=self.trigger_tags,
+            steps=self.steps,
+            source_episode_ids=episode_ids,
+            success_count=success_count,
+            failure_count=failure_count,
+            confidence=confidence,
+            status=status,
+            created_at=self.created_at,
+            updated_at=_now_iso(),
+        )
+
+
+@dataclass(frozen=True)
+class ConsolidationReport:
+    """A small audit record describing how memory evolved."""
+
+    episode_count: int
+    procedure_count: int
+    linked_episode_ids: tuple[str, ...]
+    active_procedure_ids: tuple[str, ...]
+    needs_review_procedure_ids: tuple[str, ...]
+    obsolete_procedure_ids: tuple[str, ...]
+    notes: tuple[str, ...]
+    id: str = field(default_factory=lambda: new_id("consol"))
+    created_at: str = field(default_factory=_now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "episode_count": self.episode_count,
+            "procedure_count": self.procedure_count,
+            "linked_episode_ids": list(self.linked_episode_ids),
+            "active_procedure_ids": list(self.active_procedure_ids),
+            "needs_review_procedure_ids": list(self.needs_review_procedure_ids),
+            "obsolete_procedure_ids": list(self.obsolete_procedure_ids),
+            "notes": list(self.notes),
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ConsolidationReport":
+        return cls(
+            id=str(data.get("id") or new_id("consol")),
+            episode_count=max(0, int(data.get("episode_count") or 0)),
+            procedure_count=max(0, int(data.get("procedure_count") or 0)),
+            linked_episode_ids=tuple(str(x) for x in data.get("linked_episode_ids") or ()),
+            active_procedure_ids=tuple(str(x) for x in data.get("active_procedure_ids") or ()),
+            needs_review_procedure_ids=tuple(str(x) for x in data.get("needs_review_procedure_ids") or ()),
+            obsolete_procedure_ids=tuple(str(x) for x in data.get("obsolete_procedure_ids") or ()),
+            notes=tuple(str(x) for x in data.get("notes") or ()),
+            created_at=str(data.get("created_at") or _now_iso()),
+        )
+
+
+class EpisodicMemoryStore:
+    def __init__(self, path: Path | str):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def save(self, episode: EpisodeRecord) -> None:
+        with state_file_lock(self.path):
+            append_state_jsonl_unlocked(self.path, [episode.to_dict()])
+
+    def load(self) -> list[EpisodeRecord]:
+        with state_file_lock(self.path):
+            rows = read_state_jsonl_unlocked(self.path)
+        out: list[EpisodeRecord] = []
+        for row in rows:
+            try:
+                out.append(EpisodeRecord.from_dict(row))
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def count(self) -> int:
+        return len(self.load())
+
+    def search(self, query: str, *, limit: int = 3) -> list[EpisodeRecord]:
+        q_tokens = _tokens(query)
+        if not q_tokens:
+            return []
+        scored: list[tuple[int, EpisodeRecord]] = []
+        for ep in self.load():
+            haystack = " ".join([ep.goal, ep.question, ep.summary, " ".join(ep.tags)])
+            score = len(q_tokens & _tokens(haystack))
+            if score:
+                scored.append((score, ep))
+        scored.sort(key=lambda item: (item[0], item[1].created_at), reverse=True)
+        return [ep for _score, ep in scored[:limit]]
+
+
+class ProceduralMemoryStore:
+    def __init__(self, path: Path | str):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def load(self) -> list[ProcedureRecord]:
+        with state_file_lock(self.path):
+            rows = read_state_jsonl_unlocked(self.path)
+        out: list[ProcedureRecord] = []
+        for row in rows:
+            try:
+                out.append(ProcedureRecord.from_dict(row))
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def rewrite(self, procedures: list[ProcedureRecord]) -> None:
+        with state_file_lock(self.path):
+            rewrite_state_jsonl_unlocked(self.path, [p.to_dict() for p in procedures])
+
+    def count(self) -> int:
+        return len(self.load())
+
+    def upsert_from_episode(self, episode: EpisodeRecord) -> tuple[ProcedureRecord | None, bool]:
+        candidate = procedure_from_episode(episode)
+        if candidate is None:
+            return None, False
+        procedures = self.load()
+        out: list[ProcedureRecord] = []
+        updated: ProcedureRecord | None = None
+        created = True
+        for proc in procedures:
+            if proc.workflow_key == candidate.workflow_key:
+                updated = proc.with_episode(episode)
+                out.append(updated)
+                created = False
+            else:
+                out.append(proc)
+        if updated is None:
+            updated = candidate.with_episode(episode)
+            out.append(updated)
+        self.rewrite(out)
+        return updated, created
+
+    def search(self, query: str, *, limit: int = 3) -> list[ProcedureRecord]:
+        q_tokens = _tokens(query)
+        if not q_tokens:
+            return []
+        scored: list[tuple[int, ProcedureRecord]] = []
+        for proc in self.load():
+            haystack = " ".join([proc.name, " ".join(proc.trigger_tags), " ".join(proc.steps)])
+            score = len(q_tokens & _tokens(haystack))
+            if score:
+                scored.append((score, proc))
+        scored.sort(key=lambda item: (item[0], item[1].confidence, item[1].updated_at), reverse=True)
+        return [proc for _score, proc in scored[:limit]]
+
+
+class MemoryConsolidationStore:
+    def __init__(self, path: Path | str):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def save(self, report: ConsolidationReport) -> None:
+        with state_file_lock(self.path):
+            append_state_jsonl_unlocked(self.path, [report.to_dict()])
+
+    def load(self) -> list[ConsolidationReport]:
+        with state_file_lock(self.path):
+            rows = read_state_jsonl_unlocked(self.path)
+        out: list[ConsolidationReport] = []
+        for row in rows:
+            try:
+                out.append(ConsolidationReport.from_dict(row))
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def count(self) -> int:
+        return len(self.load())
+
+
+def episode_from_agent_cycle(
+    *,
+    goal: str,
+    question: str,
+    answer: str,
+    tools_used: Iterable[str],
+    source_labels: Iterable[str],
+    verified_chunks: int = 0,
+    unverified_chunks: int = 0,
+    replan_exhausted: bool = False,
+) -> EpisodeRecord:
+    outcome: EpisodeOutcome
+    if replan_exhausted:
+        outcome = "failed"
+    elif unverified_chunks > verified_chunks and verified_chunks == 0:
+        outcome = "partial"
+    else:
+        outcome = "success"
+    tools = tuple(str(t) for t in tools_used if str(t).strip())
+    labels = tuple(str(label) for label in source_labels if str(label).strip())
+    tags = _episode_tags(tools=tools, outcome=outcome, labels=labels)
+    return EpisodeRecord(
+        goal=_clean_text(goal, max_chars=300),
+        question=_clean_text(question, max_chars=400),
+        outcome=outcome,
+        summary=_clean_text(answer, max_chars=900),
+        tools_used=tools,
+        source_labels=labels,
+        verified_chunks=max(0, int(verified_chunks)),
+        unverified_chunks=max(0, int(unverified_chunks)),
+        replan_exhausted=bool(replan_exhausted),
+        tags=tags,
+    )
+
+
+def procedure_from_episode(episode: EpisodeRecord) -> ProcedureRecord | None:
+    if episode.outcome != "success" or not episode.tools_used:
+        return None
+    workflow_key = "tools:" + "->".join(episode.tools_used)
+    readable_tools = ", ".join(episode.tools_used)
+    steps = (
+        "Understand the user goal and choose the minimal tool sequence.",
+        *(f"Run tool: {tool}" for tool in episode.tools_used),
+        "Verify tool outputs against the requested answer.",
+        "Return cited answer and record the episode outcome.",
+    )
+    return ProcedureRecord(
+        name=f"Workflow using {readable_tools}",
+        workflow_key=workflow_key,
+        trigger_tags=tuple(dict.fromkeys([*episode.tools_used, *episode.tags])),
+        steps=tuple(steps),
+        source_episode_ids=(),
+        success_count=0,
+        failure_count=0,
+        confidence=0.5,
+        status="active",
+    )
+
+
+def consolidate_memory(
+    *,
+    episodes: list[EpisodeRecord],
+    procedures: list[ProcedureRecord],
+) -> ConsolidationReport:
+    active = tuple(proc.id for proc in procedures if proc.status == "active")
+    needs_review = tuple(proc.id for proc in procedures if proc.status == "needs_review")
+    obsolete = tuple(proc.id for proc in procedures if proc.status == "obsolete")
+    linked_episode_ids = tuple(
+        dict.fromkeys(ep_id for proc in procedures for ep_id in proc.source_episode_ids)
+    )
+    notes: list[str] = []
+    if not episodes:
+        notes.append("no episodes recorded yet")
+    if not procedures:
+        notes.append("no successful tool workflows have become procedures yet")
+    if needs_review:
+        notes.append("some procedures need review because success confidence is low")
+    if len(linked_episode_ids) < len(episodes):
+        notes.append("some episodes are observations only and are not procedural skills")
+    if not notes:
+        notes.append("episodic and procedural memory are linked")
+    return ConsolidationReport(
+        episode_count=len(episodes),
+        procedure_count=len(procedures),
+        linked_episode_ids=linked_episode_ids,
+        active_procedure_ids=active,
+        needs_review_procedure_ids=needs_review,
+        obsolete_procedure_ids=obsolete,
+        notes=tuple(notes),
+    )
+
+
+def format_experience_context(
+    *,
+    episodes: list[EpisodeRecord],
+    procedures: list[ProcedureRecord],
+    max_chars: int = 2_400,
+) -> str:
+    if not episodes and not procedures:
+        return ""
+    lines = ["<agent_experience_memory>"]
+    if procedures:
+        lines.append("procedures:")
+        for proc in procedures:
+            lines.append(
+                f"- [{proc.id}] {proc.name}; confidence={proc.confidence}; "
+                f"status={proc.status}; steps={' | '.join(proc.steps[:5])}"
+            )
+    if episodes:
+        lines.append("episodes:")
+        for ep in episodes:
+            lines.append(
+                f"- [{ep.id}] outcome={ep.outcome}; tools={','.join(ep.tools_used) or 'none'}; "
+                f"summary={ep.summary}"
+            )
+    lines.append("</agent_experience_memory>")
+    text = "\n".join(lines)
+    if len(text) > max_chars:
+        return text[: max_chars - 1].rstrip() + "..."
+    return text
+
+
+def _episode_outcome(value: str) -> EpisodeOutcome:
+    return value if value in {"success", "partial", "failed"} else "partial"  # type: ignore[return-value]
+
+
+def _procedure_status(value: str) -> ProcedureStatus:
+    return value if value in {"active", "needs_review", "obsolete"} else "needs_review"  # type: ignore[return-value]
+
+
+def _episode_tags(
+    *,
+    tools: tuple[str, ...],
+    outcome: EpisodeOutcome,
+    labels: tuple[str, ...],
+) -> tuple[str, ...]:
+    tags: list[str] = ["episode", outcome]
+    tags.extend(tools)
+    if any(label.startswith("web") for label in labels):
+        tags.append("web")
+    if any(label.startswith("file") for label in labels):
+        tags.append("file")
+    return tuple(dict.fromkeys(tags))

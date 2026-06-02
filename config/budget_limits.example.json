@@ -1,0 +1,22 @@
+{
+  "windows": {
+    "hour": {
+      "llm_calls": 20,
+      "model_tokens": 100000,
+      "model_cost_units": 200,
+      "web_fetches": 50,
+      "cycles": 20,
+      "team_model_calls": 10,
+      "team_cost_units": 100
+    },
+    "day": {
+      "llm_calls": 100,
+      "model_tokens": 300000,
+      "model_cost_units": 500,
+      "web_fetches": 250,
+      "cycles": 100,
+      "team_model_calls": 40,
+      "team_cost_units": 400
+    }
+  }
+}
