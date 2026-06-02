@@ -1920,6 +1920,8 @@ def _handle_auto_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     tokens = _split_meta_args(rest)
     dry_run = True
     include_tests = True
+    include_goal = False
+    enable_reflection = False
     limit = 5
     learning_limit = 5
     goal_parts: list[str] = []
@@ -1941,6 +1943,14 @@ def _handle_auto_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             continue
         if token == "--no-tests":
             include_tests = False
+            i += 1
+            continue
+        if token == "--include-goal":
+            include_goal = True
+            i += 1
+            continue
+        if token == "--reflect":
+            enable_reflection = True
             i += 1
             continue
         if token == "--limit":
@@ -1968,6 +1978,16 @@ def _handle_auto_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         goal_parts.append(token)
         i += 1
 
+    goal = " ".join(goal_parts).strip() or "project health"
+    # --include-goal only makes sense when a real goal was provided
+    if include_goal and goal == "project health":
+        print(
+            "(auto-run: --include-goal requires a goal text, e.g.: "
+            ":auto-run --include-goal проверь покрытие тестов)",
+            file=sys.stderr,
+        )
+        return True
+
     try:
         report = AutonomousRuntime(
             agent,
@@ -1975,11 +1995,13 @@ def _handle_auto_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             approval_inbox=_approval_inbox_for(agent, workspace),
         ).run(
             AutonomousRuntimeConfig(
-                goal=" ".join(goal_parts).strip() or "project health",
+                goal=goal,
                 dry_run=dry_run,
                 limit=limit,
                 include_tests=include_tests,
+                include_goal=include_goal,
                 learning_limit=learning_limit,
+                enable_reflection=enable_reflection,
             )
         )
     except Exception as exc:
@@ -3855,6 +3877,7 @@ def _handle_team_plan(rest: str, agent: AgentLoop) -> bool:
 def _handle_team_run(rest: str, agent: AgentLoop) -> bool:
     tokens = _split_meta_args(rest)
     as_json = False
+    dry_run = True
     limit = 5
     max_model_calls = 10
     max_cost_units = 20
@@ -3864,6 +3887,14 @@ def _handle_team_run(rest: str, agent: AgentLoop) -> bool:
         token = tokens[i]
         if token == "--json":
             as_json = True
+            i += 1
+            continue
+        if token == "--dry-run":
+            dry_run = True
+            i += 1
+            continue
+        if token == "--allow-effects":
+            dry_run = False
             i += 1
             continue
         if token == "--limit":
@@ -3899,24 +3930,30 @@ def _handle_team_run(rest: str, agent: AgentLoop) -> bool:
                 return True
             i += 2
             continue
-        if token == "--dry-run":
-            i += 1
-            continue
         goal_parts.append(token)
         i += 1
     goal = " ".join(goal_parts).strip()
     if not goal:
         print(
-            "Usage: :team-run <goal> [--limit N] [--max-model-calls N] "
-            "[--max-cost-units N] [--json]",
+            "Usage: :team-run <goal> [--allow-effects] [--limit N] "
+            "[--max-model-calls N] [--max-cost-units N] [--json]",
             file=sys.stderr,
         )
         return True
     try:
+        from core.subagent_runner import SubAgentRunner  # noqa: PLC0415
+        runner = None if dry_run else SubAgentRunner(
+            workspace_root=Path("."),
+            policy=agent.policy,
+            model_router=agent.model_router,
+            parent_registry=agent.registry,
+            log_dir=agent.log.log_dir,
+        )
         plan = TeamPlanner().plan(goal, limit=limit)
-        report = TeamExecutor().run(
+        executor = TeamExecutor(runner=runner)
+        report = executor.run(
             plan,
-            dry_run=True,
+            dry_run=dry_run,
             budget=TeamBudget(
                 max_model_calls=max_model_calls,
                 max_cost_units=max_cost_units,
@@ -3925,7 +3962,8 @@ def _handle_team_run(rest: str, agent: AgentLoop) -> bool:
     except ValueError as exc:
         print(f"Usage: {exc}", file=sys.stderr)
         return True
-    agent.log.log("team_execution_dry_run", report.to_dict())
+    event = "team_execution" if not dry_run else "team_execution_dry_run"
+    agent.log.log(event, report.to_dict())
     if as_json:
         print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2), file=sys.stderr)
     else:

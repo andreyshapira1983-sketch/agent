@@ -17,9 +17,10 @@ from core.ingestion import ingest_files
 from core.learning_planner import LearningPlanner
 from core.models import ToolCall
 from core.task_queue import RuntimeTask, TaskQueueStore
+from core.reflection import ReflectionConfig, ReflectionEngine
 
 
-AutonomousTaskKind = Literal["status", "learn", "tests"]
+AutonomousTaskKind = Literal["status", "learn", "tests", "goal"]
 AutonomousTaskStatus = Literal["pending", "done", "failed", "skipped"]
 AutonomousRunStatus = Literal["completed", "stopped", "blocked"]
 
@@ -31,9 +32,13 @@ class AutonomousRuntimeConfig:
     effects_approved: bool = False
     limit: int = 5
     include_tests: bool = True
+    include_goal: bool = False
     learning_limit: int = 5
     budgets: BudgetLimits = field(default_factory=BudgetLimits)
     circuit: CircuitBreakerConfig = field(default_factory=CircuitBreakerConfig)
+    # Set True to run ReflectionEngine after the health pass.
+    enable_reflection: bool = False
+    reflection: ReflectionConfig = field(default_factory=ReflectionConfig)
 
 
 @dataclass(frozen=True)
@@ -71,6 +76,8 @@ class AutonomousRunReport:
     circuit: dict
     approvals: dict
     stop_reason: str = ""
+    # Populated when AutonomousRuntimeConfig.enable_reflection=True.
+    reflection: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -82,6 +89,7 @@ class AutonomousRunReport:
             "circuit": self.circuit,
             "approvals": self.approvals,
             "stop_reason": self.stop_reason,
+            "reflection": self.reflection,
         }
 
     def user_summary(self) -> str:
@@ -99,6 +107,10 @@ class AutonomousRunReport:
         denials = self.budget.get("denials", [])
         if denials:
             parts.append(f"  budget_denials={len(denials)}")
+        if self.reflection:
+            saved = self.reflection.get("memory_records_saved", 0)
+            lessons = self.reflection.get("lessons_count", 0)
+            parts.append(f"  reflection: lessons={lessons} saved={saved}")
         return "\n".join(parts)
 
 
@@ -323,6 +335,10 @@ class AutonomousRuntime:
             approvals=self.approval_inbox.snapshot(),
             stop_reason=stop_reason,
         )
+
+        if config.enable_reflection:
+            report.reflection = self._run_reflection(config)
+
         self._log("autonomous_runtime_stop", report.to_dict())
         return report
 
@@ -352,6 +368,8 @@ class AutonomousRuntime:
                 if not self._reserve(budget, circuit, "test_runs", task.kind):
                     return AutonomousTaskReport(task, "skipped", "test budget exhausted")
                 return self._task_tests(task)
+            if task.kind == "goal":
+                return self._task_goal(task)
         except Exception as exc:
             return AutonomousTaskReport(
                 task,
@@ -512,6 +530,17 @@ class AutonomousRuntime:
         except Exception:
             return 0
 
+    def _task_goal(self, task: AutonomousTask) -> AutonomousTaskReport:
+        """Run task.description as a user question through the parent AgentLoop."""
+        answer = self.agent.run(user_question=task.description)
+        summary = (answer[:120].replace("\n", " ")) if answer else "(no answer)"
+        return AutonomousTaskReport(
+            task,
+            "done",
+            summary,
+            {"answer": answer},
+        )
+
     def _build_queue(self, config: AutonomousRuntimeConfig) -> list[AutonomousTask]:
         tasks = [
             AutonomousTask("status", "Inspect current source registry and memory state."),
@@ -519,7 +548,34 @@ class AutonomousRuntime:
         ]
         if config.include_tests:
             tasks.append(AutonomousTask("tests", "Run the pytest suite as a health check."))
+        if config.include_goal and config.goal and config.goal != "project health":
+            tasks.append(AutonomousTask("goal", config.goal))
         return tasks
+
+    def _run_reflection(self, config: AutonomousRuntimeConfig) -> dict | None:
+        """Run ReflectionEngine after a health pass. Returns dict or None on error."""
+        persistent_store = getattr(self.agent, "persistent_store", None)
+        llm = getattr(self.agent, "llm", None)
+        if persistent_store is None or llm is None:
+            self._log("reflection_skipped", {
+                "reason": "agent missing persistent_store or llm"
+            })
+            return None
+        log = getattr(self.agent, "log", None)
+        log_dir = getattr(log, "log_dir", None) if log is not None else None
+        engine = ReflectionEngine(
+            workspace=self.workspace,
+            persistent_memory=persistent_store,
+            llm=llm,
+            log_dir=log_dir,
+            logger=log,
+        )
+        try:
+            result = engine.reflect(config.reflection)
+            return result.to_dict()
+        except Exception as exc:
+            self._log("reflection_error", {"error": f"{type(exc).__name__}: {exc}"})
+            return {"error": str(exc)}
 
     def _log(self, event: str, payload: Any) -> None:
         log = getattr(self.agent, "log", None)
