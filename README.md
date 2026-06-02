@@ -37,7 +37,7 @@ ingested with `:ingest-source` / `:ingest-project`; useful facts can be saved
 across sessions with `:remember` or controlled knowledge writes. The Write
 Policy refuses secrets, blocked tags, and unconsented noise.
 
-A hermetic test suite (**2146 cases, zero network**) backs every layer:
+A hermetic test suite (**2355 cases, zero network**) backs every layer:
 tool safety, planner routing, policy gate enforcement, working memory,
 persistent memory + write policy + retrieval policy, human approval gate
 (escalate → approve / deny / abort), secret scanning + universal
@@ -98,6 +98,10 @@ plus full Control Loop integration. Run `python -m pytest -v`.
 | §15 Multi-Agent Organization: dry-run Team Plan + subagent contracts | [`core/team_plan.py`](core/team_plan.py) + `:team-plan` |
 | §15.1 Team Executor Dry-Run — contract walk / budget / verifier handoff | [`core/team_executor.py`](core/team_executor.py) + `:team-run` |
 | §15.2 SubAgent Runner — isolated child `AgentLoop` with read-only tool subset; recursion structurally prevented; transparent audit trail | [`core/subagent_runner.py`](core/subagent_runner.py) |
+| **Layer 1** Clarification Policy — detects underspecified_goal / ambiguous_scope / missing_context / multi_intent before planning | [`core/clarification_policy.py`](core/clarification_policy.py) · 36 tests |
+| **Layer 2** Checkpoint / Resume — append-only JSONL state persistence between sessions; safe restore with validation | [`core/checkpoint.py`](core/checkpoint.py) · 28 tests |
+| **Layer 3** Prompt Registry — named prompt templates with versioning, variable substitution and hot-reload | [`core/prompt_registry.py`](core/prompt_registry.py) · 50 tests |
+| **Layer 4** User Profile / Mental Model — tracks expertise (novice/intermediate/expert), verbosity, language, interests; pure-function heuristics, JSONL persistence; injects `<user_profile>` block into synthesizer | [`core/user_profile.py`](core/user_profile.py) · 79 tests |
 | §17.1 Work Session Skeleton — bounded dry-run/status cycles | [`core/work_session.py`](core/work_session.py) + `:work-session` |
 | §18.1 Autonomous Subagent Proposal Layer | [`core/subagent_memory_scope.py`](core/subagent_memory_scope.py) + `:subagent-proposal` |
 | §18.2 Autonomous Capability Request Layer | [`core/capability_request.py`](core/capability_request.py) + `:capability-request` |
@@ -1334,7 +1338,7 @@ The full acceptance suite is in
 > redaction + classification, argument-aware risk (`risk_for`),
 > a sandboxed reversible/irreversible write tool, a sandboxed
 > whitelisted shell tool with mandatory compensation + rollback,
-> 2146 hermetic tests covering every production module, and
+> 2355 hermetic tests covering every production module, and
 > zero-network determinism. The numbered slots below extend that foundation;
 > they are not the smallest possible thing.
 
@@ -2245,7 +2249,7 @@ A real safety net lives in [`tests/`](tests/) and runs via `pytest`:
 python -m pytest -v
 ```
 
-What is covered today (**2146 tests, approx. 37 s, zero network calls**):
+What is covered today (**2355 tests, approx. 37 s, zero network calls**):
 
 | Layer | File | Cases |
 | --- | --- | --- |
@@ -2331,6 +2335,10 @@ What is covered today (**2146 tests, approx. 37 s, zero network calls**):
 | Compensation system — unit (§5 Undo MVP-11) | [`tests/test_compensation.py`](tests/test_compensation.py) | plan has unique `comp_*` id / `noop` helper / `to_dict` ↔ `from_dict` round trip / `delete_path_if_created` removes file + removes dir recursively + **idempotent when target already gone** / **path escape rejected even on rollback** — outside file untouched / `restore_from_backup` restores content + removes backup / idempotent when backup gone / backup escape rejected / **multi-action plan applied in REVERSE order (LIFO)** / one failing action does NOT abort the rest / unknown action kind returns `status='error'` not crash / `noop` action alone / summary counts ok / noop / error |
 | `shell_exec` — unit (§5 MVP-11) | [`tests/test_shell_exec.py`](tests/test_shell_exec.py) | construction rejects missing workspace / zero timeout / zero output cap; defaults `timeout=5s, cap=64KiB` — **`risk_for`**: every read_only / mutating command classified correctly, unknown → `external`, empty argv → `external`, case insensitive — **argv validation**: empty / non-list / non-string / >16 elements rejected; **every shell metachar `; \| & < > \` $ ( ) [ ] { } \n \r \t` rejected**; `~` and `$` rejected; unknown command not in whitelist rejected — **path validation** for mutating: needs exactly one arg, absolute `/etc/foo` / `\Windows\foo` rejected, drive letter `C:\evil` rejected, `..` traversal rejected, `sub/../../escape` rejected — **read-only execution**: whoami / hostname run, cwd=workspace, `shell=False`, env stripped to `{PATH, SystemRoot}`, unknown binary surfaces `FileNotFoundError` cleanly — **mutating execution**: mkdir / touch create paths inside workspace with `delete_path_if_created` plan; mkdir on existing path refused; touch on existing path is noop with `noop` plan; failed mutation doesn't leak partial state — **timeout**: `TimeoutExpired` surfaces as `timed_out=True, exit_code=None`, partial stdout/stderr captured — **redaction**: huge stdout truncated to cap with `stdout_truncated=True`; credential in stdout replaced by `[REDACTED:openai-key]`; secret in stderr on mutating path also redacted — **validate_output**: well-formed passes, non-dict fails, missing keys fail, inconsistent `timed_out=True + exit_code=0` warns |
 | `shell_exec` end-to-end (§5 + §7 MVP-11, 9 acceptance criteria) | [`tests/test_shell_exec_integration.py`](tests/test_shell_exec_integration.py) | **(1) safe**: `whoami` runs with zero `approval_*` events; `mkdir` creates inside workspace — **(2) dangerous blocked**: `rm -rf` dropped by planner sanitiser; hand-crafted `argv=['rm','-rf','x']` reaches the tool which fails with `whitelist`-mentioning error, target file untouched; metachar in argv blocked at tool layer — **(3) approval required**: `mkdir foo` order `approval_request → approval_decision → tool_call → tool_result`, `approval_request.risk == risk_for(args)` not static — **(4) deny / abort / no-provider**: each produces the matching `error.code` and ZERO `tool_call` / `tool_result` events; filesystem untouched — **(5) timeout**: mocked `TimeoutExpired` surfaces `timed_out=True, exit_code=None` in `tool_result.output` — **(6) redaction**: credential in subprocess stdout NEVER lands on disk; JSONL carries `[REDACTED:...]` — **(7) JSONL chain**: full `policy → approval_request → approval_decision → tool_call → tool_result → compensation_registered` ordered correctly, `tool_result.output.compensation_plan` carries the typed action — **(8) plan before execution**: `agent.compensation_log` populated from `tool_result.output`; failed mutation produces ZERO `compensation_registered` event — **(9) rollback**: `mkdir+rollback` removes dir, `touch+rollback` removes file, empty log is `skipped_reason='no plans registered'`, `rollback <plan_id>` targets one specific plan among multiple, unknown id is `skipped_reason`, no workspace_root is also a clean skip — **planner sanitiser**: real `LLMPlanner` with FakeLLM returning `rm -rf /etc` produces zero sources with `not in whitelist` warning; metachar in argv produces zero sources with `metachar` warning |
+| **Layer 1** — ClarificationPolicy | [`tests/test_clarification_policy.py`](tests/test_clarification_policy.py) | underspecified_goal / ambiguous_scope / missing_context / multi_intent detection; neutral questions pass; 36 cases |
+| **Layer 2** — Checkpoint / Resume | [`tests/test_checkpoint.py`](tests/test_checkpoint.py) | append-only JSONL state persistence; safe restore with validation; corrupted records skipped; 28 cases |
+| **Layer 3** — Prompt Registry | [`tests/test_prompt_registry.py`](tests/test_prompt_registry.py) | named templates; versioning; variable substitution; hot-reload; 50 cases |
+| **Layer 4** — User Profile / Mental Model | [`tests/test_user_profile.py`](tests/test_user_profile.py) | expertise (novice/intermediate/expert); verbosity detection + lock; language detection + lock; interests extraction (cap 20); pure function; JSONL persistence; `<user_profile>` block injection; AgentLoop integration events; 79 cases |
 
 All non-unit tests use two helpers in [`tests/conftest.py`](tests/conftest.py):
 
@@ -2421,7 +2429,7 @@ agent/
 ├── .github/workflows/ci.yml            # release/supply-chain/test/coverage gate
 ├── pytest.ini                        # pytest config (testpaths + pythonpath)
 ├── main.py                           # CLI entry point (+ :remember / :forget / :memory)
-├── tests/                            # 2146 hermetic tests (FakeLLM + FakePlanner)
+├── tests/                            # 2355 hermetic tests (FakeLLM + FakePlanner)
 │   ├── conftest.py                   # FakeLLM, FakePlanner, workspace fixture
 │   ├── test_ids.py                   # ID factory: 4 cases
 │   ├── test_models.py                # Pydantic Literal guards + defaults: 48 cases
@@ -2455,6 +2463,10 @@ agent/
 │   ├── test_data_classifier.py       # public / private / sensitive / secret: 14 cases
 │   ├── test_safety_integration.py    # hard invariants: secret/PII NEVER leaks: 11 cases
 │   └── test_replan.py                # bounded re-planning: 11 cases
+│   ├── test_clarification_policy.py  # Layer 1 — ClarificationPolicy: 36 cases
+│   ├── test_checkpoint.py            # Layer 2 — Checkpoint/Resume: 28 cases
+│   ├── test_prompt_registry.py       # Layer 3 — Prompt Registry: 50 cases
+│   └── test_user_profile.py          # Layer 4 — User Profile: 79 cases
 ├── core/
 │   ├── __init__.py
 │   ├── ids.py                        # short trace IDs
@@ -2476,6 +2488,10 @@ agent/
 │   ├── data_classifier.py            # public / private / sensitive / secret (§7)
 │   ├── operator_intent.py            # natural-language operator requests -> local handlers
 │   ├── planner.py                    # LLM-driven Planner (§3 Cognitive Core) + replan context
+│   ├── clarification_policy.py       # Layer 1 — ClarificationPolicy: underspecified/ambiguous/missing/multi_intent
+│   ├── checkpoint.py                 # Layer 2 — Checkpoint/Resume: append-only JSONL state between sessions
+│   ├── prompt_registry.py            # Layer 3 — Prompt Registry: named templates + versioning + hot-reload
+│   ├── user_profile.py               # Layer 4 — User Profile/Mental Model: expertise + verbosity + language + interests
 │   └── loop.py                       # Control Loop (§3) + bounded re-planning + Output Contract + Safety pipeline
 ├── tools/
 │   ├── __init__.py
