@@ -93,6 +93,9 @@ def _build_loop(
         # Single attempt so we can assert event counts deterministically.
         # MVP-8 re-planning is exercised in its own test file.
         max_replan_attempts=1,
+        # Disable clarification gate: these tests exercise the tool / approval
+        # layer with synthetic short questions, not the ambiguity detector.
+        clarification_enabled=False,
     )
     return agent, workspace / "logs" / f"{trace_id}.jsonl", tool
 

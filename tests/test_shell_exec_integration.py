@@ -81,6 +81,9 @@ def _build_agent(
         planner=planner,
         approval_provider=approver,
         max_replan_attempts=1,
+        # Disable clarification gate: these tests exercise the tool / approval
+        # layer with synthetic short questions, not the ambiguity detector.
+        clarification_enabled=False,
     )
     return agent, workspace / "logs" / f"{trace_id}.jsonl", llm
 

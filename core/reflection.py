@@ -516,3 +516,13 @@ class ReflectionEngine:
     def _log(self, event: str, payload: Any) -> None:
         if self.logger is not None:
             self.logger.log(event, payload)
+
+
+# §3.x — register ReflectionEngine._SYSTEM_PROMPT with the global Prompt Registry
+try:
+    from core.prompt_registry import register_prompt as _rp
+    _rp("reflection.system", ReflectionEngine._SYSTEM_PROMPT,
+        module="core.reflection",
+        description="System prompt for the self-reflection / lesson synthesis module")
+except ImportError:  # pragma: no cover
+    pass

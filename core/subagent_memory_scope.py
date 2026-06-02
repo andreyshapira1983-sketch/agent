@@ -417,6 +417,14 @@ If a dedicated subagent IS needed:
 }
 """
 
+# §3.x — register this prompt with the global Prompt Registry
+try:
+    from core.prompt_registry import register_prompt as _rp
+    _rp("subagent_scope.system", _SYSTEM_PROMPT, module="core.subagent_memory_scope",
+        description="System prompt for the subagent initiative evaluator")
+except ImportError:  # pragma: no cover
+    pass
+
 
 def _parse_proposal(goal: str, data: dict[str, Any]) -> SubagentProposal:
     risk = str(data.get("risk_level") or "low")

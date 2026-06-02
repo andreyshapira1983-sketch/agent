@@ -437,6 +437,14 @@ Rules:
 - If unsure, still return JSON, but lower confidence.
 """
 
+# §3.x — register this prompt with the global Prompt Registry
+try:
+    from core.prompt_registry import register_prompt as _rp
+    _rp("repair_proposal.system", _SYSTEM_PROMPT, module="core.repair_proposal",
+        description="System prompt for the LLM repair proposal generator")
+except ImportError:  # pragma: no cover
+    pass
+
 
 def _parse_json_object(raw: str) -> dict[str, Any]:
     text = raw.strip()

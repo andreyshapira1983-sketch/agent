@@ -89,6 +89,7 @@ from core.redaction import (
 )
 from core.model_router import ModelRole, ModelRouter
 from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult
+from core.user_profile import UserProfile, UserProfileStore, profile_to_prompt_block
 from core.knowledge_use_policy import KnowledgeUsePolicy
 from core.role_router import RoleContext, RoleRouter
 from core.smart_memory import (
@@ -276,6 +277,14 @@ Hard rules:
   Never say "unavailable" or "no tools" without specifying which tool or licence is missing.
 """
 
+# §3.x — register this prompt with the global Prompt Registry
+try:
+    from core.prompt_registry import register_prompt as _rp
+    _rp("synthesizer.system", SYSTEM_ANSWER, module="core.loop",
+        description="Output contract for the LLM synthesizer (§3 Cognitive Core)")
+except ImportError:  # pragma: no cover
+    pass
+
 # Regex that matches the internal verification markers the Verifier inlines
 # into the answer text.  These are audit annotations, not user content.
 # Stripped before the answer leaves the kernel so users never see them.
@@ -439,6 +448,8 @@ class AgentLoop:
         max_replan_attempts: int = DEFAULT_MAX_REPLAN_ATTEMPTS,
         replan_policy: "ReplanPolicy | None" = None,
         verifier_enabled: bool = True,
+        clarification_enabled: bool = True,
+        user_profile_store: UserProfileStore | None = None,
     ):
         self.registry = registry
         self.policy = policy
@@ -542,6 +553,13 @@ class AgentLoop:
         # annotation pass; the draft answer is returned verbatim. Useful
         # for legacy tests and for callers who want raw LLM output.
         self.verifier_enabled = bool(verifier_enabled)
+        # Layer 4 — User Profile store and last-known profile snapshot.
+        self.user_profile_store = user_profile_store
+        self.last_user_profile: UserProfile | None = None
+        # §3 Clarification Policy wiring. `clarification_enabled=False` skips
+        # the heuristic ambiguity check. Intended ONLY for integration tests
+        # that exercise the tool/approval layer with synthetic short questions.
+        self.clarification_enabled = bool(clarification_enabled)
         from core.verifier import VerificationReport as _VR
 
         self.last_verification: _VR | None = None
@@ -580,6 +598,35 @@ class AgentLoop:
         self.last_source_registry = SourceRegistry()
         self.last_knowledge_pipeline = None
 
+        # Layer 4 — load the user profile for this cycle.
+        if self.user_profile_store is not None:
+            self.last_user_profile = self.user_profile_store.load_or_default()
+            self.log.log(
+                "user_profile_load",
+                {
+                    "expertise": self.last_user_profile.expertise,
+                    "verbosity": self.last_user_profile.verbosity,
+                    "language": self.last_user_profile.language,
+                    "interaction_count": self.last_user_profile.interaction_count,
+                    "interests": self.last_user_profile.interests,
+                },
+            )
+
+        # §3.5 Checkpoint writer — one file per trace, append-only.
+        # Falls back to a no-op sentinel when the logger is a test spy that
+        # does not expose trace_id / log_dir (avoids coupling tests to I/O).
+        try:
+            from core.checkpoint import CheckpointWriter as _CPWriter
+            _cp: Any = _CPWriter(trace_id=self.log.trace_id, log_dir=self.log.log_dir)
+        except (AttributeError, ValueError):
+            class _NoOpCP:  # noqa: N801
+                """Silently drops all checkpoint calls."""
+                def save_observe(self, **_kw: Any) -> None: pass
+                def save_plan(self, **_kw: Any) -> None: pass
+                def save_act(self, **_kw: Any) -> None: pass
+                def save_respond(self, **_kw: Any) -> None: pass
+            _cp = _NoOpCP()
+
         # 1. Observe
         observation = Observation(
             source="cli",
@@ -591,6 +638,7 @@ class AgentLoop:
             provenance="user",
         )
         self.log.log("observe", observation)
+        _cp.save_observe(question=user_question, file_hint=file_hint)
 
         # Classify the question itself. A user can paste a secret into the
         # prompt; the kernel must catch it BEFORE the LLM sees it.
@@ -668,6 +716,27 @@ class AgentLoop:
         # 2. Interpret -> Goal
         goal = self._interpret(observation)
         self.log.log("interpret", goal)
+
+        # 2b. Clarification Policy (§3 Clarification Policy).
+        # Pure-heuristic check — no LLM, no I/O.  When the question is
+        # ambiguous about a destructive action the loop stops here and
+        # returns the clarification question to the caller so the REPL
+        # can surface it before any planning starts.
+        if self.clarification_enabled:
+            _clarif = self._check_clarification(user_question)
+            if _clarif.should_ask:
+                self.log.log(
+                    "clarification_request",
+                    {
+                        "question": _clarif.question,
+                        "findings": [
+                            {"kind": f.kind, "evidence": f.evidence, "confidence": f.confidence}
+                            for f in _clarif.findings
+                        ],
+                    },
+                )
+                self._stream_on_token = None
+                return _clarif.question
 
         # Memory retrieval — read-only injection into prompts
         history = ""
@@ -855,6 +924,7 @@ class AgentLoop:
 
             plan = self._build_plan(goal, planner_out.sources)
             self.log.log("plan", plan, steps=len(plan.steps), attempt=attempt)
+            _cp.save_plan(attempt=attempt, step_ids=[s.id for s in plan.steps])
 
             attempt_artifacts: dict[str, dict[str, Any]] = {}
             attempt_failures: list[ReplanTrigger] = []
@@ -882,6 +952,12 @@ class AgentLoop:
                 if ev is not None:
                     attempt_chain.add(ev)
                 step.status = "done"
+                _cp.save_act(
+                    label=outcome["label"],
+                    tool=outcome["tool"],
+                    chars=len(str(outcome["output"])),
+                    status="done",
+                )
 
             # Success: either a 0-step plan (general-knowledge / history-only
             # answer is intentional) or at least one artifact came through.
@@ -1404,6 +1480,7 @@ class AgentLoop:
                 "replan_exhausted": replan_exhausted,
             },
         )
+        _cp.save_respond(answer=answer)
 
         # Memory write — append the completed turn
         if self.memory is not None:
@@ -1436,6 +1513,30 @@ class AgentLoop:
             unverified_chunks=verification.unverified_chunks if verification else 0,
             replan_exhausted=replan_exhausted,
         )
+
+        # Layer 4 — update user profile from this interaction.
+        if self.user_profile_store is not None:
+            try:
+                updated = self.user_profile_store.update_from_interaction(
+                    question=user_question,
+                    response=answer,
+                    base=self.last_user_profile,
+                )
+                self.last_user_profile = updated
+                self.log.log(
+                    "user_profile_update",
+                    {
+                        "expertise": updated.expertise,
+                        "verbosity": updated.verbosity,
+                        "language": updated.language,
+                        "interaction_count": updated.interaction_count,
+                        "interests": updated.interests,
+                        "expert_signals": updated.expert_signals,
+                        "novice_signals": updated.novice_signals,
+                    },
+                )
+            except Exception:
+                pass  # Profile update must never abort the run.
 
         # Clear streaming callback so it cannot leak into the next turn.
         self._stream_on_token = None
@@ -2111,6 +2212,11 @@ class AgentLoop:
             description=f"Answer the question: {question}",
             success_criteria="A grounded answer citing every claim back to a provided source.",
         )
+
+    def _check_clarification(self, user_question: str) -> "ClarificationResult":
+        """Run the Clarification Policy (§3) — pure heuristic, no LLM."""
+        from core.clarification_policy import ClarificationResult, check_clarification
+        return check_clarification(user_question)
 
     def _build_plan(self, goal: Goal, sources: list[dict[str, Any]]) -> Plan:
         plan = Plan(goal_id=goal.id)
@@ -3055,6 +3161,11 @@ class AgentLoop:
             f"{persistent_block}\n\n" if persistent_block.strip() else ""
         )
         role_block = self.last_role_context.to_prompt_block() + "\n\n"
+        profile_block = (
+            profile_to_prompt_block(self.last_user_profile) + "\n\n"
+            if self.last_user_profile is not None
+            else ""
+        )
 
         # Kernel-built safety notes — the LLM is told to surface these in
         # the user-facing answer. The notes describe what was redacted
@@ -3144,6 +3255,7 @@ class AgentLoop:
                 f"{safety_block}"
                 f"{failure_block}"
                 f"{role_block}"
+                f"{profile_block}"
                 f"{long_term_block}"
                 f"{history_block}"
                 f"{allowed_citations_block}"
@@ -3177,6 +3289,7 @@ class AgentLoop:
                 f"{safety_block}"
                 f"{failure_block}"
                 f"{role_block}"
+                f"{profile_block}"
                 f"{long_term_block}"
                 f"{history_block}"
                 f"planner_reasoning: {planner_reasoning}\n\n"

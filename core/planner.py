@@ -453,6 +453,14 @@ For spawn_subagent steps, arguments must include at least 'role' and 'objective'
 If no tools are needed, return: {"reasoning": "...", "steps": []}
 """
 
+# §3.x — register this prompt with the global Prompt Registry
+try:
+    from core.prompt_registry import register_prompt as _rp
+    _rp("planner.system", PLANNER_SYSTEM, module="core.planner",
+        description="Planner system prompt: tool catalog + decision rules (§3 Cognitive Core)")
+except ImportError:  # pragma: no cover
+    pass
+
 
 @dataclass
 class PlannerOutput:

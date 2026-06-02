@@ -116,9 +116,9 @@ from core.model_registry_audit import audit_model_registry
 from core.operator_intent import OperatorIntent, route_operator_intent
 from core.strategy_router import classify_operator_strategy
 from core.persistent_memory import PersistentMemoryStore
+from core.user_profile import UserProfileStore
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
-from core.release_hygiene import build_release_manifest
 from core.self_repair import RepairProposal
 from core.scheduler import SchedulerStore
 from core.source_connectors import (
@@ -135,6 +135,7 @@ from core.smart_memory import (
     ProceduralMemoryStore,
     consolidate_memory,
 )
+from core.release_hygiene import build_release_manifest
 from core.supply_chain import audit_supply_chain
 from core.task_queue import TaskQueueStore
 from core.team_executor import TeamBudget, TeamExecutor
@@ -163,6 +164,7 @@ DEFAULT_BUDGET_LEDGER_PATH = Path("data") / "budget_ledger.jsonl"
 DEFAULT_EPISODIC_MEMORY_PATH = Path("data") / "episodic_memory.jsonl"
 DEFAULT_PROCEDURAL_MEMORY_PATH = Path("data") / "procedural_memory.jsonl"
 DEFAULT_MEMORY_CONSOLIDATION_PATH = Path("data") / "memory_consolidation.jsonl"
+DEFAULT_USER_PROFILE_PATH = Path("data") / "user_profile.jsonl"
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -233,6 +235,7 @@ def build_agent(
 
     persistent_store: PersistentMemoryStore | None = None
     source_registry_store: SourceRegistryStore | None = None
+    user_profile_store: UserProfileStore | None = None
     episodic_store: EpisodicMemoryStore | None = None
     procedural_store: ProceduralMemoryStore | None = None
     consolidation_store: MemoryConsolidationStore | None = None
@@ -242,6 +245,7 @@ def build_agent(
         source_registry_store = SourceRegistryStore(
             workspace / DEFAULT_SOURCE_REGISTRY_PATH
         )
+        user_profile_store = UserProfileStore(workspace / DEFAULT_USER_PROFILE_PATH)
         if with_memory:
             episodic_store = EpisodicMemoryStore(workspace / DEFAULT_EPISODIC_MEMORY_PATH)
             procedural_store = ProceduralMemoryStore(
@@ -338,6 +342,7 @@ def build_agent(
         consolidation_store=consolidation_store,
         knowledge_auto_write=_env_bool("AGENT_KNOWLEDGE_AUTO_WRITE", True),
         approval_provider=approval_provider,
+        user_profile_store=user_profile_store,
     )
 
 
@@ -4801,6 +4806,16 @@ def main() -> int:
             "'deny' = auto-deny everything."
         ),
     )
+    parser.add_argument(
+        "--resume",
+        metavar="TRACE_ID",
+        default=None,
+        help=(
+            "Resume a previous run by trace ID. If the run completed synthesis, "
+            "the cached answer is printed immediately (no LLM call). "
+            "If it crashed before synthesis, the full cycle is re-run from scratch."
+        ),
+    )
     args = parser.parse_args()
 
     # Must run BEFORE any non-ASCII input flows through stdin / out.
@@ -4808,6 +4823,42 @@ def main() -> int:
     load_dotenv()
 
     workspace = Path(args.workspace).resolve()
+
+    # §3.5 Resume: if --resume is given, look up the checkpoint file and
+    # short-circuit before building the full agent stack when possible.
+    if args.resume:
+        from core.checkpoint import CheckpointLoader as _CPLoader
+        _log_dir = workspace / "logs"
+        _loader = _CPLoader(_log_dir)
+        _ctx = _loader.load(args.resume)
+        if _ctx is None:
+            print(
+                f"[resume] No usable checkpoint found for trace_id={args.resume!r}. "
+                "Running fresh.",
+                file=sys.stderr,
+            )
+        elif _ctx.answer is not None:
+            # Full cycle completed previously — replay the cached answer.
+            print(
+                f"[resume] Replaying cached answer for trace_id={args.resume!r} "
+                f"(phase={_ctx.last_phase}, artifacts={list(_ctx.artifacts)})",
+                file=sys.stderr,
+            )
+            print("\n" + format_human_response(_ctx.answer) + "\n")
+            return 0
+        else:
+            # Cycle did not complete — fall through to a normal run so the
+            # agent re-tries from scratch (safe default).
+            print(
+                f"[resume] Checkpoint found but synthesis incomplete "
+                f"(last_phase={_ctx.last_phase!r}). Re-running from scratch.",
+                file=sys.stderr,
+            )
+            if not args.ask:
+                args.ask = _ctx.question
+            if not args.file:
+                args.file = _ctx.file_hint
+
     file_hint_ok, file_hint_error = _preflight_file_hint(args.file, workspace)
     if not file_hint_ok:
         print(file_hint_error, file=sys.stderr)

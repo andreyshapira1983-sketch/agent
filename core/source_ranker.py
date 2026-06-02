@@ -464,9 +464,11 @@ def _domain_matches(domain: str, known: frozenset[str]) -> bool:
     return any(domain == item or domain.endswith("." + item) for item in known)
 
 
-def _parse_dt(value: str) -> datetime | None:
+def _parse_dt(value: str | datetime | None) -> datetime | None:
     if not value:
         return None
+    if isinstance(value, datetime):
+        return value
     text = value.strip()
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"

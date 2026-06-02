@@ -53,11 +53,13 @@ plus full Control Loop integration. Run `python -m pytest -v`.
 | --- | --- |
 | §3 Control Loop / Agent Cycle | [`core/loop.py`](core/loop.py) |
 | §3 Cognitive Core: LLM-driven Planning | [`core/planner.py`](core/planner.py) |
+| §3 Strategy Router — deliberation kernel before LLM planner; maps operator input to `OperatorStrategy` with zero I/O | [`core/strategy_router.py`](core/strategy_router.py) |
 | §3 Model Router — role-based model selection | [`core/model_router.py`](core/model_router.py) |
 | §3 Model Usage Ledger — calls / tokens / rough cost units | [`core/model_usage.py`](core/model_usage.py) + `:model-usage` |
 | §3 Model Registry Audit — active routes vs candidate catalog | [`core/model_registry_audit.py`](core/model_registry_audit.py) + `:model-registry-audit` |
 | §3 Dynamic Model Catalog — provider discovery / cache / tier routing | [`core/model_catalog.py`](core/model_catalog.py), [`core/task_complexity.py`](core/task_complexity.py), [`config/model_catalog.json`](config/model_catalog.json) + `:refresh-models` |
 | §6 Persistent Budget Windows — hour/day spend caps across sessions | [`core/budget_ledger.py`](core/budget_ledger.py) + `:budget-window-status` |
+| §6 CLI Rate Limiter — token-bucket (30 req/60 s default); denies bursts before agent invocation | [`core/rate_limiter.py`](core/rate_limiter.py) |
 | §4 Memory: Working Memory + artifact cache | [`core/memory.py`](core/memory.py) |
 | §4 Memory: Persistent Long-Term Store (JSONL) | [`core/persistent_memory.py`](core/persistent_memory.py) |
 | §4 + §12.4 Memory Write Policy + Retrieval Policy | [`core/memory_policy.py`](core/memory_policy.py) |
@@ -65,6 +67,7 @@ plus full Control Loop integration. Run `python -m pytest -v`.
 | §4 Smart Experience Memory — episodic / procedural / consolidation | [`core/smart_memory.py`](core/smart_memory.py) + `:smart-memory` / `:memory-consolidate` |
 | §7 Human Approval (escalate gate, providers) | [`core/approval.py`](core/approval.py) |
 | §7 Secret Scanner (single source of truth) | [`core/secret_scanner.py`](core/secret_scanner.py) |
+| §2 Indirect Prompt Injection Guard — regex + heuristics over tool outputs; verdicts: clean / suspicious / blocked; no LLM calls | [`core/injection_guard.py`](core/injection_guard.py) |
 | §7 Universal Redaction (logs, prompts, output) | [`core/redaction.py`](core/redaction.py) |
 | §7 Data Classifier (public / private / sensitive / secret) | [`core/data_classifier.py`](core/data_classifier.py) |
 | §7 Release Hygiene Guard — excludes `.env`, `.git`, `.venv`, caches | [`core/release_hygiene.py`](core/release_hygiene.py) + `:release-audit` |
@@ -78,6 +81,7 @@ plus full Control Loop integration. Run `python -m pytest -v`.
 | §12.4 Policy Gates (consult `risk_for` per call) | [`core/policy.py`](core/policy.py) |
 | §12.4 Governance Modes (learning / repair / improvement approval boundaries) | [`core/governance.py`](core/governance.py) |
 | §14.1 Evidence + Provenance Chain | [`core/evidence.py`](core/evidence.py) |
+| §14.1 Evidence Budget — per-artifact (12 k chars) + total (32 k chars) context caps; keyword-shaped trimming by current question | [`core/evidence_budget.py`](core/evidence_budget.py) |
 | §14.3 Source Ranker / Evidence Trust Layer | [`core/source_ranker.py`](core/source_ranker.py) |
 | §14.3x Ranker-to-Output Policy | [`core/output_policy.py`](core/output_policy.py) + [`core/loop.py`](core/loop.py) |
 | §14.3b Source Registry + extracted claims catalog | [`core/source_registry.py`](core/source_registry.py) |
@@ -93,6 +97,7 @@ plus full Control Loop integration. Run `python -m pytest -v`.
 | §6 Persistent Task Queue + Scheduler Tick | [`core/task_queue.py`](core/task_queue.py), [`core/scheduler.py`](core/scheduler.py), [`main.py`](main.py) |
 | §15 Multi-Agent Organization: dry-run Team Plan + subagent contracts | [`core/team_plan.py`](core/team_plan.py) + `:team-plan` |
 | §15.1 Team Executor Dry-Run — contract walk / budget / verifier handoff | [`core/team_executor.py`](core/team_executor.py) + `:team-run` |
+| §15.2 SubAgent Runner — isolated child `AgentLoop` with read-only tool subset; recursion structurally prevented; transparent audit trail | [`core/subagent_runner.py`](core/subagent_runner.py) |
 | §17.1 Work Session Skeleton — bounded dry-run/status cycles | [`core/work_session.py`](core/work_session.py) + `:work-session` |
 | §18.1 Autonomous Subagent Proposal Layer | [`core/subagent_memory_scope.py`](core/subagent_memory_scope.py) + `:subagent-proposal` |
 | §18.2 Autonomous Capability Request Layer | [`core/capability_request.py`](core/capability_request.py) + `:capability-request` |
