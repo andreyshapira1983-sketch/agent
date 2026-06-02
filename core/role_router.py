@@ -220,7 +220,11 @@ class RoleRouter:
             tone="human",
             output_style="conversation",
             scopes=("operator", "preference", "project"),
-            tags=("preference", "user-approved", "project", "decision", "insight", "fact"),
+            tags=(
+                "preference", "user-approved", "project", "decision", "insight", "fact",
+                # Allow reflection/lesson records to be retrieved in all operator turns
+                "reflection", "lesson", "урок", "рефлексия",
+            ),
             reasons=("default operator chat",),
         )
 

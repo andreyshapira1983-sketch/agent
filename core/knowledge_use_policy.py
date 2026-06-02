@@ -112,6 +112,13 @@ class KnowledgeUsePolicy:
             if tag_overlap:
                 reasons.append(f"role tag overlap: {sorted(tag_overlap)}")
 
+            # Allow when the question itself references one of the record's tags.
+            # This surfaces episodic/reflection records when the user asks about
+            # them by tag name (e.g. "reflection", "lesson").
+            question_tag_match = q_tokens & tags_set
+            if question_tag_match:
+                reasons.append(f"question matches tags: {sorted(question_tag_match)[:4]}")
+
             content = record.content if isinstance(record.content, str) else str(record.content)
             token_overlap = q_tokens & _tokens(content)
             if token_overlap:

@@ -259,6 +259,16 @@ class MemoryRetrievalPolicy:
             # Tags also count — weak signal but useful when content is terse.
             tag_tokens = {t.lower() for t in (r.tags or [])}
             score += len(q_tokens & tag_tokens)
+            # Prefix match for inflected words (handles Russian morphology):
+            # e.g. "уроки" matches tag "урок", "рефлексии" matches "рефлексия".
+            if score == 0:
+                all_record_tokens = r_tokens | tag_tokens
+                for q in q_tokens:
+                    if len(q) >= 4:
+                        for rt in all_record_tokens:
+                            if len(rt) >= 4 and (rt.startswith(q[:4]) or q.startswith(rt[:4])):
+                                score += 1
+                                break
             if score >= self.min_score:
                 scored.append((score, r))
 
