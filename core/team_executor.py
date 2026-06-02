@@ -1,15 +1,20 @@
-"""Dry-run executor for bounded subagent contracts.
+"""Executor for bounded subagent contracts.
 
-This layer still does not run subagents. It walks a TeamPlan as an execution
-contract: order, budget, approval gates and verifier handoff. The goal is to
-make delegation inspectable before any real multi-agent execution exists.
+Supports two modes:
+- dry_run=True  (default) — walks the plan and reserves/validates contracts
+  without spawning any sub-agents.  Safe for inspection and testing.
+- dry_run=False — requires a SubAgentRunner injected via the constructor.
+  Runs each contract in plan order, blocking on approval_required items.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Literal
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal
 
 from core.team_plan import SubagentContract, TeamPlan
+
+if TYPE_CHECKING:
+    from core.subagent_runner import SubAgentRunner
 
 
 TeamExecutionStatus = Literal[
@@ -23,6 +28,8 @@ TeamStepStatus = Literal[
     "dry_run_planned",
     "approval_required",
     "budget_blocked",
+    "executed",
+    "error",
 ]
 
 
@@ -58,6 +65,7 @@ class TeamExecutionStep:
     verifier: str
     approval_required: bool
     stop_conditions: tuple[str, ...]
+    answer: str = ""  # non-empty only when status == "executed"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -124,11 +132,15 @@ class TeamExecutionReport:
         }
 
     def user_summary(self) -> str:
+        if self.dry_run:
+            header = [
+                "=== team execution dry-run ===",
+                "WARNING: planning preview only — no subagents were executed.",
+            ]
+        else:
+            header = ["=== team execution ==="]
         lines = [
-            "=== team execution dry-run ===",
-            "WARNING: this is a planning preview only — no subagents were executed,",
-            "         no tools were called, no real work was performed.",
-            "         Real multi-agent execution is deferred to a future milestone.",
+            *header,
             f"goal: {self.goal}",
             f"status: {self.status}",
             (
@@ -152,6 +164,9 @@ class TeamExecutionReport:
                     f"calls={step.reserved_model_calls} cost={step.reserved_cost_units}"
                 )
                 lines.append(f"     verifier: {step.verifier}")
+                if step.answer:
+                    preview = step.answer[:120].replace("\n", " ")
+                    lines.append(f"     answer  : {preview}")
         if self.verifier_handoffs:
             lines.append("verifier handoffs:")
             for handoff in self.verifier_handoffs:
@@ -162,7 +177,17 @@ class TeamExecutionReport:
 
 
 class TeamExecutor:
-    """Plan-order executor that only reserves/validates dry-run contracts."""
+    """Executor for bounded subagent contracts.
+
+    Parameters
+    ----------
+    runner:
+        Optional SubAgentRunner.  Required when ``dry_run=False``.
+        When None (default), the executor operates in dry-run-only mode.
+    """
+
+    def __init__(self, runner: "SubAgentRunner | None" = None) -> None:
+        self._runner = runner
 
     def run(
         self,
@@ -171,8 +196,11 @@ class TeamExecutor:
         dry_run: bool = True,
         budget: TeamBudget | None = None,
     ) -> TeamExecutionReport:
-        if not dry_run:
-            raise ValueError("TeamExecutor supports dry-run only in this MVP")
+        if not dry_run and self._runner is None:
+            raise ValueError(
+                "TeamExecutor requires a SubAgentRunner to run in non-dry-run mode. "
+                "Pass runner= to TeamExecutor() or use dry_run=True."
+            )
         budget = budget or TeamBudget()
         if not plan.needed:
             return TeamExecutionReport(
@@ -203,7 +231,7 @@ class TeamExecutor:
                     order,
                     contract,
                     status="budget_blocked",
-                    summary="Dry-run stopped before this contract because team budget would be exceeded.",
+                    summary="Stopped before this contract: team budget would be exceeded.",
                 )
                 steps.append(step)
                 status = "budget_exhausted"
@@ -213,31 +241,47 @@ class TeamExecutor:
 
             used_calls += contract.max_model_calls
             used_cost += contract.max_cost_units
+
             if contract.approval_required:
                 step_status: TeamStepStatus = "approval_required"
-                summary = (
-                    "Dry-run reserved budget but real execution would require approval."
-                )
+                summary = "Execution requires approval — skipped."
                 if status == "completed":
                     status = "blocked"
                 warnings.append(f"{contract.name} requires approval before execution")
-            else:
+                steps.append(_step_from_contract(order, contract, status=step_status, summary=summary))
+                continue
+
+            if dry_run:
                 step_status = "dry_run_planned"
-                summary = (
-                    "Dry-run planned this contract; no subagent, tool or model call was executed."
+                summary = "Dry-run planned; no subagent was executed."
+                steps.append(_step_from_contract(order, contract, status=step_status, summary=summary))
+            else:
+                # Real execution via SubAgentRunner
+                assert self._runner is not None  # guarded above
+                try:
+                    result = self._runner.run(
+                        contract_name=contract.name,
+                        role=contract.role,
+                        objective=contract.objective,
+                        allowed_tools=list(contract.allowed_tools),
+                    )
+                    step_status = "executed"
+                    answer = result.answer
+                    summary = f"executed: confidence={result.confidence_score:.2f} quality={result.quality_score}"
+                except Exception as exc:
+                    step_status = "error"
+                    answer = ""
+                    summary = f"error: {type(exc).__name__}: {exc}"
+                    if status == "completed":
+                        status = "blocked"
+                    warnings.append(f"{contract.name} failed: {summary}")
+                steps.append(
+                    _step_from_contract(order, contract, status=step_status, summary=summary, answer=answer if step_status == "executed" else "")
                 )
-            steps.append(
-                _step_from_contract(
-                    order,
-                    contract,
-                    status=step_status,
-                    summary=summary,
-                )
-            )
 
         return TeamExecutionReport(
             goal=plan.goal,
-            dry_run=True,
+            dry_run=dry_run,
             status=status,
             budget=budget,
             used_model_calls=used_calls,
@@ -255,6 +299,7 @@ def _step_from_contract(
     *,
     status: TeamStepStatus,
     summary: str,
+    answer: str = "",
 ) -> TeamExecutionStep:
     return TeamExecutionStep(
         order=order,
@@ -275,6 +320,7 @@ def _step_from_contract(
         verifier=contract.verifier,
         approval_required=contract.approval_required,
         stop_conditions=contract.stop_conditions,
+        answer=answer,
     )
 
 

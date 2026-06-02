@@ -231,8 +231,14 @@ Sources:
   2. ...
 
 Confidence: low | medium | high
-  - high   = corroborated by multiple sources OR a direct verbatim quote from a file
-  - medium = supported by a single source OR confident general-knowledge answer
+  - high   = corroborated by at least TWO INDEPENDENT source kinds
+             (e.g. file + test result, file + web, file + shell output).
+             A file listing (list_dir) and a README from the SAME project
+             are NOT independent — they are the same source. Two file:
+             sources alone are medium, not high.
+  - medium = supported by a single source OR multiple sources of the same
+             kind (e.g. only file: sources) OR confident general-knowledge
+             answer with no evidence
   - low    = inferred, partial, or uncertain
 
 Unverified:

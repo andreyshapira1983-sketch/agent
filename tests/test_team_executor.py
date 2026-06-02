@@ -70,10 +70,10 @@ def test_team_executor_marks_approval_required_contracts_without_running_them():
     assert any("ApprovalAgent requires approval" in warning for warning in report.warnings)
 
 
-def test_team_executor_rejects_non_dry_run_mode():
+def test_team_executor_rejects_non_dry_run_mode_without_runner():
     plan = TeamPlanner().plan("news business architecture")
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="SubAgentRunner"):
         TeamExecutor().run(plan, dry_run=False)
 
 

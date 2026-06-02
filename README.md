@@ -37,7 +37,7 @@ ingested with `:ingest-source` / `:ingest-project`; useful facts can be saved
 across sessions with `:remember` or controlled knowledge writes. The Write
 Policy refuses secrets, blocked tags, and unconsented noise.
 
-A hermetic test suite (**1962 cases, zero network**) backs every layer:
+A hermetic test suite (**2146 cases, zero network**) backs every layer:
 tool safety, planner routing, policy gate enforcement, working memory,
 persistent memory + write policy + retrieval policy, human approval gate
 (escalate → approve / deny / abort), secret scanning + universal
@@ -56,6 +56,7 @@ plus full Control Loop integration. Run `python -m pytest -v`.
 | §3 Model Router — role-based model selection | [`core/model_router.py`](core/model_router.py) |
 | §3 Model Usage Ledger — calls / tokens / rough cost units | [`core/model_usage.py`](core/model_usage.py) + `:model-usage` |
 | §3 Model Registry Audit — active routes vs candidate catalog | [`core/model_registry_audit.py`](core/model_registry_audit.py) + `:model-registry-audit` |
+| §3 Dynamic Model Catalog — provider discovery / cache / tier routing | [`core/model_catalog.py`](core/model_catalog.py), [`core/task_complexity.py`](core/task_complexity.py), [`config/model_catalog.json`](config/model_catalog.json) + `:refresh-models` |
 | §6 Persistent Budget Windows — hour/day spend caps across sessions | [`core/budget_ledger.py`](core/budget_ledger.py) + `:budget-window-status` |
 | §4 Memory: Working Memory + artifact cache | [`core/memory.py`](core/memory.py) |
 | §4 Memory: Persistent Long-Term Store (JSONL) | [`core/persistent_memory.py`](core/persistent_memory.py) |
@@ -92,6 +93,8 @@ plus full Control Loop integration. Run `python -m pytest -v`.
 | §6 Persistent Task Queue + Scheduler Tick | [`core/task_queue.py`](core/task_queue.py), [`core/scheduler.py`](core/scheduler.py), [`main.py`](main.py) |
 | §15 Multi-Agent Organization: dry-run Team Plan + subagent contracts | [`core/team_plan.py`](core/team_plan.py) + `:team-plan` |
 | §15.1 Team Executor Dry-Run — contract walk / budget / verifier handoff | [`core/team_executor.py`](core/team_executor.py) + `:team-run` |
+| §17.1 Work Session Skeleton — bounded dry-run/status cycles | [`core/work_session.py`](core/work_session.py) + `:work-session` |
+| §18.1 Autonomous Subagent Proposal Layer | [`core/subagent_memory_scope.py`](core/subagent_memory_scope.py) + `:subagent-proposal` |
 | §18.2 Autonomous Capability Request Layer | [`core/capability_request.py`](core/capability_request.py) + `:capability-request` |
 | Operator Architecture Audit — implemented layers vs multi-agent gaps | [`core/architecture_audit.py`](core/architecture_audit.py) + `:architecture-audit` |
 | §13.2 Self-Repair Controller (diagnose -> diff -> approval -> write -> tests -> rollback) | [`core/self_repair.py`](core/self_repair.py) + `AgentLoop.repair()` |
@@ -101,8 +104,41 @@ plus full Control Loop integration. Run `python -m pytest -v`.
 | §8 Monitoring & Logging (structured JSONL) | [`core/logger.py`](core/logger.py) |
 | §1 Interface & Communication (CLI surface) | [`main.py`](main.py) |
 
-Multi-agent/sub-agent manager, RL, deployment, SDK, embeddings/vector RAG,
-edge — explicitly **not yet**.
+Real subagent execution, connector auto-activation, open-ended unattended work,
+RL, deployment, SDK, embeddings/vector RAG and edge runtime are explicitly
+**not yet** implemented.
+
+## Current execution semantics
+
+As of 2026-06-02, the doctrine boundary is:
+
+- `:work-session` exists, but the current skeleton mainly runs bounded
+  dry-run/status cycles through `AutonomousRuntime`. It proves timing,
+  reporting and circuit-stop mechanics; it is not open-ended unattended work.
+- `:subagent-proposal` can create a `SubagentProposal` with explicit
+  memory/tool/budget scope and can submit an Approval Inbox item. It does not
+  launch or run a real subagent.
+- `:capability-request` can infer missing Telegram/email/Upwork/web/file/model/
+  memory/long-session capability boundaries from natural language and can
+  submit them for approval. It does not activate connectors automatically.
+- Smart Memory includes persistent memory, episodic memory, procedural memory
+  and consolidation reports. Memory writes remain policy-gated.
+- Dynamic Model Catalog includes provider API discovery, cached
+  `config/model_catalog.json`, and task-complexity tier selection. The cache is
+  refreshed explicitly with `:refresh-models`; tier overrides are still under
+  operator control.
+- The Approval Inbox daemon notice surfaces pending items at REPL startup.
+- Long unattended autonomy remains limited whenever approval items are pending
+  or persistent hour/day budget limits are unset. Tracking can be active while
+  enforcement is disabled if all persistent limits are zero.
+
+The operator snapshot that triggered this doctrine refresh reported
+`source_registry=64 sources / 473 claims`, `persistent_memory=21 records`,
+`approvals=3 pending / 5 total`, `scheduler_due=1`, and budget tracking active
+with hour/day enforcement disabled. Pending approval items included
+OperatorRoutingBugfixer, UpworkJobMonitor and an Upwork capability request.
+Those counts are status only; they do not approve items, activate capabilities,
+run subagents, or change memory data.
 
 ## Setup
 
@@ -146,8 +182,15 @@ edge — explicitly **not yet**.
    candidate catalog. It also lists unavailable models, unsupported providers
    and available candidates that were not selected by the current policy.
 
-   Built-in model names are safe defaults, not a live provider catalog. To keep
-   model names fresh without editing Python code, copy the example registry:
+   The agent has two separate model inventories:
+
+   - the operator-curated route registry, which decides which providers/models
+     are eligible for roles;
+   - the dynamic model catalog, refreshed from provider APIs and cached in
+     `config/model_catalog.json` for task-complexity tier selection.
+
+   Built-in model names are safe defaults. To keep role routing explicit
+   without editing Python code, copy the example registry:
    ```powershell
    Copy-Item .\config\model_registry.example.json .\config\model_registry.json
    ```
@@ -205,6 +248,18 @@ edge — explicitly **not yet**.
    selects providers that the local `LLM` adapter supports today: `anthropic`,
    `openai`, `huggingface`, and `mock`. New model names under those providers
    can be added through JSON without a code change.
+
+   To refresh the dynamic provider catalog, run:
+   ```text
+   :refresh-models
+   :refresh-models --anthropic
+   :refresh-models --openai
+   ```
+   This queries provider APIs, classifies models into `light`, `standard` and
+   `deep` tiers by naming pattern, and writes the local cache. At runtime,
+   standard tasks use the ordinary role route; light/deep task routing first
+   checks explicit `AGENT_MODEL_TIER_*` overrides, then the cached catalog, then
+   falls back to the role route.
 
    Model usage is recorded locally in `data/model_usage.jsonl`. Use
   `:model-usage` to inspect calls, tokens and rough `cost_units` by role/model.
@@ -272,9 +327,11 @@ edge — explicitly **not yet**.
    :architecture-audit --json
    ```
    This command checks concrete code/test evidence for major layers and marks
-   the current multi-agent state. Today the project has dry-run team contracts
-   and a dry-run executor. Real multi-agent execution still needs long work
-   session mode, persistent budget windows and subagent memory scopes.
+   the current multi-agent state. Today the project has dry-run team contracts,
+   a dry-run executor, a work-session skeleton, persistent budget windows and
+   subagent memory scopes. Real multi-agent execution still requires an
+   implemented runner that consumes approved proposals, plus operator-approved
+   capabilities and enforced persistent hour/day budget limits.
 
 ## Usage
 
@@ -335,6 +392,7 @@ python main.py
 > :rollback list                      # show registered compensation plans
 > :models                             # inspect active model routes + registry
 > :model-registry-audit               # explain selected routes vs available candidates
+> :refresh-models                     # refresh provider model catalog cache
 > :model-usage                        # inspect LLM calls/tokens/cost units
 > :architecture-audit                 # inspect implemented layers and multi-agent gaps
 > :operator-check                     # local owner-facing system digest; no LLM needed
@@ -349,6 +407,10 @@ python main.py
                                       # dry-run subagent contracts; does not run agents
 > :team-run "AI news and business opportunity radar"
                                       # dry-run contract walk; no subagents/tools/models executed
+> :work-session "project health" --dry-run --minutes 10 --max-cycles 3
+                                      # bounded dry-run/status cycles, not open-ended autonomy
+> :subagent-proposal "monitor Upwork and propose coding work" --submit
+                                      # proposal + approval item only; does not launch subagent
 > :capability-request "Хочу, чтобы ты сам сообщал мне, когда нужно решение"
                                       # propose Telegram/email/web/model/etc. access boundaries
 > :capability-request "Следи за важными письмами" --submit
@@ -1267,7 +1329,7 @@ The full acceptance suite is in
 > redaction + classification, argument-aware risk (`risk_for`),
 > a sandboxed reversible/irreversible write tool, a sandboxed
 > whitelisted shell tool with mandatory compensation + rollback,
-> 1962 hermetic tests covering every production module, and
+> 2146 hermetic tests covering every production module, and
 > zero-network determinism. The numbered slots below extend that foundation;
 > they are not the smallest possible thing.
 
@@ -1762,6 +1824,21 @@ ledger:
 `cost_units` are deliberately approximate. They are for budget governance and
 route comparison, not billing.
 
+### 16.4 — Dynamic Model Catalog / Tier Routing
+
+`core/model_catalog.py` and `core/task_complexity.py` keep provider model
+discovery separate from operator route policy:
+
+  - `:refresh-models` queries provider APIs (`anthropic.models.list` and
+    `openai.models.list` when credentials are available).
+  - Results are classified into `light`, `standard` and `deep` tiers by naming
+    pattern, then cached in `config/model_catalog.json`.
+  - `ModelRouter.for_task(...)` assesses task complexity before the LLM call.
+    Standard tasks use the existing role route; light/deep tasks use explicit
+    tier overrides or the cached catalog, then fall back to role routing.
+  - The cache is advisory. It does not grant API credentials and does not
+    override the operator's provider availability or role registry policy.
+
 ### MVP-15 — Multi-Agent Organization Layer
 
 This slice starts with team design, not delegation. `:team-plan <goal>` creates
@@ -1791,6 +1868,34 @@ handoffs. Useful flags:
 ```
 
 This proves sequencing and budgets before any real delegation is allowed.
+
+### MVP-17.1 — Long Work Session Skeleton
+
+`:work-session` exists as a bounded multi-cycle wrapper around
+`AutonomousRuntime`. The current skeleton:
+
+  - defaults to dry-run mode;
+  - runs one controlled health/status task per cycle;
+  - respects wall-clock minutes, max cycle count and circuit-breaker stops;
+  - emits progress reports;
+  - does not create open-ended multi-hour autonomy by itself.
+
+`--allow-effects` only passes the non-dry-run flag into the underlying runtime,
+where effects remain approval-gated or blocked by the current runtime
+semantics. Long unattended autonomy remains limited when approval items are
+pending or persistent hour/day budget enforcement limits are unset.
+
+### MVP-18.1 — Autonomous Subagent Proposal Layer
+
+`:subagent-proposal <goal>` can produce a `SubagentProposal` describing the
+proposed role, why it is needed, memory scope, tool scope, budget scope,
+outputs, stop conditions and approval requirement. With `--submit`, the
+proposal is placed into the Approval Inbox as a pending `launch_subagent` item.
+
+This layer is proposal-only. It does not execute a subagent, call subagent
+tools, spend model budget for a subagent run, or consume the approval item.
+Real execution requires a later runner that explicitly consumes an approved
+proposal and enforces the declared scopes.
 
 ### MVP-18.2 — Autonomous Capability Request Layer
 
@@ -2135,7 +2240,7 @@ A real safety net lives in [`tests/`](tests/) and runs via `pytest`:
 python -m pytest -v
 ```
 
-What is covered today (**1962 tests, ≈ 30 s, zero network calls**):
+What is covered today (**2146 tests, approx. 37 s, zero network calls**):
 
 | Layer | File | Cases |
 | --- | --- | --- |
@@ -2188,10 +2293,13 @@ What is covered today (**1962 tests, ≈ 30 s, zero network calls**):
 | Persistent Task Queue + Scheduler (MVP-16.2) | [`tests/test_task_queue.py`](tests/test_task_queue.py), [`tests/test_scheduler.py`](tests/test_scheduler.py), [`tests/test_autonomous_runtime.py`](tests/test_autonomous_runtime.py), [`tests/test_cli.py`](tests/test_cli.py) | JSONL task persistence / pending due filtering / task state transitions / schedule persistence / scheduler tick enqueues due tasks / queued tasks run through `AutonomousRuntime` / CLI `:task-*` and `:schedule-*` / **`recover_stuck(timeout_minutes)` resets stale "running" tasks back to "pending"** |
 | Model Usage Ledger (MVP-16.3) | [`tests/test_model_usage.py`](tests/test_model_usage.py), [`tests/test_cli.py`](tests/test_cli.py) | role/model token ledger / JSONL persistence / historical vs current-session totals / session call-budget block / estimated token fallback / CLI `:model-usage` and `:budget-status` integration |
 | Persistent Budget Windows (MVP-16.5) | [`tests/test_budget_ledger.py`](tests/test_budget_ledger.py), [`tests/test_model_usage.py`](tests/test_model_usage.py), [`tests/test_cli.py`](tests/test_cli.py) | hour/day JSONL budget windows / malformed budget records skipped / model call blocking across sessions / model tokens + cost units recorded / CLI `:budget-window-status` |
+| Dynamic Model Catalog / Tier Routing (MVP-16.4) | [`tests/test_task_complexity.py`](tests/test_task_complexity.py), [`tests/test_adaptive_routing.py`](tests/test_adaptive_routing.py) | task-complexity tier assessment / provider API catalog cache / `AGENT_MODEL_TIER_*` overrides / cached tier lookup / fallback to role routes |
 | Model Registry Audit (MVP-16.4) | [`tests/test_model_registry_audit.py`](tests/test_model_registry_audit.py), [`tests/test_cli.py`](tests/test_cli.py) | active routes are explained separately from the wider local registry / unavailable models flagged by missing env / unsupported providers flagged / CLI `:model-registry-audit` |
 | Release Hygiene Guard (P0 audit blocker) | [`tests/test_release_hygiene.py`](tests/test_release_hygiene.py), [`tests/test_cli.py`](tests/test_cli.py) | release manifest excludes `.env`, `.git`, `.venv`, caches, credential/token/key files, `logs/` and `data/` / forbidden local artifacts reported as present-but-excluded / CLI `:release-audit` |
 | Team Plan (MVP-15.0 dry-run) | [`tests/test_team_plan.py`](tests/test_team_plan.py), [`tests/test_cli.py`](tests/test_cli.py) | simple tasks avoid subagents / multi-concern goals emit bounded contracts / `--limit` truncation warning / tool allow/deny validation / stable JSON shape / CLI `:team-plan` |
 | Team Executor Dry-Run (MVP-15.1) | [`tests/test_team_executor.py`](tests/test_team_executor.py), [`tests/test_cli.py`](tests/test_cli.py) | contract order walk / budget aggregation / stops before budget overflow / approval-required contracts marked but not run / verifier handoffs / CLI `:team-run` |
+| Long Work Session Skeleton (MVP-17.1) | [`tests/test_work_session.py`](tests/test_work_session.py), [`tests/test_cli.py`](tests/test_cli.py) | bounded dry-run/status cycles / wall-clock and max-cycle stops / circuit-breaker stop / progress reports / no claim of open-ended autonomy |
+| Autonomous Subagent Proposal Layer (MVP-18.1) | [`tests/test_subagent_memory_scope.py`](tests/test_subagent_memory_scope.py), [`tests/test_cli.py`](tests/test_cli.py) | natural goals can produce scoped `SubagentProposal` objects / submission creates a pending Approval Inbox item / no real subagent execution implied |
 | Autonomous Capability Request Layer (MVP-18.2) | [`tests/test_capability_request.py`](tests/test_capability_request.py), [`tests/test_operator_intent.py`](tests/test_operator_intent.py), [`tests/test_cli.py`](tests/test_cli.py) | natural goals produce bounded `CapabilityRequest` proposals for Telegram/email/Upwork/subagent/web/file/long-session/model/memory capabilities / every request has approval required, explicit read/write scopes, forbidden actions, budgets, risk summary and fallback / CLI `:capability-request` can print JSON or submit to Approval Inbox without activating the capability |
 | Smart Experience Memory (MVP-18.3) | [`tests/test_smart_memory.py`](tests/test_smart_memory.py) | episodes redact secrets and record outcomes / failed or partial episodes do not become procedures / successful tool workflows upsert reusable procedures / consolidation links episodes to procedures / planner receives compact `<agent_experience_memory>` / CLI `:smart-memory` and `:memory-consolidate` |
 | Architecture Audit (operator control plane) | [`tests/test_architecture_audit.py`](tests/test_architecture_audit.py), [`tests/test_cli.py`](tests/test_cli.py) | layer checklist / current multi-agent state / priority gaps before real subagent execution / CLI `:architecture-audit` |
@@ -2308,7 +2416,7 @@ agent/
 ├── .github/workflows/ci.yml            # release/supply-chain/test/coverage gate
 ├── pytest.ini                        # pytest config (testpaths + pythonpath)
 ├── main.py                           # CLI entry point (+ :remember / :forget / :memory)
-├── tests/                            # 1962 hermetic tests (FakeLLM + FakePlanner)
+├── tests/                            # 2146 hermetic tests (FakeLLM + FakePlanner)
 │   ├── conftest.py                   # FakeLLM, FakePlanner, workspace fixture
 │   ├── test_ids.py                   # ID factory: 4 cases
 │   ├── test_models.py                # Pydantic Literal guards + defaults: 48 cases
