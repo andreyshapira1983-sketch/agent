@@ -21,6 +21,9 @@ htmlcov/
 venv/
 env/
 
+# Visual Studio / VS Code workspace state
+.vs/
+
 *.tmp
 *.bak
 *.log
