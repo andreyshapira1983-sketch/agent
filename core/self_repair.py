@@ -47,7 +47,7 @@ RepairStatus = Literal[
     "failed",
 ]
 
-MIN_REPAIR_CONFIDENCE = 0.60
+_DEFAULT_MIN_REPAIR_CONFIDENCE = 0.60
 
 
 @dataclass(frozen=True)
@@ -219,10 +219,12 @@ class SelfRepairController:
         *,
         workspace_root: Path,
         governance_policy: GovernancePolicy | None = None,
+        min_confidence: float = _DEFAULT_MIN_REPAIR_CONFIDENCE,
     ):
         self.agent = agent
         self.workspace_root = Path(workspace_root).resolve()
         self.governance_policy = governance_policy or GovernancePolicy()
+        self.min_confidence: float = min_confidence
 
     def run(self, proposal: RepairProposal) -> RepairReport:
         report = RepairReport(proposal=proposal, status="failed")
@@ -281,7 +283,7 @@ class SelfRepairController:
             self._finish(report)
             return report
 
-        if proposal.confidence < MIN_REPAIR_CONFIDENCE:
+        if proposal.confidence < self.min_confidence:
             report.status = "low_confidence"
             report.steps.append(
                 RepairStepRecord(
@@ -289,7 +291,7 @@ class SelfRepairController:
                     status="blocked",
                     error=(
                         f"proposal confidence {proposal.confidence:.2f} "
-                        f"is below threshold {MIN_REPAIR_CONFIDENCE:.2f}"
+                        f"is below threshold {self.min_confidence:.2f}"
                     ),
                 )
             )
@@ -297,7 +299,7 @@ class SelfRepairController:
                 "self_repair_confidence_gate",
                 {
                     "confidence": proposal.confidence,
-                    "threshold": MIN_REPAIR_CONFIDENCE,
+                    "threshold": self.min_confidence,
                     "path": proposal.path,
                     "decision": "block",
                 },
@@ -348,7 +350,7 @@ class SelfRepairController:
         #
         # < 1.0 means the patch broke at least one test that was passing
         #        before (regression).
-        # < MIN_REPAIR_CONFIDENCE means too many tests broke → rollback.
+        # < self.min_confidence means too many tests broke → rollback.
         # == 1.0 means test count held steady or improved.
         baseline_passed = _extract_pass_count(baseline.output)
         post_passed = _extract_pass_count(post.output)
@@ -363,17 +365,17 @@ class SelfRepairController:
                 "post_passed": post_passed,
                 "measured_confidence": report.measured_confidence,
                 "proposal_confidence": proposal.confidence,
-                "threshold": MIN_REPAIR_CONFIDENCE,
+                "threshold": self.min_confidence,
             },
         )
 
-        if post.ok and _tests_passed(post.output) and measured_confidence >= MIN_REPAIR_CONFIDENCE:
+        if post.ok and _tests_passed(post.output) and measured_confidence >= self.min_confidence:
             report.status = "repaired"
             self._finish(report)
             return report
 
         # Either tests failed outright OR measured confidence fell below threshold
-        if measured_confidence < MIN_REPAIR_CONFIDENCE:
+        if measured_confidence < self.min_confidence:
             report.steps.append(
                 RepairStepRecord(
                     name="measured_confidence_gate",
@@ -381,7 +383,7 @@ class SelfRepairController:
                     error=(
                         f"Measured confidence {measured_confidence:.2f} "
                         f"(post_passed={post_passed} / baseline_passed={max(baseline_passed, 1)}) "
-                        f"is below threshold {MIN_REPAIR_CONFIDENCE:.2f}"
+                        f"is below threshold {self.min_confidence:.2f}"
                     ),
                 )
             )

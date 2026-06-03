@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from typing import Literal as _Literal
+from core.replan import FailureType as ReplanCode  # single source of truth
 
 from core.approval import ApprovalProvider
 from core.data_classifier import DataClass, SourceHint, classify
@@ -142,26 +143,8 @@ def _to_text(output: Any) -> str:
 DEFAULT_MAX_REPLAN_ATTEMPTS = 3
 
 
-# Failure codes captured by `_execute_step` and surfaced to the planner
-# in the next attempt. Any other failure path defaults to "unknown".
-#
-# MUST stay in sync with `core.replan.FailureType` — `tests/test_replan_audit.py`
-# pins both lists against each other so a new failure type can't be added
-# in one place and silently forgotten in the other.
-ReplanCode = _Literal[
-    "policy_blocked",
-    "approval_deny",
-    "approval_abort",
-    "approval_unavailable",
-    "tool_error",
-    "file_not_found",
-    "verify_failed",
-    "web_empty",
-    "timeout",
-    "unresolved_citation",
-    "injection_blocked",
-    "unknown",
-]
+# ReplanCode is an alias for FailureType (core/replan.py) — single source of truth.
+# Imported above. No local definition needed.
 
 
 @dataclass(frozen=True)

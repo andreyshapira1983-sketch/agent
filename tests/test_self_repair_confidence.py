@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from core.self_repair import (
-    MIN_REPAIR_CONFIDENCE,
+    _DEFAULT_MIN_REPAIR_CONFIDENCE as MIN_REPAIR_CONFIDENCE,
     RepairProposal,
     RepairReport,
     _extract_pass_count,
