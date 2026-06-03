@@ -247,3 +247,54 @@ def test_smart_memory_cli_commands(workspace: Path, capsys) -> None:
     out = capsys.readouterr()
     assert '"episode_count": 1' in out.err
     assert agent.consolidation_store.count() == 1
+
+
+def test_episodic_store_evicts_oldest_when_over_limit(tmp_path: Path) -> None:
+    store = EpisodicMemoryStore(tmp_path / "ep.jsonl", max_episodes=3)
+    for i in range(5):
+        ep = episode_from_agent_cycle(
+            goal="g", question=f"q{i}", answer="a",
+            tools_used=[], source_labels=[], verified_chunks=1,
+        )
+        store.save(ep)
+    episodes = store.load()
+    assert len(episodes) == 3
+    # Oldest two (q0, q1) should have been evicted
+    questions = {e.question for e in episodes}
+    assert "q0" not in questions
+    assert "q1" not in questions
+    assert "q4" in questions
+
+
+def test_episodic_store_protects_lesson_tags(tmp_path: Path) -> None:
+    from core.smart_memory import EpisodeRecord
+    store = EpisodicMemoryStore(tmp_path / "ep.jsonl", max_episodes=2)
+    # Save 2 normal episodes first
+    for i in range(2):
+        ep = episode_from_agent_cycle(
+            goal="g", question=f"normal{i}", answer="a",
+            tools_used=[], source_labels=[], verified_chunks=1,
+        )
+        store.save(ep)
+    # Save a lesson episode (should never be evicted)
+    lesson = EpisodeRecord(
+        goal="repair", question="how to fix", outcome="success",
+        summary="fixed bug", tags=("lesson", "bug-fix"),
+    )
+    store.save(lesson)
+    # Now we have 3 episodes with max=2 → one normal evicted, lesson survives
+    episodes = store.load()
+    assert len(episodes) == 2
+    ids_with_lesson_tag = [e for e in episodes if "lesson" in e.tags]
+    assert len(ids_with_lesson_tag) == 1
+
+
+def test_episodic_store_no_eviction_under_limit(tmp_path: Path) -> None:
+    store = EpisodicMemoryStore(tmp_path / "ep.jsonl", max_episodes=10)
+    for i in range(5):
+        ep = episode_from_agent_cycle(
+            goal="g", question=f"q{i}", answer="a",
+            tools_used=[], source_labels=[], verified_chunks=1,
+        )
+        store.save(ep)
+    assert store.count() == 5

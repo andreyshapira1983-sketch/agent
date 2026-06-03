@@ -238,13 +238,47 @@ class ConsolidationReport:
 
 
 class EpisodicMemoryStore:
-    def __init__(self, path: Path | str):
+    # Tags that mark episodes as too valuable to evict (e.g. repair lessons).
+    PROTECTED_TAGS: frozenset[str] = frozenset({"lesson", "bug-fix", "regression-guard"})
+
+    def __init__(self, path: Path | str, *, max_episodes: int = 200):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.max_episodes = max_episodes
 
     def save(self, episode: EpisodeRecord) -> None:
         with state_file_lock(self.path):
             append_state_jsonl_unlocked(self.path, [episode.to_dict()])
+            self._maybe_prune_unlocked()
+
+    def _maybe_prune_unlocked(self) -> int:
+        """Evict oldest non-protected episodes when over *max_episodes*.
+
+        Protected episodes (carrying any tag in PROTECTED_TAGS) are never
+        evicted.  Returns the number of records removed.
+        """
+        if self.max_episodes <= 0:
+            return 0
+        rows = read_state_jsonl_unlocked(self.path)
+        if len(rows) <= self.max_episodes:
+            return 0
+        episodes: list[EpisodeRecord] = []
+        for row in rows:
+            try:
+                episodes.append(EpisodeRecord.from_dict(row))
+            except (TypeError, ValueError):
+                continue
+        protected = [e for e in episodes if self.PROTECTED_TAGS & set(e.tags)]
+        evictable = [e for e in episodes if not (self.PROTECTED_TAGS & set(e.tags))]
+        to_remove = len(episodes) - self.max_episodes
+        if to_remove <= 0:
+            return 0
+        # Sort evictable by age ascending so oldest are removed first.
+        evictable.sort(key=lambda e: e.created_at)
+        kept = evictable[to_remove:] + protected
+        kept.sort(key=lambda e: e.created_at)
+        rewrite_state_jsonl_unlocked(self.path, [e.to_dict() for e in kept])
+        return to_remove
 
     def load(self) -> list[EpisodeRecord]:
         with state_file_lock(self.path):
