@@ -19,6 +19,7 @@ from core.verifier import (
     DISCLAIMER_ALL_SELF_DECLARED,
     DISCLAIMER_FULLY_UNVERIFIED,
     DISCLAIMER_NO_CHAIN,
+    DISCLAIMER_SESSION_MEMORY,
     SELF_DECLARED_PREFIXES,
     Citation,
     ClaimChunk,
@@ -285,6 +286,71 @@ class TestVerifyEmptyChain:
         assert report.chain_was_empty is True
         assert report.fully_unverified is True
         assert report.disclaimer == DISCLAIMER_NO_CHAIN
+
+    def test_memory_citation_empty_chain_session_memory_disclaimer(self):
+        """When the agent answers from Working Memory (no tools ran, chain
+        is empty) and all unmatched citations use the `memory:` prefix,
+        the disclaimer should be DISCLAIMER_SESSION_MEMORY — not the
+        misleading DISCLAIMER_NO_CHAIN — because the answer IS grounded
+        in the agent’s prior-turn history."""
+        report = verify(
+            answer=(
+                "The tests ran in turn 3 [memory:turn_3_test_results]. "
+                "Two failures were found [memory:turn_3_failures]."
+            ),
+            chain=ProvenanceChain(),
+        )
+        assert report.chain_was_empty is True
+        assert report.fully_unverified is True
+        assert report.disclaimer == DISCLAIMER_SESSION_MEMORY
+        assert DISCLAIMER_SESSION_MEMORY in report.annotated_answer
+        # The misleading “no sources” note must NOT appear.
+        assert DISCLAIMER_NO_CHAIN not in report.annotated_answer
+
+    def test_mixed_memory_and_file_citation_empty_chain_no_chain_disclaimer(self):
+        """If even ONE unmatched citation is not a memory: citation, the
+        more cautious DISCLAIMER_NO_CHAIN is used."""
+        report = verify(
+            answer=(
+                "Result [memory:turn_3_data]. Also see [file:missing.txt]."
+            ),
+            chain=ProvenanceChain(),
+        )
+        assert report.disclaimer == DISCLAIMER_NO_CHAIN
+
+    def test_memory_citation_nonempty_chain_session_memory_disclaimer(self):
+        """Regression: even when the chain has Working Memory evidence
+        injected (chain_was_empty=False), if all cited-but-unmatched
+        chunks reference memory: prefix the disclaimer should still be
+        DISCLAIMER_SESSION_MEMORY, not DISCLAIMER_FULLY_UNVERIFIED.
+
+        This matches the live-run scenario where loop.py injects
+        Working Memory artifacts into the chain but the LLM-generated
+        citation body (e.g. 'Turn_3_test_results') doesn't substring-
+        match the stored source_id ('working_turn_3_run_tests_tests')."""
+        from core.evidence import make_evidence
+        chain = ProvenanceChain()
+        # Simulate what loop.py injects: Working Memory evidence whose
+        # source_id does NOT exactly match what the LLM generates.
+        chain.add(make_evidence(
+            kind="memory",
+            source_id="memory:working_turn_3_run_tests_tests",
+            obtained_via="working_memory",
+            claim="Cached tool output from turn 3: run_tests:tests",
+            excerpt="2494 passed in 16.34s",
+            confidence=0.85,
+        ))
+        report = verify(
+            answer=(
+                "All 2494 tests passed [memory:Turn_3_test_results]. "
+                "No failures found [memory:Turn_3_test_results]."
+            ),
+            chain=chain,
+        )
+        assert report.chain_was_empty is False
+        assert report.fully_unverified is True
+        assert report.disclaimer == DISCLAIMER_SESSION_MEMORY
+        assert DISCLAIMER_FULLY_UNVERIFIED not in report.annotated_answer
 
 
 class TestVerifyEmptyAnswer:

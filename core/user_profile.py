@@ -145,10 +145,15 @@ _BRIEF_PATTERNS = re.compile(
 )
 
 # Explicit detail request.
+# NOTE: bare "подробнее" is intentionally excluded — it is a comparative
+# adverb that frequently modifies a specific object ("покажи тесты подробнее")
+# rather than expressing a global verbosity preference.  Only directive
+# forms (paired with a communication verb) trigger the lock.
 _DETAILED_PATTERNS = re.compile(
-    r"\b(подробно|подробнее|детально|развёрнуто|расскажи\s+всё|"
+    r"\b(подробно|детально|развёрнуто|расскажи\s+всё|"
     r"объясни\s+подробно|full\s+explanation|in\s+detail|"
-    r"comprehensive|step.by.step|thoroughly)\b",
+    r"comprehensive|step.by.step|thoroughly)\b"
+    r"|\b(отвечай|говори|пиши|объясняй|расскажи|объясни)\s+подробн\w*\b",
     re.IGNORECASE,
 )
 

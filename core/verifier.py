@@ -229,6 +229,13 @@ DISCLAIMER_NO_CHAIN = (
     "response is based on the model's prior knowledge and the "
     "conversation history."
 )
+# Used when the answer is explicitly grounded in Working Memory (prior
+# turns) rather than newly gathered external sources.  This is a
+# legitimate and expected code-path for follow-up questions.
+DISCLAIMER_SESSION_MEMORY = (
+    "[note] This answer draws on the conversation history from this "
+    "session (prior turns). No new external sources were consulted."
+)
 DISCLAIMER_ALL_SELF_DECLARED = (
     "[note] Every claim above is marked [declared:general-knowledge] — "
     "the model honestly admits these come from its prior training, not "
@@ -522,6 +529,11 @@ def verify(
     verified = 0
     unverified = 0
     cited_unmatched = 0
+    # Counts cited_but_unmatched chunks where ALL citations use the
+    # "memory:" prefix — i.e. the LLM grounded the answer in prior
+    # turns rather than external sources.  Used to select the right
+    # disclaimer (DISCLAIMER_SESSION_MEMORY) for follow-up answers.
+    memory_only_unmatched = 0
     self_declared = 0
     structural = 0
 
@@ -625,6 +637,12 @@ def verify(
                 else:
                     verdict = "cited_but_unmatched"
                     cited_unmatched += 1
+                    if cits and all(
+                        c.prefix == "memory"
+                        or c.prefix in SELF_DECLARED_PREFIXES
+                        for c in cits
+                    ):
+                        memory_only_unmatched += 1
 
         examined_chunks.append(ClaimChunk(
             text=chunk_text,
@@ -647,8 +665,12 @@ def verify(
     )
     malformed_output = bool(all_chunks_text) and not headers_found
 
-    # Disclaimer policy (three distinct cases):
-    #   * chain_was_empty + zero verified + zero self_declared
+    # Disclaimer policy (four distinct cases):
+    #   * zero verified + zero self_declared
+    #     + ALL unmatched citations are memory: prefix (any chain state)
+    #       -> agent answered from Working Memory (follow-up question)
+    #       -> DISCLAIMER_SESSION_MEMORY (not misleading NO_CHAIN)
+    #   * chain_was_empty + zero verified + zero self_declared (other)
     #       -> agent gathered nothing AND model didn't even own up
     #       -> DISCLAIMER_NO_CHAIN
     #   * chain not empty + zero verified + zero self_declared
@@ -660,7 +682,15 @@ def verify(
     fully_unverified = (verified == 0 and self_declared == 0)
     disclaimer: str | None = None
     if fully_unverified:
-        disclaimer = DISCLAIMER_NO_CHAIN if chain_empty else DISCLAIMER_FULLY_UNVERIFIED
+        if cited_unmatched > 0 and cited_unmatched == memory_only_unmatched:
+            # All cited-but-unmatched chunks reference Working Memory
+            # (memory: prefix) — the answer IS grounded in session context,
+            # regardless of whether tool-gathered evidence is in the chain.
+            disclaimer = DISCLAIMER_SESSION_MEMORY
+        elif chain_empty:
+            disclaimer = DISCLAIMER_NO_CHAIN
+        else:
+            disclaimer = DISCLAIMER_FULLY_UNVERIFIED
     elif verified == 0 and self_declared > 0:
         disclaimer = DISCLAIMER_ALL_SELF_DECLARED
 

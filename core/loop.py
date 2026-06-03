@@ -37,6 +37,7 @@ from core.evidence import (
     evidence_from_memory_record,
     evidence_from_tool_result,
     evidence_from_user_directive,
+    make_evidence,
 )
 from core.ids import new_id
 from core.llm import LLM
@@ -1133,6 +1134,34 @@ class AgentLoop:
                 # run. A malformed record stays out of the chain but the
                 # loop completes normally.
                 pass
+
+        # MVP-14.1b — fold Working Memory (cached tool outputs from prior
+        # turns) into the chain so the Verifier can resolve [memory:…]
+        # citations that reference conversation-history artefacts.
+        # The LLM may generate citation bodies like `turn_3_test_results`;
+        # we expose the artefact label and turn index in source_id so the
+        # token-overlap fallback has material to work with.
+        if self.memory is not None:
+            for _art in self.memory.artifacts.values():
+                try:
+                    _label = str(_art.get("label", ""))
+                    _tidx = int(_art.get("turn_index", 0))
+                    _output = _art.get("output")
+                    if _output is None or not _label:
+                        continue
+                    # Sanitise label for use in source_id: replace `:` with
+                    # `_` so it doesn't confuse the citation prefix parser.
+                    _sid_label = _label.replace(":", "_")
+                    chain.add(make_evidence(
+                        kind="memory",
+                        source_id=f"memory:working_turn_{_tidx}_{_sid_label}",
+                        obtained_via="working_memory",
+                        claim=f"Cached tool output from turn {_tidx}: {_label}",
+                        excerpt=str(_output)[:500],
+                        confidence=0.85,
+                    ))
+                except Exception:
+                    pass
 
         # Store the chain on the agent so tests / future Verifier code
         # can consult it after `run()` returns.

@@ -206,6 +206,36 @@ class TestVerbosityDetection:
         p = update_profile(p, "кратко")
         assert p.verbosity == "brief"
 
+    # ------------------------------------------------------------------
+    # Regression: bare "подробнее" used as a contextual object modifier
+    # (e.g. "покажи тесты подробнее") must NOT lock verbosity to detailed.
+    # Only directive uses ("отвечай подробнее", "расскажи подробнее") lock.
+    # ------------------------------------------------------------------
+
+    @pytest.mark.parametrize("text", [
+        "покажи только упавшие тесты подробнее",
+        "выведи логи подробнее",
+        "список задач подробнее",
+    ])
+    def test_contextual_подробнее_does_not_lock_verbosity(self, text: str) -> None:
+        """'подробнее' modifying a specific object should NOT change the
+        global verbosity preference."""
+        p = update_profile(_fresh(), text)
+        assert p.verbosity == "normal"
+        assert p.verbosity_locked is False
+
+    @pytest.mark.parametrize("text", [
+        "отвечай подробнее",
+        "говори подробнее",
+        "пиши подробнее",
+        "объясняй подробнее",
+    ])
+    def test_directive_подробнее_locks_verbosity(self, text: str) -> None:
+        """Communication-verb + 'подробн*' is an explicit verbosity directive."""
+        p = update_profile(_fresh(), text)
+        assert p.verbosity == "detailed"
+        assert p.verbosity_locked is True
+
 
 # ---------------------------------------------------------------------------
 # 6. Language detection
