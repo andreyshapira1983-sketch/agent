@@ -569,6 +569,10 @@ def _matches_autonomy_readiness(text: str) -> bool:
 
 
 def _matches_budget_status(text: str) -> bool:
+    # Don't match if the primary intent is repair — "budget" can appear as part
+    # of a filename (e.g. core/budget_ledger.py) even in repair requests.
+    if _has_any(text, ("repair", "self-repair", "починить", "исправ", "propose-repair")):
+        return False
     return _has_any(
         text,
         (
@@ -616,6 +620,10 @@ def _matches_smart_memory_status(text: str) -> bool:
 
 
 def _matches_approval_status(text: str) -> bool:
+    # Don't match negated approval context — user saying "without approval" /
+    # "без одобрения" is asking to bypass it, not to inspect the inbox.
+    if _has_any(text, ("без одобр", "without approval", "no approval", "без явного")):
+        return False
     return _has_any(
         text,
         (

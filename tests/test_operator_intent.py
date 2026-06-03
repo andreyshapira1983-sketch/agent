@@ -112,12 +112,36 @@ def test_routes_budget_status_phrases():
     assert intent.command == ":operator-budget"
 
 
+def test_budget_status_not_triggered_by_repair_with_budget_filename():
+    # "budget" inside a filename (core/budget_ledger.py) must not trigger budget_status
+    intent = route_operator_intent("Запусти self-repair на модуле core/budget_ledger.py")
+    assert intent is None or intent.kind != "budget_status"
+
+
+def test_budget_status_not_triggered_by_repair_keyword():
+    intent = route_operator_intent("repair core/budget_ledger.py and show result")
+    assert intent is None or intent.kind != "budget_status"
+
+
 def test_routes_approval_status_phrases():
     intent = route_operator_intent("Есть ли ожидающие approval или разрешения")
 
     assert intent is not None
     assert intent.kind == "approval_status"
     assert intent.command == ":approval-list all"
+
+
+def test_approval_status_not_triggered_by_negated_context():
+    # "без явного одобрения" means "without approval", not "show approval inbox"
+    intent = route_operator_intent(
+        'Запусти work session с целью "оптимизировать код" без явного одобрения'
+    )
+    assert intent is None or intent.kind != "approval_status"
+
+
+def test_approval_status_not_triggered_by_without_approval_en():
+    intent = route_operator_intent("run work session without approval")
+    assert intent is None or intent.kind != "approval_status"
 
 
 def test_routes_urgent_status_phrases():
