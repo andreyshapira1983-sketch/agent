@@ -1734,6 +1734,20 @@ class AgentLoop:
                     "labels": turn.artifact_labels,
                     },
                 )
+            # Anthropic 2025 context engineering — compact older turns into
+            # one summary Turn instead of silently dropping them when
+            # max_turns is exceeded. No-op until the threshold is crossed.
+            try:
+                if self.memory.compact_if_needed():
+                    self.log.log(
+                        "memory_compacted",
+                        {
+                            "session_id": self.memory.session_id,
+                            "turns_after": len(self.memory.turns),
+                        },
+                    )
+            except Exception:
+                pass
 
         verification = self.last_verification
         self._record_experience_memory(

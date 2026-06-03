@@ -190,3 +190,36 @@ class WorkingMemory:
         self.turns.clear()
         self.artifacts.clear()
         self._next_turn_index = 1
+
+    # ---------- compaction (Anthropic 2025 context engineering) ----------
+
+    def compact_if_needed(
+        self,
+        *,
+        threshold: int | None = None,
+        keep_recent: int = 3,
+        summarizer: Any = None,
+    ) -> bool:
+        """Fold older turns into one summary Turn when count exceeds threshold.
+
+        Default ``threshold`` falls back to ``self.max_turns - 1`` so
+        compaction kicks in BEFORE the silent drop-oldest logic in
+        ``record_turn`` would discard the gist of an early turn.
+
+        Returns True iff compaction took place. Safe to call after every
+        ``record_turn``; it's a no-op until the threshold is crossed.
+        """
+        # Local import: keep core.memory free of optional deps and avoid
+        # an import cycle at module-load time.
+        from core.compactor import compact_turns
+
+        eff_threshold = threshold if threshold is not None else max(1, self.max_turns - 1)
+        if len(self.turns) <= eff_threshold:
+            return False
+        new_turns, summary = compact_turns(
+            self.turns, keep_recent=keep_recent, summarizer=summarizer
+        )
+        if summary is None:
+            return False
+        self.turns = new_turns
+        return True
