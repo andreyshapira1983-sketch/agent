@@ -503,3 +503,98 @@ class TestValidateOutput:
         ok, warnings = self._tool(workspace).validate_output(bad)
         assert ok
         assert any("exit_code is None" in w for w in warnings)
+
+
+# ===========================================================
+# 9. Extended whitelist (git subcommands + findstr/grep)
+# ===========================================================
+
+class TestExtendedWhitelist:
+    """Read-only commands added to unblock common diagnostics:
+    git log/diff/status/show/branch/tag/blame and findstr/grep.
+    """
+
+    def _tool(self, workspace: Path) -> ShellExecTool:
+        return ShellExecTool(workspace_root=workspace)
+
+    # ---- risk classification ----
+    def test_git_is_read_only(self, workspace: Path):
+        tool = self._tool(workspace)
+        assert tool.risk_for({"argv": ["git", "log"]}) == "read_only"
+        assert tool.risk_for({"argv": ["git", "status"]}) == "read_only"
+
+    def test_findstr_is_read_only(self, workspace: Path):
+        tool = self._tool(workspace)
+        assert tool.risk_for({"argv": ["findstr", "TODO"]}) == "read_only"
+        assert tool.risk_for({"argv": ["grep", "-n", "TODO"]}) == "read_only"
+
+    # ---- git subcommand whitelist ----
+    @pytest.mark.parametrize("sub", [
+        "log", "diff", "status", "show", "branch", "tag",
+        "blame", "rev-parse", "describe", "ls-files", "ls-tree",
+        "cat-file", "shortlog", "reflog", "name-rev",
+    ])
+    def test_git_safe_subcommands_validated(self, workspace: Path, sub: str):
+        # Validation must pass; we don't actually need to execute git here.
+        # _validate_argv is invoked by run() and raises only on rejection.
+        tool = self._tool(workspace)
+        cmd, argv = tool._validate_argv(["git", sub])
+        assert cmd == "git"
+        assert argv[1] == sub
+
+    @pytest.mark.parametrize("sub", [
+        "push", "pull", "fetch", "clone", "rm", "reset", "checkout",
+        "commit", "merge", "rebase", "stash", "config", "init",
+        "add", "mv", "restore", "switch", "clean", "gc",
+    ])
+    def test_git_dangerous_subcommands_rejected(self, workspace: Path, sub: str):
+        with pytest.raises(PermissionError, match="subcommand not in"):
+            self._tool(workspace).run(["git", sub])
+
+    def test_git_without_subcommand_rejected(self, workspace: Path):
+        with pytest.raises(PermissionError, match="requires a subcommand"):
+            self._tool(workspace).run(["git"])
+
+    def test_git_subcommand_case_insensitive(self, workspace: Path):
+        tool = self._tool(workspace)
+        cmd, _ = tool._validate_argv(["git", "LOG"])
+        assert cmd == "git"
+
+    # ---- findstr / grep platform alias ----
+    def test_findstr_grep_platform_alias(self, workspace: Path):
+        tool = self._tool(workspace)
+        if sys.platform == "win32":
+            assert tool._platform_alias("grep") == "findstr"
+            assert tool._platform_alias("findstr") == "findstr"
+        else:
+            assert tool._platform_alias("findstr") == "grep"
+            assert tool._platform_alias("grep") == "grep"
+
+    # ---- destructive shells still rejected ----
+    @pytest.mark.parametrize("argv0", [
+        "rm", "del", "Remove-Item", "rmdir", "format", "mv", "ren",
+        "Set-Content", "Out-File", "curl", "wget", "powershell", "cmd",
+    ])
+    def test_destructive_commands_still_rejected(self, workspace: Path, argv0: str):
+        with pytest.raises(PermissionError, match="not in whitelist"):
+            self._tool(workspace).run([argv0, "foo"])
+
+    # ---- metachar protection still applies to git/findstr ----
+    def test_git_metachar_argv_rejected(self, workspace: Path):
+        with pytest.raises(PermissionError, match="forbidden character"):
+            self._tool(workspace).run(["git", "log", "; rm -rf /"])
+
+    def test_findstr_metachar_argv_rejected(self, workspace: Path):
+        with pytest.raises(PermissionError, match="forbidden character"):
+            self._tool(workspace).run(["findstr", "TODO", "| del *"])
+
+    # ---- end-to-end execution (only if git is on PATH) ----
+    def test_git_status_executes(self, workspace: Path):
+        if shutil.which("git") is None:
+            pytest.skip("git not on PATH")
+        # Initialise a tiny repo so `git status` returns 0.
+        import subprocess
+        subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+        result = self._tool(workspace).run(["git", "status", "--porcelain"])
+        assert result["exit_code"] == 0
+        assert result["timed_out"] is False

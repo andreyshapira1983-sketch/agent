@@ -85,8 +85,33 @@ READ_ONLY_COMMANDS: frozenset[str] = frozenset(
         # We accept both — `run()` picks the right one at dispatch time.
         "where",
         "which",
+        # Source-control inspection. Only the subcommands listed in
+        # READ_ONLY_SUBCOMMANDS['git'] are accepted; anything else
+        # (push, rm, reset, checkout) is rejected at validation time.
+        "git",
+        # File-content search. `findstr` is Windows; `grep` is POSIX.
+        # `_platform_alias` swaps them so callers can use either.
+        "findstr",
+        "grep",
     }
 )
+
+# Some whitelisted commands are themselves multiplexers (one binary,
+# many subcommands). For those we further restrict argv[1] to a tight
+# set of read-only subcommands. Anything else is rejected.
+#
+# Rule of thumb: the subcommand must NOT mutate the working tree, the
+# index, refs, the config, or the network. `fetch`/`pull`/`push`/`clone`
+# touch the network or refs and are intentionally absent.
+READ_ONLY_SUBCOMMANDS: dict[str, frozenset[str]] = {
+    "git": frozenset(
+        {
+            "log", "diff", "status", "show", "branch", "tag",
+            "blame", "rev-parse", "describe", "ls-files", "ls-tree",
+            "cat-file", "shortlog", "reflog", "name-rev",
+        }
+    ),
+}
 
 # Mutating commands handled with `delete_path_if_created` compensation.
 # Both produce ONE new path and accept exactly one positional argument.
@@ -110,12 +135,13 @@ class ShellExecTool(Tool):
     name = "shell_exec"
     description = (
         "Execute ONE whitelisted shell command inside the workspace. "
-        "Read-only commands (whoami, hostname, where/which) run without "
-        "approval. Mutating commands (mkdir, touch) escalate to the "
-        "approval gate and ship with a compensation plan that can undo "
-        "the change via :rollback. Shell metacharacters, absolute "
-        "paths, and any command outside the tiny built-in whitelist "
-        "are rejected before dispatch."
+        "Read-only commands (whoami, hostname, where/which, git "
+        "log/diff/status/show/branch/tag/blame, findstr/grep) run "
+        "without approval. Mutating commands (mkdir, touch) escalate "
+        "to the approval gate and ship with a compensation plan that "
+        "can undo the change via :rollback. Shell metacharacters, "
+        "absolute paths, and any command outside the tiny built-in "
+        "whitelist are rejected before dispatch."
     )
     # Static fallback — overridden per-argv by `risk_for`.
     risk: Risk = "irreversible"
@@ -206,6 +232,21 @@ class ShellExecTool(Tool):
                 f"shell_exec refuses '{argv[0]}' — not in whitelist "
                 f"{sorted(ALL_WHITELIST)}"
             )
+
+        # Subcommand whitelist (e.g. git log/diff/status only).
+        sub_allowed = READ_ONLY_SUBCOMMANDS.get(cmd)
+        if sub_allowed is not None:
+            if len(argv) < 2:
+                raise PermissionError(
+                    f"shell_exec '{cmd}' requires a subcommand "
+                    f"(allowed: {sorted(sub_allowed)})"
+                )
+            sub = argv[1].strip().lower()
+            if sub not in sub_allowed:
+                raise PermissionError(
+                    f"shell_exec '{cmd} {argv[1]}' — subcommand not in "
+                    f"whitelist {sorted(sub_allowed)}"
+                )
 
         # Mutating commands: validate path arguments now.
         if cmd in MUTATING_COMMANDS:
@@ -433,11 +474,16 @@ class ShellExecTool(Tool):
     # Helpers
     # ------------------------------------------------------------------
     def _platform_alias(self, cmd: str) -> str:
-        """Map `where`<->`which` to the binary the current OS actually ships."""
+        """Map `where`<->`which` and `findstr`<->`grep` to the binary the
+        current OS actually ships."""
         if cmd == "where" and sys.platform != "win32":
             return "which"
         if cmd == "which" and sys.platform == "win32":
             return "where"
+        if cmd == "findstr" and sys.platform != "win32":
+            return "grep"
+        if cmd == "grep" and sys.platform == "win32":
+            return "findstr"
         return cmd
 
     def _safe_env(self) -> dict[str, str]:
