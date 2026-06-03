@@ -6,10 +6,17 @@ sources are worth feeding into that tool for a learning goal.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core.ingestion import DEFAULT_PROJECT_LIMIT, SKIP_DIR_NAMES, TEXT_EXTENSIONS
+
+if TYPE_CHECKING:
+    from core.source_registry import SourceRegistry
+
+# Files ingested within this window are considered fresh and get a score penalty.
+_STALE_HOURS: float = 6.0
 
 
 @dataclass(frozen=True)
@@ -48,6 +55,8 @@ class LearningPlanner:
         goal: str = "",
         root: str = ".",
         limit: int = DEFAULT_PROJECT_LIMIT,
+        source_registry: "SourceRegistry | None" = None,
+        stale_hours: float = _STALE_HOURS,
     ) -> LearningPlan:
         if limit < 1:
             raise ValueError("limit must be >= 1")
@@ -76,7 +85,11 @@ class LearningPlanner:
             if score <= 0:
                 skipped.append(f"{_rel(workspace, path)}: low learning value")
                 continue
-            scored.append((score, _rel(workspace, path).casefold(), path, reasons))
+            rel_path = _rel(workspace, path)
+            score = _apply_staleness(
+                score, rel_path, source_registry=source_registry, stale_hours=stale_hours
+            )
+            scored.append((score, rel_path.casefold(), path, reasons))
 
         scored.sort(key=lambda item: (-item[0], item[1]))
         picked = scored[:limit]
@@ -165,6 +178,32 @@ def _goal_terms(goal: str) -> tuple[str, ...]:
     if any(x in goal for x in ("verifier", "вериф", "evidence", "source")):
         terms.extend(["verifier", "evidence", "source", "ranker"])
     return tuple(dict.fromkeys(terms))
+
+
+def _apply_staleness(
+    score: int,
+    rel_path: str,
+    *,
+    source_registry: "SourceRegistry | None",
+    stale_hours: float,
+) -> int:
+    """Reduce score for files ingested recently; leave score unchanged if no registry."""
+    if source_registry is None or stale_hours <= 0:
+        return score
+    record = source_registry.get_source(f"file:{rel_path}")
+    if record is None:
+        return score
+    last_read = record.last_read_at
+    if not last_read:
+        return score
+    try:
+        ts = datetime.fromisoformat(last_read.rstrip("Z")).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return score
+    age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+    if age_h < stale_hours:
+        return max(1, score - 60)  # deprioritise, but keep eligible
+    return score
 
 
 def _rel(workspace: Path, path: Path) -> str:

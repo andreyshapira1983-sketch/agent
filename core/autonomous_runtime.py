@@ -401,11 +401,13 @@ class AutonomousRuntime:
         task: AutonomousTask,
         config: AutonomousRuntimeConfig,
     ) -> AutonomousTaskReport:
+        source_registry = getattr(self.agent, "source_registry_store", None)
         plan = LearningPlanner().plan(
             workspace=self.workspace,
             goal=config.goal,
             root=".",
             limit=config.learning_limit,
+            source_registry=source_registry,
         )
         self._log("autonomous_learning_plan", plan.to_log_payload())
         if not plan.source_paths:
