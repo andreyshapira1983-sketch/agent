@@ -38,6 +38,15 @@ def _clean_text(text: str, *, max_chars: int = 800) -> str:
     return redacted
 
 
+def _compute_quality_score(verified: int, unverified: int) -> float:
+    """Fraction of evidence chunks that were verified. Returns 1.0 when no
+    chunks exist (general-knowledge answer — neutral, not penalised)."""
+    total = verified + unverified
+    if total == 0:
+        return 1.0
+    return round(verified / total, 3)
+
+
 def _tokens(text: str) -> set[str]:
     normalized = (
         str(text or "")
@@ -67,6 +76,10 @@ class EpisodeRecord:
     verified_chunks: int = 0
     unverified_chunks: int = 0
     replan_exhausted: bool = False
+    # Quality score: verified / (verified + unverified), clamped to [0, 1].
+    # 1.0 when no evidence chunks were seen (general-knowledge answer — neutral).
+    # Computed from verified/unverified; not stored separately in the JSONL.
+    answer_quality_score: float = 1.0
     tags: tuple[str, ...] = ()
     id: str = field(default_factory=lambda: new_id("ep"))
     created_at: str = field(default_factory=_now_iso)
@@ -100,6 +113,10 @@ class EpisodeRecord:
             verified_chunks=max(0, int(data.get("verified_chunks") or 0)),
             unverified_chunks=max(0, int(data.get("unverified_chunks") or 0)),
             replan_exhausted=bool(data.get("replan_exhausted", False)),
+            answer_quality_score=_compute_quality_score(
+                max(0, int(data.get("verified_chunks") or 0)),
+                max(0, int(data.get("unverified_chunks") or 0)),
+            ),
             tags=tuple(str(x) for x in data.get("tags") or ()),
             created_at=str(data.get("created_at") or _now_iso()),
         )
@@ -256,6 +273,49 @@ class EpisodicMemoryStore:
         scored.sort(key=lambda item: (item[0], item[1].created_at), reverse=True)
         return [ep for _score, ep in scored[:limit]]
 
+    def find_most_similar(
+        self, query: str, *, threshold: float = 0.35
+    ) -> tuple["EpisodeRecord | None", float]:
+        """Return the episode whose *question* has the highest Jaccard similarity
+        to *query* and the similarity score.  Returns ``(None, 0.0)`` when no
+        episode reaches *threshold*.
+
+        Only the stored ``question`` field is compared (not goal/summary/tags)
+        so the signal is specifically "did the user ask THIS before?" rather than
+        "is this topic familiar?".  The Jaccard coefficient is:
+
+            |q_tokens ∩ ep_tokens| / |q_tokens ∪ ep_tokens|
+
+        When a candidate episode has low ``answer_quality_score`` (the previous
+        answer was poorly verified), the effective threshold is reduced by 0.10
+        so the re-ask hint fires more readily for known-weak episodes.
+        """
+        q_tokens = _tokens(query)
+        if not q_tokens:
+            return None, 0.0
+        best_ep: "EpisodeRecord | None" = None
+        best_score: float = 0.0
+        for ep in self.load():
+            ep_tokens = _tokens(ep.question)
+            if not ep_tokens:
+                continue
+            union = q_tokens | ep_tokens
+            if not union:
+                continue
+            score = len(q_tokens & ep_tokens) / len(union)
+            if score > best_score:
+                best_score = score
+                best_ep = ep
+        if best_ep is None:
+            return None, 0.0
+        # Lower the threshold when the best candidate was a low-quality answer.
+        effective_threshold = threshold
+        if best_ep.answer_quality_score < 0.5:
+            effective_threshold = max(0.20, threshold - 0.10)
+        if best_score >= effective_threshold:
+            return best_ep, best_score
+        return None, 0.0
+
 
 class ProceduralMemoryStore:
     def __init__(self, path: Path | str):
@@ -370,6 +430,9 @@ def episode_from_agent_cycle(
         verified_chunks=max(0, int(verified_chunks)),
         unverified_chunks=max(0, int(unverified_chunks)),
         replan_exhausted=bool(replan_exhausted),
+        answer_quality_score=_compute_quality_score(
+            max(0, int(verified_chunks)), max(0, int(unverified_chunks))
+        ),
         tags=tags,
     )
 

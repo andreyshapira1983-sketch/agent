@@ -205,7 +205,11 @@ no tools were needed. Answer from your general knowledge, mark every fact with
 the special source label [general-knowledge], and set Confidence accordingly
 (typically medium or low — never high without evidence).
 
-Output Contract — your reply MUST follow this structure exactly, in the user's language:
+Output Contract — your reply MUST follow this structure exactly.
+CRITICAL: The six section header words (Conclusion, Facts, Sources, Confidence,
+Unverified, Safety) MUST appear verbatim in English, exactly as shown below,
+regardless of the user's language. Write all content within each section in the
+user's language, but keep the header names in English.
 
 Conclusion:
   One or two sentences that directly answer the question.
@@ -261,6 +265,12 @@ Safety:
   "nothing".
 
 Hard rules:
+- NEVER translate or reword the six section headers. They MUST be exactly:
+  "Conclusion:", "Facts:", "Sources:", "Confidence:", "Unverified:", "Safety:"
+  Do NOT write "Заключение:", "Факты:", "Вывод:", or any other variant.
+  Use plain bold or no decoration — do NOT use markdown `#` headings for
+  section headers. The content inside each section is in the user's language;
+  the header words are fixed English structural markers.
 - NEVER invent facts, URLs, or sources not present in the evidence.
 - If the evidence does not answer the question, say so in Conclusion AND list
   the unanswered parts under Unverified.
@@ -2075,6 +2085,11 @@ class AgentLoop:
         persistent memory stores user-approved facts, while experience memory
         stores operational history and reusable workflows. It can guide the
         planner without becoming a source of factual claims in the final answer.
+
+        Re-ask detection: if the current question is very similar (Jaccard ≥ 0.4)
+        to the stored *question* field of a past episode, the user is likely asking
+        AGAIN because the previous answer was insufficient.  A
+        ``<repeat_question_hint>`` block is appended to signal this to the planner.
         """
         self._last_episode_records = []
         self._last_procedure_records = []
@@ -2103,6 +2118,57 @@ class AgentLoop:
         )
         self._last_episode_records = list(episodes)
         self._last_procedure_records = list(procedures)
+
+        # ── Re-ask detection ──────────────────────────────────────────────
+        # Jaccard similarity on the question tokens only (not goal/summary).
+        # High overlap (≥ 0.40) means the user is asking the SAME question
+        # again — a strong signal that the previous answer was insufficient.
+        _REPEAT_THRESHOLD = 0.40
+        if self.episodic_store is not None:
+            try:
+                repeat_ep, repeat_score = self.episodic_store.find_most_similar(
+                    question, threshold=_REPEAT_THRESHOLD
+                )
+                if repeat_ep is not None:
+                    quality_pct = int(repeat_ep.answer_quality_score * 100)
+                    quality_note = (
+                        f"previous answer quality: {quality_pct}% verified — "
+                        + ("HIGH" if quality_pct >= 70 else ("MEDIUM" if quality_pct >= 40 else "LOW"))
+                    )
+                    hint = (
+                        "<repeat_question_hint>\n"
+                        "WARNING: The user is asking a question that is very similar to a "
+                        "previously answered one (Jaccard similarity "
+                        f"{repeat_score:.2f} ≥ {_REPEAT_THRESHOLD}).\n"
+                        f"Past episode: {repeat_ep.id} | outcome={repeat_ep.outcome}\n"
+                        f"Past answer quality: {quality_note}\n"
+                        f"Previous question: {repeat_ep.question[:200]}\n"
+                        f"Previous answer summary: {repeat_ep.summary[:300]}\n"
+                        "CONCLUSION: The previous answer was likely INSUFFICIENT or "
+                        "INCOMPLETE. Do NOT repeat the same approach.\n"
+                        "Action: try a different strategy, use additional tools, go "
+                        "deeper, or explicitly acknowledge what was missing before.\n"
+                        "</repeat_question_hint>"
+                    )
+                    self.log.log(
+                        "repeat_question_detected",
+                        {
+                            "episode_id": repeat_ep.id,
+                            "similarity": repeat_score,
+                            "threshold": _REPEAT_THRESHOLD,
+                            "past_outcome": repeat_ep.outcome,
+                            "past_answer_quality": repeat_ep.answer_quality_score,
+                            "past_question_chars": len(repeat_ep.question),
+                        },
+                    )
+                    if block:
+                        block = block + "\n\n" + hint
+                    else:
+                        block = hint
+            except Exception:
+                # Re-ask detection must never abort the main loop.
+                pass
+
         return block
 
     def _record_experience_memory(
@@ -2146,6 +2212,7 @@ class AgentLoop:
                     {
                         "episode_id": episode.id,
                         "outcome": episode.outcome,
+                        "answer_quality_score": episode.answer_quality_score,
                         "tools_used": list(episode.tools_used),
                         "source_labels": list(episode.source_labels),
                         "verified_chunks": episode.verified_chunks,
