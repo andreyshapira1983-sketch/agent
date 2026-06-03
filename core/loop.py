@@ -548,6 +548,14 @@ class AgentLoop:
         self._last_persistent_records: list[Any] = []
         self._last_episode_records: list[Any] = []
         self._last_procedure_records: list[Any] = []
+        # Fast-path cache: best episodic match from the last _retrieve_experience_memory call.
+        # Keyed so run() can serve a cached answer without touching the LLM.
+        self._last_best_similar_episode: Any = None  # EpisodeRecord | None
+        self._last_best_similar_score: float = 0.0
+        # Planner plan cache: skips LLM planner call for identical questions
+        # within the same session (invalidated when the episodic store changes).
+        # Key: (hash(question), episodic_mtime, file_hint)
+        self._planner_cache: dict[tuple[int, float, str], Any] = {}
         self.last_provenance: ProvenanceChain = ProvenanceChain()
         self.last_role_context: RoleContext = self.role_router.route("")
         # MVP-14.4 — Verifier wiring. `verifier_enabled=False` skips the
@@ -799,6 +807,53 @@ class AgentLoop:
         persistent_block = self._retrieve_persistent(user_question)
         experience_block = self._retrieve_experience_memory(user_question)
 
+        # ── Episodic fast path ───────────────────────────────────────────────────
+        # Jaccard ≥ 0.85 AND quality ≥ 0.70 → serve the stored answer directly,
+        # skipping both the planner LLM call and the synthesizer LLM call.
+        # Conditions that disable the fast path:
+        #   - file_hint is set (the answer is tied to a specific file)
+        #   - question starts with ':' (operator command)
+        #   - full_answer is empty (episode from before this feature)
+        _fp_ep = self._last_best_similar_episode
+        _fp_score = self._last_best_similar_score
+        if (
+            not file_hint
+            and not user_question.strip().startswith(":")
+            and _fp_ep is not None
+            and _fp_score >= 0.85
+            and _fp_ep.answer_quality_score >= 0.70
+            and _fp_ep.full_answer
+        ):
+            self.log.log(
+                "episodic_fast_path",
+                {
+                    "episode_id": _fp_ep.id,
+                    "similarity": round(_fp_score, 4),
+                    "quality": round(_fp_ep.answer_quality_score, 4),
+                    "answer_chars": len(_fp_ep.full_answer),
+                },
+            )
+            self._record_experience_memory(
+                goal_description=goal.description,
+                question=user_question,
+                answer=_fp_ep.full_answer,
+                tools_used=[],
+                source_labels=[f"memory:{_fp_ep.id}"],
+                verified_chunks=1,
+                unverified_chunks=0,
+                replan_exhausted=False,
+            )
+            if self.memory is not None:
+                self.memory.record_turn(
+                    question=user_question,
+                    planner_reasoning="episodic fast path — cached answer",
+                    tools_used=[],
+                    artifact_labels=[f"memory:{_fp_ep.id}"],
+                    answer=_fp_ep.full_answer,
+                )
+            self._stream_on_token = None
+            return _fp_ep.full_answer
+
         # Planner sees the persistent block prepended to working history so
         # it can opt out of redundant tool calls when the answer is already
         # in long-term memory. Role is logged and injected into synthesis,
@@ -921,14 +976,44 @@ class AgentLoop:
                     warnings=forced_warnings,
                 )
             else:
-                planner_out = self.planner.plan(
-                    question=user_question,
-                    file_hint=file_hint,
-                    history=planner_history,
-                    failure_context=failure_context,
-                    forbidden_actions=forbidden_actions,
-                    llm=_task_planner_llm,
+                # ── Planner cache ─────────────────────────────────────────
+                # Cache key: (question hash, episodic store mtime, file_hint).
+                # Mtime invalidates the cache whenever a new episode is written
+                # (the store changes → the planner might choose different tools).
+                # Only applied on the first attempt with no failure context.
+                _pc_key = (
+                    hash(user_question.lower().strip()),
+                    self._episodic_store_mtime(),
+                    file_hint or "",
                 )
+                if (
+                    attempt == 1
+                    and not failure_context.strip()
+                    and _pc_key in self._planner_cache
+                ):
+                    planner_out = self._planner_cache[_pc_key]
+                    self.log.log(
+                        "planner_cache_hit",
+                        {
+                            "key_hash": _pc_key[0],
+                            "tools_cached": [s["tool"] for s in planner_out.sources],
+                        },
+                    )
+                else:
+                    planner_out = self.planner.plan(
+                        question=user_question,
+                        file_hint=file_hint,
+                        history=planner_history,
+                        failure_context=failure_context,
+                        forbidden_actions=forbidden_actions,
+                        llm=_task_planner_llm,
+                    )
+                    if (
+                        attempt == 1
+                        and not failure_context.strip()
+                        and "plan_parse_failed" not in planner_out.warnings
+                    ):
+                        self._planner_cache[_pc_key] = planner_out
                 planner_out = self._force_file_hint_read_when_explicit(
                     planner_out,
                     question=user_question,
@@ -1988,6 +2073,15 @@ class AgentLoop:
         self.log.log("persistent_memory_archive", report.summary())
         return report
 
+    def _episodic_store_mtime(self) -> float:
+        """Return the modification time of the episodic store file, or 0.0."""
+        if self.episodic_store is None:
+            return 0.0
+        try:
+            return self.episodic_store.path.stat().st_mtime
+        except OSError:
+            return 0.0
+
     def _retrieve_persistent(self, question: str) -> str:
         """Pick + format relevant persistent records for prompt injection.
 
@@ -2076,6 +2170,8 @@ class AgentLoop:
         """
         self._last_episode_records = []
         self._last_procedure_records = []
+        self._last_best_similar_episode = None
+        self._last_best_similar_score = 0.0
         if self.episodic_store is None and self.procedural_store is None:
             return ""
         episodes = (
@@ -2132,6 +2228,9 @@ class AgentLoop:
                 repeat_ep, repeat_score = self.episodic_store.find_most_similar(
                     question, threshold=_REPEAT_THRESHOLD
                 )
+                # Store for fast-path and planner-cache checks in run().
+                self._last_best_similar_episode = repeat_ep
+                self._last_best_similar_score = repeat_score
                 if repeat_ep is not None:
                     quality_pct = int(repeat_ep.answer_quality_score * 100)
                     quality_note = (

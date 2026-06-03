@@ -81,6 +81,9 @@ class EpisodeRecord:
     # Computed from verified/unverified; not stored separately in the JSONL.
     answer_quality_score: float = 1.0
     tags: tuple[str, ...] = ()
+    # Full answer text — stored verbatim for the episodic fast path.
+    # Empty string for episodes created before this field was added.
+    full_answer: str = ""
     id: str = field(default_factory=lambda: new_id("ep"))
     created_at: str = field(default_factory=_now_iso)
 
@@ -91,6 +94,7 @@ class EpisodeRecord:
             "question": self.question,
             "outcome": self.outcome,
             "summary": self.summary,
+            "full_answer": self.full_answer,
             "tools_used": list(self.tools_used),
             "source_labels": list(self.source_labels),
             "verified_chunks": self.verified_chunks,
@@ -118,6 +122,7 @@ class EpisodeRecord:
                 max(0, int(data.get("unverified_chunks") or 0)),
             ),
             tags=tuple(str(x) for x in data.get("tags") or ()),
+            full_answer=str(data.get("full_answer") or ""),
             created_at=str(data.get("created_at") or _now_iso()),
         )
 
@@ -476,6 +481,7 @@ def episode_from_agent_cycle(
         question=_clean_text(question, max_chars=400),
         outcome=outcome,
         summary=_clean_text(answer, max_chars=900),
+        full_answer=answer,
         tools_used=tools,
         source_labels=labels,
         verified_chunks=max(0, int(verified_chunks)),
