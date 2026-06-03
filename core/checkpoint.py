@@ -33,6 +33,7 @@ the full cycle runs again — safer than partial-answer injection.
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -109,9 +110,17 @@ class ResumeContext:
 class CheckpointWriter:
     """Appends checkpoint records to ``<log_dir>/checkpoints_<trace_id>.jsonl``."""
 
+    # Allowed characters in a trace_id — prevents path traversal.
+    _SAFE_TRACE_ID = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")
+
     def __init__(self, trace_id: str, log_dir: Path) -> None:
         if not trace_id:
             raise ValueError("trace_id must not be empty")
+        if not self._SAFE_TRACE_ID.match(trace_id):
+            raise ValueError(
+                f"trace_id contains disallowed characters: {trace_id!r}. "
+                "Only alphanumerics, underscores, and hyphens are permitted."
+            )
         self._trace_id = trace_id
         log_dir.mkdir(parents=True, exist_ok=True)
         self._path = log_dir / f"checkpoints_{trace_id}.jsonl"

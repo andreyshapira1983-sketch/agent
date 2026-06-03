@@ -36,13 +36,14 @@ general             — catch-all for other implicit assumptions.
 """
 from __future__ import annotations
 
+import html
 import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from core.ids import new_id
 from core.state_integrity import (
@@ -86,9 +87,27 @@ class Assumption(BaseModel):
     text: str                          # human-readable statement
     category: AssumptionCategory = "general"
     confidence: float = 0.80           # 0.0–1.0
-    source: str = "heuristic"          # "planner", "question", "kernel", "heuristic"
+    source: Literal[
+        "heuristic", "planner", "question", "kernel", "profile"
+    ] = "heuristic"
     verified: bool | None = None       # None=not yet checked
     created_at: datetime = Field(default_factory=_now)
+
+    @field_validator("confidence")
+    @classmethod
+    def _confidence_in_range(cls, v: float) -> float:
+        if not (0.0 <= v <= 1.0):
+            raise ValueError(f"confidence must be in [0.0, 1.0], got {v}")
+        return v
+
+    @field_validator("text")
+    @classmethod
+    def _text_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("assumption text must not be empty")
+        if len(v) > 500:
+            raise ValueError(f"assumption text too long ({len(v)} chars, max 500)")
+        return v
 
     def to_dict(self) -> dict:
         return self.model_dump(mode="json")
@@ -396,8 +415,10 @@ class AssumptionRegistry:
             verified_tag = ""
             if a.verified is True:
                 verified_tag = " [confirmed]"
+            # Escape XML special chars to prevent tag injection into the LLM prompt.
+            safe_text = html.escape(a.text, quote=False)
             lines.append(
-                f"- [{a.category}] {a.text} (confidence={conf_pct}%){verified_tag}"
+                f"- [{a.category}] {safe_text} (confidence={conf_pct}%){verified_tag}"
             )
         lines.append("</assumptions>")
         return "\n".join(lines)

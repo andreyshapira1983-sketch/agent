@@ -255,3 +255,47 @@ class TestPartialRun:
         w.save_respond(answer="fallback answer")
         ctx = _loader(tmp_path).load("fail_act")
         assert "bad_lbl" not in ctx.artifacts
+
+
+# ── Security / audit fixes ────────────────────────────────────────────────────
+
+class TestCheckpointSecurity:
+    """Tests for path-traversal fix in CheckpointWriter.__init__."""
+
+    def test_path_traversal_double_dot_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="disallowed characters"):
+            CheckpointWriter(trace_id="../../../etc/passwd", log_dir=tmp_path)
+
+    def test_path_traversal_backslash_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="disallowed characters"):
+            CheckpointWriter(trace_id="trace\\..\\evil", log_dir=tmp_path)
+
+    def test_path_traversal_slash_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="disallowed characters"):
+            CheckpointWriter(trace_id="trace/subdir", log_dir=tmp_path)
+
+    def test_path_traversal_null_byte_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="disallowed characters"):
+            CheckpointWriter(trace_id="trace\x00evil", log_dir=tmp_path)
+
+    def test_path_traversal_empty_raises(self, tmp_path):
+        with pytest.raises(ValueError):
+            CheckpointWriter(trace_id="", log_dir=tmp_path)
+
+    def test_valid_hex_trace_id_accepted(self, tmp_path):
+        w = CheckpointWriter(trace_id="run_03ccf8f9daff077a", log_dir=tmp_path)
+        assert w.path.name == "checkpoints_run_03ccf8f9daff077a.jsonl"
+
+    def test_valid_dash_underscore_accepted(self, tmp_path):
+        w = CheckpointWriter(trace_id="trace-001_alpha", log_dir=tmp_path)
+        assert w.path.name == "checkpoints_trace-001_alpha.jsonl"
+
+    def test_trace_id_too_long_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="disallowed characters"):
+            CheckpointWriter(trace_id="a" * 129, log_dir=tmp_path)
+
+    def test_path_stays_within_log_dir(self, tmp_path):
+        """The constructed path must be a direct child of log_dir."""
+        log_dir = tmp_path / "logs"
+        w = CheckpointWriter(trace_id="safe-id", log_dir=log_dir)
+        assert w.path.parent.resolve() == log_dir.resolve()

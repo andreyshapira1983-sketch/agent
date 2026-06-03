@@ -39,7 +39,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from core.ids import new_id
 from core.state_integrity import (
@@ -82,6 +82,24 @@ class UserProfile(BaseModel):
     language_locked: bool = False   # True when user explicitly set language
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
+
+    @field_validator("language")
+    @classmethod
+    def _language_is_bcp47_safe(cls, v: str) -> str:
+        """Accept short BCP-47 language tags only (e.g. 'ru', 'en', 'zh-CN')."""
+        import re as _re
+        if not _re.match(r"^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{1,8})*$", v):
+            raise ValueError(
+                f"language must be a BCP-47 tag like 'ru' or 'en-US', got {v!r}"
+            )
+        return v.lower()
+
+    @field_validator("interaction_count", "expert_signals", "novice_signals")
+    @classmethod
+    def _non_negative(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError(f"counter must be non-negative, got {v}")
+        return v
 
 
 # ---------------------------------------------------------------------------

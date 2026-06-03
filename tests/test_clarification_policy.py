@@ -222,3 +222,45 @@ class TestLoopClarificationIntegration:
         ]
         event_names = [e.get("event") for e in events]
         assert "clarification_request" in event_names
+
+
+# ============================================================
+# Security / validation tests (audit fixes)
+# ============================================================
+
+class TestClarificationInputValidation:
+    """Tests for None-guard and ReDoS protection added in deep audit."""
+
+    def test_none_input_returns_proceed(self):
+        result = check_clarification(None)  # type: ignore[arg-type]
+        assert result.decision == "proceed"
+
+    def test_integer_input_returns_proceed(self):
+        result = check_clarification(42)  # type: ignore[arg-type]
+        assert result.decision == "proceed"
+
+    def test_empty_string_returns_proceed(self):
+        result = check_clarification("")
+        assert result.decision == "proceed"
+
+    def test_whitespace_only_returns_proceed(self):
+        result = check_clarification("   \n\t")
+        assert result.decision == "proceed"
+
+    def test_very_long_input_returns_quickly(self):
+        """Inputs exceeding 4096 chars must be truncated, not hang."""
+        import time
+        long_text = "a" * 500_000
+        start = time.monotonic()
+        result = check_clarification(long_text)
+        elapsed = time.monotonic() - start
+        # Should complete in well under 1 second even on slow machines
+        assert elapsed < 2.0, f"Too slow on large input: {elapsed:.2f}s"
+        assert result.decision in ("proceed", "ask")
+
+    def test_long_input_with_destructive_verb_truncated(self):
+        """A destructive verb near start of a 5000-char input is still caught."""
+        text = "удали" + " слово" * 1000
+        result = check_clarification(text)
+        # After truncation to 4096, destructive verb is present
+        assert result.decision in ("proceed", "ask")

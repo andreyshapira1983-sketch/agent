@@ -139,6 +139,14 @@ def check_clarification(text: str) -> ClarificationResult:
 
     Pure function — no I/O, no LLM, deterministic.
     """
+    # Guard: non-string or empty input is always safe to proceed.
+    if not isinstance(text, str) or not text.strip():
+        return ClarificationResult(decision="proceed")
+
+    # Guard: truncate to 4096 chars before applying regex to prevent ReDoS.
+    if len(text) > 4096:
+        text = text[:4096]
+
     # 1. Fast bypass: informational / Q&A requests never need clarification.
     if _INFORMATIONAL_SIGNALS.search(text):
         return ClarificationResult(decision="proceed")
