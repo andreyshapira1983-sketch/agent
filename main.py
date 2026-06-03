@@ -590,12 +590,17 @@ def _resolve_workspace_text_file(workspace: Path, raw_path: str, *, role: str) -
 
 
 def _handle_repair(rest: str, agent: AgentLoop, workspace: Path) -> bool:
-    """`:repair <target_path> <proposal_file> [test_path...] [--pattern PAT]`."""
+    """`:repair <target_path> [proposal_file] [test_path...] [--pattern PAT]`.
+
+    When called with only <target_path>, auto-generates a proposal via
+    propose_repair and immediately applies it (one-click repair).
+    """
     tokens = rest.split()
-    if len(tokens) < 2:
+    if not tokens:
         print(
-            "Usage: :repair <target_path> <proposal_file> [test_path...] [--pattern PAT]\n"
-            "Example: :repair core/foo.py tmp/foo.proposed.py tests/test_foo.py",
+            "Usage: :repair <target_path> [proposal_file] [test_path...] [--pattern PAT]\n"
+            "  One-click: :repair core/foo.py [tests/test_foo.py ...]\n"
+            "  Two-step:  :propose-repair core/foo.py  then  :repair core/foo.py tmp/foo.proposed.py",
             file=sys.stderr,
         )
         return True
@@ -609,14 +614,58 @@ def _handle_repair(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         pattern = tokens[i + 1]
         tokens = tokens[:i] + tokens[i + 2:]
 
-    if len(tokens) < 2:
-        print("Usage: :repair <target_path> <proposal_file> [test_path...]", file=sys.stderr)
+    target_path = tokens[0]
+    remaining = tokens[1:]
+
+    # Detect whether the second token looks like a proposal file (ends with .py
+    # and exists in the workspace) or is a test path / flag.
+    proposal_path: str | None = None
+    test_paths: tuple[str, ...]
+    if remaining:
+        candidate = remaining[0]
+        candidate_p = workspace / candidate
+        # Treat as proposal_file only when it exists AND is not under tests/
+        if (
+            not candidate.startswith("tests")
+            and candidate_p.exists()
+            and candidate.endswith(".py")
+        ):
+            proposal_path = candidate
+            test_paths = tuple(remaining[1:] or ["tests"])
+        else:
+            test_paths = tuple(remaining or ["tests"])
+    else:
+        test_paths = ("tests",)
+
+    # ── One-click mode: generate proposal then apply it immediately ──────────
+    if proposal_path is None:
+        print(f"(repair: generating proposal for {target_path} …)", file=sys.stderr)
+        try:
+            gen_report = agent.propose_repair(
+                target_path=target_path,
+                workspace_root=workspace,
+                test_paths=test_paths,
+                test_pattern=pattern,
+            )
+        except Exception as exc:
+            print(f"repair: proposal generation failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return True
+        print(gen_report.user_summary(), file=sys.stderr)
+        if gen_report.proposal is None:
+            print("(repair: no proposal generated — stopping)", file=sys.stderr)
+            return True
+        try:
+            report = agent.repair(
+                gen_report.proposal,
+                workspace_root=workspace,
+            )
+        except Exception as exc:
+            print(f"repair: apply failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return True
+        print(report.user_summary(), file=sys.stderr)
         return True
 
-    target_path = tokens[0]
-    proposal_path = tokens[1]
-    test_paths = tuple(tokens[2:] or ["tests"])
-
+    # ── Two-step mode: apply a pre-generated proposal file ───────────────────
     try:
         proposal_file = _resolve_workspace_text_file(
             workspace,
@@ -2053,14 +2102,14 @@ def _handle_work_session(rest: str, agent: AgentLoop, workspace: Path) -> bool:
                 return True
             i += 2
             continue
-        if token == "--max-cycles":
+        if token in ("--max-cycles", "--cycles"):
             if i + 1 >= len(tokens):
-                print("Usage: --max-cycles requires a number", file=sys.stderr)
+                print(f"Usage: {token} requires a number", file=sys.stderr)
                 return True
             try:
                 max_cycles = int(tokens[i + 1])
             except ValueError:
-                print("Usage: --max-cycles requires an integer", file=sys.stderr)
+                print(f"Usage: {token} requires an integer", file=sys.stderr)
                 return True
             i += 2
             continue
