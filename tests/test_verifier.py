@@ -770,3 +770,171 @@ class TestDisclaimerMatrix:
     def test_disclaimer_copy_pinned(self):
         assert "honestly admits" in DISCLAIMER_ALL_SELF_DECLARED
         assert "general-knowledge" in DISCLAIMER_ALL_SELF_DECLARED
+
+
+# ============================================================
+# MVP-14.5.x — malformed_output: Russian / translated headers
+# ============================================================
+
+class TestMalformedOutputDetection:
+    """Regression tests: LLM sometimes generates Russian headers
+    (e.g. '# Заключение') instead of the required English markers.
+    The verifier must detect this as malformed so loop.py can log
+    output_contract_violation and the fix to SYSTEM_ANSWER can be
+    validated.
+    """
+
+    def test_russian_h1_headers_are_malformed(self):
+        """# Заключение / # Факты are markdown headings, not Output
+        Contract headers — answer must be flagged malformed."""
+        answer = (
+            "# Заключение\n"
+            "Ответ на вопрос [general-knowledge].\n"
+            "# Факты\n"
+            "- Факт первый [general-knowledge].\n"
+            "# Источники\n"
+            "1. general-knowledge\n"
+            "# Уверенность\n"
+            "medium\n"
+            "# Неподтверждённое\n"
+            "nothing\n"
+            "# Безопасность\n"
+            "nothing"
+        )
+        report = verify(answer=answer, chain=ProvenanceChain())
+        assert report.malformed_output is True
+
+    def test_english_h1_headers_are_not_malformed(self):
+        """# Conclusion (English) is recognised as an Output Contract
+        header via the regex prefix — NOT malformed."""
+        answer = (
+            "# Conclusion\n"
+            "Answer [general-knowledge].\n"
+            "# Facts\n"
+            "- Fact [general-knowledge].\n"
+            "# Sources\n"
+            "1. general-knowledge\n"
+            "# Confidence\n"
+            "medium\n"
+            "# Unverified\n"
+            "nothing\n"
+            "# Safety\n"
+            "nothing"
+        )
+        report = verify(answer=answer, chain=ProvenanceChain())
+        assert report.malformed_output is False
+
+    def test_bold_english_headers_are_not_malformed(self):
+        """**Conclusion:** bold format is the canonical style — NOT malformed."""
+        answer = (
+            "**Conclusion:**\n"
+            "Answer [general-knowledge].\n"
+            "**Facts:**\n"
+            "- Fact [general-knowledge].\n"
+            "**Sources:**\n"
+            "1. general-knowledge\n"
+            "**Confidence:** medium\n"
+            "**Unverified:** nothing\n"
+            "**Safety:** nothing"
+        )
+        report = verify(answer=answer, chain=ProvenanceChain())
+        assert report.malformed_output is False
+
+    def test_plain_english_headers_are_not_malformed(self):
+        """Plain 'Conclusion:' (no markdown decoration) is also valid."""
+        answer = (
+            "Conclusion:\n"
+            "Answer [general-knowledge].\n"
+            "Facts:\n"
+            "- Fact [general-knowledge].\n"
+            "Sources:\n"
+            "1. general-knowledge\n"
+            "Confidence: medium\n"
+            "Unverified: nothing\n"
+            "Safety: nothing"
+        )
+        report = verify(answer=answer, chain=ProvenanceChain())
+        assert report.malformed_output is False
+
+    def test_system_answer_prompt_requires_english_headers(self):
+        """Regression: SYSTEM_ANSWER must contain the hard rule that
+        section headers stay in English regardless of user language.
+        This prevents accidental revert of the prompt fix."""
+        from core.loop import SYSTEM_ANSWER
+        assert "English" in SYSTEM_ANSWER, (
+            "SYSTEM_ANSWER must instruct the LLM to keep section headers "
+            "in English (found no mention of 'English')"
+        )
+        assert "Conclusion" in SYSTEM_ANSWER
+        assert "Facts" in SYSTEM_ANSWER
+        assert "Unverified" in SYSTEM_ANSWER
+
+
+# ============================================================
+# MVP-14.6.x — [web:] citation fallback to web_search_hit
+# ============================================================
+
+class TestWebCitationKindFallback:
+    """Regression Bug 5: LLM uses [web:query] to cite web_search results
+    (source_label "web:query") but CITATION_PREFIXES maps "web" →
+    "web_page" while actual evidence has kind="web_search_hit".
+    The verifier must fall back to web_search_hit when no web_page
+    evidence exists so the citation is verified, not cited_but_unmatched.
+    """
+
+    def _web_search_ev(self, query: str) -> object:
+        return make_evidence(
+            kind="web_search_hit",
+            source_id=f"web_search:{query}",
+            obtained_via="web_search",
+            claim=f"search result for {query}",
+            excerpt="snippet text",
+        )
+
+    def test_web_citation_matches_web_search_hit_evidence(self):
+        """[web:query] with only web_search_hit evidence → should verify."""
+        query = "autonomous agent что это такое определение"
+        chain = _chain_with(self._web_search_ev(query))
+        report = verify(
+            answer=f"Autonomous agent is a goal-directed system [web:{query}].",
+            chain=chain,
+        )
+        assert report.verified_chunks == 1, (
+            f"Expected verified_chunks=1, got {report.verified_chunks}; "
+            f"cited_but_unmatched={report.cited_but_unmatched_chunks}"
+        )
+        assert report.cited_but_unmatched_chunks == 0
+
+    def test_web_citation_prefers_web_page_over_search_hit(self):
+        """When both web_page AND web_search_hit evidence exist, [web:url]
+        must match the web_page evidence (primary kind), not the search hit."""
+        url = "https://example.com/autonomous-agents"
+        chain = _chain_with(
+            make_evidence(
+                kind="web_page",
+                source_id=f"web_page:{url}",
+                obtained_via="web_fetch",
+                claim="fetched page",
+                excerpt="page content",
+            ),
+            self._web_search_ev("autonomous agent"),
+        )
+        report = verify(
+            answer=f"Details at the page [web:{url}].",
+            chain=chain,
+        )
+        assert report.verified_chunks == 1
+        # Annotation uses citation prefix "web", not evidence kind "web_page".
+        assert "[verified:web:" in report.annotated_answer
+
+    def test_web_url_citation_does_not_false_match_unrelated_search_hit(self):
+        """[web:https://specific.example.com] must NOT match a web_search_hit
+        whose source_id is "web_search:some other query" — no URL overlap."""
+        chain = _chain_with(self._web_search_ev("some other query"))
+        report = verify(
+            answer="See [web:https://specific.example.com/page].",
+            chain=chain,
+        )
+        # No match expected: URL body doesn't substring-match search query.
+        assert report.verified_chunks == 0
+        assert report.cited_but_unmatched_chunks == 1

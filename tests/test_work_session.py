@@ -54,7 +54,7 @@ class TestWorkSessionConfig:
     def test_defaults(self):
         cfg = WorkSessionConfig()
         assert cfg.goal == "project health"
-        assert cfg.dry_run is True
+        assert cfg.dry_run is False  # default changed: approval gate protects side-effects
         assert cfg.minutes == 10.0
         assert cfg.max_cycles == 3
         assert cfg.report_every == 1
@@ -175,7 +175,7 @@ class TestWorkSessionResult:
 class TestRunWorkSession:
     def test_completes_all_max_cycles(self, workspace: Path):
         agent = _agent(workspace)
-        config = WorkSessionConfig(goal="test", max_cycles=3, minutes=60.0)
+        config = WorkSessionConfig(goal="test", max_cycles=3, minutes=60.0, dry_run=True)
         result = run_work_session(config, agent=agent, workspace=workspace)
 
         assert result.status == "completed"
@@ -186,7 +186,7 @@ class TestRunWorkSession:
     def test_stops_on_time_budget(self, workspace: Path):
         agent = _agent(workspace)
         # Near-zero time budget — should stop before all 100 cycles complete
-        config = WorkSessionConfig(goal="test", max_cycles=100, minutes=0.0001)
+        config = WorkSessionConfig(goal="test", max_cycles=100, minutes=0.0001, dry_run=True)
         result = run_work_session(config, agent=agent, workspace=workspace)
 
         assert result.status == "stopped"
@@ -194,9 +194,14 @@ class TestRunWorkSession:
         # Stopped before completing all max_cycles
         assert result.cycles_run < config.max_cycles
 
-    def test_dry_run_true_by_default(self, workspace: Path):
-        agent = _agent(workspace)
+    def test_dry_run_false_by_default(self, workspace: Path):
+        # Default is now False; AutonomousRuntime approval gate protects side-effects.
         config = WorkSessionConfig(max_cycles=1)
+        assert config.dry_run is False
+
+    def test_dry_run_true_explicit(self, workspace: Path):
+        agent = _agent(workspace)
+        config = WorkSessionConfig(max_cycles=1, dry_run=True)
         result = run_work_session(config, agent=agent, workspace=workspace)
         assert result.dry_run is True
 
@@ -211,45 +216,45 @@ class TestRunWorkSession:
 
     def test_cycle_reports_length_equals_cycles_run(self, workspace: Path):
         agent = _agent(workspace)
-        config = WorkSessionConfig(max_cycles=2, minutes=60.0)
+        config = WorkSessionConfig(max_cycles=2, minutes=60.0, dry_run=True)
         result = run_work_session(config, agent=agent, workspace=workspace)
         assert len(result.cycle_reports) == result.cycles_run
 
     def test_cycle_numbers_are_sequential(self, workspace: Path):
         agent = _agent(workspace)
-        config = WorkSessionConfig(max_cycles=3, minutes=60.0)
+        config = WorkSessionConfig(max_cycles=3, minutes=60.0, dry_run=True)
         result = run_work_session(config, agent=agent, workspace=workspace)
         cycles = [cr.cycle for cr in result.cycle_reports]
         assert cycles == list(range(1, result.cycles_run + 1))
 
     def test_total_elapsed_non_negative(self, workspace: Path):
         agent = _agent(workspace)
-        config = WorkSessionConfig(max_cycles=1)
+        config = WorkSessionConfig(max_cycles=1, dry_run=True)
         result = run_work_session(config, agent=agent, workspace=workspace)
         assert result.total_elapsed_s >= 0.0
 
     def test_single_cycle(self, workspace: Path):
         agent = _agent(workspace)
-        config = WorkSessionConfig(max_cycles=1, minutes=60.0)
+        config = WorkSessionConfig(max_cycles=1, minutes=60.0, dry_run=True)
         result = run_work_session(config, agent=agent, workspace=workspace)
         assert result.cycles_run == 1
         assert result.status == "completed"
 
     def test_goal_preserved_in_result(self, workspace: Path):
         agent = _agent(workspace)
-        config = WorkSessionConfig(goal="custom goal", max_cycles=1)
+        config = WorkSessionConfig(goal="custom goal", max_cycles=1, dry_run=True)
         result = run_work_session(config, agent=agent, workspace=workspace)
         assert result.goal == "custom goal"
 
     def test_result_to_dict_is_json_serializable(self, workspace: Path):
         agent = _agent(workspace)
-        config = WorkSessionConfig(max_cycles=2)
+        config = WorkSessionConfig(max_cycles=2, dry_run=True)
         result = run_work_session(config, agent=agent, workspace=workspace)
         json.dumps(result.to_dict())  # must not raise
 
     def test_tasks_done_in_cycle_report(self, workspace: Path):
         agent = _agent(workspace)
-        config = WorkSessionConfig(max_cycles=1)
+        config = WorkSessionConfig(max_cycles=1, dry_run=True)
         result = run_work_session(config, agent=agent, workspace=workspace)
         cr = result.cycle_reports[0]
         # status task always succeeds → tasks_done=1, tasks_failed=0
@@ -260,7 +265,7 @@ class TestRunWorkSession:
     def test_report_every_one_logs_each_cycle(self, workspace: Path):
         """report_every=1 — a log event should be emitted for each cycle."""
         agent = _agent(workspace)
-        config = WorkSessionConfig(max_cycles=3, report_every=1)
+        config = WorkSessionConfig(max_cycles=3, report_every=1, dry_run=True)
         result = run_work_session(config, agent=agent, workspace=workspace)
         # All 3 cycles completed
         assert result.cycles_run == 3
@@ -268,7 +273,7 @@ class TestRunWorkSession:
     def test_report_every_larger_than_cycles(self, workspace: Path):
         """report_every=10 with max_cycles=2 — session completes normally."""
         agent = _agent(workspace)
-        config = WorkSessionConfig(max_cycles=2, report_every=10)
+        config = WorkSessionConfig(max_cycles=2, report_every=10, dry_run=True)
         result = run_work_session(config, agent=agent, workspace=workspace)
         assert result.cycles_run == 2
         assert result.status == "completed"

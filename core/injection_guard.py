@@ -81,13 +81,27 @@ _PATTERNS: list[tuple[InjectionCategory, re.Pattern[str], InjectionVerdict]] = [
         "blocked",
     ),
     # ── ROLE_SWITCH ─────────────────────────────────────────────────────────
+    # Explicit jailbreak persona — always blocked regardless of context.
+    (
+        "role_switch",
+        re.compile(
+            r"you\s+are\s+now\s+(?:(?:a|an|the)\s+)?"
+            r"(?:jailbreak(?:ed)?|jailbroken|unrestricted|uncensored|evil|hacker|unaligned|unfiltered)\b",
+            re.IGNORECASE,
+        ),
+        "blocked",
+    ),
+    # Generic role-switch opener ("you are now a participant…"). Can appear in
+    # legitimate academic / tutorial text (e.g. Wikipedia articles explaining
+    # agent concepts), so we treat it as SUSPICIOUS rather than blocked to
+    # avoid false-positive content drops on trusted encyclopaedia pages.
     (
         "role_switch",
         re.compile(
             r"you\s+are\s+now\s+(?:a|an|the)\s+\w",
             re.IGNORECASE,
         ),
-        "blocked",
+        "suspicious",
     ),
     (
         "role_switch",

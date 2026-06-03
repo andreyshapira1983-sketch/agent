@@ -383,6 +383,15 @@ def match_citation(
     accidental empty body never matches).
     """
     candidates = chain.by_kind(citation.expected_kind)  # type: ignore[arg-type]
+
+    # Fallback: the LLM uses [web:query] to cite web_search results because
+    # the evidence source label is "web:query" — but CITATION_PREFIXES maps
+    # "web" → "web_page" while the actual evidence kind is "web_search_hit".
+    # When no web_page evidence exists, retry against web_search_hit so the
+    # citation is matched rather than silently dropped as cited_but_unmatched.
+    if not candidates and citation.prefix == "web":
+        candidates = chain.by_kind("web_search_hit")  # type: ignore[arg-type]
+
     if not candidates:
         return None
     # No body (e.g. `[user]`): take the most-recent same-kind evidence.

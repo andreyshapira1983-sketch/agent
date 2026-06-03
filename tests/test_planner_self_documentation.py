@@ -85,18 +85,20 @@ class TestDefaultAllowlist:
         # No "no --file hint" warning was emitted.
         assert not any("no --file hint" in w for w in warnings)
 
-    def test_non_allowlisted_path_dropped_without_hint(self, workspace: Path):
+    def test_non_allowlisted_path_allowed_without_hint(self, workspace: Path):
+        """Regression Bug 6: file_read is now allowed for any ASCII
+        workspace-relative path without a --file hint. Security is
+        enforced by the tool executor, not the planner."""
         p = _planner(workspace)
         sources, warnings = _run(
             p,
             [{"tool": "file_read", "arguments": {"path": "core/loop.py"}}],
             hint=None,
         )
-        assert sources == []
-        assert any("self-documentation allowlist" in w for w in warnings)
-        # Helpful: warning lists the actual allowlist so the planner
-        # learns what it can read.
-        assert any("README.md" in w for w in warnings)
+        assert len(sources) == 1
+        assert sources[0]["arguments"]["path"] == "core/loop.py"
+        # No allowlist warning emitted.
+        assert not any("allowlist" in w for w in warnings)
 
     def test_readme_still_passes_with_matching_hint(self, workspace: Path):
         p = _planner(workspace)
@@ -142,15 +144,17 @@ class TestCustomAllowlist:
         )
         assert len(sources) == 1
 
-    def test_readme_dropped_when_not_in_custom_allowlist(self, workspace: Path):
+    def test_readme_allowed_even_when_not_in_custom_allowlist(self, workspace: Path):
+        """Regression Bug 6: file_read is allowed without hint regardless
+        of the self-documentation allowlist contents."""
         p = _planner(workspace, self_documentation_paths=("AGENTS.md",))
         sources, warnings = _run(
             p,
             [{"tool": "file_read", "arguments": {"path": "README.md"}}],
             hint=None,
         )
-        assert sources == []
-        assert any("allowlist" in w for w in warnings)
+        assert len(sources) == 1
+        assert not any("allowlist" in w for w in warnings)
 
 
 # ============================================================
@@ -203,21 +207,21 @@ class TestAllowlistValidation:
         assert "   " not in p.self_documentation_paths
 
     def test_all_invalid_yields_empty_allowlist(self, workspace: Path):
-        """If the caller passes ONLY garbage, the allowlist is empty —
-        the safe path. The default tuple is NOT silently restored."""
+        """If the caller passes ONLY garbage, the allowlist is empty.
+        But file_read is now allowed without hint for any ASCII path —
+        the allowlist no longer gates reads."""
         p = _planner(
             workspace,
             self_documentation_paths=("../bad", "/abs", "non\u00e1scii"),
         )
         assert p.self_documentation_paths == ()
-        # And now even README.md gets dropped without a hint, because
-        # the allowlist is empty:
+        # README.md is still allowed (no-hint restriction removed).
         sources, _ = _run(
             p,
             [{"tool": "file_read", "arguments": {"path": "README.md"}}],
             hint=None,
         )
-        assert sources == []
+        assert len(sources) == 1
 
 
 # ============================================================

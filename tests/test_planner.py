@@ -60,17 +60,20 @@ def test_file_question_with_hint_picks_file_read(workspace: Path) -> None:
     assert out.warnings == []
 
 
-# ---------- 2. file_read requested without --file hint -> dropped ----------
+# ---------- 2. file_read without --file hint is now ALLOWED ----------
+# Security is enforced by the tool executor (workspace sandbox + secret
+# scanner). Blocking at planner level was overly restrictive — it prevented
+# the agent from reading files explicitly named by the user in conversation.
 
-def test_file_read_without_hint_is_dropped(workspace: Path) -> None:
+def test_file_read_without_hint_is_allowed(workspace: Path) -> None:
     canned = json.dumps(
         {
-            "reasoning": "Want to read something.",
+            "reasoning": "User asked to read this file.",
             "steps": [
                 {
                     "tool": "file_read",
-                    "arguments": {"path": "secrets.txt"},
-                    "rationale": "trying to fish a file",
+                    "arguments": {"path": "notes.txt"},
+                    "rationale": "user explicitly named the file",
                 }
             ],
         }
@@ -78,10 +81,11 @@ def test_file_read_without_hint_is_dropped(workspace: Path) -> None:
     llm = FakeLLM(responses=[canned])
     planner = LLMPlanner(llm=llm, registry=_registry(workspace))
 
-    out = planner.plan(question="Show me the secret file", file_hint=None)
+    out = planner.plan(question="Read notes.txt", file_hint=None)
 
-    assert out.sources == [], "no hint => file_read step must be dropped"
-    assert any("no --file hint" in w for w in out.warnings), out.warnings
+    assert len(out.sources) == 1, "no hint => file_read step must NOT be dropped"
+    assert out.sources[0]["arguments"] == {"path": "notes.txt"}
+    assert not any("no --file hint" in w for w in out.warnings), out.warnings
 
 
 # ---------- 3. LLM picks file_read with WRONG path -> remapped to hint ----------

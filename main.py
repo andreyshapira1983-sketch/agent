@@ -4963,6 +4963,43 @@ def main() -> int:
             return 0
         if not q:
             return 0
+        # ── Multi-line input modes ────────────────────────────────────────────
+        # Mode 1: explicit block  <<<  … >>>
+        #   Start a line with <<< to enter block mode; finish with >>>
+        #   Useful when pasting text that contains newlines.
+        if q == "<<<":
+            block_parts: list[str] = []
+            print("(multi-line mode: paste text, finish with >>> on its own line)",
+                  file=sys.stderr)
+            while True:
+                try:
+                    bline = input("... ")
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    return 0
+                if bline.strip() == ">>>":
+                    break
+                block_parts.append(bline)
+            q = "\n".join(block_parts).strip()
+            if not q:
+                continue
+        # Mode 2: line continuation with trailing backslash
+        #   Each line ending in \ is joined with the next (backslash removed).
+        elif q.endswith("\\"):
+            continuation_parts: list[str] = [q[:-1]]
+            while True:
+                try:
+                    cline = input("... ")
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    return 0
+                if cline.endswith("\\"):
+                    continuation_parts.append(cline[:-1])
+                else:
+                    continuation_parts.append(cline)
+                    break
+            q = " ".join(p.strip() for p in continuation_parts if p.strip())
+        # ─────────────────────────────────────────────────────────────────────
         if q == ":operator-task":
             block_lines: list[str] = []
             print("(operator task block started; finish with :end)", file=sys.stderr)

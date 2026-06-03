@@ -775,17 +775,14 @@ class LLMPlanner:
             # about yourself?" → planner should reach for the docs
             # without needing a --file hint. The allowlist is tiny
             # and enforced both here and at instantiation time.
-            is_self_doc = path_norm in self_documentation_paths
+            # MVP-14.4.x — self-documentation allowlist is kept for reference
+            # but file_read is now allowed for any workspace-relative path when
+            # no --file hint is given. Security is enforced by the tool executor
+            # (workspace sandbox + secret scanner). The allowlist is no longer
+            # used to gate reads.
             if not file_hint:
-                if not is_self_doc:
-                    warnings.append(
-                        f"step[{idx}]: file_read requested but no --file hint was "
-                        f"provided and '{path_norm}' is not in the self-documentation "
-                        f"allowlist {list(self_documentation_paths)}, dropped"
-                    )
-                    return None
-                # Self-doc read with no hint: leave `path` as the LLM
-                # asked, skip the hint-equality check below.
+                # No startup --file hint: allow any workspace-relative path.
+                pass  # proceed to ASCII check below
             elif path_norm != file_hint.strip():
                 # A hint IS provided — only the exact hinted path is
                 # allowed (the existing pre-MVP-14 contract).
