@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
+from core.budget_governor import BudgetLimits
 from core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 
 
@@ -190,6 +191,9 @@ def run_work_session(
                     limit=3 if has_real_goal else 2,
                     include_tests=False,  # tests are slow; keep cycles fast
                     include_goal=has_real_goal,
+                    # cap goal task at 1 agent.run() call per cycle;
+                    # 0 = unlimited (default), used when no real goal.
+                    budgets=BudgetLimits(max_agent_runs=1 if has_real_goal else 0),
                 )
             )
 

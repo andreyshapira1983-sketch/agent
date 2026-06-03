@@ -369,6 +369,8 @@ class AutonomousRuntime:
                     return AutonomousTaskReport(task, "skipped", "test budget exhausted")
                 return self._task_tests(task)
             if task.kind == "goal":
+                if not self._reserve(budget, circuit, "agent_runs", task.kind):
+                    return AutonomousTaskReport(task, "skipped", "agent_runs budget exhausted")
                 return self._task_goal(task)
         except Exception as exc:
             return AutonomousTaskReport(
