@@ -343,6 +343,36 @@ Decision rules:
     the full tool catalog in your context above. Use [] (empty steps)
     and answer directly from that catalog. No file reads needed.
 
+11b. IMPLEMENTATION CHECK — user asks whether a SPECIFIC FEATURE or BEHAVIOR
+    is already implemented / done / working in THIS agent's codebase.
+    Russian trigger phrases: "это уже сделано?", "реализовано ли", "уже есть?",
+    "это уже работает?", "есть ли в коде", "проверь код".
+    English trigger phrases: "is X implemented", "is X done", "does X work",
+    "has X been added", "is there code for X".
+
+    CRITICAL: README.md describes the INTENDED architecture — it is NOT
+    ground truth about what is actually coded. The source files ARE.
+    -> DO NOT use [file_read README.md] for these questions.
+    -> Instead, identify the most likely source module and read it.
+
+    Source file heuristics for common topics:
+      learning / staleness / autonomous learning   -> core/learning_planner.py
+      episodic memory / eviction / lesson search   -> core/smart_memory.py
+      repair / self-repair / repair lessons        -> core/self_repair.py
+      dry_run / CLI / work-session / :work-session -> main.py
+      budget / cost / rate limits                  -> core/budget_governor.py
+      planner / planning / tool selection          -> core/planner.py
+      loop / agent run / conversation turn         -> core/loop.py
+      scheduling / autonomous runtime / cron       -> core/autonomous_runtime.py
+
+    If uncertain which file applies, use [list_dir core/] first to see
+    what modules exist, then read the 1-2 most plausible ones.
+
+    EXAMPLE:
+      "Хочу чтобы агент не читал недавно прочитанные файлы при обучении. Уже сделано?"
+      -> [file_read core/learning_planner.py]
+      (NOT [file_read README.md] — README won't tell you if _apply_staleness exists)
+
 ASCII-only identifiers — STRICT RULE:
   File paths, shell argv elements, and tool arguments that name things in
   the codebase MUST be ASCII (A-Z a-z 0-9 . _ - / and similar). The user
