@@ -90,6 +90,12 @@ from core.redaction import (
 from core.model_router import ModelRole, ModelRouter
 from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult
 from core.user_profile import UserProfile, UserProfileStore, profile_to_prompt_block
+from core.assumption_registry import (  # Layer 5
+    AssumptionRegistry,
+    AssumptionStore,
+    extract_from_plan,
+    extract_from_question,
+)
 from core.knowledge_use_policy import KnowledgeUsePolicy
 from core.role_router import RoleContext, RoleRouter
 from core.smart_memory import (
@@ -450,6 +456,7 @@ class AgentLoop:
         verifier_enabled: bool = True,
         clarification_enabled: bool = True,
         user_profile_store: UserProfileStore | None = None,
+        assumption_store: AssumptionStore | None = None,  # Layer 5
     ):
         self.registry = registry
         self.policy = policy
@@ -556,6 +563,10 @@ class AgentLoop:
         # Layer 4 — User Profile store and last-known profile snapshot.
         self.user_profile_store = user_profile_store
         self.last_user_profile: UserProfile | None = None
+        # Layer 5 — Assumption Registry store and last-run snapshot.
+        self.assumption_store = assumption_store
+        self.last_assumptions: AssumptionRegistry | None = None
+        self._run_assumptions_current: AssumptionRegistry | None = None
         # §3 Clarification Policy wiring. `clarification_enabled=False` skips
         # the heuristic ambiguity check. Intended ONLY for integration tests
         # that exercise the tool/approval layer with synthetic short questions.
@@ -611,6 +622,19 @@ class AgentLoop:
                     "interests": self.last_user_profile.interests,
                 },
             )
+
+        # Layer 5 — create a fresh AssumptionRegistry and seed it from the question.
+        _run_assumptions = AssumptionRegistry(
+            run_id=getattr(self.log, "trace_id", ""),
+        )
+        try:
+            _q_assumptions = extract_from_question(
+                user_question,
+                run_id=getattr(self.log, "trace_id", ""),
+            )
+            _run_assumptions.register_many(_q_assumptions)
+        except Exception:
+            pass  # Assumption extraction must never abort the run.
 
         # §3.5 Checkpoint writer — one file per trace, append-only.
         # Falls back to a no-op sentinel when the logger is a test spy that
@@ -926,6 +950,26 @@ class AgentLoop:
             self.log.log("plan", plan, steps=len(plan.steps), attempt=attempt)
             _cp.save_plan(attempt=attempt, step_ids=[s.id for s in plan.steps])
 
+            # Layer 5 — extract plan-level assumptions on the first attempt only.
+            if attempt == 1:
+                try:
+                    _plan_assumptions = extract_from_plan(
+                        planner_out.sources,
+                        question=user_question,
+                        run_id=getattr(self.log, "trace_id", ""),
+                    )
+                    _run_assumptions.register_many(_plan_assumptions)
+                    if _run_assumptions.assumptions:
+                        self.log.log(
+                            "assumptions_registered",
+                            {
+                                "count": len(_run_assumptions),
+                                "assumptions": _run_assumptions.to_log_payload(),
+                            },
+                        )
+                except Exception:
+                    pass  # Never abort the run.
+
             attempt_artifacts: dict[str, dict[str, Any]] = {}
             attempt_failures: list[ReplanTrigger] = []
             attempt_chain = ProvenanceChain()
@@ -1100,6 +1144,8 @@ class AgentLoop:
         # a structured Output Contract reply — it gets the failure history
         # and is told to explain honestly what was tried and why nothing
         # worked. This is a much better UX than a bare error string.
+        # Layer 5 — expose current-run assumptions to _synthesize via instance.
+        self._run_assumptions_current = _run_assumptions
         draft_answer = self._synthesize(
             goal=goal,
             artifacts=artifacts,
@@ -1537,6 +1583,14 @@ class AgentLoop:
                 )
             except Exception:
                 pass  # Profile update must never abort the run.
+
+        # Layer 5 — persist assumptions and expose via last_assumptions.
+        self.last_assumptions = _run_assumptions
+        if self.assumption_store is not None and _run_assumptions.assumptions:
+            try:
+                self.assumption_store.save_many(_run_assumptions.assumptions)
+            except Exception:
+                pass  # Store failure must never abort the run.
 
         # Clear streaming callback so it cannot leak into the next turn.
         self._stream_on_token = None
@@ -3166,6 +3220,13 @@ class AgentLoop:
             if self.last_user_profile is not None
             else ""
         )
+        # Layer 5 — inject active assumptions into synthesizer.
+        _assumptions_src = getattr(self, "_run_assumptions_current", None)
+        assumptions_block = (
+            _assumptions_src.to_prompt_block() + "\n\n"
+            if _assumptions_src is not None and len(_assumptions_src) > 0
+            else ""
+        )
 
         # Kernel-built safety notes — the LLM is told to surface these in
         # the user-facing answer. The notes describe what was redacted
@@ -3256,6 +3317,7 @@ class AgentLoop:
                 f"{failure_block}"
                 f"{role_block}"
                 f"{profile_block}"
+                f"{assumptions_block}"
                 f"{long_term_block}"
                 f"{history_block}"
                 f"{allowed_citations_block}"
@@ -3290,6 +3352,7 @@ class AgentLoop:
                 f"{failure_block}"
                 f"{role_block}"
                 f"{profile_block}"
+                f"{assumptions_block}"
                 f"{long_term_block}"
                 f"{history_block}"
                 f"planner_reasoning: {planner_reasoning}\n\n"

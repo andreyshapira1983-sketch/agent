@@ -117,6 +117,7 @@ from core.operator_intent import OperatorIntent, route_operator_intent
 from core.strategy_router import classify_operator_strategy
 from core.persistent_memory import PersistentMemoryStore
 from core.user_profile import UserProfileStore
+from core.assumption_registry import AssumptionStore  # Layer 5
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
 from core.self_repair import RepairProposal
@@ -165,6 +166,7 @@ DEFAULT_EPISODIC_MEMORY_PATH = Path("data") / "episodic_memory.jsonl"
 DEFAULT_PROCEDURAL_MEMORY_PATH = Path("data") / "procedural_memory.jsonl"
 DEFAULT_MEMORY_CONSOLIDATION_PATH = Path("data") / "memory_consolidation.jsonl"
 DEFAULT_USER_PROFILE_PATH = Path("data") / "user_profile.jsonl"
+DEFAULT_ASSUMPTIONS_PATH = Path("data") / "assumptions.jsonl"  # Layer 5
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -236,6 +238,7 @@ def build_agent(
     persistent_store: PersistentMemoryStore | None = None
     source_registry_store: SourceRegistryStore | None = None
     user_profile_store: UserProfileStore | None = None
+    assumption_store: AssumptionStore | None = None  # Layer 5
     episodic_store: EpisodicMemoryStore | None = None
     procedural_store: ProceduralMemoryStore | None = None
     consolidation_store: MemoryConsolidationStore | None = None
@@ -246,6 +249,7 @@ def build_agent(
             workspace / DEFAULT_SOURCE_REGISTRY_PATH
         )
         user_profile_store = UserProfileStore(workspace / DEFAULT_USER_PROFILE_PATH)
+        assumption_store = AssumptionStore(workspace / DEFAULT_ASSUMPTIONS_PATH)  # Layer 5
         if with_memory:
             episodic_store = EpisodicMemoryStore(workspace / DEFAULT_EPISODIC_MEMORY_PATH)
             procedural_store = ProceduralMemoryStore(
@@ -343,6 +347,7 @@ def build_agent(
         knowledge_auto_write=_env_bool("AGENT_KNOWLEDGE_AUTO_WRITE", True),
         approval_provider=approval_provider,
         user_profile_store=user_profile_store,
+        assumption_store=assumption_store,  # Layer 5
     )
 
 
@@ -4425,6 +4430,36 @@ def _handle_schedule_tick(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     return True
 
 
+def _handle_assumptions(rest: str, agent: AgentLoop) -> bool:  # Layer 5
+    """Show the most-recent assumptions logged by the Assumption Registry."""
+    use_json = "--json" in rest
+    store = getattr(agent, "assumption_store", None)
+    if store is None:
+        print("(assumption store not enabled in this session)", file=sys.stderr)
+        return True
+    try:
+        recent = store.load_recent(20)
+    except Exception as exc:
+        print(f"(assumption store error: {exc})", file=sys.stderr)
+        return True
+    if not recent:
+        print("(no assumptions recorded yet)", file=sys.stderr)
+        return True
+    if use_json:
+        print(json.dumps([a.to_dict() for a in recent], ensure_ascii=False, indent=2))
+        return True
+    current_run = getattr(getattr(agent, "log", None), "trace_id", None)
+    for a in recent:
+        run_tag = " [current]" if a.run_id == current_run else f" [run …{a.run_id[-8:]}]"
+        verified_tag = " ✓" if a.verified is True else (" ✗" if a.verified is False else "")
+        conf = int(a.confidence * 100)
+        print(
+            f"  [{a.category}] {a.text} ({conf}%){verified_tag}{run_tag}",
+            file=sys.stderr,
+        )
+    return True
+
+
 def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     """Returns True if the command was handled (so the REPL should skip the LLM)."""
     head, _, rest = cmd.partition(" ")
@@ -4751,6 +4786,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "                                  guarded self-repair: diff, approval, write, tests, rollback\n"
             "  :propose-repair <target> [tests...] [--pattern PAT] [--trace TRACE]\n"
             "                                  generate a RepairProposal without writing files\n"
+            "  :assumptions [--json]           show the last 20 logged planning assumptions\n"
             "  :quit | :exit                   exit\n"
             "  empty line                      exit",
             file=sys.stderr,
@@ -4769,6 +4805,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
 
     if head in {":quit", ":exit"}:
         raise SystemExit(0)
+
+    if head in {":assumptions", ":assumption-log"}:  # Layer 5
+        return _handle_assumptions(rest.strip(), agent)
 
     return False
 
