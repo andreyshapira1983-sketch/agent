@@ -2155,6 +2155,18 @@ class AgentLoop:
                         f"previous answer quality: {quality_pct}% verified — "
                         + ("HIGH" if quality_pct >= 70 else ("MEDIUM" if quality_pct >= 40 else "LOW"))
                     )
+                    if quality_pct >= 70:
+                        conclusion = (
+                            "The previous answer was HIGH quality. "
+                            "The user may be re-testing, want more detail, or verifying consistency. "
+                            "You MAY confirm the previous answer if nothing has changed, "
+                            "but try to add depth or perspective not present before."
+                        )
+                    else:
+                        conclusion = (
+                            "The previous answer was likely INSUFFICIENT or INCOMPLETE. "
+                            "Do NOT repeat the same approach."
+                        )
                     hint = (
                         "<repeat_question_hint>\n"
                         "WARNING: The user is asking a question that is very similar to a "
@@ -2164,8 +2176,7 @@ class AgentLoop:
                         f"Past answer quality: {quality_note}\n"
                         f"Previous question: {repeat_ep.question[:200]}\n"
                         f"Previous answer summary: {repeat_ep.summary[:300]}\n"
-                        "CONCLUSION: The previous answer was likely INSUFFICIENT or "
-                        "INCOMPLETE. Do NOT repeat the same approach.\n"
+                        f"CONCLUSION: {conclusion}\n"
                         "Action: try a different strategy, use additional tools, go "
                         "deeper, or explicitly acknowledge what was missing before.\n"
                         "</repeat_question_hint>"
