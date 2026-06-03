@@ -10,6 +10,7 @@ from core.memory import WorkingMemory
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
 from core.smart_memory import (
+    EpisodeRecord,
     EpisodicMemoryStore,
     MemoryConsolidationStore,
     ProceduralMemoryStore,
@@ -298,3 +299,43 @@ def test_episodic_store_no_eviction_under_limit(tmp_path: Path) -> None:
         )
         store.save(ep)
     assert store.count() == 5
+
+
+def test_search_boosts_lesson_episodes(tmp_path: Path) -> None:
+    """Lesson episodes should appear above ordinary ones on same token overlap."""
+    store = EpisodicMemoryStore(tmp_path / "ep.jsonl", max_episodes=100)
+    ordinary = episode_from_agent_cycle(
+        goal="repair", question="fix bug in core", answer="patched",
+        tools_used=[], source_labels=[], verified_chunks=1,
+    )
+    lesson = EpisodeRecord(
+        goal="repair", question="how to fix", outcome="success",
+        summary="Bug fixed in 'core/loop.py': bad import. Tests used: tests/test_loop.py.",
+        tags=("lesson", "bug-fix", "regression-guard"),
+    )
+    store.save(ordinary)
+    store.save(lesson)
+
+    results = store.search("fix bug in core", limit=2)
+    # Lesson must appear (either first or second)
+    assert lesson in results
+    # Lesson must be ranked above or equal to ordinary
+    assert results.index(lesson) <= results.index(ordinary)
+
+
+def test_search_by_tags_returns_matching_episodes(tmp_path: Path) -> None:
+    store = EpisodicMemoryStore(tmp_path / "ep.jsonl", max_episodes=100)
+    lesson = EpisodeRecord(
+        goal="repair", question="q", outcome="success",
+        summary="fixed core/foo.py", tags=("lesson", "bug-fix"),
+    )
+    other = episode_from_agent_cycle(
+        goal="g", question="q2", answer="a",
+        tools_used=[], source_labels=[], verified_chunks=1,
+    )
+    store.save(lesson)
+    store.save(other)
+
+    results = store.search_by_tags(["lesson"])
+    assert lesson in results
+    assert other not in results

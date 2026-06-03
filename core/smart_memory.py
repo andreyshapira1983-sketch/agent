@@ -303,9 +303,26 @@ class EpisodicMemoryStore:
             haystack = " ".join([ep.goal, ep.question, ep.summary, " ".join(ep.tags)])
             score = len(q_tokens & _tokens(haystack))
             if score:
+                # Boost protected episodes (lessons, bug-fixes) so they surface
+                # above ordinary episodes when there is any token overlap.
+                if self.PROTECTED_TAGS & set(ep.tags):
+                    score += 50
                 scored.append((score, ep))
         scored.sort(key=lambda item: (item[0], item[1].created_at), reverse=True)
         return [ep for _score, ep in scored[:limit]]
+
+    def search_by_tags(
+        self, tags: Iterable[str], *, limit: int = 5
+    ) -> list[EpisodeRecord]:
+        """Return episodes that carry ALL of the given tags, newest first."""
+        required = frozenset(tags)
+        if not required:
+            return []
+        matches = [
+            ep for ep in self.load() if required <= set(ep.tags)
+        ]
+        matches.sort(key=lambda e: e.created_at, reverse=True)
+        return matches[:limit]
 
     def find_most_similar(
         self, query: str, *, threshold: float = 0.35

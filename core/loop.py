@@ -2100,6 +2100,26 @@ class AgentLoop:
             if self.episodic_store is not None
             else []
         )
+        # ── Surface repair lessons for files mentioned in the question ────
+        # search() gives a +50 boost to protected-tag episodes so they usually
+        # appear in the top-3, but when the question contains a file path that
+        # exactly matches a lesson's summary we fetch them explicitly as a
+        # fallback — e.g. ":repair core/foo.py" should always see lessons
+        # about core/foo.py even if the token overlap is otherwise low.
+        if self.episodic_store is not None:
+            lessons = self.episodic_store.search_by_tags(["lesson"], limit=5)
+            q_lower = question.lower()
+            # Extract path-like tokens: words containing "/" or ending in ".py"
+            path_tokens = [
+                w.strip("\"',:;()")
+                for w in q_lower.split()
+                if "/" in w or w.endswith(".py")
+            ]
+            for lesson in lessons:
+                if lesson not in episodes and path_tokens and any(
+                    tok in lesson.summary.lower() for tok in path_tokens
+                ):
+                    episodes.append(lesson)
         procedures = (
             self.procedural_store.search(question, limit=3)
             if self.procedural_store is not None
