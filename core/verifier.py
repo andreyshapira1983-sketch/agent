@@ -18,6 +18,7 @@ Citation grammar (LLM is instructed to follow this in
   - ``[test:<cmd>]``           — pytest result
   - ``[log:<trace_id>]``       — JSONL log event
   - ``[shell:<cmd>]``          — shell_exec stdout
+  - ``[tool:<name>]``          — generic tool output (current_time, etc.)
   - ``[diff:<path>]``          — diff_file preview
   - ``[memory:<mem_id>]``      — memory record
   - ``[user]``                 — user explicit directive
@@ -61,6 +62,7 @@ CITATION_PREFIXES: dict[str, str] = {
     "test":              "test_result",
     "log":               "log_event",
     "shell":             "shell_output",
+    "tool":              "tool_output",
     "diff":              "diff_preview",
     "memory":            "memory",
     "user":              "user_explicit",
@@ -331,8 +333,8 @@ _TOKEN_STOPWORDS: frozenset[str] = frozenset({
     # Scheme / web noise
     "http", "https", "www", "ftp",
     # Citation prefix copies (LLMs often echo the prefix in the body)
-    "file", "web", "search", "test", "log", "shell", "diff", "memory",
-    "user", "general", "knowledge",
+    "file", "web", "search", "test", "log", "shell", "tool", "diff",
+    "memory", "user", "general", "knowledge",
     # Evidence kind names (we put them at the start of source_id)
     "file", "web_page", "web_search_hit", "tool_output", "test_result",
     "log_event", "shell_output", "diff_preview",
@@ -490,6 +492,52 @@ def _find_semantic_support(
     return None
 
 
+def _find_structured_support(
+    claim: str, chain: ProvenanceChain
+) -> Evidence | None:
+    """Search the ProvenanceChain for a tool_output Evidence whose
+    structured facts support *claim*.
+
+    This bridges the gap between structured tool returns
+    (``{"weekday": "Wednesday", "month": 6, "day": 3, "year": 2026}``)
+    and natural-language claims paraphrasing them in another locale
+    (``"среда, 3 июня 2026 года"``). Substring / source_id matching
+    cannot see this kind of equivalence; the structured-facts module
+    normalises both sides into a comparable set.
+
+    Returns the first matching Evidence (highest-confidence first), or
+    None when no tool_output record's facts overlap with the claim text.
+    No LLM calls — pure deterministic matching.
+    """
+    from core.structured_facts import claim_supported_by, extract_facts  # noqa: PLC0415
+
+    candidates = [
+        ev for ev in chain.evidences if ev.kind == "tool_output"
+    ]
+    candidates.sort(key=lambda e: e.confidence, reverse=True)
+    for ev in candidates:
+        if not ev.excerpt:
+            continue
+        facts = extract_facts(ev.excerpt)
+        if facts.is_empty():
+            continue
+        if claim_supported_by(claim, facts):
+            return ev
+    return None
+
+
+def _tool_citation_for(ev: Evidence) -> str:
+    """Synthesise a ``[tool:<name>]`` citation marker for a tool_output
+    evidence record matched via structured facts. Body is the tool name
+    extracted from the source_id (``tool_output:current_time`` -> ``current_time``)."""
+    sid = ev.source_id or ""
+    if sid.startswith("tool_output:"):
+        body = sid[len("tool_output:"):]
+    else:
+        body = sid or "structured"
+    return f"[verified:tool:{body}]"
+
+
 def verify(
     *,
     answer: str,
@@ -580,9 +628,24 @@ def verify(
         annotated = chunk_text
 
         if not cits:
-            verdict = "unverified"
-            unverified += 1
-            annotated = chunk_text.rstrip() + " [unverified]"
+            # No citation parsed. Before declaring `unverified`, try
+            # structured-facts fallback against tool_output evidence —
+            # the LLM may have stated a fact that derives directly from
+            # a structured tool return (date, weekday, number) without
+            # remembering the citation grammar.
+            struct_ev = (
+                _find_structured_support(chunk_text, chain)
+                if not chain_empty else None
+            )
+            if struct_ev is not None:
+                verdict = "verified"
+                verified += 1
+                matched_ids.append(struct_ev.id)
+                annotated = chunk_text.rstrip() + " " + _tool_citation_for(struct_ev)
+            else:
+                verdict = "unverified"
+                unverified += 1
+                annotated = chunk_text.rstrip() + " [unverified]"
         else:
             any_matched = False
             any_self_declared = False
@@ -621,11 +684,32 @@ def verify(
                 verdict = "self_declared"
                 self_declared += 1
             else:
-                # Primary heuristic pass failed. Optionally try semantic NLI:
+                # Primary heuristic pass failed. Before falling back
+                # to the LLM-based NLI, try the deterministic
+                # structured-facts matcher: when a tool_output evidence
+                # in the chain carries facts that line up with the
+                # claim text (date components, weekdays, numbers) we
+                # accept it as a verified match without an LLM call.
+                struct_ev = (
+                    _find_structured_support(chunk_text, chain)
+                    if chain.evidences and not chain_empty else None
+                )
+                if struct_ev is not None:
+                    verdict = "verified"
+                    verified += 1
+                    matched_ids.append(struct_ev.id)
+                    for c in cits:
+                        if c.prefix not in SELF_DECLARED_PREFIXES:
+                            body_part = f":{c.body}" if c.body else ""
+                            annotated = annotated.replace(
+                                c.raw,
+                                f"[verified:{c.prefix}{body_part}]",
+                            )
+                # Optionally try semantic NLI:
                 # ask the LLM whether any evidence excerpt in the chain
                 # actually supports this claim text. This handles URL format
                 # mismatches, partial paths, and lightly-paraphrased references.
-                if llm is not None and chain.evidences and not chain_empty:
+                elif llm is not None and chain.evidences and not chain_empty:
                     sem_ev = _find_semantic_support(chunk_text, chain, llm)
                     if sem_ev is not None:
                         verdict = "verified"

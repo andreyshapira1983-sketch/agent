@@ -213,6 +213,7 @@ Facts:
       [test:<cmd>]               pytest result
       [log:<trace_id>]           JSONL audit log event
       [shell:<cmd>]              shell_exec stdout
+      [tool:<name>]              generic tool output (current_time, etc.)
       [diff:<path>]              proposed diff preview
       [memory:<record_id>]       long-term memory record
       [user]                     explicit user directive
@@ -3742,6 +3743,9 @@ class AgentLoop:
         if ev.kind == "shell_output" and source_id.startswith("shell_output:"):
             body = source_id[len("shell_output:"):]
             return f"[shell:{body}]"
+        if ev.kind == "tool_output" and source_id.startswith("tool_output:"):
+            body = source_id[len("tool_output:"):]
+            return f"[tool:{body}]"
         if ev.kind == "diff_preview" and source_id.startswith("diff_preview:"):
             body = source_id[len("diff_preview:"):]
             return f"[diff:{body}]"

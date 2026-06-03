@@ -1350,6 +1350,23 @@ class LLMPlanner:
                 ),
             }
 
+        if tool_name == "current_time":
+            # No arguments; ignore anything the planner accidentally adds.
+            if args:
+                warnings.append(
+                    f"step[{idx}]: current_time takes no arguments, "
+                    f"dropping {sorted(args.keys())!r}"
+                )
+            return {
+                "tool": "current_time",
+                "arguments": {},
+                "label": "current_time:now",
+                "expected_outcome": (
+                    "Returns a dict with iso_utc, iso_local, unix epoch, "
+                    "tz_name, weekday, year, month, day for the current moment."
+                ),
+            }
+
         # ----- spawn_subagent: agent-as-tool pattern -----
         if tool_name == "spawn_subagent":
             from tools.spawn_subagent import (  # local import: avoid cycles
