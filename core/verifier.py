@@ -121,6 +121,136 @@ _NON_CLAIM_SECTIONS: frozenset[str] = frozenset({
 })
 
 
+# ---------------------------------------------------------------------------
+# Statistical-claim strict verification
+# ---------------------------------------------------------------------------
+#
+# Aggregated statistics, percentages, ranges, multipliers and pricing
+# look the same as any other sentence to the substring matcher: as long
+# as the citation prefix matches a record kind, the claim is marked
+# `verified`. Empirically this is the wrong answer for these claims.
+# A `web_search_hit` proves only that a query had results; it does NOT
+# prove that "66% of developers" or "a solution takes 2–4 weeks" is in
+# any of those results. The fix: when a claim carries a statistical
+# figure, the matched evidence's *excerpt* must substring-contain that
+# figure. Otherwise the verdict is downgraded to a new bucket
+# `topic_supported_but_claim_unverified`: the source supports the topic,
+# not the number.
+#
+# `_STAT_TRIGGER_RE` flags a sentence as carrying a statistical claim
+# (any of: `%`, numeric range with time/quantity unit, `Nx` multiplier,
+# RU "в N раз", "процент", currency markers, qualifier hedges like
+# `most/majority/average/средний/в среднем`).
+#
+# `_STAT_FIGURE_RE` extracts the actual figures (`66%`, `2-4`, `$199`,
+# `2x`) so we can substring-check them against `ev.excerpt`. The
+# extraction is intentionally permissive: we want every distinct number
+# the claim asserts so a partial-only match (claim says 66%, source
+# only mentions 45%) cannot pass.
+_STAT_TRIGGER_RE = re.compile(
+    r"(?:"
+    r"\d+\s*%"                                         # 45%, 66 %
+    r"|\d+\s*процент"                                  # 45 процентов
+    r"|\$\s*\d"                                        # $199
+    r"|\d+\s*(?:usd|eur|gbp|долл|руб|rub)\b"             # currency suffix
+    r"|\b\d+\s*[-–—]\s*\d+\s*(?:week|day|hour|month|year|нед|дн|час|мес|лет|год)"  # 2-4 weeks
+    r"|\b\d+\s*x\b"                                    # 2x, 10x
+    r"|\bв\s*\d+\s*раз"                                # в 2 раза
+    r"|\b(?:most|majority|average|on\s+average)\b"     # EN qualifiers
+    r"|\b(?:средний|средняя|среднее|в\s+среднем|большинство)\b"  # RU qualifiers
+    r")",
+    re.IGNORECASE,
+)
+
+_STAT_FIGURE_RE = re.compile(
+    r"\d+\s*%"                                          # 66%, 45 %
+    r"|\$\s*\d+(?:[.,]\d+)?"                            # $199, $1.5
+    r"|\b\d+\s*[-–—]\s*\d+\b"                            # 2-4, 30–40
+    r"|\b\d+\s*x\b"                                     # 2x, 10x
+    r"|\b\d+(?:[.,]\d+)?\s*(?:usd|eur|gbp|долл|руб|rub)\b"  # currency
+    r"|\b\d+(?:[.,]\d+)?\b",                            # bare numbers
+    re.IGNORECASE,
+)
+
+# Figures shorter than this are too noisy to be meaningful as a
+# statistical assertion ("1", "7", a single year digit). The trigger
+# regex still classifies the sentence as statistical, but a 1-2 digit
+# bare number alone is not enough to demand a strict number-match.
+_STAT_FIGURE_MIN_LEN = 2
+
+# Citation prefixes that we DO NOT subject to statistical strict mode.
+# `[user]` is operator's own input; `[memory]` refers to prior turns;
+# `[general-knowledge]` is the LLM's honest self-declaration handled
+# elsewhere. Strict mode targets external retrieval only.
+_STAT_STRICT_EXEMPT_PREFIXES: frozenset[str] = frozenset(
+    {"user", "memory", "general-knowledge"}
+)
+
+
+def _normalise_figure(fig: str) -> str:
+    """Lowercase + collapse internal whitespace so `66 %` and `66%`
+    compare equal when scanning evidence excerpts. Also folds en-/em-
+    dashes to ASCII `-` so `2-4` (claim) matches `2–4` (source)."""
+    s = fig.lower()
+    s = re.sub(r"\s+", "", s)
+    s = s.replace("\u2013", "-").replace("\u2014", "-")
+    return s
+
+
+def extract_statistical_figures(text: str) -> list[str]:
+    """Return every distinct statistical figure asserted in *text*.
+
+    Empty list means "no number-bearing statistical claim found".
+    A non-empty list is returned ONLY when the trigger regex also
+    fires — i.e. a bare number embedded in prose ("section 2",
+    "part 3") will not be flagged as statistical.
+    """
+    if not text:
+        return []
+    if not _STAT_TRIGGER_RE.search(text):
+        return []
+    figures: list[str] = []
+    seen: set[str] = set()
+    for m in _STAT_FIGURE_RE.finditer(text):
+        raw = m.group(0).strip()
+        # Drop bare 1-digit numbers ("5") — too noisy to gate on.
+        bare_num = re.fullmatch(r"\d+", raw)
+        if bare_num and len(raw) < _STAT_FIGURE_MIN_LEN:
+            continue
+        norm = _normalise_figure(raw)
+        if norm in seen:
+            continue
+        seen.add(norm)
+        figures.append(raw)
+    return figures
+
+
+def is_statistical_claim(text: str) -> bool:
+    """True when *text* asserts an aggregated statistic / range / price.
+
+    Convenience wrapper around the trigger regex — callers that need
+    the figures themselves should use `extract_statistical_figures`.
+    """
+    if not text:
+        return False
+    return bool(_STAT_TRIGGER_RE.search(text))
+
+
+def _excerpt_supports_figures(excerpt: str, figures: list[str]) -> bool:
+    """Return True iff EVERY claimed figure has a substring match in the
+    excerpt (whitespace-insensitive). Empty figure list means no
+    numeric assertion to verify and the function returns True (the
+    qualifier-only path — e.g. a bare "most developers" — is handled
+    by the strict-gate caller, not here).
+    """
+    if not figures:
+        return True
+    if not excerpt:
+        return False
+    excerpt_norm = _normalise_figure(excerpt)
+    return all(_normalise_figure(f) in excerpt_norm for f in figures)
+
+
 def _output_contract_header_name(text: str) -> str | None:
     stripped = (text or "").strip()
     match = _OUTPUT_CONTRACT_HEADER_RE.match(stripped)
@@ -168,7 +298,7 @@ class ClaimChunk:
     text: str
     citations: tuple[Citation, ...]
     matched_evidence_ids: tuple[str, ...]
-    verdict: str        # "verified" | "unverified" | "cited_but_unmatched" | "self_declared"
+    verdict: str        # "verified" | "unverified" | "cited_but_unmatched" | "self_declared" | "topic_supported_but_claim_unverified"
 
 
 @dataclass(frozen=True)
@@ -199,6 +329,13 @@ class VerificationReport:
     chain_was_empty: bool
     disclaimer: str | None = None
     malformed_output: bool = False
+    # Statistical-strict bucket: claim asserted a percentage / range /
+    # multiplier / pricing, the cited record matched on topic, but the
+    # actual figure could not be substring-found in the record's
+    # excerpt. Counted SEPARATELY from `verified_chunks` so callers can
+    # treat these as soft-fail (the topic is supported, the number is
+    # not). Defaults to 0 so existing fake-report fixtures don't break.
+    topic_supported_but_claim_unverified_chunks: int = 0
 
     def to_log_payload(self) -> dict[str, Any]:
         return {
@@ -208,6 +345,8 @@ class VerificationReport:
             "cited_but_unmatched_chunks": self.cited_but_unmatched_chunks,
             "self_declared_chunks": self.self_declared_chunks,
             "structural_chunks": self.structural_chunks,
+            "topic_supported_but_claim_unverified_chunks":
+                self.topic_supported_but_claim_unverified_chunks,
             "fully_unverified": self.fully_unverified,
             "chain_was_empty": self.chain_was_empty,
             "malformed_output": self.malformed_output,
@@ -666,6 +805,7 @@ def verify(
     verified = 0
     unverified = 0
     cited_unmatched = 0
+    topic_supported = 0
     # Counts cited_but_unmatched chunks where ALL citations use the
     # "memory:" prefix — i.e. the LLM grounded the answer in prior
     # turns rather than external sources.  Used to select the right
@@ -727,8 +867,18 @@ def verify(
                 unverified += 1
                 annotated = chunk_text.rstrip() + " [unverified]"
         else:
+            # Statistical-strict pre-pass: aggregated stats / ranges /
+            # multipliers / pricing must have their actual figure
+            # substring-found in the matched evidence's excerpt.
+            # Otherwise the source supports the TOPIC but not the
+            # CLAIM and we route to a separate verdict bucket.
+            stat_figures = extract_statistical_figures(chunk_text)
+            stat_claim = is_statistical_claim(chunk_text)
+
             any_matched = False
             any_self_declared = False
+            any_topic_only = False
+            topic_only_replacements: list[tuple[str, str]] = []
             for c in cits:
                 # Special-case the LLM's honest "this is from prior
                 # training" admission. We REWRITE to `[declared:...]`
@@ -743,26 +893,78 @@ def verify(
                     )
                     continue
                 ev = match_citation(c, chain)
-                if ev is not None:
+                if ev is None:
+                    continue
+
+                # Statistical strict gate.
+                strict_ok = True
+                if stat_claim and c.prefix not in _STAT_STRICT_EXEMPT_PREFIXES:
+                    excerpt = ev.excerpt or ""
+                    if stat_figures:
+                        # Every claimed figure must be substring-matched
+                        # in the excerpt. Even one missing number means
+                        # the source does not back the assertion.
+                        if not _excerpt_supports_figures(excerpt, stat_figures):
+                            strict_ok = False
+                    else:
+                        # Qualifier-only assertion ("most developers...",
+                        # "в среднем..."). A search-hit snippet is too
+                        # weak to ground a population-level claim;
+                        # require page-level evidence (web_page, file,
+                        # tool_output, shell_output, test_result,
+                        # diff_preview, log_event, memory).
+                        if ev.kind == "web_search_hit":
+                            strict_ok = False
+
+                body_part = f":{c.body}" if c.body else ""
+                if strict_ok:
                     matched_ids.append(ev.id)
                     any_matched = True
-                    body_part = f":{c.body}" if c.body else ""
                     annotated = annotated.replace(
                         c.raw,
                         f"[verified:{c.prefix}{body_part}]",
                     )
+                else:
+                    any_topic_only = True
+                    # Defer the rewrite until after the loop so a later
+                    # citation in the same chunk that DOES pass strict
+                    # mode can still take precedence (any_matched wins).
+                    topic_only_replacements.append(
+                        (c.raw, f"[topic-only:{c.prefix}{body_part}]")
+                    )
 
-            # Verdict precedence: verified > self_declared > cited_but_unmatched.
-            # A chunk that cites both a real source and general-knowledge
-            # is `verified` (the real source wins); a chunk with ONLY
-            # general-knowledge is `self_declared`; a chunk with only
-            # broken citations stays `cited_but_unmatched`.
+            # Verdict precedence:
+            #   verified > self_declared
+            #            > topic_supported_but_claim_unverified
+            #            > cited_but_unmatched.
+            # If at least one citation in the chunk passed strict mode
+            # (`any_matched=True`), the chunk is `verified` — the
+            # remaining `topic-only` citations stay marked but do not
+            # demote the chunk. If no citation passed strict mode but
+            # at least one would have matched without strict mode, the
+            # chunk is `topic_supported_but_claim_unverified`.
             if any_matched:
                 verdict = "verified"
                 verified += 1
+                # Apply the deferred topic-only rewrites for the
+                # citations in the same chunk that did not pass strict.
+                for raw, rewrite in topic_only_replacements:
+                    annotated = annotated.replace(raw, rewrite)
             elif any_self_declared:
                 verdict = "self_declared"
                 self_declared += 1
+            elif any_topic_only:
+                verdict = "topic_supported_but_claim_unverified"
+                topic_supported += 1
+                for raw, rewrite in topic_only_replacements:
+                    annotated = annotated.replace(raw, rewrite)
+                # Make the figure-mismatch visible to the user. We
+                # append a compact marker so downstream readers can
+                # spot the bucket without re-running the verifier.
+                annotated = (
+                    annotated.rstrip()
+                    + " [claim-figure-unverified]"
+                )
             else:
                 # Primary heuristic pass failed. Before falling back
                 # to the LLM-based NLI, try the deterministic
@@ -883,4 +1085,5 @@ def verify(
         chain_was_empty=chain_empty,
         disclaimer=disclaimer,
         malformed_output=malformed_output,
+        topic_supported_but_claim_unverified_chunks=topic_supported,
     )
