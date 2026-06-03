@@ -122,12 +122,21 @@ Available tools:
     credential or API key in `content` (the tool will refuse).
 
 - shell_exec(argv: list[str]) -> {argv, exit_code, stdout, stderr, ...}
-    [read_only for whoami/hostname/where/which; irreversible for mkdir/touch
-     — escalates to human approval, ships with a compensation plan]
+    [read_only for whoami/hostname/where/which/git/findstr/grep;
+     irreversible for mkdir/touch — mutating commands escalate to human
+     approval and ship with a compensation plan]
     Runs ONE whitelisted command inside the workspace sandbox.
     Whitelist (the ONLY allowed argv[0] values):
-      read-only : whoami, hostname, where, which
+      read-only : whoami, hostname, where, which,
+                  git (subcommand restricted to: log, diff, status, show,
+                       branch, tag, blame, rev-parse, describe, ls-files,
+                       ls-tree, cat-file, shortlog, reflog, name-rev),
+                  findstr (Windows) / grep (POSIX) — used as a content
+                  search across many files in one call
       mutating  : mkdir, touch  (exactly one path argument, inside workspace)
+    For "find/count X across N files" sweeps, prefer ONE
+    `findstr`/`grep` call over N file_read calls — cheaper, faster,
+    no truncation per-file.
     IMPORTANT — environment discovery MANDATORY RULE: when the user asks
     about working with files (PDF, DOCX, images, video, etc.) or asks
     "can you do X / do you have X / is X installed", you MUST probe the
@@ -973,7 +982,11 @@ class LLMPlanner:
             # dangerous commands out of the JSONL before the tool even
             # sees them. The tool's `_validate_argv` repeats the check
             # (defence in depth).
-            from tools.shell_exec import ALL_WHITELIST, MUTATING_COMMANDS
+            from tools.shell_exec import (
+                ALL_WHITELIST,
+                MUTATING_COMMANDS,
+                READ_ONLY_SUBCOMMANDS,
+            )
 
             cmd = cleaned[0].strip().lower()
             if cmd not in ALL_WHITELIST:
@@ -982,6 +995,21 @@ class LLMPlanner:
                     f"whitelist, dropped"
                 )
                 return None
+            # Subcommand whitelist (e.g. git log/diff/status only).
+            sub_allowed = READ_ONLY_SUBCOMMANDS.get(cmd)
+            if sub_allowed is not None:
+                if len(cleaned) < 2:
+                    warnings.append(
+                        f"step[{idx}]: shell_exec '{cmd}' requires a "
+                        f"subcommand from {sorted(sub_allowed)}, dropped"
+                    )
+                    return None
+                if cleaned[1].strip().lower() not in sub_allowed:
+                    warnings.append(
+                        f"step[{idx}]: shell_exec '{cmd} {cleaned[1]}' "
+                        f"subcommand not in {sorted(sub_allowed)}, dropped"
+                    )
+                    return None
             # Shell metacharacters anywhere -> drop.
             _BAD = set(";|&<>`$()[]{}\n\r\t\0")
             for j, elem in enumerate(cleaned):

@@ -56,6 +56,7 @@ _SAFE_SUBAGENT_TOOLS: frozenset[str] = frozenset({
     "run_tests",
     "read_logs",
     "diff_file",
+    "current_time",
 })
 
 # Hard ceiling on how many tool calls a single sub-agent may make.

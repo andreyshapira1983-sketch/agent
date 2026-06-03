@@ -142,6 +142,7 @@ from core.task_queue import TaskQueueStore
 from core.team_executor import TeamBudget, TeamExecutor
 from core.team_plan import TeamPlanner
 from tools.base import ToolRegistry
+from tools.current_time import CurrentTimeTool
 from tools.diff_file import DiffFileTool
 from tools.file_read import FileReadTool
 from tools.file_write import FileWriteTool
@@ -189,6 +190,8 @@ def build_agent(
     registry.register(WebSearchTool())
     registry.register(FileWriteTool(workspace_root=workspace))
     registry.register(ShellExecTool(workspace_root=workspace))
+    # Pure clock primitive — keeps the agent from guessing today's date.
+    registry.register(CurrentTimeTool())
     # MVP-13.1 — self-repair diagnostic primitives.
     registry.register(RunTestsTool(workspace_root=workspace))
     registry.register(ReadLogsTool(workspace_root=workspace))

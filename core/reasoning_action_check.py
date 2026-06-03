@@ -45,6 +45,9 @@ _TOOL_KEYWORDS: dict[str, tuple[str, ...]] = {
     "rss_fetch": ("rss", "feed", "лента"),
     "spawn_subagent": ("subagent", "субагент", "delegate", "делегир"),
     "self_repair": ("self_repair", "repair", "почини", "исправ"),
+    "current_time": ("current_time", "current time", "today's date",
+                     "current date", "now()", "сегодн", "текущая дат",
+                     "текущее врем", "число", "дату"),
 }
 
 
