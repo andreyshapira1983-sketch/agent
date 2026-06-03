@@ -63,6 +63,7 @@ from core.models import (
     ToolResult,
 )
 from core.output_policy import apply_ranker_output_policy
+from core.low_evidence_policy import evaluate_low_evidence_policy
 from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner, PlannerOutput
 from core.policy import PolicyGate
@@ -1771,6 +1772,31 @@ class AgentLoop:
         if policy_result.applied:
             answer = policy_result.answer
             self.log.log("output_policy", policy_result.to_log_payload())
+
+        # Low-evidence enforcement: if the verifier's verdict
+        # distribution is severely below threshold (few verified, many
+        # unverified, long enough draft), replace the long polished
+        # answer with a deterministic short reply that lists ONLY the
+        # verified claims and explicitly states "insufficient data".
+        # The informational ConfidenceGate already logs the warning;
+        # this is the structural enforcement paired with it.
+        if self.last_verification is not None:
+            try:
+                _le = evaluate_low_evidence_policy(
+                    answer=answer,
+                    report=self.last_verification,
+                    question=user_question,
+                )
+                if _le.triggered:
+                    self.log.log(
+                        "low_evidence_truncation", _le.to_log_payload()
+                    )
+                    answer = _le.answer
+            except Exception:
+                # Defence-in-depth: truncation must NEVER take down
+                # the loop. A failed evaluation falls back to the
+                # original answer the user would otherwise have got.
+                pass
 
         # Strip internal verification markers before user-facing output.
         # Must happen AFTER output_policy which needs [verified:...] markers.
