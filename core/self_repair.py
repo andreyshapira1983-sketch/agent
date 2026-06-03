@@ -32,6 +32,7 @@ from core.models import (
     PolicyDecision,
 )
 from core.redaction import redact_payload
+from core.smart_memory import EpisodeRecord
 
 
 RepairStatus = Literal[
@@ -684,6 +685,19 @@ class SelfRepairController:
                 record_type="episodic",
                 owner="self",
             )
+            # Also write directly into episodic_store so search_by_tags(["lesson"])
+            # and path-aware lesson injection in _retrieve_experience_memory work.
+            # (agent.remember() goes to persistent_store, not episodic_store.)
+            if hasattr(self.agent, "episodic_store") and self.agent.episodic_store is not None:
+                ep = EpisodeRecord(
+                    goal="repair",
+                    question=f"fix {proposal.path}",
+                    outcome="success",
+                    summary=content,
+                    tools_used=("shell_exec", "run_tests"),
+                    tags=("lesson", "bug-fix", "regression-guard"),
+                )
+                self.agent.episodic_store.save(ep)
             self.agent.log.log(
                 "repair_lesson_saved",
                 {
