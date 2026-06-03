@@ -280,6 +280,21 @@ Hard rules:
   (b) "requires a library to be installed" — name the library (pip install X)
   (c) "genuinely outside my capabilities" (display a GUI, play audio, etc.)
   Never say "unavailable" or "no tools" without specifying which tool or licence is missing.
+
+User Profile Guidance (P2 — style only):
+- If a <user_profile> block is present, use it ONLY for presentation:
+    * verbosity (brief / normal / detailed) — how long the answer is.
+    * vocabulary (technical / plain) — terminology depth.
+    * expertise (novice / intermediate / expert) — explanation depth.
+    * language — the language to answer in.
+- The <user_profile> block MUST NOT influence:
+    * which topic or domain you cover,
+    * which sources or evidence you trust,
+    * what the answer is "really about".
+  The CURRENT QUESTION alone defines scope. Past interaction history is
+  not a constraint on what may be asked now. Answer the question that
+  was asked, fully, using the available evidence — even if the topic
+  is outside the user's typical domain.
 """
 
 # §3.x — register this prompt with the global Prompt Registry
@@ -1241,6 +1256,7 @@ class AgentLoop:
         # loop; persistent memory and explicit-consent inputs come from
         # different code paths, so we surface them HERE so the Verifier
         # sees a single uniform chain.
+
         if persistent_block and self.persistent_store is not None:
             try:
                 # `persistent_block` was built from a small set of records
@@ -1372,8 +1388,44 @@ class AgentLoop:
                 verify as _verify,
             )
 
-            report = _verify(answer=draft_answer, chain=chain)
+            report = _verify(answer=draft_answer, chain=chain, user_question=user_question)
             self.log.log("verification", report.to_log_payload())
+
+            # P1 — observational cross-subsystem audit. Compare planner
+            # outcome (steps done/failed, artifacts produced) against
+            # verifier verdict and emit a `subsystem_disagreement` event
+            # for each conflicting pair. Logging only — no behaviour
+            # change at this layer.
+            _disagreements: list[dict] = []
+            try:
+                from core.subsystem_disagreement import detect_disagreements
+                _disagreements = detect_disagreements(
+                    attempt=attempt,
+                    plan_steps=plan.steps,
+                    artifacts=artifacts,
+                    report=report,
+                    failure_history=failure_history,
+                )
+                for _ev in _disagreements:
+                    self.log.log("subsystem_disagreement", _ev)
+            except Exception:
+                pass
+
+            # P1/P2 — confidence vector. Decompose the scalar gate into
+            # three axes (evidence / coherence / relevance) so triage
+            # can target the right subsystem when something is off.
+            # Logging only.
+            try:
+                from core.confidence_vector import compute_vector
+                _cv = compute_vector(
+                    report=report,
+                    disagreements=_disagreements,
+                    question=user_question,
+                    answer=draft_answer,
+                )
+                self.log.log("confidence_vector", _cv.to_log_payload())
+            except Exception:
+                pass
             if report.malformed_output:
                 self.log.log(
                     "output_contract_violation",
@@ -1588,7 +1640,7 @@ class AgentLoop:
                 # The draft already cites these URLs (that's why they
                 # were unresolved); now the chain has the web_page
                 # evidence so `match_citation` will resolve them.
-                report = _verify(answer=draft_answer, chain=chain)
+                report = _verify(answer=draft_answer, chain=chain, user_question=user_question)
                 self.log.log(
                     "verification",
                     {

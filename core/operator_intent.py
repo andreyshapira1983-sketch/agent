@@ -52,6 +52,13 @@ def route_operator_intent(text: str) -> OperatorIntent | None:
     normalized = _normalize(text)
     if not normalized:
         return None
+    # Long pasted documents (job listings, articles, log dumps) almost
+    # never express an operator intent — they are content for the agent
+    # to process. Substring heuristics on tokens like "письм", "нужен",
+    # "почт" otherwise misclassify them as capability/email requests.
+    # Real intents fit comfortably under this size.
+    if len(normalized) > 600:
+        return None
     if _looks_like_shell_command(normalized):
         return OperatorIntent(
             kind="shell_command_hint",
@@ -275,8 +282,11 @@ def _matches_capability_request(text: str) -> bool:
         "телеграм",
         "email",
         "e-mail",
-        "почт",
-        "письм",
+        "почту",
+        "почты",
+        "почтой",
+        "письма",
+        "письмо",
         "gmail",
         "upwork",
         "апворк",

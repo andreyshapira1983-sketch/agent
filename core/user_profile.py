@@ -321,8 +321,15 @@ def update_profile(
 # ---------------------------------------------------------------------------
 
 def profile_to_prompt_block(profile: UserProfile) -> str:
-    """Render a ``<user_profile>`` XML block for synthesizer injection."""
-    interests_str = ", ".join(profile.interests) if profile.interests else "general"
+    """Render a ``<user_profile>`` XML block for synthesizer injection.
+
+    P2 — STYLE-ONLY block. Only fields that influence presentation
+    (verbosity, vocabulary, language, expertise level for terminology
+    depth) are emitted. Domain-tied fields like ``interests`` and
+    ``interaction_count`` are deliberately withheld so the LLM cannot
+    use the operator's past-topic history to narrow or steer the
+    current answer's domain. The current question alone defines scope.
+    """
     vocab = "technical" if profile.technical else "plain"
     return (
         "<user_profile>\n"
@@ -330,8 +337,6 @@ def profile_to_prompt_block(profile: UserProfile) -> str:
         f"verbosity: {profile.verbosity}\n"
         f"vocabulary: {vocab}\n"
         f"language: {profile.language}\n"
-        f"interests: {interests_str}\n"
-        f"interaction_count: {profile.interaction_count}\n"
         "</user_profile>"
     )
 

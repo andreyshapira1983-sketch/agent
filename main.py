@@ -5014,7 +5014,12 @@ def main() -> int:
             print()
             return 0
         if not q:
-            return 0
+            # An empty Enter must NOT exit — otherwise pasting a long
+            # multi-line block whose first line is blank (or pressing
+            # Enter to clear the prompt) drops the user back into the
+            # parent shell, which then tries to interpret the rest of
+            # the paste as commands. Use :quit / :exit / Ctrl+C / EOF.
+            continue
         # ── Multi-line input modes ────────────────────────────────────────────
         # Mode 1: explicit block  <<<  … >>>
         #   Start a line with <<< to enter block mode; finish with >>>
@@ -5029,7 +5034,15 @@ def main() -> int:
                 except (EOFError, KeyboardInterrupt):
                     print()
                     return 0
-                if bline.strip() == ">>>":
+                stripped = bline.strip()
+                if stripped == ">>>":
+                    break
+                # Tolerate the terminator glued to the end of a paste:
+                # "...вакансии.>>>" should also end the block, otherwise
+                # users get stuck in `... ` prompt forever after a single
+                # Ctrl+V whose buffer ended with ">>>" without a newline.
+                if stripped.endswith(">>>"):
+                    block_parts.append(bline.rstrip()[:-3].rstrip())
                     break
                 block_parts.append(bline)
             q = "\n".join(block_parts).strip()

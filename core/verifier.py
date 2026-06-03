@@ -38,7 +38,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from core.evidence import Evidence, ProvenanceChain
+from core.evidence import Evidence, ProvenanceChain, make_evidence
 
 
 # ---------------------------------------------------------------------------
@@ -543,6 +543,7 @@ def verify(
     answer: str,
     chain: ProvenanceChain,
     llm: Any = None,
+    user_question: str | None = None,
 ) -> VerificationReport:
     """Examine an answer and produce a structured verification report.
 
@@ -554,17 +555,48 @@ def verify(
     This handles URL format mismatches, partial paths, and lightly-paraphrased
     references that the substring matcher misses.
 
+    When *user_question* is provided, the operator's own input is treated
+    as a primary user_explicit source for verification purposes only —
+    a synthetic Evidence record is added to a local chain copy so claims
+    citing ``[user]`` (or paraphrasing the prompt text) resolve instead
+    of being marked ``cited_but_unmatched``. The original *chain* and any
+    downstream consumers (source_registry, evidence_collected event) are
+    unaffected — this baseline lives only inside the verifier.
+
     The annotated_answer is the answer text with citations rewritten:
     ``[file:foo.txt]`` becomes ``[verified:file:foo.txt]`` when matched,
     ``[general-knowledge]`` becomes ``[declared:general-knowledge]``
     (a third "self-declared" verdict — LLM owns up to prior knowledge),
     and chunks with no citation get a trailing ``[unverified]`` tag.
 
-    Structural scaffolding (Output Contract headers like ``Conclusion:``,
+    structural scaffolding (Output Contract headers like ``Conclusion:``,
     list markers, markdown headings) is preserved unchanged — these
     carry no claim and must never be tagged ``[unverified]``.
     """
+    # Track whether the externally-supplied chain was empty BEFORE we
+    # add the synthetic user_explicit baseline. The "no-chain" disclaimer
+    # and downstream gates fire on this value, not on the post-baseline
+    # length, so an answer derived purely from operator input is still
+    # honestly labelled "no external source consulted".
     chain_empty = len(chain) == 0
+    if user_question and user_question.strip():
+        # P0: synthesise a user_explicit baseline locally so [user]
+        # citations and paraphrases of the prompt resolve. We work on
+        # a fresh ProvenanceChain so callers' chain is not mutated and
+        # peripheral systems (source_registry, evidence_collected,
+        # knowledge_pipeline) keep their existing contracts.
+        user_ev = make_evidence(
+            kind="user_explicit",
+            source_id="user:current_turn",
+            obtained_via="user_input",
+            claim="Operator-provided text for the current turn",
+            excerpt=user_question.strip(),
+        )
+        local_chain = ProvenanceChain()
+        for ev in chain.evidences:
+            local_chain.add(ev)
+        local_chain.add(user_ev)
+        chain = local_chain
     all_chunks_text = split_into_chunks(answer)
 
     if not all_chunks_text:

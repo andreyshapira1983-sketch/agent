@@ -313,6 +313,9 @@ class TestAgentAttribute:
             }],
         )
         agent.run("read", file_hint="a.txt")
+        # P0 lives only inside verifier; agent.last_provenance still
+        # only carries external sources gathered by the planner.
+        assert len(agent.last_provenance.by_kind("file")) == 1
         assert len(agent.last_provenance) == 1
 
     def test_last_provenance_resets_between_runs(self, workspace: Path):

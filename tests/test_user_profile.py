@@ -378,11 +378,15 @@ class TestProfileToPromptBlock:
         block = profile_to_prompt_block(p)
         assert "language: en" in block
 
-    def test_block_contains_interests(self) -> None:
+    def test_block_excludes_interests(self) -> None:
+        # P2 — the prompt block must NOT carry domain-tied fields like
+        # interests; otherwise the synthesizer can self-bias topic
+        # selection on the operator's past-topic history.
         p = UserProfile(interests=["testing", "security"])
         block = profile_to_prompt_block(p)
-        assert "testing" in block
-        assert "security" in block
+        assert "testing" not in block
+        assert "security" not in block
+        assert "interests" not in block
 
     def test_block_has_opening_tag(self) -> None:
         block = profile_to_prompt_block(_fresh())
@@ -392,10 +396,14 @@ class TestProfileToPromptBlock:
         block = profile_to_prompt_block(_fresh())
         assert "</user_profile>" in block
 
-    def test_empty_interests_shows_general(self) -> None:
-        p = UserProfile(interests=[])
+    def test_block_excludes_interaction_count(self) -> None:
+        # P2 — interaction_count is metadata, not a style hint, and
+        # signals "how long has this user been here" which can prime
+        # the LLM to defer to past topics. Withhold it.
+        p = UserProfile(interests=[], interaction_count=42)
         block = profile_to_prompt_block(p)
-        assert "general" in block
+        assert "interaction_count" not in block
+        assert "42" not in block
 
     def test_technical_vocab_label(self) -> None:
         p_tech = UserProfile(technical=True)
