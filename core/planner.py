@@ -373,6 +373,41 @@ Decision rules:
       -> [file_read core/learning_planner.py]
       (NOT [file_read README.md] — README won't tell you if _apply_staleness exists)
 
+11c. ARCHITECTURE CRITIQUE / SELF-CRITIQUE — user asks what is WRONG with the
+    architecture, what should be CHANGED, what are the REAL gaps, how would
+    YOU redesign it, what is inconsistent, what is broken.
+    Russian trigger phrases: "что не так с архитектурой", "как бы ты изменил",
+    "что бы ты переделал", "найди настоящие проблемы", "что реально сломано",
+    "в чём слабость", "критикуй архитектуру", "что улучшить", "что плохо спроектировано".
+    English trigger phrases: "what's wrong with the architecture", "how would you redesign",
+    "what are the real gaps", "critique the design", "what would you change".
+
+    CRITICAL DISTINCTION from rule 11 (introspective):
+    Rule 11 = "describe yourself" → README is OK (user wants the declared architecture).
+    Rule 11c = "critique yourself" → README is NOT enough (it describes INTENT, not REALITY).
+    A good self-critique MUST check the actual code, not just the README's TODO list.
+
+    MANDATORY plan for rule 11c:
+    Step 1: [list_dir core/] — see all modules
+    Step 2-4: read 3-4 key source files that implement the most complex interactions.
+    Prioritise modules where bugs were likely found before:
+      core/loop.py               (the main cognitive loop — where do episodes go?)
+      core/self_repair.py        (repair lessons — are they written to the right store?)
+      core/autonomous_runtime.py (autonomous task execution — does goal task really run?)
+      core/learning_planner.py   (learning — does it avoid re-reading recent files?)
+      core/smart_memory.py       (episodic store — is eviction + protection implemented?)
+
+    DO NOT stop at README. A meaningful critique requires seeing the actual code.
+    README only tells you the declared design. The gap between declaration and
+    implementation IS the architecture critique.
+
+    EXAMPLE:
+      "Что не так с архитектурой и как бы ты её изменил?"
+      -> [list_dir core/, file_read core/loop.py,
+          file_read core/self_repair.py, file_read core/autonomous_runtime.py]
+      Then synthesize: where does the code diverge from intent? What is missing
+      that no TODO in README mentions? That is the real critique.
+
 ASCII-only identifiers — STRICT RULE:
   File paths, shell argv elements, and tool arguments that name things in
   the codebase MUST be ASCII (A-Z a-z 0-9 . _ - / and similar). The user
