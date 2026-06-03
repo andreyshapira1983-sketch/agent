@@ -2074,7 +2074,7 @@ def _handle_auto_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
 def _handle_work_session(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     """Handle :work-session command — bounded multi-cycle session."""
     tokens = _split_meta_args(rest)
-    dry_run = True
+    dry_run = False
     minutes: float = 10.0
     max_cycles: int = 3
     report_every: int = 1
