@@ -697,3 +697,186 @@ class TestAgentLoopAssumptionIntegration:
         if agent.last_assumptions:
             for a in agent.last_assumptions.assumptions:
                 assert a.run_id == "trace_test_001"
+
+
+# ---------------------------------------------------------------------------
+# Layer connections
+# ---------------------------------------------------------------------------
+
+class TestLayerConnections:
+    """Tests for cross-layer bridges: Layer 4→5 and Layer 2→5."""
+
+    # ------------------------------------------------------------------ L4→5
+
+    def test_known_language_ru_produces_profile_sourced_assumption(self):
+        """When known_language='ru' is passed, result is source='profile'."""
+        results = extract_from_question(
+            "привет мир тест проверка",
+            known_language="ru",
+        )
+        lang = [a for a in results if a.category == "language"]
+        assert len(lang) == 1
+        assert lang[0].source == "profile"
+        assert lang[0].confidence == 0.95
+
+    def test_known_language_en_produces_profile_sourced_assumption(self):
+        results = extract_from_question(
+            "hello world test check",
+            known_language="en",
+        )
+        lang = [a for a in results if a.category == "language"]
+        assert len(lang) == 1
+        assert lang[0].source == "profile"
+        assert "English" in lang[0].text
+
+    def test_known_language_none_falls_back_to_heuristic(self):
+        """Without known_language, Russian heuristic still fires."""
+        results = extract_from_question(
+            "привет мир тест проверка",
+            known_language=None,
+        )
+        lang = [a for a in results if a.category == "language"]
+        assert len(lang) == 1
+        assert lang[0].source == "question"
+        assert lang[0].confidence == 0.90
+
+    def test_known_language_omitted_falls_back_to_heuristic(self):
+        """Default call (no known_language arg) still uses heuristic."""
+        results = extract_from_question("привет мир тест проверка")
+        lang = [a for a in results if a.category == "language"]
+        assert len(lang) == 1
+        assert lang[0].source == "question"
+
+    def test_known_language_profile_higher_confidence_than_heuristic(self):
+        """Profile-sourced confidence (0.95) > heuristic confidence (0.90)."""
+        profile_result = extract_from_question("привет мир тест", known_language="ru")
+        heuristic_result = extract_from_question("привет мир тест проверка")
+        profile_lang = [a for a in profile_result if a.category == "language"]
+        heuristic_lang = [a for a in heuristic_result if a.category == "language"]
+        # profile requires known_language — need enough words to get heuristic but skip
+        if profile_lang and heuristic_lang:
+            assert profile_lang[0].confidence > heuristic_lang[0].confidence
+
+    def test_known_language_other_value_produces_no_language_assumption(self):
+        """An unrecognised language code ('fr') produces no assumption."""
+        results = extract_from_question("bonjour monde test", known_language="fr")
+        lang = [a for a in results if a.category == "language"]
+        assert len(lang) == 0
+
+    # ------------------------------------------------------------------ L2→5
+
+    def test_restore_from_store_marks_ids_as_restored(self):
+        """Assumptions loaded from store must be in _restored_ids."""
+        reg = AssumptionRegistry(run_id="r1")
+        a = Assumption(run_id="r1", text="Test.", category="general",
+                       source="heuristic", confidence=0.80)
+        reg.restore_from_store([a])
+        assert a.id in reg._restored_ids
+        assert a in reg.assumptions
+
+    def test_new_assumptions_excludes_restored(self):
+        """new_assumptions should not contain restored items."""
+        reg = AssumptionRegistry(run_id="r1")
+        restored = Assumption(run_id="r1", text="Old.", category="general",
+                              source="heuristic", confidence=0.80)
+        reg.restore_from_store([restored])
+        fresh = Assumption(run_id="r1", text="New.", category="scope",
+                          source="planner", confidence=0.80)
+        reg.register_many([fresh])
+        assert fresh in reg.new_assumptions
+        assert restored not in reg.new_assumptions
+
+    def test_new_assumptions_all_when_no_restore(self):
+        """Without any restore, new_assumptions == assumptions."""
+        reg = AssumptionRegistry(run_id="r2")
+        a1 = Assumption(run_id="r2", text="A.", source="heuristic")
+        a2 = Assumption(run_id="r2", text="B.", source="question")
+        reg.register_many([a1, a2])
+        assert reg.new_assumptions == reg.assumptions
+
+    def test_store_not_duplicated_on_second_run(self, tmp_path):
+        """If store already has assumptions for run_id, restore_from_store
+        prevents them being written again."""
+        store = _store(tmp_path)
+        a = Assumption(run_id="run_abc", text="Existing.", source="heuristic")
+        store.save(a)
+
+        # Simulate new run with same run_id
+        reg = AssumptionRegistry(run_id="run_abc")
+        prior = store.load_by_run("run_abc")
+        reg.restore_from_store(prior)
+
+        # Add one new assumption
+        new_a = Assumption(run_id="run_abc", text="Fresh.", source="question")
+        reg.register_many([new_a])
+
+        # Only save new ones
+        saved_count = store.save_many(reg.new_assumptions)
+        assert saved_count == 1
+
+        # Total in store: 2 (original + new), not 3
+        all_loaded = store.load_by_run("run_abc")
+        assert len(all_loaded) == 2
+
+    def test_loop_uses_profile_language_for_extract(self, tmp_path):
+        """AgentLoop passes user_profile.language to extract_from_question
+        so a known language produces a profile-sourced assumption."""
+        from unittest.mock import patch
+        from core.planner import PlannerOutput
+
+        agent = _make_agent_for_connections(tmp_path)
+
+        # Prime the profile with a known language
+        from core.user_profile import UserProfile
+        agent.last_user_profile = UserProfile(language="ru", language_locked=True)
+
+        mock_plan = PlannerOutput(reasoning="noop", sources=[], raw_response="", warnings=[])
+        with patch.object(agent.planner, "plan", return_value=mock_plan):
+            agent.run("привет мир тест проверка")
+
+        assert agent.last_assumptions is not None
+        lang_assumptions = [
+            a for a in agent.last_assumptions.assumptions if a.category == "language"
+        ]
+        assert len(lang_assumptions) == 1
+        assert lang_assumptions[0].source == "profile"
+
+
+# ---------------------------------------------------------------------------
+# Helper for connection tests
+# ---------------------------------------------------------------------------
+
+def _make_agent_for_connections(tmp_path):
+    """Minimal AgentLoop for Layer-connection tests."""
+    from core.logger import TraceLogger
+    from core.loop import AgentLoop
+    from core.memory import WorkingMemory
+    from core.planner import LLMPlanner
+    from core.policy import PolicyGate
+    from tools.base import ToolRegistry
+
+    class _FakeLLM:
+        provider = "mock"
+        model = "mock-model"
+        def complete(self, system, user, **kw):
+            return "Conclusion: done.\nSources:\n1. [general-knowledge]\nConfidence: high\nUnverified: nothing"
+        def stream(self, system, user, **kw):
+            yield "Conclusion: done.\nSources:\n1. [general-knowledge]\nConfidence: high\nUnverified: nothing"
+
+    llm = _FakeLLM()
+    logger = TraceLogger(trace_id="trace_conn_001", log_dir=tmp_path, verbose=False)
+    registry = ToolRegistry()
+    policy = PolicyGate(registry)
+    memory = WorkingMemory()
+    planner = LLMPlanner(llm=llm, registry=registry)
+    store = _store(tmp_path)
+
+    return AgentLoop(
+        registry=registry,
+        policy=policy,
+        llm=llm,
+        logger=logger,
+        planner=planner,
+        memory=memory,
+        assumption_store=store,
+    )

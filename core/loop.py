@@ -624,13 +624,35 @@ class AgentLoop:
             )
 
         # Layer 5 — create a fresh AssumptionRegistry and seed it from the question.
+        # Layer 4→5 bridge: pass the profile's known language so extract_from_question
+        # uses a higher-confidence profile signal instead of a raw heuristic.
         _run_assumptions = AssumptionRegistry(
             run_id=getattr(self.log, "trace_id", ""),
         )
+        # Layer 2→5 bridge: if the store already has assumptions for this run_id
+        # (e.g. a previous failed attempt in the same session), restore them so
+        # they are not duplicated and the prompt block stays accurate.
         try:
+            if self.assumption_store is not None:
+                _existing = self.assumption_store.load_by_run(
+                    getattr(self.log, "trace_id", "")
+                )
+                if _existing:
+                    _run_assumptions.restore_from_store(_existing)
+                    self.log.log("assumptions_restored", {
+                        "run_id": getattr(self.log, "trace_id", ""),
+                        "count": len(_existing),
+                    })
+        except Exception:
+            pass  # Restore must never abort the run.
+        try:
+            _known_lang: str | None = None
+            if self.last_user_profile is not None:
+                _known_lang = self.last_user_profile.language or None
             _q_assumptions = extract_from_question(
                 user_question,
                 run_id=getattr(self.log, "trace_id", ""),
+                known_language=_known_lang,
             )
             _run_assumptions.register_many(_q_assumptions)
         except Exception:
@@ -1586,9 +1608,9 @@ class AgentLoop:
 
         # Layer 5 — persist assumptions and expose via last_assumptions.
         self.last_assumptions = _run_assumptions
-        if self.assumption_store is not None and _run_assumptions.assumptions:
+        if self.assumption_store is not None and _run_assumptions.new_assumptions:
             try:
-                self.assumption_store.save_many(_run_assumptions.assumptions)
+                self.assumption_store.save_many(_run_assumptions.new_assumptions)
             except Exception:
                 pass  # Store failure must never abort the run.
 

@@ -150,32 +150,65 @@ _TOOL_ASSUMPTIONS: dict[str, list[tuple[str, AssumptionCategory, float]]] = {
 _PY_FILE_PATTERN = re.compile(r"\.py\b", re.IGNORECASE)
 
 
-def extract_from_question(question: str, run_id: str = "") -> list[Assumption]:
+def extract_from_question(
+    question: str,
+    run_id: str = "",
+    known_language: str | None = None,
+) -> list[Assumption]:
     """Extract implicit assumptions from the raw question text.
 
     Pure function — no I/O, no side effects.
+
+    Parameters
+    ----------
+    known_language:
+        If the ``UserProfile`` (Layer 4) already has a confirmed language
+        (``"ru"`` or ``"en"``), pass it here so the heuristic is skipped and
+        replaced by a higher-confidence profile-backed assumption.  When
+        ``None`` the regex heuristic runs as usual.
     """
     assumptions: list[Assumption] = []
 
-    # Language assumption — only when clearly one-sided
-    ru_count = len(_RUSSIAN_WORD.findall(question))
-    en_count = len(_ENGLISH_WORD.findall(question))
-    if ru_count >= 3 and en_count < ru_count:
-        assumptions.append(Assumption(
-            run_id=run_id,
-            text="The user expects a Russian-language response.",
-            category="language",
-            confidence=0.90,
-            source="question",
-        ))
-    elif en_count >= 4 and ru_count == 0:
-        assumptions.append(Assumption(
-            run_id=run_id,
-            text="The user expects an English-language response.",
-            category="language",
-            confidence=0.90,
-            source="question",
-        ))
+    # Language assumption
+    # Layer 4→5 bridge: if the user profile already knows the language,
+    # use that signal directly (higher confidence, source="profile").
+    if known_language is not None:
+        if known_language == "ru":
+            assumptions.append(Assumption(
+                run_id=run_id,
+                text="The user expects a Russian-language response.",
+                category="language",
+                confidence=0.95,
+                source="profile",
+            ))
+        elif known_language == "en":
+            assumptions.append(Assumption(
+                run_id=run_id,
+                text="The user expects an English-language response.",
+                category="language",
+                confidence=0.95,
+                source="profile",
+            ))
+    else:
+        # Fall back to heuristic — only when clearly one-sided
+        ru_count = len(_RUSSIAN_WORD.findall(question))
+        en_count = len(_ENGLISH_WORD.findall(question))
+        if ru_count >= 3 and en_count < ru_count:
+            assumptions.append(Assumption(
+                run_id=run_id,
+                text="The user expects a Russian-language response.",
+                category="language",
+                confidence=0.90,
+                source="question",
+            ))
+        elif en_count >= 4 and ru_count == 0:
+            assumptions.append(Assumption(
+                run_id=run_id,
+                text="The user expects an English-language response.",
+                category="language",
+                confidence=0.90,
+                source="question",
+            ))
 
     # Python version — "python" without a version specifier
     if _PYTHON_PATTERNS.search(question):
@@ -272,6 +305,10 @@ class AssumptionRegistry:
     def __init__(self, run_id: str = "") -> None:
         self.run_id = run_id
         self._items: list[Assumption] = []
+        # IDs loaded from the persistent store at run start (Layer 2→5 bridge).
+        # These are excluded from the end-of-run save_many call to avoid
+        # duplication in the JSONL file.
+        self._restored_ids: set[str] = set()
 
     # ---------- writes ----------
 
@@ -297,6 +334,16 @@ class AssumptionRegistry:
         """Bulk-register pre-built Assumption objects."""
         self._items.extend(assumptions)
 
+    def restore_from_store(self, assumptions: list[Assumption]) -> None:
+        """Load assumptions that were previously persisted (Layer 2→5 bridge).
+
+        These are added to the registry but marked as *restored* so they are
+        not written to the store again at end-of-run.
+        """
+        for a in assumptions:
+            self._restored_ids.add(a.id)
+        self._items.extend(assumptions)
+
     def mark_verified(self, assumption_id: str, *, verified: bool) -> bool:
         """Mark an assumption as confirmed (True) or contradicted (False).
 
@@ -315,6 +362,14 @@ class AssumptionRegistry:
     @property
     def assumptions(self) -> list[Assumption]:
         return list(self._items)
+
+    @property
+    def new_assumptions(self) -> list[Assumption]:
+        """Assumptions that were NOT restored from the store — only new ones.
+
+        Use this for end-of-run persistence to avoid JSONL duplication.
+        """
+        return [a for a in self._items if a.id not in self._restored_ids]
 
     @property
     def active(self) -> list[Assumption]:
