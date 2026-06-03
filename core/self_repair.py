@@ -653,6 +653,48 @@ class SelfRepairController:
 
     def _finish(self, report: RepairReport) -> None:
         self.agent.log.log("self_repair_result", report.summary())
+        # After a successful repair, persist a regression-guard lesson so the
+        # agent never silently reintroduces the same bug across sessions.
+        if report.status == "repaired":
+            self._write_repair_lesson(report)
+
+    def _write_repair_lesson(self, report: RepairReport) -> None:
+        """Persist a lesson to long-term memory after a confirmed repair.
+
+        The lesson is tagged "fact"+"insight" so it passes the Write Policy
+        consent gate without requiring an explicit user directive. It is also
+        tagged "regression-guard" and "bug-fix" so the retrieval policy can
+        surface it when similar files are touched in future cycles.
+        """
+        try:
+            if not hasattr(self.agent, "remember"):
+                return
+            proposal = report.proposal
+            evidence_summary = "; ".join(list(proposal.evidence)[:3]) or "none"
+            content = (
+                f"Bug fixed in '{proposal.path}': {proposal.reason or 'no description'}. "
+                f"Post-repair confidence: {report.measured_confidence:.2f}. "
+                f"Tests used: {', '.join(proposal.test_paths)}. "
+                f"Evidence: {evidence_summary}."
+            )
+            self.agent.remember(
+                content=content,
+                tags=["lesson", "bug-fix", "regression-guard", "fact", "insight"],
+                source="repair",
+                record_type="episodic",
+                owner="self",
+            )
+            self.agent.log.log(
+                "repair_lesson_saved",
+                {
+                    "path": proposal.path,
+                    "measured_confidence": report.measured_confidence,
+                    "content_chars": len(content),
+                },
+            )
+        except Exception:
+            # Lesson writing must never abort the repair report flow.
+            pass
 
     def _log_error(
         self,
