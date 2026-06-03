@@ -170,6 +170,7 @@ _UNSUPPORTED_VERDICTS: frozenset[str] = frozenset({
     "unverified",
     "cited_but_unmatched",
     "topic_supported_but_claim_unverified",
+    "subagent_asserted",
 })
 
 
@@ -211,7 +212,12 @@ def evaluate_low_evidence_policy(
             report, "topic_supported_but_claim_unverified_chunks", 0
         ) or 0
     )
-    unverified_total = unverified + cited_unmatched + topic_supported
+    subagent_asserted = int(
+        getattr(report, "subagent_asserted_chunks", 0) or 0
+    )
+    unverified_total = (
+        unverified + cited_unmatched + topic_supported + subagent_asserted
+    )
     verified_ratio = (verified / total) if total > 0 else 0.0
 
     if total < min_total_chunks:

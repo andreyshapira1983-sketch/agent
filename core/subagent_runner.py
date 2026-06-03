@@ -62,6 +62,17 @@ _SAFE_SUBAGENT_TOOLS: frozenset[str] = frozenset({
 # Hard ceiling on how many tool calls a single sub-agent may make.
 MAX_SUBAGENT_TOOL_CALLS = 3
 
+# Evidence kinds that count as EXTERNAL — i.e. verifiable artefacts the
+# sub-agent fetched from outside the LLM. `memory`, `llm_claim`,
+# `tool_output` (the catch-all for opaque tool returns), `unknown`, and
+# `user_explicit` are deliberately excluded: they don't add new
+# verifiable information beyond what the parent already trusts the LLM
+# or operator for.
+_EXTERNAL_EVIDENCE_KINDS: frozenset[str] = frozenset({
+    "file", "web_page", "web_search_hit", "test_result",
+    "log_event", "shell_output", "diff_preview",
+})
+
 # ---------------------------------------------------------------------------
 # Structural quality signals (no LLM call)
 # ---------------------------------------------------------------------------
@@ -195,10 +206,24 @@ class SubAgentRunResult:
     confidence_score: float = 0.0   # structural quality signal [0.0, 1.0]
     quality_score: int = 0          # LLM judge score [1-5], 0 = not judged
     complexity_tier: str = "standard"  # "trivial" | "standard" | "complex"
+    # Trust signal: how many pieces of evidence with an EXTERNAL kind
+    # (file / web_page / web_search_hit / test_result / log_event /
+    # shell_output / diff_preview) the sub-agent itself collected.
+    # When 0 the sub-agent only re-asserted what an LLM said with
+    # no verifiable backing — the parent verifier must NOT count
+    # such citations as `verified`.
+    external_evidence_count: int = 0
+    external_evidence_kinds: tuple[str, ...] = ()
 
     def to_evidence_text(self) -> str:
         """Format for injection into the parent loop's Evidence chain."""
+        # First line is a parseable trust marker that survives memory
+        # caching; the parent verifier reads it to decide whether the
+        # sub-agent's answer is admissible as `verified` evidence.
+        kinds_csv = ",".join(self.external_evidence_kinds)
         lines = [
+            f"[subagent-meta external_evidence_count={self.external_evidence_count}"
+            f" external_kinds={kinds_csv}]",
             f"SubAgent name={self.contract_name!r}",
             f"  role           : {self.role}",
             f"  objective      : {self.objective}",
@@ -386,6 +411,25 @@ class SubAgentRunner:
         # gracefully returns 0 on any failure so it never blocks the run)
         quality_score = self._judge_answer(objective, answer)
 
+        # Inspect the child's provenance chain for external evidence.
+        # Sub-agents that produced no external evidence cannot be
+        # treated as a primary source by the parent verifier.
+        ext_count = 0
+        ext_kinds: tuple[str, ...] = ()
+        try:
+            child_chain = getattr(child_loop, "last_provenance", None)
+            if child_chain is not None:
+                seen: list[str] = []
+                for _ev in child_chain.evidences:
+                    if _ev.kind in _EXTERNAL_EVIDENCE_KINDS:
+                        ext_count += 1
+                        if _ev.kind not in seen:
+                            seen.append(_ev.kind)
+                ext_kinds = tuple(seen)
+        except Exception:
+            ext_count = 0
+            ext_kinds = ()
+
         child_logger.log(
             "subagent_done",
             {
@@ -394,6 +438,8 @@ class SubAgentRunner:
                 "confidence_score": confidence_score,
                 "quality_score": quality_score,
                 "complexity_tier": complexity_tier,
+                "external_evidence_count": ext_count,
+                "external_evidence_kinds": list(ext_kinds),
             },
         )
         return SubAgentRunResult(
@@ -406,6 +452,8 @@ class SubAgentRunner:
             confidence_score=confidence_score,
             quality_score=quality_score,
             complexity_tier=complexity_tier,
+            external_evidence_count=ext_count,
+            external_evidence_kinds=ext_kinds,
         )
 
     # ------------------------------------------------------------------

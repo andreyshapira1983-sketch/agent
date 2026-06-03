@@ -298,7 +298,7 @@ class ClaimChunk:
     text: str
     citations: tuple[Citation, ...]
     matched_evidence_ids: tuple[str, ...]
-    verdict: str        # "verified" | "unverified" | "cited_but_unmatched" | "self_declared" | "topic_supported_but_claim_unverified"
+    verdict: str        # "verified" | "unverified" | "cited_but_unmatched" | "self_declared" | "topic_supported_but_claim_unverified" | "subagent_asserted"
 
 
 @dataclass(frozen=True)
@@ -336,6 +336,12 @@ class VerificationReport:
     # treat these as soft-fail (the topic is supported, the number is
     # not). Defaults to 0 so existing fake-report fixtures don't break.
     topic_supported_but_claim_unverified_chunks: int = 0
+    # Trust-architecture bucket: chunk's only matching evidence is a
+    # sub-agent answer that itself collected NO external evidence.
+    # Sub-agents are witnesses, not sources — they only become a
+    # source when they bring back verifiable artefacts. Counted
+    # separately from `verified_chunks`.
+    subagent_asserted_chunks: int = 0
 
     def to_log_payload(self) -> dict[str, Any]:
         return {
@@ -347,6 +353,7 @@ class VerificationReport:
             "structural_chunks": self.structural_chunks,
             "topic_supported_but_claim_unverified_chunks":
                 self.topic_supported_but_claim_unverified_chunks,
+            "subagent_asserted_chunks": self.subagent_asserted_chunks,
             "fully_unverified": self.fully_unverified,
             "chain_was_empty": self.chain_was_empty,
             "malformed_output": self.malformed_output,
@@ -725,6 +732,42 @@ def _tool_citation_for(ev: Evidence) -> str:
     return f"[verified:tool:{body}]"
 
 
+# Marker prepended by SubAgentRunResult.to_evidence_text() that survives
+# memory caching. Format:
+#   [subagent-meta external_evidence_count=N external_kinds=...]
+# When N == 0 the sub-agent collected NO external evidence and its
+# answer must NOT count as `verified` for the parent verifier.
+_SUBAGENT_META_RE = re.compile(
+    r"\[subagent-meta\s+external_evidence_count=(\d+)\s+external_kinds=([^\]]*)\]"
+)
+
+
+def _is_derivative_subagent_evidence(ev: Evidence) -> bool:
+    """True when *ev* came from a sub-agent that itself produced no
+    external evidence. Such an evidence is a witness, not a source."""
+    excerpt = ev.excerpt or ""
+    m = _SUBAGENT_META_RE.search(excerpt)
+    if m is None:
+        # Heuristic fallback: a memory artefact cached from a sub-agent
+        # answer (`memory:working_turn_X_subagent_NAME`) carries the
+        # marker only when the cache included it. Older artefacts
+        # without a marker are treated as derivative ONLY when the
+        # source_id explicitly identifies them as a sub-agent product
+        # AND the excerpt mentions no obvious external citation grammar.
+        sid = ev.source_id or ""
+        if "subagent_" in sid or sid == "tool_output:spawn_subagent":
+            # Look for citation hints inside the excerpt that suggest
+            # the sub-agent did fetch something external.
+            if any(tok in excerpt for tok in ("[web:", "[file:", "[search:", "[test:")):
+                return False
+            return True
+        return False
+    try:
+        return int(m.group(1)) == 0
+    except ValueError:
+        return False
+
+
 def verify(
     *,
     answer: str,
@@ -1027,6 +1070,57 @@ def verify(
         ))
         annotated_chunks.append(annotated)
 
+    # Trust-architecture post-pass: a chunk classified as `verified`
+    # whose matched evidences are ALL sub-agent answers with NO external
+    # backing is demoted to `subagent_asserted`. The sub-agent is a
+    # witness, not a source — its assertion only becomes evidence when
+    # it brings back verifiable artefacts.
+    subagent_asserted = 0
+    if examined_chunks:
+        ev_by_id: dict[str, Evidence] = {
+            ev.id: ev for ev in chain.evidences
+        }
+        rebuilt_chunks: list[ClaimChunk] = []
+        rebuilt_annotated: list[str] = []
+        # Pair chunks with their already-built annotated string. The
+        # annotated_chunks list interleaves structural blocks too, so
+        # we iterate by (chunk, annotated_str) for the claim chunks
+        # only and pass-through structural strings unchanged.
+        ann_iter = iter(annotated_chunks)
+        for ch in examined_chunks:
+            if ch.verdict != "verified" or not ch.matched_evidence_ids:
+                rebuilt_chunks.append(ch)
+                continue
+            evs = [ev_by_id.get(eid) for eid in ch.matched_evidence_ids]
+            evs = [e for e in evs if e is not None]
+            if not evs:
+                rebuilt_chunks.append(ch)
+                continue
+            if all(_is_derivative_subagent_evidence(e) for e in evs):
+                verified -= 1
+                subagent_asserted += 1
+                rebuilt_chunks.append(ClaimChunk(
+                    text=ch.text,
+                    citations=ch.citations,
+                    matched_evidence_ids=ch.matched_evidence_ids,
+                    verdict="subagent_asserted",
+                ))
+                # Visually mark the affected annotated chunk so a
+                # human reading the answer sees the demotion.
+                for i, line in enumerate(annotated_chunks):
+                    if line.startswith(ch.text[:30]) and (
+                        "[verified:" in line or "[subagent-asserted]" not in line
+                    ):
+                        if "[subagent-asserted]" not in line:
+                            annotated_chunks[i] = (
+                                line.rstrip() + " [subagent-asserted]"
+                            )
+                        break
+            else:
+                rebuilt_chunks.append(ch)
+        examined_chunks = rebuilt_chunks
+        del rebuilt_annotated, ann_iter
+
     annotated_answer = "\n".join(annotated_chunks)
 
     # Detect malformed output: the LLM completely ignored the Output Contract
@@ -1086,4 +1180,5 @@ def verify(
         disclaimer=disclaimer,
         malformed_output=malformed_output,
         topic_supported_but_claim_unverified_chunks=topic_supported,
+        subagent_asserted_chunks=subagent_asserted,
     )
