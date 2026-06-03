@@ -34,7 +34,10 @@ class WorkSessionConfig:
     """Immutable configuration for one work session."""
 
     goal: str = "project health"
-    dry_run: bool = True
+    # dry_run=False means real effects; the AutonomousRuntime will still block
+    # unless effects_approved=True, so this is safe to default to False.
+    # Pass dry_run=True explicitly from the CLI when you want a read-only pass.
+    dry_run: bool = False
     minutes: float = 10.0
     max_cycles: int = 3
     report_every: int = 1

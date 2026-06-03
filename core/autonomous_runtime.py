@@ -36,8 +36,8 @@ class AutonomousRuntimeConfig:
     learning_limit: int = 5
     budgets: BudgetLimits = field(default_factory=BudgetLimits)
     circuit: CircuitBreakerConfig = field(default_factory=CircuitBreakerConfig)
-    # Set True to run ReflectionEngine after the health pass.
-    enable_reflection: bool = False
+    # Run ReflectionEngine after the health pass to persist lessons from logs.
+    enable_reflection: bool = True
     reflection: ReflectionConfig = field(default_factory=ReflectionConfig)
 
 
@@ -572,6 +572,31 @@ class AutonomousRuntime:
         )
         try:
             result = engine.reflect(config.reflection)
+            # ── Consume the LearningPlan: ingest the files the reflection engine
+            # identified as weak spots so the agent actually studies them.
+            if result.learning_plan and result.learning_plan.source_paths:
+                try:
+                    ingest = ingest_files(
+                        agent=self.agent,
+                        workspace=self.workspace,
+                        paths=result.learning_plan.source_paths,
+                        dry_run=config.dry_run,
+                        auto_write_memory=False,
+                    )
+                    self._log(
+                        "reflection_learning_ingest",
+                        {
+                            "sources": len(result.learning_plan.source_paths),
+                            "claims": ingest.claim_count,
+                            "conflicts": ingest.conflicts,
+                            "dry_run": config.dry_run,
+                        },
+                    )
+                except Exception as ingest_exc:
+                    self._log(
+                        "reflection_learning_ingest_error",
+                        {"error": f"{type(ingest_exc).__name__}: {ingest_exc}"},
+                    )
             return result.to_dict()
         except Exception as exc:
             self._log("reflection_error", {"error": f"{type(exc).__name__}: {exc}"})
