@@ -178,13 +178,18 @@ def run_work_session(
 
             cycle_start = time.monotonic()
 
-            # ── one autonomous health pass per cycle (MVP: status task only) ─
+            # ── one autonomous pass per cycle ─────────────────────────────────
+            # include_goal=True when a non-default goal was supplied so the
+            # agent actually executes it via agent.run().  limit=2 allows both
+            # the mandatory status task and the goal task to run in one cycle.
+            has_real_goal = bool(config.goal) and config.goal != "project health"
             run_report = runtime.run(
                 AutonomousRuntimeConfig(
                     goal=config.goal,
                     dry_run=config.dry_run,
-                    limit=1,          # one task per cycle in this skeleton
+                    limit=2 if has_real_goal else 1,
                     include_tests=False,  # tests are slow; keep cycles fast
+                    include_goal=has_real_goal,
                 )
             )
 
