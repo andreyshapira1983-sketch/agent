@@ -102,6 +102,7 @@ from core.knowledge_use_policy import KnowledgeUsePolicy
 from core.reasoning_action_check import check_reasoning_actions
 from core.role_router import RoleContext, RoleRouter
 from core.step_repetition import StepRepetitionTracker
+from core.termination_guard import TerminationGuard
 from core.smart_memory import (
     EpisodicMemoryStore,
     MemoryConsolidationStore,
@@ -560,6 +561,8 @@ class AgentLoop:
         self._planner_cache: dict[tuple[int, float, str], Any] = {}
         # MAST FM-1.3 step-repetition tracker; replaced per `run()` call.
         self._step_repetition: StepRepetitionTracker = StepRepetitionTracker()
+        # MAST FM-1.5 / FM-3.1 termination guard; replaced per `run()` call.
+        self._termination_guard: TerminationGuard = TerminationGuard()
         self.last_provenance: ProvenanceChain = ProvenanceChain()
         self.last_role_context: RoleContext = self.role_router.route("")
         # MVP-14.4 — Verifier wiring. `verifier_enabled=False` skips the
@@ -932,6 +935,8 @@ class AgentLoop:
         # executions across all attempts so the loop can surface looping
         # planners. Reset every `run()` call.
         self._step_repetition = StepRepetitionTracker()
+        # Per-run termination guard (MAST FM-1.5, FM-3.1).
+        self._termination_guard = TerminationGuard()
         # MVP-14.1 — typed Evidence chain. Built in parallel with
         # `artifacts`; lives at the same scope so the synthesizer (and,
         # later, the Verifier) can consult it.
@@ -1140,6 +1145,19 @@ class AgentLoop:
             # triggers forward and ask the policy what to do next.
             failure_history.extend(attempt_failures)
 
+            # MAST FM-1.5 — stagnation check: same failure signature twice
+            # in a row means the loop is looping. Observational only.
+            try:
+                _stag = self._termination_guard.observe_attempt(
+                    attempt=attempt,
+                    failure_codes=[t.code for t in attempt_failures],
+                    artifact_labels=list(attempt_artifacts.keys()),
+                )
+                if _stag is not None:
+                    self.log.log("stagnation_detected", _stag.to_log_payload())
+            except Exception:
+                pass
+
             decision = self.replan_policy.decide(
                 failure_history=failure_history,
                 completed_attempts=attempt,
@@ -1269,6 +1287,21 @@ class AgentLoop:
         # Store the chain on the agent so tests / future Verifier code
         # can consult it after `run()` returns.
         self.last_provenance = chain
+
+        # MAST FM-3.1 — premature completion risk: empty evidence chain
+        # on a question whose phrasing demanded tools. Observational.
+        try:
+            _pc = self._termination_guard.check_completion(
+                question=user_question,
+                chain_size=len(chain),
+                had_any_artifacts=bool(artifacts),
+            )
+            if _pc is not None:
+                self.log.log(
+                    "premature_completion_risk", _pc.to_log_payload()
+                )
+        except Exception:
+            pass
 
         self.log.log(
             "evidence_collected",
