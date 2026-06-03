@@ -99,7 +99,9 @@ from core.assumption_registry import (  # Layer 5
     extract_from_question,
 )
 from core.knowledge_use_policy import KnowledgeUsePolicy
+from core.reasoning_action_check import check_reasoning_actions
 from core.role_router import RoleContext, RoleRouter
+from core.step_repetition import StepRepetitionTracker
 from core.smart_memory import (
     EpisodicMemoryStore,
     MemoryConsolidationStore,
@@ -556,6 +558,8 @@ class AgentLoop:
         # within the same session (invalidated when the episodic store changes).
         # Key: (hash(question), episodic_mtime, file_hint)
         self._planner_cache: dict[tuple[int, float, str], Any] = {}
+        # MAST FM-1.3 step-repetition tracker; replaced per `run()` call.
+        self._step_repetition: StepRepetitionTracker = StepRepetitionTracker()
         self.last_provenance: ProvenanceChain = ProvenanceChain()
         self.last_role_context: RoleContext = self.role_router.route("")
         # MVP-14.4 — Verifier wiring. `verifier_enabled=False` skips the
@@ -924,6 +928,10 @@ class AgentLoop:
         #   - stop on success OR when the attempt budget is gone
         failure_history: list[ReplanTrigger] = []
         artifacts: dict[str, dict[str, Any]] = {}
+        # Per-run step repetition tracker (MAST FM-1.3). Counts (tool, args)
+        # executions across all attempts so the loop can surface looping
+        # planners. Reset every `run()` call.
+        self._step_repetition = StepRepetitionTracker()
         # MVP-14.1 — typed Evidence chain. Built in parallel with
         # `artifacts`; lives at the same scope so the synthesizer (and,
         # later, the Verifier) can consult it.
@@ -1046,6 +1054,23 @@ class AgentLoop:
                         "attempt": attempt,
                     },
                 )
+
+            # MAST FM-2.6 — reasoning ↔ action consistency check.
+            try:
+                _ra_report = check_reasoning_actions(
+                    planner_out.reasoning,
+                    [s["tool"] for s in planner_out.sources],
+                )
+                if _ra_report.has_mismatch:
+                    self.log.log(
+                        "reasoning_action_mismatch",
+                        {
+                            **_ra_report.to_log_payload(),
+                            "attempt": attempt,
+                        },
+                    )
+            except Exception:
+                pass  # Observational only — must never abort the loop.
 
             plan = self._build_plan(goal, planner_out.sources)
             self.log.log("plan", plan, steps=len(plan.steps), attempt=attempt)
@@ -2873,6 +2898,15 @@ class AgentLoop:
         tool_name = step.action_spec.get("tool_name")
         source_label = step.action_spec.get("source_label") or f"step:{step.id}"
         arguments = step.action_spec.get("arguments", {})
+
+        # MAST FM-1.3 — track (tool, args) repetition across the whole run.
+        # Logged only the first time the count crosses the threshold so the
+        # event remains a single signal, not a per-replan stream.
+        _tracker = getattr(self, "_step_repetition", None)
+        if _tracker is not None and tool_name:
+            _rep = _tracker.observe(tool_name, arguments)
+            if _rep is not None:
+                self.log.log("step_repetition_detected", _rep)
 
         # Memory cache short-circuit
         if self.memory is not None and tool_name:
