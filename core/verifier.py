@@ -389,10 +389,21 @@ def match_citation(
     # Fallback: the LLM uses [web:query] to cite web_search results because
     # the evidence source label is "web:query" — but CITATION_PREFIXES maps
     # "web" → "web_page" while the actual evidence kind is "web_search_hit".
-    # When no web_page evidence exists, retry against web_search_hit so the
-    # citation is matched rather than silently dropped as cited_but_unmatched.
-    if not candidates and citation.prefix == "web":
-        candidates = chain.by_kind("web_search_hit")  # type: ignore[arg-type]
+    # We MERGE both kinds for the "web" prefix so that, even when a single
+    # web_page (e.g. a `web_fetch` URL) is in the chain, body-substring
+    # matches against query-style source_ids in `web_search_hit` records
+    # still resolve. Without this merge the URL-shaped source_id wins the
+    # candidate set, the body never substring-matches a URL, and every
+    # `[web:<query>]` citation is silently dropped as cited_but_unmatched.
+    if citation.prefix == "web":
+        search_hits = chain.by_kind("web_search_hit")  # type: ignore[arg-type]
+        if search_hits:
+            # Preserve order: page candidates first (more authoritative),
+            # then search hits.
+            seen: set[str] = {ev.id for ev in candidates}
+            candidates = list(candidates) + [
+                ev for ev in search_hits if ev.id not in seen
+            ]
 
     if not candidates:
         return None
@@ -407,7 +418,44 @@ def match_citation(
     # Prefixes whose body is a URL / file path skip the token
     # fallback — tokenising URLs produces noisy fragments (TLDs,
     # protocol names) that match across unrelated records.
+    # EXCEPTION: when the prefix is "web" and the body did not match
+    # any URL by substring, fall through to the token-overlap pass
+    # against the web_search_hit subset of candidates. The body of a
+    # `[web:<query>]` citation is a free-text query that will not
+    # substring-match a URL, but its meaningful tokens DO appear
+    # inside the corresponding `web_search:<query>` source_id, so the
+    # token-overlap pass can recover the link the substring pass
+    # missed without exposing the noisy URL-tokenisation problem.
     if citation.prefix in _NO_TOKEN_FALLBACK_PREFIXES:
+        if citation.prefix == "web":
+            # Only do token fallback when the body looks like a free-text
+            # query, NOT when it's a URL. Tokenising URLs produces noisy
+            # fragments (TLDs, "https", "com", path words) that can
+            # spuriously match unrelated `web_search:<query>` source_ids.
+            body_lower_full = citation.body.lower()
+            body_is_url = (
+                body_lower_full.startswith(("http://", "https://"))
+                or "://" in body_lower_full
+            )
+            if not body_is_url:
+                search_only = [
+                    ev for ev in candidates if ev.kind == "web_search_hit"
+                ]
+                if search_only:
+                    body_tokens = _tokenise_citation_body(citation.body)
+                    if body_tokens:
+                        best: Evidence | None = None
+                        best_score = 0
+                        for ev in search_only:
+                            sid_lower = ev.source_id.lower()
+                            score = sum(
+                                1 for tok in body_tokens if tok in sid_lower
+                            )
+                            if score > best_score:
+                                best = ev
+                                best_score = score
+                        if best_score >= 1:
+                            return best
         return None
 
     # Token-overlap fallback (test / shell / log / diff / memory /
