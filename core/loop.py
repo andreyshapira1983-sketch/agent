@@ -99,6 +99,7 @@ from core.assumption_registry import (  # Layer 5
     extract_from_question,
 )
 from core.knowledge_use_policy import KnowledgeUsePolicy
+from core.confidence_gate import ConfidenceGate
 from core.reasoning_action_check import check_reasoning_actions
 from core.role_router import RoleContext, RoleRouter
 from core.step_repetition import StepRepetitionTracker
@@ -563,6 +564,9 @@ class AgentLoop:
         self._step_repetition: StepRepetitionTracker = StepRepetitionTracker()
         # MAST FM-1.5 / FM-3.1 termination guard; replaced per `run()` call.
         self._termination_guard: TerminationGuard = TerminationGuard()
+        # Post-verifier confidence gate (Berkeley MAST 2025, Horvitz 1999).
+        # Constructed once; threshold/min_total can be overridden by tests.
+        self._confidence_gate: ConfidenceGate = ConfidenceGate()
         self.last_provenance: ProvenanceChain = ProvenanceChain()
         self.last_role_context: RoleContext = self.role_router.route("")
         # MVP-14.4 — Verifier wiring. `verifier_enabled=False` skips the
@@ -1380,6 +1384,20 @@ class AgentLoop:
                 )
             self.last_verification = report
             self.last_provenance = chain
+
+            # Berkeley MAST 2025 / Horvitz 1999 — post-verifier confidence
+            # gate. Observational only: the loop may still ship the answer,
+            # but a `low_confidence_gate` event is emitted when the
+            # verified/cited mass is below threshold so operators can
+            # detect over-confident-but-unsupported answers.
+            try:
+                _gate = self._confidence_gate.evaluate(report)
+                if _gate.triggered:
+                    self.log.log(
+                        "low_confidence_gate", _gate.to_log_payload()
+                    )
+            except Exception:
+                pass
 
             verify_replan_attempt = 0
             VERIFY_REPLAN_HARD_CAP = 2  # belt + braces over ReplanPolicy

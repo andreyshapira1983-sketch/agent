@@ -372,6 +372,31 @@ class EpisodicMemoryStore:
             return best_ep, best_score
         return None, 0.0
 
+    def prune_stale(
+        self,
+        *,
+        max_age_days: int = 30,
+        min_quality: float = 0.4,
+        staleness_threshold: float = 1.5,
+        dry_run: bool = False,
+    ) -> list[str]:
+        """Remove old, low-quality, non-protected episodes.
+
+        Wraps :func:`core.episodic_hygiene.prune_stale_episodes`.
+        Returns the IDs of evicted episodes.
+        """
+        # Local import: keeps episodic_hygiene out of the tight import
+        # graph of smart_memory.
+        from core.episodic_hygiene import prune_stale_episodes
+
+        return prune_stale_episodes(
+            self,
+            max_age_days=max_age_days,
+            min_quality=min_quality,
+            staleness_threshold=staleness_threshold,
+            dry_run=dry_run,
+        )
+
 
 class ProceduralMemoryStore:
     def __init__(self, path: Path | str):
