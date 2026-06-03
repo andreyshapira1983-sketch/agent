@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -9,6 +10,15 @@ from core.budget_ledger import BudgetLedger, BudgetWindow
 
 
 NOW = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _clear_budget_env(monkeypatch):
+    # Operator shells may export AGENT_BUDGET_* vars; strip them so tests
+    # that rely on `BudgetLedger.from_env` see a clean environment.
+    for name in list(os.environ):
+        if name.startswith("AGENT_BUDGET_"):
+            monkeypatch.delenv(name, raising=False)
 
 
 def test_budget_ledger_reserves_and_blocks_inside_window(tmp_path: Path):
