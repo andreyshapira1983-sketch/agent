@@ -53,6 +53,7 @@ FailureType = Literal[
     "policy_blocked",        # PolicyGate refused (unknown tool, missing reg)
     "unresolved_citation",   # MVP-14.5: Verifier saw [web:URL] but no web_fetch ran
     "injection_blocked",     # §2 Adversarial Defence: tool output contained injection
+    "plan_parse_failed",     # planner LLM output was not valid JSON
     "unknown",               # safety net for any code path the audit missed
 ]
 
@@ -68,6 +69,7 @@ ALL_FAILURE_TYPES: tuple[FailureType, ...] = (
     "policy_blocked",
     "unresolved_citation",
     "injection_blocked",
+    "plan_parse_failed",
     "unknown",
 )
 
@@ -243,6 +245,24 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
             "return an empty plan and inform the user honestly."
         ),
         requires_different_action=True,
+    ),
+
+    # The previous LLM reply was not valid JSON. The cheapest fix is
+    # to ask again with a hard reminder of the contract. Two attempts
+    # is enough: if the model can't return JSON twice in a row, it's
+    # not going to on the third try either, and we'd rather honestly
+    # tell the user the plan failed than synthesise a confident answer
+    # from no plan at all.
+    "plan_parse_failed": FailureBudget(
+        max_occurrences=2,
+        advice=(
+            "Your previous reply was NOT valid JSON and could not be "
+            "parsed. Reply with ONLY a single JSON object of the form "
+            '{"reasoning": "...", "steps": [...]} — no markdown fences, '
+            "no commentary before or after, no trailing text. If you "
+            "truly need no tools, return {\"reasoning\": \"...\", "
+            "\"steps\": []}."
+        ),
     ),
 
     # Safety-net.

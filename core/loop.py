@@ -1124,6 +1124,43 @@ class AgentLoop:
             attempt_artifacts: dict[str, dict[str, Any]] = {}
             attempt_failures: list[ReplanTrigger] = []
             attempt_chain = ProvenanceChain()
+
+            # Planner JSON parse failure: empty `sources` here is NOT an
+            # intentional general-knowledge plan, it's a contract break.
+            # Without this gate the loop would fall through to the
+            # `if not plan.steps or attempt_artifacts: break` branch
+            # below and the synthesizer would happily produce a long
+            # confident answer from zero evidence. Treat it as a real
+            # failure so `replan_policy.decide()` either gets us a clean
+            # JSON retry or trips `replan_exhausted` and the synthesizer
+            # writes the honest "I could not plan" reply.
+            plan_parse_failed = (
+                "plan_parse_failed" in (planner_out.warnings or ())
+            )
+            if plan_parse_failed:
+                self.log.log(
+                    "plan_parse_failed",
+                    {
+                        "attempt": attempt,
+                        "warnings": list(planner_out.warnings),
+                        "raw_chars": len(planner_out.raw_response),
+                        "raw_preview": planner_out.raw_response[:240],
+                    },
+                )
+                attempt_failures.append(
+                    ReplanTrigger(
+                        code="plan_parse_failed",
+                        step_id="planner",
+                        tool_name=None,
+                        arguments={},
+                        reason=(
+                            "Planner LLM reply did not parse as JSON "
+                            f"(raw_chars={len(planner_out.raw_response)})."
+                        ),
+                        attempt=attempt,
+                    )
+                )
+
             for step, outcome, trigger in self._execute_steps_parallel(plan.steps):
                 if outcome is None:
                     step.status = "failed"
@@ -1156,7 +1193,9 @@ class AgentLoop:
 
             # Success: either a 0-step plan (general-knowledge / history-only
             # answer is intentional) or at least one artifact came through.
-            if not plan.steps or attempt_artifacts:
+            # `plan_parse_failed` is NOT success — empty `sources` came from
+            # a JSON parse failure, not from the planner choosing zero tools.
+            if (not plan.steps and not plan_parse_failed) or attempt_artifacts:
                 artifacts = attempt_artifacts
                 chain = attempt_chain
                 break
