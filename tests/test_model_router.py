@@ -120,6 +120,11 @@ def test_router_reuses_one_model_instance_for_identical_routes():
 def test_router_can_select_new_model_from_registry_json(monkeypatch):
     monkeypatch.delenv("AGENT_PROVIDER", raising=False)
     monkeypatch.delenv("AGENT_MODEL", raising=False)
+    # Pin the routing policy: this test asserts the *conservative* default
+    # reason, so it must not inherit an ambient AGENT_MODEL_POLICY (e.g. the
+    # daemon's .env sets it to "balanced").
+    monkeypatch.delenv("AGENT_MODEL_POLICY", raising=False)
+    monkeypatch.delenv("AGENT_MODEL_MAX_COST", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv(
         "AGENT_MODEL_REGISTRY_JSON",
@@ -176,6 +181,10 @@ def test_router_can_select_new_model_from_registry_file(tmp_path: Path, monkeypa
         }),
         encoding="utf-8",
     )
+    # Same isolation as above: assert the conservative default, so strip any
+    # ambient policy override leaking from the environment / .env.
+    monkeypatch.delenv("AGENT_MODEL_POLICY", raising=False)
+    monkeypatch.delenv("AGENT_MODEL_MAX_COST", raising=False)
     monkeypatch.setenv("AGENT_MODEL_REGISTRY_PATH", str(registry_path))
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
