@@ -25,7 +25,7 @@ from core.reflection import ReflectionConfig, ReflectionEngine
 
 
 AutonomousTaskKind = Literal["status", "learn", "tests", "goal", "propose"]
-AutonomousTaskStatus = Literal["pending", "done", "failed", "skipped"]
+AutonomousTaskStatus = Literal["pending", "done", "failed", "skipped", "inconclusive"]
 AutonomousRunStatus = Literal["completed", "stopped", "blocked"]
 
 # Rotated per 10-min bucket so successive auto-run ticks study different
@@ -540,14 +540,27 @@ class AutonomousRuntime:
             return AutonomousTaskReport(task, "failed", result.error or "run_tests failed")
         failed = int(output.get("failed", 0) or 0) + int(output.get("errors", 0) or 0)
         passed = int(output.get("passed", 0) or 0)
-        status: AutonomousTaskStatus = "done" if failed == 0 else "failed"
+        timed_out = bool(output.get("timed_out"))
+        exit_code = output.get("exit_code")
+        # A timed-out run (or one with no exit code) did NOT actually establish
+        # health: passed=0/failed=0 only means "we never finished", not "green".
+        # Report it as inconclusive so downstream never reads it as success.
+        if timed_out or exit_code is None:
+            status: AutonomousTaskStatus = "inconclusive"
+            summary = (
+                f"inconclusive (timed_out={timed_out}, exit_code={exit_code}); "
+                f"passed={passed} failed_or_errors={failed}"
+            )
+        else:
+            status = "done" if failed == 0 else "failed"
+            summary = f"passed={passed} failed_or_errors={failed}"
         return AutonomousTaskReport(
             task,
             status,
-            f"passed={passed} failed_or_errors={failed}",
+            summary,
             {
-                "exit_code": output.get("exit_code"),
-                "timed_out": output.get("timed_out"),
+                "exit_code": exit_code,
+                "timed_out": timed_out,
                 "passed": passed,
                 "failed": output.get("failed", 0),
                 "errors": output.get("errors", 0),
@@ -763,6 +776,7 @@ class AutonomousRuntime:
                     "hash": phash,
                     "canonical_signature": signature,
                 },
+                dedup_key=f"proposed_task:{signature}",
             )
             written.append(
                 {

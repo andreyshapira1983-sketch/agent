@@ -106,23 +106,46 @@ class ApprovalInbox:
         reasons: tuple[str, ...] | list[str] = (),
         payload: dict | None = None,
         expires_at: str | None = None,
+        dedup_key: str | None = None,
     ) -> ApprovalInboxItem:
+        # Structural duplicate guard: if a dedup_key is supplied and an
+        # equivalent pending item already exists, return it instead of
+        # appending a near-identical row. This keeps the inbox drained of the
+        # repetitive proposed_task clusters the daemon used to accumulate.
+        if dedup_key is not None:
+            existing = self._find_pending_by_dedup_key(dedup_key)
+            if existing is not None:
+                return existing
         if expires_at is None:
             from datetime import timedelta
             expires_at = (
                 datetime.now(timezone.utc) + timedelta(hours=_DEFAULT_TTL_HOURS)
             ).isoformat()
+        merged_payload = dict(payload or {})
+        if dedup_key is not None:
+            merged_payload.setdefault("dedup_key", dedup_key)
         item = ApprovalInboxItem(
             operation=operation,
             summary=summary,
             risk=risk,
             reasons=tuple(reasons),
-            payload=dict(payload or {}),
+            payload=merged_payload,
             expires_at=expires_at,
         )
         self.items.append(item)
         self._save()
         return item
+
+    def _find_pending_by_dedup_key(self, dedup_key: str) -> ApprovalInboxItem | None:
+        """Return a still-pending item carrying ``dedup_key``, if any.
+
+        Expired items are first swept by ``pending()`` so a stale duplicate
+        never blocks a fresh, legitimately re-proposed task.
+        """
+        for item in self.pending():
+            if item.payload.get("dedup_key") == dedup_key:
+                return item
+        return None
 
     def expire_stale(self) -> int:
         """Abort pending items whose ``expires_at`` timestamp has passed.

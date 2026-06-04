@@ -172,3 +172,55 @@ class TestApprovalInboxExpiry:
 
         assert expired == 3
         assert all(it.status == "aborted" for it in inbox.items)
+
+
+class TestApprovalInboxDedup:
+    def test_same_dedup_key_does_not_create_second_pending(self):
+        inbox = ApprovalInbox()
+        first = inbox.add(
+            operation="proposed_task",
+            summary="add source registry tests",
+            dedup_key="proposed_task:tests:source-registry",
+        )
+        second = inbox.add(
+            operation="proposed_task",
+            summary="add source registry tests (reworded)",
+            dedup_key="proposed_task:tests:source-registry",
+        )
+
+        assert second.id == first.id  # returns the existing item
+        pending = inbox.pending()
+        assert len(pending) == 1
+
+    def test_distinct_dedup_keys_create_separate_items(self):
+        inbox = ApprovalInbox()
+        inbox.add(operation="proposed_task", summary="a", dedup_key="k:a")
+        inbox.add(operation="proposed_task", summary="b", dedup_key="k:b")
+        assert len(inbox.pending()) == 2
+
+    def test_dedup_key_is_stored_in_payload(self):
+        inbox = ApprovalInbox()
+        item = inbox.add(
+            operation="proposed_task", summary="x", dedup_key="k:x"
+        )
+        assert item.payload["dedup_key"] == "k:x"
+
+    def test_no_dedup_key_keeps_legacy_behaviour(self):
+        # Without a dedup_key, identical adds still both land (back-compat).
+        inbox = ApprovalInbox()
+        inbox.add(operation="proposed_task", summary="dup")
+        inbox.add(operation="proposed_task", summary="dup")
+        assert len(inbox.pending()) == 2
+
+    def test_dedup_allows_new_item_after_existing_one_decided(self):
+        inbox = ApprovalInbox()
+        first = inbox.add(
+            operation="proposed_task", summary="task", dedup_key="k:t"
+        )
+        inbox.deny(first.id)  # no longer pending
+        second = inbox.add(
+            operation="proposed_task", summary="task again", dedup_key="k:t"
+        )
+        assert second.id != first.id
+        assert len(inbox.pending()) == 1
+

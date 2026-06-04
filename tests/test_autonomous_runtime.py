@@ -36,6 +36,22 @@ class FakeRunTestsTool(Tool):
         }
 
 
+class FakeTimedOutRunTestsTool(Tool):
+    name = "run_tests"
+    description = "fake tests that time out"
+    risk = "reversible"
+
+    def run(self, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "exit_code": None,
+            "timed_out": True,
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "failed_tests": [],
+        }
+
+
 class LLMCountingRuntime(AutonomousRuntime):
     def _task_status(self, task):
         # Make 2 LLM calls so that a budget limit of 1 is reliably exceeded.
@@ -94,6 +110,117 @@ def test_auto_runtime_can_run_test_health_check(workspace: Path):
     assert report.tasks[-1].task.kind == "tests"
     assert report.tasks[-1].status == "done"
     assert "passed=3" in report.tasks[-1].summary
+
+
+def test_timed_out_tests_are_reported_inconclusive_not_done(workspace: Path):
+    # A run that times out (passed=0, failed=0, exit_code=None) must NOT be
+    # reported as a clean "done" — that is the false-success bug in Layer A.
+    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
+    registry = ToolRegistry()
+    registry.register(FakeTimedOutRunTestsTool())
+    llm = FakeLLM(responses=[])
+    agent = AgentLoop(
+        registry=registry,
+        policy=PolicyGate(registry),
+        llm=llm,
+        logger=TraceLogger(new_trace_id(), workspace / "logs", verbose=False),
+        planner=LLMPlanner(llm=llm, registry=registry),
+        memory=WorkingMemory(),
+        persistent_store=PersistentMemoryStore(workspace / "data" / "memory.jsonl"),
+        retrieval_policy=MemoryRetrievalPolicy(),
+        write_policy=MemoryWritePolicy(),
+        source_registry_store=SourceRegistryStore(workspace / "data" / "sources.jsonl"),
+        approval_provider=AutoApprover(default="approve"),
+        max_replan_attempts=1,
+    )
+
+    report = AutonomousRuntime(agent, workspace=workspace).run(
+        AutonomousRuntimeConfig(limit=3, include_tests=True)
+    )
+
+    tests_report = report.tasks[-1]
+    assert tests_report.task.kind == "tests"
+    assert tests_report.status == "inconclusive"
+    assert tests_report.status != "done"
+    assert tests_report.details["timed_out"] is True
+    assert tests_report.details["exit_code"] is None
+
+
+
+def test_tick_marks_timed_out_run_inconclusive_not_healthy(workspace: Path, monkeypatch):
+    """End-to-end daemon tick regression.
+
+    Drive the real ``run_tick`` with a run_tests tool that times out
+    (timed_out=true, exit_code=null, passed=0, failed_or_errors=0). The tick
+    log must record the honest verdict — result_status/tests_health =
+    "inconclusive" — and must NEVER mark this tick as done/pass/healthy, while
+    keeping run_status=completed as a separate signal.
+    """
+    import json
+    import agent_tick
+
+    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
+
+    # Minimal agent whose only test tool reports a timed-out (unfinished) run.
+    registry = ToolRegistry()
+    registry.register(FakeTimedOutRunTestsTool())
+    llm = FakeLLM(responses=[])
+    agent = AgentLoop(
+        registry=registry,
+        policy=PolicyGate(registry),
+        llm=llm,
+        logger=TraceLogger(new_trace_id(), workspace / "logs", verbose=False),
+        planner=LLMPlanner(llm=llm, registry=registry),
+        memory=WorkingMemory(),
+        persistent_store=PersistentMemoryStore(workspace / "data" / "memory.jsonl"),
+        retrieval_policy=MemoryRetrievalPolicy(),
+        write_policy=MemoryWritePolicy(),
+        source_registry_store=SourceRegistryStore(workspace / "data" / "sources.jsonl"),
+        approval_provider=AutoApprover(default="approve"),
+        max_replan_attempts=1,
+    )
+
+    # run_tick lazily does `from main import build_agent`; patch that symbol.
+    import main
+    monkeypatch.setattr(main, "build_agent", lambda *a, **k: agent)
+
+    # run_tick does os.environ.setdefault("AGENT_TEST_TIMEOUT_SECONDS", ...);
+    # pin it via monkeypatch so the global env mutation is reverted on teardown
+    # and cannot leak into other tests (e.g. the default-timeout assertion).
+    monkeypatch.setenv("AGENT_TEST_TIMEOUT_SECONDS", "300")
+
+    # Enqueue a pending auto_run task that includes the tests health check.
+    queue = TaskQueueStore(workspace / "data" / "task_queue.jsonl")
+    queue.add(goal="project health", dry_run=True, include_tests=True, limit=3)
+
+    exit_code = agent_tick.run_tick(workspace, dry_run=True)
+    assert exit_code == 0
+
+    # Parse the append-only tick log.
+    log_path = workspace / "logs" / "daemon_tick.jsonl"
+    events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+    by_event = {}
+    for ev in events:
+        by_event.setdefault(ev.get("event"), []).append(ev)
+
+    # task_done carries the honest result_status, kept separate from run_status.
+    task_done = by_event["task_done"][-1]
+    assert task_done["result_status"] == "inconclusive"
+    assert task_done["run_status"] == "completed"  # the run itself finished
+
+    # tick_complete must report inconclusive, never a healthy/pass verdict.
+    tick_complete = by_event["tick_complete"][-1]
+    assert tick_complete["tests_health"] == "inconclusive"
+    assert tick_complete["result_status"] == "inconclusive"
+    assert tick_complete["tests_health"] not in {"pass", "done"}
+
+    # An explicit inconclusive marker event must have been logged.
+    assert "tests_inconclusive" in by_event
+
+    # No event anywhere may claim the timed-out run passed.
+    for ev in events:
+        assert ev.get("tests_health") != "pass"
+        assert ev.get("result_status") not in {"done", "pass"}
 
 
 def test_auto_runtime_blocks_non_dry_run_into_approval_inbox(workspace: Path):
