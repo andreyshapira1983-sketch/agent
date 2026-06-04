@@ -4098,6 +4098,22 @@ def _handle_approval_list(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     return True
 
 
+def _handle_approval_triage(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """Read-only triage of the pending approval inbox.
+
+    Groups pending proposed_task items into clusters, flags duplicates / stale
+    / dangerous / low-value items, and prints a recommended_action per item.
+    Never deletes or executes anything — purely advisory.
+    """
+    from core.approval_triage import format_triage_report, triage_inbox
+
+    inbox = _approval_inbox_for(agent, workspace)
+    report = triage_inbox(inbox.pending())
+    print(format_triage_report(report), file=sys.stderr)
+    agent.log.log("approval_inbox_triage", report.to_dict())
+    return True
+
+
 def _handle_approval_decision(
     rest: str,
     agent: AgentLoop,
@@ -4735,6 +4751,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head == ":approval-list":
         return _handle_approval_list(rest.strip(), agent, workspace)
 
+    if head in {":approval-triage", ":triage"}:
+        return _handle_approval_triage(rest.strip(), agent, workspace)
+
     # Short aliases for approval commands
     if head == ":inbox":
         return _handle_approval_list("pending", agent, workspace)
@@ -4856,6 +4875,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :release-audit [--json]         inspect release artifact hygiene exclusions\n"
             "  :supply-chain-audit [--json]   inspect pinned deps and CI release gates\n"
             "  :approval-list [status|all]     list pending/approved/denied approval items\n"
+            "  :approval-triage                read-only triage: clusters/duplicates/stale + advice\n"
             "  :approval-approve <id>          mark an approval inbox item approved\n"
             "  :approval-deny <id>             mark an approval inbox item denied\n"
             "  :approval-run <id>              execute one approved whitelisted operation\n"
@@ -5052,7 +5072,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-triage  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:
