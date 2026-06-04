@@ -34,6 +34,14 @@ AutonomousRunStatus = Literal["completed", "stopped", "blocked"]
 _LEARN_ROOT_ROTATION: tuple[str, ...] = (".", "core", "tools", "tests", "scripts")
 _REFLECTION_LOG_WINDOWS: tuple[int, ...] = (20, 40, 30, 60)
 
+# Effect-producing tools that must NOT run during a dry-run goal task. A
+# dry-run is meant to be a read-only "think out loud" pass; allowing
+# file_write here let the agent litter the workspace with junk artifacts
+# (e.g. install_coverage.bat). PolicyGate denies these by name and the
+# planner replans onto a read-only path (replan code: policy_blocked,
+# requires_different_action=True).
+_DRY_RUN_BLOCKED_TOOLS: frozenset[str] = frozenset({"file_write", "shell_exec"})
+
 
 def _rotation_index(modulus: int, *, bucket_seconds: int = 600) -> int:
     return int(time.time() // bucket_seconds) % max(modulus, 1)
@@ -456,7 +464,7 @@ class AutonomousRuntime:
             if task.kind == "goal":
                 if not self._reserve(budget, circuit, "agent_runs", task.kind):
                     return AutonomousTaskReport(task, "skipped", "agent_runs budget exhausted")
-                return self._task_goal(task)
+                return self._task_goal(task, config)
             if task.kind == "propose":
                 return self._task_propose(task, config, budget)
         except Exception as exc:
@@ -624,9 +632,27 @@ class AutonomousRuntime:
         except Exception:
             return 0
 
-    def _task_goal(self, task: AutonomousTask) -> AutonomousTaskReport:
-        """Run task.description as a user question through the parent AgentLoop."""
-        answer = self.agent.run(user_question=task.description)
+    def _task_goal(self, task: AutonomousTask, config: AutonomousRuntimeConfig) -> AutonomousTaskReport:
+        """Run task.description as a user question through the parent AgentLoop.
+
+        In dry-run mode, effect-producing tools (file_write, shell_exec) are
+        blocked for the duration of the run so the agent reasons read-only and
+        cannot leave junk files behind. The block is run-scoped and always
+        restored, even on error.
+        """
+        policy = getattr(self.agent, "policy", None)
+        block = config.dry_run and policy is not None and hasattr(policy, "blocked_tools")
+        previous_blocked = getattr(policy, "blocked_tools", None) if block else None
+        if block:
+            policy.blocked_tools = policy.blocked_tools | _DRY_RUN_BLOCKED_TOOLS
+            self._log("autonomous_goal_effects_blocked", {
+                "blocked_tools": sorted(_DRY_RUN_BLOCKED_TOOLS),
+            })
+        try:
+            answer = self.agent.run(user_question=task.description)
+        finally:
+            if block:
+                policy.blocked_tools = previous_blocked
         summary = (answer[:120].replace("\n", " ")) if answer else "(no answer)"
         return AutonomousTaskReport(
             task,

@@ -239,3 +239,58 @@ def test_auto_runtime_queue_can_run_specific_task_ids(workspace: Path):
     assert report.processed[0].task_id == new.id
     assert queue.get(new.id).status == "done"
     assert queue.get(old.id).status == "pending"
+
+
+def test_dry_run_goal_blocks_effect_tools_and_restores(workspace: Path):
+    """A dry-run goal task must deny file_write/shell_exec so the agent
+    cannot leave junk files (e.g. install_coverage.bat) behind, then
+    restore the policy's block-list afterwards."""
+    from core.autonomous_runtime import AutonomousTask
+
+    agent = _agent(workspace, with_tests=False)
+
+    seen: dict[str, frozenset[str]] = {}
+
+    def _capture(*, user_question: str) -> str:
+        seen["blocked"] = frozenset(agent.policy.blocked_tools)
+        return "analysis"
+
+    agent.run = _capture  # type: ignore[method-assign]
+    runtime = AutonomousRuntime(agent, workspace=workspace)
+    task = AutonomousTask(kind="goal", description="analyze core/replan.py")
+
+    # Dry-run: effect tools are blocked during the run.
+    report = runtime._task_goal(task, AutonomousRuntimeConfig(dry_run=True))
+    assert report.status == "done"
+    assert {"file_write", "shell_exec"} <= seen["blocked"]
+    # And the block-list is restored once the run finishes.
+    assert agent.policy.blocked_tools == frozenset()
+
+    # Non-dry-run: effect tools are NOT blocked (the loop's own approval
+    # gate governs them instead).
+    seen.clear()
+    runtime._task_goal(task, AutonomousRuntimeConfig(dry_run=False))
+    assert "file_write" not in seen["blocked"]
+    assert agent.policy.blocked_tools == frozenset()
+
+
+def test_policy_gate_blocks_listed_tool(workspace: Path):
+    """PolicyGate denies any tool named in its blocked_tools set, before
+    risk evaluation, regardless of that tool's reversibility."""
+    from core.models import Action
+
+    registry = ToolRegistry()
+    registry.register(FakeRunTestsTool())
+    gate = PolicyGate(registry)
+
+    allow = gate.check(
+        Action(step_id="s1", type="tool_call", tool_name="run_tests", parameters={})
+    )
+    assert allow.decision == "allow"
+
+    gate.blocked_tools = frozenset({"run_tests"})
+    deny = gate.check(
+        Action(step_id="s1", type="tool_call", tool_name="run_tests", parameters={})
+    )
+    assert deny.decision == "deny"
+    assert "blocked in this context" in " ".join(deny.reasons)

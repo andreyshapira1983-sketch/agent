@@ -19,6 +19,13 @@ POLICY_ID = "mvp-default-policy"
 class PolicyGate:
     def __init__(self, registry: ToolRegistry):
         self.registry = registry
+        # Optional run-scoped block-list. Tools whose name is in this set are
+        # denied before any risk evaluation. The autonomous runtime uses this
+        # to forbid effect-producing tools (file_write, shell_exec) during a
+        # dry-run so the agent cannot litter the workspace with junk files
+        # (e.g. an install_coverage.bat) while merely "thinking out loud".
+        # Empty by default — interactive use is unaffected.
+        self.blocked_tools: frozenset[str] = frozenset()
 
     def check(self, action: Action) -> PolicyDecision:
         subject = action.tool_name or action.type
@@ -50,6 +57,18 @@ class PolicyGate:
                 action="tool_call",
                 decision="deny",
                 reasons=[f"tool '{action.tool_name}' not in registry"],
+            )
+
+        if action.tool_name in self.blocked_tools:
+            return PolicyDecision(
+                policy_id=POLICY_ID,
+                subject=action.tool_name,
+                action="tool_call",
+                decision="deny",
+                reasons=[
+                    f"tool '{action.tool_name}' is blocked in this context "
+                    "(effects disabled / dry-run)"
+                ],
             )
 
         # Argument-aware risk: e.g. file_write is `reversible` when the
