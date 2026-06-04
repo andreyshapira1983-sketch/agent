@@ -339,3 +339,78 @@ def test_search_by_tags_returns_matching_episodes(tmp_path: Path) -> None:
     results = store.search_by_tags(["lesson"])
     assert lesson in results
     assert other not in results
+
+
+# ── Episodic fast-path environment-safety guard ──────────────────────────────
+# The fast path replays a stored answer verbatim, skipping planner + synthesizer.
+# It must NOT do so when the cached episode used tools: such answers depend on
+# the state of the environment (files, installed packages, command output) which
+# may have changed since. Only purely reasoned (no-tool) answers are replayable.
+
+PLAN_GENERAL_KNOWLEDGE = json.dumps({"reasoning": "general knowledge", "steps": []})
+
+SYNTH_GENERAL_KNOWLEDGE = (
+    "Conclusion: A fresh general-knowledge answer. [general-knowledge]\n"
+    "Facts:\n"
+    "- a fact [general-knowledge]\n"
+    "Sources:\n"
+    "1. general-knowledge - general-knowledge\n"
+    "Confidence: high\n"
+    "Unverified: nothing\n"
+    "Safety: nothing\n"
+)
+
+
+def test_fast_path_skipped_when_cached_episode_used_tools(workspace: Path) -> None:
+    """A high-quality cached answer produced WITH tools must not be replayed
+    verbatim — the environment may have changed, so the agent must re-plan."""
+    llm = FakeLLM([PLAN_GENERAL_KNOWLEDGE, SYNTH_GENERAL_KNOWLEDGE])
+    agent, log_path = _build_agent(workspace, llm)
+    question = "is pytest cov installed in this project"
+    agent.episodic_store.save(
+        EpisodeRecord(
+            goal="check tooling",
+            question=question,
+            outcome="success",
+            summary="cached tool-based answer",
+            tools_used=("shell_exec",),
+            verified_chunks=2,
+            unverified_chunks=0,
+            full_answer="STALE: pytest-cov is NOT installed.",
+        )
+    )
+
+    answer = agent.run(question)
+
+    events = _events(log_path)
+    assert not [e for e in events if e["event"] == "episodic_fast_path"]
+    planner_calls = [c for c in llm.calls if "PLANNER_MODE" in c["system"]]
+    assert planner_calls, "fast path was taken — planner should have run"
+    assert "STALE" not in answer
+
+
+def test_fast_path_used_when_cached_episode_had_no_tools(workspace: Path) -> None:
+    """A high-quality cached answer produced WITHOUT tools is environment-
+    independent and may be replayed verbatim via the fast path."""
+    llm = FakeLLM([])  # fast path returns before any LLM call
+    agent, log_path = _build_agent(workspace, llm)
+    question = "what is the capital of france"
+    agent.episodic_store.save(
+        EpisodeRecord(
+            goal="trivia",
+            question=question,
+            outcome="success",
+            summary="cached reasoned answer",
+            tools_used=(),
+            verified_chunks=2,
+            unverified_chunks=0,
+            full_answer="Paris is the capital of France.",
+        )
+    )
+
+    answer = agent.run(question)
+
+    events = _events(log_path)
+    assert [e for e in events if e["event"] == "episodic_fast_path"]
+    assert answer == "Paris is the capital of France."
+    assert not [c for c in llm.calls if "PLANNER_MODE" in c["system"]]

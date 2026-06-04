@@ -842,6 +842,10 @@ class AgentLoop:
         #   - file_hint is set (the answer is tied to a specific file)
         #   - question starts with ':' (operator command)
         #   - full_answer is empty (episode from before this feature)
+        #   - the cached episode used tools — its answer depends on the state of
+        #     the environment (files, installed packages, command output) which
+        #     may have changed since; only purely reasoned answers (no tools)
+        #     are safe to replay verbatim.
         _fp_ep = self._last_best_similar_episode
         _fp_score = self._last_best_similar_score
         if (
@@ -851,6 +855,7 @@ class AgentLoop:
             and _fp_score >= 0.85
             and _fp_ep.answer_quality_score >= 0.70
             and _fp_ep.full_answer
+            and not _fp_ep.tools_used
         ):
             self.log.log(
                 "episodic_fast_path",
