@@ -29,7 +29,7 @@ AutonomousRunStatus = Literal["completed", "stopped", "blocked"]
 # subtrees and reflect over different log windows instead of repeating the
 # same input. Stateless: derived from wall clock.
 _LEARN_ROOT_ROTATION: tuple[str, ...] = (".", "core", "tools", "tests", "scripts")
-_REFLECTION_LOG_WINDOWS: tuple[int, ...] = (20, 40, 10, 60)
+_REFLECTION_LOG_WINDOWS: tuple[int, ...] = (20, 40, 30, 60)
 
 
 def _rotation_index(modulus: int, *, bucket_seconds: int = 600) -> int:
