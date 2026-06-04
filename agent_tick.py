@@ -124,6 +124,56 @@ def _is_stale(age_seconds: float | None) -> bool:
     return age_seconds > EXPECTED_TICK_INTERVAL_SECONDS * STALENESS_FACTOR
 
 
+def _dry_run_visibility(
+    *,
+    dry_run: bool,
+    previous_streak: int = 0,
+    processed_effects: int = 0,
+) -> dict:
+    """Honest observability fields for the current tick — PURE, NO behaviour change.
+
+    A pure function: no file/env/clock reads, no side effects. The caller is
+    responsible for sourcing ``previous_streak`` (e.g. from the prior heartbeat)
+    and ``processed_effects`` (count of effects actually applied this tick).
+
+    This block only *describes* what the daemon is (not) doing; it never enables
+    effects, never touches approval policy, and never alters proposal logic. It
+    is also kept SEPARATE from run_status / result_status — those answer "did the
+    run finish" and "what did it establish"; these answer "what mode am I in and
+    did I apply anything".
+
+    Args:
+      - ``dry_run``          — whether this tick runs without applying effects.
+      - ``previous_streak``  — dry_run_streak carried from the previous tick.
+      - ``processed_effects``— effects actually applied this tick (normally 0).
+
+    Returns:
+      - ``mode``             — ``"dry_run"`` or ``"live"``.
+      - ``effects``          — ``"disabled"`` in dry-run, else ``"enabled"``
+                               (i.e. *policy-allowed*, not "already applied").
+      - ``processed_effects``— echoed back, clamped to a non-negative int. In
+                               practice 0: dry-run applies nothing and the live
+                               path is still gated into the approval inbox.
+      - ``dry_run_streak``   — consecutive dry-run ticks. ``previous_streak + 1``
+                               on a dry-run tick (regardless of test health —
+                               a failed/inconclusive dry-run tick is STILL a
+                               dry-run tick), and resets to 0 on a live tick.
+    """
+    try:
+        prev = max(0, int(previous_streak))
+    except (TypeError, ValueError):
+        prev = 0
+    try:
+        applied = max(0, int(processed_effects))
+    except (TypeError, ValueError):
+        applied = 0
+    return {
+        "mode": "dry_run" if dry_run else "live",
+        "effects": "disabled" if dry_run else "enabled",
+        "processed_effects": applied,
+        "dry_run_streak": prev + 1 if dry_run else 0,
+    }
+
 
 def _classify_test_health(tests_result: dict | None) -> str:
     """Map a ``tests_result`` payload to a single honest health verdict.
@@ -182,6 +232,18 @@ def _print_status(workspace: Path) -> int:
                 f"(event={last_event}).",
                 file=sys.stderr,
             )
+
+    # Dry-run visibility from the last heartbeat: honest "what was (not) applied".
+    if heartbeat is not None:
+        mode = heartbeat.get("mode", "?")
+        effects = heartbeat.get("effects", "?")
+        processed = heartbeat.get("processed_effects", "?")
+        streak = heartbeat.get("dry_run_streak", "?")
+        print(
+            f"Mode: {mode} (effects={effects}, processed_effects={processed}, "
+            f"dry_run_streak={streak})",
+            file=sys.stderr,
+        )
 
     inbox = ApprovalInbox(path=workspace / APPROVAL_INBOX_PATH)
     pending = inbox.pending()
@@ -288,11 +350,27 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         "error": None,
     }
 
+    # Dry-run visibility (observability only — never changes behaviour). Read
+    # the PREVIOUS heartbeat before overwriting it so the streak is accurate.
+    # Extraction lives here (impure I/O); the helper itself stays pure.
+    _prev_hb = _read_heartbeat(workspace)
+    try:
+        _prev_streak = max(0, int((_prev_hb or {}).get("dry_run_streak", 0) or 0))
+    except (TypeError, ValueError):
+        _prev_streak = 0
+    visibility = _dry_run_visibility(
+        dry_run=dry_run,
+        previous_streak=_prev_streak,
+        processed_effects=0,  # no effect is ever applied in this layer
+    )
+    summary.update(visibility)
+
     # Heartbeat #1: record that a tick STARTED before doing any work. Even if
     # the tick later crashes, the liveness file proves the daemon is running.
     _write_heartbeat(
         workspace,
-        {"event": "tick_start", "tick_start": tick_start, "dry_run": dry_run},
+        {"event": "tick_start", "tick_start": tick_start, "dry_run": dry_run,
+         **visibility},
     )
 
     try:
@@ -370,9 +448,14 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
                 task_store.mark_done(task.id, report=run_report.to_dict())
                 # run_status = did the run finish (completed); result_status =
                 # what the work actually established (done/failed/inconclusive).
+                # mode/processed_effects make it explicit that a dry-run task
+                # applied nothing.
                 _log_tick(workspace, {"event": "task_done", "task_id": task.id,
                                       "run_status": run_report.status,
-                                      "result_status": task_result_status})
+                                      "result_status": task_result_status,
+                                      "mode": summary["mode"],
+                                      "effects": summary["effects"],
+                                      "processed_effects": summary["processed_effects"]})
 
         # ── 3. Tally inbox ────────────────────────────────────────────────────
         inbox_check = ApprovalInbox(path=workspace / APPROVAL_INBOX_PATH)
@@ -389,6 +472,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
                 "tick_start": tick_start,
                 "dry_run": dry_run,
                 "error": summary["error"],
+                **visibility,
             },
         )
         print(f"[agent_tick] ERROR: {exc}", file=sys.stderr)
@@ -409,6 +493,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
             "result_status": summary["result_status"],
             "tasks_processed": summary["tasks_processed"],
             "inbox_pending_after": summary["inbox_pending_after"],
+            **visibility,
         },
     )
 
@@ -416,8 +501,13 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     pending = summary["inbox_pending_after"]
     tests   = summary["tests_result"]
     health  = summary["tests_health"]
-    mode    = "DRY-RUN (no effects applied)" if dry_run else "LIVE (effects allowed)"
-    print(f"[agent_tick] mode={mode}", file=sys.stderr)
+    # Honest, machine-greppable visibility line: never implies effects ran.
+    print(
+        f"[agent_tick] mode={summary['mode']} effects={summary['effects']} "
+        f"processed_effects={summary['processed_effects']} "
+        f"dry_run_streak={summary['dry_run_streak']}",
+        file=sys.stderr,
+    )
     if tests:
         print(
             f"[agent_tick] tests_health={health} "

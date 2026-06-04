@@ -223,6 +223,57 @@ def test_tick_marks_timed_out_run_inconclusive_not_healthy(workspace: Path, monk
         assert ev.get("result_status") not in {"done", "pass"}
 
 
+def test_tick_dry_run_streak_grows_then_resets_on_live(workspace: Path, monkeypatch):
+    """End-to-end dry-run visibility regression.
+
+    Two consecutive dry-run ticks must grow dry_run_streak (1 -> 2) and report
+    mode=dry_run / effects=disabled / processed_effects=0. A following live tick
+    must reset the streak to 0 and never imply that effects were applied.
+    """
+    import json
+    import agent_tick
+
+    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
+
+    agent = _agent(workspace, with_tests=False)
+    import main
+    monkeypatch.setattr(main, "build_agent", lambda *a, **k: agent)
+    monkeypatch.setenv("AGENT_TEST_TIMEOUT_SECONDS", "300")
+
+    hb_path = workspace / "data" / "daemon_heartbeat.json"
+
+    # Tick 1 (dry-run): no pending task needed; we only assert visibility fields.
+    assert agent_tick.run_tick(workspace, dry_run=True) == 0
+    hb1 = json.loads(hb_path.read_text(encoding="utf-8"))
+    assert hb1["mode"] == "dry_run"
+    assert hb1["effects"] == "disabled"
+    assert hb1["processed_effects"] == 0
+    assert hb1["dry_run_streak"] == 1
+
+    # Tick 2 (dry-run): streak increments.
+    assert agent_tick.run_tick(workspace, dry_run=True) == 0
+    hb2 = json.loads(hb_path.read_text(encoding="utf-8"))
+    assert hb2["dry_run_streak"] == 2
+    assert hb2["mode"] == "dry_run"
+
+    # Tick 3 (live): streak resets, nothing implies effects were applied.
+    assert agent_tick.run_tick(workspace, dry_run=False) == 0
+    hb3 = json.loads(hb_path.read_text(encoding="utf-8"))
+    assert hb3["mode"] == "live"
+    assert hb3["dry_run_streak"] == 0
+    assert hb3["processed_effects"] == 0
+
+    # The tick log never claims an effect was applied.
+    events = [
+        json.loads(line)
+        for line in (workspace / "logs" / "daemon_tick.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    for ev in events:
+        assert ev.get("processed_effects", 0) == 0
+
+
 def test_auto_runtime_blocks_non_dry_run_into_approval_inbox(workspace: Path):
     agent = _agent(workspace, with_tests=False)
 
