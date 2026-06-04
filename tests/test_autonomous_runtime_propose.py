@@ -82,12 +82,14 @@ def test_propose_writes_three_inbox_items(workspace: Path) -> None:
     assert report.tasks[0].task.kind == "propose"
     assert report.tasks[0].status == "done"
     assert "proposals_written=3" in report.tasks[0].summary
+    assert "semantic_dupes=0" in report.tasks[0].summary
     proposed = [item for item in inbox.items if item.operation == "proposed_task"]
     assert len(proposed) == 3
     for item in proposed:
         assert item.status == "pending"
         assert item.risk == "reversible"
         assert "kind" in item.payload and "description" in item.payload
+        assert "canonical_signature" in item.payload
 
 
 def test_propose_handles_malformed_json(workspace: Path) -> None:
@@ -197,3 +199,95 @@ def test_propose_appended_when_flag_on(workspace: Path) -> None:
 
     kinds = [t.task.kind for t in report.tasks]
     assert kinds[-1] == "propose"
+
+
+def test_propose_semantic_dedup_against_existing(workspace: Path) -> None:
+    """Reworded but conceptually identical proposal must be rejected."""
+    inbox = ApprovalInbox()
+    inbox.add(
+        operation="proposed_task",
+        summary="Analyze claim distribution across sources to identify knowledge gaps",
+        risk="reversible",
+        payload={
+            "kind": "learn",
+            "description": "Analyze claim distribution across sources to identify knowledge gaps",
+        },
+    )
+    payload = {
+        "proposals": [
+            # Reworded near-duplicate of the existing one (same kind, same topic).
+            {
+                "kind": "learn",
+                "description": "Examine the distribution of claims among sources to find knowledge gaps and concentration",
+                "rationale": "near-duplicate",
+                "est_cost": "low",
+            },
+            # Genuinely new topic.
+            {
+                "kind": "tests",
+                "description": "Add CLI smoke tests for the work-session command",
+                "rationale": "uncovered",
+                "est_cost": "low",
+            },
+        ]
+    }
+    llm = FakeLLM(responses=[json.dumps(payload)])
+    agent = _agent(workspace, llm)
+
+    report = ProposeOnlyRuntime(agent, workspace=workspace, approval_inbox=inbox).run(_config())
+
+    summary = report.tasks[0].summary
+    assert "proposals_written=1" in summary
+    assert "semantic_dupes=1" in summary
+    proposed = [item for item in inbox.items if item.operation == "proposed_task"]
+    # one pre-existing + one new (tests CLI), but NOT the reworded learn one
+    assert len(proposed) == 2
+    descriptions = [p.summary for p in proposed]
+    assert any("CLI smoke tests" in d for d in descriptions)
+    assert not any("Examine the distribution" in d for d in descriptions)
+
+
+def test_propose_semantic_dedup_different_kind_passes(workspace: Path) -> None:
+    """Same topic but different kind must NOT collide (different work)."""
+    inbox = ApprovalInbox()
+    inbox.add(
+        operation="proposed_task",
+        summary="Analyze claim distribution across sources",
+        risk="reversible",
+        payload={"kind": "learn", "description": "Analyze claim distribution across sources"},
+    )
+    payload = {
+        "proposals": [
+            {
+                "kind": "tests",
+                "description": "Analyze claim distribution across sources via tests",
+                "rationale": "different kind",
+                "est_cost": "low",
+            },
+        ]
+    }
+    llm = FakeLLM(responses=[json.dumps(payload)])
+    agent = _agent(workspace, llm)
+
+    report = ProposeOnlyRuntime(agent, workspace=workspace, approval_inbox=inbox).run(_config())
+
+    assert "proposals_written=1" in report.tasks[0].summary
+    assert "semantic_dupes=0" in report.tasks[0].summary
+
+
+def test_propose_canonical_signature_recorded(workspace: Path) -> None:
+    payload = {
+        "proposals": [
+            {"kind": "tests", "description": "Add registry integrity tests", "rationale": "ok", "est_cost": "low"},
+        ]
+    }
+    llm = FakeLLM(responses=[json.dumps(payload)])
+    agent = _agent(workspace, llm)
+    inbox = ApprovalInbox()
+
+    ProposeOnlyRuntime(agent, workspace=workspace, approval_inbox=inbox).run(_config())
+
+    proposed = [item for item in inbox.items if item.operation == "proposed_task"]
+    assert len(proposed) == 1
+    sig = proposed[0].payload.get("canonical_signature")
+    assert isinstance(sig, str) and sig.startswith("tests:")

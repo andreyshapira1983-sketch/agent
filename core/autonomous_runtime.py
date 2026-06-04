@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -36,6 +37,73 @@ _REFLECTION_LOG_WINDOWS: tuple[int, ...] = (20, 40, 30, 60)
 
 def _rotation_index(modulus: int, *, bucket_seconds: int = 600) -> int:
     return int(time.time() // bucket_seconds) % max(modulus, 1)
+
+
+# --- Proposal hygiene: canonical signature + token-Jaccard semantic dedup ---
+#
+# sha256(description) only catches verbatim repeats. Sonnet rewords the same
+# idea every tick, so the inbox accumulates near-duplicates. Below we extract
+# a canonical token set per proposal and reject new proposals whose tokens
+# overlap an existing same-kind proposal at >= _PROPOSAL_JACCARD_THRESHOLD.
+# Kind is part of the signature: a "learn" claim-distribution and a "goal"
+# claim-distribution stay separate (they imply different work).
+_PROPOSAL_STOPWORDS: frozenset[str] = frozenset({
+    "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "by", "with",
+    "from", "is", "are", "be", "that", "this", "these", "those", "it", "its",
+    "as", "at", "across", "into", "their", "there", "which", "what", "than",
+    "then", "also", "we", "our", "i", "you", "your", "they", "them", "not",
+    "no", "but", "so", "if", "via", "about", "any", "all", "some", "more",
+    "most", "less", "few", "each", "other", "such", "may", "can", "will",
+    "would", "should", "could", "have", "has", "had", "been", "being",
+    "ensure", "help", "help", "use", "uses", "used",
+})
+_PROPOSAL_JACCARD_THRESHOLD: float = 0.4
+
+
+def _proposal_stem(token: str) -> str:
+    """Strip a few common English suffixes so 'claim'/'claims' collapse.
+
+    Intentionally tiny and deterministic — no NLTK, no language detection.
+    Good enough to make Sonnet's reworded near-duplicates collide on the
+    Jaccard threshold below.
+    """
+    for suffix in ("ization", "ations", "ation", "ings", "ies", "ied", "ing", "ers", "ers", "ed", "es", "s"):
+        if len(token) > len(suffix) + 2 and token.endswith(suffix):
+            base = token[: -len(suffix)]
+            if suffix == "ies":
+                base += "y"
+            return base
+    return token
+
+
+def _proposal_tokens(text: str) -> frozenset[str]:
+    text = (text or "").lower()
+    text = re.sub(r"[^a-z0-9_]+", " ", text)
+    return frozenset(
+        _proposal_stem(t)
+        for t in text.split()
+        if len(t) > 2 and t not in _PROPOSAL_STOPWORDS
+    )
+
+
+def _proposal_canonical_signature(kind: str, description: str) -> str:
+    """Deterministic, human-readable bucket key like 'tests:claim:registry:source'.
+
+    Different `kind` always yields different signatures. Within a kind, two
+    descriptions collapse to the same signature only if their token-sets are
+    identical *after* taking the top alphabetic slice; this is intentionally
+    coarse so the operator can grep the inbox.
+    """
+    kind = (kind or "other").strip().lower() or "other"
+    toks = sorted(_proposal_tokens(description))
+    return f"{kind}:{':'.join(toks[:6])}"
+
+
+def _proposal_jaccard(a: frozenset[str], b: frozenset[str]) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
 
 
 @dataclass(frozen=True)
@@ -584,7 +652,7 @@ class AutonomousRuntime:
             return AutonomousTaskReport(task, "skipped", "agent has no llm")
 
         digest = self._proposal_digest()
-        existing_hashes = self._existing_proposal_hashes()
+        existing_hashes, existing_token_sets = self._existing_proposal_fingerprints()
 
         system = (
             "You propose next tasks for a bounded autonomous coding agent. "
@@ -613,6 +681,7 @@ class AutonomousRuntime:
 
         written: list[dict] = []
         skipped_dupes = 0
+        skipped_semantic = 0
         for proposal in proposals:
             if len(written) >= cap:
                 break
@@ -632,7 +701,29 @@ class AutonomousRuntime:
             if phash in existing_hashes:
                 skipped_dupes += 1
                 continue
+            tokens = _proposal_tokens(description)
+            best_overlap = 0.0
+            for prev_kind, prev_tokens in existing_token_sets:
+                if prev_kind != kind:
+                    continue
+                overlap = _proposal_jaccard(tokens, prev_tokens)
+                if overlap > best_overlap:
+                    best_overlap = overlap
+            if best_overlap >= _PROPOSAL_JACCARD_THRESHOLD:
+                skipped_semantic += 1
+                self._log(
+                    "proposal_semantic_dupe",
+                    {
+                        "kind": kind,
+                        "jaccard": round(best_overlap, 3),
+                        "threshold": _PROPOSAL_JACCARD_THRESHOLD,
+                        "description": description,
+                    },
+                )
+                continue
+            signature = _proposal_canonical_signature(kind, description)
             existing_hashes.add(phash)
+            existing_token_sets.append((kind, tokens))
             item = self.approval_inbox.add(
                 operation="proposed_task",
                 summary=description,
@@ -644,16 +735,42 @@ class AutonomousRuntime:
                     "description": description,
                     "rationale": rationale,
                     "hash": phash,
+                    "canonical_signature": signature,
                 },
             )
-            written.append({"id": item.id, "kind": kind, "description": description})
+            written.append(
+                {
+                    "id": item.id,
+                    "kind": kind,
+                    "description": description,
+                    "canonical_signature": signature,
+                }
+            )
 
-        summary = f"proposals_written={len(written)} dupes={skipped_dupes}"
+        cluster_summary: dict[str, int] = {}
+        for entry in written:
+            sig = entry.get("canonical_signature") or ""
+            cluster_summary[sig] = cluster_summary.get(sig, 0) + 1
+        if cluster_summary:
+            self._log(
+                "proposal_cluster",
+                {"written": len(written), "clusters": cluster_summary},
+            )
+
+        summary = (
+            f"proposals_written={len(written)} "
+            f"dupes={skipped_dupes} semantic_dupes={skipped_semantic}"
+        )
         return AutonomousTaskReport(
             task,
             "done",
             summary,
-            {"written": written, "skipped_dupes": skipped_dupes, "raw_count": len(proposals)},
+            {
+                "written": written,
+                "skipped_dupes": skipped_dupes,
+                "skipped_semantic_dupes": skipped_semantic,
+                "raw_count": len(proposals),
+            },
         )
 
     def _proposal_digest(self) -> dict:
@@ -678,24 +795,36 @@ class AutonomousRuntime:
                 digest["recent_lessons"] = []
         return digest
 
-    def _existing_proposal_hashes(self) -> set[str]:
+    def _existing_proposal_fingerprints(
+        self,
+    ) -> tuple[set[str], list[tuple[str, frozenset[str]]]]:
+        """Return (sha256_hashes, [(kind, token_set), ...]) for pending proposals.
+
+        Hashes catch verbatim repeats. Token sets feed the Jaccard-based
+        semantic dedup so reworded near-duplicates do not bloat the inbox.
+        """
         hashes: set[str] = set()
+        token_sets: list[tuple[str, frozenset[str]]] = []
         try:
             snap = self.approval_inbox.snapshot()
         except Exception:
-            return hashes
+            return hashes, token_sets
         for item in snap.get("items", []) or []:
             if item.get("operation") != "proposed_task":
                 continue
+            if item.get("status") != "pending":
+                continue
             payload = item.get("payload") or {}
+            desc = payload.get("description") or item.get("summary") or ""
+            kind = (payload.get("kind") or "other").strip().lower() or "other"
             phash = payload.get("hash")
             if isinstance(phash, str) and phash:
                 hashes.add(phash)
-                continue
-            desc = payload.get("description") or item.get("summary") or ""
-            if desc:
+            elif desc:
                 hashes.add(hashlib.sha256(desc.lower().encode("utf-8")).hexdigest()[:16])
-        return hashes
+            if desc:
+                token_sets.append((kind, _proposal_tokens(desc)))
+        return hashes, token_sets
 
     @staticmethod
     def _parse_proposals(raw: str | None) -> list[dict] | None:
