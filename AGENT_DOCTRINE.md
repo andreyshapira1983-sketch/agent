@@ -7,7 +7,7 @@ in `README.md`.
 
 ## Current Execution Semantics
 
-Snapshot date: 2026-06-02.
+Snapshot date: 2026-06-04.
 
 - Work Session exists as `core/work_session.py` and the `:work-session`
   command. Its current skeleton runs bounded multi-cycle health/status passes,
@@ -34,6 +34,10 @@ Snapshot date: 2026-06-02.
 - Approval Inbox daemon notice exists. On REPL startup, pending items from
   `data/approval_inbox.jsonl` are surfaced as a daemon notice so the operator
   can review them later.
+- `:auto-run` rotates the learning root (`. / core / tools / tests / scripts`)
+  and the reflection log window (`20 / 40 / 30 / 60`) per 10-minute wall-clock
+  bucket. This is a stateless diversification of inputs; it does not change
+  approval, budget or execution boundaries.
 - Long unattended autonomy remains blocked while approval items are pending or
   persistent hour/day budget enforcement limits are unset. Budget tracking can
   be active while enforcement remains disabled when all persistent limits are
@@ -45,13 +49,11 @@ The operator state that triggered this doctrine refresh reported:
 
 - architecture audit: present=17, gap=1
 - stale gap: Doctrine and Architecture Source of Truth
-- source registry: 64 sources / 473 claims
-- persistent memory: 21 records
-- approvals: 3 pending / 5 total
-- scheduler_due=1
+- source registry: 191 sources / 913 claims
+- persistent memory: 80 records
+- approvals: 0 pending
+- scheduler_due=0
 - budget tracking active with hour/day enforcement disabled
-- pending approvals include OperatorRoutingBugfixer, UpworkJobMonitor and an
-  Upwork capability request
 
 These are observed status counts, not permissions. This doctrine update does
 not approve pending items, activate capabilities, run subagents, or change

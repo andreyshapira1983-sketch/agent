@@ -37,7 +37,7 @@ ingested with `:ingest-source` / `:ingest-project`; useful facts can be saved
 across sessions with `:remember` or controlled knowledge writes. The Write
 Policy refuses secrets, blocked tags, and unconsented noise.
 
-A hermetic test suite (**2355 cases, zero network**) backs every layer:
+A hermetic test suite (**2779 cases, zero network**) backs every layer:
 tool safety, planner routing, policy gate enforcement, working memory,
 persistent memory + write policy + retrieval policy, human approval gate
 (escalate → approve / deny / abort), secret scanning + universal
@@ -119,7 +119,7 @@ RL, deployment, SDK, embeddings/vector RAG and edge runtime are explicitly
 
 ## Current execution semantics
 
-As of 2026-06-02, the doctrine boundary is:
+As of 2026-06-04, the doctrine boundary is:
 
 - `:work-session` exists, but the current skeleton mainly runs bounded
   dry-run/status cycles through `AutonomousRuntime`. It proves timing,
@@ -137,15 +137,15 @@ As of 2026-06-02, the doctrine boundary is:
   refreshed explicitly with `:refresh-models`; tier overrides are still under
   operator control.
 - The Approval Inbox daemon notice surfaces pending items at REPL startup.
+- `:auto-run` rotates the learning root (`. / core / tools / tests / scripts`) and the reflection log window (`20 / 40 / 30 / 60`) per 10-minute wall-clock bucket; this surfaces different weak areas across successive ticks instead of repeating the same input. See `core/autonomous_runtime.py`.
 - Long unattended autonomy remains limited whenever approval items are pending
   or persistent hour/day budget limits are unset. Tracking can be active while
   enforcement is disabled if all persistent limits are zero.
 
 The operator snapshot that triggered this doctrine refresh reported
-`source_registry=64 sources / 473 claims`, `persistent_memory=21 records`,
-`approvals=3 pending / 5 total`, `scheduler_due=1`, and budget tracking active
-with hour/day enforcement disabled. Pending approval items included
-OperatorRoutingBugfixer, UpworkJobMonitor and an Upwork capability request.
+`source_registry=191 sources / 913 claims`, `persistent_memory=80 records`,
+`approvals=0 pending`, `scheduler_due=0`, and budget tracking active
+with hour/day enforcement disabled.
 Those counts are status only; they do not approve items, activate capabilities,
 run subagents, or change memory data.
 
@@ -1338,7 +1338,7 @@ The full acceptance suite is in
 > redaction + classification, argument-aware risk (`risk_for`),
 > a sandboxed reversible/irreversible write tool, a sandboxed
 > whitelisted shell tool with mandatory compensation + rollback,
-> 2355 hermetic tests covering every production module, and
+> 2779 hermetic tests covering every production module, and
 > zero-network determinism. The numbered slots below extend that foundation;
 > they are not the smallest possible thing.
 
@@ -2249,7 +2249,7 @@ A real safety net lives in [`tests/`](tests/) and runs via `pytest`:
 python -m pytest -v
 ```
 
-What is covered today (**2355 tests, approx. 37 s, zero network calls**):
+What is covered today (**2779 tests, approx. 37 s, zero network calls**):
 
 | Layer | File | Cases |
 | --- | --- | --- |
@@ -2429,7 +2429,7 @@ agent/
 ├── .github/workflows/ci.yml            # release/supply-chain/test/coverage gate
 ├── pytest.ini                        # pytest config (testpaths + pythonpath)
 ├── main.py                           # CLI entry point (+ :remember / :forget / :memory)
-├── tests/                            # 2355 hermetic tests (FakeLLM + FakePlanner)
+├── tests/                            # 2779 hermetic tests (FakeLLM + FakePlanner)
 │   ├── conftest.py                   # FakeLLM, FakePlanner, workspace fixture
 │   ├── test_ids.py                   # ID factory: 4 cases
 │   ├── test_models.py                # Pydantic Literal guards + defaults: 48 cases
