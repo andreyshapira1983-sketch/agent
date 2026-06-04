@@ -7,6 +7,7 @@ approval items instead of silently crossing a risky boundary.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -23,6 +24,16 @@ from core.reflection import ReflectionConfig, ReflectionEngine
 AutonomousTaskKind = Literal["status", "learn", "tests", "goal"]
 AutonomousTaskStatus = Literal["pending", "done", "failed", "skipped"]
 AutonomousRunStatus = Literal["completed", "stopped", "blocked"]
+
+# Rotated per 10-min bucket so successive auto-run ticks study different
+# subtrees and reflect over different log windows instead of repeating the
+# same input. Stateless: derived from wall clock.
+_LEARN_ROOT_ROTATION: tuple[str, ...] = (".", "core", "tools", "tests", "scripts")
+_REFLECTION_LOG_WINDOWS: tuple[int, ...] = (20, 40, 10, 60)
+
+
+def _rotation_index(modulus: int, *, bucket_seconds: int = 600) -> int:
+    return int(time.time() // bucket_seconds) % max(modulus, 1)
 
 
 @dataclass(frozen=True)
@@ -402,10 +413,13 @@ class AutonomousRuntime:
         config: AutonomousRuntimeConfig,
     ) -> AutonomousTaskReport:
         source_registry = getattr(self.agent, "source_registry_store", None)
+        rotated_root = _LEARN_ROOT_ROTATION[_rotation_index(len(_LEARN_ROOT_ROTATION))]
+        if rotated_root != "." and not (self.workspace / rotated_root).is_dir():
+            rotated_root = "."
         plan = LearningPlanner().plan(
             workspace=self.workspace,
             goal=config.goal,
-            root=".",
+            root=rotated_root,
             limit=config.learning_limit,
             source_registry=source_registry,
         )
@@ -574,8 +588,15 @@ class AutonomousRuntime:
             log_dir=log_dir,
             logger=log,
         )
+        rotated_max_logs = _REFLECTION_LOG_WINDOWS[_rotation_index(len(_REFLECTION_LOG_WINDOWS))]
+        rotated_reflection = ReflectionConfig(
+            max_logs=rotated_max_logs,
+            min_occurrences=config.reflection.min_occurrences,
+            max_lessons=config.reflection.max_lessons,
+            learning_limit=config.reflection.learning_limit,
+        )
         try:
-            result = engine.reflect(config.reflection)
+            result = engine.reflect(rotated_reflection)
             # ── Consume the LearningPlan: ingest the files the reflection engine
             # identified as weak spots so the agent actually studies them.
             if result.learning_plan and result.learning_plan.source_paths:
