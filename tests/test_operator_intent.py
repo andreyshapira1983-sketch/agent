@@ -218,3 +218,40 @@ def test_patch_proposal_requests_route_to_patch_proposal():
 def test_does_not_capture_normal_chat():
     assert route_operator_intent("как дела") is None
     assert route_operator_intent("напиши короткое письмо") is None
+
+
+def test_meta_instruction_negation_does_not_route_to_keyword_shortcut():
+    # A rule *about* routing must not trigger the very shortcut it describes.
+    samples = [
+        "Не маршрутизировать в implementation_plan, если пользователь просит создать заявку",
+        "Не вызывай budget_status, когда в тексте есть слово бюджет",
+        "Правило: симптом про approval не должен открывать approval inbox",
+        "do not route to implementation_plan when the user asks for a plan",
+    ]
+    for sample in samples:
+        assert route_operator_intent(sample) is None
+
+
+def test_explicit_inbox_task_request_outranks_implementation_plan():
+    samples = [
+        "Создай заявку в inbox на починку буфера задач",
+        "Создай proposed_task для рефакторинга роутера",
+        "Запиши в inbox: добавить :task-begin / :task-end",
+        "create proposed_task to fix router priority",
+    ]
+    for sample in samples:
+        intent = route_operator_intent(sample)
+        assert intent is None or intent.kind != "implementation_plan"
+
+
+def test_symptom_report_with_budget_and_approval_words_is_not_routed():
+    # Real operator bug report: mentions "бюджет"/"approval" only as the subject
+    # of a symptom/constraint note, not as a status request.
+    text = (
+        "симптом 1: audit-запрос ушёл в budget_status из-за слова бюджет\n"
+        "симптом 2: follow-up ушёл в approval_status\n"
+        "ограничение: не применяй патч"
+    )
+    assert route_operator_intent(text) is None
+
+

@@ -59,6 +59,18 @@ def route_operator_intent(text: str) -> OperatorIntent | None:
     # Real intents fit comfortably under this size.
     if len(normalized) > 600:
         return None
+    # P0 operator routing guard: negations and meta-instructions describe a
+    # rule *about* routing ("не маршрутизируй в implementation_plan", "если
+    # пользователь просит ...", "симптом ...") rather than asking for a status
+    # action. Keyword shortcuts must not fire on them — hand the text to the
+    # normal planner instead.
+    if _looks_like_meta_instruction(normalized):
+        return None
+    # P0 explicit inbox / proposed_task intent: creating an approval-inbox
+    # request must outrank implementation/source-review keyword matching, which
+    # otherwise hijacks "создай заявку в inbox" into a planning digest.
+    if _matches_inbox_task_request(normalized):
+        return None
     if _looks_like_shell_command(normalized):
         return OperatorIntent(
             kind="shell_command_hint",
@@ -184,6 +196,77 @@ def _normalize(text: str) -> str:
 
 def _has_any(text: str, terms: tuple[str, ...]) -> bool:
     return any(term in text for term in terms)
+
+
+def _looks_like_meta_instruction(text: str) -> bool:
+    """Detect text that states a *rule about* routing rather than a request.
+
+    These phrasings (negations, conditionals, requirement/constraint language,
+    symptom reports) must not trigger keyword-based operator shortcuts, because
+    the matching word (budget / approval / implementation / plan) only appears
+    as the subject of an instruction, not as something the operator is asking
+    the agent to do right now.
+    """
+    meta_markers = (
+        "не маршрутизир",
+        "не маршрутизаци",
+        "не роути",
+        "не routи",
+        "не вызывай",
+        "не вызови",
+        "не применяй",
+        "не применить",
+        "не запускай",
+        "не используй",
+        "не должен",
+        "не нужно маршрут",
+        "если пользователь просит",
+        "если пользователь пишет",
+        "если текст содержит",
+        "должен ",
+        "должна ",
+        "должно ",
+        "правило:",
+        "правило ",
+        "симптом",
+        "ограничение",
+        "do not route",
+        "don't route",
+        "do not call",
+        "don't call",
+        "should not route",
+        "must not route",
+        "if the user asks",
+        "if the user requests",
+        "rule:",
+    )
+    return _has_any(text, meta_markers)
+
+
+def _matches_inbox_task_request(text: str) -> bool:
+    """Detect an explicit request to create an approval-inbox proposed_task.
+
+    Such requests must outrank implementation/source-review planning matchers
+    so the agent actually files the task instead of returning a planning digest.
+    """
+    inbox_markers = (
+        "создай заявку в inbox",
+        "создать заявку в inbox",
+        "создай заявку в инбокс",
+        "заявку в inbox",
+        "заявку в инбокс",
+        "создай proposed_task",
+        "создать proposed_task",
+        "создай proposed task",
+        "запиши в inbox",
+        "запиши в инбокс",
+        "добавь в inbox",
+        "добавь в инбокс",
+        "create proposed_task",
+        "create inbox task",
+        "add to inbox",
+    )
+    return _has_any(text, inbox_markers)
 
 
 def _looks_like_shell_command(text: str) -> bool:
