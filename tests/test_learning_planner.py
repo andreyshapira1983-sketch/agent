@@ -77,3 +77,127 @@ def test_staleness_no_effect_when_registry_is_none(workspace: Path):
 
     plan = LearningPlanner().plan(workspace=workspace, limit=1, source_registry=None)
     assert "core/loop.py" in plan.source_paths
+
+
+def test_apply_staleness_returns_score_when_stale_hours_zero(workspace: Path):
+    """stale_hours <= 0 should disable the staleness adjustment entirely."""
+    (workspace / "core").mkdir()
+    (workspace / "core" / "loop.py").write_text("loop", encoding="utf-8")
+    (workspace / "README.md").write_text("ov", encoding="utf-8")
+
+    recent_ts = datetime.now(timezone.utc).isoformat()
+    fresh = MagicMock(); fresh.last_read_at = recent_ts
+    registry = MagicMock(); registry.get_source = lambda sid: fresh
+
+    plan = LearningPlanner().plan(
+        workspace=workspace, limit=2, source_registry=registry, stale_hours=0.0
+    )
+    # without staleness applied loop.py keeps full score; both selected
+    assert "core/loop.py" in plan.source_paths
+
+
+def test_apply_staleness_skips_when_record_missing(workspace: Path):
+    """Registry returns None for a path → score unchanged."""
+    (workspace / "core").mkdir()
+    (workspace / "core" / "loop.py").write_text("loop", encoding="utf-8")
+
+    registry = MagicMock(); registry.get_source = lambda sid: None
+    plan = LearningPlanner().plan(
+        workspace=workspace, limit=1, source_registry=registry, stale_hours=6.0
+    )
+    assert "core/loop.py" in plan.source_paths
+
+
+def test_apply_staleness_skips_when_last_read_empty(workspace: Path):
+    (workspace / "core").mkdir()
+    (workspace / "core" / "loop.py").write_text("loop", encoding="utf-8")
+
+    record = MagicMock(); record.last_read_at = ""
+    registry = MagicMock(); registry.get_source = lambda sid: record
+    plan = LearningPlanner().plan(
+        workspace=workspace, limit=1, source_registry=registry, stale_hours=6.0
+    )
+    assert "core/loop.py" in plan.source_paths
+
+
+def test_apply_staleness_skips_when_timestamp_unparseable(workspace: Path):
+    (workspace / "core").mkdir()
+    (workspace / "core" / "loop.py").write_text("loop", encoding="utf-8")
+
+    record = MagicMock(); record.last_read_at = "not-a-real-iso-timestamp"
+    registry = MagicMock(); registry.get_source = lambda sid: record
+    plan = LearningPlanner().plan(
+        workspace=workspace, limit=1, source_registry=registry, stale_hours=6.0
+    )
+    assert "core/loop.py" in plan.source_paths
+
+
+def test_apply_staleness_keeps_score_when_record_older_than_window(workspace: Path):
+    """Files read longer ago than stale_hours are not deprioritised."""
+    (workspace / "core").mkdir()
+    (workspace / "core" / "loop.py").write_text("loop", encoding="utf-8")
+    (workspace / "README.md").write_text("ov", encoding="utf-8")
+
+    from datetime import timedelta
+    old_ts = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+    record = MagicMock(); record.last_read_at = old_ts
+    registry = MagicMock(); registry.get_source = lambda sid: record
+
+    plan = LearningPlanner().plan(
+        workspace=workspace, limit=2, source_registry=registry, stale_hours=6.0
+    )
+    # README still wins, but loop.py keeps original score (no -60 penalty applied)
+    assert "core/loop.py" in plan.source_paths
+
+
+def test_goal_terms_memory_keyword_picks_memory_files(workspace: Path):
+    (workspace / "core").mkdir()
+    (workspace / "core" / "memory_policy.py").write_text("m", encoding="utf-8")
+    (workspace / "core" / "ingestion.py").write_text("i", encoding="utf-8")
+
+    plan = LearningPlanner().plan(workspace=workspace, goal="памят", limit=2)
+    assert "core/memory_policy.py" in plan.source_paths
+    assert "core/ingestion.py" in plan.source_paths
+
+
+def test_goal_terms_role_keyword_picks_router(workspace: Path):
+    (workspace / "core").mkdir()
+    (workspace / "core" / "role_router.py").write_text("r", encoding="utf-8")
+
+    plan = LearningPlanner().plan(workspace=workspace, goal="role router", limit=1)
+    assert "core/role_router.py" in plan.source_paths
+
+
+def test_goal_terms_tool_keyword_picks_tools(workspace: Path):
+    (workspace / "core").mkdir()
+    (workspace / "tools").mkdir()
+    (workspace / "tools" / "shell_exec.py").write_text("s", encoding="utf-8")
+
+    plan = LearningPlanner().plan(workspace=workspace, goal="инструмент", limit=1)
+    assert "tools/shell_exec.py" in plan.source_paths
+
+
+def test_goal_terms_verifier_keyword_picks_verifier(workspace: Path):
+    (workspace / "core").mkdir()
+    (workspace / "core" / "verifier.py").write_text("v", encoding="utf-8")
+
+    plan = LearningPlanner().plan(workspace=workspace, goal="вериф evidence", limit=1)
+    assert "core/verifier.py" in plan.source_paths
+
+
+def test_runtime_directory_files_get_scored(workspace: Path):
+    (workspace / "runtime").mkdir()
+    (workspace / "runtime" / "agent.py").write_text("rt", encoding="utf-8")
+
+    plan = LearningPlanner().plan(workspace=workspace, limit=1)
+    assert "runtime/agent.py" in plan.source_paths
+
+
+def test_unsupported_extension_skipped(workspace: Path):
+    (workspace / "binary.bin").write_text("x", encoding="utf-8")
+    (workspace / "README.md").write_text("ov", encoding="utf-8")
+
+    plan = LearningPlanner().plan(workspace=workspace, limit=2)
+    assert "README.md" in plan.source_paths
+    assert "binary.bin" not in plan.source_paths
+    assert any("binary.bin" in s for s in plan.skipped_paths)

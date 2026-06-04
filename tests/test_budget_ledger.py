@@ -134,3 +134,37 @@ def test_budget_window_rejects_invalid_values():
 
     with pytest.raises(ValueError):
         BudgetWindow("bad", 1, {"llm_calls": -1})
+
+
+def test_user_summary_with_no_windows(tmp_path: Path):
+    ledger = BudgetLedger(path=tmp_path / "b.jsonl", windows=())
+    text = ledger.user_summary()
+    assert "persistent budget windows" in text
+    assert "no persistent budget windows configured" in text
+
+
+def test_user_summary_with_windows_lists_counters_and_skips_zero_unlimited(tmp_path: Path):
+    ledger = BudgetLedger(
+        path=tmp_path / "b.jsonl",
+        windows=(BudgetWindow("day", 86400, {"llm_calls": 5, "tool_calls": 0}),),
+    )
+    now = datetime.now(tz=timezone.utc)
+    # tool_calls limit=0 and never used → must be omitted from summary.
+    ledger.reserve("llm_calls", reason="r1", now=now)
+    ledger.reserve("llm_calls", reason="r2", now=now)
+
+    text = ledger.user_summary()
+    assert "window: day (86400s)" in text
+    assert "llm_calls: 2/5" in text
+    # counter with limit<=0 and used==0 must be omitted
+    assert "tool_calls" not in text
+
+
+def test_user_summary_renders_unlimited_for_zero_limit_after_use(tmp_path: Path):
+    ledger = BudgetLedger(
+        path=tmp_path / "b.jsonl",
+        windows=(BudgetWindow("day", 86400, {"unbound": 0}),),
+    )
+    ledger.reserve("unbound", reason="r", now=datetime.now(tz=timezone.utc))
+    text = ledger.user_summary()
+    assert "unbound: 1/unlimited" in text

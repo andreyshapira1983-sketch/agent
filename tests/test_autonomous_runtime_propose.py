@@ -291,3 +291,22 @@ def test_propose_canonical_signature_recorded(workspace: Path) -> None:
     assert len(proposed) == 1
     sig = proposed[0].payload.get("canonical_signature")
     assert isinstance(sig, str) and sig.startswith("tests:")
+
+
+class UnknownKindRuntime(AutonomousRuntime):
+    """Runtime variant that emits an unknown task kind (bypasses Literal type)."""
+
+    def _build_queue(self, config: AutonomousRuntimeConfig) -> list[AutonomousTask]:
+        return [AutonomousTask("not_a_real_kind", "bogus")]  # type: ignore[arg-type]
+
+
+def test_unknown_task_kind_returns_failed_report(workspace: Path) -> None:
+    llm = FakeLLM(responses=[])
+    agent = _agent(workspace, llm)
+
+    report = UnknownKindRuntime(agent, workspace=workspace).run(_config(include_proposals=False))
+
+    assert len(report.tasks) == 1
+    assert report.tasks[0].status == "failed"
+    assert "unknown task kind" in report.tasks[0].summary
+    assert "not_a_real_kind" in report.tasks[0].summary
