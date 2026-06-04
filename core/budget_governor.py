@@ -26,6 +26,7 @@ BudgetCounter = Literal[
     "approval_requests",
     "llm_calls",
     "web_fetches",
+    "proposals_per_run",
 ]
 
 
@@ -38,6 +39,7 @@ class BudgetLimits:
     max_approval_requests: int = 20
     max_llm_calls: int = 0
     max_web_fetches: int = 0
+    max_proposals_per_run: int = 3
 
     def limit_for(self, counter: BudgetCounter) -> int:
         return {
@@ -48,6 +50,7 @@ class BudgetLimits:
             "approval_requests": self.max_approval_requests,
             "llm_calls": self.max_llm_calls,
             "web_fetches": self.max_web_fetches,
+            "proposals_per_run": self.max_proposals_per_run,
         }[counter]
 
 
@@ -119,6 +122,7 @@ class BudgetGovernor:
             "approval_requests",
             "llm_calls",
             "web_fetches",
+            "proposals_per_run",
         )
         return {
             "limits": {counter: self.limits.limit_for(counter) for counter in counters},

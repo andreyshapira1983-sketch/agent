@@ -7,6 +7,8 @@ approval items instead of silently crossing a risky boundary.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -21,7 +23,7 @@ from core.task_queue import RuntimeTask, TaskQueueStore
 from core.reflection import ReflectionConfig, ReflectionEngine
 
 
-AutonomousTaskKind = Literal["status", "learn", "tests", "goal"]
+AutonomousTaskKind = Literal["status", "learn", "tests", "goal", "propose"]
 AutonomousTaskStatus = Literal["pending", "done", "failed", "skipped"]
 AutonomousRunStatus = Literal["completed", "stopped", "blocked"]
 
@@ -50,6 +52,10 @@ class AutonomousRuntimeConfig:
     # Run ReflectionEngine after the health pass to persist lessons from logs.
     enable_reflection: bool = True
     reflection: ReflectionConfig = field(default_factory=ReflectionConfig)
+    # When True, append a 'propose' task that asks the LLM for 1-3 bounded
+    # task ideas and writes them to the approval inbox WITHOUT executing
+    # any of them. Off by default — proposals are an opt-in autonomy feature.
+    include_proposals: bool = False
 
 
 @dataclass(frozen=True)
@@ -383,6 +389,8 @@ class AutonomousRuntime:
                 if not self._reserve(budget, circuit, "agent_runs", task.kind):
                     return AutonomousTaskReport(task, "skipped", "agent_runs budget exhausted")
                 return self._task_goal(task)
+            if task.kind == "propose":
+                return self._task_propose(task, config, budget)
         except Exception as exc:
             return AutonomousTaskReport(
                 task,
@@ -559,6 +567,171 @@ class AutonomousRuntime:
             {"answer": answer},
         )
 
+    def _task_propose(
+        self,
+        task: AutonomousTask,
+        config: AutonomousRuntimeConfig,
+        budget: BudgetGovernor,
+    ) -> AutonomousTaskReport:
+        """Ask the LLM for 1-3 bounded next-task proposals and write them to
+        the approval inbox. Never executes any proposal."""
+        cap = max(0, int(budget.limits.max_proposals_per_run))
+        if cap == 0:
+            return AutonomousTaskReport(task, "skipped", "proposals disabled (cap=0)")
+
+        llm = getattr(self.agent, "llm", None)
+        if llm is None:
+            return AutonomousTaskReport(task, "skipped", "agent has no llm")
+
+        digest = self._proposal_digest()
+        existing_hashes = self._existing_proposal_hashes()
+
+        system = (
+            "You propose next tasks for a bounded autonomous coding agent. "
+            "Each proposal must be small, reversible, and reviewable by a human. "
+            "Reply with STRICT JSON only, matching this schema: "
+            "{\"proposals\":[{\"kind\":\"learn|tests|goal|other\","
+            "\"description\":\"<<= 160 chars>\",\"rationale\":\"<<= 280 chars>\","
+            "\"est_cost\":\"low|medium|high\"}]}. "
+            "Return between 1 and 3 proposals. No prose, no markdown."
+        )
+        user = (
+            "Current state digest:\n" + json.dumps(digest, ensure_ascii=False, indent=2)
+            + "\n\nReturn JSON with 1-3 distinct proposals."
+        )
+
+        try:
+            raw = llm.complete(system=system, user=user, max_tokens=800, temperature=0.4)
+        except Exception as exc:
+            self._log("propose_llm_failed", {"error": f"{type(exc).__name__}: {exc}"})
+            return AutonomousTaskReport(task, "failed", "llm error", {"error": str(exc)})
+
+        proposals = self._parse_proposals(raw)
+        if proposals is None:
+            self._log("propose_parse_failed", {"raw": (raw or "")[:400]})
+            return AutonomousTaskReport(task, "failed", "proposals JSON malformed", {"raw_head": (raw or "")[:200]})
+
+        written: list[dict] = []
+        skipped_dupes = 0
+        for proposal in proposals:
+            if len(written) >= cap:
+                break
+            description = (proposal.get("description") or "").strip()
+            rationale = (proposal.get("rationale") or "").strip()
+            kind = (proposal.get("kind") or "other").strip().lower()
+            est_cost = (proposal.get("est_cost") or "low").strip().lower()
+            if not description:
+                continue
+            if kind not in {"learn", "tests", "goal", "other"}:
+                kind = "other"
+            if est_cost not in {"low", "medium", "high"}:
+                est_cost = "low"
+            description = description[:160]
+            rationale = rationale[:280]
+            phash = hashlib.sha256(description.lower().encode("utf-8")).hexdigest()[:16]
+            if phash in existing_hashes:
+                skipped_dupes += 1
+                continue
+            existing_hashes.add(phash)
+            item = self.approval_inbox.add(
+                operation="proposed_task",
+                summary=description,
+                risk="reversible",
+                reasons=(rationale,) if rationale else (),
+                payload={
+                    "kind": kind,
+                    "est_cost": est_cost,
+                    "description": description,
+                    "rationale": rationale,
+                    "hash": phash,
+                },
+            )
+            written.append({"id": item.id, "kind": kind, "description": description})
+
+        summary = f"proposals_written={len(written)} dupes={skipped_dupes}"
+        return AutonomousTaskReport(
+            task,
+            "done",
+            summary,
+            {"written": written, "skipped_dupes": skipped_dupes, "raw_count": len(proposals)},
+        )
+
+    def _proposal_digest(self) -> dict:
+        snap = self.approval_inbox.snapshot()
+        digest: dict[str, Any] = {
+            "source_registry": self._source_counts(),
+            "persistent_memory_records": self._memory_count(),
+            "approval_inbox_pending": int(snap.get("pending") or 0),
+        }
+        # Recent lessons from persistent memory (tagged "lesson"), best-effort.
+        store = getattr(self.agent, "persistent_store", None)
+        if store is not None:
+            try:
+                records = store.load()
+                lessons = [
+                    (getattr(r, "content", None) or getattr(r, "text", None) or str(r))[:240]
+                    for r in records
+                    if "lesson" in (getattr(r, "tags", ()) or ())
+                ]
+                digest["recent_lessons"] = lessons[-5:]
+            except Exception:
+                digest["recent_lessons"] = []
+        return digest
+
+    def _existing_proposal_hashes(self) -> set[str]:
+        hashes: set[str] = set()
+        try:
+            snap = self.approval_inbox.snapshot()
+        except Exception:
+            return hashes
+        for item in snap.get("items", []) or []:
+            if item.get("operation") != "proposed_task":
+                continue
+            payload = item.get("payload") or {}
+            phash = payload.get("hash")
+            if isinstance(phash, str) and phash:
+                hashes.add(phash)
+                continue
+            desc = payload.get("description") or item.get("summary") or ""
+            if desc:
+                hashes.add(hashlib.sha256(desc.lower().encode("utf-8")).hexdigest()[:16])
+        return hashes
+
+    @staticmethod
+    def _parse_proposals(raw: str | None) -> list[dict] | None:
+        if not raw:
+            return None
+        text = raw.strip()
+        # Strip ```json fences if present.
+        if text.startswith("```"):
+            text = text.strip("`")
+            # remove a leading "json" language tag
+            if text.lower().startswith("json"):
+                text = text[4:]
+            text = text.strip()
+        # Find first JSON object.
+        try:
+            data = json.loads(text)
+        except Exception:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start < 0 or end <= start:
+                return None
+            try:
+                data = json.loads(text[start : end + 1])
+            except Exception:
+                return None
+        if not isinstance(data, dict):
+            return None
+        proposals = data.get("proposals")
+        if not isinstance(proposals, list):
+            return None
+        out: list[dict] = []
+        for entry in proposals:
+            if isinstance(entry, dict):
+                out.append(entry)
+        return out
+
     def _build_queue(self, config: AutonomousRuntimeConfig) -> list[AutonomousTask]:
         tasks = [
             AutonomousTask("status", "Inspect current source registry and memory state."),
@@ -568,6 +741,8 @@ class AutonomousRuntime:
             tasks.append(AutonomousTask("tests", "Run the pytest suite as a health check."))
         if config.include_goal and config.goal and config.goal != "project health":
             tasks.append(AutonomousTask("goal", config.goal))
+        if config.include_proposals:
+            tasks.append(AutonomousTask("propose", "Propose 1-3 bounded next tasks for human review."))
         return tasks
 
     def _run_reflection(self, config: AutonomousRuntimeConfig) -> dict | None:

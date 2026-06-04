@@ -1984,6 +1984,7 @@ def _handle_auto_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     include_tests = True
     include_goal = False
     enable_reflection = False
+    include_proposals = False
     limit = 5
     learning_limit = 5
     goal_parts: list[str] = []
@@ -2013,6 +2014,10 @@ def _handle_auto_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             continue
         if token == "--reflect":
             enable_reflection = True
+            i += 1
+            continue
+        if token == "--include-proposals":
+            include_proposals = True
             i += 1
             continue
         if token == "--limit":
@@ -2064,6 +2069,7 @@ def _handle_auto_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
                 include_goal=include_goal,
                 learning_limit=learning_limit,
                 enable_reflection=enable_reflection,
+                include_proposals=include_proposals,
             )
         )
     except Exception as exc:
