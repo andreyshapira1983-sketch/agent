@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from core.evidence import ProvenanceChain, make_evidence
 from core.output_policy import apply_ranker_output_policy
 from core.source_ranker import rank_chain
+
+# Anchor "now" to the fixed evidence timestamps so freshness-based assertions
+# stay deterministic regardless of the real wall-clock date.
+_FROZEN_NOW = datetime(2026, 5, 28, 12, 0, 0, tzinfo=timezone.utc)
 
 
 def _chain_with_page(source: str, excerpt: str = "Bitcoin price is 123 USD") -> ProvenanceChain:
@@ -55,7 +61,7 @@ def test_realtime_live_source_keeps_high_confidence() -> None:
         "web_page:https://coinmarketcap.com/currencies/bitcoin/",
         excerpt="Bitcoin price is 123 USD. Last updated 2026-05-28 11:59 UTC.",
     )
-    ranking = rank_chain(chain, question="latest BTC price today")
+    ranking = rank_chain(chain, question="latest BTC price today", now=_FROZEN_NOW)
     answer = (
         "Conclusion: BTC is 123 USD. [verified:web:https://coinmarketcap.com/currencies/bitcoin/]\n"
         "Facts:\n"
