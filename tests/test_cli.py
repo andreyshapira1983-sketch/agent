@@ -31,6 +31,7 @@ from core.source_registry_store import SourceRegistryStore
 from main import (
     _autonomy_readiness_payload,
     _budget_enforcement_status,
+    _collect_instruction_buffer,
     _force_utf8_io,
     _format_next_actions,
     _format_operator_budget_digest,
@@ -261,6 +262,60 @@ class TestParseRemember:
         tags, content = _parse_remember("PREFERENCE be terse")
         assert tags == ["preference"]
         assert content == "be terse"
+
+
+# ============================================================
+# _collect_instruction_buffer — :task-begin/:task-end/:task-abort
+# ============================================================
+
+class TestCollectInstructionBuffer:
+    @staticmethod
+    def _reader(lines: list[str]):
+        """Return a callable that yields the given lines one per call."""
+        it = iter(lines)
+        return lambda: next(it)
+
+    def test_commits_multiline_buffer_on_task_end(self):
+        reader = self._reader([
+            "Не маршрутизировать в implementation_plan,",
+            "если пользователь просит создать заявку.",
+            ":task-end",
+        ])
+        text, cancelled = _collect_instruction_buffer(reader)
+        assert cancelled is False
+        assert text == (
+            "Не маршрутизировать в implementation_plan,\n"
+            "если пользователь просит создать заявку."
+        )
+
+    def test_abort_discards_buffer(self):
+        reader = self._reader([
+            "первая строка",
+            "вторая строка",
+            ":task-abort",
+        ])
+        text, cancelled = _collect_instruction_buffer(reader)
+        assert cancelled is True
+        assert text == ""
+
+    def test_terminator_is_case_insensitive_and_trimmed(self):
+        reader = self._reader(["payload", "  :TASK-END  "])
+        text, cancelled = _collect_instruction_buffer(reader)
+        assert cancelled is False
+        assert text == "payload"
+
+    def test_empty_buffer_returns_empty_string(self):
+        reader = self._reader([":task-end"])
+        text, cancelled = _collect_instruction_buffer(reader)
+        assert cancelled is False
+        assert text == ""
+
+    def test_eof_propagates_to_caller(self):
+        def reader() -> str:
+            raise EOFError
+
+        with pytest.raises(EOFError):
+            _collect_instruction_buffer(reader)
 
 
 # ============================================================

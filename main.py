@@ -40,6 +40,7 @@ import os
 import re
 import shlex
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -3669,6 +3670,36 @@ def _dispatch_operator_intent(
     return False
 
 
+def _truncate_text(text: str, max_chars: int) -> str:
+    """Trim ``text`` to ``max_chars``, appending an ellipsis when shortened."""
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    return text[: max(0, max_chars - 1)].rstrip() + "…"
+
+
+def _collect_instruction_buffer(
+    read_line: Callable[[], str],
+) -> tuple[str, bool]:
+    """Collect operator instruction lines until a terminator marker.
+
+    Reads lines via ``read_line`` until ``:task-end`` (commit) or
+    ``:task-abort`` (discard). Returns ``(text, cancelled)`` where ``text`` is
+    the joined+stripped buffer and ``cancelled`` is ``True`` when the operator
+    aborted. ``read_line`` may raise ``EOFError``/``KeyboardInterrupt``; that is
+    propagated so the caller can treat it as a request to leave the REPL.
+    """
+    lines: list[str] = []
+    while True:
+        line = read_line()
+        marker = line.strip().lower()
+        if marker == ":task-end":
+            return "\n".join(lines).strip(), False
+        if marker == ":task-abort":
+            return "", True
+        lines.append(line)
+
+
 def _print_daemon_inbox_notice(workspace: Path) -> None:
     """Check the approval inbox and print a wake-up notice if items are pending.
 
@@ -3676,28 +3707,38 @@ def _print_daemon_inbox_notice(workspace: Path) -> None:
     background daemon (agent_tick.py) found while they were away.
     """
     try:
-        from core.approval_inbox import ApprovalInbox
+        from collections import Counter
+
         inbox = ApprovalInbox(path=workspace / "data" / "approval_inbox.jsonl")
         pending = inbox.pending()
         if not pending:
             return
+
+        total = len(pending)
+        by_operation = Counter(item.operation for item in pending)
+
+        print(f"\n{'='*60}", file=sys.stderr)
         print(
-            f"\n{'='*60}",
-            file=sys.stderr,
-        )
-        print(
-            f"  DAEMON NOTICE: {len(pending)} item(s) found while you were away",
+            f"  DAEMON NOTICE: {total} pending approval item(s)",
             file=sys.stderr,
         )
         print(f"{'='*60}", file=sys.stderr)
-        for item in pending:
-            print(f"\n  [{item.id}]  {item.operation}", file=sys.stderr)
-            for line in item.summary.splitlines():
-                print(f"    {line}", file=sys.stderr)
-            if item.reasons:
-                print(f"    reason: {'; '.join(item.reasons)}", file=sys.stderr)
+
+        # Always show the breakdown by operation type — compact, one line each.
+        for operation, count in by_operation.most_common():
+            print(f"  - {operation}: {count}", file=sys.stderr)
+
+        if total <= 5:
+            # Small backlog: show each item on a single trimmed line.
+            print("", file=sys.stderr)
+            for item in pending:
+                first_line = item.summary.splitlines()[0] if item.summary else ""
+                summary = _truncate_text(first_line, 90)
+                print(f"  [{item.id[:16]}] {summary}", file=sys.stderr)
+
         print(
-            f"\n  Use :approval-list to review  |  :approval-run to act\n{'='*60}\n",
+            "\n  Use :approval-list to review  |  :approval-list all for full detail"
+            f"\n{'='*60}\n",
             file=sys.stderr,
         )
     except Exception:  # noqa: BLE001
@@ -4793,6 +4834,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :autonomy-readiness [--json]   whether autonomy is safe to run now\n"
             "  :coding-readiness [--json]     safe programming task readiness report\n"
             "  :operator-task ... :end        one safe multi-line operator task report\n"
+            "  :task-begin ... :task-end       buffer a complex instruction (bypasses keyword router; :task-abort discards)\n"
             "  :model-usage [--json]           inspect model calls/tokens/cost units\n"
             "  :team-plan <goal> [--json]      dry-run bounded subagent contracts\n"
             "  :team-run <goal> [--json]       dry-run execution walk over subagent contracts\n"
@@ -5010,7 +5052,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :conflicts  :budget-status  :budget-window-status  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:
@@ -5084,6 +5126,48 @@ def main() -> int:
                     break
                 block_lines.append(line)
             _handle_operator_task("\n".join(block_lines), agent, workspace)
+            continue
+        # ── CLI instruction buffer ────────────────────────────────────────────
+        # :task-begin … :task-end lets the operator compose a complex,
+        # multi-line instruction that is sent straight to the agent, bypassing
+        # the operator keyword router. This is the reliable way to give an
+        # instruction whose wording would otherwise be hijacked by a shortcut
+        # (e.g. text that merely *mentions* budget / approval / implementation).
+        # :task-abort discards the buffer.
+        if q == ":task-begin":
+            print(
+                "(instruction buffer started; finish with :task-end, "
+                "discard with :task-abort)",
+                file=sys.stderr,
+            )
+            try:
+                buffered, cancelled = _collect_instruction_buffer(
+                    lambda: input("... ")
+                )
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return 0
+            if cancelled:
+                print("(instruction buffer cancelled)", file=sys.stderr)
+                continue
+            if not buffered:
+                print("(instruction buffer empty — nothing sent)", file=sys.stderr)
+                continue
+            rl = _rate_limiter.consume()
+            if not rl.allowed:
+                print(
+                    f"(rate limit: too many requests — "
+                    f"retry in {rl.retry_after_seconds:.1f}s, "
+                    f"tokens remaining: {rl.tokens_remaining:.2f})",
+                    file=sys.stderr,
+                )
+                continue
+            answer = _run_agent_with_budget_guard(
+                agent,
+                user_question=buffered,
+                file_hint=args.file,
+            )
+            print("\n" + format_human_response(answer) + "\n")
             continue
         if q.startswith(":") or q == "?":
             if handle_meta_command(q, agent, workspace):
