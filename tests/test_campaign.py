@@ -209,7 +209,9 @@ class TestIdleStall:
 
 class TestBudgetStop:
     def test_llm_calls_budget_stops_before_next_spend(self):
-        gather = _ScriptedGather([_useful()])
+        # Distinct actions so each cycle executes and spends (a repeated action
+        # would be deduped and never reach the budget cap).
+        gather = _ScriptedGather([_useful("fix_a"), _useful("fix_b")])
         execute = _RecordingExecute(
             CampaignActionOutcome(result="completed", llm_calls_spent=1)
         )
@@ -229,7 +231,7 @@ class TestBudgetStop:
         assert execute.calls == 2
 
     def test_cost_units_budget_stops(self):
-        gather = _ScriptedGather([_useful()])
+        gather = _ScriptedGather([_useful("fix_a"), _useful("fix_b")])
         execute = _RecordingExecute(
             CampaignActionOutcome(result="completed", llm_calls_spent=1, cost_units_spent=3)
         )
@@ -254,7 +256,8 @@ class TestBudgetStop:
 
 class TestCompletedRun:
     def test_runs_all_cycles_when_nothing_trips(self):
-        gather = _ScriptedGather([_useful()])
+        # Distinct actions so each cycle is a genuinely-new useful pass.
+        gather = _ScriptedGather([_useful("fix_a"), _useful("fix_b"), _useful("fix_c")])
         execute = _RecordingExecute(
             CampaignActionOutcome(result="completed", llm_calls_spent=0)
         )
@@ -271,6 +274,90 @@ class TestCompletedRun:
         assert result.stop_reason == ""
         assert result.cycles_run == 3
         assert result.totals["useful_cycles"] == 3
+
+
+# ============================================================
+# Signal dedup (B) — a repeated action does NOT re-execute
+# ============================================================
+
+class TestRepeatDedup:
+    def test_repeated_action_skips_execution_and_stalls(self):
+        # The same signal forever: cycle1 executes (new), then every re-pick is
+        # a REPEAT (no LLM, no execution) and counts toward the no-progress
+        # stall — proving the campaign does NOT spin on one signal.
+        gather = _ScriptedGather([_useful("restore_daemon_liveness")])
+        execute = _RecordingExecute(
+            CampaignActionOutcome(result="completed", llm_calls_spent=2, cost_units_spent=6)
+        )
+        result = run_campaign(
+            CampaignConfig(max_cycles=10, max_idle_streak=3, max_llm_calls=0),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+        # cycle1 new->exec, cycles 2,3,4 repeat -> streak 3 -> stop.
+        assert execute.calls == 1
+        assert result.status == "stopped"
+        assert result.stop_reason.startswith("no_progress_stall:3")
+        assert result.cycles_run == 4
+        assert result.totals["useful_cycles"] == 1
+        assert result.totals["repeat_cycles"] == 3
+        # Only the single real execution spent anything.
+        assert result.totals["llm_calls"] == 2
+        assert result.totals["cost_units"] == 6
+
+    def test_repeat_record_is_honest_and_logged(self):
+        events: list[tuple[str, dict]] = []
+        agent = SimpleNamespace(log=SimpleNamespace(log=lambda e, p: events.append((e, p))))
+        gather = _ScriptedGather([_useful("review_dry_run_stall")])
+        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        result = run_campaign(
+            CampaignConfig(max_cycles=10, max_idle_streak=2, max_llm_calls=0),
+            agent=agent,
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+        # cycle1 new->exec, cycle2 repeat (streak1), cycle3 repeat (streak2)->stop.
+        assert result.cycles_run == 3
+        repeat = result.records[1]
+        assert repeat.result == "repeat"
+        assert repeat.idle is False
+        assert repeat.llm_calls_spent == 0
+        assert repeat.cost_units_spent == 0
+        assert "already attempted" in repeat.reason
+        assert "REPEAT (no LLM, skipped)" in repeat.user_summary()
+        names = [e for e, _ in events]
+        assert "campaign_cycle_repeat" in names
+
+    def test_new_action_resets_the_no_progress_streak(self):
+        # a, a(repeat), b(new->reset), b(repeat), b(repeat) -> stall on b.
+        gather = _ScriptedGather([
+            _useful("fix_a"), _useful("fix_a"),
+            _useful("fix_b"), _useful("fix_b"), _useful("fix_b"),
+        ])
+        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        result = run_campaign(
+            CampaignConfig(max_cycles=10, max_idle_streak=3, max_llm_calls=0),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+        # fix_a executes (cycle1), repeat (cycle2, streak1); fix_b is NEW -> reset
+        # + execute (cycle3, streak0); repeat (cycle4, streak1), repeat (cycle5,
+        # streak2). streak never reaches 3 -> completed at max_cycles? No: only
+        # 5 scripted then it repeats fix_b forever -> cycle6 repeat streak3 stop.
+        assert execute.calls == 2  # fix_a once + fix_b once
+        assert result.totals["useful_cycles"] == 2
+        assert result.stop_reason.startswith("no_progress_stall:3")
 
 
 # ============================================================

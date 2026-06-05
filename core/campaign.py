@@ -177,6 +177,11 @@ class CampaignCycleRecord:
                 f"[cycle {self.cycle}] IDLE (no LLM) "
                 f"action={self.action} reason={self.reason}"
             )
+        if self.result == "repeat":
+            return (
+                f"[cycle {self.cycle}] REPEAT (no LLM, skipped) "
+                f"action={self.action} reason={self.reason}"
+            )
         return (
             f"[cycle {self.cycle}] {self.result} "
             f"action={self.action} llm={self.llm_calls_spent} "
@@ -238,6 +243,7 @@ class CampaignResult:
                 f"cycles={self.cycles_run}  "
                 f"useful={self.totals.get('useful_cycles', 0)}  "
                 f"idle={self.totals.get('idle_cycles', 0)}  "
+                f"repeats={self.totals.get('repeat_cycles', 0)}  "
                 f"llm_calls={self.totals.get('llm_calls', 0)}  "
                 f"cost_units={self.totals.get('cost_units', 0)}  "
                 f"proposals={self.totals.get('proposals', 0)}  "
@@ -281,6 +287,7 @@ def run_campaign(
         ledger = CampaignLedger(path=Path(workspace) / "data" / "campaign_ledger.jsonl")
 
     records: list[CampaignCycleRecord] = []
+    attempted_signatures: set[str] = set()
     idle_streak = 0
     llm_calls_used = 0
     cost_units_used = 0
@@ -288,6 +295,7 @@ def run_campaign(
     artifacts = 0
     idle_cycles = 0
     useful_cycles = 0
+    repeat_cycles = 0
     stop_reason = ""
     status: CampaignStatus = "completed"
 
@@ -351,7 +359,48 @@ def run_campaign(
             continue
 
         # ── USEFUL cycle: a real action -> one bounded, gated pass ───────────
+        # B — signal dedup: an action already attempted this campaign whose
+        # earlier pass did not clear the signal is a REPEAT. Re-running it
+        # identically would spend again to reach the same dead end (the smoke
+        # showed two identical `restore_daemon_liveness` cycles), so skip
+        # execution, record it honestly, and let the no-progress streak stop
+        # the campaign — the same "empty cycles -> ask the operator" guarantee
+        # as idle, just for "nothing NEW to do" instead of "nothing to do".
+        signature = action.action
+        if signature in attempted_signatures:
+            idle_streak += 1
+            repeat_cycles += 1
+            record = CampaignCycleRecord(
+                cycle=cycle,
+                ts=now.isoformat(),
+                goal=config.goal,
+                action=action.action,
+                action_title=action.title,
+                severity=action.severity,
+                priority=action.priority,
+                risk=action.risk,
+                idle=False,
+                llm_calls_spent=0,
+                cost_units_spent=0,
+                result="repeat",
+                reason=(
+                    f"already attempted '{action.action}' this campaign; the "
+                    f"earlier pass did not clear the signal — skipping re-execution"
+                ),
+            )
+            ledger.append(record)
+            records.append(record)
+            _log(agent, "campaign_cycle_repeat", record.to_dict())
+
+            if idle_streak >= config.max_idle_streak:
+                stop_reason = f"no_progress_stall:{idle_streak}_cycles_without_new_action"
+                status = "stopped"
+                break
+            continue
+
+        # ── genuinely NEW action: reset the no-progress streak and execute ───
         idle_streak = 0
+        attempted_signatures.add(signature)
         useful_cycles += 1
         outcome = execute(
             agent=agent,
@@ -393,6 +442,7 @@ def run_campaign(
         "cost_units": cost_units_used,
         "idle_cycles": idle_cycles,
         "useful_cycles": useful_cycles,
+        "repeat_cycles": repeat_cycles,
         "proposals": proposals,
         "artifacts": artifacts,
     }
