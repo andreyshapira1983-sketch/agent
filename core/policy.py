@@ -26,6 +26,16 @@ class PolicyGate:
         # (e.g. an install_coverage.bat) while merely "thinking out loud".
         # Empty by default — interactive use is unaffected.
         self.blocked_tools: frozenset[str] = frozenset()
+        # Optional run-scoped escalation list. Tools whose name is in this set
+        # have their `reversible` verdict PROMOTED to `escalate` — i.e. even a
+        # safe new-file write must be approved by a human before it runs. This
+        # is the "brake before the agent creates a file" gate: an operator
+        # script may write a diagnostic file directly (it never goes through
+        # this gate), but the agent/runtime loop must ask first. `irreversible`
+        # (overwrite) and `external` already escalate; this closes the
+        # remaining `reversible` (new-file) path. Empty by default so existing
+        # behaviour is unchanged.
+        self.escalate_reversible_tools: frozenset[str] = frozenset()
 
     def check(self, action: Action) -> PolicyDecision:
         subject = action.tool_name or action.type
@@ -85,6 +95,17 @@ class PolicyGate:
                 reasons=["read-only tool"],
             )
         if effective_risk == "reversible":
+            if action.tool_name in self.escalate_reversible_tools:
+                return PolicyDecision(
+                    policy_id=POLICY_ID,
+                    subject=tool.name,
+                    action="tool_call",
+                    decision="escalate",
+                    reasons=[
+                        f"reversible action ({tool.name}) requires approval in "
+                        "this context (agent/runtime writes need a human checkpoint)"
+                    ],
+                )
             return PolicyDecision(
                 policy_id=POLICY_ID,
                 subject=tool.name,

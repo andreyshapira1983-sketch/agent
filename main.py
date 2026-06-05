@@ -208,6 +208,15 @@ def build_agent(
     logger = TraceLogger(trace_id=trace_id, log_dir=workspace / "logs", verbose=True)
 
     policy = PolicyGate(registry)
+    # Optional safety brake: when AGENT_REQUIRE_WRITE_APPROVAL is truthy, the
+    # agent/runtime loop must get human approval before creating even a new
+    # (reversible) file. Overwrites (irreversible) and external actions already
+    # escalate; this closes the new-file path. Off by default so existing
+    # behaviour and the test suite are unchanged. Operator scripts that write
+    # files directly (e.g. scripts/first_live_probe.py) never pass through this
+    # gate and are therefore unaffected.
+    if _env_bool("AGENT_REQUIRE_WRITE_APPROVAL", False):
+        policy.escalate_reversible_tools = frozenset({"file_write"})
     budget_ledger = BudgetLedger.from_env(
         path=workspace / DEFAULT_BUDGET_LEDGER_PATH,
         logger=logger,

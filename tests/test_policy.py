@@ -109,6 +109,46 @@ def test_external_side_effect_tool_is_escalated() -> None:
     assert any("external" in r for r in decision.reasons)
 
 
+# ---------- escalate_reversible_tools (agent/runtime write brake) ----------
+
+def test_reversible_write_escalates_when_tool_is_in_escalate_set() -> None:
+    """A reversible (new-file) write is promoted to escalate when the tool is
+    listed — the human checkpoint before the agent/runtime creates a file."""
+    reg = _registry(StubTool("file_write", "reversible"))
+    gate = PolicyGate(reg)
+    gate.escalate_reversible_tools = frozenset({"file_write"})
+
+    decision = gate.check(_tool_call("file_write"))
+
+    assert decision.decision == "escalate"
+    assert any("requires approval" in r for r in decision.reasons)
+
+
+def test_reversible_write_still_allowed_when_tool_not_in_escalate_set() -> None:
+    """Other reversible tools are unaffected by the brake."""
+    reg = _registry(
+        StubTool("file_write", "reversible"),
+        StubTool("other", "reversible"),
+    )
+    gate = PolicyGate(reg)
+    gate.escalate_reversible_tools = frozenset({"file_write"})
+
+    decision = gate.check(_tool_call("other"))
+
+    assert decision.decision == "allow"
+    assert any("reversible" in r for r in decision.reasons)
+
+
+def test_escalate_reversible_tools_defaults_empty_and_preserves_allow() -> None:
+    """Default behaviour is unchanged: reversible writes are allowed."""
+    reg = _registry(StubTool("file_write", "reversible"))
+    gate = PolicyGate(reg)
+
+    assert gate.escalate_reversible_tools == frozenset()
+    decision = gate.check(_tool_call("file_write"))
+    assert decision.decision == "allow"
+
+
 # ---------- deny paths ----------
 
 def test_unknown_tool_is_denied() -> None:
