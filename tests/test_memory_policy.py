@@ -62,6 +62,51 @@ class TestWritePolicyAccepts:
 
 
 # ============================================================
+# Write Policy — context freeze (operator brake)
+# ============================================================
+
+class TestWritePolicyContextFreeze:
+    def test_frozen_source_is_rejected_even_with_consent_tag(self):
+        policy = MemoryWritePolicy(frozen_sources={"agent-auto"})
+        d = policy.decide(
+            content="User stack: Python 3.12 + Pydantic v2.",
+            tags=["fact"],
+            source="agent-auto",
+        )
+        assert d.decision == "reject"
+        assert any("frozen in this context" in r for r in d.reasons)
+
+    def test_freeze_is_case_insensitive(self):
+        policy = MemoryWritePolicy(frozen_sources={"Agent-Auto"})
+        d = policy.decide(
+            content="Some auto-learned fact about the codebase.",
+            tags=["fact"],
+            source="AGENT-AUTO",
+        )
+        assert d.decision == "reject"
+        assert any("frozen in this context" in r for r in d.reasons)
+
+    def test_user_explicit_not_frozen_when_only_agent_auto_frozen(self):
+        policy = MemoryWritePolicy(frozen_sources={"agent-auto"})
+        d = policy.decide(
+            content="I prefer concise Russian answers.",
+            tags=["preference"],
+            source="user-explicit",
+        )
+        assert d.decision == "save"
+
+    def test_default_policy_does_not_freeze_anything(self):
+        policy = MemoryWritePolicy()
+        assert policy.frozen_sources == frozenset()
+        d = policy.decide(
+            content="User stack: Python 3.12 + Pydantic v2.",
+            tags=["fact"],
+            source="agent-auto",
+        )
+        assert d.decision == "save"
+
+
+# ============================================================
 # Write Policy — rejects: secrets
 # ============================================================
 

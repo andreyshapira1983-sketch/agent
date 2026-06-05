@@ -217,6 +217,17 @@ def build_agent(
     # gate and are therefore unaffected.
     if _env_bool("AGENT_REQUIRE_WRITE_APPROVAL", False):
         policy.escalate_reversible_tools = frozenset({"file_write"})
+    # Optional safety brake: when AGENT_FREEZE_AUTO_MEMORY is truthy, the
+    # agent may not silently grow its own persistent memory. The knowledge
+    # pipeline writes 'agent-auto' records straight through the memory write
+    # policy — a side channel PolicyGate never sees (the file_write approval
+    # gate does not cover memory). Freezing that source forces every
+    # agent-initiated memory write to be rejected; user ':remember' writes
+    # (source='user-explicit') are unaffected. Off by default.
+    if _env_bool("AGENT_FREEZE_AUTO_MEMORY", False):
+        write_policy = MemoryWritePolicy(frozen_sources={"agent-auto"})
+    else:
+        write_policy = MemoryWritePolicy()
     budget_ledger = BudgetLedger.from_env(
         path=workspace / DEFAULT_BUDGET_LEDGER_PATH,
         logger=logger,
@@ -353,7 +364,7 @@ def build_agent(
         memory=memory,
         persistent_store=persistent_store,
         retrieval_policy=MemoryRetrievalPolicy(),
-        write_policy=MemoryWritePolicy(),
+        write_policy=write_policy,
         source_registry_store=source_registry_store,
         episodic_store=episodic_store,
         procedural_store=procedural_store,

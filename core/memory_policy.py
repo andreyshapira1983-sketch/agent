@@ -72,6 +72,19 @@ class MemoryWriteDecision:
 class MemoryWritePolicy:
     """Decides whether a candidate MemoryRecord may reach the persistent store."""
 
+    def __init__(self, frozen_sources: Iterable[str] = ()):
+        """`frozen_sources` names write sources that are blocked in this
+        context (run-scoped). Used by the operator brake to freeze
+        agent-initiated ("agent-auto") memory writes so the agent cannot
+        silently grow its own persistent memory without a human in the
+        loop. Empty by default — existing behaviour is unchanged. User
+        writes (source='user-explicit') are never frozen unless explicitly
+        listed.
+        """
+        self.frozen_sources: frozenset[str] = frozenset(
+            (s or "").strip().lower() for s in frozen_sources if s
+        )
+
     def decide(
         self,
         content: str,
@@ -90,6 +103,20 @@ class MemoryWritePolicy:
         reasons: list[str] = []
         tags_set = {t.strip().lower() for t in tags if t}
         text = (content or "").strip()
+
+        # --- context freeze (operator brake) -----------------------------
+        # When a write source is frozen for this run, refuse before any
+        # content checks. This closes the side channel where the knowledge
+        # pipeline auto-persists 'agent-auto' records that PolicyGate never
+        # sees (file_write approval does not cover memory writes).
+        if (source or "").strip().lower() in self.frozen_sources:
+            return MemoryWriteDecision(
+                "reject",
+                [
+                    f"auto-memory writes frozen in this context "
+                    f"(source='{source}' needs a human checkpoint)"
+                ],
+            )
 
         # --- hard blocks (never save, regardless of consent) -------------
 
