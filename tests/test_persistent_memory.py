@@ -230,3 +230,94 @@ class TestTTLEviction:
         store.save(self._fresh_record())
         assert store.count() == 1  # count() calls load() internally
 
+    def test_naive_created_at_ttl_is_treated_as_utc(self, tmp_path: Path):
+        """A record persisted with a tz-naive created_at must still be TTL-evicted.
+
+        Covers the load() branch that backfills UTC tzinfo before comparing,
+        so legacy/naive timestamps don't silently dodge expiry.
+        """
+        store = PersistentMemoryStore(tmp_path / "mem.jsonl")
+        naive_past = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) - dt.timedelta(seconds=120)
+        rec = MemoryRecord(
+            type="semantic",
+            content="naive stale",
+            tags=["ttl-test"],
+            owner="user",
+            ttl_seconds=60,
+            created_at=naive_past,
+        )
+        store.save(rec)
+        assert store.load() == []
+
+
+class TestStoreUpdate:
+    def test_update_replaces_record_in_place(self, tmp_path: Path):
+        store = PersistentMemoryStore(tmp_path / "mem.jsonl")
+        rec = _record("before")
+        store.save(rec)
+        store.save(_record("other"))
+
+        edited = rec.model_copy(update={"content": "after", "importance": 0.9})
+        assert store.update(edited) is True
+
+        loaded = {r.id: r for r in store.load()}
+        assert loaded[rec.id].content == "after"
+        assert loaded[rec.id].importance == 0.9
+        # Sibling record is untouched and order preserved.
+        assert [r.content for r in store.load()] == ["after", "other"]
+
+    def test_update_unknown_id_returns_false_and_writes_nothing(self, tmp_path: Path):
+        store = PersistentMemoryStore(tmp_path / "mem.jsonl")
+        store.save(_record("only"))
+        ghost = _record("ghost")  # never saved → different id
+        assert store.update(ghost) is False
+        assert [r.content for r in store.load()] == ["only"]
+
+
+class TestStoreArchive:
+    def test_archive_record_moves_to_archive_store(self, tmp_path: Path):
+        store = PersistentMemoryStore(tmp_path / "mem.jsonl")
+        keep = _record("keep")
+        move = _record("low value")
+        store.save(keep)
+        store.save(move)
+
+        assert store.archive_record(move.id) is True
+
+        # Active store no longer holds it.
+        active_ids = {r.id for r in store.load()}
+        assert active_ids == {keep.id}
+        # Archive holds it, flagged archived.
+        archived = store.load_archive()
+        assert len(archived) == 1
+        assert archived[0].id == move.id
+        assert archived[0].archived is True
+        assert store.count_archive() == 1
+
+    def test_archive_unknown_id_returns_false(self, tmp_path: Path):
+        store = PersistentMemoryStore(tmp_path / "mem.jsonl")
+        store.save(_record("present"))
+        assert store.archive_record("mem_missing") is False
+        assert store.count_archive() == 0
+
+    def test_load_archive_empty_when_no_archive_file(self, tmp_path: Path):
+        store = PersistentMemoryStore(tmp_path / "mem.jsonl")
+        assert store.load_archive() == []
+        assert store.count_archive() == 0
+
+    def test_load_archive_skips_corrupted_lines(self, tmp_path: Path):
+        store = PersistentMemoryStore(tmp_path / "mem.jsonl")
+        rec = _record("real archived")
+        store.save(rec)
+        store.archive_record(rec.id)
+
+        # Corrupt the archive file with junk lines.
+        with store.archive_path.open("a", encoding="utf-8") as fh:
+            fh.write("not-json\n")
+            fh.write('{"not": "a record"}\n')
+
+        loaded = store.load_archive()
+        assert len(loaded) == 1
+        assert loaded[0].id == rec.id
+
+
