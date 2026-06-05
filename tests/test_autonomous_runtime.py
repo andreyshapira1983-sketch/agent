@@ -52,6 +52,22 @@ class FakeTimedOutRunTestsTool(Tool):
         }
 
 
+class FakeFailingRunTestsTool(Tool):
+    name = "run_tests"
+    description = "fake tests that fail at one concrete test file"
+    risk = "reversible"
+
+    def run(self, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "exit_code": 1,
+            "timed_out": False,
+            "passed": 2,
+            "failed": 1,
+            "errors": 0,
+            "failed_tests": ["tests/test_target_under_repair.py::test_broken"],
+        }
+
+
 class LLMCountingRuntime(AutonomousRuntime):
     def _task_status(self, task):
         # Make 2 LLM calls so that a budget limit of 1 is reliably exceeded.
@@ -221,6 +237,130 @@ def test_tick_marks_timed_out_run_inconclusive_not_healthy(workspace: Path, monk
     for ev in events:
         assert ev.get("tests_health") != "pass"
         assert ev.get("result_status") not in {"done", "pass"}
+
+
+def test_tick_failed_tests_drive_a_repair_proposal_into_the_inbox(
+    workspace: Path, monkeypatch
+):
+    """End-to-end daemon auto-repair regression — the seam that hid 3 bugs.
+
+    The `run_tick -> task tests status == "failed" -> _maybe_propose_repair ->
+    real ApprovalInbox.add` path was only ever exercised by hand. Here we drive
+    the REAL `run_tick` with a run_tests tool that fails at exactly one existing
+    test file. The proposal generator is stubbed to return a REAL
+    ProposalGenerationReport carrying a REAL RepairProposal (so the field shapes
+    `prop.path` / `prop.reason` / `prop.proposed_content` are bound to the real
+    dataclass, not a guessed fake). The tick must:
+
+      * log a `repair_attempt` event with repair_proposed=True and the target,
+      * record the honest result_status=="failed" on the task,
+      * land a `repair_proposal` item in the real on-disk inbox whose payload
+        was built from the real proposal fields.
+    """
+    import json
+
+    import agent_tick
+    from core.repair_proposal import ProposalGenerationReport
+    from core.self_repair import RepairProposal
+
+    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
+
+    # The failing test must point at a single existing file for
+    # `_repair_target_from_failures` to derive a concrete target.
+    target_rel = "tests/test_target_under_repair.py"
+    target_file = workspace / target_rel
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    target_file.write_text(
+        "def test_broken():\n    assert 1 == 2\n", encoding="utf-8"
+    )
+
+    # Stub the generator (lazily imported inside _maybe_propose_repair as
+    # `from core.repair_proposal import RepairProposalGenerator`) so it returns
+    # a REAL proposed report with a REAL RepairProposal — deterministic, no LLM.
+    class _FakeProposingGenerator:
+        def __init__(self, *, llm, workspace_root, **_kw):
+            assert llm is not None
+            assert Path(workspace_root) == workspace
+
+        def generate(self, *, target_path, **_kw):
+            prop = RepairProposal(
+                path=target_path,
+                proposed_content="def test_broken():\n    assert 1 == 1\n",
+                reason="correct the inverted assertion",
+                confidence=0.9,
+                evidence=(f"{target_path}::test_broken",),
+            )
+            return ProposalGenerationReport(
+                status="proposed",
+                proposal=prop,
+                diagnosis="assertion compared 1 == 2",
+                confidence=0.9,
+                evidence=("baseline failed at test_broken", "single failing file"),
+            )
+
+    monkeypatch.setattr(
+        "core.repair_proposal.RepairProposalGenerator", _FakeProposingGenerator
+    )
+
+    # Agent whose only test tool reports one concrete failing test file.
+    registry = ToolRegistry()
+    registry.register(FakeFailingRunTestsTool())
+    llm = FakeLLM(responses=[])
+    agent = AgentLoop(
+        registry=registry,
+        policy=PolicyGate(registry),
+        llm=llm,
+        logger=TraceLogger(new_trace_id(), workspace / "logs", verbose=False),
+        planner=LLMPlanner(llm=llm, registry=registry),
+        memory=WorkingMemory(),
+        persistent_store=PersistentMemoryStore(workspace / "data" / "memory.jsonl"),
+        retrieval_policy=MemoryRetrievalPolicy(),
+        write_policy=MemoryWritePolicy(),
+        source_registry_store=SourceRegistryStore(workspace / "data" / "sources.jsonl"),
+        approval_provider=AutoApprover(default="approve"),
+        max_replan_attempts=1,
+    )
+
+    import main
+    monkeypatch.setattr(main, "build_agent", lambda *a, **k: agent)
+    monkeypatch.setenv("AGENT_TEST_TIMEOUT_SECONDS", "300")
+
+    queue = TaskQueueStore(workspace / "data" / "task_queue.jsonl")
+    queue.add(goal="project health", dry_run=True, include_tests=True, limit=3)
+
+    exit_code = agent_tick.run_tick(workspace, dry_run=True)
+    assert exit_code == 0
+
+    log_path = workspace / "logs" / "daemon_tick.jsonl"
+    events = [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+    ]
+    by_event: dict[str, list[dict]] = {}
+    for ev in events:
+        by_event.setdefault(ev.get("event"), []).append(ev)
+
+    # 1. The failed-tests branch actually fired and proposed a repair.
+    repair_attempt = by_event["repair_attempt"][-1]
+    assert repair_attempt["repair_proposed"] is True
+    assert repair_attempt["target"] == target_rel
+
+    # 2. The task itself was recorded with the honest failed verdict.
+    task_done = by_event["task_done"][-1]
+    assert task_done["result_status"] == "failed"
+
+    # 3. A real proposal landed in the real on-disk inbox, built from the real
+    #    RepairProposal fields (path/reason/proposed_content) — the exact seam
+    #    where the AttributeError bug used to live.
+    inbox = ApprovalInbox(path=workspace / "data" / "approval_inbox.jsonl")
+    proposals = [i for i in inbox.pending() if i.operation == "repair_proposal"]
+    assert len(proposals) == 1
+    payload = proposals[0].payload
+    assert payload["target_file"] == target_rel
+    assert payload["failed_count"] == 1
+    assert payload["confidence"] == 0.9
+    assert payload["failed_tests"] == [f"{target_rel}::test_broken"]
+    assert "assert 1 == 1" in payload["proposed_content_preview"]
 
 
 def test_tick_dry_run_streak_grows_then_resets_on_live(workspace: Path, monkeypatch):
