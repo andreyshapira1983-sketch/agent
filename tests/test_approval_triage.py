@@ -231,3 +231,123 @@ def test_report_to_dict_is_serialisable_shape():
     assert data["clusters"][0]["signature"] == "tests:x"
     assert "recommended_dismissals" in data
     assert isinstance(report, TriageReport)
+
+
+def _legacy_proposal(
+    *,
+    kind: str,
+    description: str,
+    item_id: str,
+    created_at: datetime | None = None,
+) -> ApprovalInboxItem:
+    """A proposed_task written by an OLD tick: no canonical_signature/dedup_key.
+
+    Mirrors the real backlog found on the first live run, where 21 distinct
+    proposals predated the signature field.
+    """
+    created = (created_at or _NOW).isoformat()
+    return ApprovalInboxItem(
+        operation="proposed_task",
+        summary=description,
+        risk="reversible",
+        reasons=("r",),
+        payload={"kind": kind, "description": description},  # NO signature
+        id=item_id,
+        created_at=created,
+        updated_at=created,
+    )
+
+
+def test_signatureless_distinct_proposals_do_not_collapse_into_one_cluster():
+    # Regression: the first live tick surfaced 21 DISTINCT legacy proposals
+    # with no canonical_signature. The old _signature_of fell back to the bare
+    # operation name ("proposed_task"), collapsing all of them into one giant
+    # fake duplicate cluster and recommending 20 legitimate tasks for dismissal.
+    items = [
+        _legacy_proposal(
+            kind="learn",
+            description="Analyze source registry patterns to identify common claim types",
+            item_id="a",
+        ),
+        _legacy_proposal(
+            kind="tests",
+            description="Add integration tests for the source registry deduplication",
+            item_id="b",
+        ),
+        _legacy_proposal(
+            kind="goal",
+            description="Implement a registry health check command that validates consistency",
+            item_id="c",
+        ),
+    ]
+
+    report = triage_inbox(items, now=_NOW)
+
+    # Each distinct task stays its own cluster; NONE is flagged as a duplicate.
+    assert report.total_pending == 3
+    assert len(report.clusters) == 3
+    assert report.duplicates == ()
+    assert all(i.recommended_action == "keep" for i in report.items)
+    # And they must NOT all share the bare-operation signature.
+    signatures = {c.signature for c in report.clusters}
+    assert "proposed_task" not in signatures
+
+
+def test_signatureless_genuine_duplicates_still_collapse():
+    # The fix must not under-cluster real repeats: two legacy proposals with the
+    # same kind + same wording should still collapse and recommend dismissal.
+    older = _legacy_proposal(
+        kind="goal",
+        description="Review and process the pending approval inbox items to clear the backlog",
+        item_id="dup_old",
+        created_at=_NOW - timedelta(hours=2),
+    )
+    newer = _legacy_proposal(
+        kind="goal",
+        description="Review and process the pending approval inbox items to clear the backlog",
+        item_id="dup_new",
+        created_at=_NOW - timedelta(hours=1),
+    )
+
+    report = triage_inbox([older, newer], now=_NOW)
+
+    assert len(report.clusters) == 1
+    assert report.clusters[0].count == 2
+    actions = {i.id: i.recommended_action for i in report.items}
+    assert actions["dup_old"] == "keep"
+    assert actions["dup_new"] == "dismiss_duplicate"
+    assert report.duplicates == ("dup_new",)
+
+
+def test_signatureless_proposal_clusters_with_matching_signed_proposal():
+    # A legacy signature-less proposal and a freshly-signed proposal describing
+    # the same work should land in the SAME cluster (the derived signature must
+    # match the runtime's own canonical signature).
+    from core.autonomous_runtime import _proposal_canonical_signature
+
+    description = "Add integration tests for source registry claim deduplication"
+    signed_sig = _proposal_canonical_signature("tests", description)
+
+    legacy = _legacy_proposal(kind="tests", description=description, item_id="legacy")
+    signed = _proposal(signature=signed_sig, summary=description, item_id="signed")
+
+    report = triage_inbox(
+        [
+            ApprovalInboxItem(  # legacy is older so it is the kept original
+                operation=legacy.operation,
+                summary=legacy.summary,
+                risk=legacy.risk,
+                reasons=legacy.reasons,
+                payload=legacy.payload,
+                id="legacy",
+                created_at=(_NOW - timedelta(hours=1)).isoformat(),
+                updated_at=(_NOW - timedelta(hours=1)).isoformat(),
+            ),
+            signed,
+        ],
+        now=_NOW,
+    )
+
+    assert len(report.clusters) == 1
+    assert report.clusters[0].count == 2
+    assert report.duplicates == ("signed",)

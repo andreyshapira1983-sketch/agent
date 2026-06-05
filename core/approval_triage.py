@@ -50,9 +50,17 @@ def _parse_iso(ts: str | None) -> datetime | None:
 def _signature_of(item: ApprovalInboxItem) -> str:
     """Stable cluster key for a proposed_task item.
 
-    Prefers the canonical signature the runtime stamped into the payload;
-    falls back to the dedup_key, then to the operation so non-proposal items
-    still cluster sensibly.
+    Resolution order:
+
+    1. the canonical signature the runtime stamped into the payload;
+    2. the dedup_key;
+    3. for ``proposed_task`` items written by *older* ticks that predate the
+       signature field, derive one on the fly from ``kind`` + ``description``
+       using the runtime's own algorithm. Without this, every signature-less
+       proposal collapses onto the bare operation name (``proposed_task``) and
+       21 distinct tasks masquerade as one giant duplicate cluster — the exact
+       over-clustering that would recommend dismissing legitimate work;
+    4. finally, the operation name, so non-proposal items still cluster.
     """
     payload = item.payload or {}
     sig = payload.get("canonical_signature")
@@ -61,6 +69,15 @@ def _signature_of(item: ApprovalInboxItem) -> str:
     dedup = payload.get("dedup_key")
     if isinstance(dedup, str) and dedup.strip():
         return dedup.strip()
+    if item.operation == "proposed_task":
+        kind = str(payload.get("kind") or "other")
+        description = str(payload.get("description") or item.summary or "")
+        if description.strip():
+            # Lazy import: keeps this module light and avoids an import cycle
+            # with the heavy autonomous_runtime module at load time.
+            from core.autonomous_runtime import _proposal_canonical_signature
+
+            return _proposal_canonical_signature(kind, description)
     return item.operation or "unknown"
 
 
