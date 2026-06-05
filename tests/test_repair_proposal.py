@@ -137,6 +137,168 @@ def test_generator_rejects_invalid_json(workspace: Path, monkeypatch):
     assert report.proposal is None
 
 
+# --------------------------------------------------------------------------- #
+# validation rejection branches — load-bearing "refuse a bad proposal" guards   #
+# --------------------------------------------------------------------------- #
+
+def test_generator_rejects_missing_target_file(workspace: Path, monkeypatch):
+    _seed(workspace)
+    _fake_pytest(monkeypatch, passed=False)
+    generator = RepairProposalGenerator(
+        workspace_root=workspace,
+        llm=FakeLLM(responses=[_json_response(target_file="")]),
+    )
+
+    report = generator.generate(target_path="buggy.py", test_paths=("tests",))
+
+    assert report.status == "rejected"
+    assert report.proposal is None
+    assert any("target_file must be a non-empty string" in w for w in report.warnings)
+
+
+def test_generator_rejects_empty_proposed_content(workspace: Path, monkeypatch):
+    _seed(workspace)
+    _fake_pytest(monkeypatch, passed=False)
+    generator = RepairProposalGenerator(
+        workspace_root=workspace,
+        llm=FakeLLM(responses=[_json_response(proposed_content="   ")]),
+    )
+
+    report = generator.generate(target_path="buggy.py", test_paths=("tests",))
+
+    assert report.status == "rejected"
+    assert report.proposal is None
+    assert any("proposed_content must be a non-empty string" in w for w in report.warnings)
+
+
+def test_generator_rejects_invalid_confidence(workspace: Path, monkeypatch):
+    _seed(workspace)
+    _fake_pytest(monkeypatch, passed=False)
+    generator = RepairProposalGenerator(
+        workspace_root=workspace,
+        llm=FakeLLM(responses=[_json_response(confidence="very-high")]),
+    )
+
+    report = generator.generate(target_path="buggy.py", test_paths=("tests",))
+
+    assert report.status == "rejected"
+    assert report.proposal is None
+    assert any("confidence must be a number" in w for w in report.warnings)
+
+
+def test_generator_rejects_missing_evidence(workspace: Path, monkeypatch):
+    _seed(workspace)
+    _fake_pytest(monkeypatch, passed=False)
+    generator = RepairProposalGenerator(
+        workspace_root=workspace,
+        llm=FakeLLM(responses=[_json_response(evidence=[])]),
+    )
+
+    report = generator.generate(target_path="buggy.py", test_paths=("tests",))
+
+    assert report.status == "rejected"
+    assert report.proposal is None
+    assert any("evidence must contain at least one string" in w for w in report.warnings)
+
+
+def test_generator_rejects_empty_diff(workspace: Path, monkeypatch):
+    # proposed_content identical to current file → zero-line diff → refuse.
+    _seed(workspace)
+    _fake_pytest(monkeypatch, passed=False)
+    generator = RepairProposalGenerator(
+        workspace_root=workspace,
+        llm=FakeLLM(responses=[
+            _json_response(proposed_content="def answer():\n    return 41\n")
+        ]),
+    )
+
+    report = generator.generate(target_path="buggy.py", test_paths=("tests",))
+
+    assert report.status == "rejected"
+    assert report.proposal is None
+    assert any("empty diff" in w for w in report.warnings)
+
+
+def test_generator_rejects_oversized_diff(workspace: Path, monkeypatch):
+    # A patch that changes more lines than max_changed_lines is refused so a
+    # "repair" can never quietly rewrite a whole file.
+    _seed(workspace)
+    _fake_pytest(monkeypatch, passed=False)
+    big = "def answer():\n" + "".join(f"    x{i} = {i}\n" for i in range(20)) + "    return 42\n"
+    generator = RepairProposalGenerator(
+        workspace_root=workspace,
+        llm=FakeLLM(responses=[_json_response(proposed_content=big)]),
+        max_changed_lines=2,
+    )
+
+    report = generator.generate(target_path="buggy.py", test_paths=("tests",))
+
+    assert report.status == "rejected"
+    assert report.proposal is None
+    assert any("too many lines" in w for w in report.warnings)
+
+
+def test_generator_reports_tool_error_when_baseline_run_fails(workspace: Path, monkeypatch):
+    # If the baseline test run itself raises, the generator must NOT invent a
+    # repair on top of an unknown baseline — it returns tool_error.
+    _seed(workspace)
+
+    def boom(argv, **kwargs):
+        raise OSError("pytest binary missing")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    llm = FakeLLM(responses=[_json_response()])
+    generator = RepairProposalGenerator(workspace_root=workspace, llm=llm)
+
+    report = generator.generate(target_path="buggy.py", test_paths=("tests",))
+
+    assert report.status == "tool_error"
+    assert report.proposal is None
+    # The LLM was never consulted — no baseline, no proposal.
+    assert llm.calls == []
+
+
+def test_generator_uses_trace_id_diagnostic_logs_in_prompt(workspace: Path, monkeypatch):
+    # When a trace_id is supplied the generator pulls diagnostic logs and folds
+    # them into the LLM prompt; a valid proposal still comes back.
+    _seed(workspace)
+    _fake_pytest(monkeypatch, passed=False)
+    trace_id = new_trace_id()
+    (workspace / "logs").mkdir(exist_ok=True)
+    (workspace / "logs" / f"{trace_id}.jsonl").write_text(
+        json.dumps({"event": "error", "trace_id": trace_id, "payload": {"message": "boom"}}) + "\n",
+        encoding="utf-8",
+    )
+    llm = FakeLLM(responses=[_json_response()])
+    generator = RepairProposalGenerator(workspace_root=workspace, llm=llm)
+
+    report = generator.generate(
+        target_path="buggy.py", test_paths=("tests",), trace_id=trace_id
+    )
+
+    assert report.status == "proposed"
+    assert report.proposal is not None
+    assert report.diagnostic_logs is not None
+    assert llm.calls  # the single proposal prompt was built and sent
+
+
+def test_generator_rejects_invalid_constructor_args(workspace: Path):
+    # Guard: non-directory workspace and non-positive bounds are refused up
+    # front so a misconfigured generator can never run.
+    import pytest
+
+    with pytest.raises(ValueError):
+        RepairProposalGenerator(workspace_root=workspace / "nope", llm=FakeLLM(responses=[]))
+    with pytest.raises(ValueError):
+        RepairProposalGenerator(
+            workspace_root=workspace, llm=FakeLLM(responses=[]), max_context_chars=0
+        )
+    with pytest.raises(ValueError):
+        RepairProposalGenerator(
+            workspace_root=workspace, llm=FakeLLM(responses=[]), max_changed_lines=0
+        )
+
+
 def test_agent_loop_exposes_propose_repair(workspace: Path, monkeypatch):
     _seed(workspace)
     _fake_pytest(monkeypatch, passed=False)
