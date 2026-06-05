@@ -1,5 +1,7 @@
 # Pinned direct dependencies for reproducible local/CI installs.
 # Source intent lives in requirements.in.
+# Optional HTTP server extras (api/server.py) are NOT part of the core
+# hash-locked set and are installed separately: pip install fastapi uvicorn[standard]
 anthropic==0.102.0
 openai==2.36.0
 pydantic==2.13.4
@@ -7,7 +9,3 @@ python-dotenv==1.2.2
 ddgs==9.14.4
 pytest==9.0.3
 coverage==7.14.0
-fastapi>=0.115.0
-uvicorn[standard]>=0.30.0
-fastapi>=0.115.0
-uvicorn[standard]>=0.30.0
