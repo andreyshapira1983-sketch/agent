@@ -16,7 +16,7 @@ import json
 
 import pytest
 
-from core.llm import LLM
+from core.llm import LLM, _default_model
 
 
 def _make_planner_prompt(question: str, file_hint: str = "(none)") -> str:
@@ -313,3 +313,315 @@ class TestUsageTracking:
         assert llm.call_count == 1
         assert llm.last_usage["input_tokens"] > 0
         assert llm.last_usage["output_tokens"] > 0
+
+
+# ============================================================
+# Pure helpers — model classification and default selection
+# ============================================================
+
+class TestModelHelpers:
+    @pytest.mark.parametrize(
+        "provider,expected",
+        [
+            ("openai", "gpt-4o-mini"),
+            ("huggingface", "meta-llama/Llama-3.3-70B-Instruct"),
+            ("mock", "mock-1"),
+            ("anthropic", "claude-sonnet-4-5"),
+        ],
+    )
+    def test_default_model_per_provider(self, provider, expected, monkeypatch):
+        monkeypatch.delenv("AGENT_MODEL", raising=False)
+        assert _default_model(provider) == expected
+
+    def test_default_model_env_override_wins(self, monkeypatch):
+        monkeypatch.setenv("AGENT_MODEL", "my-model")
+        assert _default_model("openai") == "my-model"
+
+    @pytest.mark.parametrize(
+        "model,supported",
+        [
+            ("claude-3-5-sonnet-20241022", True),   # gen-3 → temperature allowed
+            ("claude-sonnet-4-5", False),           # gen-4 → temperature dropped
+            ("claude-opus-4-1", False),
+        ],
+    )
+    def test_anthropic_supports_temperature(self, model, supported):
+        assert LLM._anthropic_supports_temperature(model) is supported
+
+    @pytest.mark.parametrize(
+        "model,is_o",
+        [
+            ("o1", True),
+            ("o3-mini", True),
+            ("o4-mini", True),
+            ("gpt-5", True),
+            ("gpt-5.1-mini", True),
+            ("gpt-4o-mini", False),   # the 'o' in 4o is not a word-boundary o-series
+            ("gpt-4o", False),
+            ("gpt-3.5-turbo", False),
+        ],
+    )
+    def test_is_o_series(self, model, is_o):
+        assert LLM._is_o_series(model) is is_o
+
+
+# ============================================================
+# Provider client construction (no network — clients are lazy)
+# ============================================================
+
+class TestBuildClient:
+    def test_openai_client_built_with_key(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        llm = LLM(provider="openai")
+        assert llm._client is not None
+
+    def test_huggingface_client_built_with_token(self, monkeypatch):
+        monkeypatch.setenv("HF_TOKEN", "hf-test")
+        llm = LLM(provider="huggingface")
+        assert llm._client is not None
+        # HF routes through the OpenAI-compatible router base URL.
+        assert "huggingface" in str(getattr(llm._client, "base_url", ""))
+
+    def test_anthropic_client_built_with_key(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        llm = LLM(provider="anthropic")
+        assert llm._client is not None
+
+
+# ============================================================
+# Real provider call paths exercised with FAKE clients (no network)
+#
+# These close the "never-run seam": the token-parsing + usage-recording
+# logic inside _complete_anthropic / _complete_openai_compatible and the
+# streaming variants was only ever exercised by a live API call. We inject
+# fake clients that reproduce the SDK response shapes so the seam runs
+# deterministically offline.
+# ============================================================
+
+class _Usage:
+    def __init__(self, **kw):
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+class _Block:
+    def __init__(self, text):
+        self.text = text
+
+
+class _AnthropicMessage:
+    def __init__(self, text, in_tok, out_tok):
+        self.content = [_Block(text)]
+        self.usage = _Usage(input_tokens=in_tok, output_tokens=out_tok)
+
+
+class _FakeAnthropicMessages:
+    def __init__(self, parent):
+        self._parent = parent
+
+    def create(self, **kwargs):
+        self._parent.last_create_kwargs = kwargs
+        return _AnthropicMessage("hello from claude", 11, 7)
+
+    def stream(self, **kwargs):
+        self._parent.last_stream_kwargs = kwargs
+        return _FakeAnthropicStream(["he", "llo"], 12, 8)
+
+
+class _FakeAnthropicStream:
+    def __init__(self, chunks, in_tok, out_tok):
+        self.text_stream = chunks
+        self._final = _AnthropicMessage("".join(chunks), in_tok, out_tok)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def get_final_message(self):
+        return self._final
+
+
+class _FakeAnthropicClient:
+    def __init__(self):
+        self.messages = _FakeAnthropicMessages(self)
+        self.last_create_kwargs = None
+        self.last_stream_kwargs = None
+
+
+def _anthropic_llm(model="claude-sonnet-4-5"):
+    llm = LLM(provider="mock")
+    llm.provider = "anthropic"
+    llm.model = model
+    llm._client = _FakeAnthropicClient()
+    return llm
+
+
+class TestAnthropicCallPath:
+    def test_complete_parses_text_and_records_usage(self):
+        llm = _anthropic_llm()
+        out = llm.complete(system="sys", user="hi", temperature=0.3)
+        assert out == "hello from claude"
+        assert llm.call_count == 1
+        assert llm.last_usage == {
+            "input_tokens": 11, "output_tokens": 7, "total_tokens": 18
+        }
+
+    def test_complete_drops_temperature_for_gen4_model(self):
+        llm = _anthropic_llm("claude-sonnet-4-5")
+        llm.complete(system="s", user="u", temperature=0.9)
+        # gen-4 models must not receive the temperature kwarg.
+        assert "temperature" not in llm._client.last_create_kwargs
+
+    def test_complete_keeps_temperature_for_gen3_model(self):
+        llm = _anthropic_llm("claude-3-5-sonnet-20241022")
+        llm.complete(system="s", user="u", temperature=0.4)
+        assert llm._client.last_create_kwargs["temperature"] == 0.4
+
+    def test_stream_accumulates_tokens_and_records_usage(self):
+        llm = _anthropic_llm()
+        seen = []
+        out = llm.stream_complete(
+            system="s", user="u", on_token=lambda t: seen.append(t)
+        )
+        assert out == "hello"
+        assert seen == ["he", "llo"]
+        assert llm.last_usage == {
+            "input_tokens": 12, "output_tokens": 8, "total_tokens": 20
+        }
+
+    def test_stream_on_token_error_is_swallowed(self):
+        llm = _anthropic_llm()
+
+        def boom(_):
+            raise RuntimeError("callback failed")
+
+        # A failing on_token must not break streaming.
+        out = llm.stream_complete(system="s", user="u", on_token=boom)
+        assert out == "hello"
+
+    def test_stream_keeps_temperature_for_gen3_model(self):
+        llm = _anthropic_llm("claude-3-5-sonnet-20241022")
+        llm.stream_complete(system="s", user="u", temperature=0.6)
+        assert llm._client.last_stream_kwargs["temperature"] == 0.6
+
+
+class _OAIMessage:
+    def __init__(self, content):
+        self.message = _Usage(content=content)
+
+
+class _OAIResponse:
+    def __init__(self, content, in_tok, out_tok):
+        self.choices = [_OAIMessage(content)]
+        self.usage = _Usage(prompt_tokens=in_tok, completion_tokens=out_tok)
+
+
+class _OAIDelta:
+    def __init__(self, content):
+        self.delta = _Usage(content=content)
+
+
+class _OAIChunk:
+    def __init__(self, content, usage=None):
+        self.choices = [_OAIDelta(content)] if content is not None else []
+        self.usage = usage
+
+
+class _FakeCompletions:
+    def __init__(self, parent):
+        self._parent = parent
+
+    def create(self, **kwargs):
+        self._parent.last_kwargs = kwargs
+        if kwargs.get("stream"):
+            return iter([
+                _OAIChunk("he"),
+                _OAIChunk("llo"),
+                _OAIChunk(None, usage=_Usage(prompt_tokens=5, completion_tokens=3)),
+            ])
+        return _OAIResponse("hello from gpt", 9, 4)
+
+
+class _FakeChat:
+    def __init__(self, parent):
+        self.completions = _FakeCompletions(parent)
+
+
+class _FakeOpenAIClient:
+    def __init__(self):
+        self.chat = _FakeChat(self)
+        self.last_kwargs = None
+
+
+def _openai_llm(model="gpt-4o-mini"):
+    llm = LLM(provider="mock")
+    llm.provider = "openai"
+    llm.model = model
+    llm._client = _FakeOpenAIClient()
+    return llm
+
+
+class TestOpenAICallPath:
+    def test_complete_parses_content_and_records_usage(self):
+        llm = _openai_llm()
+        out = llm.complete(system="s", user="u", temperature=0.5)
+        assert out == "hello from gpt"
+        assert llm.last_usage == {
+            "input_tokens": 9, "output_tokens": 4, "total_tokens": 13
+        }
+        # Non-o-series model uses max_tokens + temperature.
+        assert "max_tokens" in llm._client.last_kwargs
+        assert llm._client.last_kwargs["temperature"] == 0.5
+
+    def test_complete_o_series_uses_max_completion_tokens_no_temperature(self):
+        llm = _openai_llm("o3-mini")
+        llm.complete(system="s", user="u", temperature=0.5)
+        kw = llm._client.last_kwargs
+        assert "max_completion_tokens" in kw
+        assert "max_tokens" not in kw
+        assert "temperature" not in kw
+
+    def test_stream_accumulates_and_records_final_chunk_usage(self):
+        llm = _openai_llm()
+        seen = []
+        out = llm.stream_complete(
+            system="s", user="u", on_token=lambda t: seen.append(t)
+        )
+        assert out == "hello"
+        assert seen == ["he", "llo"]
+        assert llm.last_usage == {
+            "input_tokens": 5, "output_tokens": 3, "total_tokens": 8
+        }
+
+    def test_stream_o_series_branch_sets_max_completion_tokens(self):
+        llm = _openai_llm("o4-mini")
+        llm.stream_complete(system="s", user="u")
+        kw = llm._client.last_kwargs
+        assert "max_completion_tokens" in kw
+        assert "max_tokens" not in kw
+
+    def test_stream_on_token_error_is_swallowed(self):
+        llm = _openai_llm()
+
+        def boom(_):
+            raise RuntimeError("callback failed")
+
+        out = llm.stream_complete(system="s", user="u", on_token=boom)
+        assert out == "hello"
+
+
+class TestHuggingFaceFallsBackToComplete:
+    def test_stream_complete_falls_back_for_huggingface(self):
+        # huggingface has no native streaming → stream_complete delegates to
+        # complete(). We point it at a fake openai-compatible client.
+        llm = LLM(provider="mock")
+        llm.provider = "huggingface"
+        llm.model = "meta-llama/Llama-3.3-70B-Instruct"
+        llm._client = _FakeOpenAIClient()
+        out = llm.stream_complete(system="s", user="u")
+        # Fell back to the non-streaming completions path.
+        assert out == "hello from gpt"
+        assert llm._client.last_kwargs.get("stream") is None
+
