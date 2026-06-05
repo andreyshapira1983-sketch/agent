@@ -471,6 +471,87 @@ class TestDefaultGatherSignals:
         assert "triage" in signals
 
 
+class TestActionFocusedGoal:
+    def test_goal_is_coupled_to_the_picked_action(self):
+        from core.campaign import _action_focused_goal
+
+        action = _useful(action="restore_daemon_liveness")
+        text = _action_focused_goal("Check agent health", action)
+        # Action-COUPLED: the campaign goal AND the picked signal both appear.
+        assert "Check agent health" in text
+        assert "restore_daemon_liveness" in text
+        assert action.title in text
+        assert action.reason in text
+        # Read-only contract is stated to the model.
+        assert "read-only" in text.lower()
+
+    def test_evidence_is_included_when_present(self):
+        from core.campaign import _action_focused_goal
+
+        action = BestNextAction(
+            action="investigate_tick_error",
+            title="Look into the tick error",
+            severity="critical",
+            priority=90,
+            reason="last tick failed",
+            risk="read_only",
+            evidence=("error in logs/agent_tick.log", "exit code 1"),
+        )
+        text = _action_focused_goal("Stabilise the daemon", action)
+        assert "error in logs/agent_tick.log" in text
+        assert "exit code 1" in text
+
+    def test_execute_action_couples_goal_and_surfaces_reasoning(self, monkeypatch):
+        """`_default_execute_action` must build an action-coupled goal and turn
+        the goal task's answer into a readable artifact in the ledger."""
+        import core.autonomous_runtime as ar
+        from core.campaign import _default_execute_action
+
+        captured: dict = {}
+
+        class _FakeRuntime:
+            def __init__(self, agent, *, workspace, approval_inbox=None):
+                pass
+
+            def run(self, config):
+                captured["goal"] = config.goal
+                captured["include_goal"] = config.include_goal
+                captured["dry_run"] = config.dry_run
+                goal_task = SimpleNamespace(
+                    task=SimpleNamespace(kind="goal"),
+                    details={"answer": "Re-run agent_tick.py --status to confirm liveness."},
+                )
+                return SimpleNamespace(
+                    status="completed",
+                    approvals={"pending": 0},
+                    tasks=[goal_task],
+                )
+
+        monkeypatch.setattr(ar, "AutonomousRuntime", _FakeRuntime)
+
+        budget_ledger = SimpleNamespace(
+            snapshot=lambda: {"totals": {"llm_calls": 0, "model_cost_units": 0}}
+        )
+        agent = SimpleNamespace(
+            model_router=SimpleNamespace(
+                usage_ledger=SimpleNamespace(budget_ledger=budget_ledger)
+            )
+        )
+        config = CampaignConfig(goal="Verify agent state", dry_run=True)
+        action = _useful(action="restore_daemon_liveness")
+
+        outcome = _default_execute_action(
+            agent=agent, workspace="/ws", action=action, config=config
+        )
+
+        assert captured["include_goal"] is True
+        assert captured["dry_run"] is True
+        assert "Verify agent state" in captured["goal"]
+        assert "restore_daemon_liveness" in captured["goal"]
+        assert outcome.result == "completed"
+        assert outcome.artifact == "reasoning: Re-run agent_tick.py --status to confirm liveness."
+
+
 class TestCostTotals:
     def test_absent_ledger_chain_returns_zeros(self):
         assert _cost_totals(SimpleNamespace(model_router=SimpleNamespace())) == (0, 0)

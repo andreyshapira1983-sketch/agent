@@ -525,6 +525,34 @@ def _cost_totals(agent: Any) -> tuple[int, int]:
         return (0, 0)
 
 
+def _action_focused_goal(goal: str, action: BestNextAction) -> str:
+    """Turn the picked action into a focused, read-only reasoning question.
+
+    GAP A — the campaign cycle is action-COUPLED: instead of running a generic
+    health pass decoupled from the picked signal, the agent reasons about the
+    SINGLE highest-priority action toward the campaign goal. Effects are blocked
+    in dry-run, so this asks the model "what is the one useful next step here?"
+    without performing it. Pure string builder so it can be unit-tested without
+    a live agent.
+    """
+    reason = (action.reason or "").strip()
+    evidence = "; ".join(e for e in action.evidence[:3] if e)
+    parts = [
+        f"Campaign goal: {goal.strip()}.",
+        f"The single highest-priority signal right now is '{action.action}' — {action.title}.",
+    ]
+    if reason:
+        parts.append(f"Why it matters: {reason}")
+    if evidence:
+        parts.append(f"Evidence: {evidence}.")
+    parts.append(
+        "Decide the ONE most useful next step a human should take to move the "
+        "goal forward, and justify it with the evidence. Reason read-only — do "
+        "not perform any effects."
+    )
+    return " ".join(parts)
+
+
 def _default_execute_action(
     *,
     agent: Any,
@@ -533,26 +561,33 @@ def _default_execute_action(
     config: CampaignConfig,
     approval_inbox: Any = None,
 ) -> CampaignActionOutcome:
-    """Run ONE bounded pass through the existing AutonomousRuntime.
+    """Run ONE bounded, action-coupled pass through the existing AutonomousRuntime.
 
+    GAP A fix: the pass is driven by the PICKED action (not a generic health
+    sweep). The action becomes a focused read-only question answered by the
+    ``goal`` task — real LLM reasoning about the single highest-priority signal.
     Opens no new effect path: effects flow only through the runtime's PolicyGate
-    + approval inbox, and ``dry_run`` follows the campaign config (default True).
-    Cost is measured as the delta of the agent's persistent budget ledger
-    around the pass, so the ledger records the REAL spend, not a guess.
+    + approval inbox, and ``dry_run`` (which blocks file_write/shell_exec inside
+    the goal task) follows the campaign config. Cost is measured as the delta of
+    the agent's persistent budget ledger around the pass, so the ledger records
+    the REAL spend, not a guess.
     """
     from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
     from core.budget_governor import BudgetLimits
 
     llm_before, cost_before = _cost_totals(agent)
 
+    focused_goal = _action_focused_goal(config.goal, action)
     runtime = AutonomousRuntime(agent, workspace=workspace, approval_inbox=approval_inbox)
     report = runtime.run(
         AutonomousRuntimeConfig(
-            goal=config.goal,
+            goal=focused_goal,
             dry_run=config.dry_run,
-            limit=2,
+            # status, learn, goal — the goal task does the action-coupled
+            # reasoning; the two read-only preambles cost nothing.
+            limit=3,
             include_tests=False,
-            include_goal=False,
+            include_goal=True,
             budgets=BudgetLimits(max_agent_runs=1),
             enable_reflection=False,
         )
@@ -567,12 +602,24 @@ def _default_execute_action(
         pending = 0
     proposal = f"approvals_pending={pending}" if pending else None
 
+    # The goal task's answer is the cycle's measurable output — surface a short
+    # digest in the ledger so an operator can read what the agent concluded.
+    artifact = None
+    for task_report in getattr(report, "tasks", []) or []:
+        if getattr(task_report.task, "kind", "") == "goal":
+            answer = (task_report.details or {}).get("answer")
+            if answer:
+                digest = " ".join(str(answer).split())[:160]
+                if digest:
+                    artifact = f"reasoning: {digest}"
+            break
+
     return CampaignActionOutcome(
         result=report.status,
         llm_calls_spent=max(0, llm_after - llm_before),
         cost_units_spent=max(0, cost_after - cost_before),
         proposal=proposal,
-        artifact=None,
+        artifact=artifact,
     )
 
 
