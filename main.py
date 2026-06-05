@@ -91,7 +91,13 @@ from core.capability_request import propose_capability_request
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
 from core.budget_governor import BudgetGovernor, BudgetLimits
 from core.work_session import WorkSessionConfig, run_work_session
-from core.campaign import CampaignConfig, CampaignLedger, run_campaign
+from core.campaign import (
+    CampaignConfig,
+    CampaignLedger,
+    load_ledger_rows,
+    run_campaign,
+    summarise_ledger,
+)
 from core.subagent_memory_scope import (
     SubagentProposalResult,
     make_default_proposal,
@@ -2305,6 +2311,42 @@ def _handle_campaign_start(rest: str, agent: AgentLoop, workspace: Path) -> bool
         return True
 
     print(result.user_summary(), file=sys.stderr)
+    return True
+
+
+def _handle_campaign_status(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """Handle :campaign-status — read the campaign ledger and print a digest.
+
+    Pure read-only operator window over ``data/campaign_ledger.jsonl``: spends
+    no budget, creates no agent, touches no state. Answers "what did it do with
+    my keys?" by aggregating every recorded cycle (all-time totals, per-result
+    counts, distinct goals) and showing the most recent cycles. ``--recent N``
+    controls how many trailing rows to show (0 = all).
+    """
+    tokens = _split_meta_args(rest)
+    recent = 10
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token == "--recent":
+            if i + 1 >= len(tokens):
+                print("Usage: --recent requires a number", file=sys.stderr)
+                return True
+            try:
+                recent = int(tokens[i + 1])
+            except ValueError:
+                print("Usage: --recent requires an integer", file=sys.stderr)
+                return True
+            if recent < 0:
+                print("Usage: --recent must be >= 0", file=sys.stderr)
+                return True
+            i += 2
+            continue
+        print(f"(campaign-status: ignoring unknown argument {token!r})", file=sys.stderr)
+        i += 1
+
+    rows = load_ledger_rows(workspace / "data" / "campaign_ledger.jsonl")
+    print(summarise_ledger(rows, recent=recent), file=sys.stderr)
     return True
 
 
@@ -5001,6 +5043,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head in {":campaign-start", ":campaign"}:
         return _handle_campaign_start(rest.strip(), agent, workspace)
 
+    if head in {":campaign-status", ":campaign-ledger"}:
+        return _handle_campaign_status(rest.strip(), agent, workspace)
+
     if head in {":capability-request", ":capability-proposal"}:
         return _handle_capability_request(rest.strip(), agent, workspace)
 
@@ -5170,6 +5215,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "      flags: --dry-run  --allow-effects  --minutes N  --max-cycles N  --report-every N\n"
             "  :campaign-start [goal] [flags]  budgeted autonomous campaign with per-cycle ledger\n"
             "      flags: --dry-run  --allow-effects  --cycles N  --max-llm-calls N  --max-cost-units N  --max-idle N\n"
+            "  :campaign-status [--recent N]   read the campaign ledger digest (no budget spent)\n"
             "  :auto-status                    inspect autonomous runtime inbox/status\n"
             "  :conflicts [--limit N|--json]   inspect source claim conflicts and suggestions\n"
             "  :budget-status                  inspect default autonomous runtime budgets\n"

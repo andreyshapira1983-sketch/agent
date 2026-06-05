@@ -402,6 +402,82 @@ class TestCampaignLedger:
         assert ledger.path is None
 
 
+class TestLedgerReader:
+    def test_load_rows_missing_file_is_empty(self, tmp_path: Path):
+        from core.campaign import load_ledger_rows
+
+        assert load_ledger_rows(tmp_path / "nope.jsonl") == []
+
+    def test_load_rows_skips_blank_and_malformed_lines(self, tmp_path: Path):
+        from core.campaign import load_ledger_rows
+
+        path = tmp_path / "ledger.jsonl"
+        path.write_text(
+            '{"cycle": 1, "action": "a"}\n'
+            "\n"
+            "not json at all\n"
+            '"a bare string is not a dict"\n'
+            '{"cycle": 2, "action": "b"}\n',
+            encoding="utf-8",
+        )
+        rows = load_ledger_rows(path)
+        assert [r["cycle"] for r in rows] == [1, 2]
+
+    def test_summarise_empty_rows(self):
+        from core.campaign import summarise_ledger
+
+        text = summarise_ledger([])
+        assert "campaign ledger" in text
+        assert "empty" in text
+
+    def test_summarise_aggregates_and_shows_recent(self):
+        from core.campaign import summarise_ledger
+
+        rows = [
+            {"cycle": 1, "goal": "G1", "action": "restore_daemon_liveness",
+             "idle": False, "result": "completed", "llm_calls_spent": 2,
+             "cost_units_spent": 6, "artifact": "reasoning: x", "reason": ""},
+            {"cycle": 2, "goal": "G1", "action": "restore_daemon_liveness",
+             "idle": False, "result": "repeat", "llm_calls_spent": 0,
+             "cost_units_spent": 0, "reason": "already attempted"},
+            {"cycle": 3, "goal": "G2", "action": "observe",
+             "idle": True, "result": "idle", "llm_calls_spent": 0,
+             "cost_units_spent": 0, "reason": "nothing pressing"},
+        ]
+        text = summarise_ledger(rows, recent=2)
+        # All-time aggregates over every row.
+        assert "cycles_logged=3" in text
+        assert "useful=1" in text
+        assert "idle=1" in text
+        assert "repeats=1" in text
+        assert "llm_calls=2" in text
+        assert "cost_units=6" in text
+        assert "artifacts=1" in text
+        # Per-result breakdown + distinct goals.
+        assert "completed=1" in text
+        assert "repeat=1" in text
+        assert "idle=1" in text
+        assert "G1" in text and "G2" in text
+        # recent=2 shows only the last two cycles (cycle 1 omitted from tail).
+        assert "recent 2 cycle(s):" in text
+        assert "REPEAT (no LLM, skipped)" in text
+        assert "[cycle 3] IDLE (no LLM)" in text
+        assert "[cycle 1]" not in text
+
+    def test_summarise_recent_zero_shows_all(self):
+        from core.campaign import summarise_ledger
+
+        rows = [
+            {"cycle": i, "goal": "G", "action": "observe", "idle": True,
+             "result": "idle", "llm_calls_spent": 0, "cost_units_spent": 0,
+             "reason": "r"}
+            for i in range(1, 4)
+        ]
+        text = summarise_ledger(rows, recent=0)
+        assert "recent 3 cycle(s):" in text
+        assert "[cycle 1]" in text and "[cycle 3]" in text
+
+
 # ============================================================
 # Reporting + cost probe
 # ============================================================

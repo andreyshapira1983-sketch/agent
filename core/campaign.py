@@ -212,6 +212,111 @@ class CampaignLedger:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Ledger reader — answers "what did it do with my keys?" from the audit trail
+# ─────────────────────────────────────────────────────────────────────────────
+
+def load_ledger_rows(path: Path) -> list[dict[str, Any]]:
+    """Read the append-only campaign ledger JSONL into plain dict rows.
+
+    Honest and tolerant: a missing file yields ``[]`` and a malformed line is
+    skipped (the ledger is plain JSONL an operator may have hand-edited). The
+    rows are the per-cycle ``CampaignCycleRecord.to_dict()`` shape, accumulated
+    across every campaign that ever wrote to this file.
+    """
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def _format_ledger_row(row: dict[str, Any]) -> str:
+    """Render one ledger row the way CampaignCycleRecord.user_summary would."""
+    cycle = row.get("cycle", "?")
+    action = row.get("action", "?")
+    reason = row.get("reason", "")
+    if row.get("idle"):
+        return f"[cycle {cycle}] IDLE (no LLM) action={action} reason={reason}"
+    if row.get("result") == "repeat":
+        return f"[cycle {cycle}] REPEAT (no LLM, skipped) action={action} reason={reason}"
+    proposal = row.get("proposal")
+    artifact = row.get("artifact")
+    return (
+        f"[cycle {cycle}] {row.get('result', '?')} action={action} "
+        f"llm={row.get('llm_calls_spent', 0)} cost={row.get('cost_units_spent', 0)}"
+        + (f" proposal={proposal}" if proposal else "")
+        + (f" artifact={artifact}" if artifact else "")
+    )
+
+
+def summarise_ledger(rows: list[dict[str, Any]], *, recent: int = 10) -> str:
+    """Build an operator-readable digest of the campaign ledger.
+
+    Pure (no I/O): takes the rows from :func:`load_ledger_rows` so it can be
+    unit-tested without a file. Reports all-time totals, a per-result count,
+    the distinct goals seen, and the most recent ``recent`` cycle rows.
+    """
+    if not rows:
+        return (
+            "=== campaign ledger ===\n"
+            "(empty — no campaign cycles have been recorded yet)"
+        )
+
+    def _as_int(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    total = len(rows)
+    llm_calls = sum(_as_int(r.get("llm_calls_spent")) for r in rows)
+    cost_units = sum(_as_int(r.get("cost_units_spent")) for r in rows)
+    idle = sum(1 for r in rows if r.get("idle"))
+    repeats = sum(1 for r in rows if r.get("result") == "repeat")
+    artifacts = sum(1 for r in rows if r.get("artifact"))
+    proposals = sum(1 for r in rows if r.get("proposal"))
+    useful = total - idle - repeats
+
+    result_counts: dict[str, int] = {}
+    for r in rows:
+        key = "idle" if r.get("idle") else str(r.get("result", "?"))
+        result_counts[key] = result_counts.get(key, 0) + 1
+    by_result = ", ".join(f"{k}={v}" for k, v in sorted(result_counts.items()))
+
+    goals: list[str] = []
+    for r in rows:
+        goal = str(r.get("goal", ""))
+        if goal and goal not in goals:
+            goals.append(goal)
+
+    lines = [
+        "=== campaign ledger ===",
+        (
+            f"cycles_logged={total}  useful={useful}  idle={idle}  "
+            f"repeats={repeats}  llm_calls={llm_calls}  cost_units={cost_units}  "
+            f"proposals={proposals}  artifacts={artifacts}"
+        ),
+        f"by_result: {by_result}",
+        f"goals_seen ({len(goals)}): " + "; ".join(goals[:5])
+        + (" …" if len(goals) > 5 else ""),
+    ]
+    tail = rows[-recent:] if recent > 0 else rows
+    lines.append(f"recent {len(tail)} cycle(s):")
+    for r in tail:
+        lines.append(f"  {_format_ledger_row(r)}")
+    return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Final result
 # ─────────────────────────────────────────────────────────────────────────────
 
