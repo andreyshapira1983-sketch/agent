@@ -91,6 +91,7 @@ from core.capability_request import propose_capability_request
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
 from core.budget_governor import BudgetGovernor, BudgetLimits
 from core.work_session import WorkSessionConfig, run_work_session
+from core.campaign import CampaignConfig, CampaignLedger, run_campaign
 from core.subagent_memory_scope import (
     SubagentProposalResult,
     make_default_proposal,
@@ -2194,6 +2195,113 @@ def _handle_work_session(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         )
     except Exception as exc:
         print(f"(work-session failed: {type(exc).__name__}: {exc})", file=sys.stderr)
+        return True
+
+    print(result.user_summary(), file=sys.stderr)
+    return True
+
+
+def _handle_campaign_start(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """Handle :campaign-start — a budgeted multi-cycle autonomous campaign.
+
+    Unlike :work-session (a fixed time/cycle health loop), a campaign records a
+    per-cycle ledger (goal, best-next-action, cost, result, proposal,
+    reason_if_idle) and stops honestly: when the budget is spent, or after N
+    consecutive idle cycles where there is no high-priority action to take. An
+    idle cycle spends NO model call. Dry-run by default — effects still flow
+    only through the existing approval gate.
+    """
+    tokens = _split_meta_args(rest)
+    dry_run = True
+    max_cycles = 24
+    max_llm_calls = 100
+    max_cost_units = 0
+    max_idle_streak = 3
+    goal_parts: list[str] = []
+
+    def _int_arg(flag: str, index: int) -> int | None:
+        if index + 1 >= len(tokens):
+            print(f"Usage: {flag} requires a number", file=sys.stderr)
+            return None
+        try:
+            return int(tokens[index + 1])
+        except ValueError:
+            print(f"Usage: {flag} requires an integer", file=sys.stderr)
+            return None
+
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token == "--dry-run":
+            dry_run = True
+            i += 1
+            continue
+        if token == "--allow-effects":
+            dry_run = False
+            i += 1
+            continue
+        if token in ("--cycles", "--max-cycles"):
+            value = _int_arg(token, i)
+            if value is None:
+                return True
+            max_cycles = value
+            i += 2
+            continue
+        if token == "--max-llm-calls":
+            value = _int_arg(token, i)
+            if value is None:
+                return True
+            max_llm_calls = value
+            i += 2
+            continue
+        if token == "--max-cost-units":
+            value = _int_arg(token, i)
+            if value is None:
+                return True
+            max_cost_units = value
+            i += 2
+            continue
+        if token == "--max-idle":
+            value = _int_arg(token, i)
+            if value is None:
+                return True
+            max_idle_streak = value
+            i += 2
+            continue
+        goal_parts.append(token)
+        i += 1
+
+    try:
+        config = CampaignConfig(
+            goal=" ".join(goal_parts).strip() or "project health",
+            dry_run=dry_run,
+            max_cycles=max_cycles,
+            max_llm_calls=max_llm_calls,
+            max_cost_units=max_cost_units,
+            max_idle_streak=max_idle_streak,
+        )
+    except ValueError as exc:
+        print(f"(campaign config error: {exc})", file=sys.stderr)
+        return True
+
+    print(
+        f"(campaign goal={config.goal!r} dry_run={config.dry_run} "
+        f"max_cycles={config.max_cycles} max_llm_calls={config.max_llm_calls} "
+        f"max_cost_units={config.max_cost_units} max_idle={config.max_idle_streak})",
+        file=sys.stderr,
+    )
+
+    ledger = CampaignLedger(path=workspace / "data" / "campaign_ledger.jsonl")
+    try:
+        result = run_campaign(
+            config,
+            agent=agent,
+            workspace=workspace,
+            approval_inbox=_approval_inbox_for(agent, workspace),
+            ledger=ledger,
+        )
+    except Exception as exc:
+        print(f"(campaign failed: {type(exc).__name__}: {exc})", file=sys.stderr)
         return True
 
     print(result.user_summary(), file=sys.stderr)
@@ -4890,6 +4998,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head in {":work-session", ":work-sess"}:
         return _handle_work_session(rest.strip(), agent, workspace)
 
+    if head in {":campaign-start", ":campaign"}:
+        return _handle_campaign_start(rest.strip(), agent, workspace)
+
     if head in {":capability-request", ":capability-proposal"}:
         return _handle_capability_request(rest.strip(), agent, workspace)
 
@@ -5057,6 +5168,8 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "      flags: --dry-run  --allow-effects  --limit N  --learning-limit N  --no-tests\n"
             "  :work-session [goal] [flags]    bounded multi-cycle session with time budget\n"
             "      flags: --dry-run  --allow-effects  --minutes N  --max-cycles N  --report-every N\n"
+            "  :campaign-start [goal] [flags]  budgeted autonomous campaign with per-cycle ledger\n"
+            "      flags: --dry-run  --allow-effects  --cycles N  --max-llm-calls N  --max-cost-units N  --max-idle N\n"
             "  :auto-status                    inspect autonomous runtime inbox/status\n"
             "  :conflicts [--limit N|--json]   inspect source claim conflicts and suggestions\n"
             "  :budget-status                  inspect default autonomous runtime budgets\n"
