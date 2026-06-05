@@ -21,25 +21,21 @@ import pytest
 
 import agent_tick
 from agent_tick import _maybe_propose_repair, _repair_target_from_failures
+from core.self_repair import RepairProposal
 
 
 # --------------------------------------------------------------------------- #
 # Fakes                                                                        #
 # --------------------------------------------------------------------------- #
 
-class _FakeProposal:
-    def __init__(self, target_file: str):
-        self.target_file = target_file
-        self.description = "fix the thing"
-        self.patch_preview = "--- a\n+++ b\n"
-
-
 class _FakeReport:
+    """Mirrors the parts of ProposalGenerationReport that the daemon reads."""
+
     def __init__(self, status, proposal=None):
         self.status = status
         self.proposal = proposal
         self.confidence = 0.9
-        self.evidence = ["ev1", "ev2"]
+        self.evidence = ("ev1", "ev2")
         self.diagnosis = "diag"
 
 
@@ -149,7 +145,16 @@ def test_generator_constructed_with_workspace_root_not_workspace(tmp_path, monke
 def test_proposed_report_is_inboxed(tmp_path, monkeypatch):
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_x.py").write_text("# x\n", encoding="utf-8")
-    _FakeGen.report = _FakeReport("proposed", _FakeProposal("tests/test_x.py"))
+    # Use the REAL RepairProposal so the test is bound to its actual field
+    # contract (path/reason/proposed_content) — a fake with invented field
+    # names is exactly what let a shape-mismatch bug slip past before.
+    real_proposal = RepairProposal(
+        path="tests/test_x.py",
+        proposed_content="# fixed\n",
+        reason="fix the thing",
+        confidence=0.9,
+    )
+    _FakeGen.report = _FakeReport("proposed", real_proposal)
     _patch_gen(monkeypatch)
     inbox = _FakeInbox()
 
@@ -164,6 +169,7 @@ def test_proposed_report_is_inboxed(tmp_path, monkeypatch):
     assert result["target"] == "tests/test_x.py"
     assert len(inbox.added) == 1
     assert inbox.added[0]["operation"] == "repair_proposal"
+    assert inbox.added[0]["payload"]["target_file"] == "tests/test_x.py"
 
 
 def test_underivable_target_refuses_cleanly_without_building_generator(tmp_path, monkeypatch):

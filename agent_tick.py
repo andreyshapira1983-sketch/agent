@@ -330,9 +330,12 @@ def _maybe_propose_repair(
 
         if report.status == "proposed" and report.proposal is not None:
             prop = report.proposal
+            # RepairProposal (core/self_repair.py) carries `path` / `reason` /
+            # `proposed_content` — NOT target_file/description/patch_preview.
+            description = (prop.reason or report.diagnosis or "").strip() or "(no description)"
             summary_lines = [
                 f"{failed} test(s) failed: {', '.join(failed_names[:5])}",
-                f"Proposed fix → {prop.target_file}: {prop.description}",
+                f"Proposed fix → {prop.path}: {description}",
                 f"Confidence: {report.confidence:.0%}",
             ]
             inbox.add(
@@ -346,13 +349,15 @@ def _maybe_propose_repair(
                 payload={
                     "failed_count": failed,
                     "failed_tests": failed_names,
-                    "target_file": prop.target_file,
-                    "patch_preview": prop.patch_preview[:500] if prop.patch_preview else "",
+                    "target_file": prop.path,
+                    "proposed_content_preview": (
+                        prop.proposed_content[:500] if prop.proposed_content else ""
+                    ),
                     "confidence": report.confidence,
                     "diagnosis": report.diagnosis,
                 },
             )
-            return {"repair_proposed": True, "target": prop.target_file}
+            return {"repair_proposed": True, "target": prop.path}
 
         return {"repair_proposed": False, "reason": f"generator status: {report.status}"}
 
