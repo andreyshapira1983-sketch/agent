@@ -129,6 +129,7 @@ def _dry_run_visibility(
     dry_run: bool,
     previous_streak: int = 0,
     processed_effects: int = 0,
+    did_work: bool = True,
 ) -> dict:
     """Honest observability fields for the current tick — PURE, NO behaviour change.
 
@@ -146,6 +147,12 @@ def _dry_run_visibility(
       - ``dry_run``          — whether this tick runs without applying effects.
       - ``previous_streak``  — dry_run_streak carried from the previous tick.
       - ``processed_effects``— effects actually applied this tick (normally 0).
+      - ``did_work``         — whether this tick actually ran a dry-run pass
+                               (``tasks_processed > 0``). An IDLE no-op tick
+                               (nothing due, nothing pending) did no work and
+                               carries no information, so it must NOT inflate the
+                               streak. Defaults to ``True`` so callers that only
+                               care about mode/effects keep the simple behaviour.
 
     Returns:
       - ``mode``             — ``"dry_run"`` or ``"live"``.
@@ -154,10 +161,14 @@ def _dry_run_visibility(
       - ``processed_effects``— echoed back, clamped to a non-negative int. In
                                practice 0: dry-run applies nothing and the live
                                path is still gated into the approval inbox.
-      - ``dry_run_streak``   — consecutive dry-run ticks. ``previous_streak + 1``
-                               on a dry-run tick (regardless of test health —
-                               a failed/inconclusive dry-run tick is STILL a
-                               dry-run tick), and resets to 0 on a live tick.
+      - ``dry_run_streak``   — consecutive *meaningful* dry-run passes. On a
+                               dry-run tick that did work it is ``previous_streak
+                               + 1`` (regardless of test health — a failed /
+                               inconclusive dry-run pass is STILL a dry-run pass).
+                               On an IDLE dry-run tick (``did_work`` false) it is
+                               carried forward UNCHANGED — an idle tick adds no
+                               information and must not dilute the stall signal.
+                               A live tick resets it to 0.
     """
     try:
         prev = max(0, int(previous_streak))
@@ -167,11 +178,17 @@ def _dry_run_visibility(
         applied = max(0, int(processed_effects))
     except (TypeError, ValueError):
         applied = 0
+    if not dry_run:
+        streak = 0
+    elif did_work:
+        streak = prev + 1
+    else:
+        streak = prev  # idle no-op tick — carry forward, do not inflate
     return {
         "mode": "dry_run" if dry_run else "live",
         "effects": "disabled" if dry_run else "enabled",
         "processed_effects": applied,
-        "dry_run_streak": prev + 1 if dry_run else 0,
+        "dry_run_streak": streak,
     }
 
 
@@ -358,10 +375,15 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         _prev_streak = max(0, int((_prev_hb or {}).get("dry_run_streak", 0) or 0))
     except (TypeError, ValueError):
         _prev_streak = 0
+    # At tick_start no work has happened yet, so carry the streak forward
+    # (did_work=False). The final tick_complete recomputes it once we know
+    # whether this tick actually ran a dry-run pass. An idle no-op or an early
+    # crash therefore never inflates the dry-run-stall signal.
     visibility = _dry_run_visibility(
         dry_run=dry_run,
         previous_streak=_prev_streak,
         processed_effects=0,  # no effect is ever applied in this layer
+        did_work=False,
     )
     summary.update(visibility)
 
@@ -479,6 +501,16 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         return 1
 
     summary["tick_end"] = _now_iso()
+    # Recompute the streak now that we know whether this tick did real work.
+    # mode/effects/processed_effects are unchanged by did_work; only the streak
+    # differs: a working dry-run pass increments, an idle no-op carries forward.
+    visibility = _dry_run_visibility(
+        dry_run=dry_run,
+        previous_streak=_prev_streak,
+        processed_effects=0,
+        did_work=summary["tasks_processed"] > 0,
+    )
+    summary.update(visibility)
     _log_tick(workspace, {"event": "tick_complete", **summary})
 
     # Heartbeat #2: record successful completion with the honest health verdict.

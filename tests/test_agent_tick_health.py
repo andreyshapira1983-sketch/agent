@@ -169,4 +169,48 @@ def test_dry_run_streak_tolerates_corrupt_previous_value():
     assert v["dry_run_streak"] == 1
 
 
+def test_idle_dry_run_tick_carries_streak_forward_unchanged():
+    # An IDLE no-op tick (nothing due, nothing pending -> did_work=False) carries
+    # no information: it must NOT inflate the dry-run-stall streak. The streak is
+    # preserved, not incremented, so the stall signal stays honest.
+    v = _dry_run_visibility(dry_run=True, previous_streak=9, did_work=False)
+    assert v["mode"] == "dry_run"
+    assert v["effects"] == "disabled"
+    assert v["dry_run_streak"] == 9  # carried forward, NOT 10
+
+
+def test_streak_grows_only_on_working_ticks_idle_runs_do_not_dilute_signal():
+    # Reproduces the 73-idle-tick inflation: only ticks that actually ran a
+    # dry-run pass (did_work=True) move the counter; idle ticks hold it steady.
+    streak = 0
+    # 3 working dry-run passes -> 1,2,3
+    for _ in range(3):
+        streak = _dry_run_visibility(
+            dry_run=True, previous_streak=streak, did_work=True
+        )["dry_run_streak"]
+    assert streak == 3
+    # 50 idle no-op ticks -> still 3 (no inflation)
+    for _ in range(50):
+        streak = _dry_run_visibility(
+            dry_run=True, previous_streak=streak, did_work=False
+        )["dry_run_streak"]
+    assert streak == 3
+    # one more working pass -> 4
+    streak = _dry_run_visibility(
+        dry_run=True, previous_streak=streak, did_work=True
+    )["dry_run_streak"]
+    assert streak == 4
+
+
+def test_idle_live_tick_still_resets_streak():
+    # did_work is irrelevant to a live tick: a live tick always resets to 0,
+    # whether or not it did work.
+    assert _dry_run_visibility(
+        dry_run=False, previous_streak=8, did_work=False
+    )["dry_run_streak"] == 0
+    assert _dry_run_visibility(
+        dry_run=False, previous_streak=8, did_work=True
+    )["dry_run_streak"] == 0
+
+
 

@@ -226,9 +226,10 @@ def test_tick_marks_timed_out_run_inconclusive_not_healthy(workspace: Path, monk
 def test_tick_dry_run_streak_grows_then_resets_on_live(workspace: Path, monkeypatch):
     """End-to-end dry-run visibility regression.
 
-    Two consecutive dry-run ticks must grow dry_run_streak (1 -> 2) and report
-    mode=dry_run / effects=disabled / processed_effects=0. A following live tick
-    must reset the streak to 0 and never imply that effects were applied.
+    Only ticks that actually run a dry-run pass (a pending task was processed)
+    grow dry_run_streak; an IDLE no-op tick in between carries it forward
+    UNCHANGED so the stall signal is not diluted by mere script invocations.
+    A following live tick resets the streak to 0 and never implies effects ran.
     """
     import json
     import agent_tick
@@ -241,22 +242,35 @@ def test_tick_dry_run_streak_grows_then_resets_on_live(workspace: Path, monkeypa
     monkeypatch.setenv("AGENT_TEST_TIMEOUT_SECONDS", "300")
 
     hb_path = workspace / "data" / "daemon_heartbeat.json"
+    task_store = TaskQueueStore(workspace / agent_tick.TASK_QUEUE_PATH)
 
-    # Tick 1 (dry-run): no pending task needed; we only assert visibility fields.
+    def _enqueue_work() -> None:
+        task_store.add(goal="health check", dry_run=True, include_tests=False)
+
+    # Tick 1 (dry-run, did work): a pending task is processed -> streak 1.
+    _enqueue_work()
     assert agent_tick.run_tick(workspace, dry_run=True) == 0
     hb1 = json.loads(hb_path.read_text(encoding="utf-8"))
     assert hb1["mode"] == "dry_run"
     assert hb1["effects"] == "disabled"
     assert hb1["processed_effects"] == 0
+    assert hb1["tasks_processed"] >= 1
     assert hb1["dry_run_streak"] == 1
 
-    # Tick 2 (dry-run): streak increments.
+    # Tick 2 (dry-run, IDLE no-op): nothing pending -> streak carries forward.
+    assert agent_tick.run_tick(workspace, dry_run=True) == 0
+    hb_idle = json.loads(hb_path.read_text(encoding="utf-8"))
+    assert hb_idle["tasks_processed"] == 0
+    assert hb_idle["dry_run_streak"] == 1  # NOT inflated by an idle tick
+
+    # Tick 3 (dry-run, did work): streak increments to 2.
+    _enqueue_work()
     assert agent_tick.run_tick(workspace, dry_run=True) == 0
     hb2 = json.loads(hb_path.read_text(encoding="utf-8"))
     assert hb2["dry_run_streak"] == 2
     assert hb2["mode"] == "dry_run"
 
-    # Tick 3 (live): streak resets, nothing implies effects were applied.
+    # Tick 4 (live): streak resets, nothing implies effects were applied.
     assert agent_tick.run_tick(workspace, dry_run=False) == 0
     hb3 = json.loads(hb_path.read_text(encoding="utf-8"))
     assert hb3["mode"] == "live"
