@@ -275,6 +275,26 @@ def _print_status(workspace: Path) -> int:
 
 # ── repair proposal after failed tests ───────────────────────────────────────
 
+def _repair_target_from_failures(failed_names: list[str], workspace: Path) -> str | None:
+    """Pick a single concrete repair target from failing test names.
+
+    `RepairProposalGenerator.generate` requires one existing `target_path`;
+    it does NOT auto-pick a target. Each failing name looks like
+    ``tests/foo.py::Klass::test_bar`` — the part before ``::`` is the test
+    file. We return that file only when the failures point at exactly one
+    existing file; otherwise we return None so the caller refuses cleanly
+    instead of guessing across multiple files.
+    """
+    files: list[str] = []
+    for name in failed_names:
+        path = (name or "").split("::", 1)[0].strip()
+        if not path:
+            continue
+        if (workspace / path).is_file() and path not in files:
+            files.append(path)
+    return files[0] if len(files) == 1 else None
+
+
 def _maybe_propose_repair(
     workspace: Path,
     test_report: dict,
@@ -288,6 +308,16 @@ def _maybe_propose_repair(
 
     failed_names: list[str] = test_report.get("failed_tests", []) or []
 
+    target_path = _repair_target_from_failures(failed_names, workspace)
+    if target_path is None:
+        return {
+            "repair_proposed": False,
+            "reason": (
+                "could not determine a single repair target from failing tests: "
+                f"{failed_names[:5]}"
+            ),
+        }
+
     try:
         from core.repair_proposal import RepairProposalGenerator
 
@@ -295,8 +325,8 @@ def _maybe_propose_repair(
         if llm is None:
             return {"repair_proposed": False, "reason": "no llm on agent"}
 
-        gen = RepairProposalGenerator(llm=llm, workspace=workspace)
-        report = gen.generate(target_path=None)   # let generator pick based on logs
+        gen = RepairProposalGenerator(llm=llm, workspace_root=workspace)
+        report = gen.generate(target_path=target_path)
 
         if report.status == "proposed" and report.proposal is not None:
             prop = report.proposal
