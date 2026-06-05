@@ -85,8 +85,9 @@ def _build_agent(
     workspace: Path,
     *,
     llm_response: str,
-    approval_default: str,
-) -> tuple[AgentLoop, Path, AutoApprover]:
+    approval_default: str | None,
+    blocked_tools: frozenset[str] | None = None,
+) -> tuple[AgentLoop, Path, AutoApprover | None]:
     reg = ToolRegistry()
     reg.register(FileReadTool(workspace_root=workspace))
     reg.register(WebSearchTool())
@@ -98,10 +99,15 @@ def _build_agent(
 
     trace_id = new_trace_id()
     logger = TraceLogger(trace_id=trace_id, log_dir=workspace / "logs", verbose=False)
-    approver = AutoApprover(default=approval_default)
+    # approval_default=None means "no approval provider configured at all" — the
+    # repair controller must then refuse to apply a code change.
+    approver = AutoApprover(default=approval_default) if approval_default is not None else None
+    policy = PolicyGate(reg)
+    if blocked_tools:
+        policy.blocked_tools = frozenset(blocked_tools)
     agent = AgentLoop(
         registry=reg,
-        policy=PolicyGate(reg),
+        policy=policy,
         llm=ScriptLLM([llm_response]),
         logger=logger,
         planner=FakePlanner([]),
@@ -251,3 +257,80 @@ def test_e2e_low_confidence_blocks_before_approval(tmp_path: Path):
         "diff_file",
     ]
     assert any(e["event"] == "self_repair_confidence_gate" for e in _events(log_path))
+
+
+def test_e2e_no_approval_provider_refuses_to_apply(tmp_path: Path):
+    """Safety brake: with NO approval provider configured, a self-repair that
+    requires approval (APPLY_CODE_CHANGE) must refuse to touch the file.
+
+    This is a load-bearing guard — the agent cannot rewrite its own code
+    without an approval channel. It exercises the `provider is None` branch in
+    `_request_approval` and the `approval_unavailable` mapping in run().
+    """
+    _seed_workspace(tmp_path)
+    agent, log_path, approver = _build_agent(
+        tmp_path,
+        llm_response=_proposal_json(return_value=42),
+        approval_default=None,  # no provider at all
+    )
+    assert approver is None
+    initial = (tmp_path / "buggy.py").read_text(encoding="utf-8")
+    proposal_report = agent.propose_repair(
+        target_path="buggy.py",
+        workspace_root=tmp_path,
+        test_paths=("tests",),
+    )
+
+    repair_report = agent.repair(proposal_report.proposal, workspace_root=tmp_path)
+
+    assert repair_report.status == "approval_unavailable"
+    # The file is byte-for-byte untouched and no compensation was registered.
+    assert (tmp_path / "buggy.py").read_text(encoding="utf-8") == initial
+    assert len(agent.compensation_log) == 0
+    # baseline + diff ran; the write never executed.
+    assert [e["payload"]["tool_name"] for e in _events(log_path) if e["event"] == "tool_call"] == [
+        "run_tests",
+        "diff_file",
+    ]
+    assert any(
+        e["event"] == "error"
+        and e["payload"].get("code") == "approval_unavailable"
+        for e in _events(log_path)
+    )
+
+
+def test_e2e_policy_blocked_write_tool_stops_repair_before_approval(tmp_path: Path):
+    """Safety brake: if PolicyGate blocks `file_write`, the repair must stop at
+    the write step — BEFORE any approval is even requested — and leave the file
+    untouched. Exercises the `policy_decision.decision == "deny"` branch in
+    `_execute_tool` and the default `blocked` mapping in `_blocked_status`.
+    """
+    _seed_workspace(tmp_path)
+    agent, log_path, approver = _build_agent(
+        tmp_path,
+        llm_response=_proposal_json(return_value=42),
+        approval_default="approve",
+        blocked_tools=frozenset({"file_write"}),
+    )
+    initial = (tmp_path / "buggy.py").read_text(encoding="utf-8")
+    proposal_report = agent.propose_repair(
+        target_path="buggy.py",
+        workspace_root=tmp_path,
+        test_paths=("tests",),
+    )
+
+    repair_report = agent.repair(proposal_report.proposal, workspace_root=tmp_path)
+
+    assert repair_report.status == "blocked"
+    assert (tmp_path / "buggy.py").read_text(encoding="utf-8") == initial
+    # Denied at policy → approval was never consulted, nothing to roll back.
+    assert approver is not None and len(approver.calls) == 0
+    assert len(agent.compensation_log) == 0
+    assert [e["payload"]["tool_name"] for e in _events(log_path) if e["event"] == "tool_call"] == [
+        "run_tests",
+        "diff_file",
+    ]
+    assert any(
+        e["event"] == "error" and e["payload"].get("code") == "policy_blocked"
+        for e in _events(log_path)
+    )
