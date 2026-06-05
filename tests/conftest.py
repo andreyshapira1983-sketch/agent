@@ -106,6 +106,36 @@ def fake_llm() -> FakeLLM:
     return FakeLLM()
 
 
+# Operator-facing model-routing env vars. These are normally set by the
+# daemon's .env (e.g. AGENT_MODEL_POLICY=balanced) or by an operator running
+# the suite offline (AGENT_PROVIDER=mock / AGENT_MODEL_POLICY=offline /
+# AGENT_ALLOW_MOCK_ROUTING=1). Tests that exercise routing assert a specific
+# policy and must NOT silently inherit whatever the ambient environment carries
+# — otherwise the suite is green only by accident of the shell. The daemon's own
+# health-check runs this suite under its .env, so hermeticity here keeps that
+# self-test stable regardless of routing mode.
+_OPERATOR_MODEL_ENV_VARS = (
+    "AGENT_MODEL_POLICY",
+    "AGENT_MODEL_MAX_COST",
+    "AGENT_ALLOW_MOCK_ROUTING",
+    "AGENT_PROVIDER",
+    "AGENT_MODEL",
+)
+
+
+@pytest.fixture(autouse=True)
+def _neutralize_operator_model_env(monkeypatch):
+    """Strip ambient model-routing overrides before each test.
+
+    Runs before the test body, so a test that explicitly sets one of these
+    (via its own monkeypatch.setenv) still wins. In a plain `pytest` run these
+    vars are usually unset, making this a no-op; under an offline/mock operator
+    environment it prevents routing tests from flipping red.
+    """
+    for var in _OPERATOR_MODEL_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+
 @pytest.fixture
 def workspace(tmp_path: Path) -> Path:
     """An isolated workspace directory."""
