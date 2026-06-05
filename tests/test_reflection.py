@@ -242,6 +242,47 @@ def test_reflection_saves_lessons_to_memory(tmp_path: Path):
     assert "repair" in saved[0].tags
 
 
+# ── 7b. Operator brake (freeze_writes) withholds lessons from memory ─────────
+
+def test_reflection_freeze_writes_withholds_lessons(tmp_path: Path):
+    """When freeze_writes is set (operator brake), lessons are still
+    synthesised and surfaced in the report but never reach the store."""
+    log_dir = tmp_path / "logs"
+    events = [
+        _tool_call_event("tc1", "web_fetch", "run_a"),
+        _tool_error_event("tc1", "timeout", "run_a"),
+        _tool_call_event("tc2", "web_fetch", "run_b"),
+        _tool_error_event("tc2", "timeout", "run_b"),
+    ]
+    _write_log(log_dir, "runs", events)
+
+    lesson_payload = _lessons_json(
+        {
+            "insight": "web_fetch times out frequently; retry or increase timeout",
+            "action": "repair",
+            "focus_area": "tools/web_fetch.py",
+            "confidence": 0.9,
+        }
+    )
+    memory = PersistentMemoryStore(tmp_path / "data" / "persistent_memory.jsonl")
+    engine = ReflectionEngine(
+        workspace=tmp_path,
+        persistent_memory=memory,
+        llm=FakeLLM(responses=[lesson_payload]),
+        log_dir=log_dir,
+        freeze_writes=True,
+    )
+
+    report = engine.reflect()
+
+    # The lesson is still visible in the report (honest)...
+    assert len(report.lessons) == 1
+    assert report.lessons[0].action == "repair"
+    # ...but nothing was persisted.
+    assert report.memory_records_saved == 0
+    assert memory.load() == []
+
+
 # ── 8. LLM returns garbage → warning, no lessons, no crash ───────────────────
 
 def test_reflection_handles_llm_json_failure(tmp_path: Path):

@@ -626,3 +626,89 @@ def test_policy_gate_blocks_listed_tool(workspace: Path):
     )
     assert deny.decision == "deny"
     assert "blocked in this context" in " ".join(deny.reasons)
+
+
+# ── Reflection freeze: operator brake reaches the reflection side channel ────
+
+def _agent_with_policy(
+    workspace: Path, *, write_policy: MemoryWritePolicy, llm_responses: list[str]
+) -> AgentLoop:
+    registry = ToolRegistry()
+    llm = FakeLLM(responses=llm_responses)
+    return AgentLoop(
+        registry=registry,
+        policy=PolicyGate(registry),
+        llm=llm,
+        logger=TraceLogger(new_trace_id(), workspace / "logs", verbose=False),
+        planner=LLMPlanner(llm=llm, registry=registry),
+        memory=WorkingMemory(),
+        persistent_store=PersistentMemoryStore(workspace / "data" / "memory.jsonl"),
+        retrieval_policy=MemoryRetrievalPolicy(),
+        write_policy=write_policy,
+        source_registry_store=SourceRegistryStore(workspace / "data" / "sources.jsonl"),
+        approval_provider=AutoApprover(default="approve"),
+        max_replan_attempts=1,
+    )
+
+
+def _seed_failure_logs(workspace: Path) -> None:
+    """Write logs with a repeating tool failure so reflection synthesises a lesson."""
+    import json as _json
+
+    log_dir = workspace / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    events = [
+        {"trace_id": "r1", "event": "tool_call", "payload": {"id": "tc1", "tool_name": "web_fetch"}},
+        {"trace_id": "r1", "event": "tool_result", "payload": {"tool_call_id": "tc1", "status": "error", "error": "timeout"}},
+        {"trace_id": "r2", "event": "tool_call", "payload": {"id": "tc2", "tool_name": "web_fetch"}},
+        {"trace_id": "r2", "event": "tool_result", "payload": {"tool_call_id": "tc2", "status": "error", "error": "timeout"}},
+    ]
+    (log_dir / "runs.jsonl").write_text(
+        "\n".join(_json.dumps(e) for e in events), encoding="utf-8"
+    )
+
+
+_LESSONS_JSON = (
+    '[{"insight": "web_fetch keeps timing out; add retry/backoff", '
+    '"action": "repair", "focus_area": "tools/web_fetch.py", "confidence": 0.9}]'
+)
+
+
+def test_run_reflection_honors_frozen_write_policy(workspace: Path):
+    """When the operator brake froze 'agent-auto' writes, reflection lessons
+    (agent-initiated memory growth) must NOT reach the persistent store."""
+    _seed_failure_logs(workspace)
+    agent = _agent_with_policy(
+        workspace,
+        write_policy=MemoryWritePolicy(frozen_sources={"agent-auto"}),
+        llm_responses=[_LESSONS_JSON],
+    )
+    runtime = AutonomousRuntime(agent, workspace=workspace)
+
+    result = runtime._run_reflection(AutonomousRuntimeConfig(limit=1, dry_run=True))
+
+    assert result is not None
+    # A lesson was synthesised (honest visibility) ...
+    assert len(result["lessons"]) == 1
+    # ... but nothing was persisted because the brake is active.
+    assert result["memory_records_saved"] == 0
+    assert agent.persistent_store.load() == []
+
+
+def test_run_reflection_saves_with_default_policy(workspace: Path):
+    """Without the operator brake, reflection persists its lessons as before."""
+    _seed_failure_logs(workspace)
+    agent = _agent_with_policy(
+        workspace,
+        write_policy=MemoryWritePolicy(),
+        llm_responses=[_LESSONS_JSON],
+    )
+    runtime = AutonomousRuntime(agent, workspace=workspace)
+
+    result = runtime._run_reflection(AutonomousRuntimeConfig(limit=1, dry_run=True))
+
+    assert result is not None
+    assert len(result["lessons"]) == 1
+    assert result["memory_records_saved"] == 1
+    assert len(agent.persistent_store.load()) == 1
+

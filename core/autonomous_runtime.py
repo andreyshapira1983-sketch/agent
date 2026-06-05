@@ -925,12 +925,22 @@ class AutonomousRuntime:
             return None
         log = getattr(self.agent, "log", None)
         log_dir = getattr(log, "log_dir", None) if log is not None else None
+        # Honour the same operator brake the rest of the agent uses: when
+        # AGENT_FREEZE_AUTO_MEMORY froze 'agent-auto' writes, reflection's
+        # auto-generated lessons (which are agent-initiated memory growth)
+        # must be frozen too — otherwise they slip past the freeze straight
+        # into the persistent store. Derived from the live write policy so
+        # the runtime never re-reads the environment.
+        write_policy = getattr(self.agent, "write_policy", None)
+        frozen_sources = getattr(write_policy, "frozen_sources", frozenset())
+        freeze_writes = "agent-auto" in frozen_sources
         engine = ReflectionEngine(
             workspace=self.workspace,
             persistent_memory=persistent_store,
             llm=llm,
             log_dir=log_dir,
             logger=log,
+            freeze_writes=freeze_writes,
         )
         rotated_max_logs = _REFLECTION_LOG_WINDOWS[_rotation_index(len(_REFLECTION_LOG_WINDOWS))]
         rotated_reflection = ReflectionConfig(

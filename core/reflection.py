@@ -171,12 +171,22 @@ class ReflectionEngine:
         llm: LLM,
         log_dir: Path | str | None = None,
         logger: Any | None = None,
+        freeze_writes: bool = False,
     ) -> None:
         self.workspace = Path(workspace).resolve()
         self.persistent_memory = persistent_memory
         self.llm = llm
         self.log_dir = Path(log_dir) if log_dir else self.workspace / "logs"
         self.logger = logger
+        # Operator brake: when True, lessons are still synthesised and
+        # surfaced in the report but NOT persisted to memory. This closes
+        # the side channel where reflection wrote 'agent-auto'-equivalent
+        # lessons straight to the store, bypassing the MemoryWritePolicy
+        # freeze that AGENT_FREEZE_AUTO_MEMORY installs for the rest of the
+        # agent. The caller wires this to the same operator brake (see
+        # AutonomousRuntime._run_reflection). Off by default so existing
+        # behaviour is unchanged.
+        self.freeze_writes = freeze_writes
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -459,6 +469,12 @@ class ReflectionEngine:
     def _save_lessons(self, lessons: list[Lesson]) -> int:
         """Persist lessons as episodic MemoryRecords. Returns count saved."""
         if not lessons:
+            return 0
+        if self.freeze_writes:
+            # Operator brake active: do not grow persistent memory. Lessons
+            # are still returned in the report (honest visibility) but none
+            # reach disk.
+            self._log("reflection_writes_frozen", {"lessons_withheld": len(lessons)})
             return 0
         records = [
             MemoryRecord(
