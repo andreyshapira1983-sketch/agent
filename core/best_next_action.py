@@ -47,6 +47,25 @@ _DRY_RUN_STREAK_ALERT = 5     # ~5 consecutive dry-run ticks before nudging
 _INBOX_DEBT_DUPLICATES = 3    # this many duplicates is real debt, not noise
 _INBOX_BACKLOG_PENDING = 12   # backlog worth a dedicated review pass
 
+# Severities an operator may acknowledge away (see core.alert_ack). Objective
+# breakages (critical/high) are intentionally excluded — never suppressible.
+_SUPPRESSIBLE_SEVERITIES = frozenset({"medium", "low"})
+
+# The advisory alert actions (exactly the medium/low candidates below) that an
+# operator is allowed to acknowledge. Kept as an explicit registry so the REPL
+# can validate an ack request from the action NAME alone, before any signals
+# are gathered. Critical/high actions are deliberately absent.
+_SUPPRESSIBLE_ACTIONS = frozenset({
+    "reduce_inbox_duplicate_debt",  # medium
+    "review_dry_run_stall",         # medium
+    "review_inbox_backlog",         # low
+})
+
+
+def is_suppressible_alert(action: str) -> bool:
+    """Whether an alert with this action name may be acknowledged. Pure."""
+    return str(action) in _SUPPRESSIBLE_ACTIONS
+
 
 @dataclass(frozen=True)
 class BestNextAction:
@@ -89,6 +108,7 @@ def select_best_next_action(
     failed_tests: tuple[str, ...] = (),
     triage: Optional[TriageReport] = None,
     inbox_pending: int = 0,
+    acknowledged: frozenset[str] = frozenset(),
 ) -> BestNextAction:
     """Pick the single most important next action from the current signals.
 
@@ -96,6 +116,13 @@ def select_best_next_action(
     (typically from the latest heartbeat plus a triage pass) and decides what
     to do with the recommendation. The agent is expected to PROPOSE this action,
     not perform it.
+
+    ``acknowledged`` is the set of action names the operator has accepted (see
+    :mod:`core.alert_ack`). An acknowledged candidate is removed from the
+    top-pick race ONLY when its severity is suppressible (``medium``/``low``) —
+    objective breakages (``critical``/``high``) are never silenced, so you can
+    never acknowledge away a real failure. Suppressed alerts are not deleted:
+    when nothing else is pressing they are surfaced by the ``observe`` fallback.
 
     Returns exactly one :class:`BestNextAction`. When nothing is pressing it
     returns an honest ``observe`` action rather than inventing busywork.
@@ -126,12 +153,31 @@ def select_best_next_action(
     if backlog is not None:
         candidates.append(backlog)
 
-    if not candidates:
-        return _candidate_observe(tests_health, result_status, inbox_pending)
+    # Partition: an acknowledged advisory alert (medium/low) leaves the race so
+    # the next genuine action surfaces. A critical/high candidate is NEVER
+    # suppressible even if its name was acknowledged.
+    active = [c for c in candidates if not _is_suppressed(c, acknowledged)]
+    suppressed = [c for c in candidates if _is_suppressed(c, acknowledged)]
+
+    if not active:
+        return _candidate_observe(
+            tests_health, result_status, inbox_pending, suppressed=suppressed
+        )
 
     # Deterministic: highest priority wins; ties keep first-appended (which is
     # already the intended severity order above).
-    return max(candidates, key=lambda c: c.priority)
+    return max(active, key=lambda c: c.priority)
+
+
+def _is_suppressed(
+    candidate: BestNextAction,
+    acknowledged: frozenset[str],
+) -> bool:
+    """Whether this candidate is acknowledged AND soft enough to suppress."""
+    return (
+        candidate.action in acknowledged
+        and candidate.severity in _SUPPRESSIBLE_SEVERITIES
+    )
 
 
 # ── candidate generators ─────────────────────────────────────────────────────
@@ -318,18 +364,38 @@ def _candidate_observe(
     tests_health: str,
     result_status: str,
     inbox_pending: int,
+    *,
+    suppressed: Optional[list[BestNextAction]] = None,
 ) -> BestNextAction:
+    suppressed = suppressed or []
+    evidence = [
+        f"tests_health={tests_health}, result_status={result_status}",
+        f"{int(inbox_pending or 0)} pending approval item(s)",
+    ]
+    unknowns = ["whether a problem exists that no current signal exposes"]
+    if suppressed:
+        names = ", ".join(sorted({c.action for c in suppressed}))
+        reason = (
+            "No unacknowledged signal warrants action: the only active alert(s) "
+            "have been acknowledged by the operator."
+        )
+        evidence.append(f"acknowledged (suppressed) alert(s) still present: {names}")
+        unknowns.append(
+            "whether the acknowledged condition has since worsened — re-check before clearing the ack"
+        )
+    else:
+        reason = (
+            "No failing tests, no errors, no inbox debt, and the daemon is live: "
+            "nothing warrants action now."
+        )
     return BestNextAction(
         action="observe",
         title="No pressing action — stay in honest observation",
         severity="none",
         priority=_P_OBSERVE,
-        reason="No failing tests, no errors, no inbox debt, and the daemon is live: nothing warrants action now.",
-        evidence=(
-            f"tests_health={tests_health}, result_status={result_status}",
-            f"{int(inbox_pending or 0)} pending approval item(s)",
-        ),
-        unknowns=("whether a problem exists that no current signal exposes",),
+        reason=reason,
+        evidence=tuple(evidence),
+        unknowns=tuple(unknowns),
         risk="read_only",
         recommended_command=None,
         confidence=0.5,

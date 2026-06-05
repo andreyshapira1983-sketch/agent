@@ -162,6 +162,7 @@ DEFAULT_SOURCE_REGISTRY_PATH = Path("data") / "source_registry.jsonl"
 DEFAULT_RUNTIME_TASKS_PATH = Path("data") / "runtime_tasks.jsonl"
 DEFAULT_RUNTIME_SCHEDULES_PATH = Path("data") / "runtime_schedules.jsonl"
 DEFAULT_APPROVAL_INBOX_PATH = Path("data") / "approval_inbox.jsonl"
+DEFAULT_ALERT_ACK_PATH = Path("data") / "alert_acknowledgements.jsonl"
 DEFAULT_MODEL_USAGE_PATH = Path("data") / "model_usage.jsonl"
 DEFAULT_BUDGET_LEDGER_PATH = Path("data") / "budget_ledger.jsonl"
 DEFAULT_EPISODIC_MEMORY_PATH = Path("data") / "episodic_memory.jsonl"
@@ -1977,6 +1978,14 @@ def _approval_inbox_for(agent: AgentLoop, workspace: Path | None = None) -> Appr
         inbox = ApprovalInbox(path=path)
         setattr(agent, "approval_inbox", inbox)
     return inbox
+
+
+def _alert_ack_store_for(workspace: Path | None = None):
+    """Build an :class:`AlertAckStore` bound to the workspace runtime state."""
+    from core.alert_ack import AlertAckStore
+
+    path = (workspace / DEFAULT_ALERT_ACK_PATH) if workspace is not None else None
+    return AlertAckStore(path=path)
 
 
 def _handle_auto_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
@@ -4136,6 +4145,9 @@ def _handle_best_next_action(rest: str, agent: AgentLoop, workspace: Path) -> bo
     inbox = _approval_inbox_for(agent, workspace)
     triage = triage_inbox(inbox.pending())
 
+    ack_store = _alert_ack_store_for(workspace)
+    acknowledged = ack_store.active_actions()
+
     action = select_best_next_action(
         result_status=str(hb.get("result_status", "none")),
         tests_health=str(hb.get("tests_health", "none")),
@@ -4147,13 +4159,116 @@ def _handle_best_next_action(rest: str, agent: AgentLoop, workspace: Path) -> bo
         tick_error=hb.get("error"),
         triage=triage,
         inbox_pending=triage.total_pending,
+        acknowledged=acknowledged,
     )
 
     if rest.strip() == "--json":
         print(json.dumps(action.to_dict(), ensure_ascii=False, indent=2), file=sys.stderr)
     else:
         print(format_best_next_action(action), file=sys.stderr)
+        if acknowledged:
+            print(
+                f"  (acknowledged alert(s) currently suppressed: {', '.join(sorted(acknowledged))} "
+                "— :ack-list to review, :ack-clear <action> to restore)",
+                file=sys.stderr,
+            )
     agent.log.log("best_next_action", action.to_dict())
+    return True
+
+
+def _handle_alert_ack(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """Acknowledge an advisory alert so it stops dominating :best-next-action.
+
+    Usage: ``:ack <action> [--ttl <hours>] [reason words...]``. Only advisory
+    (medium/low) alerts can be acknowledged — objective breakages are rejected.
+    Read/write of runtime state only; never executes the alert's action.
+    """
+    from core.best_next_action import is_suppressible_alert
+
+    tokens = rest.split()
+    if not tokens:
+        print(
+            "Usage: :ack <action> [--ttl <hours>] [reason...]\n"
+            "  (advisory alerts only, e.g. review_dry_run_stall, "
+            "reduce_inbox_duplicate_debt, review_inbox_backlog)",
+            file=sys.stderr,
+        )
+        return True
+
+    action = tokens[0]
+    if not is_suppressible_alert(action):
+        print(
+            f"(ack refused: '{action}' is not an acknowledgeable advisory alert — "
+            "objective breakages (daemon/tests/tick errors) can never be suppressed)",
+            file=sys.stderr,
+        )
+        return True
+
+    ttl_hours: float | None = None
+    reason_parts: list[str] = []
+    i = 1
+    while i < len(tokens):
+        if tokens[i] == "--ttl" and i + 1 < len(tokens):
+            try:
+                ttl_hours = float(tokens[i + 1])
+            except ValueError:
+                print(f"(ack: invalid --ttl value '{tokens[i + 1]}', ignoring)", file=sys.stderr)
+            i += 2
+            continue
+        reason_parts.append(tokens[i])
+        i += 1
+
+    store = _alert_ack_store_for(workspace)
+    ack = store.acknowledge(
+        action=action,
+        acknowledged_by="operator",
+        reason=" ".join(reason_parts),
+        ttl_hours=ttl_hours,
+    )
+    ttl_note = f" (expires {ack.expires_at})" if ack.expires_at else " (no expiry)"
+    print(
+        f"acknowledged: {action}{ttl_note}\n"
+        f"  reason: {ack.reason or '(none given)'}\n"
+        "  note: the alert is suppressed from the top pick but still computed and "
+        "reported; use :ack-clear to restore it.",
+        file=sys.stderr,
+    )
+    agent.log.log("alert_acknowledged", ack.to_dict())
+    return True
+
+
+def _handle_alert_ack_list(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """List active operator acknowledgements. Read-only."""
+    store = _alert_ack_store_for(workspace)
+    active = store.list_active()
+    if not active:
+        print("no active acknowledgements.", file=sys.stderr)
+        return True
+    print(f"active acknowledgement(s): {len(active)}", file=sys.stderr)
+    for ack in active:
+        ttl = f"expires {ack.expires_at}" if ack.expires_at else "no expiry"
+        print(
+            f"  - {ack.action}  [{ttl}]  by={ack.acknowledged_by}  "
+            f"reason={ack.reason or '(none)'}",
+            file=sys.stderr,
+        )
+    print("  note: :ack-clear <action> to restore an alert to the top-pick race.", file=sys.stderr)
+    return True
+
+
+def _handle_alert_ack_clear(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """Un-acknowledge an alert so it can dominate :best-next-action again."""
+    action = rest.strip()
+    if not action:
+        print("Usage: :ack-clear <action>", file=sys.stderr)
+        return True
+    store = _alert_ack_store_for(workspace)
+    removed = store.clear(action)
+    if removed:
+        print(f"cleared acknowledgement for: {action} (restored to top-pick race)", file=sys.stderr)
+        agent.log.log("alert_ack_cleared", {"action": action, "removed": removed})
+    else:
+        print(f"(no active acknowledgement found for '{action}')", file=sys.stderr)
     return True
 
 
@@ -4800,6 +4915,15 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head in {":best-next-action", ":next-action", ":bna"}:
         return _handle_best_next_action(rest.strip(), agent, workspace)
 
+    if head in {":ack", ":acknowledge"}:
+        return _handle_alert_ack(rest.strip(), agent, workspace)
+
+    if head in {":ack-list", ":acks"}:
+        return _handle_alert_ack_list(rest.strip(), agent, workspace)
+
+    if head in {":ack-clear", ":unack"}:
+        return _handle_alert_ack_clear(rest.strip(), agent, workspace)
+
     # Short aliases for approval commands
     if head == ":inbox":
         return _handle_approval_list("pending", agent, workspace)
@@ -4923,6 +5047,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :approval-list [status|all]     list pending/approved/denied approval items\n"
             "  :approval-triage                read-only triage: clusters/duplicates/stale + advice\n"
             "  :best-next-action [--json]      choose the single most important next action (advisory)\n"
+            "  :ack <action> [--ttl H] [why]   acknowledge an advisory alert so it stops dominating BNA\n"
+            "  :ack-list                       list active acknowledgements\n"
+            "  :ack-clear <action>             restore an acknowledged alert to the top-pick race\n"
             "  :approval-approve <id>          mark an approval inbox item approved\n"
             "  :approval-deny <id>             mark an approval inbox item denied\n"
             "  :approval-run <id>              execute one approved whitelisted operation\n"
@@ -5119,7 +5246,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-triage  :best-next-action  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-triage  :best-next-action  :ack  :ack-list  :ack-clear  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:
