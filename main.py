@@ -2225,6 +2225,7 @@ def _handle_campaign_start(rest: str, agent: AgentLoop, workspace: Path) -> bool
     max_idle_streak = 3
     max_wall_clock_seconds = 0
     cycle_pause_seconds = 0
+    max_unproductive_streak = 3
     goal_parts: list[str] = []
 
     def _int_arg(flag: str, index: int) -> int | None:
@@ -2304,6 +2305,13 @@ def _handle_campaign_start(rest: str, agent: AgentLoop, workspace: Path) -> bool
             cycle_pause_seconds = value
             i += 2
             continue
+        if token in ("--max-unproductive-streak", "--max-unproductive"):
+            value = _int_arg(token, i)
+            if value is None:
+                return True
+            max_unproductive_streak = value
+            i += 2
+            continue
         goal_parts.append(token)
         i += 1
 
@@ -2317,6 +2325,7 @@ def _handle_campaign_start(rest: str, agent: AgentLoop, workspace: Path) -> bool
             max_idle_streak=max_idle_streak,
             max_wall_clock_seconds=max_wall_clock_seconds,
             cycle_pause_seconds=cycle_pause_seconds,
+            max_unproductive_streak=max_unproductive_streak,
         )
     except ValueError as exc:
         print(f"(campaign config error: {exc})", file=sys.stderr)

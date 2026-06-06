@@ -100,6 +100,17 @@ class CampaignConfig:
     # this many *consecutive* cycle errors stops the campaign (error_stall). A
     # single good cycle resets the streak. Must be >= 1.
     max_consecutive_errors: int = 3
+    # Loop-suspicion brake (the general "usefulness" detector). A *useful*
+    # (executed) cycle that produces NO useful state change — no new artifact,
+    # no new proposal, and no change in result_status vs the previous executed
+    # cycle — is "movement without progress". This many such cycles IN A ROW
+    # stops the campaign with stop_reason=loop_suspected and a report that
+    # recommends asking the operator. It is the broad, cheap immune signal that
+    # catches loops no narrower brake does: the agent keeps finding new-looking
+    # actions, keeps spending, but nothing useful comes out. ``0`` = off (the
+    # 0=off convention used by the spend caps) so the pure loop stays backward
+    # compatible; every real operator-facing entry point turns it on.
+    max_unproductive_streak: int = 0
 
     def __post_init__(self) -> None:
         if self.max_cycles < 1:
@@ -120,6 +131,8 @@ class CampaignConfig:
             raise ValueError("cycle_pause_seconds must be >= 0 (0 = no pause)")
         if self.max_consecutive_errors < 1:
             raise ValueError("max_consecutive_errors must be >= 1")
+        if self.max_unproductive_streak < 0:
+            raise ValueError("max_unproductive_streak must be >= 0 (0 = off)")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -446,6 +459,10 @@ def run_campaign(
     repeat_cycles = 0
     error_cycles = 0
     consecutive_errors = 0
+    unproductive_streak = 0
+    unproductive_cycles = 0
+    prev_exec_result: Optional[str] = None
+    recent_actions: list[str] = []
     stop_reason = ""
     status: CampaignStatus = "completed"
     started_at = now_fn()
@@ -645,6 +662,52 @@ def run_campaign(
             _log(agent, "campaign_cycle_work", record.to_dict())
             _emit_cycle(record)
             consecutive_errors = 0
+
+            # ── usefulness brake (loop_suspected): did this executed cycle
+            #    actually move the system forward? A NEW artifact, a NEW
+            #    proposal, or a CHANGE in result_status vs the previous executed
+            #    cycle counts as useful. Otherwise the agent spent a cycle (and
+            #    possibly money) finding a new-looking action that produced
+            #    nothing — "movement without progress". N such cycles in a row
+            #    stop the campaign with a report that recommends asking the
+            #    operator. Exact-repeat actions never reach here (the repeat
+            #    path above handles them via no_progress_stall); this catches
+            #    the broader case the narrower brakes miss. ──────────────────
+            recent_actions.append(action.action)
+            productive = (
+                outcome.artifact is not None
+                or outcome.proposal is not None
+                or (prev_exec_result is not None and outcome.result != prev_exec_result)
+            )
+            prev_exec_result = outcome.result
+            if productive:
+                unproductive_streak = 0
+            else:
+                unproductive_streak += 1
+                unproductive_cycles += 1
+                if (
+                    config.max_unproductive_streak
+                    and unproductive_streak >= config.max_unproductive_streak
+                ):
+                    stop_reason = (
+                        f"loop_suspected:"
+                        f"{unproductive_streak}_cycles_without_useful_change"
+                    )
+                    status = "stopped"
+                    _log(agent, "campaign_loop_suspected", {
+                        "cycles_without_progress": unproductive_streak,
+                        "recent_actions": recent_actions[-5:],
+                        "llm_calls_spent": llm_calls_used,
+                        "cost_units_spent": cost_units_used,
+                        "useful_state_change": False,
+                        "recommended_action": "ask_operator_or_change_strategy",
+                        "reason": (
+                            "no new artifact, proposal, or result-status change "
+                            "across the last "
+                            f"{unproductive_streak} executed cycles"
+                        ),
+                    })
+                    break
         except Exception as exc:  # noqa: BLE001 — per-cycle resilience seam
             # One cycle raising must not end the run. Record it honestly, count
             # it toward the consecutive-error streak, and continue. Every audit
@@ -701,6 +764,7 @@ def run_campaign(
         "useful_cycles": useful_cycles,
         "repeat_cycles": repeat_cycles,
         "error_cycles": error_cycles,
+        "unproductive_cycles": unproductive_cycles,
         "proposals": proposals,
         "artifacts": artifacts,
         "wall_clock_seconds": round((now_fn() - started_at).total_seconds(), 1),

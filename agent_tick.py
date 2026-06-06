@@ -612,6 +612,7 @@ def run_paced_campaign(
     max_wall_clock_seconds: int = 0,
     max_llm_calls: int = 100,
     max_cost_units: int = 0,
+    max_unproductive_streak: int = 3,
     heartbeat_fn: Callable[[Path, dict], None] | None = None,
     run_campaign_fn: Callable[..., Any] | None = None,
     build_agent_fn: Callable[[Path], Any] | None = None,
@@ -665,6 +666,7 @@ def run_paced_campaign(
             max_cost_units=max_cost_units,
             cycle_pause_seconds=cycle_pause_seconds,
             max_wall_clock_seconds=max_wall_clock_seconds,
+            max_unproductive_streak=max_unproductive_streak,
         )
     except ValueError as exc:
         print(f"[agent_tick] campaign config error: {exc}", file=sys.stderr)
@@ -807,6 +809,14 @@ def _parse_args() -> argparse.Namespace:
         default=0,
         help="Campaign cost-unit budget, 0 = unlimited (only used with --campaign).",
     )
+    parser.add_argument(
+        "--max-unproductive-streak",
+        type=int,
+        default=3,
+        help="Stop the campaign after this many consecutive executed cycles "
+             "with no useful state change (loop_suspected); 0 = off "
+             "(only used with --campaign).",
+    )
     return parser.parse_args()
 
 
@@ -832,6 +842,7 @@ if __name__ == "__main__":
             max_wall_clock_seconds=args.max_wall_clock_seconds,
             max_llm_calls=args.max_llm_calls,
             max_cost_units=args.max_cost_units,
+            max_unproductive_streak=args.max_unproductive_streak,
         ))
 
     sys.exit(run_tick(ws, dry_run=dry))

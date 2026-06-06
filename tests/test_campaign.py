@@ -114,6 +114,7 @@ class TestCampaignConfig:
         {"max_wall_clock_seconds": -1},
         {"cycle_pause_seconds": -1},
         {"max_consecutive_errors": 0},
+        {"max_unproductive_streak": -1},
     ])
     def test_invalid_config_rejected(self, kwargs):
         with pytest.raises(ValueError):
@@ -963,4 +964,181 @@ class TestPerCycleResilience:
                 ledger=CampaignLedger(),
                 now_fn=_fixed_now,
             )
+
+
+# ============================================================
+# loop_suspected — the general "usefulness" brake
+# (movement without progress: executed but produced nothing useful)
+# ============================================================
+
+class _NewActionGather:
+    """Yields a genuinely-NEW useful action every call (distinct names).
+
+    Every cycle reaches the execute path (never the repeat-dedup path), so the
+    loop_suspected brake — not no_progress_stall — is what we exercise.
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self, agent, workspace, approval_inbox):
+        self.calls += 1
+        return {"action": _useful(action=f"fix_{self.calls}", priority=80)}
+
+
+class TestLoopSuspected:
+    def test_three_unproductive_cycles_trip_loop_suspected(self):
+        # Each cycle executes a NEW action but produces no artifact/proposal and
+        # the same result_status -> movement without progress -> loop_suspected.
+        gather = _NewActionGather()
+        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        result = run_campaign(
+            CampaignConfig(
+                max_cycles=20, max_idle_streak=99, max_unproductive_streak=3
+            ),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+        assert result.status == "stopped"
+        assert result.stop_reason == "loop_suspected:3_cycles_without_useful_change"
+        assert result.cycles_run == 3
+        assert result.totals["unproductive_cycles"] == 3
+
+    def test_a_new_proposal_resets_the_unproductive_streak(self):
+        # unproductive, unproductive, PROPOSAL (reset), unproductive, unproductive
+        # -> never 3 in a row -> survives to max_cycles.
+        outcomes = [
+            CampaignActionOutcome(result="completed"),
+            CampaignActionOutcome(result="completed"),
+            CampaignActionOutcome(result="completed", proposal="fix tests"),
+            CampaignActionOutcome(result="completed"),
+            CampaignActionOutcome(result="completed"),
+        ]
+
+        class _SeqExecute:
+            def __init__(self, seq): self.seq = seq; self.calls = 0
+            def __call__(self, **_kw):
+                o = self.seq[min(self.calls, len(self.seq) - 1)]
+                self.calls += 1
+                return o
+
+        result = run_campaign(
+            CampaignConfig(
+                max_cycles=5, max_idle_streak=99, max_unproductive_streak=3
+            ),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=_NewActionGather(),
+            execute_action=_SeqExecute(outcomes),
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+        assert result.status == "completed"
+        assert result.cycles_run == 5
+        assert result.totals["proposals"] == 1
+
+    def test_a_new_artifact_resets_the_unproductive_streak(self):
+        outcomes = [
+            CampaignActionOutcome(result="completed"),
+            CampaignActionOutcome(result="completed"),
+            CampaignActionOutcome(result="completed", artifact="patch.diff"),
+            CampaignActionOutcome(result="completed"),
+            CampaignActionOutcome(result="completed"),
+        ]
+
+        class _SeqExecute:
+            def __init__(self, seq): self.seq = seq; self.calls = 0
+            def __call__(self, **_kw):
+                o = self.seq[min(self.calls, len(self.seq) - 1)]
+                self.calls += 1
+                return o
+
+        result = run_campaign(
+            CampaignConfig(
+                max_cycles=5, max_idle_streak=99, max_unproductive_streak=3
+            ),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=_NewActionGather(),
+            execute_action=_SeqExecute(outcomes),
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+        assert result.status == "completed"
+        assert result.cycles_run == 5
+        assert result.totals["artifacts"] == 1
+
+    def test_loop_suspected_logs_a_report_for_the_operator(self):
+        events: list[tuple[str, dict]] = []
+        agent = SimpleNamespace(log=SimpleNamespace(log=lambda e, p: events.append((e, p))))
+        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        run_campaign(
+            CampaignConfig(
+                max_cycles=20, max_idle_streak=99, max_unproductive_streak=3
+            ),
+            agent=agent,
+            workspace="/tmp/ws",
+            gather_signals=_NewActionGather(),
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+        suspected = [p for e, p in events if e == "campaign_loop_suspected"]
+        assert len(suspected) == 1
+        report = suspected[0]
+        assert report["cycles_without_progress"] == 3
+        assert report["recommended_action"] == "ask_operator_or_change_strategy"
+        assert report["useful_state_change"] is False
+        # The report names the recent actions so the operator sees the loop.
+        assert report["recent_actions"] == ["fix_1", "fix_2", "fix_3"]
+
+    def test_budget_stop_takes_priority_over_loop_suspected(self):
+        # Both brakes are armed; the budget cap is checked at the TOP of the
+        # loop (before the next spend), so it must win even when the cycles are
+        # also unproductive.
+        gather = _NewActionGather()
+        execute = _RecordingExecute(
+            CampaignActionOutcome(result="completed", llm_calls_spent=1)
+        )
+        result = run_campaign(
+            CampaignConfig(
+                max_cycles=20,
+                max_idle_streak=99,
+                max_unproductive_streak=3,
+                max_llm_calls=2,
+            ),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+        # cycle1 spend=1, cycle2 spend=2; cycle3 budget pre-check stops BEFORE
+        # the unproductive streak (which is only 2 at that point) can reach 3.
+        assert result.status == "stopped"
+        assert result.stop_reason.startswith("budget_exhausted:llm_calls")
+        assert result.cycles_run == 2
+
+    def test_off_by_default_never_trips(self):
+        # Default config (max_unproductive_streak=0) must never stop on
+        # loop_suspected — backward compatible with the pure loop.
+        gather = _NewActionGather()
+        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        result = run_campaign(
+            CampaignConfig(max_cycles=6, max_idle_streak=99),  # streak defaults 0=off
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+        assert result.status == "completed"
+        assert result.cycles_run == 6
+        assert result.totals["unproductive_cycles"] >= 3
 
