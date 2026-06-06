@@ -361,9 +361,9 @@ class TestSelfRepairChain:
             for e in ev
             if e["event"] == "tool_call"
         ]
-        # AgentLoop runs the first artifact-producing step and stops; we
-        # at least verify the sequencing surface — diff_file ran first.
-        assert tool_names[0] == "diff_file"
+        # AgentLoop may execute independent steps in parallel; ordering is
+        # not deterministic here, but the full chain must be present.
+        assert set(tool_names) == {"diff_file", "file_write", "run_tests"}
         assert target.read_text(encoding="utf-8") in (
             "VALUE = 1\n", "VALUE = 42\n"
         )
