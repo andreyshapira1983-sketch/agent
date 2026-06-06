@@ -2223,6 +2223,8 @@ def _handle_campaign_start(rest: str, agent: AgentLoop, workspace: Path) -> bool
     max_llm_calls = 100
     max_cost_units = 0
     max_idle_streak = 3
+    max_wall_clock_seconds = 0
+    cycle_pause_seconds = 0
     goal_parts: list[str] = []
 
     def _int_arg(flag: str, index: int) -> int | None:
@@ -2274,6 +2276,34 @@ def _handle_campaign_start(rest: str, agent: AgentLoop, workspace: Path) -> bool
             max_idle_streak = value
             i += 2
             continue
+        if token in ("--max-wall-clock-seconds", "--max-seconds"):
+            value = _int_arg(token, i)
+            if value is None:
+                return True
+            max_wall_clock_seconds = value
+            i += 2
+            continue
+        if token in ("--max-minutes",):
+            value = _int_arg(token, i)
+            if value is None:
+                return True
+            max_wall_clock_seconds = value * 60
+            i += 2
+            continue
+        if token in ("--max-hours",):
+            value = _int_arg(token, i)
+            if value is None:
+                return True
+            max_wall_clock_seconds = value * 3600
+            i += 2
+            continue
+        if token in ("--cycle-pause-seconds", "--pause-seconds"):
+            value = _int_arg(token, i)
+            if value is None:
+                return True
+            cycle_pause_seconds = value
+            i += 2
+            continue
         goal_parts.append(token)
         i += 1
 
@@ -2285,6 +2315,8 @@ def _handle_campaign_start(rest: str, agent: AgentLoop, workspace: Path) -> bool
             max_llm_calls=max_llm_calls,
             max_cost_units=max_cost_units,
             max_idle_streak=max_idle_streak,
+            max_wall_clock_seconds=max_wall_clock_seconds,
+            cycle_pause_seconds=cycle_pause_seconds,
         )
     except ValueError as exc:
         print(f"(campaign config error: {exc})", file=sys.stderr)
@@ -2293,7 +2325,9 @@ def _handle_campaign_start(rest: str, agent: AgentLoop, workspace: Path) -> bool
     print(
         f"(campaign goal={config.goal!r} dry_run={config.dry_run} "
         f"max_cycles={config.max_cycles} max_llm_calls={config.max_llm_calls} "
-        f"max_cost_units={config.max_cost_units} max_idle={config.max_idle_streak})",
+        f"max_cost_units={config.max_cost_units} max_idle={config.max_idle_streak} "
+        f"max_wall_clock_s={config.max_wall_clock_seconds} "
+        f"cycle_pause_s={config.cycle_pause_seconds})",
         file=sys.stderr,
     )
 

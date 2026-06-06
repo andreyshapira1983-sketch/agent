@@ -48,6 +48,7 @@ inject deterministic fakes and assert on the real record shapes.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -85,6 +86,12 @@ class CampaignConfig:
     dry_run: bool = True
     report_every: int = 1
     idle_recheck_seconds: int = 600
+    # Real wall-clock controls for multi-hour runs. A campaign with the two
+    # defaults below behaves exactly as before: cycles run back-to-back with no
+    # sleep and stop only on the cycle/idle/spend caps. Set them to pace a
+    # genuine 24-48h run and to give the operator a hard real-time ceiling.
+    max_wall_clock_seconds: int = 0   # 0 = unlimited (no real-time ceiling)
+    cycle_pause_seconds: int = 0      # 0 = back-to-back (no inter-cycle sleep)
 
     def __post_init__(self) -> None:
         if self.max_cycles < 1:
@@ -99,6 +106,10 @@ class CampaignConfig:
             raise ValueError("report_every must be >= 1")
         if self.idle_recheck_seconds < 0:
             raise ValueError("idle_recheck_seconds must be >= 0")
+        if self.max_wall_clock_seconds < 0:
+            raise ValueError("max_wall_clock_seconds must be >= 0 (0 = unlimited)")
+        if self.cycle_pause_seconds < 0:
+            raise ValueError("cycle_pause_seconds must be >= 0 (0 = no pause)")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -378,6 +389,7 @@ def run_campaign(
     gather_signals: Optional[GatherSignals] = None,
     execute_action: Optional[ExecuteAction] = None,
     now_fn: Callable[[], datetime] = _utc_now,
+    sleep_fn: Callable[[float], None] = time.sleep,
 ) -> CampaignResult:
     """Run a bounded autonomous campaign and return a full ledgered report.
 
@@ -385,6 +397,11 @@ def run_campaign(
     NEVER calls a model directly: the only spend happens inside
     ``execute_action`` for a *useful* cycle, and that spend is bounded by the
     campaign budget which is checked BEFORE each cycle.
+
+    Real wall-clock pacing (``cycle_pause_seconds`` / ``max_wall_clock_seconds``)
+    is driven through the injected ``now_fn`` and ``sleep_fn`` so tests stay
+    instant and deterministic. With both at their ``0`` defaults the loop runs
+    cycles back-to-back exactly as before.
     """
     gather = gather_signals or _default_gather_signals
     execute = execute_action or _default_execute_action
@@ -403,6 +420,7 @@ def run_campaign(
     repeat_cycles = 0
     stop_reason = ""
     status: CampaignStatus = "completed"
+    started_at = now_fn()
 
     _log(agent, "campaign_start", {
         "goal": config.goal,
@@ -414,6 +432,31 @@ def run_campaign(
     })
 
     for cycle in range(1, config.max_cycles + 1):
+        # ── pace: a real wall-clock gap between cycles (never before the
+        #    first). Capped to whatever real time is left so the pause itself
+        #    can never sleep meaningfully past the hard ceiling. ────────────
+        if cycle > 1 and config.cycle_pause_seconds:
+            pause = float(config.cycle_pause_seconds)
+            if config.max_wall_clock_seconds:
+                remaining = config.max_wall_clock_seconds - (
+                    now_fn() - started_at
+                ).total_seconds()
+                pause = min(pause, max(0.0, remaining))
+            if pause > 0:
+                sleep_fn(pause)
+
+        # ── wall-clock budget: stop BEFORE starting new work past the
+        #    deadline (a hard real-time ceiling for a 24-48h run). ──────────
+        if config.max_wall_clock_seconds:
+            elapsed = (now_fn() - started_at).total_seconds()
+            if elapsed >= config.max_wall_clock_seconds:
+                stop_reason = (
+                    f"wall_clock_exhausted:{int(elapsed)}s/"
+                    f"{config.max_wall_clock_seconds}s"
+                )
+                status = "stopped"
+                break
+
         # ── budget pre-check: stop BEFORE the next spend, never after ────────
         if config.max_llm_calls and llm_calls_used >= config.max_llm_calls:
             stop_reason = f"budget_exhausted:llm_calls={llm_calls_used}/{config.max_llm_calls}"
@@ -550,6 +593,7 @@ def run_campaign(
         "repeat_cycles": repeat_cycles,
         "proposals": proposals,
         "artifacts": artifacts,
+        "wall_clock_seconds": round((now_fn() - started_at).total_seconds(), 1),
     }
     result = CampaignResult(
         status=status,

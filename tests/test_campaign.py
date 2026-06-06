@@ -15,7 +15,7 @@ BestNextAction objects and REAL CampaignCycleRecord shapes.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -111,6 +111,8 @@ class TestCampaignConfig:
         {"max_cost_units": -1},
         {"report_every": 0},
         {"idle_recheck_seconds": -1},
+        {"max_wall_clock_seconds": -1},
+        {"cycle_pause_seconds": -1},
     ])
     def test_invalid_config_rejected(self, kwargs):
         with pytest.raises(ValueError):
@@ -643,3 +645,121 @@ class TestCostTotals:
             )
         )
         assert _cost_totals(agent) == (7, 21)
+
+
+# ============================================================
+# Real wall-clock pacing + budget (step 3: campaign over real time)
+# ============================================================
+
+class _FakeClock:
+    """Deterministic clock that only advances when sleep() is called.
+
+    Models real wall-clock honestly: time passes when (and only when) the
+    campaign actually sleeps between cycles, so tests stay instant while
+    exercising the exact now_fn/sleep_fn wiring used in production.
+    """
+
+    def __init__(self, start: datetime | None = None):
+        self._t = start or datetime(2026, 6, 5, 12, 0, 0, tzinfo=timezone.utc)
+        self.sleeps: list[float] = []
+
+    def now(self) -> datetime:
+        return self._t
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self._t = self._t + timedelta(seconds=seconds)
+
+
+def _distinct_useful(n: int) -> list[BestNextAction]:
+    # Distinct action names so every cycle is a genuinely NEW useful action
+    # (avoids the repeat-dedup path), letting us count paced cycles cleanly.
+    return [_useful(action=f"fix_{i}", priority=80) for i in range(n)]
+
+
+class TestWallClockPacing:
+    def test_pause_happens_between_cycles_never_before_first(self):
+        clock = _FakeClock()
+        gather = _ScriptedGather(_distinct_useful(3))
+        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        result = run_campaign(
+            CampaignConfig(
+                max_cycles=3, max_idle_streak=9, cycle_pause_seconds=5
+            ),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=clock.now,
+            sleep_fn=clock.sleep,
+        )
+        assert result.cycles_run == 3
+        # 3 cycles -> paced before cycles 2 and 3 only (never before the first).
+        assert clock.sleeps == [5.0, 5.0]
+        assert result.totals["wall_clock_seconds"] == 10.0
+
+    def test_default_is_back_to_back_no_sleep(self):
+        clock = _FakeClock()
+        gather = _ScriptedGather(_distinct_useful(3))
+        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        run_campaign(
+            CampaignConfig(max_cycles=3, max_idle_streak=9),  # pause defaults to 0
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=clock.now,
+            sleep_fn=clock.sleep,
+        )
+        assert clock.sleeps == []
+
+    def test_wall_clock_budget_stops_before_next_work(self):
+        clock = _FakeClock()
+        gather = _ScriptedGather(_distinct_useful(10))
+        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        result = run_campaign(
+            CampaignConfig(
+                max_cycles=10,
+                max_idle_streak=99,
+                cycle_pause_seconds=5,
+                max_wall_clock_seconds=10,
+            ),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=clock.now,
+            sleep_fn=clock.sleep,
+        )
+        # cycle1@0 runs; pause->5 cycle2@5 runs; pause->10 cycle3@10 == ceiling -> stop
+        assert result.status == "stopped"
+        assert result.stop_reason.startswith("wall_clock_exhausted")
+        assert result.cycles_run == 2
+        assert execute.calls == 2
+
+    def test_pause_is_capped_to_remaining_wall_clock(self):
+        clock = _FakeClock()
+        gather = _ScriptedGather(_distinct_useful(10))
+        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        result = run_campaign(
+            CampaignConfig(
+                max_cycles=10,
+                max_idle_streak=99,
+                cycle_pause_seconds=5,
+                max_wall_clock_seconds=8,
+            ),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=clock.now,
+            sleep_fn=clock.sleep,
+        )
+        # cycle2 sleeps full 5 (remaining 8); cycle3 capped to remaining 3 then stop
+        assert clock.sleeps == [5.0, 3.0]
+        assert result.cycles_run == 2
+        assert result.stop_reason.startswith("wall_clock_exhausted")
