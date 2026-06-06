@@ -470,6 +470,7 @@ class AgentLoop:
         replan_policy: "ReplanPolicy | None" = None,
         verifier_enabled: bool = True,
         clarification_enabled: bool = True,
+        odd_enabled: bool = True,
         user_profile_store: UserProfileStore | None = None,
         assumption_store: AssumptionStore | None = None,  # Layer 5
     ):
@@ -601,6 +602,10 @@ class AgentLoop:
         # the heuristic ambiguity check. Intended ONLY for integration tests
         # that exercise the tool/approval layer with synthetic short questions.
         self.clarification_enabled = bool(clarification_enabled)
+        # §7 Operational Design Domain (ODD / B-05) wiring. When enabled, an
+        # out-of-domain request is refused or escalated BEFORE any planning.
+        # `odd_enabled=False` skips the check for integration tests.
+        self.odd_enabled = bool(odd_enabled)
         from core.verifier import VerificationReport as _VR
 
         self.last_verification: _VR | None = None
@@ -793,7 +798,30 @@ class AgentLoop:
         goal = self._interpret(observation)
         self.log.log("interpret", goal)
 
-        # 2b. Clarification Policy (§3 Clarification Policy).
+        # 2b. Operational Design Domain gate (§7 ODD / B-05).
+        # Pure-heuristic check — no LLM, no I/O.  When the request falls
+        # outside the agent's operational domain (harmful/illegal, real
+        # money, physical world, regulated advice, authority over people),
+        # the loop stops here BEFORE any planning and returns an honest
+        # refusal/escalation message instead of improvising an action.
+        if self.odd_enabled:
+            _odd = self._check_operational_domain(user_question)
+            if _odd.blocks:
+                self.log.log(
+                    "out_of_domain",
+                    {
+                        "verdict": _odd.verdict,
+                        "action": _odd.action,
+                        "findings": [
+                            {"kind": f.kind, "evidence": f.evidence, "confidence": f.confidence}
+                            for f in _odd.findings
+                        ],
+                    },
+                )
+                self._stream_on_token = None
+                return _odd.message
+
+        # 2c. Clarification Policy (§3 Clarification Policy).
         # Pure-heuristic check — no LLM, no I/O.  When the question is
         # ambiguous about a destructive action the loop stops here and
         # returns the clarification question to the caller so the REPL
@@ -2715,6 +2743,11 @@ class AgentLoop:
         """Run the Clarification Policy (§3) — pure heuristic, no LLM."""
         from core.clarification_policy import ClarificationResult, check_clarification
         return check_clarification(user_question)
+
+    def _check_operational_domain(self, user_question: str) -> "DomainResult":
+        """Run the Operational Design Domain gate (§7 ODD) — pure, no LLM."""
+        from core.operational_domain import DomainResult, check_operational_domain
+        return check_operational_domain(user_question)
 
     def _build_plan(self, goal: Goal, sources: list[dict[str, Any]]) -> Plan:
         plan = Plan(goal_id=goal.id)
