@@ -25,13 +25,16 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Iterable, Literal
+from typing import TYPE_CHECKING, Iterable, Literal
 
 from core.dlp import contains_pii
 from core.models import MemoryRecord
 from core.secret_scanner import contains_secret
 # Imported lazily inside `decide` to avoid an import cycle when
 # `core/hygiene.py` later wants to reach into models / policies.
+
+if TYPE_CHECKING:
+    from core.memory_echo_antibody import MemoryWriteEvent
 
 
 # ============================================================
@@ -92,6 +95,7 @@ class MemoryWritePolicy:
         source: str = "agent-auto",
         owner: str = "self",
         existing: Iterable[MemoryRecord] = (),
+        recent_writes: "Iterable[MemoryWriteEvent]" = (),
     ) -> MemoryWriteDecision:
         """Decide whether `content` may reach persistent storage.
 
@@ -99,6 +103,13 @@ class MemoryWritePolicy:
         already on disk. Pass `store.load()` from the caller — the
         policy never reads the store itself, keeping it a pure
         function over inputs.
+
+        `recent_writes` is the time-windowed rolling log of recent
+        `agent-auto` writes (from `core.memory_echo_antibody`). When
+        supplied, the Memory Echo Antibody (A1) refuses an `agent-auto`
+        record that merely re-states something the agent already wrote in
+        the last window — the "echo chamber" failure mode. `user-explicit`
+        writes are never affected.
         """
         reasons: list[str] = []
         tags_set = {t.strip().lower() for t in tags if t}
@@ -185,6 +196,25 @@ class MemoryWritePolicy:
                     f"'{CROSS_OWNER_CONSENT_TAG}' is missing"
                 ],
             )
+
+        # --- echo gate (A1 Memory Echo Antibody) -------------------------
+        # Before the on-disk dedup check, refuse an `agent-auto` write that
+        # echoes something the agent itself wrote in the recent window. This
+        # catches the "echo chamber" (re-stating the same lesson cycle after
+        # cycle) that plain dedup misses because dedup has no clock and no
+        # notion of source. `user-explicit` writes pass straight through —
+        # the detector no-ops for anything that is not `agent-auto`.
+        recent_list = list(recent_writes)
+        if recent_list:
+            from core.memory_echo_antibody import detect_memory_echo
+
+            echo = detect_memory_echo(
+                candidate_content=text,
+                candidate_source=source,
+                recent_writes=recent_list,
+            )
+            if echo.is_reject:
+                return MemoryWriteDecision("reject", [echo.reason])
 
         # --- dedup gate (§4 Memory Hygiene MVP-10) ------------------------
         # Refuse to persist a near-duplicate of something already on disk.

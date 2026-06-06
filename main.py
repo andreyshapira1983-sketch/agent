@@ -118,6 +118,7 @@ from core.learning_planner import LearningPlanner
 from core.loop import AgentLoop, format_human_response, new_trace_id
 from core.memory import WorkingMemory
 from core.memory_policy import MemoryRetrievalPolicy, MemoryWritePolicy
+from core.memory_echo_antibody import MemoryWriteRegistry
 from core.model_usage import ModelBudgetExceeded, ModelUsageLedger
 from core.model_router import ModelRole, ModelRouter
 from core.model_registry_audit import audit_model_registry
@@ -372,6 +373,11 @@ def build_agent(
         persistent_store=persistent_store,
         retrieval_policy=MemoryRetrievalPolicy(),
         write_policy=write_policy,
+        memory_write_registry=(
+            MemoryWriteRegistry(workspace / "data" / "memory_writes.jsonl")
+            if persistent_store is not None
+            else None
+        ),
         source_registry_store=source_registry_store,
         episodic_store=episodic_store,
         procedural_store=procedural_store,

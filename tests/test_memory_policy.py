@@ -302,6 +302,78 @@ class TestWritePolicyDedup:
 
 
 # ============================================================
+# Write Policy — echo gate (A1 Memory Echo Antibody)
+# ============================================================
+
+class TestWritePolicyEchoGate:
+    """`recent_writes` lets the policy refuse an `agent-auto` record that
+    echoes something the agent itself wrote in the recent window. The
+    detector lives in `core.memory_echo_antibody`; here we lock in that
+    the policy wires it before the on-disk dedup gate and that
+    `user-explicit` writes are never echo-guarded.
+    """
+
+    def _recent(self, content: str, source: str = "agent-auto"):
+        from core.memory_echo_antibody import make_event
+
+        return [make_event(content, tags=["fact"], source=source)]
+
+    def test_agent_auto_echo_is_rejected(self):
+        d = MemoryWritePolicy().decide(
+            content="The build fails when the cache is stale.",
+            tags=["fact"],
+            source="agent-auto",
+            recent_writes=self._recent("The build fails when the cache is stale."),
+        )
+        assert d.decision == "reject"
+        assert any("memory_echo_suspected" in r for r in d.reasons)
+
+    def test_user_explicit_echo_bypasses(self):
+        # Byte-identical content, but a HUMAN write is never echo-guarded.
+        d = MemoryWritePolicy().decide(
+            content="The build fails when the cache is stale.",
+            tags=["fact"],
+            source="user-explicit",
+            recent_writes=self._recent("The build fails when the cache is stale."),
+        )
+        assert d.decision == "save"
+
+    def test_fresh_agent_auto_write_passes(self):
+        d = MemoryWritePolicy().decide(
+            content="A brand new observation about the deploy pipeline.",
+            tags=["fact"],
+            source="agent-auto",
+            recent_writes=self._recent("Something completely unrelated earlier."),
+        )
+        assert d.decision == "save"
+
+    def test_no_recent_writes_keeps_old_behaviour(self):
+        d = MemoryWritePolicy().decide(
+            content="The build fails when the cache is stale.",
+            tags=["fact"],
+            source="agent-auto",
+            recent_writes=[],
+        )
+        assert d.decision == "save"
+
+    def test_echo_gate_runs_before_secret_check_does_not_mask_secret(self):
+        # A secret must still be caught even if it also echoes a recent
+        # write — the secret reason is the more important signal and the
+        # echo gate sits AFTER the hard secret block.
+        d = MemoryWritePolicy().decide(
+            content="my password is hunter2",
+            tags=["fact"],
+            source="agent-auto",
+            recent_writes=self._recent("my password is hunter2"),
+        )
+        assert d.decision == "reject"
+        assert any(
+            "password" in r or "credential" in r or "secret" in r
+            for r in d.reasons
+        )
+
+
+# ============================================================
 # Write Policy — owner parameter (third-party data gate)
 # ============================================================
 

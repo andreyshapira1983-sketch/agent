@@ -25,7 +25,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from typing import Literal as _Literal
 from core.replan import FailureType as ReplanCode  # single source of truth
@@ -49,6 +49,10 @@ from core.memory_policy import (
     MemoryWriteDecision,
     MemoryWritePolicy,
 )
+from core.memory_echo_antibody import make_event
+
+if TYPE_CHECKING:
+    from core.memory_echo_antibody import MemoryWriteEvent, MemoryWriteRegistry
 from core.models import (
     Action,
     ApprovalRequest,
@@ -457,6 +461,7 @@ class AgentLoop:
         persistent_store: PersistentMemoryStore | None = None,
         retrieval_policy: MemoryRetrievalPolicy | None = None,
         write_policy: MemoryWritePolicy | None = None,
+        memory_write_registry: "MemoryWriteRegistry | None" = None,
         role_router: RoleRouter | None = None,
         knowledge_use_policy: KnowledgeUsePolicy | None = None,
         source_registry_store: SourceRegistryStore | None = None,
@@ -487,6 +492,7 @@ class AgentLoop:
         self.persistent_store = persistent_store
         self.retrieval_policy = retrieval_policy or MemoryRetrievalPolicy()
         self.write_policy = write_policy or MemoryWritePolicy()
+        self.memory_write_registry = memory_write_registry
         self.role_router = role_router or RoleRouter()
         self.knowledge_use_policy = knowledge_use_policy or KnowledgeUsePolicy()
         self.source_registry_store = source_registry_store
@@ -2011,12 +2017,22 @@ class AgentLoop:
         # Dedup gate (MVP-10) needs the existing records — load them once
         # and pass into the policy so the policy stays a pure function.
         existing = self.persistent_store.load()
+        # Echo gate (A1) needs the recent agent-auto write-log, time-windowed.
+        # Only consulted when a registry is wired; stays a pure input to the
+        # policy. `user-explicit` writes are never echo-guarded.
+        recent_writes: list[MemoryWriteEvent] = []
+        if self.memory_write_registry is not None:
+            try:
+                recent_writes = self.memory_write_registry.recent()
+            except Exception:
+                recent_writes = []  # Registry hiccup must never block a write.
         decision = self.write_policy.decide(
             content=content,
             tags=tags,
             source=source,
             owner=owner,
             existing=existing,
+            recent_writes=recent_writes,
         )
         if decision.decision == "reject":
             self.log.log(
@@ -2051,6 +2067,25 @@ class AgentLoop:
             owner=owner,
         )
         self.persistent_store.save(record)
+        # Record this agent-auto write in the rolling echo-log so the next
+        # cycle's echo gate can see it. Only agent-auto writes are logged —
+        # the registry exists to catch the agent echoing *itself*.
+        if (
+            self.memory_write_registry is not None
+            and (source or "").strip().lower() == "agent-auto"
+        ):
+            try:
+                self.memory_write_registry.append(
+                    make_event(
+                        record.content if isinstance(record.content, str) else str(record.content),
+                        tags=tags,
+                        record_type=record_type,
+                        source=source,
+                        cycle_id=getattr(self.log, "trace_id", "") or "",
+                    )
+                )
+            except Exception:
+                pass  # Echo-log write must never abort the memory write.
         self.log.log(
             "persistent_memory_write",
             {
