@@ -97,6 +97,7 @@ def _build_agent(
     llm_responses: list[str],
     *,
     max_replan_attempts: int = 3,
+    clarification_gate_enabled: bool = True,
 ) -> tuple[AgentLoop, Path]:
     reg = ToolRegistry()
     reg.register(_StubSearchTool())
@@ -114,6 +115,7 @@ def _build_agent(
         approval_provider=AutoApprover(default="approve"),
         max_replan_attempts=max_replan_attempts,
         verifier_enabled=False,
+        clarification_gate_enabled=clarification_gate_enabled,
     )
     return agent, workspace / "logs" / f"{trace_id}.jsonl"
 
@@ -196,6 +198,65 @@ class TestPlanParseFailedGate:
         exhausted = [e for e in events if e["event"] == "replan_exhausted"]
         assert len(exhausted) == 1
         assert "plan_parse_failed" in exhausted[0]["payload"]["triggers"]
+
+    def test_stuck_loop_prepends_clarification_questions(self, workspace: Path):
+        # B-1: when the loop is STUCK (replan exhausted == loop_suspected) the
+        # Clarification Gate switches to "ask, don't build" — the user-facing
+        # answer must lead with the minimal clarifying questions, and a
+        # `clarification_gate` event must be logged.
+        planner = _ScriptedPlannerWithWarnings([
+            ([], ["json_decode_error", "plan_parse_failed"]),
+            ([], ["json_decode_error", "plan_parse_failed"]),
+        ])
+        fallback_answer = (
+            "Conclusion: I could not plan this turn.\n"
+            "Facts: planner JSON parse failed.\n"
+            "Sources: none\n"
+            "Confidence: low\n"
+            "Unverified: everything\n"
+            "Safety: ok"
+        )
+        agent, log_path = _build_agent(
+            workspace, planner, llm_responses=[fallback_answer]
+        )
+        answer = agent.run("test question")
+
+        # The answer leads with the clarification prompt (ask, don't build).
+        assert answer.startswith("Я не могу безопасно продолжить. Уточни:")
+        assert "Что именно нужно построить?" in answer
+        # The honest failure body is still present below the questions.
+        assert "could not plan this turn" in answer
+        # A clarification_gate event was logged with mode=clarify.
+        events = _events(log_path)
+        gate = [e for e in events if e["event"] == "clarification_gate"]
+        assert len(gate) == 1
+        assert gate[0]["payload"]["mode"] == "clarify"
+        assert "loop_suspected" in gate[0]["payload"]["triggered_by"]
+
+    def test_clarification_gate_can_be_disabled(self, workspace: Path):
+        # With the gate disabled the stuck answer is returned unchanged — no
+        # clarifying questions prepended, no gate event logged.
+        planner = _ScriptedPlannerWithWarnings([
+            ([], ["json_decode_error", "plan_parse_failed"]),
+            ([], ["json_decode_error", "plan_parse_failed"]),
+        ])
+        fallback_answer = (
+            "Conclusion: I could not plan this turn.\n"
+            "Facts: planner JSON parse failed.\n"
+            "Sources: none\n"
+            "Confidence: low\n"
+            "Unverified: everything\n"
+            "Safety: ok"
+        )
+        agent, log_path = _build_agent(
+            workspace, planner, llm_responses=[fallback_answer],
+            clarification_gate_enabled=False,
+        )
+        answer = agent.run("test question")
+
+        assert not answer.startswith("Я не могу безопасно продолжить")
+        events = _events(log_path)
+        assert [e for e in events if e["event"] == "clarification_gate"] == []
 
     def test_clean_empty_plan_still_treated_as_success(self, workspace: Path):
         # Regression guard: an INTENTIONAL 0-step plan (no parse failure,

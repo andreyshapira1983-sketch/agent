@@ -54,6 +54,7 @@ TICK_LOG_FILE      = "daemon_tick.jsonl"
 APPROVAL_INBOX_PATH = "data/approval_inbox.jsonl"
 SCHEDULES_PATH     = "data/runtime_schedules.jsonl"
 TASK_QUEUE_PATH    = "data/task_queue.jsonl"
+INCIDENT_LOG_PATH  = "data/incidents.jsonl"
 HEARTBEAT_PATH     = "data/daemon_heartbeat.json"
 
 # Expected wall-clock gap between ticks. The daemon is normally driven by Task
@@ -382,6 +383,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     from core.scheduler import SchedulerStore
     from core.task_queue import TaskQueueStore
     from core.autonomous_runtime import AutonomousRuntime, _config_from_task
+    from core.incident import IncidentLog
     from main import build_agent
 
     tick_start = _now_iso()
@@ -448,7 +450,13 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         else:
             agent = build_agent(workspace, with_memory=False, approval_provider=None)
             inbox = ApprovalInbox(path=workspace / APPROVAL_INBOX_PATH)
-            runtime = AutonomousRuntime(agent, workspace=workspace, approval_inbox=inbox)
+            incident_log = IncidentLog(path=workspace / INCIDENT_LOG_PATH)
+            runtime = AutonomousRuntime(
+                agent,
+                workspace=workspace,
+                approval_inbox=inbox,
+                incident_log=incident_log,
+            )
 
             for task in pending_tasks:
                 try:

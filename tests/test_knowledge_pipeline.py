@@ -111,6 +111,59 @@ def test_conflict_resolver_ignores_generic_this_subject():
     assert {c.status for c in resolved.claims} == {"extracted"}
 
 
+def test_conflict_resolver_promotes_corroborated_claim_to_verified():
+    # Two INDEPENDENT sources attesting the SAME subject=value (no
+    # contradiction) -> the claim is corroborated and promoted to "verified",
+    # carrying the other agreeing source in support_source_ids. This is the
+    # honest "усвоил и проверил" step: a fact is verified only when more than
+    # one independent source agrees.
+    registry = SourceRegistry()
+    a = registry.register_source(type="file", title="a", locator="a.txt", trust_level=0.9)
+    b = registry.register_source(type="file", title="b", locator="b.txt", trust_level=0.9)
+    registry.register_claim(source_id=a.id, text="Agent mode is local.", confidence=0.9)
+    registry.register_claim(source_id=b.id, text="Agent mode is local.", confidence=0.9)
+
+    resolved, report = ConflictResolver().resolve(registry)
+
+    assert report.count == 0
+    assert {c.status for c in resolved.claims} == {"verified"}
+    by_source = {c.source_id: c for c in resolved.claims}
+    assert by_source[a.id].support_source_ids == (b.id,)
+    assert by_source[b.id].support_source_ids == (a.id,)
+
+
+def test_conflict_resolver_single_source_stays_extracted():
+    # A claim attested by only ONE source is NOT verified — verification needs
+    # independent corroboration, not mere repetition.
+    registry = SourceRegistry()
+    a = registry.register_source(type="file", title="a", locator="a.txt", trust_level=0.9)
+    registry.register_claim(source_id=a.id, text="Agent mode is local.", confidence=0.9)
+
+    resolved, report = ConflictResolver().resolve(registry)
+
+    assert report.count == 0
+    assert {c.status for c in resolved.claims} == {"extracted"}
+
+
+def test_conflict_resolver_does_not_promote_weak_unverified_claim():
+    # Two WEAK (unverified) sources agreeing must NOT manufacture a "verified"
+    # fact — weak corroboration stays weak.
+    registry = SourceRegistry()
+    a = registry.register_source(type="file", title="a", locator="a.txt", trust_level=0.9)
+    b = registry.register_source(type="file", title="b", locator="b.txt", trust_level=0.9)
+    registry.register_claim(
+        source_id=a.id, text="Agent mode is local.", confidence=0.9, status="unverified"
+    )
+    registry.register_claim(
+        source_id=b.id, text="Agent mode is local.", confidence=0.9, status="unverified"
+    )
+
+    resolved, report = ConflictResolver().resolve(registry)
+
+    assert report.count == 0
+    assert {c.status for c in resolved.claims} == {"unverified"}
+
+
 def test_knowledge_write_policy_rejects_unverified_and_accepts_strong_claim():
     registry = SourceRegistry()
     source = registry.register_source(type="documentation", title="docs", locator="docs", trust_level=0.82)
@@ -131,6 +184,26 @@ def test_knowledge_write_policy_rejects_unverified_and_accepts_strong_claim():
     rejected = policy.decide(weak, source=source)
     assert rejected.decision == "reject"
     assert "unverified" in rejected.reasons[0]
+
+
+def test_knowledge_write_policy_rejects_promotional_hype_claim():
+    # Truth/Hype antibody wiring: a loud, substance-free marketing claim from a
+    # trusted source must still be REJECTED — hype is not knowledge.
+    registry = SourceRegistry()
+    source = registry.register_source(
+        type="documentation", title="docs", locator="docs", trust_level=0.90
+    )
+    hype = registry.register_claim(
+        source_id=source.id,
+        text="Our revolutionary, game-changing platform delivers seamless, "
+             "world-class synergy!",
+        confidence=0.95,
+    )
+    policy = KnowledgeWritePolicy()
+
+    decision = policy.decide(hype, source=source)
+    assert decision.decision == "reject"
+    assert "hype" in decision.reasons[0]
 
 
 def test_agent_loop_persists_sources_and_writes_verified_knowledge(tmp_path: Path):

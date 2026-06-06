@@ -23,7 +23,7 @@ import json
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -37,7 +37,6 @@ from core.evidence import (
     ProvenanceChain,
     evidence_from_memory_record,
     evidence_from_tool_result,
-    evidence_from_user_directive,
     make_evidence,
 )
 from core.ids import new_id
@@ -475,6 +474,7 @@ class AgentLoop:
         replan_policy: "ReplanPolicy | None" = None,
         verifier_enabled: bool = True,
         clarification_enabled: bool = True,
+        clarification_gate_enabled: bool = True,
         odd_enabled: bool = True,
         user_profile_store: UserProfileStore | None = None,
         assumption_store: AssumptionStore | None = None,  # Layer 5
@@ -608,6 +608,13 @@ class AgentLoop:
         # the heuristic ambiguity check. Intended ONLY for integration tests
         # that exercise the tool/approval layer with synthetic short questions.
         self.clarification_enabled = bool(clarification_enabled)
+        # B-1 Clarification Gate wiring (режим переспроса). When the loop
+        # gets STUCK (replan exhausted == loop_suspected), switch to
+        # "ask, don't build": prepend the minimal clarifying questions to the
+        # honest failure answer so the operator can narrow the frame instead of
+        # the agent churning. `False` skips it for tests that assert on the bare
+        # exhaustion answer. Pure/deterministic — no LLM, no I/O.
+        self.clarification_gate_enabled = bool(clarification_gate_enabled)
         # §7 Operational Design Domain (ODD / B-05) wiring. When enabled, an
         # out-of-domain request is refused or escalated BEFORE any planning.
         # `odd_enabled=False` skips the check for integration tests.
@@ -1812,6 +1819,23 @@ class AgentLoop:
             answer = policy_result.answer
             self.log.log("output_policy", policy_result.to_log_payload())
 
+        # B-1 Clarification Gate — режим переспроса. When the loop is STUCK
+        # (replan exhausted == loop_suspected), the mature response is to ASK,
+        # not to keep building. Prepend the gate's minimal clarifying questions
+        # to the honest answer so the operator can narrow the frame. Pure and
+        # deterministic (no LLM, no I/O); best-effort so it can never take down
+        # the response path.
+        if replan_exhausted and self.clarification_gate_enabled:
+            try:
+                from core.clarification_gate import for_loop_suspected
+                _clarify = for_loop_suspected()
+                _clarify_prompt = _clarify.prompt()
+                if _clarify_prompt and _clarify_prompt not in answer:
+                    self.log.log("clarification_gate", _clarify.to_dict())
+                    answer = f"{_clarify_prompt}\n\n{answer}"
+            except Exception:
+                pass
+
         # Low-evidence enforcement: if the verifier's verdict
         # distribution is severely below threshold (few verified, many
         # unverified, long enough draft), replace the long polished
@@ -2181,8 +2205,6 @@ class AgentLoop:
         --workspace argument; tests pass the same root the producing
         tool used.
         """
-        from pathlib import Path as _Path
-
         from core.compensation import CompensationReport, apply_compensation_plan
 
         if workspace_root is None:
@@ -2195,7 +2217,7 @@ class AgentLoop:
 
         if not self.compensation_log:
             report = CompensationReport(
-                plan_id=plan_id or "", workspace_root=str(_Path(workspace_root).resolve())
+                plan_id=plan_id or "", workspace_root=str(Path(workspace_root).resolve())
             )
             self.log.log(
                 "compensation_apply",
@@ -2212,7 +2234,7 @@ class AgentLoop:
                     break
             else:
                 report = CompensationReport(
-                    plan_id=plan_id, workspace_root=str(_Path(workspace_root).resolve())
+                    plan_id=plan_id, workspace_root=str(Path(workspace_root).resolve())
                 )
                 self.log.log(
                     "compensation_apply",
@@ -2220,7 +2242,7 @@ class AgentLoop:
                 )
                 return report
 
-        report = apply_compensation_plan(plan, _Path(workspace_root))
+        report = apply_compensation_plan(plan, Path(workspace_root))
         self.log.log("compensation_apply", report.summary())
         return report
 
@@ -2787,7 +2809,7 @@ class AgentLoop:
     def _build_plan(self, goal: Goal, sources: list[dict[str, Any]]) -> Plan:
         plan = Plan(goal_id=goal.id)
         for i, src in enumerate(sources, start=1):
-            plan.steps.append(
+            plan.steps.append(  # pylint: disable=no-member  # pydantic list field, real list at runtime
                 PlanStep(
                     plan_id=plan.id,
                     order=i,
@@ -3771,7 +3793,7 @@ class AgentLoop:
         if failure_history:
             lines = ["<failure_context>"]
             lines.append(
-                f"Re-planning was exhausted after every attempt failed."
+                "Re-planning was exhausted after every attempt failed."
             )
             for trig in failure_history:
                 lines.append(
@@ -3786,7 +3808,7 @@ class AgentLoop:
         safe_question, _q_findings, _q_pii_findings = redact_dlp_text(question)
 
         if artifacts:
-            from core.evidence_budget import apply_total_budget, budget_file_content
+            from core.evidence_budget import apply_total_budget
             raw_blocks: list[tuple[str, str]] = []
             for label, art in artifacts.items():
                 formatted = self._format_artifact(

@@ -17,6 +17,7 @@ from typing import Any, Literal
 from core.approval_inbox import ApprovalInbox
 from core.budget_governor import BudgetGovernor, BudgetLimits, BudgetCounter
 from core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+from core.incident import IncidentLog
 from core.ingestion import ingest_files
 from core.learning_planner import LearningPlanner
 from core.models import ToolCall
@@ -63,7 +64,7 @@ _PROPOSAL_STOPWORDS: frozenset[str] = frozenset({
     "no", "but", "so", "if", "via", "about", "any", "all", "some", "more",
     "most", "less", "few", "each", "other", "such", "may", "can", "will",
     "would", "should", "could", "have", "has", "had", "been", "being",
-    "ensure", "help", "help", "use", "uses", "used",
+    "ensure", "help", "use", "uses", "used",
 })
 _PROPOSAL_JACCARD_THRESHOLD: float = 0.4
 
@@ -260,10 +261,12 @@ class AutonomousRuntime:
         *,
         workspace: Any,
         approval_inbox: ApprovalInbox | None = None,
+        incident_log: IncidentLog | None = None,
     ):
         self.agent = agent
         self.workspace = workspace
         self.approval_inbox = approval_inbox or ApprovalInbox()
+        self.incident_log = incident_log
 
     def run_task_queue(
         self,
@@ -432,8 +435,52 @@ class AutonomousRuntime:
         if config.enable_reflection:
             report.reflection = self._run_reflection(config)
 
+        if status == "stopped":
+            self._record_incident(stop_reason, tasks)
+
         self._log("autonomous_runtime_stop", report.to_dict())
         return report
+
+    def _record_incident(
+        self,
+        stop_reason: str,
+        tasks: list[AutonomousTaskReport],
+    ) -> None:
+        """Open a structured incident when the run is halted by the circuit.
+
+        A circuit-open stop is a real safety event: it must leave a durable,
+        human-readable trace instead of just a log line. Best-effort and
+        de-duplicated (one open incident per trigger/module at a time) so the
+        daemon never spams the log, and never raises back into the run path.
+        """
+        log = self.incident_log
+        if log is None:
+            return
+        trigger = "autonomous_run_stopped"
+        affected = "core.autonomous_runtime"
+        try:
+            for inc in log.open_incidents():
+                if inc.trigger == trigger and inc.affected_module == affected:
+                    return  # already tracked — do not open a duplicate
+            failed = sum(1 for t in tasks if t.status == "failed")
+            log.open_incident(
+                severity="high",
+                trigger=trigger,
+                affected_module=affected,
+                containment_action=(
+                    "halted autonomous run; remaining queued tasks not executed"
+                ),
+            )
+            self._log(
+                "incident_opened",
+                {
+                    "trigger": trigger,
+                    "stop_reason": stop_reason,
+                    "failed_tasks": failed,
+                },
+            )
+        except Exception:
+            return
 
     def status(self) -> dict:
         return {

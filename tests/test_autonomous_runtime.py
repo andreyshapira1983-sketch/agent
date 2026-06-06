@@ -490,6 +490,76 @@ def test_auto_runtime_stops_on_budget_denial(workspace: Path):
     assert report.budget["denials"]
 
 
+def test_auto_runtime_stop_opens_a_structured_incident(workspace: Path):
+    """A circuit/budget stop must leave a durable incident trace, not just a log line.
+
+    Mirrors the budget-denial stop but passes an IncidentLog collaborator. The
+    halted run must open exactly one high-severity incident that forces a human
+    look (B-2 wiring).
+    """
+    from core.incident import IncidentLog
+
+    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
+    agent = _agent(workspace, with_tests=False)
+    incident_log = IncidentLog(path=workspace / "data" / "incidents.jsonl")
+
+    report = AutonomousRuntime(
+        agent, workspace=workspace, incident_log=incident_log
+    ).run(
+        AutonomousRuntimeConfig(
+            limit=3,
+            include_tests=False,
+            budgets=BudgetLimits(max_cycles=1),
+        )
+    )
+
+    assert report.status == "stopped"
+    open_incidents = incident_log.open_incidents()
+    assert len(open_incidents) == 1
+    inc = open_incidents[0]
+    assert inc.trigger == "autonomous_run_stopped"
+    assert inc.affected_module == "core.autonomous_runtime"
+    assert inc.severity == "high"
+    assert inc.human_escalation is True   # high severity always demands a human
+    assert inc.needs_human is True
+
+
+def test_auto_runtime_stop_does_not_open_duplicate_incidents(workspace: Path):
+    """A second stop while one incident is still open must not spam duplicates."""
+    from core.incident import IncidentLog
+
+    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
+    agent = _agent(workspace, with_tests=False)
+    incident_log = IncidentLog(path=workspace / "data" / "incidents.jsonl")
+    runtime = AutonomousRuntime(
+        agent, workspace=workspace, incident_log=incident_log
+    )
+    cfg = AutonomousRuntimeConfig(
+        limit=3, include_tests=False, budgets=BudgetLimits(max_cycles=1)
+    )
+
+    runtime.run(cfg)
+    runtime.run(cfg)
+
+    assert len(incident_log.open_incidents()) == 1
+
+
+def test_auto_runtime_completed_run_opens_no_incident(workspace: Path):
+    """A clean completed run must NOT open any incident."""
+    from core.incident import IncidentLog
+
+    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
+    agent = _agent(workspace, with_tests=False)
+    incident_log = IncidentLog(path=workspace / "data" / "incidents.jsonl")
+
+    report = AutonomousRuntime(
+        agent, workspace=workspace, incident_log=incident_log
+    ).run(AutonomousRuntimeConfig(limit=2, include_tests=False))
+
+    assert report.status == "completed"
+    assert incident_log.open_incidents() == []
+
+
 def test_auto_runtime_runs_persistent_task_queue(workspace: Path):
     (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
     agent = _agent(workspace, with_tests=False)

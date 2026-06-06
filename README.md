@@ -389,9 +389,12 @@ run subagents, or change memory data.
    This command checks concrete code/test evidence for major layers and marks
    the current multi-agent state. Today the project has dry-run team contracts,
    a dry-run executor, a work-session skeleton, persistent budget windows and
-   subagent memory scopes. Real multi-agent execution still requires an
-   implemented runner that consumes approved proposals, plus operator-approved
-   capabilities and enforced persistent hour/day budget limits.
+   subagent memory scopes. Real *approval-driven* multi-agent execution still
+   requires an implemented runner that consumes approved proposals, plus
+   operator-approved capabilities and enforced persistent hour/day budget
+   limits. (A separate `spawn_subagent` tool, backed by `core/subagent_runner.py`,
+   can run an isolated child `AgentLoop` with a restricted tool set when the host
+   is not in dry-run mode; it is independent of the approval-proposal path.)
 
 ## Usage
 
@@ -1629,15 +1632,19 @@ What is wired:
   - `ClaimExtractor` deterministically extracts sentence-level claims
     from Evidence excerpts and rejects secret-shaped claims.
   - `ConflictResolver` marks obvious same-subject/different-value
-    contradictions as `conflicted`.
+    contradictions as `conflicted`. It also promotes a claim to `verified`
+    when at least two independent sources agree on the same value
+    (corroboration); two weak `unverified` sources echoing each other do not
+    manufacture a verified fact.
   - `ConflictReview` turns conflicted claims into operator-visible
     suggestions: competing claims, source trust, claim confidence,
     suggested winner or `needs_review`.
   - `SourceRegistryStore` persists source records and extracted claims
     to `data/source_registry.jsonl` with duplicate suppression.
   - `KnowledgeWritePolicy` gates claims before they can become long-term
-    memory: no secrets, no unverified/conflicted claims, confidence and
-    source-trust thresholds, and weak source-type rejection.
+    memory: no secrets, no unverified/conflicted claims, no promotional hype
+    (via `core/truth_hype_filter.py`), confidence and source-trust thresholds,
+    and weak source-type rejection.
   - `AgentLoop` emits `knowledge_pipeline`, exposes
     `agent.last_knowledge_pipeline`, and can write approved knowledge
     to persistent memory when `AGENT_KNOWLEDGE_AUTO_WRITE=true`.

@@ -7,7 +7,7 @@ in `README.md`.
 
 ## Current Execution Semantics
 
-Snapshot date: 2026-06-04.
+Snapshot date: 2026-06-07.
 
 - Work Session exists as `core/work_session.py` and the `:work-session`
   command. Its current skeleton runs bounded multi-cycle health/status passes,
@@ -19,6 +19,11 @@ Snapshot date: 2026-06-04.
   subagent, produce explicit memory/tool/budget scopes, and optionally submit
   a human approval item. Real subagent execution must not be implied by this
   layer unless a later implementation consumes an approved proposal and runs it.
+  Note: a separate, distinct path — the `spawn_subagent` tool backed by
+  `core/subagent_runner.py` (`SubAgentRunner`) — does run an isolated child
+  `AgentLoop` with a restricted tool set. That tool path is wired in
+  `main.py` only when the host is not in dry-run mode (`main.py:4282`); it does
+  not consume an approved `SubagentProposal`. The two paths are independent.
 - CapabilityRequest exists as `core/capability_request.py` and the
   `:capability-request` command. The agent can infer missing capabilities from
   natural language and submit bounded access requests. Connectors, messaging,
@@ -42,10 +47,29 @@ Snapshot date: 2026-06-04.
   persistent hour/day budget enforcement limits are unset. Budget tracking can
   be active while enforcement remains disabled when all persistent limits are
   zero.
+- Structured incident on stop is wired. When the autonomous runtime
+  (`core/autonomous_runtime.py`) halts a run (budget denial, circuit stop), it
+  opens one high-severity `Incident` (`core/incident.py`) into
+  `data/incidents.jsonl`, de-duplicated per trigger+module, forcing human
+  escalation. `agent_tick.py` provides the incident log to the runtime.
+- Clarification gate when stuck is wired into the live loop. When replanning is
+  exhausted (`core/loop.py`), the agent runs `core/clarification_gate.py` and,
+  if a loop is suspected, prepends concrete clarification questions to the
+  answer instead of silently looping. The gate is on by default and can be
+  disabled per-loop (`clarification_gate_enabled`).
+- Corroboration-based verification is wired. A claim reaches `verified` status
+  only when at least two independent sources agree on the same value
+  (`core/knowledge_pipeline.py` `ConflictResolver`). Two weak (`unverified`)
+  sources echoing each other do not manufacture a verified fact.
+- Truth/Hype filter is wired into the knowledge write path. Promotional content
+  with no checkable substance (`core/truth_hype_filter.py`) is classified as
+  hype and rejected by `KnowledgeWritePolicy`, so marketing noise never becomes
+  long-term knowledge.
 
 ## Operator Snapshot
 
-The operator state that triggered this doctrine refresh reported:
+The operator state that triggered this doctrine refresh reported (historical
+2026-06-04 observation; counts not re-measured in the 2026-06-07 refresh):
 
 - architecture audit: present=17, gap=1
 - stale gap: Doctrine and Architecture Source of Truth

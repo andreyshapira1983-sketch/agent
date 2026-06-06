@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Iterable, Literal
+from typing import Any, Callable, Literal
 
 from core.evidence import Evidence, ProvenanceChain
 from core.memory_policy import MemoryWriteDecision
@@ -26,6 +26,7 @@ from core.source_registry import (
     claim_from_evidence,
 )
 from core.source_registry_store import SourceRegistryStore
+from core.truth_hype_filter import evaluate as evaluate_truth_hype
 
 
 KnowledgeDecision = Literal["save", "reject"]
@@ -197,21 +198,34 @@ class ConflictResolver:
 
         conflicts: list[ConflictRecord] = []
         conflicted_ids: set[str] = set()
+        # claim_id -> the OTHER independent source_ids that agree with it.
+        # A claim corroborated by >=2 independent sources (single agreed value,
+        # no contradiction) is promoted to "verified" below — this is the
+        # honest "усвоил и проверил" step: a fact is verified only when more
+        # than one independent source attests it.
+        corroborated: dict[str, tuple[str, ...]] = {}
         for subject, pairs in grouped.items():
             values = sorted({value for _claim, value in pairs})
             source_ids = sorted({claim.source_id for claim, _value in pairs})
-            if len(values) < 2 or len(source_ids) < 2:
+            if len(source_ids) < 2:
                 continue
-            claim_ids = tuple(claim.id for claim, _value in pairs)
-            conflicted_ids.update(claim_ids)
-            conflicts.append(ConflictRecord(
-                subject=subject,
-                claim_ids=claim_ids,
-                source_ids=tuple(source_ids),
-                values=tuple(values),
-            ))
+            if len(values) >= 2:
+                claim_ids = tuple(claim.id for claim, _value in pairs)
+                conflicted_ids.update(claim_ids)
+                conflicts.append(ConflictRecord(
+                    subject=subject,
+                    claim_ids=claim_ids,
+                    source_ids=tuple(source_ids),
+                    values=tuple(values),
+                ))
+            else:
+                # One agreed value from >=2 independent sources -> corroboration.
+                for claim, _value in pairs:
+                    others = tuple(s for s in source_ids if s != claim.source_id)
+                    if others:
+                        corroborated[claim.id] = others
 
-        if not conflicted_ids:
+        if not conflicted_ids and not corroborated:
             return registry, ConflictReport()
 
         resolved = SourceRegistry()
@@ -230,6 +244,18 @@ class ConflictResolver:
                     claim,
                     status="conflicted",
                     conflict_source_ids=tuple(conflict_sources),
+                ))
+            elif claim.id in corroborated and claim.status == "extracted":
+                # Only a normally-extracted claim is promoted; a weak-source
+                # "unverified" claim stays weak even if echoed, so two weak
+                # sources cannot manufacture a "verified" fact.
+                merged_support = tuple(sorted(
+                    set(claim.support_source_ids) | set(corroborated[claim.id])
+                ))
+                resolved.add_claim(replace(
+                    claim,
+                    status="verified",
+                    support_source_ids=merged_support,
                 ))
             else:
                 resolved.add_claim(claim)
@@ -266,6 +292,15 @@ class KnowledgeWritePolicy:
             return KnowledgeWriteDecision("reject", (f"claim too long (>{self.max_chars})",))
         if contains_secret(text)[0]:
             return KnowledgeWriteDecision("reject", ("claim contains secret material",))
+        # Truth/Hype filter (first LEARNING antibody): promotional content with
+        # no checkable substance is "шумиха", not knowledge — never absorb it.
+        _th = evaluate_truth_hype(text)
+        if _th.is_hype:
+            return KnowledgeWriteDecision(
+                "reject",
+                (f"claim is promotional hype (no checkable substance): "
+                 f"{'; '.join(_th.reasons[:2])}",),
+            )
         if claim.status in {"unverified", "conflicted"}:
             return KnowledgeWriteDecision("reject", (f"claim status is {claim.status}",))
         if claim.confidence < self.min_claim_confidence:

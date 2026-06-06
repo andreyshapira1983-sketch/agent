@@ -1,0 +1,64 @@
+# pylint configuration — "signal, not noise".
+#
+# Goal: remove IDE red-marker noise from purely stylistic / convention /
+# refactor checks WITHOUT weakening real bug detection. The project's quality
+# gate is pytest + coverage + supply-chain audit; pylint is kept only as an
+# extra net for genuine defects (undefined names, wrong kwargs, no-member,
+# duplicate set values, etc.). Everything disabled below is cosmetic and never
+# indicates a runtime bug.
+#
+# DO NOT add bug-catching checks (E* errors, unused-import, unused-variable,
+# no-member, unexpected-keyword-arg, not-callable, bad-except-order,
+# duplicate-value) to the disable list — those have caught (or would catch)
+# real problems such as `workspace` vs `workspace_root`.
+
+[MAIN]
+# Keep analysis fast and avoid following heavy generated/vendored trees.
+ignore = .venv,.git,reports,data,logs
+
+[MESSAGES CONTROL]
+# Disable ONLY style / convention / refactor warnings that are not bugs.
+disable =
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    too-many-arguments,
+    too-many-positional-arguments,
+    too-many-locals,
+    too-many-branches,
+    too-many-statements,
+    too-many-instance-attributes,
+    too-many-public-methods,
+    too-many-return-statements,
+    too-few-public-methods,
+    too-many-lines,
+    line-too-long,
+    duplicate-code,
+    broad-exception-caught,
+    unused-argument,
+    attribute-defined-outside-init,
+    protected-access,
+    import-outside-toplevel,
+    # Pure convention / refactor style (formatting & taste, never a bug):
+    invalid-name,
+    wrong-import-position,
+    wrong-import-order,
+    ungrouped-imports,
+    multiple-statements,
+    trailing-newlines,
+    use-implicit-booleaness-not-comparison,
+    too-many-nested-blocks,
+    too-many-boolean-expressions,
+    no-else-return,
+    no-else-raise,
+    consider-using-in,
+    consider-using-max-builtin,
+    inconsistent-return-statements,
+
+# Everything NOT listed above stays ENABLED on purpose, including:
+#   undefined-variable, unused-import, unused-variable, no-member,
+#   unexpected-keyword-arg, not-callable, bad-except-order, duplicate-value,
+#   reimported, f-string-without-interpolation.
+
+[FORMAT]
+max-line-length = 120
