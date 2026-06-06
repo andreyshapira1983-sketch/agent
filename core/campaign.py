@@ -92,6 +92,14 @@ class CampaignConfig:
     # genuine 24-48h run and to give the operator a hard real-time ceiling.
     max_wall_clock_seconds: int = 0   # 0 = unlimited (no real-time ceiling)
     cycle_pause_seconds: int = 0      # 0 = back-to-back (no inter-cycle sleep)
+    # Per-cycle fault tolerance for a long unattended run. A single cycle that
+    # raises (a flaky model error, a momentary file lock, a network blip) must
+    # NOT end a 24-48h campaign: the cycle is recorded as an error and the loop
+    # continues. But a PERSISTENTLY broken state must still stop honestly rather
+    # than burn the rest of the wall-clock looping on the same exception, so
+    # this many *consecutive* cycle errors stops the campaign (error_stall). A
+    # single good cycle resets the streak. Must be >= 1.
+    max_consecutive_errors: int = 3
 
     def __post_init__(self) -> None:
         if self.max_cycles < 1:
@@ -110,6 +118,8 @@ class CampaignConfig:
             raise ValueError("max_wall_clock_seconds must be >= 0 (0 = unlimited)")
         if self.cycle_pause_seconds < 0:
             raise ValueError("cycle_pause_seconds must be >= 0 (0 = no pause)")
+        if self.max_consecutive_errors < 1:
+            raise ValueError("max_consecutive_errors must be >= 1")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -193,6 +203,11 @@ class CampaignCycleRecord:
                 f"[cycle {self.cycle}] REPEAT (no LLM, skipped) "
                 f"action={self.action} reason={self.reason}"
             )
+        if self.result == "error":
+            return (
+                f"[cycle {self.cycle}] ERROR (no LLM, recovered) "
+                f"reason={self.reason}"
+            )
         return (
             f"[cycle {self.cycle}] {self.result} "
             f"action={self.action} llm={self.llm_calls_spent} "
@@ -259,6 +274,8 @@ def _format_ledger_row(row: dict[str, Any]) -> str:
         return f"[cycle {cycle}] IDLE (no LLM) action={action} reason={reason}"
     if row.get("result") == "repeat":
         return f"[cycle {cycle}] REPEAT (no LLM, skipped) action={action} reason={reason}"
+    if row.get("result") == "error":
+        return f"[cycle {cycle}] ERROR (no LLM, recovered) reason={reason}"
     proposal = row.get("proposal")
     artifact = row.get("artifact")
     return (
@@ -293,9 +310,10 @@ def summarise_ledger(rows: list[dict[str, Any]], *, recent: int = 10) -> str:
     cost_units = sum(_as_int(r.get("cost_units_spent")) for r in rows)
     idle = sum(1 for r in rows if r.get("idle"))
     repeats = sum(1 for r in rows if r.get("result") == "repeat")
+    errors = sum(1 for r in rows if r.get("result") == "error")
     artifacts = sum(1 for r in rows if r.get("artifact"))
     proposals = sum(1 for r in rows if r.get("proposal"))
-    useful = total - idle - repeats
+    useful = total - idle - repeats - errors
 
     result_counts: dict[str, int] = {}
     for r in rows:
@@ -313,7 +331,8 @@ def summarise_ledger(rows: list[dict[str, Any]], *, recent: int = 10) -> str:
         "=== campaign ledger ===",
         (
             f"cycles_logged={total}  useful={useful}  idle={idle}  "
-            f"repeats={repeats}  llm_calls={llm_calls}  cost_units={cost_units}  "
+            f"repeats={repeats}  errors={errors}  llm_calls={llm_calls}  "
+            f"cost_units={cost_units}  "
             f"proposals={proposals}  artifacts={artifacts}"
         ),
         f"by_result: {by_result}",
@@ -360,6 +379,7 @@ class CampaignResult:
                 f"useful={self.totals.get('useful_cycles', 0)}  "
                 f"idle={self.totals.get('idle_cycles', 0)}  "
                 f"repeats={self.totals.get('repeat_cycles', 0)}  "
+                f"errors={self.totals.get('error_cycles', 0)}  "
                 f"llm_calls={self.totals.get('llm_calls', 0)}  "
                 f"cost_units={self.totals.get('cost_units', 0)}  "
                 f"proposals={self.totals.get('proposals', 0)}  "
@@ -424,6 +444,8 @@ def run_campaign(
     idle_cycles = 0
     useful_cycles = 0
     repeat_cycles = 0
+    error_cycles = 0
+    consecutive_errors = 0
     stop_reason = ""
     status: CampaignStatus = "completed"
     started_at = now_fn()
@@ -443,6 +465,7 @@ def run_campaign(
             "useful_cycles": useful_cycles,
             "idle_cycles": idle_cycles,
             "repeat_cycles": repeat_cycles,
+            "error_cycles": error_cycles,
         })
 
     _log(agent, "campaign_start", {
@@ -490,58 +513,116 @@ def run_campaign(
             status = "stopped"
             break
 
-        signals = gather(agent, workspace, approval_inbox)
-        action: BestNextAction = signals["action"]
-        now = now_fn()
+        # ── per-cycle resilience: a single cycle that raises (flaky model,
+        #    momentary file lock, network blip) must NOT end a 24-48h run. The
+        #    body below is wrapped so one exception is recorded as an error
+        #    cycle and the loop continues; ``max_consecutive_errors`` in a row
+        #    still stops honestly (error_stall) so a persistently broken state
+        #    can't burn the rest of the wall-clock. A good cycle resets the
+        #    streak. KeyboardInterrupt/SystemExit (BaseException) are NOT caught
+        #    — an operator interrupt still stops immediately. ─────────────────
+        try:
+            signals = gather(agent, workspace, approval_inbox)
+            action: BestNextAction = signals["action"]
+            now = now_fn()
 
-        # ── IDLE cycle: no high-priority action -> do NOT call the LLM ───────
-        if action.priority <= 0:
-            idle_streak += 1
-            idle_cycles += 1
-            next_check = (
-                (now + timedelta(seconds=config.idle_recheck_seconds)).isoformat()
-                if config.idle_recheck_seconds
-                else None
+            # ── IDLE cycle: no high-priority action -> do NOT call the LLM ───
+            if action.priority <= 0:
+                idle_streak += 1
+                idle_cycles += 1
+                next_check = (
+                    (now + timedelta(seconds=config.idle_recheck_seconds)).isoformat()
+                    if config.idle_recheck_seconds
+                    else None
+                )
+                record = CampaignCycleRecord(
+                    cycle=cycle,
+                    ts=now.isoformat(),
+                    goal=config.goal,
+                    action=action.action,
+                    action_title=action.title,
+                    severity=action.severity,
+                    priority=action.priority,
+                    risk=action.risk,
+                    idle=True,
+                    llm_calls_spent=0,
+                    cost_units_spent=0,
+                    result="idle",
+                    reason=action.reason,
+                    next_check_at=next_check,
+                )
+                ledger.append(record)
+                records.append(record)
+                _log(agent, "campaign_cycle_idle", record.to_dict())
+                _emit_cycle(record)
+                consecutive_errors = 0
+
+                if idle_streak >= config.max_idle_streak:
+                    stop_reason = f"idle_stall:{idle_streak}_consecutive_idle_cycles"
+                    status = "stopped"
+                    break
+                continue
+
+            # ── USEFUL cycle: a real action -> one bounded, gated pass ───────
+            # B — signal dedup: an action already attempted this campaign whose
+            # earlier pass did not clear the signal is a REPEAT. Re-running it
+            # identically would spend again to reach the same dead end (the
+            # smoke showed two identical `restore_daemon_liveness` cycles), so
+            # skip execution, record it honestly, and let the no-progress streak
+            # stop the campaign — the same "empty cycles -> ask the operator"
+            # guarantee as idle, just for "nothing NEW to do" vs "nothing to do".
+            signature = action.action
+            if signature in attempted_signatures:
+                idle_streak += 1
+                repeat_cycles += 1
+                record = CampaignCycleRecord(
+                    cycle=cycle,
+                    ts=now.isoformat(),
+                    goal=config.goal,
+                    action=action.action,
+                    action_title=action.title,
+                    severity=action.severity,
+                    priority=action.priority,
+                    risk=action.risk,
+                    idle=False,
+                    llm_calls_spent=0,
+                    cost_units_spent=0,
+                    result="repeat",
+                    reason=(
+                        f"already attempted '{action.action}' this campaign; the "
+                        f"earlier pass did not clear the signal — skipping re-execution"
+                    ),
+                )
+                ledger.append(record)
+                records.append(record)
+                _log(agent, "campaign_cycle_repeat", record.to_dict())
+                _emit_cycle(record)
+                consecutive_errors = 0
+
+                if idle_streak >= config.max_idle_streak:
+                    stop_reason = f"no_progress_stall:{idle_streak}_cycles_without_new_action"
+                    status = "stopped"
+                    break
+                continue
+
+            # ── genuinely NEW action: reset the no-progress streak and run ───
+            idle_streak = 0
+            attempted_signatures.add(signature)
+            useful_cycles += 1
+            outcome = execute(
+                agent=agent,
+                workspace=workspace,
+                action=action,
+                config=config,
+                approval_inbox=approval_inbox,
             )
-            record = CampaignCycleRecord(
-                cycle=cycle,
-                ts=now.isoformat(),
-                goal=config.goal,
-                action=action.action,
-                action_title=action.title,
-                severity=action.severity,
-                priority=action.priority,
-                risk=action.risk,
-                idle=True,
-                llm_calls_spent=0,
-                cost_units_spent=0,
-                result="idle",
-                reason=action.reason,
-                next_check_at=next_check,
-            )
-            ledger.append(record)
-            records.append(record)
-            _log(agent, "campaign_cycle_idle", record.to_dict())
-            _emit_cycle(record)
+            llm_calls_used += max(0, outcome.llm_calls_spent)
+            cost_units_used += max(0, outcome.cost_units_spent)
+            if outcome.proposal:
+                proposals += 1
+            if outcome.artifact:
+                artifacts += 1
 
-            if idle_streak >= config.max_idle_streak:
-                stop_reason = f"idle_stall:{idle_streak}_consecutive_idle_cycles"
-                status = "stopped"
-                break
-            continue
-
-        # ── USEFUL cycle: a real action -> one bounded, gated pass ───────────
-        # B — signal dedup: an action already attempted this campaign whose
-        # earlier pass did not clear the signal is a REPEAT. Re-running it
-        # identically would spend again to reach the same dead end (the smoke
-        # showed two identical `restore_daemon_liveness` cycles), so skip
-        # execution, record it honestly, and let the no-progress streak stop
-        # the campaign — the same "empty cycles -> ask the operator" guarantee
-        # as idle, just for "nothing NEW to do" instead of "nothing to do".
-        signature = action.action
-        if signature in attempted_signatures:
-            idle_streak += 1
-            repeat_cycles += 1
             record = CampaignCycleRecord(
                 cycle=cycle,
                 ts=now.isoformat(),
@@ -552,64 +633,66 @@ def run_campaign(
                 priority=action.priority,
                 risk=action.risk,
                 idle=False,
-                llm_calls_spent=0,
-                cost_units_spent=0,
-                result="repeat",
-                reason=(
-                    f"already attempted '{action.action}' this campaign; the "
-                    f"earlier pass did not clear the signal — skipping re-execution"
-                ),
+                llm_calls_spent=max(0, outcome.llm_calls_spent),
+                cost_units_spent=max(0, outcome.cost_units_spent),
+                result=outcome.result,
+                reason=action.reason,
+                proposal=outcome.proposal,
+                artifact=outcome.artifact,
             )
             ledger.append(record)
             records.append(record)
-            _log(agent, "campaign_cycle_repeat", record.to_dict())
+            _log(agent, "campaign_cycle_work", record.to_dict())
             _emit_cycle(record)
-
-            if idle_streak >= config.max_idle_streak:
-                stop_reason = f"no_progress_stall:{idle_streak}_cycles_without_new_action"
+            consecutive_errors = 0
+        except Exception as exc:  # noqa: BLE001 — per-cycle resilience seam
+            # One cycle raising must not end the run. Record it honestly, count
+            # it toward the consecutive-error streak, and continue. Every audit
+            # write here is best-effort so a broken sink (full disk, locked
+            # file, dead heartbeat) can't escalate one cycle error into a crash.
+            consecutive_errors += 1
+            error_cycles += 1
+            err_now = now_fn()
+            err_record = CampaignCycleRecord(
+                cycle=cycle,
+                ts=err_now.isoformat(),
+                goal=config.goal,
+                action="<cycle_error>",
+                action_title="cycle raised an exception",
+                severity="error",
+                priority=0,
+                risk="unknown",
+                idle=False,
+                llm_calls_spent=0,
+                cost_units_spent=0,
+                result="error",
+                reason=f"{type(exc).__name__}: {exc}",
+            )
+            records.append(err_record)
+            try:
+                ledger.append(err_record)
+            except Exception:  # noqa: BLE001 — best-effort audit write
+                pass
+            try:
+                _log(agent, "campaign_cycle_error", {
+                    "cycle": cycle,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "consecutive_errors": consecutive_errors,
+                    "max_consecutive_errors": config.max_consecutive_errors,
+                })
+            except Exception:  # noqa: BLE001 — best-effort audit log
+                pass
+            try:
+                _emit_cycle(err_record)
+            except Exception:  # noqa: BLE001 — best-effort liveness ping
+                pass
+            if consecutive_errors >= config.max_consecutive_errors:
+                stop_reason = (
+                    f"error_stall:{consecutive_errors}_consecutive_cycle_errors"
+                )
                 status = "stopped"
                 break
             continue
-
-        # ── genuinely NEW action: reset the no-progress streak and execute ───
-        idle_streak = 0
-        attempted_signatures.add(signature)
-        useful_cycles += 1
-        outcome = execute(
-            agent=agent,
-            workspace=workspace,
-            action=action,
-            config=config,
-            approval_inbox=approval_inbox,
-        )
-        llm_calls_used += max(0, outcome.llm_calls_spent)
-        cost_units_used += max(0, outcome.cost_units_spent)
-        if outcome.proposal:
-            proposals += 1
-        if outcome.artifact:
-            artifacts += 1
-
-        record = CampaignCycleRecord(
-            cycle=cycle,
-            ts=now.isoformat(),
-            goal=config.goal,
-            action=action.action,
-            action_title=action.title,
-            severity=action.severity,
-            priority=action.priority,
-            risk=action.risk,
-            idle=False,
-            llm_calls_spent=max(0, outcome.llm_calls_spent),
-            cost_units_spent=max(0, outcome.cost_units_spent),
-            result=outcome.result,
-            reason=action.reason,
-            proposal=outcome.proposal,
-            artifact=outcome.artifact,
-        )
-        ledger.append(record)
-        records.append(record)
-        _log(agent, "campaign_cycle_work", record.to_dict())
-        _emit_cycle(record)
 
     totals = {
         "llm_calls": llm_calls_used,
@@ -617,6 +700,7 @@ def run_campaign(
         "idle_cycles": idle_cycles,
         "useful_cycles": useful_cycles,
         "repeat_cycles": repeat_cycles,
+        "error_cycles": error_cycles,
         "proposals": proposals,
         "artifacts": artifacts,
         "wall_clock_seconds": round((now_fn() - started_at).total_seconds(), 1),

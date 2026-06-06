@@ -113,6 +113,7 @@ class TestCampaignConfig:
         {"idle_recheck_seconds": -1},
         {"max_wall_clock_seconds": -1},
         {"cycle_pause_seconds": -1},
+        {"max_consecutive_errors": 0},
     ])
     def test_invalid_config_rejected(self, kwargs):
         with pytest.raises(ValueError):
@@ -821,4 +822,145 @@ class TestOnCycleHook:
             now_fn=_fixed_now,
         )
         assert result.cycles_run == 2
+
+
+# ============================================================
+# Per-cycle resilience (a single cycle error must not kill a 48h run)
+# ============================================================
+
+class _FlakyGather:
+    """Gather that raises on chosen 1-based call indices, else a NEW useful action.
+
+    Distinct action names per call keep every non-error cycle on the genuinely
+    NEW path (no repeat dedup), so error vs useful counts stay unambiguous.
+    """
+
+    def __init__(self, raise_on: set[int], exc: BaseException | None = None):
+        self.raise_on = raise_on
+        self.exc = exc or RuntimeError("transient blip")
+        self.calls = 0
+
+    def __call__(self, agent, workspace, approval_inbox):
+        self.calls += 1
+        if self.calls in self.raise_on:
+            raise self.exc
+        return {"action": _useful(action=f"fix_{self.calls}", priority=80)}
+
+
+class _BrokenLedger(CampaignLedger):
+    """Ledger whose append always fails — models a full disk / locked file."""
+
+    def append(self, record):  # type: ignore[override]
+        raise OSError("disk full")
+
+
+class TestPerCycleResilience:
+    def test_single_cycle_error_does_not_end_the_campaign(self):
+        # Cycle 2 raises; cycles 1, 3, 4 are normal useful cycles.
+        gather = _FlakyGather(raise_on={2})
+        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        result = run_campaign(
+            CampaignConfig(max_cycles=4, max_idle_streak=99, max_consecutive_errors=3),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+        # The run survived the transient error and used all 4 cycles.
+        assert result.status == "completed"
+        assert result.cycles_run == 4
+        assert result.totals["error_cycles"] == 1
+        assert result.totals["useful_cycles"] == 3
+        # The error cycle is recorded honestly in the ledger.
+        error_rows = [r for r in result.records if r.result == "error"]
+        assert len(error_rows) == 1
+        assert error_rows[0].action == "<cycle_error>"
+        assert "RuntimeError" in error_rows[0].reason
+
+    def test_consecutive_errors_stop_the_campaign(self):
+        # Every cycle raises -> the streak reaches the cap and stops honestly.
+        gather = _FlakyGather(raise_on=set(range(1, 100)))
+        result = run_campaign(
+            CampaignConfig(max_cycles=20, max_idle_streak=99, max_consecutive_errors=3),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=_explode_execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+        assert result.status == "stopped"
+        assert result.stop_reason == "error_stall:3_consecutive_cycle_errors"
+        assert result.cycles_run == 3
+        assert result.totals["error_cycles"] == 3
+
+    def test_a_good_cycle_resets_the_error_streak(self):
+        # err, err, good, err, err, good -> never 3 in a row -> survives all 6.
+        gather = _FlakyGather(raise_on={1, 2, 4, 5})
+        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        result = run_campaign(
+            CampaignConfig(max_cycles=6, max_idle_streak=99, max_consecutive_errors=3),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+        assert result.status == "completed"
+        assert result.cycles_run == 6
+        assert result.totals["error_cycles"] == 4
+        assert result.totals["useful_cycles"] == 2
+
+    def test_error_cycles_surface_in_the_on_cycle_snapshot(self):
+        seen: list[dict] = []
+        gather = _FlakyGather(raise_on={2})
+        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        run_campaign(
+            CampaignConfig(max_cycles=3, max_idle_streak=99, max_consecutive_errors=3),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+            on_cycle=seen.append,
+        )
+        # The hook fired for every cycle including the error one.
+        assert [s["result"] for s in seen] == ["completed", "error", "completed"]
+        assert [s["error_cycles"] for s in seen] == [0, 1, 1]
+
+    def test_broken_audit_sink_during_error_does_not_crash(self):
+        # The error handler's ledger write fails too; it must be swallowed so a
+        # broken sink can't escalate one cycle error into a campaign crash.
+        gather = _FlakyGather(raise_on={1})
+        result = run_campaign(
+            CampaignConfig(max_cycles=1, max_idle_streak=99, max_consecutive_errors=3),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=_explode_execute,
+            ledger=_BrokenLedger(),
+            now_fn=_fixed_now,
+        )
+        # No exception propagated; the error cycle is still in the in-memory log.
+        assert result.totals["error_cycles"] == 1
+        assert result.cycles_run == 1
+
+    def test_keyboard_interrupt_is_not_swallowed(self):
+        # An operator interrupt (BaseException) must stop the run immediately,
+        # never be caught by the per-cycle resilience seam.
+        gather = _FlakyGather(raise_on={1}, exc=KeyboardInterrupt())
+        with pytest.raises(KeyboardInterrupt):
+            run_campaign(
+                CampaignConfig(max_cycles=5, max_idle_streak=99),
+                agent=SimpleNamespace(log=None),
+                workspace="/tmp/ws",
+                gather_signals=gather,
+                execute_action=_explode_execute,
+                ledger=CampaignLedger(),
+                now_fn=_fixed_now,
+            )
 
