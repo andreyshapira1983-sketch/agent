@@ -23,6 +23,7 @@ from core.memory import WorkingMemory
 from core.memory_policy import MemoryRetrievalPolicy, MemoryWritePolicy
 from core.model_usage import ModelBudgetExceeded, ModelUsageLedger
 from core.models import MemoryRecord
+from core.operator_intent import route_operator_intent
 from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
@@ -341,6 +342,37 @@ class TestHandleMetaCommand:
         assert handle_meta_command("?", agent, workspace) is True
         out = capsys.readouterr()
         assert "Commands:" in out.err
+
+    def test_campaign_start_command_reaches_handler_not_budget(
+        self, workspace: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        # Regression: ':campaign-start --max-cost-units 0' contains budget
+        # wording, so the fuzzy intent classifier misroutes it to a budget
+        # digest. The fuzzy router is the trap...
+        cmd = ":campaign-start --dry-run --max-cycles 3 --max-cost-units 0"
+        trapped = route_operator_intent(cmd)
+        assert trapped is not None and trapped.kind == "budget_status"
+
+        # ...but explicit ':' meta-commands must win: handle_meta_command must
+        # dispatch to the campaign handler (which calls run_campaign), never to
+        # the budget digest. This is why main() routes ':'-prefixed --ask input
+        # through handle_meta_command BEFORE the conversational classifier.
+        called = {}
+
+        class _FakeReport:
+            def user_summary(self) -> str:
+                return "status=completed cycles=3"
+
+        def _fake_run_campaign(config, **kwargs):
+            called["goal"] = config.goal
+            called["dry_run"] = config.dry_run
+            called["max_cost_units"] = config.max_cost_units
+            return _FakeReport()
+
+        monkeypatch.setattr("main.run_campaign", _fake_run_campaign)
+        agent = _build_agent(workspace)
+        assert handle_meta_command(cmd, agent, workspace) is True
+        assert called == {"goal": "project health", "dry_run": True, "max_cost_units": 0}
 
     def test_mem_prints_working_and_persistent(self, workspace: Path, capsys):
         agent = _build_agent(workspace)

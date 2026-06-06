@@ -5389,6 +5389,15 @@ def main() -> int:
             approval_provider = None
 
         agent = build_agent(workspace, with_memory=False, approval_provider=approval_provider)
+        # Explicit ':' meta-commands take precedence over fuzzy intent routing,
+        # mirroring the interactive REPL — otherwise e.g. ':campaign-start
+        # --max-cost-units 0' is misread as a budget query by the classifier.
+        ask_head = args.ask.lstrip()
+        if ask_head.startswith(":") or ask_head == "?":
+            if handle_meta_command(ask_head, agent, workspace):
+                return 0
+            print(f"(unknown command: {ask_head})", file=sys.stderr)
+            return 0
         if handle_conversational_operator_input(args.ask, agent, workspace):
             return 0
         answer = _run_agent_with_budget_guard(
