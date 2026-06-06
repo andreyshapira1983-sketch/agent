@@ -109,34 +109,94 @@ $Settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -MultipleInstances IgnoreNew
 
-# Run as current user (no elevated password prompt needed for dry-run)
-$Principal = New-ScheduledTaskPrincipal `
-    -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
-    -LogonType S4U `
-    -RunLevel Limited
+# Run as current user. Two logon modes:
+#   S4U         — task runs whether or not you are logged in, but registering
+#                 it requires elevation (Administrator). This is the ideal mode.
+#   Interactive — task runs only while you are logged in, but registers WITHOUT
+#                 admin rights. Used as an automatic fallback so the install
+#                 still succeeds on a normal (non-elevated) PowerShell.
+$UserId = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+
+function New-AgentPrincipal {
+    param([string] $LogonType)
+    New-ScheduledTaskPrincipal -UserId $UserId -LogonType $LogonType -RunLevel Limited
+}
+
+# Detect whether this PowerShell is elevated (Administrator).
+$IsAdmin = ([System.Security.Principal.WindowsPrincipal] `
+    [System.Security.Principal.WindowsIdentity]::GetCurrent()
+).IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+
+# Register (or update) the task with a given principal. Returns $true on real
+# success (the task actually exists afterwards), $false otherwise. NEVER claims
+# success it cannot prove.
+function Register-AgentTask {
+    param($Principal)
+    try {
+        if ($Existing) {
+            Set-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger `
+                -Settings $Settings -Principal $Principal -ErrorAction Stop | Out-Null
+        } else {
+            Register-ScheduledTask `
+                -TaskName  $TaskName `
+                -Action    $Action `
+                -Trigger   $Trigger `
+                -Settings  $Settings `
+                -Principal $Principal `
+                -Description "Autonomous agent daemon: runs health checks every $IntervalMinutes min and writes repair proposals to the approval inbox." `
+                -ErrorAction Stop | Out-Null
+        }
+    } catch {
+        Write-Host "  registration attempt failed: $($_.Exception.Message)" -ForegroundColor DarkYellow
+        return $false
+    }
+    # Prove it: the cmdlet can report a non-terminating failure, so verify.
+    return [bool] (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)
+}
 
 $Existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($Existing) {
     Write-Host "Updating existing task '$TaskName'..." -ForegroundColor Yellow
-    Set-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal
 } else {
     Write-Host "Creating scheduled task '$TaskName'..." -ForegroundColor Cyan
-    Register-ScheduledTask `
-        -TaskName  $TaskName `
-        -Action    $Action `
-        -Trigger   $Trigger `
-        -Settings  $Settings `
-        -Principal $Principal `
-        -Description "Autonomous agent daemon: runs health checks every $IntervalMinutes min and writes repair proposals to the approval inbox."
+}
+
+# Primary attempt: S4U (best behaviour). Fall back to Interactive if denied.
+$LogonModeUsed = "S4U (runs whether or not you are logged in)"
+$Ok = Register-AgentTask (New-AgentPrincipal "S4U")
+if (-not $Ok) {
+    Write-Host "S4U registration denied (needs Administrator). " -NoNewline -ForegroundColor Yellow
+    Write-Host "Falling back to Interactive mode (runs while you are logged in)..." -ForegroundColor Yellow
+    $LogonModeUsed = "Interactive (runs only while you are logged in)"
+    $Ok = Register-AgentTask (New-AgentPrincipal "Interactive")
+}
+
+if (-not $Ok) {
+    Write-Host ""
+    Write-Error @"
+Could not register the scheduled task '$TaskName'.
+Both S4U and Interactive registration failed (access denied).
+
+To fix, re-run this script from an ELEVATED PowerShell:
+  1. Press Start, type 'PowerShell'
+  2. Right-click 'Windows PowerShell' -> 'Run as administrator'
+  3. cd '$Workspace'
+  4. .\scripts\install_daemon.ps1$(if ($AllowEffects) { ' -AllowEffects' })
+
+No task was created. Nothing is scheduled.
+"@
+    exit 1
 }
 
 Write-Host ""
-Write-Host "Done! Task '$TaskName' is now active." -ForegroundColor Green
-Write-Host "  Interval : every $IntervalMinutes minutes"
-Write-Host "  Python   : $PythonExe"
-Write-Host "  Script   : $TickScript"
-Write-Host "  Log      : $LogFile"
-Write-Host "  Dry-run  : $(-not $AllowEffects)"
+Write-Host "Done! Task '$TaskName' is registered and verified." -ForegroundColor Green
+Write-Host "  Interval  : every $IntervalMinutes minutes"
+Write-Host "  Logon mode: $LogonModeUsed"
+Write-Host "  Elevated  : $IsAdmin"
+Write-Host "  Python    : $PythonExe"
+Write-Host "  Script    : $TickScript"
+Write-Host "  Log       : $LogFile"
+Write-Host "  Dry-run   : $(-not $AllowEffects)"
 Write-Host ""
 Write-Host "To check status:   Get-ScheduledTask -TaskName '$TaskName'"
 Write-Host "To run now:        Start-ScheduledTask -TaskName '$TaskName'"
