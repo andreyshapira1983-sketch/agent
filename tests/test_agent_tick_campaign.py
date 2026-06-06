@@ -84,6 +84,12 @@ def test_emits_a_heartbeat_per_cycle(workspace: Path):
     assert [c["cycle"] for c in cycle_beats] == [1, 2, 3]
     assert all(c["mode"] == "dry_run" and c["effects"] == "disabled"
                for c in cycle_beats)
+    # start + complete also carry the full Mode-line fields so --status is
+    # never left showing "effects=?" after a campaign.
+    start = hb.calls[0]
+    complete = hb.calls[-1]
+    assert start["effects"] == "disabled" and start["processed_effects"] == 0
+    assert complete["effects"] == "disabled" and complete["processed_effects"] == 0
 
 
 def test_dry_run_flag_propagates_to_config(workspace: Path):
