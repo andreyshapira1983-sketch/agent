@@ -1091,10 +1091,13 @@ class TestLoopSuspected:
         assert len(suspected) == 1
         report = suspected[0]
         assert report["cycles_without_progress"] == 3
-        assert report["recommended_action"] == "ask_operator_or_change_strategy"
+        assert report["recommended_action"] == "enter_clarify_mode"
         assert report["useful_state_change"] is False
         # The report names the recent actions so the operator sees the loop.
         assert report["recent_actions"] == ["fix_1", "fix_2", "fix_3"]
+        # And it carries the clarify-mode decision (question, not more building).
+        assert report["clarification"]["mode"] == "clarify"
+        assert report["clarification"]["questions"]
 
     def test_budget_stop_takes_priority_over_loop_suspected(self):
         # Both brakes are armed; the budget cap is checked at the TOP of the
@@ -1141,4 +1144,72 @@ class TestLoopSuspected:
         assert result.status == "completed"
         assert result.cycles_run == 6
         assert result.totals["unproductive_cycles"] >= 3
+
+    def test_loop_suspected_switches_into_clarify_mode(self):
+        # The stuck campaign must hand the operator a question and forbid the
+        # chaos actions — режим переспроса, not more building.
+        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        result = run_campaign(
+            CampaignConfig(
+                max_cycles=20, max_idle_streak=99, max_unproductive_streak=3
+            ),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=_NewActionGather(),
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+        assert result.status == "stopped"
+        assert result.clarification is not None
+        clar = result.clarification
+        assert clar["mode"] == "clarify"
+        assert clar["allowed_action"] == "ask_question"
+        assert clar["questions"]  # at least one concrete question
+        # The chaos actions a bad agent would take are all forbidden.
+        for action in (
+            "spawn_subagent",
+            "create_module",
+            "write_memory",
+            "create_proposal",
+            "expensive_llm_call",
+        ):
+            assert action in clar["forbidden_actions"]
+
+    def test_clarify_question_appears_in_user_summary(self):
+        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        result = run_campaign(
+            CampaignConfig(
+                max_cycles=20, max_idle_streak=99, max_unproductive_streak=3
+            ),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=_NewActionGather(),
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+        summary = result.user_summary()
+        assert "Я не могу безопасно продолжить" in summary
+        assert "режим вопроса" in summary
+
+    def test_clean_completion_has_no_clarification(self):
+        # A healthy run that never trips loop_suspected leaves clarification None.
+        execute = _RecordingExecute(
+            CampaignActionOutcome(result="completed", artifact="patch.diff")
+        )
+        result = run_campaign(
+            CampaignConfig(
+                max_cycles=3, max_idle_streak=99, max_unproductive_streak=3
+            ),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=_NewActionGather(),
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+        assert result.status == "completed"
+        assert result.clarification is None
+        assert "режим вопроса" not in result.user_summary()
 

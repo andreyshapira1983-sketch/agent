@@ -371,6 +371,9 @@ class CampaignResult:
     cycles_run: int
     records: list[CampaignCycleRecord] = field(default_factory=list)
     totals: dict[str, int] = field(default_factory=dict)
+    # Populated only when the run stopped into clarify mode (loop_suspected):
+    # the operator-facing question + the actions forbidden while unclear.
+    clarification: Optional[dict[str, Any]] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -380,6 +383,7 @@ class CampaignResult:
             "cycles_run": self.cycles_run,
             "totals": self.totals,
             "records": [r.to_dict() for r in self.records],
+            "clarification": self.clarification,
         }
 
     def user_summary(self) -> str:
@@ -401,6 +405,14 @@ class CampaignResult:
         ]
         for record in self.records:
             lines.append(f"  {record.user_summary()}")
+        if self.clarification and self.clarification.get("questions"):
+            lines.append("--- нужно уточнение (режим вопроса) ---")
+            lines.append("Я не могу безопасно продолжить. Уточни:")
+            for question in self.clarification["questions"]:
+                lines.append(f"  - {question}")
+            forbidden = self.clarification.get("forbidden_actions") or []
+            if forbidden:
+                lines.append(f"  (пока запрещено: {', '.join(forbidden)})")
         return "\n".join(lines)
 
 
@@ -463,6 +475,7 @@ def run_campaign(
     unproductive_cycles = 0
     prev_exec_result: Optional[str] = None
     recent_actions: list[str] = []
+    clarification: Optional[dict[str, Any]] = None
     stop_reason = ""
     status: CampaignStatus = "completed"
     started_at = now_fn()
@@ -694,13 +707,20 @@ def run_campaign(
                         f"{unproductive_streak}_cycles_without_useful_change"
                     )
                     status = "stopped"
+                    # Stuck → switch to the question mode, not more building.
+                    # The clarification gate forbids the chaos actions (spawn
+                    # subagents, write modules/memory, spray proposals, burn
+                    # LLM) and hands the operator one clear question instead.
+                    from core.clarification_gate import for_loop_suspected
+                    clarification = for_loop_suspected().to_dict()
                     _log(agent, "campaign_loop_suspected", {
                         "cycles_without_progress": unproductive_streak,
                         "recent_actions": recent_actions[-5:],
                         "llm_calls_spent": llm_calls_used,
                         "cost_units_spent": cost_units_used,
                         "useful_state_change": False,
-                        "recommended_action": "ask_operator_or_change_strategy",
+                        "recommended_action": "enter_clarify_mode",
+                        "clarification": clarification,
                         "reason": (
                             "no new artifact, proposal, or result-status change "
                             "across the last "
@@ -776,6 +796,7 @@ def run_campaign(
         cycles_run=len(records),
         records=records,
         totals=totals,
+        clarification=clarification,
     )
     _log(agent, "campaign_stop", {
         "status": result.status,
