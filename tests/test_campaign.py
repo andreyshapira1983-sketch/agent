@@ -763,3 +763,62 @@ class TestWallClockPacing:
         assert clock.sleeps == [5.0, 3.0]
         assert result.cycles_run == 2
         assert result.stop_reason.startswith("wall_clock_exhausted")
+
+
+# ============================================================
+# on_cycle liveness seam (step 3b: daemon heartbeat per cycle)
+# ============================================================
+
+class TestOnCycleHook:
+    def test_hook_fires_once_per_recorded_cycle(self):
+        seen: list[dict] = []
+        gather = _ScriptedGather(_distinct_useful(3))
+        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        result = run_campaign(
+            CampaignConfig(max_cycles=3, max_idle_streak=9),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+            on_cycle=seen.append,
+        )
+        assert len(seen) == result.cycles_run == 3
+        assert [s["cycle"] for s in seen] == [1, 2, 3]
+        assert all(s["result"] == "completed" for s in seen)
+        # Running totals are exposed and monotonic for liveness reporting.
+        assert [s["useful_cycles"] for s in seen] == [1, 2, 3]
+
+    def test_hook_fires_on_idle_cycles_too(self):
+        seen: list[dict] = []
+        gather = _ScriptedGather([_observe()])
+        run_campaign(
+            CampaignConfig(max_cycles=5, max_idle_streak=2),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=_explode_execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+            on_cycle=seen.append,
+        )
+        # idle-stall stops after 2 idle cycles; the hook saw both.
+        assert len(seen) == 2
+        assert all(s["idle"] and s["result"] == "idle" for s in seen)
+
+    def test_default_no_hook_is_a_noop(self):
+        gather = _ScriptedGather(_distinct_useful(2))
+        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        # No on_cycle passed -> must not raise and must still run normally.
+        result = run_campaign(
+            CampaignConfig(max_cycles=2, max_idle_streak=9),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+        assert result.cycles_run == 2
+

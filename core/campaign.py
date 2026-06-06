@@ -390,6 +390,7 @@ def run_campaign(
     execute_action: Optional[ExecuteAction] = None,
     now_fn: Callable[[], datetime] = _utc_now,
     sleep_fn: Callable[[float], None] = time.sleep,
+    on_cycle: Optional[Callable[[dict], None]] = None,
 ) -> CampaignResult:
     """Run a bounded autonomous campaign and return a full ledgered report.
 
@@ -402,6 +403,11 @@ def run_campaign(
     is driven through the injected ``now_fn`` and ``sleep_fn`` so tests stay
     instant and deterministic. With both at their ``0`` defaults the loop runs
     cycles back-to-back exactly as before.
+
+    ``on_cycle`` is an optional liveness seam fired once per recorded cycle with
+    a small snapshot dict (cycle number, result, running totals). It lets a
+    daemon emit a heartbeat per cycle during a multi-hour paced run WITHOUT the
+    pure loop knowing anything about heartbeats/I/O. Default ``None`` = no-op.
     """
     gather = gather_signals or _default_gather_signals
     execute = execute_action or _default_execute_action
@@ -421,6 +427,23 @@ def run_campaign(
     stop_reason = ""
     status: CampaignStatus = "completed"
     started_at = now_fn()
+
+    def _emit_cycle(record: CampaignCycleRecord) -> None:
+        # Liveness seam: hand the daemon a small snapshot after each recorded
+        # cycle. Reads the running counters from the enclosing scope at call
+        # time. The pure loop stays oblivious to what the hook does with it.
+        if on_cycle is None:
+            return
+        on_cycle({
+            "cycle": record.cycle,
+            "result": record.result,
+            "idle": record.idle,
+            "llm_calls": llm_calls_used,
+            "cost_units": cost_units_used,
+            "useful_cycles": useful_cycles,
+            "idle_cycles": idle_cycles,
+            "repeat_cycles": repeat_cycles,
+        })
 
     _log(agent, "campaign_start", {
         "goal": config.goal,
@@ -499,6 +522,7 @@ def run_campaign(
             ledger.append(record)
             records.append(record)
             _log(agent, "campaign_cycle_idle", record.to_dict())
+            _emit_cycle(record)
 
             if idle_streak >= config.max_idle_streak:
                 stop_reason = f"idle_stall:{idle_streak}_consecutive_idle_cycles"
@@ -539,6 +563,7 @@ def run_campaign(
             ledger.append(record)
             records.append(record)
             _log(agent, "campaign_cycle_repeat", record.to_dict())
+            _emit_cycle(record)
 
             if idle_streak >= config.max_idle_streak:
                 stop_reason = f"no_progress_stall:{idle_streak}_cycles_without_new_action"
@@ -584,6 +609,7 @@ def run_campaign(
         ledger.append(record)
         records.append(record)
         _log(agent, "campaign_cycle_work", record.to_dict())
+        _emit_cycle(record)
 
     totals = {
         "llm_calls": llm_calls_used,

@@ -41,6 +41,7 @@ import sys
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Callable
 
 
 # ── paths ─────────────────────────────────────────────────────────────────────
@@ -599,6 +600,149 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     return 0
 
 
+# ── paced campaign daemon mode ────────────────────────────────────────────────
+
+def run_paced_campaign(
+    workspace: Path,
+    *,
+    dry_run: bool = True,
+    goal: str = "project health",
+    max_cycles: int = 24,
+    cycle_pause_seconds: int = 0,
+    max_wall_clock_seconds: int = 0,
+    max_llm_calls: int = 100,
+    max_cost_units: int = 0,
+    heartbeat_fn: Callable[[Path, dict], None] | None = None,
+    run_campaign_fn: Callable[..., Any] | None = None,
+    build_agent_fn: Callable[[Path], Any] | None = None,
+) -> int:
+    """Run ONE long, PACED autonomous campaign as a single daemon process.
+
+    Unlike :func:`run_tick` (a single bounded pass driven externally by Task
+    Scheduler), this drives the multi-cycle campaign loop itself over real
+    wall-clock time: it sleeps ``cycle_pause_seconds`` between cycles and stops
+    at ``max_wall_clock_seconds``. Crucially it emits a heartbeat PER CYCLE so
+    the operator's ``--status`` view shows liveness throughout a multi-hour
+    unattended run instead of going dark between the start and the end.
+
+    Dry-run by default; effects still flow only through the existing approval
+    gate inside the campaign. The heavy collaborators (heartbeat writer, the
+    campaign loop, agent builder) are injectable so the wiring is testable with
+    deterministic fakes. Returns an exit code (0 = ok, 1 = hard error).
+    """
+    from core.campaign import (
+        CampaignConfig,
+        CampaignLedger,
+        run_campaign as _real_run_campaign,
+    )
+
+    write_heartbeat = heartbeat_fn or _write_heartbeat
+    run_campaign = run_campaign_fn or _real_run_campaign
+
+    def _on_cycle(snapshot: dict) -> None:
+        # Liveness during a long paced run. A heartbeat-write failure (e.g. a
+        # transient disk error) must NEVER kill a multi-hour campaign, so the
+        # per-cycle write is best-effort at this daemon layer (the core seam
+        # in run_campaign stays pure).
+        payload = {
+            "event": "campaign_cycle",
+            "dry_run": dry_run,
+            "mode": "dry_run" if dry_run else "live",
+            "effects": "disabled" if dry_run else "enabled",
+            **snapshot,
+        }
+        try:
+            write_heartbeat(workspace, payload)
+        except Exception:
+            pass
+
+    try:
+        config = CampaignConfig(
+            goal=goal,
+            dry_run=dry_run,
+            max_cycles=max_cycles,
+            max_llm_calls=max_llm_calls,
+            max_cost_units=max_cost_units,
+            cycle_pause_seconds=cycle_pause_seconds,
+            max_wall_clock_seconds=max_wall_clock_seconds,
+        )
+    except ValueError as exc:
+        print(f"[agent_tick] campaign config error: {exc}", file=sys.stderr)
+        return 1
+
+    # Heartbeat #1: prove the campaign process started before any cycle runs.
+    write_heartbeat(workspace, {
+        "event": "campaign_start",
+        "dry_run": dry_run,
+        "mode": "dry_run" if dry_run else "live",
+        "goal": config.goal,
+        "max_cycles": config.max_cycles,
+        "cycle_pause_seconds": config.cycle_pause_seconds,
+        "max_wall_clock_seconds": config.max_wall_clock_seconds,
+    })
+
+    # Build the agent + inbox + ledger lazily (mirrors run_tick).
+    if build_agent_fn is not None:
+        agent = build_agent_fn(workspace)
+    else:
+        from dotenv import load_dotenv
+        load_dotenv(workspace / ".env")
+        from main import build_agent
+        agent = build_agent(workspace, with_memory=False, approval_provider=None)
+
+    from core.approval_inbox import ApprovalInbox
+    inbox = ApprovalInbox(path=workspace / APPROVAL_INBOX_PATH)
+    ledger = CampaignLedger(path=workspace / DATA_DIR / "campaign_ledger.jsonl")
+
+    print(
+        f"[agent_tick] paced campaign goal={config.goal!r} dry_run={dry_run} "
+        f"max_cycles={config.max_cycles} pause={config.cycle_pause_seconds}s "
+        f"ceiling={config.max_wall_clock_seconds}s",
+        file=sys.stderr,
+    )
+
+    try:
+        result = run_campaign(
+            config,
+            agent=agent,
+            workspace=workspace,
+            approval_inbox=inbox,
+            ledger=ledger,
+            on_cycle=_on_cycle,
+        )
+    except Exception as exc:
+        write_heartbeat(workspace, {
+            "event": "campaign_error",
+            "dry_run": dry_run,
+            "error": f"{type(exc).__name__}: {exc}",
+        })
+        print(
+            f"[agent_tick] campaign failed: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Final heartbeat + honest tick-log summary.
+    write_heartbeat(workspace, {
+        "event": "campaign_complete",
+        "dry_run": dry_run,
+        "mode": "dry_run" if dry_run else "live",
+        "status": result.status,
+        "stop_reason": result.stop_reason,
+        "cycles_run": result.cycles_run,
+        **result.totals,
+    })
+    _log_tick(workspace, {
+        "event": "campaign_complete",
+        "status": result.status,
+        "stop_reason": result.stop_reason,
+        "cycles_run": result.cycles_run,
+        "totals": result.totals,
+    })
+    print(result.user_summary(), file=sys.stderr)
+    return 0
+
+
 # ── entry point ───────────────────────────────────────────────────────────────
 
 def _parse_args() -> argparse.Namespace:
@@ -618,6 +762,47 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Only print pending inbox items and exit; do not run a tick.",
     )
+    parser.add_argument(
+        "--campaign",
+        action="store_true",
+        help="Run a long PACED campaign in this process (heartbeat per cycle) "
+             "instead of one bounded tick. Use with the pacing flags below.",
+    )
+    parser.add_argument(
+        "--goal",
+        default="project health",
+        help="Campaign goal (only used with --campaign).",
+    )
+    parser.add_argument(
+        "--max-cycles",
+        type=int,
+        default=24,
+        help="Max campaign cycles (only used with --campaign).",
+    )
+    parser.add_argument(
+        "--cycle-pause-seconds",
+        type=int,
+        default=0,
+        help="Real wall-clock pause between cycles (only used with --campaign).",
+    )
+    parser.add_argument(
+        "--max-wall-clock-seconds",
+        type=int,
+        default=0,
+        help="Hard real-time ceiling for the campaign (only used with --campaign).",
+    )
+    parser.add_argument(
+        "--max-llm-calls",
+        type=int,
+        default=100,
+        help="Campaign llm-call budget, 0 = unlimited (only used with --campaign).",
+    )
+    parser.add_argument(
+        "--max-cost-units",
+        type=int,
+        default=0,
+        help="Campaign cost-unit budget, 0 = unlimited (only used with --campaign).",
+    )
     return parser.parse_args()
 
 
@@ -632,5 +817,17 @@ if __name__ == "__main__":
     # Respect env var override too
     if os.environ.get("AGENT_TICK_DRY_RUN", "1").strip().lower() in {"0", "false", "no"}:
         dry = False
+
+    if args.campaign:
+        sys.exit(run_paced_campaign(
+            ws,
+            dry_run=dry,
+            goal=args.goal,
+            max_cycles=args.max_cycles,
+            cycle_pause_seconds=args.cycle_pause_seconds,
+            max_wall_clock_seconds=args.max_wall_clock_seconds,
+            max_llm_calls=args.max_llm_calls,
+            max_cost_units=args.max_cost_units,
+        ))
 
     sys.exit(run_tick(ws, dry_run=dry))
