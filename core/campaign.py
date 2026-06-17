@@ -815,8 +815,8 @@ def run_campaign(
 def _default_gather_signals(agent: Any, workspace: Any, approval_inbox: Any) -> dict[str, Any]:
     """Collect every signal READ-ONLY, then pick the single best next action.
 
-    Mirrors ``scripts/first_live_probe._gather_signals`` but reuses a passed
-    approval inbox when supplied. No mutation, no execution, no network.
+    Reuses a passed approval inbox when supplied. No mutation, no execution,
+    no network.
     """
     import agent_tick
     from core.alert_ack import AlertAckStore
