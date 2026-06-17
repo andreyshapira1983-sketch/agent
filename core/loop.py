@@ -638,6 +638,7 @@ class AgentLoop:
         user_question: str,
         file_hint: str | None = None,
         on_token: Any = None,
+        deep_escalation: Any = None,
     ) -> str:
         """Run one observe→plan→act→verify→respond cycle.
 
@@ -648,6 +649,11 @@ class AgentLoop:
                       synthesis token as it streams from the LLM.  Pass
                       ``lambda t: print(t, end="", flush=True)`` for live
                       CLI display.  ``None`` (default) disables streaming.
+            deep_escalation: Optional operator-supplied
+                      :class:`~core.deep_escalation.OperatorEscalation`. Only an
+                      explicit, valid operator reason lets planner/synthesizer
+                      escalate to the deep (Opus) tier; the default ``None``
+                      keeps every autonomous run on the standard tier.
         """
         # Store streaming callback so _synthesize() can pick it up without
         # changing its signature (which is called from multiple paths).
@@ -787,8 +793,12 @@ class AgentLoop:
         # STANDARD tasks reuse the default role route — no change.
         # Falls back silently to the default LLM if for_task() raises.
         try:
-            _task_planner_llm = self.model_router.for_task(ModelRole.PLANNER, user_question)
-            _task_synth_llm = self.model_router.for_task(ModelRole.SYNTHESIZER, user_question)
+            _task_planner_llm = self.model_router.for_task(
+                ModelRole.PLANNER, user_question, escalation=deep_escalation
+            )
+            _task_synth_llm = self.model_router.for_task(
+                ModelRole.SYNTHESIZER, user_question, escalation=deep_escalation
+            )
             _planner_model = getattr(_task_planner_llm, "model", None)
             _synth_model = getattr(_task_synth_llm, "model", None)
             _route_reason = getattr(

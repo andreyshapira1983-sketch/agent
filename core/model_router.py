@@ -732,7 +732,40 @@ class ModelRouter:
         self._tracked_cache[role_key] = tracked
         return tracked
 
-    def for_task(self, role: ModelRole | str, task: str) -> Any:
+    def _for_role_with_reason(self, role_key: str, route_reason: str) -> Any:
+        """Return the standard role LLM but stamp a custom ``route_reason``.
+
+        Used by the deep-escalation gate to record a downgrade in the usage
+        ledger (e.g. ``deep_downgraded:missing_reason``) while still serving the
+        normal standard-tier model. Not stored in the role cache so the gate's
+        one-off reason never poisons a later plain :meth:`for_role` call.
+        """
+        if self._static_llm is not None:
+            return self._static_llm
+        route = self.route_for(role_key)
+        provider = route.provider or self.default_provider
+        model = route.model or self.default_model
+        cache_key = (provider, model)
+        if cache_key not in self._cache:
+            self._cache[cache_key] = self._llm_factory(provider, model)
+        llm = self._cache[cache_key]
+        if self.usage_ledger is None:
+            return llm
+        stamped = ModelRoute(
+            role=role_key,
+            provider=provider,
+            model=model,
+            reason=route_reason,
+        )
+        return UsageTrackedLLM(
+            llm,
+            role=role_key,
+            route=stamped,
+            cost_tier=self._cost_tier_for_route(route),
+            ledger=self.usage_ledger,
+        )
+
+    def for_task(self, role: ModelRole | str, task: str, *, escalation: Any = None) -> Any:
         """Like :meth:`for_role` but auto-selects model based on task complexity.
 
         Model selection order
@@ -749,6 +782,12 @@ class ModelRouter:
             AGENT_MODEL_TIER_LIGHT
             AGENT_MODEL_TIER_STANDARD
             AGENT_MODEL_TIER_DEEP
+
+        ``escalation`` is an optional operator-supplied
+        :class:`~core.deep_escalation.OperatorEscalation` (role-free). It only
+        affects a DEEP request: without a valid operator reason the deep request
+        gracefully downgrades to the standard tier (the agent can never open
+        Opus for itself). LIGHT escalation is never gated.
         """
         from core.task_complexity import ComplexityTier, assess_complexity
         from core.model_catalog import tier_model_for
@@ -768,8 +807,33 @@ class ModelRouter:
         provider = _normalise_provider(route.provider or self.default_provider) or "anthropic"
 
         tier_model = tier_model_for(tier, provider)
+
+        # ── Deep/Opus escalation gate ────────────────────────────────────────
+        # DEEP is the only expensive direction; LIGHT (cheap) is never gated.
+        # Without a valid operator reason a deep request downgrades to the
+        # standard tier, recording WHY in route_reason for the usage ledger.
+        if tier == ComplexityTier.DEEP:
+            from core.deep_escalation import (
+                DeepEscalationRequest,
+                evaluate_deep_escalation,
+            )
+            decision = evaluate_deep_escalation(DeepEscalationRequest(
+                role=role_key,
+                reason=getattr(escalation, "reason", None),
+                expected_output=getattr(escalation, "expected_output", None),
+                deep_model_available=bool(tier_model),
+                budget_ok=getattr(escalation, "budget_ok", False),
+                operator_approved=getattr(escalation, "operator_approved", False),
+            ))
+            if decision.effective_tier == "standard":
+                return self._for_role_with_reason(role_key, decision.route_reason)
+            tier_reason = decision.route_reason
+        else:
+            tier_reason = f"complexity:{tier.value}"
+
         if not tier_model:
-            # No model configured/discovered for this tier → fall back to role routing
+            # No model configured/discovered for this tier → fall back to role
+            # routing. (DEEP with no model already downgraded above.)
             return self.for_role(role_key)
 
         cache_key = (provider, tier_model)
@@ -784,7 +848,7 @@ class ModelRouter:
             role=role_key,
             provider=provider,
             model=tier_model,
-            reason=f"complexity:{tier.value}",
+            reason=tier_reason,
         )
         return UsageTrackedLLM(
             llm,

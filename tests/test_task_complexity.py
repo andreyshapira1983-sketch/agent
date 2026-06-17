@@ -379,9 +379,11 @@ def test_model_router_for_task_light_uses_haiku_model(monkeypatch):
 
 
 def test_model_router_for_task_deep_task_different_from_standard():
-    """DEEP tier should not return the same LLM instance as STANDARD."""
+    """DEEP tier returns a different LLM than STANDARD only when an operator
+    escalation unlocks it; without a reason the deep request downgrades."""
     from unittest.mock import MagicMock
     from core.model_router import ModelRole, ModelRouter
+    from core.deep_escalation import OperatorEscalation
 
     instances: list[object] = []
 
@@ -398,15 +400,27 @@ def test_model_router_for_task_deep_task_different_from_standard():
         llm_factory=factory,
     )
 
+    deep_question = "спроектируй архитектуру распределённой системы с аудитом безопасности"
+    std_question = "напиши функцию сортировки"
+
     # Configure a different deep model
     with patch.dict(os.environ, {"AGENT_MODEL_TIER_DEEP": "claude-opus-deep-test"}):
-        deep_llm  = router.for_task(
-            ModelRole.PLANNER,
-            "спроектируй архитектуру распределённой системы с аудитом безопасности",
+        # Without an operator reason → the deep request downgrades to standard,
+        # so it resolves to the SAME standard model instance.
+        downgraded = router.for_task(ModelRole.PLANNER, deep_question)
+        std_llm = router.for_task(ModelRole.PLANNER, std_question)
+        assert downgraded is std_llm
+
+        # With a valid operator escalation → the deep model is actually used.
+        escalation = OperatorEscalation(
+            reason="planner_multi_file_architecture_change",
+            expected_output="architecture_tradeoff",
         )
-    std_llm = router.for_task(ModelRole.PLANNER, "напиши функцию сортировки")
-    # Different task complexity → different model instances
+        deep_llm = router.for_task(
+            ModelRole.PLANNER, deep_question, escalation=escalation
+        )
     assert deep_llm is not std_llm
+    assert deep_llm.model == "claude-opus-deep-test"
 
 
 # ── needs_live_grounding ──────────────────────────────────────────────────────

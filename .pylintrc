@@ -53,6 +53,7 @@ disable =
     no-else-raise,
     consider-using-in,
     consider-using-max-builtin,
+    use-dict-literal,
     inconsistent-return-statements,
 
 # Everything NOT listed above stays ENABLED on purpose, including:

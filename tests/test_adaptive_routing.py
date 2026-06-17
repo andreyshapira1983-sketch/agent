@@ -160,7 +160,7 @@ class TestRunAdaptiveRoute:
         # Patch model_router.for_task to return fake_llm and record calls
         for_task_calls: list[tuple] = []
 
-        def fake_for_task(role, task):
+        def fake_for_task(role, task, *, escalation=None):
             for_task_calls.append((role, task))
             return fake_llm
 

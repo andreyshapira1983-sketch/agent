@@ -99,8 +99,6 @@ from core.campaign import (
     summarise_ledger,
 )
 from core.subagent_memory_scope import (
-    SubagentProposalResult,
-    make_default_proposal,
     needs_delegation,
     propose_subagent,
 )
@@ -395,6 +393,7 @@ def _run_agent_with_budget_guard(
     user_question: str,
     file_hint: str | None = None,
     stream: bool = True,
+    deep_escalation=None,
 ) -> str:
     """Run the agent, optionally streaming synthesis tokens to stdout.
 
@@ -417,6 +416,7 @@ def _run_agent_with_budget_guard(
                 user_question=user_question,
                 file_hint=file_hint,
                 on_token=_on_token,
+                deep_escalation=deep_escalation,
             )
         except ModelBudgetExceeded as exc:
             answer = f"Model budget exceeded: {exc}"
@@ -427,7 +427,7 @@ def _run_agent_with_budget_guard(
             print()  # newline after streamed tokens
         return answer
     try:
-        return agent.run(user_question=user_question, file_hint=file_hint)
+        return agent.run(user_question=user_question, file_hint=file_hint, deep_escalation=deep_escalation)
     except ModelBudgetExceeded as exc:
         message = f"Model budget exceeded: {exc}"
         agent.log.log("model_budget_blocked", {"error": str(exc)})
@@ -1860,7 +1860,7 @@ def _handle_refresh_models(rest: str, agent: AgentLoop) -> bool:
     Results are classified by naming pattern (haiku→light, opus→deep, …)
     and saved to config/model_catalog.json. No model names are hardcoded.
     """
-    from core.model_catalog import catalog_summary, classify_model, refresh_catalog
+    from core.model_catalog import refresh_catalog
     from core.task_complexity import ComplexityTier
 
     tokens = _split_meta_args(rest)
@@ -5377,6 +5377,24 @@ def main() -> int:
             "If it crashed before synthesis, the full cycle is re-run from scratch."
         ),
     )
+    parser.add_argument(
+        "--reason",
+        default=None,
+        help=(
+            "Deep/Opus escalation reason (one-shot --ask only). Without it, a "
+            "deep request downgrades to the standard model — the agent never "
+            "opens Opus for itself. Valid: operator_explicitly_requested_opus, "
+            "planner_multi_file_architecture_change."
+        ),
+    )
+    parser.add_argument(
+        "--expect",
+        default=None,
+        help=(
+            "Expected deep output (used with --reason). Valid: minimal_patch_plan, "
+            "architecture_tradeoff, cross_file_synthesis, final_answer_high_stakes."
+        ),
+    )
     args = parser.parse_args()
 
     # Must run BEFORE any non-ASCII input flows through stdin / out.
@@ -5449,10 +5467,22 @@ def main() -> int:
             return 0
         if handle_conversational_operator_input(args.ask, agent, workspace):
             return 0
+        # Deep/Opus escalation is opt-in and operator-driven: only an explicit
+        # --reason (with --expect) lets planner/synthesizer reach the deep tier.
+        # Without it, deep_escalation stays None and every deep request
+        # downgrades to the standard model.
+        deep_escalation = None
+        if args.reason or args.expect:
+            from core.deep_escalation import OperatorEscalation
+            deep_escalation = OperatorEscalation(
+                reason=args.reason,
+                expected_output=args.expect,
+            )
         answer = _run_agent_with_budget_guard(
             agent,
             user_question=args.ask,
             file_hint=args.file,
+            deep_escalation=deep_escalation,
         )
         print("\n" + format_human_response(answer) + "\n")
         return 0
