@@ -38,7 +38,6 @@ import argparse
 import json
 import os
 import re
-import shlex
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -162,6 +161,20 @@ from tools.semantic_scholar_search import SemanticScholarSearchTool
 from tools.web_fetch import WebFetchTool
 from tools.web_search import WebSearchTool
 
+# Parsers and small text helpers live in cli/parsers.py; re-exported here so
+# existing imports (`from main import _parse_remember`, …) keep working.
+from cli.parsers import (
+    _compact_one_line,
+    _env_bool,
+    _parse_ingest_options,
+    _parse_remember,
+    _parse_repair_generation_args,
+    _parse_source_planning_args,
+    _resolve_workspace_text_file,
+    _split_meta_args,
+    _truncate_text,
+)
+
 
 DEFAULT_PERSISTENT_PATH = Path("data") / "persistent_memory.jsonl"
 DEFAULT_SOURCE_REGISTRY_PATH = Path("data") / "source_registry.jsonl"
@@ -176,13 +189,6 @@ DEFAULT_PROCEDURAL_MEMORY_PATH = Path("data") / "procedural_memory.jsonl"
 DEFAULT_MEMORY_CONSOLIDATION_PATH = Path("data") / "memory_consolidation.jsonl"
 DEFAULT_USER_PROFILE_PATH = Path("data") / "user_profile.jsonl"
 DEFAULT_ASSUMPTIONS_PATH = Path("data") / "assumptions.jsonl"  # Layer 5
-
-
-def _env_bool(name: str, default: bool = False) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on", "approve"}
 
 
 def build_agent(
@@ -433,37 +439,6 @@ def _run_agent_with_budget_guard(
         return message
 
 
-def _parse_remember(rest: str) -> tuple[list[str], str]:
-    """Parse `:remember [tag,tag] text...` into (tags, content).
-
-    Tags are detected when the first whitespace-separated token contains a
-    comma OR matches a known consent tag. Anything else is treated as part
-    of the content with the default tag list.
-
-    ASCII-only identifier policy applies to TAGS (they are identifiers).
-    `content` may contain any unicode (it's human text).
-    """
-    rest = rest.strip()
-    if not rest:
-        return [], ""
-    head, _, tail = rest.partition(" ")
-    tag_candidates = {
-        "preference", "fact", "decision", "insight",
-        "user-approved", "project",
-    }
-    if "," in head or head.lower() in tag_candidates:
-        raw_tags = [t.strip().lower() for t in head.split(",") if t.strip()]
-        # Silently drop non-ASCII tags so the user gets the obvious
-        # fallback (`user-approved`) instead of a stack trace. Tags are
-        # programming identifiers in this codebase; Russian / other
-        # unicode belongs in the content body.
-        tags = [t for t in raw_tags if t.isascii()]
-        if not tags:
-            tags = ["user-approved"]
-        return tags, tail.strip()
-    return ["user-approved"], rest
-
-
 def _handle_rollback(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     """`:rollback` — apply / inspect compensation plans."""
     tokens = rest.split()
@@ -610,22 +585,6 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     return True
 
 
-def _resolve_workspace_text_file(workspace: Path, raw_path: str, *, role: str) -> Path:
-    if not raw_path or not raw_path.isascii():
-        raise ValueError(f"{role} must be a non-empty ASCII path")
-    p = Path(raw_path)
-    if p.is_absolute() or ".." in p.parts:
-        raise PermissionError(f"{role} must stay inside the workspace")
-    resolved = (workspace / p).resolve()
-    try:
-        resolved.relative_to(workspace.resolve())
-    except ValueError:
-        raise PermissionError(f"{role} resolves outside the workspace") from None
-    if not resolved.is_file():
-        raise FileNotFoundError(f"{role} not found: {raw_path}")
-    return resolved
-
-
 def _handle_repair(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     """`:repair <target_path> [proposal_file] [test_path...] [--pattern PAT]`.
 
@@ -726,30 +685,6 @@ def _handle_repair(rest: str, agent: AgentLoop, workspace: Path) -> bool:
 
     print(report.user_summary(), file=sys.stderr)
     return True
-
-
-def _parse_repair_generation_args(rest: str) -> tuple[str | None, tuple[str, ...], str | None, str | None, str | None]:
-    tokens = rest.split()
-    if not tokens:
-        return None, (), None, None, "Usage: :propose-repair <target_path> [test_path...] [--pattern PAT] [--trace TRACE]"
-
-    pattern: str | None = None
-    trace_id: str | None = None
-    for flag_name in ("--pattern", "--trace"):
-        while flag_name in tokens:
-            i = tokens.index(flag_name)
-            if i + 1 >= len(tokens):
-                return None, (), None, None, f"Usage: {flag_name} requires a value"
-            value = tokens[i + 1]
-            tokens = tokens[:i] + tokens[i + 2:]
-            if flag_name == "--pattern":
-                pattern = value
-            else:
-                trace_id = value
-
-    target_path = tokens[0]
-    test_paths = tuple(tokens[1:] or ["tests"])
-    return target_path, test_paths, pattern, trace_id, None
 
 
 def _handle_propose_repair(rest: str, agent: AgentLoop, workspace: Path) -> bool:
@@ -854,62 +789,6 @@ def _handle_memory_consolidate(rest: str, agent: AgentLoop) -> bool:
     for note in report.notes:
         print(f"  - {note}", file=sys.stderr)
     return True
-
-
-def _split_meta_args(rest: str) -> list[str]:
-    if not rest.strip():
-        return []
-    try:
-        tokens = shlex.split(rest, posix=False)
-    except ValueError:
-        tokens = rest.split()
-    return [t.strip().strip('"').strip("'") for t in tokens if t.strip()]
-
-
-def _parse_ingest_options(
-    rest: str,
-    *,
-    default_path: str | None,
-) -> tuple[str | None, bool, bool | None, int, str | None]:
-    tokens = _split_meta_args(rest)
-    dry_run = False
-    auto_write: bool | None = None
-    limit = DEFAULT_PROJECT_LIMIT
-    paths: list[str] = []
-
-    i = 0
-    while i < len(tokens):
-        token = tokens[i]
-        if token == "--dry-run":
-            dry_run = True
-            i += 1
-            continue
-        if token == "--write-memory":
-            auto_write = True
-            i += 1
-            continue
-        if token == "--no-memory":
-            auto_write = False
-            i += 1
-            continue
-        if token == "--limit":
-            if i + 1 >= len(tokens):
-                return None, dry_run, auto_write, limit, "Usage: --limit requires a number"
-            try:
-                limit = int(tokens[i + 1])
-            except ValueError:
-                return None, dry_run, auto_write, limit, "Usage: --limit requires a number"
-            if limit < 1:
-                return None, dry_run, auto_write, limit, "Usage: --limit must be >= 1"
-            i += 2
-            continue
-        paths.append(token)
-        i += 1
-
-    if not paths and default_path is None:
-        return None, dry_run, auto_write, limit, "Usage: :ingest-source <path> [--dry-run] [--write-memory|--no-memory]"
-    path = " ".join(paths) if paths else default_path
-    return path, dry_run, auto_write, limit, None
 
 
 def _handle_ingest_source(rest: str, agent: AgentLoop, workspace: Path) -> bool:
@@ -1105,37 +984,6 @@ def _handle_source_registry(rest: str, agent: AgentLoop, workspace: Path) -> boo
                     file=sys.stderr,
                 )
     return True
-
-
-def _parse_source_planning_args(rest: str, *, usage: str) -> tuple[bool, int, str] | None:
-    tokens = _split_meta_args(rest)
-    as_json = False
-    limit = 8
-    goal_parts: list[str] = []
-    i = 0
-    while i < len(tokens):
-        token = tokens[i]
-        if token == "--json":
-            as_json = True
-            i += 1
-            continue
-        if token == "--limit":
-            if i + 1 >= len(tokens):
-                print(f"Usage: {usage} --limit requires a number", file=sys.stderr)
-                return None
-            try:
-                limit = int(tokens[i + 1])
-            except ValueError:
-                print(f"Usage: {usage} --limit requires a number", file=sys.stderr)
-                return None
-            i += 2
-            continue
-        goal_parts.append(token)
-        i += 1
-    if limit < 1:
-        print(f"Usage: {usage} --limit must be >= 1", file=sys.stderr)
-        return None
-    return as_json, limit, " ".join(goal_parts).strip()
 
 
 def _handle_source_review_plan(rest: str, agent: AgentLoop, workspace: Path) -> bool:
@@ -3390,13 +3238,6 @@ def _operator_patch_diff_plan(files: list[dict], text: str) -> list[str]:
     ]
 
 
-def _compact_one_line(text: str, *, limit: int) -> str:
-    compact = " ".join(text.split())
-    if len(compact) <= limit:
-        return compact
-    return compact[: max(0, limit - 1)] + "…"
-
-
 def _extract_operator_task_checks(text: str) -> list[str]:
     mapping = (
         ("architecture", ("architecture", "архитектур")),
@@ -3895,14 +3736,6 @@ def _dispatch_operator_intent(
     if intent.kind == "patch_proposal":
         return _handle_patch_proposal_plan(original_text, agent, workspace)
     return False
-
-
-def _truncate_text(text: str, max_chars: int) -> str:
-    """Trim ``text`` to ``max_chars``, appending an ellipsis when shortened."""
-    text = text.strip()
-    if len(text) <= max_chars:
-        return text
-    return text[: max(0, max_chars - 1)].rstrip() + "…"
 
 
 def _collect_instruction_buffer(
