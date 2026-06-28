@@ -217,6 +217,7 @@ from cli.commands_ingest import (
     _handle_ingest_source,
     _handle_ingest_web,
     _handle_patch_proposal_plan,
+    _handle_self_build_propose,
     _handle_source_library,
     _handle_source_registry,
     _handle_source_review_plan,
@@ -2589,6 +2590,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head in {":patch-proposal-plan", ":patch-plan"}:
         return _handle_patch_proposal_plan(rest.strip(), agent, workspace)
 
+    if head == ":self-build-propose":
+        return _handle_self_build_propose(rest.strip(), agent, workspace)
+
     if head == ":ingest-web":
         return _handle_ingest_web(rest.strip(), agent, workspace)
 
@@ -2787,6 +2791,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "      flags: --limit N  --json\n"
             "  :patch-proposal-plan <goal>     local read-only patch proposal plan\n"
             "      flags: --limit N  --json\n"
+            "  :self-build-propose             propose a self-build patch or NO_PATCH\n"
             "  :ingest-web <topic> [flags]     search/fetch curated web library sources\n"
             "      flags: --sources wikis|books|science|docs|all|id,id  --limit N  --per-source N\n"
             "  :ingest-rss <url> [flags]       fetch RSS/Atom feed entries into Source Registry\n"
@@ -2956,9 +2961,14 @@ def main() -> int:
 
     # Must run BEFORE any non-ASCII input flows through stdin / out.
     _force_utf8_io()
-    load_dotenv()
-
     workspace = Path(args.workspace).resolve()
+    ask_head = args.ask.lstrip() if args.ask else ""
+    head, _, rest = ask_head.partition(" ")
+    if head.lower() == ":self-build-propose":
+        _handle_self_build_propose(rest.strip(), None, workspace)  # type: ignore[arg-type]
+        return 0
+
+    load_dotenv()
 
     # §3.5 Resume: if --resume is given, look up the checkpoint file and
     # short-circuit before building the full agent stack when possible.
@@ -3098,7 +3108,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-triage  :best-next-action  :ack  :ack-list  :ack-clear  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-triage  :best-next-action  :ack  :ack-list  :ack-clear  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:

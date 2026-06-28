@@ -12,9 +12,11 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import main as main_module
 from core.approval import AutoApprover
 from core.budget_ledger import BudgetLedger, BudgetWindow
 from core.logger import TraceLogger
@@ -716,6 +718,130 @@ class TestHandleMetaCommand:
         assert '"kind": "patch_proposal"' in out.err
         assert '"approval_boundary"' in out.err
         assert agent.llm.calls == []
+
+    def test_self_build_propose_command_returns_unified_diff_without_writes(
+        self,
+        workspace: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
+    ):
+        agent = SimpleNamespace(llm=FakeLLM(responses=[]))
+        (workspace / "core").mkdir()
+        target = workspace / "core" / "operator_intent.py"
+        original = (
+            "def route_operator_intent(text: str):\n"
+            "    normalized = _normalize(text)\n"
+            "    if _looks_like_meta_instruction(normalized):\n"
+            "        return None\n"
+            "    if _matches_inbox_task_request(normalized):\n"
+            "        return None\n"
+            "    return None\n"
+            "\n"
+            "\n"
+            "def _looks_like_meta_instruction(text: str) -> bool:\n"
+            "    return False\n"
+            "\n"
+            "\n"
+            "def _matches_inbox_task_request(text: str) -> bool:\n"
+            "    return False\n"
+        )
+        target.write_text(original, encoding="utf-8")
+        original_read_text = Path.read_text
+
+        def guarded_read_text(path: Path, *args, **kwargs):
+            normalized = str(path).replace("\\", "/").casefold()
+            assert not normalized.endswith("config/model_registry.json")
+            assert not normalized.endswith("config/credentials.json")
+            assert "/data/" not in normalized
+            assert "/logs/" not in normalized
+            return original_read_text(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", guarded_read_text)
+
+        assert handle_meta_command(":self-build-propose", agent, workspace) is True
+
+        out = capsys.readouterr()
+        assert "=== self-build proposal ===" in out.err
+        assert "--- core/operator_intent.py" in out.err
+        assert "+++ core/operator_intent.py" in out.err
+        assert "if _looks_like_self_build_request(normalized):" in out.err
+        assert "def _looks_like_self_build_request" in out.err
+        assert target.read_text(encoding="utf-8") == original
+        assert agent.llm.calls == []
+
+    def test_self_build_propose_command_returns_no_patch_when_guard_exists(
+        self,
+        workspace: Path,
+        capsys,
+    ):
+        agent = SimpleNamespace(llm=FakeLLM(responses=[]))
+        (workspace / "core").mkdir()
+        (workspace / "core" / "operator_intent.py").write_text(
+            "def route_operator_intent(text: str):\n"
+            "    normalized = _normalize(text)\n"
+            "    if _looks_like_meta_instruction(normalized):\n"
+            "        return None\n"
+            "    if _looks_like_self_build_request(normalized):\n"
+            "        return None\n"
+            "    return None\n"
+            "\n"
+            "\n"
+            "def _looks_like_self_build_request(text: str) -> bool:\n"
+            "    return True\n",
+            encoding="utf-8",
+        )
+
+        assert handle_meta_command(":self-build-propose", agent, workspace) is True
+
+        out = capsys.readouterr()
+        assert out.err.strip() == "NO_PATCH"
+        assert agent.llm.calls == []
+
+    def test_self_build_propose_one_shot_short_circuits_before_agent_build(
+        self,
+        workspace: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
+    ):
+        (workspace / "core").mkdir()
+        (workspace / "core" / "operator_intent.py").write_text(
+            "def route_operator_intent(text: str):\n"
+            "    normalized = _normalize(text)\n"
+            "    if _looks_like_meta_instruction(normalized):\n"
+            "        return None\n"
+            "    if _looks_like_self_build_request(normalized):\n"
+            "        return None\n"
+            "    return None\n"
+            "\n"
+            "\n"
+            "def _looks_like_self_build_request(text: str) -> bool:\n"
+            "    return True\n",
+            encoding="utf-8",
+        )
+
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("self-build propose must not build agent or load dotenv")
+
+        monkeypatch.setattr(main_module, "build_agent", fail_if_called)
+        monkeypatch.setattr(main_module, "load_dotenv", fail_if_called)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "main.py",
+                "--workspace",
+                str(workspace),
+                "--ask",
+                ":self-build-propose",
+            ],
+        )
+
+        assert main_module.main() == 0
+
+        out = capsys.readouterr()
+        assert out.err.strip() == "NO_PATCH"
+        assert not (workspace / "logs").exists()
+        assert not (workspace / "data").exists()
 
     def test_operator_task_block_reports_once_without_effects(self, workspace: Path, capsys):
         agent = _build_agent(workspace)

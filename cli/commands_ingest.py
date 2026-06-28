@@ -10,6 +10,7 @@ extract helpers stay internal to this module.
 from __future__ import annotations
 
 import json
+import difflib
 import re
 import sys
 from typing import TYPE_CHECKING
@@ -290,6 +291,102 @@ def _handle_patch_proposal_plan(rest: str, agent: AgentLoop, workspace: Path) ->
     else:
         print(_format_implementation_plan(payload), file=sys.stderr)
     return True
+
+
+def _handle_self_build_propose(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    del rest, agent
+    payload = _self_build_propose_payload(workspace)
+    patch = payload["diff"]
+    if patch == "NO_PATCH":
+        print("NO_PATCH", file=sys.stderr)
+        return True
+    lines = [
+        "=== self-build proposal ===",
+        f"diagnosis: {payload['diagnosis']}",
+        f"file: {payload['file']}",
+        "diff:",
+        patch.rstrip(),
+        f"tests: {payload['tests']}",
+        f"risk: {payload['risk']}",
+    ]
+    print("\n".join(lines), file=sys.stderr)
+    return True
+
+
+def _self_build_propose_payload(workspace: Path) -> dict[str, str]:
+    target = "core/operator_intent.py"
+    path = workspace / target
+    if not path.is_file():
+        return _self_build_no_patch(target)
+    original = path.read_text(encoding="utf-8")
+    patched = _propose_self_build_operator_intent_patch(original)
+    if patched is None or patched == original:
+        return _self_build_no_patch(target)
+    diff = "".join(
+        difflib.unified_diff(
+            original.splitlines(keepends=True),
+            patched.splitlines(keepends=True),
+            fromfile=target,
+            tofile=target,
+        )
+    )
+    if not diff.startswith("--- ") or "\n@@ " not in diff:
+        return _self_build_no_patch(target)
+    return {
+        "diagnosis": (
+            "Self-build prompts can be captured by generic operator shortcuts "
+            "before the planner sees them."
+        ),
+        "file": target,
+        "diff": diff,
+        "tests": r".\.venv\Scripts\python.exe -m pytest tests/test_operator_intent.py tests/test_cli.py -q",
+        "risk": "low; explicit ':' commands are dispatched before conversational routing.",
+    }
+
+
+def _self_build_no_patch(target: str) -> dict[str, str]:
+    return {
+        "diagnosis": "No ready unified diff is available for the self-build routing guard.",
+        "file": target,
+        "diff": "NO_PATCH",
+        "tests": r".\.venv\Scripts\python.exe -m pytest tests/test_operator_intent.py tests/test_cli.py -q",
+        "risk": "none; no patch is proposed.",
+    }
+
+
+def _propose_self_build_operator_intent_patch(text: str) -> str | None:
+    patched = text
+    guard = (
+        "    if _looks_like_meta_instruction(normalized):\n"
+        "        return None\n"
+    )
+    if "_looks_like_self_build_request(normalized)" not in patched:
+        if guard not in patched:
+            return None
+        patched = patched.replace(
+            guard,
+            guard
+            + "    if _looks_like_self_build_request(normalized):\n"
+            + "        return None\n",
+            1,
+        )
+    if "def _looks_like_self_build_request(" not in patched:
+        helper_anchor = "\n\ndef _matches_inbox_task_request"
+        helper = (
+            "\n\n"
+            "def _looks_like_self_build_request(text: str) -> bool:\n"
+            "    return _has_any(\n"
+            "        text,\n"
+            '        ("self-build", "selfbuild", "self build", "самостро"),\n'
+            "    ) and _has_any(\n"
+            "        text,\n"
+            '        ("propose", "inspect", "найди", "проанализ", "улучш", "код", "code", "diff"),\n'
+            "    )\n"
+        )
+        if helper_anchor not in patched:
+            return None
+        patched = patched.replace(helper_anchor, helper + helper_anchor, 1)
+    return patched
 
 
 def _source_review_plan_payload(goal: str, agent: AgentLoop, *, limit: int = 8) -> dict:
