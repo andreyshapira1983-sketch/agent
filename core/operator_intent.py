@@ -66,6 +66,8 @@ def route_operator_intent(text: str) -> OperatorIntent | None:
     # normal planner instead.
     if _looks_like_meta_instruction(normalized):
         return None
+    if _looks_like_self_build_request(normalized):
+        return None
     # P0 explicit inbox / proposed_task intent: creating an approval-inbox
     # request must outrank implementation/source-review keyword matching, which
     # otherwise hijacks "создай заявку в inbox" into a planning digest.
@@ -241,6 +243,16 @@ def _looks_like_meta_instruction(text: str) -> bool:
         "rule:",
     )
     return _has_any(text, meta_markers)
+
+
+def _looks_like_self_build_request(text: str) -> bool:
+    return _has_any(
+        text,
+        ("self-build", "selfbuild", "self build", "самостро"),
+    ) and _has_any(
+        text,
+        ("propose", "inspect", "найди", "проанализ", "улучш", "код", "code", "diff"),
+    )
 
 
 def _matches_inbox_task_request(text: str) -> bool:

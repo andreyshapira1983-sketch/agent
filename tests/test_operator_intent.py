@@ -123,6 +123,16 @@ def test_budget_status_not_triggered_by_self_build_cost_optimization_request():
     assert intent is None or intent.kind != "budget_status"
 
 
+def test_self_build_propose_bypasses_operator_shortcuts():
+    text = (
+        "SELF-BUILD PROPOSE. Inspect code for model routing budget behavior. "
+        "Return one file, minimal diff, tests, and risk. Do not read "
+        "config/model_registry.json."
+    )
+
+    assert route_operator_intent(text) is None
+
+
 def test_budget_status_not_triggered_by_engineering_token_usage_request():
     text = (
         "Проанализируй свой код и предложи изменение, которое уменьшит "
@@ -283,4 +293,3 @@ def test_symptom_report_with_budget_and_approval_words_is_not_routed():
         "ограничение: не применяй патч"
     )
     assert route_operator_intent(text) is None
-
