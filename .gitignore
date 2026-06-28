@@ -27,3 +27,6 @@ env/
 *.tmp
 *.bak
 *.log
+
+.vscode/
+config/model_registry.json
