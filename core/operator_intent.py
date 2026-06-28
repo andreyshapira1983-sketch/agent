@@ -662,11 +662,11 @@ def _matches_autonomy_readiness(text: str) -> bool:
 
 
 def _matches_budget_status(text: str) -> bool:
-    # Don't match if the primary intent is repair — "budget" can appear as part
-    # of a filename (e.g. core/budget_ledger.py) even in repair requests.
-    if _has_any(text, ("repair", "self-repair", "починить", "исправ", "propose-repair")):
+    if _looks_like_engineering_change_request(text):
         return False
-    return _has_any(
+    if _is_explicit_budget_status_command(text):
+        return True
+    if not _has_any(
         text,
         (
             "бюджет",
@@ -674,13 +674,117 @@ def _matches_budget_status(text: str) -> bool:
             "стоим",
             "токен",
             "лимит",
+            "llm-выз",
+            "llm выз",
+            "llm_call",
+            "llm call",
             "budget",
             "spend",
+            "spent",
             "cost",
             "token",
             "limit",
         ),
+    ):
+        return False
+    return _has_any(
+        text,
+        (
+            "сколько",
+            "какой",
+            "какая",
+            "какие",
+            "покажи",
+            "показать",
+            "статус",
+            "остат",
+            "израсход",
+            "потра",
+            "текущ",
+            "сейчас",
+            "сегодня",
+            "how much",
+            "what is",
+            "show",
+            "status",
+            "remaining",
+            "current",
+            "today",
+            "used",
+            "usage",
+        ),
     )
+
+
+def _is_explicit_budget_status_command(text: str) -> bool:
+    head = text.strip().split(maxsplit=1)[0]
+    return head in (
+        ":operator-budget",
+        ":budget-digest",
+        ":budget-status",
+        ":budget-config",
+        ":budget-limits",
+        ":budget-window-status",
+        ":budget-windows",
+        ":budget-ledger",
+        ":model-usage",
+        ":usage-models",
+    )
+
+
+def _looks_like_engineering_change_request(text: str) -> bool:
+    engineering_terms = (
+        "self-build",
+        "self build",
+        "самостро",
+        "код",
+        "code",
+        ".py",
+        "файл",
+        "file",
+        "модул",
+        "module",
+        "patch",
+        "diff",
+        "патч",
+        "тест",
+        "test",
+        "улучш",
+        "изменен",
+        "изменить",
+        "изменение",
+        "change",
+        "рефактор",
+        "llm-выз",
+        "llm выз",
+        "llm_call",
+        "llm call",
+        "короткие простые вопросы",
+    )
+    change_terms = (
+        "найди",
+        "проанализ",
+        "предлож",
+        "составь",
+        "верни",
+        "ничего не меняй",
+        "сниз",
+        "уменьш",
+        "оптимиз",
+        "исправ",
+        "почин",
+        "analy",
+        "find",
+        "propose",
+        "return",
+        "improve",
+        "reduce",
+        "lower",
+        "optimi",
+        "fix",
+        "repair",
+    )
+    return _has_any(text, engineering_terms) and _has_any(text, change_terms)
 
 
 def _matches_smart_memory_status(text: str) -> bool:

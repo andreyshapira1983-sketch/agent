@@ -807,6 +807,22 @@ class ModelRouter:
         provider = _normalise_provider(route.provider or self.default_provider) or "anthropic"
 
         tier_model = tier_model_for(tier, provider)
+        tier_reason = f"complexity:{tier.value}"
+
+        if tier == ComplexityTier.LIGHT and not tier_model:
+            light_spec = self.registry.best_for_role(
+                role_key,
+                policy=ModelSelectionPolicy(
+                    name="cost",
+                    max_cost_tier="low",
+                    allow_mock=self.selection_policy.allow_mock,
+                    require_available=self.selection_policy.require_available,
+                ),
+            )
+            if light_spec is not None:
+                provider = light_spec.provider
+                tier_model = light_spec.model
+                tier_reason = f"complexity:{tier.value}:{light_spec.id}"
 
         # ── Deep/Opus escalation gate ────────────────────────────────────────
         # DEEP is the only expensive direction; LIGHT (cheap) is never gated.
@@ -828,8 +844,6 @@ class ModelRouter:
             if decision.effective_tier == "standard":
                 return self._for_role_with_reason(role_key, decision.route_reason)
             tier_reason = decision.route_reason
-        else:
-            tier_reason = f"complexity:{tier.value}"
 
         if not tier_model:
             # No model configured/discovered for this tier → fall back to role

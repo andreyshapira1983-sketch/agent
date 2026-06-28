@@ -279,6 +279,44 @@ def test_balanced_policy_can_fall_back_to_available_provider_for_planning(monkey
     assert summary["planner"]["reason"] == "policy:balanced:openai-default-small"
 
 
+def test_light_task_uses_openai_default_small_when_available(monkeypatch):
+    monkeypatch.setenv("AGENT_MODEL_POLICY", "balanced")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("AGENT_MODEL_CATALOG_PATH", "/nonexistent/path/catalog.json")
+    monkeypatch.delenv("AGENT_MODEL_TIER_LIGHT", raising=False)
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        llm = FakeLLM()
+        llm.provider = provider or "unset"
+        llm.model = model or "unset"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+    llm = router.for_task(ModelRole.PLANNER, "привет")
+
+    assert llm.provider == "openai"
+    assert llm.model == "gpt-4o-mini"
+
+
+def test_standard_task_stays_on_anthropic_balanced_route(monkeypatch):
+    monkeypatch.setenv("AGENT_MODEL_POLICY", "balanced")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        llm = FakeLLM()
+        llm.provider = provider or "unset"
+        llm.model = model or "unset"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+    llm = router.for_task(ModelRole.PLANNER, "напиши функцию сортировки для списка чисел")
+
+    assert llm.provider == "anthropic"
+    assert llm.model == "claude-sonnet-4-5"
+
+
 def test_cost_policy_respects_max_cost_and_model_availability(monkeypatch):
     monkeypatch.setenv("AGENT_MODEL_POLICY", "cost")
     monkeypatch.setenv("AGENT_MODEL_MAX_COST", "low")

@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -483,6 +484,57 @@ def _run_agent_with_budget_guard(
         message = f"Model budget exceeded: {exc}"
         agent.log.log("model_budget_blocked", {"error": str(exc)})
         return message
+
+
+_REPLY_ONLY_STOP_RE = re.compile(
+    r"\breply\s+only\s+with:\s*(?:\"([^\"]+)\"|'([^']+)'|“([^”]+)”)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _local_operator_reply(text: str, agent: AgentLoop | None = None) -> str | None:
+    """Return a local response for explicit stop/ack operator instructions.
+
+    TD-001: some operator-control messages are intentionally local and must not
+    enter Planner/Synthesizer. Keep this narrow: only honour a quoted
+    "Reply only with:" directive when the same instruction explicitly forbids
+    the expensive model path.
+    """
+    normalized = " ".join((text or "").casefold().split())
+    if "reply only with:" not in normalized:
+        return None
+    llm_stop_markers = (
+        "do not call planner",
+        "do not call planner or synthesizer",
+        "do not use claude",
+        "do not make a plan with llm",
+        "не вызывай planner",
+        "не вызывай synthesizer",
+        "не используй claude",
+        "не использовать claude",
+    )
+    if not any(marker in normalized for marker in llm_stop_markers):
+        return None
+    match = _REPLY_ONLY_STOP_RE.search(text)
+    if match is None:
+        return None
+    answer = next((part for part in match.groups() if part), "").strip()
+    if not answer:
+        return None
+    if agent is not None:
+        agent.log.log(
+            "local_operator_reply",
+            {"reason": "reply_only_stop_instruction", "answer_preview": answer[:120]},
+        )
+    return answer
+
+
+def _handle_local_operator_reply(text: str, agent: AgentLoop) -> bool:
+    answer = _local_operator_reply(text, agent)
+    if answer is None:
+        return False
+    print("\n" + format_human_response(answer) + "\n")
+    return True
 
 
 def _handle_auto_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
@@ -2815,7 +2867,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "                                  generate a RepairProposal without writing files\n"
             "  :assumptions [--json]           show the last 20 logged planning assumptions\n"
             "  :quit | :exit                   exit\n"
-            "  empty line                      exit",
+            "  empty line                      ignored (use :quit or Ctrl+C to exit)",
             file=sys.stderr,
         )
         print(
@@ -2911,6 +2963,19 @@ def main() -> int:
     # §3.5 Resume: if --resume is given, look up the checkpoint file and
     # short-circuit before building the full agent stack when possible.
     if args.resume:
+        import re as _re
+        # Mirror the allowlist that CheckpointWriter uses: alphanumerics plus
+        # hyphens and underscores only.  Reject anything with slashes, dots,
+        # or other characters that could produce a path-traversal when the
+        # loader constructs its file path (core/checkpoint.py:166).
+        _SAFE_TRACE_RE = _re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$')
+        if not _SAFE_TRACE_RE.match(args.resume):
+            print(
+                f"[resume] Invalid trace_id {args.resume!r}: "
+                "only letters, digits, hyphens and underscores are allowed.",
+                file=sys.stderr,
+            )
+            return 2
         from core.checkpoint import CheckpointLoader as _CPLoader
         _log_dir = workspace / "logs"
         _loader = _CPLoader(_log_dir)
@@ -2960,7 +3025,16 @@ def main() -> int:
             # 'off' in one-shot = no provider wired = escalated tools blocked.
             approval_provider = None
 
-        agent = build_agent(workspace, with_memory=False, approval_provider=approval_provider)
+        # with_persistent=False: one-shot must NOT read or mutate
+        # data/persistent_memory.jsonl — the docstring at line 9 promises
+        # "no memory, fresh session", so persistent memory must be excluded
+        # too, not just working (session) memory.
+        agent = build_agent(
+            workspace,
+            with_memory=False,
+            with_persistent=False,
+            approval_provider=approval_provider,
+        )
         # Explicit ':' meta-commands take precedence over fuzzy intent routing,
         # mirroring the interactive REPL — otherwise e.g. ':campaign-start
         # --max-cost-units 0' is misread as a budget query by the classifier.
@@ -2969,6 +3043,8 @@ def main() -> int:
             if handle_meta_command(ask_head, agent, workspace):
                 return 0
             print(f"(unknown command: {ask_head})", file=sys.stderr)
+            return 0
+        if _handle_local_operator_reply(args.ask, agent):
             return 0
         if handle_conversational_operator_input(args.ask, agent, workspace):
             return 0
@@ -2983,10 +3059,14 @@ def main() -> int:
                 reason=args.reason,
                 expected_output=args.expect,
             )
+        # stream=False: the formatted print below is the sole output.
+        # With stream=True the raw Output-Contract tokens arrive first, then
+        # format_human_response reprints the same content — double output.
         answer = _run_agent_with_budget_guard(
             agent,
             user_question=args.ask,
             file_hint=args.file,
+            stream=False,
             deep_escalation=deep_escalation,
         )
         print("\n" + format_human_response(answer) + "\n")
@@ -3119,6 +3199,8 @@ def main() -> int:
             if not buffered:
                 print("(instruction buffer empty — nothing sent)", file=sys.stderr)
                 continue
+            if _handle_local_operator_reply(buffered, agent):
+                continue
             rl = _rate_limiter.consume()
             if not rl.allowed:
                 print(
@@ -3132,6 +3214,7 @@ def main() -> int:
                 agent,
                 user_question=buffered,
                 file_hint=args.file,
+                stream=False,
             )
             print("\n" + format_human_response(answer) + "\n")
             continue
@@ -3139,6 +3222,8 @@ def main() -> int:
             if handle_meta_command(q, agent, workspace):
                 continue
             print(f"(unknown command: {q})", file=sys.stderr)
+            continue
+        if _handle_local_operator_reply(q, agent):
             continue
         if handle_conversational_operator_input(q, agent, workspace):
             continue
@@ -3156,6 +3241,7 @@ def main() -> int:
             agent,
             user_question=q,
             file_hint=args.file,
+            stream=False,
         )
         print("\n" + format_human_response(answer) + "\n")
 

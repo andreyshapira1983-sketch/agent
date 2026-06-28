@@ -102,6 +102,15 @@ def test_unrecognised_text_yields_general_question(phrase: str) -> None:
     assert result is OperatorStrategy.general_question
 
 
+def test_self_build_cost_optimization_yields_general_question() -> None:
+    result = classify_operator_strategy(
+        "Найди одно минимальное улучшение, которое снизит расход LLM-вызовов "
+        "в твоём коде. Ничего не меняй, верни diff-патч и тесты."
+    )
+
+    assert result is OperatorStrategy.general_question
+
+
 # ---------------------------------------------------------------------------
 # is_local_strategy helper
 # ---------------------------------------------------------------------------

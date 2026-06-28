@@ -38,7 +38,9 @@ from main import (
     _format_operator_budget_digest,
     _handle_auto_run,
     _handle_hygiene,
+    _handle_local_operator_reply,
     _handle_rollback,
+    _local_operator_reply,
     _parse_remember,
     _preflight_file_hint,
     _print_persistent,
@@ -129,6 +131,68 @@ def test_run_agent_with_budget_guard_returns_clean_budget_message(
         "1/1 before synthesizer:fake/fake-1"
     )
     assert "model_budget_blocked" in agent.log.path.read_text(encoding="utf-8")
+
+
+def test_local_operator_reply_bypasses_agent_run(
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+):
+    agent = _build_agent(workspace)
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("agent.run must not be called for local reply")
+
+    monkeypatch.setattr(agent, "run", fail_if_called)
+
+    handled = _handle_local_operator_reply(
+        "\n".join(
+            [
+                "TD-001 stop condition.",
+                "Do not call Planner or Synthesizer for this instruction.",
+                "Do not use Claude.",
+                'Reply only with: "TD-001 evidence recorded; waiting for explicit patch approval."',
+            ]
+        ),
+        agent,
+    )
+
+    assert handled is True
+    out = capsys.readouterr()
+    assert "TD-001 evidence recorded; waiting for explicit patch approval." in out.out
+    assert "local_operator_reply" in agent.log.path.read_text(encoding="utf-8")
+
+
+def test_local_operator_reply_requires_explicit_llm_stop_marker():
+    assert _local_operator_reply('Reply only with: "ok"') is None
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [":model-usage", ":budget-window-status", ":models", ":help"],
+)
+def test_local_meta_commands_do_not_start_model_calls(
+    workspace: Path,
+    capsys,
+    cmd: str,
+):
+    agent = _build_agent(workspace)
+
+    assert handle_meta_command(cmd, agent, workspace) is True
+
+    capsys.readouterr()
+    assert len(agent.llm.calls) == 0
+    assert "model_call_start" not in agent.log.path.read_text(encoding="utf-8")
+
+
+def test_quit_meta_command_does_not_start_model_call(workspace: Path):
+    agent = _build_agent(workspace)
+
+    with pytest.raises(SystemExit):
+        handle_meta_command(":quit", agent, workspace)
+
+    assert len(agent.llm.calls) == 0
+    assert "model_call_start" not in agent.log.path.read_text(encoding="utf-8")
 
 
 class FakeWebSearchTool(Tool):
@@ -347,13 +411,13 @@ class TestHandleMetaCommand:
         self, workspace: Path, monkeypatch: pytest.MonkeyPatch
     ):
         # Regression: ':campaign-start --max-cost-units 0' contains budget
-        # wording, so the fuzzy intent classifier misroutes it to a budget
-        # digest. The fuzzy router is the trap...
+        # wording, but that flag belongs to the campaign command, not a budget
+        # status question.
         cmd = ":campaign-start --dry-run --max-cycles 3 --max-cost-units 0"
         trapped = route_operator_intent(cmd)
-        assert trapped is not None and trapped.kind == "budget_status"
+        assert trapped is None or trapped.kind != "budget_status"
 
-        # ...but explicit ':' meta-commands must win: handle_meta_command must
+        # Explicit ':' meta-commands must win: handle_meta_command must
         # dispatch to the campaign handler (which calls run_campaign), never to
         # the budget digest. This is why main() routes ':'-prefixed --ask input
         # through handle_meta_command BEFORE the conversational classifier.
