@@ -797,6 +797,89 @@ class TestHandleMetaCommand:
         assert out.err.strip() == "NO_PATCH"
         assert agent.llm.calls == []
 
+    def test_self_build_large_files_reports_python_files_only(
+        self,
+        workspace: Path,
+        capsys,
+    ):
+        agent = SimpleNamespace(llm=FakeLLM(responses=[]))
+        (workspace / "core").mkdir()
+        (workspace / "core" / "large.py").write_text("x = 1\n" * 3001, encoding="utf-8")
+        (workspace / "core" / "edge.py").write_text("x = 1\n" * 3000, encoding="utf-8")
+
+        assert handle_meta_command(":self-build-propose --large-files", agent, workspace) is True
+
+        out = capsys.readouterr()
+        assert out.err.splitlines()[0] == "LARGE_FILE_REPORT"
+        assert "threshold_lines=3000" in out.err
+        assert "core/large.py lines=3001" in out.err
+        assert "core/edge.py" not in out.err
+        assert agent.llm.calls == []
+
+    def test_self_build_large_files_returns_no_large_files_at_threshold(
+        self,
+        workspace: Path,
+        capsys,
+    ):
+        agent = SimpleNamespace(llm=FakeLLM(responses=[]))
+        (workspace / "core").mkdir()
+        (workspace / "core" / "edge.py").write_text("x = 1\n" * 3000, encoding="utf-8")
+
+        assert handle_meta_command(":self-build-propose --large-files", agent, workspace) is True
+
+        out = capsys.readouterr()
+        assert out.err.strip() == "NO_LARGE_FILES"
+        assert agent.llm.calls == []
+
+    def test_self_build_large_files_one_shot_skips_forbidden_roots(
+        self,
+        workspace: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
+    ):
+        (workspace / "core").mkdir()
+        (workspace / "core" / "large.py").write_text("x = 1\n" * 3001, encoding="utf-8")
+        for name in ("config", "data", "logs", ".venv", ".git"):
+            root = workspace / name
+            root.mkdir()
+            (root / "ignored.py").write_text("x = 1\n" * 4000, encoding="utf-8")
+
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("large-file report must not build agent or load dotenv")
+
+        original_open = Path.open
+
+        def guarded_open(path: Path, *args, **kwargs):
+            normalized = str(path).replace("\\", "/").casefold()
+            assert "/config/" not in normalized
+            assert "/data/" not in normalized
+            assert "/logs/" not in normalized
+            assert "/.venv/" not in normalized
+            assert "/.git/" not in normalized
+            return original_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", guarded_open)
+        monkeypatch.setattr(main_module, "build_agent", fail_if_called)
+        monkeypatch.setattr(main_module, "load_dotenv", fail_if_called)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "main.py",
+                "--workspace",
+                str(workspace),
+                "--ask",
+                ":self-build-propose --large-files",
+            ],
+        )
+
+        assert main_module.main() == 0
+
+        out = capsys.readouterr()
+        assert out.err.splitlines()[0] == "LARGE_FILE_REPORT"
+        assert "core/large.py lines=3001" in out.err
+        assert "ignored.py" not in out.err
+
     def test_self_build_propose_one_shot_short_circuits_before_agent_build(
         self,
         workspace: Path,

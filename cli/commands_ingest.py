@@ -293,8 +293,37 @@ def _handle_patch_proposal_plan(rest: str, agent: AgentLoop, workspace: Path) ->
     return True
 
 
+LARGE_FILE_LINE_THRESHOLD = 3000
+SAFE_PYTHON_SCAN_ROOTS = (
+    "api",
+    "bug_lab",
+    "cli",
+    "core",
+    "scripts",
+    "tests",
+    "tools",
+)
+UNSAFE_SCAN_DIRS = {
+    ".agents",
+    ".codex",
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "config",
+    "data",
+    "logs",
+}
+
+
 def _handle_self_build_propose(rest: str, agent: AgentLoop, workspace: Path) -> bool:
-    del rest, agent
+    del agent
+    tokens = _split_meta_args(rest)
+    if "--large-files" in tokens:
+        print(_format_large_file_report(_large_file_report(workspace)), file=sys.stderr)
+        return True
     payload = _self_build_propose_payload(workspace)
     patch = payload["diff"]
     if patch == "NO_PATCH":
@@ -311,6 +340,88 @@ def _handle_self_build_propose(rest: str, agent: AgentLoop, workspace: Path) -> 
     ]
     print("\n".join(lines), file=sys.stderr)
     return True
+
+
+def _large_file_report(
+    workspace: Path,
+    *,
+    threshold: int = LARGE_FILE_LINE_THRESHOLD,
+) -> list[dict[str, int | str]]:
+    items: list[dict[str, int | str]] = []
+    for path in _iter_safe_python_files(workspace):
+        line_count = _count_lines(path)
+        if line_count > threshold:
+            items.append(
+                {
+                    "path": path.relative_to(workspace).as_posix(),
+                    "lines": line_count,
+                }
+            )
+    return sorted(items, key=lambda item: (-int(item["lines"]), str(item["path"])))
+
+
+def _iter_safe_python_files(workspace: Path):
+    for path in sorted(workspace.glob("*.py")):
+        if _safe_python_file(path):
+            yield path
+    for name in SAFE_PYTHON_SCAN_ROOTS:
+        root = workspace / name
+        if not _safe_scan_dir(root):
+            continue
+        yield from _iter_python_files_under(root)
+
+
+def _iter_python_files_under(root: Path):
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        if not _safe_scan_dir(current):
+            continue
+        dirs = []
+        files = []
+        for child in current.iterdir():
+            if child.is_dir():
+                if _safe_scan_dir(child):
+                    dirs.append(child)
+                continue
+            if child.suffix == ".py" and _safe_python_file(child):
+                files.append(child)
+        for path in sorted(files):
+            yield path
+        stack.extend(sorted(dirs, reverse=True))
+
+
+def _safe_scan_dir(path: Path) -> bool:
+    return (
+        path.exists()
+        and path.is_dir()
+        and not path.is_symlink()
+        and path.name not in UNSAFE_SCAN_DIRS
+        and not path.name.startswith(".")
+    )
+
+
+def _safe_python_file(path: Path) -> bool:
+    if path.suffix != ".py" or path.is_symlink() or not path.is_file():
+        return False
+    parts = set(path.parts)
+    return not any(part in UNSAFE_SCAN_DIRS or part.startswith(".") for part in parts)
+
+
+def _count_lines(path: Path) -> int:
+    with path.open("rb") as fh:
+        return sum(1 for _ in fh)
+
+
+def _format_large_file_report(items: list[dict[str, int | str]]) -> str:
+    if not items:
+        return "NO_LARGE_FILES"
+    lines = [
+        "LARGE_FILE_REPORT",
+        f"threshold_lines={LARGE_FILE_LINE_THRESHOLD}",
+    ]
+    lines.extend(f"{item['path']} lines={item['lines']}" for item in items)
+    return "\n".join(lines)
 
 
 def _self_build_propose_payload(workspace: Path) -> dict[str, str]:
