@@ -757,3 +757,61 @@ Hard safety-гейты (до любой записи файла, первый с
   новый файл вычищается при rollback, нет push-метода.
 - targeted: 47 passed (safe_vcs + self_apply_lane).
 - full pytest: 3569 passed.
+
+----------------------------------------------------------------------
+
+TD-024 — Wire validated approval/proposal to trusted self-apply lane
+
+Статус: Done
+
+Проблема
+TD-023 дал core/safe_vcs.py и core/self_apply_lane.py, но полоса не была
+подключена к human-approval flow. Не хватало узкого моста: одобренный человеком
+валидированный low-risk proposal -> run_self_apply_lane. Это мост, НЕ новая
+широкая команда и НЕ daemon auto-write.
+
+Готово
+- core/self_apply_bridge.py (новый): чистая логика моста без CLI/IO.
+  * SELF_APPLY_OPERATION="self_apply_lane.run" — принимается только эта операция.
+  * build_self_apply_payload(): формирует well-formed payload; требует полный
+    content на каждый файл (diff-only отвергается) — единая форма для
+    producers (repair/supervisor/manual) и runtime.
+  * rehydrate_proposal(): payload -> SelfApplyProposal; InvalidProposalError при
+    нехватке полей или diff-only.
+  * run_approved_self_apply(): гейты (первый выигрывает, до любой записи):
+    1) item не approved -> approval_required;
+    2) чужая operation / битый payload -> needs_validated_proposal;
+    3) не low-risk (та же classify_patch_risk) -> risk_rejected;
+    4) иначе -> run_self_apply_lane РОВНО один раз, статус пробрасывается как
+       есть (budget_kill_switch/budget_wait/approval_wait/rejected/rolled_back/
+       committed_local/error).
+  * mark_executed ТОЛЬКО для terminal статусов committed_local/rolled_back;
+    transient (budget_kill_switch/budget_wait/approval_wait) оставляют item
+    approved -> ретрай возможен.
+  * approvals_pending НЕ считает текущий approved item (только другие pending).
+  * lane инъектируется -> полностью тестируемо без git/pytest/provider/network.
+- cli/commands_self_apply.py (новый): :self-apply-run <approval-inbox-id>.
+  * принимает РОВНО один id; free-text / лишние args / патч-текст -> usage-refuse;
+  * строит SafeVCS/RunTestsTool/BudgetKillSwitch/budget snapshot и зовёт мост;
+  * secret-free структурный лог self_apply_run (без содержимого файлов/diff).
+- main.py: импорт + ветка :self-apply-run + строки в :help. Отдельная узкая
+  команда — :approval-run НЕ расширяли.
+
+Область НЕ тронута
+- НЕ подключено к daemon/scheduler/agent_tick (только осознанный человеком trigger).
+- shell_exec остаётся read-only; мост ходит через SafeVCS (нет push/fetch/pull/
+  remote/merge). Нет provider/model/catalog записей, нет изменений budget-лимитов,
+  config/budget_limits.json не тронут. self_apply_lane/safe_vcs не менялись.
+
+Проверка
+- tests/test_self_apply_approval_bridge.py (новый): approval_required,
+  needs_validated_proposal (missing/wrong-op/invalid/diff-only), risk_rejected
+  (denylist, файл не записан), lane вызван ровно один раз, committed_local с
+  commit_hash + mark_executed, rolled_back + mark_executed, transient статусы
+  без mark_executed (retryable), approvals_pending исключает текущий item,
+  rehydrate roundtrip, нет network-методов у SafeVCS, мост не импортирует
+  shell_exec/subprocess.
+- tests/test_cli.py: :self-apply-run зарегистрирован, отвергает free-text и
+  пустой ввод.
+- targeted: 91 passed (bridge + CLI dispatcher).
+- full pytest: 3591 passed.
