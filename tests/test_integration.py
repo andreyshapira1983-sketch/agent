@@ -54,7 +54,9 @@ def _events(log_path: Path) -> list[dict]:
     return events
 
 
-def _build_agent(workspace: Path, llm: FakeLLM) -> tuple[AgentLoop, Path]:
+def _build_agent(
+    workspace: Path, llm: FakeLLM, *, cheap_path_enabled: bool = True
+) -> tuple[AgentLoop, Path]:
     registry = ToolRegistry()
     registry.register(FileReadTool(workspace_root=workspace))
 
@@ -72,6 +74,7 @@ def _build_agent(workspace: Path, llm: FakeLLM) -> tuple[AgentLoop, Path]:
         llm=llm,
         logger=logger,
         planner=planner,
+        cheap_path_enabled=cheap_path_enabled,
     )
     return agent, workspace / "logs" / f"{trace_id}.jsonl"
 
@@ -153,7 +156,7 @@ def test_full_cycle_no_tools_general_knowledge(workspace: Path) -> None:
         "Confidence: high\nUnverified: nothing\n"
     )
     llm = FakeLLM(responses=[empty_plan, gk_answer])
-    agent, log_path = _build_agent(workspace, llm)
+    agent, log_path = _build_agent(workspace, llm, cheap_path_enabled=False)
 
     answer = agent.run(user_question="What is 2+2?", file_hint=None)
 
@@ -169,3 +172,60 @@ def test_full_cycle_no_tools_general_knowledge(workspace: Path) -> None:
     # No tool execution events should appear for an empty plan
     assert "tool_call" not in {e["event"] for e in events}
     assert by_event["respond"]["payload"]["sources"] == ["general-knowledge"]
+
+
+def test_cheap_path_skips_planner_llm_call(workspace: Path) -> None:
+    """A trivial no-tool input must skip the planner LLM call entirely.
+
+    Only the synthesizer LLM call happens (session_calls halved), a
+    ``planner_cheap_path`` event is logged, and the planner event still
+    reports an empty plan so downstream observability is preserved.
+    """
+    gk_answer = (
+        "Conclusion: The flag disables effects. [general-knowledge]\n"
+        "Facts:\n- A false flag turns a feature off. [general-knowledge]\n"
+        "Sources:\n1. general-knowledge - general-knowledge\n"
+        "Confidence: high\nUnverified: nothing\n"
+    )
+    # Only ONE response queued: if the planner were called this would be
+    # consumed by the planner and synthesis would fall back to "{}".
+    llm = FakeLLM(responses=[gk_answer])
+    agent, log_path = _build_agent(workspace, llm)
+
+    answer = agent.run(user_question="effects=disabled", file_hint=None)
+
+    assert isinstance(answer, str) and answer.strip()
+    # Exactly one LLM call — the synthesizer. The planner call was skipped.
+    assert len(llm.calls) == 1, "planner LLM call must be skipped on the cheap path"
+    only_call = llm.calls[0]
+    assert "PLANNER_MODE" not in only_call["system"]
+    assert "planner of an autonomous" not in only_call["system"]
+
+    events = _events(log_path)
+    event_names = {e["event"] for e in events}
+    assert "planner_cheap_path" in event_names
+    by_event = {e["event"]: e for e in events}
+    assert by_event["planner"]["payload"]["tools_chosen"] == []
+    assert "planner_skipped_cheap_path" in by_event["planner"]["payload"]["warnings"]
+    assert by_event["plan"]["extra"]["steps"] == 0
+    assert "tool_call" not in event_names
+
+
+def test_cheap_path_disabled_still_calls_planner(workspace: Path) -> None:
+    """With the gate disabled the planner runs even for a trivial input."""
+    empty_plan = json.dumps({"reasoning": "no tools needed", "steps": []})
+    gk_answer = (
+        "Conclusion: The flag disables effects. [general-knowledge]\n"
+        "Facts:\n- A false flag turns a feature off. [general-knowledge]\n"
+        "Sources:\n1. general-knowledge - general-knowledge\n"
+        "Confidence: high\nUnverified: nothing\n"
+    )
+    llm = FakeLLM(responses=[empty_plan, gk_answer])
+    agent, log_path = _build_agent(workspace, llm, cheap_path_enabled=False)
+
+    agent.run(user_question="effects=disabled", file_hint=None)
+
+    # Planner + synthesizer both called.
+    assert len(llm.calls) == 2
+    events = _events(log_path)
+    assert "planner_cheap_path" not in {e["event"] for e in events}

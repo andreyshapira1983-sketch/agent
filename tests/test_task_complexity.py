@@ -11,6 +11,7 @@ from core.task_complexity import (
     _ALWAYS_LIGHT_ROLES,
     _SHORT_TEXT_THRESHOLD,
     assess_complexity,
+    can_skip_planner,
     needs_live_grounding,
     tier_label,
 )
@@ -508,4 +509,98 @@ def test_no_live_grounding_planner_prompt_clean():
     planner = LLMPlanner(llm=CapturingLLM(), registry=ToolRegistry())
     planner.plan(question="напиши функцию сортировки", file_hint=None)
     assert "LIVE_GROUNDING" not in captured[0]["user"]
+
+
+# ── can_skip_planner (cheap-path gate) ────────────────────────────────────────
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "effects=disabled",
+        "dry_run=true",
+        "auto_apply=false",
+        "auto_model_update=false",
+        "budget_cap=250/day",
+        "model_decision_log=true",
+    ],
+)
+def test_can_skip_planner_config_flag_echoes(text):
+    """Config-flag echoes never need a tool → planner can be skipped."""
+    assert can_skip_planner(text) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["привет", "hello", "hi", "hey", "спасибо", "добрый день", "good morning", "thank you"],
+)
+def test_can_skip_planner_greetings(text):
+    """Pure greeting / thanks messages are trivial → skippable."""
+    assert can_skip_planner(text) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["что такое REST", "what is JSON", "статус", "ping", "объясни коротко", "Mixed?"],
+)
+def test_can_skip_planner_ambiguous_questions_run_planner(text):
+    """Ambiguous 'what is X' / status phrasing may need a tool → NOT skipped."""
+    assert can_skip_planner(text) is False
+
+
+def test_can_skip_planner_greeting_word_not_matched_as_substring():
+    # "hi" must not match inside "this"/"which"; the sentence has real content.
+    assert can_skip_planner("this is a design overview") is False
+
+
+def test_can_skip_planner_greeting_with_tool_verb_runs_planner():
+    assert can_skip_planner("напиши привет") is False
+
+
+def test_can_skip_planner_false_with_file_hint():
+    # A file hint always means a file_read step is needed.
+    assert can_skip_planner("effects=disabled", file_hint="config.txt") is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "прочитай файл config.txt",
+        "read the config file",
+        "search the web for news",
+        "run the test suite",
+        "напиши функцию сортировки",
+        "создай новый модуль",
+    ],
+)
+def test_can_skip_planner_false_when_tool_signal(text):
+    """Any tool-signal keyword forces the planner to run."""
+    assert can_skip_planner(text) is False
+
+
+def test_can_skip_planner_false_for_deep_task():
+    assert can_skip_planner("сделай полный архитектурный аудит") is False
+
+
+def test_can_skip_planner_false_for_live_grounding():
+    # Needs fresh web data → web_search step required.
+    assert can_skip_planner("what is the latest model") is False
+
+
+def test_can_skip_planner_false_for_generic_untriggered_text():
+    # No trivial signal and no flag pattern → default to running the planner.
+    assert can_skip_planner("Mixed?") is False
+    assert can_skip_planner("объясни подробно про распределённые системы") is False
+
+
+def test_can_skip_planner_false_for_overlong_text():
+    long_flagless = "объясни " + ("слово " * 60)  # > 200 chars, no signal
+    assert len(long_flagless) > 200
+    assert can_skip_planner(long_flagless) is False
+
+
+def test_can_skip_planner_handles_non_string_and_empty():
+    assert can_skip_planner(None) is False  # type: ignore[arg-type]
+    assert can_skip_planner("") is False
+    assert can_skip_planner("   ") is False
+
 

@@ -119,6 +119,7 @@ from core.smart_memory import (
 from core.source_ranker import SourceRankingReport, rank_chain
 from core.source_registry import SourceRegistry
 from core.source_registry_store import SourceRegistryStore
+from core.task_complexity import can_skip_planner
 from tools.base import ToolRegistry
 from tools.file_read import MAX_BYTES as FILE_READ_MAX_BYTES
 
@@ -476,6 +477,7 @@ class AgentLoop:
         clarification_enabled: bool = True,
         clarification_gate_enabled: bool = True,
         odd_enabled: bool = True,
+        cheap_path_enabled: bool = True,
         user_profile_store: UserProfileStore | None = None,
         assumption_store: AssumptionStore | None = None,  # Layer 5
     ):
@@ -619,6 +621,10 @@ class AgentLoop:
         # out-of-domain request is refused or escalated BEFORE any planning.
         # `odd_enabled=False` skips the check for integration tests.
         self.odd_enabled = bool(odd_enabled)
+        # Cheap-path planner gate (TD — trivial no-tool input skips the planner
+        # LLM call and synthesises directly). `False` forces the planner to run
+        # for every input, preserving the pre-gate behaviour for tests/rollback.
+        self.cheap_path_enabled = bool(cheap_path_enabled)
         from core.verifier import VerificationReport as _VR
 
         self.last_verification: _VR | None = None
@@ -1066,44 +1072,79 @@ class AgentLoop:
                     warnings=forced_warnings,
                 )
             else:
-                # ── Planner cache ─────────────────────────────────────────
-                # Cache key: (question hash, episodic store mtime, file_hint).
-                # Mtime invalidates the cache whenever a new episode is written
-                # (the store changes → the planner might choose different tools).
-                # Only applied on the first attempt with no failure context.
-                _pc_key = (
-                    hash(user_question.lower().strip()),
-                    self._episodic_store_mtime(),
-                    file_hint or "",
-                )
+                # ── Cheap-path gate ───────────────────────────────────────
+                # Trivial, no-tool input (config-flag echoes, greetings, one
+                # line "what is X") never needs a tool: the planner would only
+                # spend a full LLM call to return an empty plan. Skip that call
+                # and let the normal empty-plan flow synthesise the answer.
+                # Gated to the first attempt with no failure/replan context so
+                # replans always get the real planner.
                 if (
-                    attempt == 1
+                    self.cheap_path_enabled
+                    and attempt == 1
                     and not failure_context.strip()
-                    and _pc_key in self._planner_cache
+                    and can_skip_planner(user_question, file_hint=file_hint)
                 ):
-                    planner_out = self._planner_cache[_pc_key]
+                    planner_out = PlannerOutput(
+                        reasoning=(
+                            "Cheap path: trivial no-tool input — answering from "
+                            "general knowledge and memory without a planner call."
+                        ),
+                        sources=[],
+                        raw_response="",
+                        warnings=["planner_skipped_cheap_path"],
+                        diagnostics={
+                            "stage": "skipped",
+                            "reason": "trivial no-tool input",
+                            "fallback": "cheap_path",
+                        },
+                    )
                     self.log.log(
-                        "planner_cache_hit",
+                        "planner_cheap_path",
                         {
-                            "key_hash": _pc_key[0],
-                            "tools_cached": [s["tool"] for s in planner_out.sources],
+                            "question_chars": len(user_question),
+                            "reason": "trivial no-tool input",
                         },
                     )
                 else:
-                    planner_out = self.planner.plan(
-                        question=user_question,
-                        file_hint=file_hint,
-                        history=planner_history,
-                        failure_context=failure_context,
-                        forbidden_actions=forbidden_actions,
-                        llm=_task_planner_llm,
+                    # ── Planner cache ─────────────────────────────────────
+                    # Cache key: (question hash, episodic store mtime, file_hint).
+                    # Mtime invalidates the cache whenever a new episode is written
+                    # (the store changes → the planner might choose different tools).
+                    # Only applied on the first attempt with no failure context.
+                    _pc_key = (
+                        hash(user_question.lower().strip()),
+                        self._episodic_store_mtime(),
+                        file_hint or "",
                     )
                     if (
                         attempt == 1
                         and not failure_context.strip()
-                        and "plan_parse_failed" not in planner_out.warnings
+                        and _pc_key in self._planner_cache
                     ):
-                        self._planner_cache[_pc_key] = planner_out
+                        planner_out = self._planner_cache[_pc_key]
+                        self.log.log(
+                            "planner_cache_hit",
+                            {
+                                "key_hash": _pc_key[0],
+                                "tools_cached": [s["tool"] for s in planner_out.sources],
+                            },
+                        )
+                    else:
+                        planner_out = self.planner.plan(
+                            question=user_question,
+                            file_hint=file_hint,
+                            history=planner_history,
+                            failure_context=failure_context,
+                            forbidden_actions=forbidden_actions,
+                            llm=_task_planner_llm,
+                        )
+                        if (
+                            attempt == 1
+                            and not failure_context.strip()
+                            and "plan_parse_failed" not in planner_out.warnings
+                        ):
+                            self._planner_cache[_pc_key] = planner_out
                 planner_out = self._force_file_hint_read_when_explicit(
                     planner_out,
                     question=user_question,

@@ -210,3 +210,45 @@ Live Model Discovery
 Provider Catalog
 Self Improvement
 Memory Optimization
+
+
+TD-016 — Cheap Path for Trivial Input
+
+Статус: Done
+
+Проблема
+Тривиальные реплики (config-flag echoes вида effects=disabled, приветствия) всё
+равно проходят полный конвейер planner (~7k input-токенов) + synthesizer, хотя
+planner для них всегда возвращает пустой план (tools_chosen=[]). Шесть таких
+реплик подряд выжигали весь часовой llm_calls-бюджет (12/12), и реальные тестовые
+сценарии дальше падали с budget exceeded, ничего не проверив.
+
+Что должно быть
+Тривиальный no-tool ввод должен пропускать planner-вызов и синтезировать ответ
+напрямую (один LLM-вызов вместо двух), не ломая tool-задачи.
+
+Готово
+- core/task_complexity.can_skip_planner(text, *, file_hint) — чистая эвристика без
+  I/O и без LLM. Пропускает planner ТОЛЬКО при позитивном тривиальном сигнале
+  (config-flag key=value ИЛИ чистое приветствие/благодарность) и при отсутствии
+  любых дисквалификаторов: file_hint, tool-signal keyword, live-grounding, DEEP.
+- Позитивный сигнал намеренно узкий: неоднозначные «what is X» / «define» / «list»
+  НЕ пропускаются (могут требовать web_search/file_read), чтобы промах стоил лишь
+  одного planner-вызова, а не потерянного tool-шага.
+- Приветствия матчатся по словам (токенизация), а не по подстроке, чтобы «hi» не
+  срабатывал внутри «this»/«which».
+- core/loop.py: cheap-path-ветка в run() (attempt==1, без failure/replan context)
+  строит пустой PlannerOutput с warning planner_skipped_cheap_path и логирует
+  событие planner_cheap_path; далее идёт штатный empty-plan flow (synthesizer,
+  verification, respond). Флаг конструктора cheap_path_enabled=True (можно
+  выключить для отката/тестов).
+
+Проверка
+- tests/test_task_complexity.py: config-flag echoes и приветствия → skip;
+  tool-signal / DEEP / live-grounding / file_hint / неоднозначные вопросы → planner
+  выполняется; «hi» не матчится как подстрока; non-string/пустой ввод безопасны.
+- tests/test_integration.py::test_cheap_path_skips_planner_llm_call — тривиальный
+  ввод даёт ровно один LLM-вызов (synthesizer), событие planner_cheap_path,
+  planner-событие с пустым планом; test_cheap_path_disabled_still_calls_planner —
+  при выключенном флаге planner вызывается (2 вызова).
+- full pytest: 3400 passed.
