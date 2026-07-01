@@ -1212,3 +1212,46 @@ TD-032 — Human Value Review / Proposal Quality Gate (capture-only)
 - Targeted: test_subagent_registry_lane, test_self_apply_approval_bridge,
   test_approval, test_agent_anatomy_check — зелёные.
 - Full pytest: 3699 passed (+15).
+==============================================================================
+TD-033 — Feed Human Value Reviews into Subagent Registry Scoring
+Статус: Done
+
+Проблема
+- TD-031 писал в леджер только technical-success сигналы (approved/committed_local/
+  rolled_back) с малым весом 0.25. TD-032 фиксировал человеческие value-review
+  вердикты в data/value_reviews.jsonl, но они никак не влияли на scoring ролей.
+  usefulness_score всё ещё почти не отражал подтверждённую человеком ценность.
+
+Готово
+- core/subagent_registry.py: RoleRecord получил confirmed_value и value_rejected
+  (int, default 0; tolerant to_dict/from_dict). Добавлен VERDICT_ROLE map
+  (accepted/rejected_low_value -> builder, rejected_wrong_target -> manager,
+  rejected_misleading_summary -> reporter, rejected_risky -> critic).
+- Новый reconcile_value_reviews(effective) — это projection, а не инкремент:
+  обнуляет confirmed_value/value_rejected у всех ролей и пересобирает их из
+  снимка {item_id: verdict}. Идемпотентно; смена вердикта и переатрибуция роли
+  пересобираются без double-count. Эти два счётчика принадлежат ТОЛЬКО этому
+  методу.
+- Scoring: confirmed_value идёт полным весом в usefulness и trust; value_rejected
+  полным весом в минус. technical_success остаётся 0.25. Статус роли никогда не
+  мутируется автоматически (только recommendation, advisory).
+- cli/commands_value_review.py: после успешного append вердикта — guarded
+  best-effort reconcile (try/except pass). Падение реестра не ломает запись
+  value-review.
+
+Область НЕ тронута
+- agent_tick.py, main.py command list, approval/self-apply flow, model routing,
+  budget/config без изменений; config/budget_limits.json не тронут. Нет
+  auto-approve/apply/merge/retire. Нового CLI-команды нет. Нового core-модуля
+  нет (anatomy-check остаётся зелёным).
+
+Проверка
+- tests/test_subagent_registry_value.py (16): атрибуция каждого вердикта нужной
+  роли; accepted > committed_local alone; идемпотентность; смена вердикта
+  пересобирает без double-count; переатрибуция builder->manager; старый JSON без
+  новых полей грузится с 0; много rejected меняет recommendation но не status;
+  unknown verdict игнорируется; персист/reload; пустой снимок обнуляет счётчики.
+- tests/test_value_review.py (+2): CLI reconcile обновляет реестр; падение
+  reconcile не ломает персист вердикта.
+- Targeted: test_subagent_registry_lane, test_subagent_registry — зелёные.
+- Full pytest: 3717 passed (+18).
