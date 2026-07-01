@@ -107,9 +107,39 @@ def _handle_refresh_models(rest: str, agent: AgentLoop) -> bool:
     try:
         catalog = refresh_catalog(providers=providers)
     except Exception as exc:  # noqa: BLE001
+        # Structured audit trail for the failed write path (no secrets: only
+        # provider names, the exception type, and a truncated message).
+        agent.log.log(
+            "refresh_models_failed",
+            {
+                "providers": providers,
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:200],
+            },
+        )
         print(f"(refresh-models ошибка: {exc})", file=sys.stderr)
         print("  Проверьте ANTHROPIC_API_KEY / OPENAI_API_KEY в .env", file=sys.stderr)
         return True
+
+    # Structured audit trail for the successful write path. Payload is safe:
+    # provider names, per-provider model counts, best model per tier and the
+    # catalog timestamp — never any credential or env value.
+    catalog_providers = catalog.get("providers", {})
+    agent.log.log(
+        "refresh_models",
+        {
+            "providers": providers,
+            "counts": {
+                provider: len(pdata.get("models", []))
+                for provider, pdata in catalog_providers.items()
+            },
+            "tier_best": {
+                provider: dict(pdata.get("tier_best", {}))
+                for provider, pdata in catalog_providers.items()
+            },
+            "updated_at": catalog.get("updated_at"),
+        },
+    )
 
     print("\n── Результат ────────────────────────────────────────────────────────", file=sys.stderr)
     for provider, pdata in catalog.get("providers", {}).items():
