@@ -50,9 +50,33 @@ TD-003 — Planner JSON Parsing
 улучшить диагностику ошибок.
 TD-004 — Budget Enforcement
 
+Статус: Done
+
 Сейчас агент может тратить огромный бюджет ещё до того, как поймёт, что задача простая.
 
 Нужно проверять стоимость до первого LLM-вызова.
+
+Готово
+- pre-flight оценка стоимости в ModelUsageLedger.assert_can_start: по размеру
+  промпта (system+user) плюс output-cap оценивается число токенов и cost units
+  предстоящего вызова.
+- блокировка, если totals + оценка превышают session-лимит
+  (AGENT_MODEL_MAX_TOKENS_PER_SESSION / AGENT_MODEL_MAX_COST_UNITS_PER_SESSION).
+- BudgetLedger.check() — read-only проверка persistent-окон model_tokens /
+  model_cost_units без записи; сначала выполняются неблокирующие проверки, и лишь
+  затем резервируется llm_calls, чтобы заблокированная оценка не создавала
+  фантомный вызов.
+- параметры оценки прокидываются из UsageTrackedLLM.complete (system/user/
+  max_tokens/cost_tier).
+- нулевые лимиты по-прежнему означают «не enforced» — поведение по умолчанию не
+  изменилось.
+
+Проверка
+- tests/test_model_usage.py: pre-flight блокирует один крупный вызов по session
+  cost/token cap и по persistent-окну, не записывая фантомный llm_call.
+- tests/test_budget_ledger.py: check() ничего не пишет и учитывает уже
+  израсходованный бюджет.
+- full pytest: 3348 passed.
 
 P1 — Архитектура
 TD-005 — Project Indexer

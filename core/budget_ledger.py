@@ -217,6 +217,46 @@ class BudgetLedger:
         _log(self.logger, "budget_window_reserved", decision.to_dict())
         return decision
 
+    def check(
+        self,
+        counter: BudgetLedgerCounter,
+        *,
+        amount: int = 1,
+        reason: str = "",
+        now: datetime | None = None,
+    ) -> BudgetLedgerDecision:
+        """Evaluate whether *amount* would fit inside every window WITHOUT
+        recording anything. Used for pre-flight cost estimates where the actual
+        usage is recorded separately once the call completes."""
+        if amount < 1:
+            raise ValueError("budget amount must be >= 1")
+        now = now or _utc_now()
+        records = self.load_records()
+        for window in self.windows:
+            limit = window.limit_for(counter)
+            if limit <= 0:
+                continue
+            used = _used_in_window(records, counter=counter, window=window, now=now)
+            if used + amount > limit:
+                return BudgetLedgerDecision(
+                    counter=counter,
+                    allowed=False,
+                    amount=amount,
+                    reason=(
+                        reason
+                        or f"persistent {window.name} budget would exhaust for {counter}"
+                    ),
+                    window=window.name,
+                    used=used,
+                    limit=limit,
+                )
+        return BudgetLedgerDecision(
+            counter=counter,
+            allowed=True,
+            amount=amount,
+            reason=reason,
+        )
+
     def record(
         self,
         counter: BudgetLedgerCounter,

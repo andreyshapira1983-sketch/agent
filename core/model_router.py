@@ -316,6 +316,10 @@ class UsageTrackedLLM:
             role=self.role,
             provider=provider,
             model=model,
+            system=system,
+            user=user,
+            max_output_tokens=max_tokens,
+            cost_tier=self.cost_tier,
         )
         self.ledger.log_start(
             role=self.role,
