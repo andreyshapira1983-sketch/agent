@@ -396,3 +396,47 @@ claim'ов из тех же файлов и пытается записать к
 - targeted: test_knowledge_pipeline / test_persistent_integration / test_integration
   / test_ingestion_helpers / test_work_session / test_smart_memory — 102 passed.
 - full pytest: 3418 passed.
+
+
+TD-018 — Work-Session Convergence Stop
+
+Статус: Done
+
+Проблема
+run_work_session крутил ровно max_cycles циклов, даже когда цель уже не двигалась:
+каждый цикл заново запускал ту же goal с тем же результатом (agent переспрашивает
+одно и то же, прогресса нет), выжигая весь бюджет впустую. Единственные early-stop
+были time_budget, circuit_open, interrupted — сигнала «сошлось / нечего делать» не
+было.
+
+Что должно быть
+Обнаружить установившееся состояние (несколько подряд идентичных по результату
+циклов) и остановиться раньше, не ломая поведение коротких сессий и существующих
+тестов, без большого рефактора.
+
+Готово
+- core/work_session.py WorkSessionConfig: добавлены stop_on_convergence: bool = True
+  и convergence_window: int = 3 (валидация >= 2). Дефолт включён — CLI (:work-session)
+  использует kwargs, поэтому фикс активен без изменений вызова.
+- Новый WorkSessionStopReason "converged".
+- _cycle_signature(run_report): контент-подпись прохода = (status, tuple((task.kind,
+  status, summary))). Намеренно без времени/счётчиков — реальный прогресс меняет
+  summary и рвёт серию; спиннинг даёт идентичную подпись. Best-effort: любая
+  неожиданная форма схлопывается в стабильный tuple, детекция не падает.
+- В цикле после cycle_reports.append(cr): считается серия одинаковых подписей;
+  при repeat_count >= convergence_window И cycle < max_cycles — stop_reason=
+  "converged", status="completed", лог work_session_converged, break.
+- Guard cycle < max_cycles: серия, достигнутая ровно на последнем цикле, НЕ
+  переопределяет естественное завершение (stop_reason=""), поэтому прогоны с
+  max_cycles <= convergence_window (в т.ч. все текущие тесты) не затронуты.
+
+Проверка
+- tests/test_work_session_convergence.py:
+  * _cycle_signature: идентичные отчёты равны; смена summary/status рвёт подпись;
+    битый отчёт не бросает.
+  * converged на 3-м цикле из 8 (stop_reason="converged", status="completed");
+  * stop_on_convergence=False проходит все 5 циклов (stop_reason="");
+  * max_cycles == convergence_window не режется раньше времени;
+  * событие work_session_converged пишется в лог.
+- tests/test_work_session.py: 31 существующий тест без изменений — passed.
+- full pytest: 3428 passed.
