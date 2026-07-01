@@ -43,6 +43,14 @@ _REFLECTION_LOG_WINDOWS: tuple[int, ...] = (20, 40, 30, 60)
 # requires_different_action=True).
 _DRY_RUN_BLOCKED_TOOLS: frozenset[str] = frozenset({"file_write", "shell_exec"})
 
+# Tools that must NOT run during a goal task when the operator disabled tests
+# (include_tests=False, e.g. :work-session or :auto-run --no-tests). Gating the
+# dedicated "tests" task is not enough: the planner can still select run_tests
+# while executing the goal via the parent AgentLoop. Blocking it run-scoped
+# makes the planner replan onto a path that honors --no-tests. This is not an
+# effect-only block; it enforces operator intent, so it is logged separately.
+_NO_TESTS_BLOCKED_TOOLS: frozenset[str] = frozenset({"run_tests"})
+
 
 def _rotation_index(modulus: int, *, bucket_seconds: int = 600) -> int:
     return int(time.time() // bucket_seconds) % max(modulus, 1)
@@ -695,18 +703,29 @@ class AutonomousRuntime:
     def _task_goal(self, task: AutonomousTask, config: AutonomousRuntimeConfig) -> AutonomousTaskReport:
         """Run task.description as a user question through the parent AgentLoop.
 
-        In dry-run mode, effect-producing tools (file_write, shell_exec) are
-        blocked for the duration of the run so the agent reasons read-only and
-        cannot leave junk files behind. The block is run-scoped and always
-        restored, even on error.
+        Two run-scoped tool blocks may apply while the goal executes:
+        - In dry-run mode, effect-producing tools (file_write, shell_exec) are
+          blocked so the agent reasons read-only and cannot leave junk files.
+        - When tests are disabled (include_tests=False), run_tests is blocked so
+          the planner cannot run tests during goal execution against operator
+          intent (e.g. :work-session or :auto-run --no-tests).
+
+        Both blocks are run-scoped and the previous set is always restored, even
+        on error.
         """
         policy = getattr(self.agent, "policy", None)
-        block = config.dry_run and policy is not None and hasattr(policy, "blocked_tools")
+        has_block_support = policy is not None and hasattr(policy, "blocked_tools")
+        effect_block = _DRY_RUN_BLOCKED_TOOLS if config.dry_run else frozenset()
+        tests_block = _NO_TESTS_BLOCKED_TOOLS if not config.include_tests else frozenset()
+        to_block = effect_block | tests_block
+        block = has_block_support and bool(to_block)
         previous_blocked = getattr(policy, "blocked_tools", None) if block else None
         if block:
-            policy.blocked_tools = policy.blocked_tools | _DRY_RUN_BLOCKED_TOOLS
-            self._log("autonomous_goal_effects_blocked", {
-                "blocked_tools": sorted(_DRY_RUN_BLOCKED_TOOLS),
+            policy.blocked_tools = policy.blocked_tools | to_block
+            self._log("autonomous_goal_tools_blocked", {
+                "blocked_tools": sorted(to_block),
+                "dry_run": bool(config.dry_run),
+                "no_tests": not config.include_tests,
             })
         try:
             answer = self.agent.run(user_question=task.description)
