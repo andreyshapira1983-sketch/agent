@@ -574,6 +574,7 @@ evidence.
 - `core/termination_guard` — wired-live
 - `core/truth_hype_filter` — wired-live (via knowledge_pipeline)
 - `core/user_profile` — wired-live
+- `core/value_review` — manual-only (`:value-review`, TD-032)
 - `core/verifier` — wired-live
 - `core/work_session` — manual-only (`:work-session`)
 

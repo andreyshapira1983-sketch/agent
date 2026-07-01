@@ -1165,3 +1165,50 @@ TD-031 — Lane Outcomes to Subagent Ledger
 - Тесты: committed_local инкрементит счётчик, но usefulness Builder остаётся
   низким без confirmed value; producer-stage veto перевешивает technical
   committed_local. Full pytest: 3684 passed.
+==============================================================================
+TD-032 — Human Value Review / Proposal Quality Gate (capture-only)
+Статус: Done
+
+Проблема
+- Технические lane-исходы (approved/committed_local/rolled_back) не отражают
+  ценность изменения. Живой прогон: proposal для core/redaction.py дошёл до
+  committed_local и прошёл тесты, но менял лишь регистр в комментарии под
+  вывеской "robustness improvement" — человек отклонил как low value. Нужен
+  отдельный человеческий сигнал ценности, не смешанный с техническими исходами.
+
+Готово
+- core/value_review.py — новый append-only ledger data/value_reviews.jsonl:
+  ValueVerdict (accepted / rejected_low_value / rejected_misleading_summary /
+  rejected_risky / rejected_wrong_target); frozen ValueReview (item_id, verdict,
+  reviewer="human", note, commit_hash?, created_at); ValueReviewLog с tolerant-
+  load (missing/empty/corrupt -> []), append, list, effective_by_item_id
+  (последний валидный вердикт на item_id побеждает), валидация вердикта, redact+
+  truncate note перед записью (MAX_NOTE_CHARS=500).
+- cli/commands_value_review.py — :value-review <item_id> <verdict> [note] и
+  read-only :value-review-list. Eligibility строго: status==executed,
+  operation==self_apply_lane.run, payload.origin==subagent_self_build_producer;
+  неизвестный id / non-executed / чужой operation / чужой origin / невалидный
+  verdict -> понятная ошибка и НИЧЕГО не пишется.
+- main.py — диспатч двух команд, строки в :help и в общем списке команд.
+- docs/AGENT_ANATOMY.md — core/value_review проиндексирован (manual-only, TD-032);
+  anatomy-check снова in sync (100/100).
+
+Область НЕ тронута
+- Нет изменений scoring: core/subagent_registry.py не тронут; RoleRecord
+  confirmed_value/value_rejected НЕ вводятся (это будущий TD). committed_local
+  по-прежнему не считается реальной usefulness.
+- ApprovalInboxItem не мутируется (frozen). Нет запуска producer/lane/tests/LLM/
+  network/git; пишется только data/value_reviews.jsonl. Нет auto-approve/apply/
+  merge/retire, model routing, budget/config изменений; config/budget_limits.json
+  не тронут. Нет изменений agent_tick --status.
+
+Проверка
+- tests/test_value_review.py (15): все 5 вердиктов персистятся/релоадятся;
+  последний вердикт побеждает; невалидный verdict ничего не пишет; missing/
+  corrupt ledger -> []; note redacted+truncated; from_dict отклоняет мусор; CLI
+  пишет для eligible item; unknown/non-executed/wrong-operation/wrong-origin
+  ничего не пишут; status inbox-item не меняется; value-review-list read-only;
+  записан только value_reviews.jsonl, budget_limits.json не создан.
+- Targeted: test_subagent_registry_lane, test_self_apply_approval_bridge,
+  test_approval, test_agent_anatomy_check — зелёные.
+- Full pytest: 3699 passed (+15).
