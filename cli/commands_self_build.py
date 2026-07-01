@@ -7,8 +7,9 @@ approval inbox as an ``operation="self_apply_lane.run"`` item.
 
 The Manager picks its target + diagnosis from a *grounded* backlog candidate
 (TECH_DEBT.md / docs/AGENT_ANATOMY.md) by default — it never invents a diagnosis
-via the LLM. When the grounded backlog is empty the command returns ``no_patch``
-(surfaced as ``no_grounded_backlog``) instead of falling back to the LLM.
+via the LLM. When the grounded path yields no publishable target (empty backlog,
+or a candidate that is off-allowlist / critical) the command returns ``no_patch``
+with the precise grounded reason instead of falling back to the LLM.
 
 It is deliberately narrow:
 
@@ -64,15 +65,21 @@ def _handle_self_build_produce(rest: str, agent: "AgentLoop", workspace: Path) -
     result = report.to_dict()
 
     # Surface the grounded Manager decision (TD-036) so the operator can see
-    # whether a verifiable backlog candidate drove the run, and why an empty
-    # backlog produced no patch.
+    # whether a verifiable backlog candidate drove the run, and — when it did not
+    # produce a patch — the precise grounded reason (empty backlog, off-allowlist
+    # target, or critical target) rather than a vague message.
     manager = next(
         (r for r in (result.get("roles") or []) if r.get("role") == "manager"),
         None,
     )
-    grounded = bool((manager or {}).get("data", {}).get("grounded"))
-    evidence_ref = (manager or {}).get("data", {}).get("evidence_ref") or ""
-    no_grounded_backlog = (
+    manager_data = (manager or {}).get("data", {})
+    grounded = bool(manager_data.get("grounded"))
+    evidence_ref = manager_data.get("evidence_ref") or ""
+    manager_detail = (manager or {}).get("detail") or ""
+    # True when the grounded path ran but yielded no publishable target. This is
+    # NOT necessarily an empty backlog — a candidate may have been found and then
+    # rejected as off-allowlist/critical; manager_detail carries the exact reason.
+    no_grounded_target = (
         result.get("status") == "no_patch"
         and manager is not None
         and manager.get("decision") == "no_target"
@@ -90,7 +97,7 @@ def _handle_self_build_produce(rest: str, agent: "AgentLoop", workspace: Path) -
             "veto_reasons": result.get("veto_reasons"),
             "grounded": grounded,
             "evidence_ref": evidence_ref,
-            "no_grounded_backlog": no_grounded_backlog,
+            "no_grounded_target": no_grounded_target,
         },
     )
 
@@ -103,8 +110,9 @@ def _handle_self_build_produce(rest: str, agent: "AgentLoop", workspace: Path) -
         lines.append("manager: grounded backlog candidate")
         if evidence_ref:
             lines.append(f"evidence_ref: {evidence_ref}")
-    elif no_grounded_backlog:
-        lines.append("manager: no_grounded_backlog (no verifiable candidate)")
+    elif no_grounded_target:
+        detail = manager_detail or "no verifiable grounded candidate"
+        lines.append(f"manager: no grounded target ({detail})")
     if result.get("target_path"):
         lines.append(f"target: {result.get('target_path')}")
     if result.get("approval_id"):
