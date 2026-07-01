@@ -186,6 +186,9 @@ def test_local_operator_reply_requires_explicit_llm_stop_marker():
         ":schedule-list active",
         ":source-registry",
         ":source-registry --claims",
+        # TD-011 — local, no-network model discovery audit.
+        ":model-discovery-audit",
+        ":model-discovery-audit --json",
     ],
 )
 def test_local_meta_commands_do_not_start_model_calls(
@@ -209,6 +212,7 @@ def test_local_meta_commands_do_not_start_model_calls(
         ":approval-list",
         ":schedule-list",
         ":source-registry",
+        ":model-discovery-audit",
     ],
 )
 def test_local_meta_commands_never_invoke_planner_or_synthesizer(
@@ -216,8 +220,8 @@ def test_local_meta_commands_never_invoke_planner_or_synthesizer(
     capsys,
     cmd: str,
 ):
-    """TD-002: the four read-only status commands must resolve deterministically
-    without Planner, Synthesizer or any LLM/provider call."""
+    """TD-002/TD-011: these read-only status/audit commands must resolve
+    deterministically without Planner, Synthesizer or any LLM/provider call."""
     agent = _build_agent(workspace)
 
     planner_calls = 0

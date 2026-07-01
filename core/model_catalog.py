@@ -262,24 +262,35 @@ _FETCHERS: dict[str, Any] = {
 
 # ── public refresh API ────────────────────────────────────────────────────────
 
-def refresh_catalog(
+def discover_catalog(
     providers: list[str] | None = None,
     *,
     api_keys: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Query provider APIs, classify models, save cache.
+    """Query provider model lists and classify them — WITHOUT writing anything.
+
+    This is the read-only half of :func:`refresh_catalog`. It performs the same
+    provider queries and tier classification and returns the resulting catalog
+    dict, but it never touches ``config/model_catalog.json``.
+
+    IMPORTANT: querying a provider's model list is a metadata-only, non-inference
+    provider call — it runs no LLM inference and generates no completion — but it
+    is still a real network/provider call. It must only be triggered by an
+    explicit operator request (e.g. a dry-run discovery command), never on a
+    normal run, and should be recorded as provider metadata access rather than an
+    LLM inference call.
 
     Parameters
     ----------
     providers : list[str] | None
-        Which providers to refresh. Defaults to all in _FETCHERS.
+        Which providers to query. Defaults to all in _FETCHERS.
     api_keys : dict[str, str] | None
         Optional explicit API keys; falls back to env vars.
 
     Returns
     -------
     dict
-        The catalog data that was saved.
+        The discovered catalog data (NOT saved to disk).
     """
     providers = providers or list(_FETCHERS.keys())
     api_keys  = api_keys or {}
@@ -317,10 +328,38 @@ def refresh_catalog(
             "tier_best": tier_best,
         }
         logger.info(
-            "model_catalog refreshed provider=%s models=%d tiers=%s",
+            "model_catalog discovered provider=%s models=%d tiers=%s",
             provider, len(classified), tier_best,
         )
 
+    return catalog
+
+
+def refresh_catalog(
+    providers: list[str] | None = None,
+    *,
+    api_keys: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Query provider APIs, classify models, and SAVE the cache.
+
+    Thin write wrapper over :func:`discover_catalog`: it performs the same
+    read-only discovery and then persists the result to
+    ``config/model_catalog.json``. Behaviour is unchanged from before the
+    discover/refresh split.
+
+    Parameters
+    ----------
+    providers : list[str] | None
+        Which providers to refresh. Defaults to all in _FETCHERS.
+    api_keys : dict[str, str] | None
+        Optional explicit API keys; falls back to env vars.
+
+    Returns
+    -------
+    dict
+        The catalog data that was saved.
+    """
+    catalog = discover_catalog(providers, api_keys=api_keys)
     _save_catalog(catalog)
     return catalog
 
