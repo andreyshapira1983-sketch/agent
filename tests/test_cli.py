@@ -532,6 +532,36 @@ class TestHandleMetaCommand:
         out = capsys.readouterr()
         assert "Usage: :self-apply-run" in out.err
 
+    def test_self_build_produce_registered(self, workspace: Path, capsys):
+        # Dispatcher recognizes :self-build-produce. With an empty FakeLLM the
+        # Manager selects no target, so the producer reports no_patch without
+        # creating any approval item, applying anything, or touching git state.
+        import subprocess
+
+        for args in (["init", "-q"], ["add", "-A"]):
+            subprocess.run(["git", *args], cwd=workspace, check=True)
+        subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@e",
+             "commit", "-q", "--allow-empty", "-m", "init"],
+            cwd=workspace, check=True,
+        )
+        agent = _build_agent(workspace)
+        assert handle_meta_command(":self-build-produce", agent, workspace) is True
+        out = capsys.readouterr()
+        assert "=== self-build produce ===" in out.err
+        assert "status:" in out.err
+
+    def test_self_build_produce_rejects_args(self, workspace: Path, capsys):
+        # Narrow trigger: it takes no arguments and no free-text patch.
+        agent = _build_agent(workspace)
+        assert (
+            handle_meta_command(":self-build-produce some patch text", agent, workspace)
+            is True
+        )
+        out = capsys.readouterr()
+        assert "Usage: :self-build-produce" in out.err
+
+
     def test_mem_prints_working_and_persistent(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
         agent.persistent_store.save_many([MemoryRecord(content="pinned fact", tags=["fact"], owner="user")])
