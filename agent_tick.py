@@ -58,6 +58,13 @@ INCIDENT_LOG_PATH  = "data/incidents.jsonl"
 HEARTBEAT_PATH     = "data/daemon_heartbeat.json"
 BUDGET_LEDGER_PATH = "data/budget_ledger.jsonl"
 BUDGET_CONFIG_PATH = "config/budget_limits.json"
+# Persistent cooldown state for the autonomous self-build producer (TD-026).
+# Holds the ISO timestamp of the last *successfully proposed* item so the daemon
+# does not create a new self-build proposal more often than the cooldown window.
+SELF_BUILD_STATE_PATH = "data/self_build_producer_state.json"
+# Default hours between autonomous self-build proposals. Conservative by design;
+# override via AGENT_SELF_BUILD_COOLDOWN_HOURS.
+SELF_BUILD_COOLDOWN_HOURS_DEFAULT = 12.0
 
 # Expected wall-clock gap between ticks. The daemon is normally driven by Task
 # Scheduler every 30 minutes. If the newest heartbeat is older than
@@ -388,6 +395,171 @@ def _maybe_propose_repair(
         return {"repair_proposed": False, "reason": f"exception: {exc}"}
 
 
+# ── autonomous self-build producer wiring (TD-026) ────────────────────────────
+
+
+def _self_build_cooldown_hours() -> float:
+    """Resolve the cooldown window in hours (env override, else default).
+
+    Read at call time (not import time) so the daemon and tests can tune it via
+    ``AGENT_SELF_BUILD_COOLDOWN_HOURS`` without reloading the module.
+    """
+    raw = os.environ.get("AGENT_SELF_BUILD_COOLDOWN_HOURS")
+    if raw is None or not str(raw).strip():
+        return SELF_BUILD_COOLDOWN_HOURS_DEFAULT
+    try:
+        hours = float(raw)
+    except (TypeError, ValueError):
+        return SELF_BUILD_COOLDOWN_HOURS_DEFAULT
+    return hours if hours >= 0 else SELF_BUILD_COOLDOWN_HOURS_DEFAULT
+
+
+def _read_producer_state(workspace: Path) -> dict:
+    path = workspace / SELF_BUILD_STATE_PATH
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_producer_state(workspace: Path, last_proposed_at: str) -> None:
+    path = workspace / SELF_BUILD_STATE_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {"last_proposed_at": last_proposed_at}
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)  # atomic swap
+
+
+def _cooldown_remaining_seconds(
+    state: dict, *, cooldown_hours: float, now: datetime | None = None
+) -> float:
+    """Seconds still to wait before another proposal is allowed (0 = ready)."""
+    if cooldown_hours <= 0:
+        return 0.0
+    last = state.get("last_proposed_at")
+    if not last:
+        return 0.0
+    try:
+        when = datetime.fromisoformat(str(last))
+    except (ValueError, TypeError):
+        return 0.0  # unparseable timestamp never blocks a fresh proposal
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    elapsed = (now - when).total_seconds()
+    remaining = cooldown_hours * 3600.0 - elapsed
+    return remaining if remaining > 0 else 0.0
+
+
+def _maybe_produce_self_build(
+    workspace: Path,
+    inbox: "ApprovalInbox",
+    *,
+    dry_run: bool = True,
+    now_iso: str | None = None,
+    cooldown_hours: float | None = None,
+    build_agent_fn: Callable[[Path], Any] | None = None,
+    producer_fn: Callable[..., Any] | None = None,
+    vcs: Any = None,
+    kill_switch: Any = None,
+    budget_snapshot: Any = None,
+) -> dict:
+    """Run the autonomous self-build producer at most once per tick (TD-026).
+
+    The producer (TD-025) owns the kill-switch/budget/approval/dirty-tree gates;
+    this wrapper adds ONLY a persistent cooldown gate that runs *before* the
+    agent is built, so ``cooldown_wait`` never constructs an agent. It creates at
+    most one approval inbox item, never applies/commits/pushes and never runs the
+    self-apply lane. Any exception is swallowed into ``status="error"`` so a tick
+    can never crash here. Heavy collaborators are injectable for deterministic
+    tests (no real LLM/provider/network/git).
+    """
+    now_iso = now_iso or _now_iso()
+    try:
+        now_dt = datetime.fromisoformat(now_iso)
+        if now_dt.tzinfo is None:
+            now_dt = now_dt.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        now_dt = datetime.now(timezone.utc)
+
+    hours = cooldown_hours if cooldown_hours is not None else _self_build_cooldown_hours()
+
+    # ── cooldown gate (the ONLY gate this layer owns) — before build_agent ──
+    remaining = _cooldown_remaining_seconds(
+        _read_producer_state(workspace), cooldown_hours=hours, now=now_dt
+    )
+    if remaining > 0:
+        return {
+            "self_build_status": "cooldown_wait",
+            "cooldown_remaining_s": int(remaining),
+            "next_human_action": "",
+        }
+
+    try:
+        # Lazy imports: keep module import cheap and match the tick's dotenv order.
+        from core.budget_kill_switch import BudgetKillSwitch, default_path
+        from core.budget_ledger import BudgetLedger
+        from core.safe_vcs import SafeVCS
+        from core.self_build_producer import produce_self_apply_proposal
+
+        produce = producer_fn or produce_self_apply_proposal
+
+        if budget_snapshot is None:
+            ledger = BudgetLedger.from_env(
+                path=workspace / BUDGET_LEDGER_PATH,
+                config_path=workspace / BUDGET_CONFIG_PATH,
+            )
+            budget_snapshot = ledger.snapshot()
+        if kill_switch is None:
+            kill_switch = BudgetKillSwitch(path=default_path(workspace)).status(
+                budget_snapshot
+            )
+        if vcs is None:
+            vcs = SafeVCS(workspace=workspace)
+
+        builder = build_agent_fn or (
+            lambda ws: __import__("main", fromlist=["build_agent"]).build_agent(
+                ws, with_memory=False, approval_provider=None
+            )
+        )
+        agent = builder(workspace)
+        llm = agent.model_router.for_role("synthesizer")
+
+        report = produce(
+            workspace=workspace,
+            inbox=inbox,
+            llm=llm,
+            vcs=vcs,
+            budget_snapshot=budget_snapshot,
+            kill_switch=kill_switch,
+            now_iso=now_iso,
+        )
+        result = report.to_dict() if hasattr(report, "to_dict") else dict(report)
+        status = result.get("status", "error")
+
+        # Cooldown is spent ONLY when a proposal is actually created; a wait /
+        # veto / no_patch / error must let the next tick try again immediately.
+        if status == "proposed":
+            _write_producer_state(workspace, now_iso)
+
+        return {
+            "self_build_status": status,
+            "approval_id": result.get("approval_id"),
+            "target_path": result.get("target_path"),
+            "next_human_action": result.get("next_human_action", ""),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "self_build_status": "error",
+            "error": f"{type(exc).__name__}: {exc}",
+            "next_human_action": "",
+        }
+
+
 # ── main tick ─────────────────────────────────────────────────────────────────
 
 def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
@@ -422,6 +594,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         # exit_code-less run is "inconclusive", never silently "done".
         "result_status": "none",
         "repair_proposed": False,
+        "self_build_status": "none",
         "inbox_pending_after": 0,
         "error": None,
     }
@@ -574,7 +747,21 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
                                       "effects": summary["effects"],
                                       "processed_effects": summary["processed_effects"]})
 
-        # ── 3. Tally inbox ────────────────────────────────────────────────────
+        # ── 3. Autonomous self-build producer (TD-026) ────────────────────────
+        # At most one proposal per tick, gated by a persistent cooldown that runs
+        # BEFORE any agent is built. Producer owns kill-switch/budget/approval/
+        # dirty-tree gates; this only adds cooldown. It NEVER applies/commits/
+        # pushes and NEVER runs the self-apply lane — it only proposes into the
+        # human-gated approval inbox (safe in dry-run too).
+        producer_inbox = ApprovalInbox(path=workspace / APPROVAL_INBOX_PATH)
+        self_build = _maybe_produce_self_build(
+            workspace, producer_inbox, dry_run=dry_run
+        )
+        summary["self_build_status"] = self_build.get("self_build_status", "none")
+        summary["self_build"] = self_build
+        _log_tick(workspace, {"event": "self_build_produce", **self_build})
+
+        # ── 4. Tally inbox ────────────────────────────────────────────────────
         inbox_check = ApprovalInbox(path=workspace / APPROVAL_INBOX_PATH)
         summary["inbox_pending_after"] = len(inbox_check.pending())
 
@@ -620,6 +807,13 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
             "result_status": summary["result_status"],
             "tasks_processed": summary["tasks_processed"],
             "inbox_pending_after": summary["inbox_pending_after"],
+            "self_build_status": summary["self_build_status"],
+            "self_build_next_human_action": (
+                summary.get("self_build", {}).get("next_human_action", "")
+            ),
+            "self_build_approval_id": (
+                summary.get("self_build", {}).get("approval_id")
+            ),
             **visibility,
         },
     )
@@ -651,6 +845,16 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
             )
     if summary["repair_proposed"]:
         print("[agent_tick] Repair proposal added to inbox.", file=sys.stderr)
+    sb = summary.get("self_build", {})
+    sb_status = summary["self_build_status"]
+    if sb_status == "proposed":
+        print(
+            f"[agent_tick] Self-build proposal added to inbox "
+            f"({sb.get('approval_id')}). {sb.get('next_human_action', '')}",
+            file=sys.stderr,
+        )
+    elif sb_status not in ("none", "cooldown_wait"):
+        print(f"[agent_tick] Self-build producer: {sb_status}.", file=sys.stderr)
     if pending:
         print(f"[agent_tick] {pending} item(s) waiting in approval inbox.", file=sys.stderr)
     else:
