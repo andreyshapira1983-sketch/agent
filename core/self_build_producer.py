@@ -45,6 +45,7 @@ from core.self_apply_bridge import (
     build_self_apply_payload,
 )
 from core.self_apply_lane import FileChange, classify_patch_risk
+from core.proposal_value_gate import evaluate_proposal_value
 from core.self_build_supervisor import (
     hour_budget_headroom,
     is_budget_near_exhaustion,
@@ -121,6 +122,7 @@ class ProducerReport:
     checked_gates: list[str] = field(default_factory=list)
     role_outputs: list[RoleOutput] = field(default_factory=list)
     veto_reasons: list[str] = field(default_factory=list)
+    value_flags: list[str] = field(default_factory=list)
     next_human_action: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -132,6 +134,7 @@ class ProducerReport:
             "checked_gates": list(self.checked_gates),
             "roles": [r.to_dict() for r in self.role_outputs],
             "veto_reasons": list(self.veto_reasons),
+            "value_flags": list(self.value_flags),
             "next_human_action": self.next_human_action,
         }
 
@@ -555,6 +558,32 @@ def produce_self_apply_proposal(
             next_human_action="Critic vetoed the candidate; no approval created.",
         ))
 
+    # ── Value gate (TD-035): reject no-effect changes before publishing ─────
+    # Runs after the Critic's *technical* pass and before the Reporter creates
+    # an approval item. A hard veto (no code effect) blocks publication and
+    # creates NO inbox item; soft flags are attached to the evidence so a human
+    # reviewer sees them, but never block. Doc (*.md) targets are exempt from
+    # hard veto. Deterministic — no LLM/network/git side effects.
+    value = evaluate_proposal_value(
+        target,
+        current_content,
+        builder.data.get("content") or "",
+        builder.data.get("reason") or "",
+    )
+    if value.vetoed:
+        return _record(ProducerReport(
+            status="value_veto",
+            reason="; ".join(value.veto_reasons) or "no-effect change",
+            target_path=target,
+            checked_gates=gates,
+            role_outputs=roles,
+            veto_reasons=list(value.veto_reasons),
+            value_flags=list(value.flags),
+            next_human_action="Value gate vetoed a no-effect change; no approval created.",
+        ))
+    if value.flags:
+        evidence.extend(f"value-flag: {flag}" for flag in value.flags)
+
     # ── Reporter ────────────────────────────────────────────────────────────
     reporter = _reporter_publish(inbox, target, builder.data, evidence)
     roles.append(reporter)
@@ -566,6 +595,7 @@ def produce_self_apply_proposal(
         approval_id=approval_id,
         checked_gates=gates,
         role_outputs=roles,
+        value_flags=list(value.flags),
         next_human_action=(
             f"Review approval item {approval_id} and run "
             f":self-apply-run {approval_id} to apply it."

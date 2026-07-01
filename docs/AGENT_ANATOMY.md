@@ -534,6 +534,7 @@ evidence.
 - `core/persistent_memory` — wired-live
 - `core/planner` — wired-live (brain)
 - `core/policy` — wired-live
+- `core/proposal_value_gate` — wired-live (daemon; self_build_producer pre-publish value gate)
 - `core/prompt_registry` — wired-live
 - `core/rate_limiter` — wired-live~
 - `core/reasoning_action_check` — wired-live
