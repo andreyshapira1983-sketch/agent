@@ -527,6 +527,7 @@ class AutonomousRuntime:
                 task,
                 "failed",
                 f"{type(exc).__name__}: {exc}",
+                {"error_type": type(exc).__name__},
             )
         return AutonomousTaskReport(task, "failed", f"unknown task kind: {task.kind}")
 
