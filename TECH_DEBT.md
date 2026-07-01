@@ -1255,3 +1255,35 @@ TD-033 — Feed Human Value Reviews into Subagent Registry Scoring
   reconcile не ломает персист вердикта.
 - Targeted: test_subagent_registry_lane, test_subagent_registry — зелёные.
 - Full pytest: 3717 passed (+18).
+==============================================================================
+TD-034 — Recommendation gate includes human value evidence (P0 fix)
+Статус: Done
+
+Проблема
+- TD-033 добавил confirmed_value/value_rejected и завёл их в trust/usefulness,
+  но _recommendation считал judged только из successes+vetoes+failures+
+  outputs_vetoed. Человеческие вердикты в «улики» не входили, поэтому даже много
+  rejected_low_value оставляли recommendation=keep, если у роли не было объёма
+  producer-стадии. Проверено эмпирически: 8x rejected_low_value -> trust=0.0,
+  usefulness=0.0, но recommendation=keep. Тест TD-033 на этот случай был
+  тавтологией (recommendation in {keep,watch,pause,retire}) и баг не ловил.
+
+Готово
+- core/subagent_registry.py: _recommendation теперь включает confirmed_value и
+  value_rejected в judged-улики. Технические исходы (proposals_approved,
+  committed_local) в judged НЕ добавлены намеренно — они доказывают применение,
+  а не суждение о ценности. Веса scoring не менялись. Статус роли по-прежнему
+  никогда не мутируется автоматически (advisory-only).
+
+Область НЕ тронута
+- value_review, approval, self_apply, agent_tick/daemon, model routing, budget,
+  config, CLI — без изменений. config/budget_limits.json не тронут. Веса и
+  правила мутации статуса не менялись.
+
+Проверка
+- tests/test_subagent_registry_value.py: тавтологичный тест заменён на реальный
+  (8x rejected -> recommendation != keep, status остаётся active); добавлены
+  value_rejected как judged-улика; confirmed_value как judged-улика (high trust
+  -> keep); одиночный rejection не форсит pause/retire. Проекция/идемпотентность
+  TD-033 по-прежнему зелёные.
+- Full pytest: 3720 passed.

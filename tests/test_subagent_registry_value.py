@@ -10,7 +10,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from core.subagent_registry import VERDICT_ROLE, SubagentRegistry
+from core.subagent_registry import (
+    _MIN_JUDGED_FOR_RECOMMENDATION as _MIN_JUDGED,
+    VERDICT_ROLE,
+    SubagentRegistry,
+)
 
 
 def _reg(tmp_path: Path) -> SubagentRegistry:
@@ -175,10 +179,10 @@ def test_old_json_without_new_fields_loads_with_zero_defaults(tmp_path: Path) ->
     assert reg.roles["builder"].invocations == 3
 
 
-# ── status invariant ─────────────────────────────────────────────────────────
+# ── status invariant + recommendation gate (TD-034 P0 fix) ──────────────────
 
 
-def test_many_rejections_change_recommendation_never_status(tmp_path: Path) -> None:
+def test_many_rejections_sour_recommendation_never_status(tmp_path: Path) -> None:
     reg = _reg(tmp_path)
     b = reg.roles["builder"]
     b.invocations = 10
@@ -186,9 +190,49 @@ def test_many_rejections_change_recommendation_never_status(tmp_path: Path) -> N
     reg.reconcile_value_reviews(effective)
     b = reg.roles["builder"]
     assert b.value_rejected == 8
-    # Recommendation may sour, but status stays whatever it was (advisory-only).
+    # TD-034: human value evidence now opens the recommendation gate. Eight
+    # low-value rejections (trust -> 0.0) must actually move off "keep"...
+    assert b.recommendation != "keep"
+    # ...but status is advisory-only and must NEVER auto-mutate.
     assert b.status == "active"
-    assert b.recommendation in {"keep", "watch", "pause", "retire"}
+
+
+def test_value_rejected_counts_as_judged_evidence(tmp_path: Path) -> None:
+    """Before TD-034 the gate excluded value_rejected, so recommendation stayed
+    ``keep`` regardless of how many human rejections landed. Guard against that
+    regression: with no producer-stage events at all, pure human rejections must
+    still be enough judged evidence to open the gate."""
+    reg = _reg(tmp_path)
+    reg.roles["builder"].invocations = 8
+    reg.reconcile_value_reviews(
+        {f"ain_{i}": "rejected_low_value" for i in range(_MIN_JUDGED)}
+    )
+    assert reg.roles["builder"].recommendation != "keep"
+
+
+def test_confirmed_value_counts_as_judged_evidence(tmp_path: Path) -> None:
+    """confirmed_value is judged evidence too; enough accepted verdicts (all
+    positive) keep the recommendation at ``keep`` on high trust rather than
+    leaving it stuck below the evidence gate."""
+    reg = _reg(tmp_path)
+    reg.roles["builder"].invocations = 8
+    reg.reconcile_value_reviews(
+        {f"ain_{i}": "accepted" for i in range(_MIN_JUDGED)}
+    )
+    b = reg.roles["builder"]
+    # All-positive human signal: gate is open (enough evidence) and trust is high.
+    assert b.trust_score >= 0.70
+    assert b.recommendation == "keep"
+
+
+def test_single_rejection_does_not_force_pause_or_retire(tmp_path: Path) -> None:
+    """One low-value rejection is below the evidence gate, so it must not on its
+    own push the role to pause/retire."""
+    reg = _reg(tmp_path)
+    reg.roles["builder"].invocations = 3
+    reg.reconcile_value_reviews({"ain_1": "rejected_low_value"})
+    assert reg.roles["builder"].recommendation not in {"pause", "retire"}
+    assert reg.roles["builder"].status == "active"
 
 
 def test_empty_snapshot_resets_counters(tmp_path: Path) -> None:
