@@ -32,7 +32,8 @@ from core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 
 WorkSessionStatus = Literal["completed", "stopped", "interrupted"]
 WorkSessionStopReason = Literal[
-    "max_cycles", "time_budget", "circuit_open", "converged", "interrupted", ""
+    "max_cycles", "time_budget", "circuit_open", "converged", "budget_exhausted",
+    "interrupted", ""
 ]
 
 
@@ -232,6 +233,22 @@ def run_work_session(
             )
             cycle_reports.append(cr)
 
+            # ── budget-exhaustion stop ───────────────────────────────────────
+            # If the cycle's goal task died on a model/token budget limit
+            # (ModelBudgetExceeded surfaces as a failed task carrying
+            # error_type="ModelBudgetExceeded"), stop now instead of spinning
+            # the remaining cycles, which would each hit the same exhausted
+            # window. Checked before the convergence/circuit update so a
+            # starved cycle is never mis-recorded as a success.
+            if _is_budget_exhausted(run_report):
+                stop_reason = "budget_exhausted"
+                status = "stopped"
+                _log(agent, "work_session_budget_exhausted", {
+                    "cycle": cycle,
+                    "goal": config.goal,
+                })
+                break
+
             # ── convergence stop (TD-018) ────────────────────────────────────
             # If the cycle produced the same outcome signature as the previous
             # ones for `convergence_window` passes in a row, the session is
@@ -329,6 +346,28 @@ def _cycle_signature(run_report: Any) -> tuple:
         return (getattr(run_report, "status", ""), tasks)
     except Exception:
         return ("__unknown__",)
+
+
+def _is_budget_exhausted(run_report: Any) -> bool:
+    """True when a task in the pass failed on a model/token budget limit.
+
+    ModelBudgetExceeded raised inside agent.run() is caught by the runtime and
+    surfaces as a failed task whose details carry error_type="ModelBudgetExceeded"
+    (see AutonomousRuntime._run_task). Detecting it structurally (not by summary
+    text) lets the work session stop early instead of re-running cycles that
+    would hit the same exhausted budget window. Best-effort: any unexpected
+    shape returns False so detection never raises.
+    """
+    try:
+        for t in getattr(run_report, "tasks", []) or []:
+            if getattr(t, "status", "") != "failed":
+                continue
+            details = getattr(t, "details", None) or {}
+            if details.get("error_type") == "ModelBudgetExceeded":
+                return True
+        return False
+    except Exception:
+        return False
 
 
 def _log(agent: Any, event: str, payload: Any) -> None:
