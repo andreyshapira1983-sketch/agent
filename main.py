@@ -230,6 +230,9 @@ from cli.commands_ingest import (
 )
 # Self-repair commands live in cli/commands_repair.py (no main back-references).
 from cli.commands_repair import _handle_propose_repair, _handle_repair
+# :self-apply-run bridges an approved inbox item into the trusted self-apply
+# lane (cli/commands_self_apply.py, no main back-references).
+from cli.commands_self_apply import _handle_self_apply_run
 
 
 DEFAULT_PERSISTENT_PATH = Path("data") / "persistent_memory.jsonl"
@@ -3060,6 +3063,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head == ":approval-run":
         return _handle_approval_run(rest.strip(), agent, workspace)
 
+    if head == ":self-apply-run":
+        return _handle_self_apply_run(rest.strip(), agent, workspace)
+
     if head == ":approval-abort":
         return _handle_approval_abort(rest.strip(), agent, workspace)
 
@@ -3182,6 +3188,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :approval-approve <id>          mark an approval inbox item approved\n"
             "  :approval-deny <id>             mark an approval inbox item denied\n"
             "  :approval-run <id>              execute one approved whitelisted operation\n"
+            "  :self-apply-run <id>            run one approved low-risk self-apply proposal\n"
             "  :approval-abort <id>            mark an approval inbox item aborted\n"
             "  :inbox                          shortcut: list pending approvals\n"
             "  :approve <id>                   shortcut: :approval-approve\n"
@@ -3463,7 +3470,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :budget-kill-switch  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :model-discovery-audit  :provider-catalog-refresh  :approval-list  :approval-triage  :best-next-action  :ack  :ack-list  :ack-clear  :approval-run  :task-add  :schedule-disable  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :self-build-supervisor  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :budget-kill-switch  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :model-discovery-audit  :provider-catalog-refresh  :approval-list  :approval-triage  :best-next-action  :ack  :ack-list  :ack-clear  :approval-run  :self-apply-run  :task-add  :schedule-disable  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :self-build-supervisor  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:

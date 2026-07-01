@@ -507,6 +507,31 @@ class TestHandleMetaCommand:
         assert handle_meta_command(cmd, agent, workspace) is True
         assert called == {"goal": "project health", "dry_run": True, "max_cost_units": 0}
 
+    def test_self_apply_run_command_registered(self, workspace: Path, capsys):
+        # Dispatcher recognizes :self-apply-run. An unknown id is refused by the
+        # bridge (needs_validated_proposal) without touching git or tests.
+        agent = _build_agent(workspace)
+        assert handle_meta_command(":self-apply-run ain-nope", agent, workspace) is True
+        out = capsys.readouterr()
+        assert "self-apply run" in out.err
+        assert "needs_validated_proposal" in out.err
+
+    def test_self_apply_run_rejects_free_text(self, workspace: Path, capsys):
+        # More than one token (a patch body / extra args) is rejected outright.
+        agent = _build_agent(workspace)
+        assert (
+            handle_meta_command(":self-apply-run ain-1 extra words", agent, workspace)
+            is True
+        )
+        out = capsys.readouterr()
+        assert "Usage: :self-apply-run" in out.err
+
+    def test_self_apply_run_rejects_empty(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+        assert handle_meta_command(":self-apply-run", agent, workspace) is True
+        out = capsys.readouterr()
+        assert "Usage: :self-apply-run" in out.err
+
     def test_mem_prints_working_and_persistent(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
         agent.persistent_store.save_many([MemoryRecord(content="pinned fact", tags=["fact"], owner="user")])
