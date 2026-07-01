@@ -922,7 +922,13 @@ class ModelRouter:
         elif tier == ComplexityTier.STANDARD:
             # STANDARD with no preferred provider → reuse normal role routing
             # (backward-compatible fast path; no catalog query, identity kept).
-            return self.for_role(role_key)
+            # TD-021: keep the resolved model identical to for_role but stamp an
+            # honest reason so the ledger shows the complexity tier and the
+            # fallback, not the registry's opaque policy:* route id.
+            reason = _append_skipped(
+                f"complexity:{tier.value}|fallback:role_default", skipped
+            )
+            return self._for_role_with_reason(role_key, reason)
         else:
             # LIGHT / DEEP fall back to the explicit/default role provider.
             provider = _normalise_provider(route.provider or self.default_provider) or "anthropic"
@@ -976,7 +982,14 @@ class ModelRouter:
         if not tier_model:
             # No model configured/discovered for this tier → fall back to role
             # routing. (DEEP with no model already downgraded above.)
-            return self.for_role(role_key)
+            # TD-021: the resolved model is unchanged, but stamp an honest reason
+            # so the ledger records the assessed tier and *why* it fell back
+            # (no tier model) instead of the registry's opaque policy:* id.
+            reason = _append_skipped(
+                f"complexity:{tier.value}|fallback:role_default:no_tier_model",
+                skipped,
+            )
+            return self._for_role_with_reason(role_key, reason)
 
         cache_key = (provider, tier_model)
         if cache_key not in self._cache:
