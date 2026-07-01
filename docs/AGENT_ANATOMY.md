@@ -484,6 +484,8 @@ evidence.
 - `core/architecture_audit` — manual-only
 - `core/assumption_registry` — wired-live
 - `core/autonomous_runtime` — wired-live
+- `core/backlog_selector` — wired-live~ (daemon; producer goal selection, opt-in)
+- `core/backlog_signals` — wired-live~ (read-only backlog parsers for selector)
 - `core/best_next_action` — wired-live~
 - `core/budget_governor` — wired-live (runtime)
 - `core/budget_kill_switch` — wired-live (daemon/lane)
