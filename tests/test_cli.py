@@ -189,6 +189,9 @@ def test_local_operator_reply_requires_explicit_llm_stop_marker():
         # TD-011 — local, no-network model discovery audit.
         ":model-discovery-audit",
         ":model-discovery-audit --json",
+        # self-build supervisor — read-only, no LLM/provider calls.
+        ":self-build-supervisor",
+        ":self-build-supervisor --json",
     ],
 )
 def test_local_meta_commands_do_not_start_model_calls(
@@ -213,6 +216,7 @@ def test_local_meta_commands_do_not_start_model_calls(
         ":schedule-list",
         ":source-registry",
         ":model-discovery-audit",
+        ":self-build-supervisor",
     ],
 )
 def test_local_meta_commands_never_invoke_planner_or_synthesizer(

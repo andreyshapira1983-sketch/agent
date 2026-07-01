@@ -111,6 +111,7 @@ from core.model_router import ModelRole, ModelRouter
 from core.operator_intent import OperatorIntent, route_operator_intent
 from core.strategy_router import classify_operator_strategy
 from core.persistent_memory import PersistentMemoryStore
+from core.self_build_supervisor import evaluate_self_build_supervisor
 from core.user_profile import UserProfileStore
 from core.assumption_registry import AssumptionStore  # Layer 5
 from core.planner import LLMPlanner
@@ -224,6 +225,7 @@ from cli.commands_ingest import (
     _handle_source_library,
     _handle_source_registry,
     _handle_source_review_plan,
+    _self_build_propose_payload,
 )
 # Self-repair commands live in cli/commands_repair.py (no main back-references).
 from cli.commands_repair import _handle_propose_repair, _handle_repair
@@ -1150,6 +1152,143 @@ def _handle_auto_status(agent: AgentLoop, workspace: Path) -> bool:
     status["model_usage"] = agent.model_router.usage_snapshot()
     status["persistent_budget_windows"] = _budget_ledger_snapshot(agent)
     print(json.dumps(status, ensure_ascii=False, indent=2), file=sys.stderr)
+    return True
+
+
+def _tech_debt_summary(workspace: Path) -> dict:
+    """Best-effort, read-only TECH_DEBT.md digest: counts of TD entries by status."""
+    path = workspace / "TECH_DEBT.md"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {"present": False}
+    td_re = re.compile(r"^\s*TD-\d+\b")
+    status_re = re.compile(r"^\s*Статус\s*:\s*(.+?)\s*$", re.IGNORECASE)
+    total = open_count = done_count = 0
+    awaiting_status = False
+    for line in text.splitlines():
+        if td_re.match(line):
+            total += 1
+            awaiting_status = True
+            continue
+        if awaiting_status:
+            match = status_re.match(line)
+            if match:
+                if match.group(1).strip().lower().startswith("done"):
+                    done_count += 1
+                else:
+                    open_count += 1
+                awaiting_status = False
+    return {
+        "present": True,
+        "total": total,
+        "done": done_count,
+        "open": open_count,
+    }
+
+
+def _recent_error_lines(workspace: Path, *, max_errors: int = 5) -> list[str]:
+    """Best-effort scan of the newest trace log for recent error events.
+
+    Read-only and defensive: any failure returns an empty list. Only compact,
+    log-safe identifiers (event name + optional error type) are surfaced.
+    """
+    try:
+        log_dir = workspace / "logs"
+        candidates = sorted(
+            (p for p in log_dir.glob("*.jsonl") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError:
+        return []
+    if not candidates:
+        return []
+    errors: list[str] = []
+    try:
+        lines = candidates[0].read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    for raw in reversed(lines):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            event = json.loads(raw)
+        except (ValueError, TypeError):
+            continue
+        name = str(event.get("event") or event.get("type") or "")
+        if not name:
+            continue
+        lowered = name.lower()
+        if "error" in lowered or "fail" in lowered or "blocked" in lowered:
+            errors.append(name)
+            if len(errors) >= max_errors:
+                break
+    return errors
+
+
+def _handle_self_build_supervisor(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """Read-only supervisor cycle: decide whether to wait, stop, or propose one
+    evidence-backed self-build candidate. Never applies changes / runs tests /
+    writes files / calls shell_exec / refreshes models."""
+    as_json = "--json" in _split_meta_args(rest)
+    budget_windows = _budget_ledger_snapshot(agent)
+    approvals_pending = int(
+        _approval_inbox_for(agent, workspace).snapshot().get("pending", 0) or 0
+    )
+    task_queue = _task_queue_for(agent, workspace).summary()
+    scheduler = _scheduler_for(agent, workspace).summary()
+    recent_errors = _recent_error_lines(workspace)
+    tech_debt = _tech_debt_summary(workspace)
+
+    report = evaluate_self_build_supervisor(
+        budget_windows=budget_windows,
+        approvals_pending=approvals_pending,
+        task_queue=task_queue,
+        scheduler=scheduler,
+        recent_errors=recent_errors,
+        tech_debt=tech_debt,
+        candidate_provider=lambda: _self_build_propose_payload(workspace),
+    )
+
+    # Log a compact, secret-free copy: never dump a full candidate diff.
+    candidate = report.get("candidate")
+    if isinstance(candidate, dict):
+        candidate_log = {
+            "file": candidate.get("file"),
+            "has_diff": candidate.get("diff") not in (None, "NO_PATCH"),
+        }
+    else:
+        candidate_log = candidate
+    agent.log.log(
+        "self_build_supervisor",
+        {
+            "status": report.get("status"),
+            "reason": report.get("reason"),
+            "checked_sections": report.get("checked_sections"),
+            "candidate": candidate_log,
+            "recommended_next_action": report.get("recommended_next_action"),
+        },
+    )
+
+    if as_json:
+        print(json.dumps(report, ensure_ascii=False, indent=2), file=sys.stderr)
+        return True
+
+    lines = [
+        "=== self-build supervisor ===",
+        f"status: {report.get('status')}",
+        f"reason: {report.get('reason')}",
+        f"checked: {', '.join(report.get('checked_sections') or [])}",
+    ]
+    if isinstance(candidate, dict):
+        lines.append(f"candidate file: {candidate.get('file')}")
+        lines.append(f"candidate diagnosis: {candidate.get('diagnosis')}")
+    else:
+        lines.append(f"candidate: {candidate}")
+    lines.append(f"next: {report.get('recommended_next_action')}")
+    print("\n".join(lines), file=sys.stderr)
     return True
 
 
@@ -2772,6 +2911,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head == ":self-build-propose":
         return _handle_self_build_propose(rest.strip(), agent, workspace)
 
+    if head == ":self-build-supervisor":
+        return _handle_self_build_supervisor(rest.strip(), agent, workspace)
+
     if head == ":ingest-web":
         return _handle_ingest_web(rest.strip(), agent, workspace)
 
@@ -2980,6 +3122,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :patch-proposal-plan <goal>     local read-only patch proposal plan\n"
             "      flags: --limit N  --json\n"
             "  :self-build-propose             propose a self-build patch or NO_PATCH\n"
+            "  :self-build-supervisor          read-only supervisor: wait/stop/propose one candidate\n"
             "  :ingest-web <topic> [flags]     search/fetch curated web library sources\n"
             "      flags: --sources wikis|books|science|docs|all|id,id  --limit N  --per-source N\n"
             "  :ingest-rss <url> [flags]       fetch RSS/Atom feed entries into Source Registry\n"
@@ -3315,7 +3458,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :model-discovery-audit  :provider-catalog-refresh  :approval-list  :approval-triage  :best-next-action  :ack  :ack-list  :ack-clear  :approval-run  :task-add  :schedule-disable  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :model-discovery-audit  :provider-catalog-refresh  :approval-list  :approval-triage  :best-next-action  :ack  :ack-list  :ack-clear  :approval-run  :task-add  :schedule-disable  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :self-build-supervisor  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:

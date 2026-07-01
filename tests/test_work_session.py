@@ -29,6 +29,18 @@ from tools.base import ToolRegistry
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+class _FakeClock:
+    """Minimal stand-in for the ``time`` module exposing a controllable
+    ``monotonic``. Lets timing tests advance virtual time deterministically,
+    independent of host speed."""
+
+    def __init__(self, start: float = 0.0) -> None:
+        self.now = start
+
+    def monotonic(self) -> float:
+        return self.now
+
+
 def _agent(workspace: Path) -> AgentLoop:
     llm = FakeLLM(responses=[])
     registry = ToolRegistry()
@@ -183,16 +195,36 @@ class TestRunWorkSession:
         assert len(result.cycle_reports) == 3
         assert result.stop_reason == ""
 
-    def test_stops_on_time_budget(self, workspace: Path):
+    def test_stops_on_time_budget(self, workspace: Path, monkeypatch: pytest.MonkeyPatch):
+        from core import work_session as ws_mod
+
         agent = _agent(workspace)
-        # Near-zero time budget — should stop before all 100 cycles complete
-        config = WorkSessionConfig(goal="test", max_cycles=100, minutes=0.0001, dry_run=True)
+        # Deterministic virtual clock so the time-budget gate is tested in
+        # isolation. A near-zero *real* budget is racy: on a fast runner several
+        # cycles finish inside the budget, letting the convergence stop (a
+        # separate feature) win before the wall-clock deadline is crossed —
+        # which is exactly why this used to pass on slow Windows but fail on
+        # fast CI. Here each executed cycle advances virtual time past the
+        # budget, so the session must stop with stop_reason="time_budget".
+        clock = _FakeClock()
+        monkeypatch.setattr(ws_mod, "time", clock)
+
+        real_run = ws_mod.AutonomousRuntime.run
+
+        def timed_run(self, cfg):
+            clock.now += 120.0  # each cycle consumes 2 virtual minutes
+            return real_run(self, cfg)
+
+        monkeypatch.setattr(ws_mod.AutonomousRuntime, "run", timed_run)
+
+        # 1-minute budget → the first cycle (2 virtual minutes) overruns it.
+        config = WorkSessionConfig(goal="test", max_cycles=100, minutes=1.0, dry_run=True)
         result = run_work_session(config, agent=agent, workspace=workspace)
 
         assert result.status == "stopped"
         assert result.stop_reason == "time_budget"
-        # Stopped before completing all max_cycles
-        assert result.cycles_run < config.max_cycles
+        # Stopped early — long before the 100-cycle ceiling.
+        assert 1 <= result.cycles_run < config.max_cycles
 
     def test_dry_run_false_by_default(self, workspace: Path):
         # Default is now False; AutonomousRuntime approval gate protects side-effects.
