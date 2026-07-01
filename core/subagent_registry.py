@@ -35,7 +35,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 # Persistent ledger location (gitignored ``data/`` tree). One small JSON file
 # keyed by role id; atomic tmp+replace on write.
@@ -63,6 +63,17 @@ LANE_OUTCOME_ROLE: dict[str, str] = {
     "rolled_back": "builder",
 }
 
+# TD-033 canonical human value-review attribution. Each verdict blames/credits
+# exactly one role. ``accepted`` is confirmed value for the built change; each
+# ``rejected_*`` points at the role most responsible for that failure mode.
+VERDICT_ROLE: dict[str, str] = {
+    "accepted": "builder",
+    "rejected_low_value": "builder",
+    "rejected_wrong_target": "manager",
+    "rejected_misleading_summary": "reporter",
+    "rejected_risky": "critic",
+}
+
 # Advisory recommendation thresholds. Conservative by design; they only shape the
 # ``recommendation`` string and never the stored ``status``.
 _MIN_JUDGED_FOR_RECOMMENDATION = 5
@@ -82,9 +93,11 @@ _TRUST_PAUSE = 0.20
 # "robustness improvement" — humans rejected it as low value. So technical
 # outcomes get a small reliability nudge in usefulness, never a full value point.
 #
-# ``confirmed_value`` (a human-accepted / merged / value-reviewed outcome) is a
-# *future* signal and is deliberately NOT wired in this PR; when it lands it will
-# carry full usefulness weight. Until then no counter feeds it.
+# ``confirmed_value`` (a human-accepted / value-reviewed outcome, TD-033) is the
+# separate, full-weight positive signal that a technical success actually
+# delivered value; ``value_rejected`` is its full-weight negative. Both are owned
+# exclusively by :meth:`SubagentRegistry.reconcile_value_reviews` (a projection of
+# the TD-032 value-review ledger) — no other code path increments them.
 _TECHNICAL_SUCCESS_WEIGHT = 0.25
 
 
@@ -127,6 +140,11 @@ class RoleRecord:
     proposals_approved: int = 0
     committed_local: int = 0
     rolled_back: int = 0
+    # TD-033 human value-review counters. Owned exclusively by
+    # ``reconcile_value_reviews`` (projection of the value-review ledger); no
+    # other method increments them, so they never double-count.
+    confirmed_value: int = 0
+    value_rejected: int = 0
     cost_units: float = 0.0
     cost_source: str = "unknown"
     last_used_at: str | None = None
@@ -147,6 +165,8 @@ class RoleRecord:
             "proposals_approved": self.proposals_approved,
             "committed_local": self.committed_local,
             "rolled_back": self.rolled_back,
+            "confirmed_value": self.confirmed_value,
+            "value_rejected": self.value_rejected,
             "cost_units": self.cost_units,
             "cost_source": self.cost_source,
             "last_used_at": self.last_used_at,
@@ -173,6 +193,8 @@ class RoleRecord:
             proposals_approved=_as_int(data.get("proposals_approved")),
             committed_local=_as_int(data.get("committed_local")),
             rolled_back=_as_int(data.get("rolled_back")),
+            confirmed_value=_as_int(data.get("confirmed_value")),
+            value_rejected=_as_int(data.get("value_rejected")),
             cost_units=_as_float(data.get("cost_units")),
             cost_source=str(data.get("cost_source") or "unknown"),
             last_used_at=(str(data["last_used_at"]) if data.get("last_used_at") else None),
@@ -185,13 +207,14 @@ class RoleRecord:
 def _trust_score(rec: RoleRecord) -> float:
     """Fraction of *judged* events that went well (0..1).
 
-    Positives are successes plus Critic vetoes (a veto is the Critic doing its
-    job). Negatives are failures plus Builder outputs that were vetoed. Neutral
+    Positives are successes, Critic vetoes (a veto is the Critic doing its job)
+    and human-``confirmed_value`` reviews. Negatives are failures, Builder
+    outputs that were vetoed, and human ``value_rejected`` reviews. Neutral
     outcomes (e.g. manager ``no_target``) are ignored so they neither reward nor
     punish. Returns 0.0 when there is nothing judged yet.
     """
-    positives = rec.successes + rec.vetoes
-    negatives = rec.failures + rec.outputs_vetoed
+    positives = rec.successes + rec.vetoes + rec.confirmed_value
+    negatives = rec.failures + rec.outputs_vetoed + rec.value_rejected
     denom = positives + negatives
     if denom <= 0:
         return 0.0
@@ -201,8 +224,11 @@ def _trust_score(rec: RoleRecord) -> float:
 def _usefulness_score(rec: RoleRecord) -> float:
     """Value delivered per invocation (0..1, capped).
 
-    Two tiers of positive signal, deliberately weighted differently:
+    Positive signals, deliberately weighted differently:
 
+    * **Confirmed value** (full weight): human ``accepted`` value reviews
+      (``confirmed_value``, TD-033). This is the only signal that a change was
+      actually *worth making*, so it carries full weight.
     * **Producer-stage value** (full weight): proposals created and Critic
       vetoes. These reflect the pipeline doing its judgement work up front and
       do not depend on any downstream execution being *good*.
@@ -212,9 +238,8 @@ def _usefulness_score(rec: RoleRecord) -> float:
       they must not by themselves push a role to high usefulness. See the
       ``_TECHNICAL_SUCCESS_WEIGHT`` note for the redaction.py evidence.
 
-    ``rolled_back`` subtracts at full weight (a reverted change is wasted work).
-    ``confirmed_value`` (human-accepted / merged / value-reviewed) is a future
-    signal not recorded yet; when added it will use full weight. Normalised by
+    ``rolled_back`` and human ``value_rejected`` reviews both subtract at full
+    weight (wasted work / a change humans judged not worth making). Normalised by
     invocations so a role that adds value on most runs trends toward 1.0.
     """
     if rec.invocations <= 0:
@@ -222,9 +247,11 @@ def _usefulness_score(rec: RoleRecord) -> float:
     producer_stage_value = rec.proposals_created + rec.vetoes
     technical_success = rec.proposals_approved + rec.committed_local
     value = (
-        producer_stage_value
+        rec.confirmed_value
+        + producer_stage_value
         + _TECHNICAL_SUCCESS_WEIGHT * technical_success
         - rec.rolled_back
+        - rec.value_rejected
     )
     if value <= 0:
         return 0.0
@@ -446,6 +473,45 @@ class SubagentRegistry:
         if not self.record_lane_outcome(role_id, outcome, save=False):
             return False
         self.applied_outcomes.add(key)
+        if save:
+            self.save()
+        return True
+
+    def reconcile_value_reviews(
+        self, effective: Mapping[str, str], *, save: bool = True
+    ) -> bool:
+        """Project the TD-032 value-review ledger onto role scoring (TD-033).
+
+        ``effective`` is ``{item_id: verdict}`` — the *latest valid* verdict per
+        item, as produced by
+        :meth:`core.value_review.ValueReviewLog.effective_by_item_id`.
+
+        This is a **projection**, not an accumulation: it resets every role's
+        ``confirmed_value`` / ``value_rejected`` to zero and rebuilds them from
+        ``effective`` in full. That makes it naturally idempotent and immune to
+        double-counting — a changed verdict (even one that moves attribution to a
+        different role) simply re-projects. These two counters are owned solely
+        by this method; no other code path increments them.
+
+        Verdicts map to roles via :data:`VERDICT_ROLE`: ``accepted`` credits
+        ``confirmed_value``; every ``rejected_*`` adds to that role's
+        ``value_rejected``. Unknown verdicts are ignored. Only counters/scores/
+        recommendation change — role ``status`` is never mutated.
+        """
+        for rec in self.roles.values():
+            rec.confirmed_value = 0
+            rec.value_rejected = 0
+        for verdict in effective.values():
+            role_id = VERDICT_ROLE.get(str(verdict))
+            if role_id is None:
+                continue
+            rec = self._role(role_id)
+            if verdict == "accepted":
+                rec.confirmed_value += 1
+            else:
+                rec.value_rejected += 1
+        for rec in self.roles.values():
+            _recompute(rec)
         if save:
             self.save()
         return True

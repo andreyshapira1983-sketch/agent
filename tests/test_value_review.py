@@ -220,3 +220,34 @@ def test_only_expected_files_written_no_stray_side_effects(tmp_path):
     # no budget/config file was created or touched anywhere under the workspace
     assert not (tmp_path / "config" / "budget_limits.json").exists()
     assert list(tmp_path.rglob("budget_limits.json")) == []
+
+
+# ── TD-033: value review feeds the subagent registry (guarded) ──────────────────
+
+
+def test_cli_reconciles_registry_after_recording(tmp_path):
+    from core.subagent_registry import SubagentRegistry
+
+    inbox = _inbox(tmp_path)
+    item = _executed_producer_item(inbox)
+    agent = _FakeAgent(inbox)
+    _handle_value_review(f"{item.id} accepted", agent, tmp_path)
+    reg = SubagentRegistry.load(tmp_path)
+    assert reg.roles["builder"].confirmed_value == 1
+
+
+def test_cli_persists_even_if_registry_reconcile_fails(tmp_path, monkeypatch):
+    import core.subagent_registry as sr
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("registry unavailable")
+
+    monkeypatch.setattr(sr.SubagentRegistry, "load", classmethod(_boom))
+
+    inbox = _inbox(tmp_path)
+    item = _executed_producer_item(inbox)
+    agent = _FakeAgent(inbox)
+    # Must not raise; the value review must still be persisted.
+    assert _handle_value_review(f"{item.id} accepted", agent, tmp_path) is True
+    effective = ValueReviewLog.for_workspace(tmp_path).effective_by_item_id()
+    assert effective[item.id].verdict == "accepted"

@@ -93,6 +93,19 @@ def _handle_value_review(rest: str, agent: "AgentLoop", workspace: Path) -> bool
         "value_review_recorded",
         {"item_id": review.item_id, "verdict": review.verdict},
     )
+    # TD-033: best-effort project the latest verdicts onto subagent scoring.
+    # Guarded so a registry read/write failure never breaks value-review capture.
+    try:
+        from core.subagent_registry import SubagentRegistry
+
+        registry = SubagentRegistry.load(workspace)
+        effective = {
+            item_id: review.verdict
+            for item_id, review in log.effective_by_item_id().items()
+        }
+        registry.reconcile_value_reviews(effective)
+    except Exception:  # noqa: BLE001 — scoring is advisory; persistence must win
+        pass
     print(
         f"(value-review recorded: {review.item_id} -> {review.verdict})",
         file=sys.stderr,
