@@ -56,6 +56,8 @@ SCHEDULES_PATH     = "data/runtime_schedules.jsonl"
 TASK_QUEUE_PATH    = "data/task_queue.jsonl"
 INCIDENT_LOG_PATH  = "data/incidents.jsonl"
 HEARTBEAT_PATH     = "data/daemon_heartbeat.json"
+BUDGET_LEDGER_PATH = "data/budget_ledger.jsonl"
+BUDGET_CONFIG_PATH = "config/budget_limits.json"
 
 # Expected wall-clock gap between ticks. The daemon is normally driven by Task
 # Scheduler every 30 minutes. If the newest heartbeat is older than
@@ -124,6 +126,25 @@ def _is_stale(age_seconds: float | None) -> bool:
     if age_seconds is None:
         return True
     return age_seconds > EXPECTED_TICK_INTERVAL_SECONDS * STALENESS_FACTOR
+
+
+def _check_budget_kill_switch(workspace: Path):
+    """Evaluate (and latch) the persistent budget kill-switch for this tick.
+
+    Reads the persistent budget ledger directly — no agent / LLM is built —
+    so the check is cheap and happens *before* any planner/synthesizer work.
+    Returns a ``KillSwitchState``; ``.active`` is True when the autonomous day
+    budget is exhausted and the daemon must skip LLM-heavy work.
+    """
+    from core.budget_ledger import BudgetLedger  # noqa: PLC0415 (lazy: after dotenv)
+    from core.budget_kill_switch import BudgetKillSwitch, default_path  # noqa: PLC0415
+
+    ledger = BudgetLedger.from_env(
+        path=workspace / BUDGET_LEDGER_PATH,
+        config_path=workspace / BUDGET_CONFIG_PATH,
+    )
+    kill_switch = BudgetKillSwitch(path=default_path(workspace))
+    return kill_switch.engage_if_needed(ledger.snapshot())
 
 
 def _dry_run_visibility(
@@ -434,6 +455,36 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     )
 
     try:
+        # ── 0. Budget kill-switch gate (TD-022) ───────────────────────────────
+        # Safety-by-default: if the persistent DAY budget is exhausted, skip all
+        # LLM-heavy work this tick. Checked before the scheduler/agent are even
+        # built so no planner/synthesizer/provider call can happen.
+        kill_switch = _check_budget_kill_switch(workspace)
+        if kill_switch.active:
+            ks_payload = kill_switch.to_dict()
+            summary["error"] = None
+            summary["budget_kill_switch"] = ks_payload
+            summary["result_status"] = "budget_kill_switch"
+            summary["tick_end"] = _now_iso()
+            _log_tick(workspace, {"event": "budget_kill_switch", **ks_payload})
+            _write_heartbeat(
+                workspace,
+                {
+                    "event": "budget_kill_switch",
+                    "tick_start": tick_start,
+                    "dry_run": dry_run,
+                    **ks_payload,
+                    **visibility,
+                },
+            )
+            print(
+                "[agent_tick] budget kill-switch active "
+                f"({kill_switch.counter} {kill_switch.used}/{kill_switch.limit}); "
+                "skipping LLM-heavy work",
+                file=sys.stderr,
+            )
+            return 0
+
         # ── 1. Scheduler tick — enqueue due schedules ─────────────────────────
         sched_store = SchedulerStore(workspace / SCHEDULES_PATH)
         task_store  = TaskQueueStore(workspace / TASK_QUEUE_PATH)

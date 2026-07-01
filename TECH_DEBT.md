@@ -605,3 +605,76 @@ TD-011 / TD-012 — Live Model Discovery + Provider Catalog Refresh (read-only)
   (0 LLM-вызовов, нет model_call_start, Planner не вызывается).
 - targeted: 16 passed (discovery) / 149 passed (discovery+catalog+cli).
 - full pytest: 3482 passed.
+
+----------------------------------------------------------------------
+
+TD-022 — Budget-on-by-default + Persistent Daemon Kill-Switch
+
+Статус: Done
+
+Проблема
+Persistent budget windows (core/budget_ledger.py) и hard ModelBudgetExceeded
+pre-flight уже есть, но как дефолтная граница автономного демона бюджет-защита
+недостаточно строгая: limit ≤ 0 (или отсутствующий config/budget_limits.json)
+трактуется как «unlimited». Значит, unattended daemon (agent_tick.run_tick)
+после исчерпания дневного бюджета мог продолжать тратить прогон за прогоном,
+и не было персистентного kill-switch, переживающего рестарт процесса.
+
+Область (только budget safety)
+- без self-apply, без изменений file_write/shell_exec-политик;
+- без изменений routing / provider catalog / registry schema;
+- без git-автоматизации;
+- лимиты НЕ поднимаются; существующий config/budget_limits.json уважается;
+- не ломать интерактивные read-only status-команды.
+
+Что должно быть
+1. Enforcement ON by default для autonomous/daemon пути.
+2. Missing/all-zero budget config в daemon-режиме НЕ значит «unlimited».
+3. Персистентный kill-switch при исчерпании дневного (day) бюджета.
+4. agent_tick / daemon проверяет kill-switch ДО любой LLM-heavy работы.
+5. При активном kill-switch: пропустить работу, heartbeat/report
+   reason=budget_kill_switch, никаких planner/synthesizer вызовов.
+6. Kill-switch переживает рестарт процесса (latched state file).
+7. Operator-readable статус: active/inactive, reason, counter, window,
+   used/limit, timestamp.
+
+Готово
+- core/budget_kill_switch.py (новый):
+  * CONSERVATIVE_DAY_LIMITS (llm_calls=100, model_tokens=300000,
+    model_cost_units=500) — safety-net дневные лимиты, применяемые к дорогим
+    счётчикам когда положительный лимит не сконфигурирован. Любой
+    положительный config/env лимит имеет приоритеж (limit_source="config").
+  * evaluate_day_budget(snapshot) — чистая функция: срабатывает как только
+    used ≥ effective_limit по любому guarded day-счётчику. all-zero config →
+    conservative default, никогда не unlimited.
+  * BudgetKillSwitch(path): load/status(read-only)/engage_if_needed(latch)/
+    clear. Latched-состояние (data/budget_kill_switch.json, атомарная запись)
+    остаётся active между процессами, пока оператор не сбросит.
+  * KillSwitchState dataclass: active/reason/counter/window/used/limit/
+    limit_source/timestamp + to_dict/from_dict.
+- agent_tick.py:
+  * BUDGET_LEDGER_PATH / BUDGET_CONFIG_PATH константы;
+  * _check_budget_kill_switch(workspace) — строит ledger напрямую (без agent/
+    LLM) и latch'ит switch;
+  * run_tick: gate шагом «0» ДО scheduler tick / build_agent. При active →
+    tick-log + heartbeat event=budget_kill_switch (reason/counter/window/
+    used/limit/timestamp), return 0, задача остаётся pending.
+- cli/commands_budget.py + main.py:
+  * :budget-kill-switch [--json] [--clear] — read-only operator status; --clear
+    сбрасывает latched switch (не трогает лимиты/routing/catalog).
+  * зарегистрирован в dispatch/help/command-list; добавлен в TD-002 local-only
+    списки (0 LLM, нет model_call_start, Planner/Synthesizer не вызываются).
+
+Проверка
+- tests/test_budget_kill_switch.py (новый, 14 тестов):
+  * missing/all-zero config → conservative default, не unlimited;
+  * configured limit имеет приоритет над default;
+  * status payload содержит reason/counter/window/used/limit/timestamp;
+  * kill-switch переживает fresh helper load; clear() сбрасывает;
+  * status() read-only (не latch'ит когда inactive); битый state → inactive;
+  * daemon пропускает LLM-работу при исчерпанном day-бюджете (build_agent НЕ
+    вызывается, задача pending, heartbeat=budget_kill_switch, нет scheduler_tick);
+  * control: доступный бюджет → switch inactive, daemon идёт нормальным путём.
+- tests/test_cli.py: :budget-kill-switch в local-only параметрах.
+- targeted: 11 (kill-switch) / 197 (kill-switch+cli+daemon+ledger) passed.
+- full pytest: 3522 passed.
