@@ -1148,3 +1148,20 @@ TD-031 — Lane Outcomes to Subagent Ledger
 - Targeted: test_subagent_registry, test_self_apply_approval_bridge,
   test_self_apply_lane, test_approval* — зелёные.
 - Full pytest: 3682 passed (+18).
+Правка (scoring, TD-031): technical success != confirmed value
+- Живой self-build эксперимент: proposal для core/redaction.py дошёл до
+  committed_local и прошёл тесты, но по сути менял только регистр в комментарии
+  (WIDEST -> widest) под вывеской "robustness improvement"; человек отклонил как
+  low value.
+- core/subagent_registry._usefulness_score: committed_local и approved теперь
+  считаются techincal_success с малым весом _TECHNICAL_SUCCESS_WEIGHT=0.25, а не
+  полноценным value-очком. Producer-stage сигналы (proposals_created, vetoes)
+  остаются с полным весом; rolled_back по-прежнему вычитается полностью.
+- committed_local по-прежнему пишется как технический lane-исход (счётчик
+  committed_local += 1), но сам по себе не делает Builder high-value.
+- confirmed_value (human-accepted / merged / value-reviewed) — будущий сигнал,
+  в этом PR НЕ вводится (нет merge-tracking, нет новой CLI-команды, нет
+  auto-merge/auto-retire/model routing/budget/config изменений).
+- Тесты: committed_local инкрементит счётчик, но usefulness Builder остаётся
+  низким без confirmed value; producer-stage veto перевешивает technical
+  committed_local. Full pytest: 3684 passed.

@@ -230,6 +230,46 @@ def test_bridge_hook_is_idempotent_on_repeat(tmp_path):
     assert reg.roles["builder"].committed_local == 1
 
 
+# ── technical success is not confirmed value (TD-031 amendment) ────────────────
+
+
+def test_committed_local_counts_but_is_not_high_value(tmp_path):
+    """A committed_local lane outcome is a *technical* success, not confirmed
+    value: it must increment the counter without pushing Builder to high
+    usefulness on its own. Evidence: the live redaction.py run committed a
+    trivial comment edit that humans rejected as low value.
+    """
+    reg = SubagentRegistry(tmp_path)
+    # Builder ran once and built (invocations=1). No producer-stage value yet.
+    reg.record_report({"roles": [{"role": "builder", "decision": "built"}]},
+                      save=False)
+    builder = reg.roles["builder"]
+    assert builder.invocations == 1
+    assert builder.usefulness_score == 0.0
+
+    # Downstream: the change reached committed_local.
+    assert reg.apply_lane_outcome("ain_1", "committed_local", save=False) is True
+    assert builder.committed_local == 1  # technical outcome recorded
+
+    # ...but that alone must NOT mark Builder high-value.
+    assert builder.usefulness_score < 0.5
+    assert builder.usefulness_score < 1.0
+
+
+def test_technical_success_is_weighted_below_producer_stage_value(tmp_path):
+    """Same invocation count: a producer-stage value event (a Critic veto)
+    outweighs a technical lane success (committed_local)."""
+    reg = SubagentRegistry(tmp_path)
+    # builder: 1 invocation + committed_local (technical only)
+    reg.record_report({"roles": [{"role": "builder", "decision": "built"}]},
+                      save=False)
+    reg.apply_lane_outcome("ain_1", "committed_local", save=False)
+    # critic: 1 invocation + a veto (producer-stage value, full weight)
+    reg.record_report({"roles": [{"role": "critic", "decision": "veto"}]},
+                      save=False)
+    assert reg.roles["builder"].usefulness_score < reg.roles["critic"].usefulness_score
+
+
 # ── approve hook (commands_approval) ────────────────────────────────────────────
 
 
