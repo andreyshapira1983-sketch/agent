@@ -1334,3 +1334,66 @@ TD-035 — Producer Value Gate (Phase 1: deterministic pre-publish no-effect vet
 Примечание по нумерации: пользователь запросил это как «TD-034», но TD-034 уже
 занят (Recommendation gate P0 fix, PR #21). Во избежание двойной нумерации
 запись оформлена как TD-035.
+==============================================================================
+TD-036 — Grounded Backlog Selector (Phase 1: manager перестаёт выдумывать диагноз)
+Статус: Done
+
+Проблема
+- Manager (_manager_select) получал статический allowlist из 3 файлов и
+  генерировал diagnosis из воздуха; Builder — reason тоже свободной генерацией.
+  Даже с TD-035 (value gate режет no-effect патч) у агента не было источника
+  правды для «зачем эта задача». Отсюда «robustness improvement» на смене
+  регистра в комментарии. Не хватало слоя обоснованной инициативы: выбирать
+  задачу только из реальных машиночитаемых сигналов, с provenance, и честно
+  отказываться, когда обоснованной задачи нет.
+
+Готово
+- core/backlog_signals.py (новый, read-only, детерминированный): парсеры
+  closed-set сигналов. open_tech_debt — записи TECH_DEBT.md со статусом не Done
+  (Partial/deferred/пустой); заголовок записи = дословный problem_quote.
+  anatomy_candidates — список «Candidate follow-ups (TD-030+)» из
+  AGENT_ANATOMY.md; жирный заголовок пункта = дословный quote (номера трактуются
+  как текст, НЕ как исполняемые TD id). value_review_penalties — value_reviews
+  ТОЛЬКО как анти-повтор: rejected_wrong_target -> suppress цели,
+  rejected_low_value/misleading/risky -> штраф; резолвинг цели через
+  опциональный item_target_map (best-effort, value_reviews не мутируются).
+- core/backlog_selector.py (новый, чистый): BacklogCandidate с 8 полями
+  (target_path, signal_source, evidence_ref, problem_quote, proposed_change,
+  proof_of_value, expected_effect, confidence) + score. Валидация provenance:
+  problem_quote обязан быть точной подстрокой источника, иначе кандидат
+  отбрасывается; suppressed цель отбрасывается. Детерминированный ранг
+  (tech_debt > anatomy, минус штраф). select_top -> кандидат или None. Пустой
+  backlog -> None. load_backlog — read-only IO, отсутствующие файлы -> [].
+- core/self_build_producer.py: опциональный guarded параметр grounded_selector.
+  None (по умолчанию) -> поведение байт-в-байт как раньше (_manager_select+LLM).
+  Задан -> _manager_from_grounded берёт target+diagnosis из кандидата, БЕЗ
+  LLM-вызова; None/off-allowlist/critical/исключение селектора -> no_target
+  (producer -> no_patch), без выдумывания. Дальше без изменений: Researcher ->
+  Builder -> Critic -> TD-035 value gate -> Reporter -> human approval.
+- docs/AGENT_ANATOMY.md: индекс модулей дополнен core/backlog_selector и
+  core/backlog_signals.
+
+Область НЕ тронута
+- Нет registry-источника, producer-history и tests-status в Phase 1. Нет LLM/
+  network/git/apply/inbox side effects из селектора. cooldown/approval/
+  self_apply/TD-035 value gate/human gating без изменений. agent_tick/daemon,
+  CLI, registry-scoring, value_review write, model routing, budget/config — не
+  тронуты. config/budget_limits.json не тронут.
+
+Проверка
+- tests/test_backlog_signals.py (новый, 11): non-Done отбор; quote traceable;
+  evidence_ref; multi-id title; anatomy секция/границы; penalties suppress/
+  penalize/latest-wins/need-map.
+- tests/test_backlog_selector.py (новый, 14): пустой set -> None; grounded
+  кандидат из TECH_DEBT и из anatomy; детерминизм; ранг tech_debt>anatomy;
+  untraceable quote -> drop; нет источника -> drop; rejected_wrong_target ->
+  suppress; penalized -> ниже ранг; load_backlog read-only и tolerant.
+- tests/test_self_build_producer.py: selector=None -> прежнее поведение;
+  grounded кандидат -> Manager не зовёт LLM, diagnosis из кандидата; None ->
+  no_target; off-allowlist/critical -> no_target; исключение селектора не ломает
+  producer.
+- Full pytest: 3777 passed. Anatomy-check зелёный.
+
+Примечание: пользователь заказывал это как «TD-036»; номер в TECH_DEBT свободен
+(предыдущий shipped — TD-035 Producer Value Gate). anatomy-список TD-030+
+остаётся advisory-текстом.

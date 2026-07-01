@@ -256,6 +256,56 @@ def _manager_select(
     )
 
 
+def _manager_from_grounded(
+    provider: Callable[[], Any], candidate_targets: tuple[str, ...]
+) -> RoleOutput:
+    """Manager variant (TD-036) that takes its target + diagnosis from a grounded
+    backlog candidate instead of inventing one via the LLM.
+
+    ``provider`` is a zero-arg callable returning a candidate (with
+    ``target_path``/``problem_quote``/``evidence_ref``) or ``None``. A ``None``
+    candidate, an off-allowlist target, or a critical target all yield
+    ``no_target`` — the producer then refuses rather than fabricating a
+    diagnosis. Best-effort: a raising provider is treated as ``None``.
+    """
+    try:
+        candidate = provider()
+    except Exception:  # noqa: BLE001 — a broken selector must never break producer
+        candidate = None
+    if candidate is None:
+        return RoleOutput("manager", "no_target", "no grounded backlog candidate")
+    target = str(getattr(candidate, "target_path", "") or "").strip()
+    diagnosis = str(getattr(candidate, "problem_quote", "") or "").strip()
+    evidence_ref = str(getattr(candidate, "evidence_ref", "") or "").strip()
+    if not target:
+        return RoleOutput("manager", "no_target", "grounded candidate has no target")
+    if target not in candidate_targets:
+        return RoleOutput(
+            "manager",
+            "no_target",
+            f"grounded target {target!r} is off-allowlist",
+            {"rejected_target": target},
+        )
+    if _is_critical(target):
+        return RoleOutput(
+            "manager",
+            "no_target",
+            f"grounded target {target!r} is critical",
+            {"rejected_target": target},
+        )
+    return RoleOutput(
+        "manager",
+        "selected",
+        f"selected {target} (grounded)",
+        {
+            "target": target,
+            "diagnosis": diagnosis,
+            "grounded": True,
+            "evidence_ref": evidence_ref,
+        },
+    )
+
+
 def _researcher_gather(
     file_reader: Callable[[str], str | None], target: str, diagnosis: str
 ) -> RoleOutput:
@@ -446,6 +496,7 @@ def produce_self_apply_proposal(
     confidence_threshold: float = _DEFAULT_CONFIDENCE_THRESHOLD,
     now_iso: str | None = None,
     registry: Any = None,
+    grounded_selector: Callable[[], Any] | None = None,
 ) -> ProducerReport:
     """Run the Manager/Researcher/Builder/Critic/Reporter pipeline to produce at
     most one validated low-risk self-apply proposal into the approval inbox.
@@ -516,7 +567,13 @@ def produce_self_apply_proposal(
     roles: list[RoleOutput] = []
 
     # ── Manager ─────────────────────────────────────────────────────────────
-    manager = _manager_select(llm, targets)
+    # TD-036: when a grounded backlog selector is supplied, the Manager takes its
+    # target + diagnosis from a verifiable backlog candidate instead of inventing
+    # them via the LLM. Default (None) is byte-identical to prior behavior.
+    if grounded_selector is not None:
+        manager = _manager_from_grounded(grounded_selector, targets)
+    else:
+        manager = _manager_select(llm, targets)
     roles.append(manager)
     if manager.decision != "selected":
         return _record(ProducerReport(

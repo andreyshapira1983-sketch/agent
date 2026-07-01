@@ -418,3 +418,109 @@ def test_overclaim_summary_adds_soft_flag_without_blocking(workspace: Path):
     # The flag is visible to a human reviewer on the approval item's reasons.
     item = inbox.list()[0]
     assert any("value-flag" in r for r in item.reasons)
+
+
+# ── TD-036: grounded backlog selector integration ────────────────────────────
+
+
+class _Candidate:
+    """Minimal stand-in for a BacklogCandidate."""
+
+    def __init__(self, target_path: str, problem_quote: str, evidence_ref: str = "ref"):
+        self.target_path = target_path
+        self.problem_quote = problem_quote
+        self.evidence_ref = evidence_ref
+
+
+def test_selector_none_preserves_existing_behavior(workspace: Path):
+    # Default path: Manager still selects via the LLM exactly as before.
+    llm = FakeLLM([_manager_ok(), _builder_ok()])
+    report = _produce(workspace, llm=llm)  # grounded_selector defaults to None
+    assert report.status == "proposed"
+    assert [r.role for r in report.role_outputs][0] == "manager"
+    # The manager consulted the LLM (first canned response consumed).
+    assert any("Manager" in c["system"] for c in llm.calls)
+
+
+def test_grounded_candidate_used_without_inventing_diagnosis(workspace: Path):
+    inbox = ApprovalInbox(path=None)
+    candidate = _Candidate(_TARGET, "grounded: fix the real bug", "TECH_DEBT.md:42")
+    # No manager response provided: if the LLM were consulted for selection this
+    # would fall through to the {} default. We assert the LLM is NOT asked to
+    # select a manager target.
+    llm = FakeLLM([_builder_custom("VALUE = 2\n", "small fix")])
+    report = _produce(
+        workspace,
+        llm=llm,
+        inbox=inbox,
+        grounded_selector=lambda: candidate,
+    )
+    assert report.status == "proposed"
+    manager = report.role_outputs[0]
+    assert manager.role == "manager" and manager.decision == "selected"
+    assert manager.data["grounded"] is True
+    assert manager.data["diagnosis"] == "grounded: fix the real bug"
+    assert manager.data["evidence_ref"] == "TECH_DEBT.md:42"
+    # The Manager never invented a diagnosis via the LLM.
+    assert not any("Manager" in c["system"] for c in llm.calls)
+
+
+def test_grounded_selector_none_returns_no_target_not_invented(workspace: Path):
+    inbox = ApprovalInbox(path=None)
+    llm = FakeLLM([_manager_ok(), _builder_ok()])  # would be used only if invented
+    report = _produce(
+        workspace,
+        llm=llm,
+        inbox=inbox,
+        grounded_selector=lambda: None,
+    )
+    assert report.status == "no_patch"
+    assert [r.role for r in report.role_outputs] == ["manager"]
+    assert report.role_outputs[0].decision == "no_target"
+    assert llm.calls == []  # no LLM invention, no builder work
+    assert inbox.list() == []
+
+
+def test_grounded_off_allowlist_target_is_no_target(workspace: Path):
+    inbox = ApprovalInbox(path=None)
+    candidate = _Candidate("TD-060", "an open backlog item")  # not a code target
+    llm = FakeLLM([])
+    report = _produce(
+        workspace,
+        llm=llm,
+        inbox=inbox,
+        candidate_targets=(_TARGET,),
+        grounded_selector=lambda: candidate,
+    )
+    assert report.status == "no_patch"
+    assert report.role_outputs[0].decision == "no_target"
+    assert inbox.list() == []
+
+
+def test_grounded_critical_target_is_no_target(workspace: Path):
+    inbox = ApprovalInbox(path=None)
+    candidate = _Candidate("core/loop.py", "touch the brain")
+    report = _produce(
+        workspace,
+        llm=FakeLLM([]),
+        inbox=inbox,
+        candidate_targets=("core/loop.py",),
+        grounded_selector=lambda: candidate,
+        file_reader=_reader({"core/loop.py": "x = 1\n"}),
+    )
+    assert report.status == "no_patch"
+    assert report.role_outputs[0].decision == "no_target"
+
+
+def test_broken_selector_does_not_break_producer(workspace: Path):
+    def _boom():
+        raise RuntimeError("selector exploded")
+
+    report = _produce(
+        workspace,
+        llm=FakeLLM([]),
+        grounded_selector=_boom,
+    )
+    # A raising selector is treated as "no grounded candidate", never a crash.
+    assert report.status == "no_patch"
+    assert report.role_outputs[0].decision == "no_target"
