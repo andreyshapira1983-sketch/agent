@@ -41,6 +41,11 @@ def _handle_self_apply_run(rest: str, agent: "AgentLoop", workspace: Path) -> bo
     item_id = parts[0]
 
     inbox = _approval_inbox_for(agent, workspace)
+    try:
+        from core.subagent_registry import SubagentRegistry
+        registry = SubagentRegistry.load(workspace)
+    except Exception:
+        registry = None
     result = run_approved_self_apply(
         inbox=inbox,
         item_id=item_id,
@@ -49,6 +54,7 @@ def _handle_self_apply_run(rest: str, agent: "AgentLoop", workspace: Path) -> bo
         test_runner=RunTestsTool(workspace_root=workspace),
         kill_switch=BudgetKillSwitch(path=default_path(workspace)),
         budget_snapshot=_budget_ledger_snapshot(agent),
+        registry=registry,
     )
 
     # Secret-free structured log (never dumps file content or diffs).

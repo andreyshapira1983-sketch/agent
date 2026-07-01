@@ -54,6 +54,15 @@ DEFAULT_ROLES: tuple[str, ...] = (
 VALID_STATUSES: tuple[str, ...] = ("active", "paused", "retired")
 VALID_RECOMMENDATIONS: tuple[str, ...] = ("keep", "watch", "pause", "retire")
 
+# TD-031 canonical, narrow lane-outcome attribution. One role per outcome; do NOT
+# credit all roles. ``reporter`` published the item that got approved; ``builder``
+# owns the file content that either committed or had to be rolled back.
+LANE_OUTCOME_ROLE: dict[str, str] = {
+    "approved": "reporter",
+    "committed_local": "builder",
+    "rolled_back": "builder",
+}
+
 # Advisory recommendation thresholds. Conservative by design; they only shape the
 # ``recommendation`` string and never the stored ``status``.
 _MIN_JUDGED_FOR_RECOMMENDATION = 5
@@ -239,9 +248,14 @@ class SubagentRegistry:
     write helpers persist atomically and never raise on a corrupt/missing file.
     """
 
-    def __init__(self, workspace: str | Path, roles: dict[str, RoleRecord] | None = None):
+    def __init__(self, workspace: str | Path, roles: dict[str, RoleRecord] | None = None,
+                 applied_outcomes: set[str] | None = None):
         self.workspace = Path(workspace)
         self.roles: dict[str, RoleRecord] = roles if roles is not None else {}
+        # Persistent dedup set for TD-031 lane outcomes. Keyed
+        # ``f"{item_id}:{role_id}:{outcome}"`` so re-firing a hook (or a restart)
+        # never double-counts, and future multi-role crediting stays safe.
+        self.applied_outcomes: set[str] = applied_outcomes if applied_outcomes is not None else set()
         self._ensure_defaults()
 
     # ── persistence ─────────────────────────────────────────────────────────
@@ -262,6 +276,7 @@ class SubagentRegistry:
         """Read the ledger; a missing/corrupt file degrades to default roles."""
         path = Path(workspace) / REGISTRY_PATH
         roles: dict[str, RoleRecord] = {}
+        applied: set[str] = set()
         if path.exists():
             try:
                 raw = json.loads(path.read_text(encoding="utf-8"))
@@ -272,9 +287,14 @@ class SubagentRegistry:
                             rec = RoleRecord.from_dict({**data, "role_id": role_id})
                             _recompute(rec)
                             roles[role_id] = rec
+                # Tolerant-load: older ledgers have no ``applied_outcomes`` key.
+                raw_applied = raw.get("applied_outcomes", []) if isinstance(raw, dict) else []
+                if isinstance(raw_applied, list):
+                    applied = {str(k) for k in raw_applied}
             except (ValueError, OSError):
                 roles = {}  # corrupt -> rebuild defaults
-        return cls(workspace, roles)
+                applied = set()
+        return cls(workspace, roles, applied)
 
     def save(self) -> None:
         """Persist atomically (tmp + replace). Best-effort; may raise on IO —
@@ -283,6 +303,7 @@ class SubagentRegistry:
         record = {
             "updated_at": _now_iso(),
             "roles": {rid: rec.to_dict() for rid, rec in self.roles.items()},
+            "applied_outcomes": sorted(self.applied_outcomes),
         }
         tmp = self.path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -354,9 +375,11 @@ class SubagentRegistry:
     ) -> bool:
         """Link a downstream self-apply lane outcome to a role (TD-023/TD-024).
 
-        Defined for FUTURE wiring; this PR never invokes it automatically
-        (TD-028 clarification 8). ``outcome`` is one of ``approved`` /
-        ``committed_local`` / ``rolled_back``.
+        Low-level primitive. TD-031 invokes it via :meth:`apply_lane_outcome`
+        (which adds correlation + persistent dedup) from guarded, best-effort
+        hooks. ``outcome`` is one of ``approved`` / ``committed_local`` /
+        ``rolled_back``. Only updates counters/scores/recommendation; it never
+        mutates role ``status`` (advisory-only).
         """
         rec = self._role(role_id)
         if outcome == "approved":
@@ -369,6 +392,31 @@ class SubagentRegistry:
             return False
         rec.last_used_at = _now_iso()
         _recompute(rec)
+        if save:
+            self.save()
+        return True
+
+    def apply_lane_outcome(
+        self, item_id: str, outcome: str, *, save: bool = True
+    ) -> bool:
+        """Record a lane/approval outcome for the approval item ``item_id`` (TD-031).
+
+        Resolves the canonical crediting role via :data:`LANE_OUTCOME_ROLE`
+        (``approved``->reporter, ``committed_local``/``rolled_back``->builder),
+        then delegates to :meth:`record_lane_outcome`. Persistent dedup keyed
+        ``f"{item_id}:{role_id}:{outcome}"`` makes it idempotent across re-fired
+        hooks and restarts. Returns ``True`` only when it newly recorded. Never
+        mutates role ``status``.
+        """
+        role_id = LANE_OUTCOME_ROLE.get(outcome)
+        if role_id is None:
+            return False
+        key = f"{item_id}:{role_id}:{outcome}"
+        if key in self.applied_outcomes:
+            return False
+        if not self.record_lane_outcome(role_id, outcome, save=False):
+            return False
+        self.applied_outcomes.add(key)
         if save:
             self.save()
         return True
