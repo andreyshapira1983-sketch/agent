@@ -306,6 +306,41 @@ def _manager_from_grounded(
     )
 
 
+def _default_grounded_selector(workspace: str | Path) -> Callable[[], Any]:
+    """Build the DEFAULT grounded backlog selector for a workspace (TD-036
+    follow-up).
+
+    This is what makes the grounded path the default for the real callers
+    (``:self-build-produce`` and the daemon) without them having to assemble a
+    selector themselves. It reads ``TECH_DEBT.md`` / ``docs/AGENT_ANATOMY.md``
+    and the value-review ledger strictly read-only and returns a zero-arg
+    callable yielding the top-ranked backlog candidate, or ``None`` when the
+    closed backlog set is empty.
+
+    It never calls an LLM, never touches the network/git, and is fully
+    best-effort: any import/load failure yields a selector that returns
+    ``None``, so the Manager refuses (``no_patch``) instead of silently falling
+    back to the LLM manager.
+    """
+    def _select() -> Any:
+        try:
+            from core.backlog_selector import load_backlog, select_top
+
+            reviews = None
+            try:
+                from core.value_review import ValueReviewLog
+
+                reviews = ValueReviewLog.for_workspace(workspace).list()
+            except Exception:  # noqa: BLE001 — reviews are an optional signal
+                reviews = None
+            candidates = load_backlog(workspace, value_reviews=reviews)
+            return select_top(candidates)
+        except Exception:  # noqa: BLE001 — a broken backlog must never break producer
+            return None
+
+    return _select
+
+
 def _researcher_gather(
     file_reader: Callable[[str], str | None], target: str, diagnosis: str
 ) -> RoleOutput:
@@ -497,6 +532,7 @@ def produce_self_apply_proposal(
     now_iso: str | None = None,
     registry: Any = None,
     grounded_selector: Callable[[], Any] | None = None,
+    legacy_llm_manager: bool = False,
 ) -> ProducerReport:
     """Run the Manager/Researcher/Builder/Critic/Reporter pipeline to produce at
     most one validated low-risk self-apply proposal into the approval inbox.
@@ -508,6 +544,15 @@ def produce_self_apply_proposal(
     are recorded into it as an additive, best-effort side effect (TD-028). When
     ``registry is None`` — the default — behaviour is byte-identical to before,
     and a registry write failure can never change or break this function.
+
+    Manager target selection (TD-036 follow-up): by default the Manager takes its
+    target + diagnosis from a *grounded* backlog candidate (TECH_DEBT.md /
+    docs/AGENT_ANATOMY.md), never inventing one via the LLM. Pass an explicit
+    ``grounded_selector`` (a zero-arg callable returning a candidate or ``None``)
+    to override the default workspace-backed selector. An empty backlog yields
+    ``no_patch`` — there is no LLM fallback. The legacy LLM manager (which invents
+    a diagnosis from the static allowlist) runs ONLY when explicitly requested via
+    ``legacy_llm_manager=True`` (debug/tests).
     """
     def _record(report: ProducerReport) -> ProducerReport:
         if registry is not None:
@@ -567,13 +612,20 @@ def produce_self_apply_proposal(
     roles: list[RoleOutput] = []
 
     # ── Manager ─────────────────────────────────────────────────────────────
-    # TD-036: when a grounded backlog selector is supplied, the Manager takes its
-    # target + diagnosis from a verifiable backlog candidate instead of inventing
-    # them via the LLM. Default (None) is byte-identical to prior behavior.
-    if grounded_selector is not None:
-        manager = _manager_from_grounded(grounded_selector, targets)
-    else:
+    # TD-036 follow-up: the grounded backlog selector is now the DEFAULT source
+    # of the Manager's target + diagnosis, so the real callers
+    # (``:self-build-produce`` and the daemon) stop inventing a diagnosis via the
+    # LLM. Resolution order:
+    #   * an explicit ``grounded_selector`` (tests / advanced callers), else
+    #   * the default workspace-backed grounded selector.
+    # There is NO LLM fallback: an empty grounded backlog yields ``no_patch``
+    # rather than a fabricated diagnosis. The legacy LLM manager path runs ONLY
+    # when explicitly opted into via ``legacy_llm_manager=True`` (debug/tests).
+    if legacy_llm_manager:
         manager = _manager_select(llm, targets)
+    else:
+        selector = grounded_selector or _default_grounded_selector(workspace)
+        manager = _manager_from_grounded(selector, targets)
     roles.append(manager)
     if manager.decision != "selected":
         return _record(ProducerReport(
