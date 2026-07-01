@@ -94,7 +94,7 @@ from core.redaction import (
     scan,
 )
 from core.model_router import ModelRole, ModelRouter
-from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult
+from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult, RememberFn
 from core.user_profile import UserProfile, UserProfileStore, profile_to_prompt_block
 from core.assumption_registry import (  # Layer 5
     AssumptionRegistry,
@@ -1498,7 +1498,7 @@ class AgentLoop:
                 chain,
                 ranking=source_ranking,
                 source_store=self.source_registry_store,
-                remember=self._remember_from_knowledge,
+                remember=self._knowledge_remember_batch(),
                 auto_write_memory=self.knowledge_auto_write,
             )
             source_registry = knowledge_result.registry
@@ -1857,7 +1857,7 @@ class AgentLoop:
                     chain,
                     ranking=source_ranking,
                     source_store=self.source_registry_store,
-                    remember=self._remember_from_knowledge,
+                    remember=self._knowledge_remember_batch(),
                     auto_write_memory=self.knowledge_auto_write,
                 )
                 source_registry = knowledge_result.registry
@@ -2108,6 +2108,40 @@ class AgentLoop:
             owner=owner,
         )
 
+    def _knowledge_remember_batch(self) -> RememberFn:
+        """Return a ``remember`` callback that loads the persistent store ONCE.
+
+        The knowledge pipeline attempts a write for every extracted claim. On a
+        repeated read-only turn (e.g. a work-session re-running the same goal)
+        the same ~60 claims are re-extracted from the same files each cycle, and
+        each `remember()` used to reload the entire store to run the dedup gate —
+        an O(claims × records) disk reload every cycle whose writes are ~all
+        rejected as duplicates (TD-019). This closure loads the snapshot a single
+        time per pipeline pass and reuses it; ``remember`` keeps it current by
+        appending any saved record, so dedup/echo behavior is unchanged.
+        """
+        snapshot: list[MemoryRecord] = (
+            self.persistent_store.load() if self.persistent_store is not None else []
+        )
+
+        def _remember(
+            content: str,
+            tags: list[str],
+            source: str,
+            record_type: str,
+            owner: str,
+        ) -> tuple[MemoryWriteDecision, MemoryRecord | None]:
+            return self.remember(
+                content=content,
+                tags=tags,
+                source=source,
+                record_type=record_type,
+                owner=owner,
+                existing=snapshot,
+            )
+
+        return _remember
+
     def remember(
         self,
         content: str,
@@ -2115,6 +2149,7 @@ class AgentLoop:
         source: str = "user-explicit",
         record_type: str = "semantic",
         owner: str = "user",
+        existing: list[MemoryRecord] | None = None,
     ) -> tuple[MemoryWriteDecision, MemoryRecord | None]:
         """Run a `:remember`-style write through the Write Policy.
 
@@ -2123,6 +2158,15 @@ class AgentLoop:
 
         `owner` flows into the Write Policy. Anything outside the first-
         party whitelist needs a `cross-owner-consent` tag.
+
+        ``existing`` is an optional pre-loaded snapshot of the persistent
+        records used by the dedup gate. When a caller writes many records in
+        one pass (e.g. the knowledge pipeline attempting dozens of agent-auto
+        claims per cycle) it can load the store ONCE and pass the same list in,
+        avoiding a full store reload per write. When provided, any record saved
+        here is appended to it so later writes in the same pass still dedup
+        against it — matching the reload-every-time semantics exactly. When
+        ``None`` (the default) the store is loaded fresh, as before.
         """
         if self.persistent_store is None:
             decision = MemoryWriteDecision(
@@ -2132,9 +2176,10 @@ class AgentLoop:
             return decision, None
 
         tags = tags or []
-        # Dedup gate (MVP-10) needs the existing records — load them once
-        # and pass into the policy so the policy stays a pure function.
-        existing = self.persistent_store.load()
+        # Dedup gate (MVP-10) needs the existing records. Load them once and
+        # pass into the policy so the policy stays a pure function. A caller
+        # may supply the snapshot (TD-019) to avoid reloading per write.
+        existing = self.persistent_store.load() if existing is None else existing
         # Echo gate (A1) needs the recent agent-auto write-log, time-windowed.
         # Only consulted when a registry is wired; stays a pure input to the
         # policy. `user-explicit` writes are never echo-guarded.
@@ -2185,6 +2230,10 @@ class AgentLoop:
             owner=owner,
         )
         self.persistent_store.save(record)
+        # Keep a caller-supplied snapshot (TD-019) current so subsequent writes
+        # in the same pass dedup against this record, exactly as a fresh reload
+        # would have. Harmless when ``existing`` is a private freshly-loaded list.
+        existing.append(record)
         # Record this agent-auto write in the rolling echo-log so the next
         # cycle's echo gate can see it. Only agent-auto writes are logged —
         # the registry exists to catch the agent echoing *itself*.

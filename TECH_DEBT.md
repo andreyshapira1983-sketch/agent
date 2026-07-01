@@ -351,3 +351,48 @@ pipeline над пустой evidence-цепочкой. Для «привет» 
   — cheap-ход пишет эпизод, но НЕ гоняет consolidation (memory_consolidation_skipped,
   0 отчётов).
 - full pytest: 3404 passed.
+
+
+TD-019 — Duplicate Memory Write Waste (knowledge pipeline)
+
+Статус: Done
+
+Проблема
+На повторяющемся read-only ходе (например, work-session, который каждый цикл
+перезапускает одну и ту же цель) knowledge pipeline заново извлекает те же ~60
+claim'ов из тех же файлов и пытается записать каждый в persistent memory. Раньше
+КАЖДЫЙ AgentLoop.remember() перечитывал весь store (self.persistent_store.load(),
+~456 записей) ради dedup-гейта — то есть O(claims × records) перезагрузок с диска
+за цикл, причём почти все записи всё равно отклонялись как дубликаты. Чистые
+накладные расходы, растущие с размером памяти.
+
+Что должно быть
+Грузить снапшот store ОДИН раз за проход pipeline, сохранив dedup/echo-поведение
+ровно как было; не трогать одиночный remember() из ingestion.
+
+Готово
+- core/loop.py remember(): добавлен необязательный параметр existing:
+  list[MemoryRecord] | None. При None — как раньше (self.persistent_store.load()),
+  что сохраняет поведение всех текущих вызовов; при переданном списке (в т.ч.
+  пустом []) reload не происходит. После save записанный (уже DLP-редакт.) record
+  добавляется в existing — later-writes в том же проходе дедуплицируются ровно так
+  же, как при свежем load().
+- core/loop.py _knowledge_remember_batch() -> RememberFn: грузит снапшот один раз
+  и возвращает closure, вызывающий remember(..., existing=snapshot). Оба вызова
+  knowledge_pipeline.run(remember=...) теперь используют этот batch-callback вместо
+  _remember_from_knowledge (тот оставлен без изменений — на него ссылаются
+  core/ingestion.py и tests/test_ingestion_helpers.py).
+- Echo-гейт (memory_write_registry.recent) и логирование каждого reject сохранены
+  без изменений — фикс убирает лишний дисковый I/O, а не телеметрию.
+
+Проверка
+- tests/test_knowledge_remember_batch.py:
+  * remember(existing=snapshot) не перезагружает store и добавляет сохранённый
+    record в снапшот;
+  * _knowledge_remember_batch() грузит store ровно один раз независимо от числа
+    записей;
+  * дубликат в том же проходе всё ещё reject (снапшот актуален без reload);
+  * контент из прошлого цикла reject на следующем проходе без per-claim reload.
+- targeted: test_knowledge_pipeline / test_persistent_integration / test_integration
+  / test_ingestion_helpers / test_work_session / test_smart_memory — 102 passed.
+- full pytest: 3418 passed.
