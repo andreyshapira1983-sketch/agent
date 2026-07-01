@@ -120,11 +120,13 @@ _OPERATOR_MODEL_ENV_VARS = (
     "AGENT_ALLOW_MOCK_ROUTING",
     "AGENT_PROVIDER",
     "AGENT_MODEL",
+    "AGENT_MODEL_REGISTRY_JSON",
+    "AGENT_MODEL_REGISTRY_PATH",
 )
 
 
 @pytest.fixture(autouse=True)
-def _neutralize_operator_model_env(monkeypatch):
+def _neutralize_operator_model_env(monkeypatch, tmp_path_factory):
     """Strip ambient model-routing overrides before each test.
 
     Runs before the test body, so a test that explicitly sets one of these
@@ -134,6 +136,9 @@ def _neutralize_operator_model_env(monkeypatch):
     """
     for var in _OPERATOR_MODEL_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
+    empty_registry = tmp_path_factory.getbasetemp() / "empty_model_registry.json"
+    empty_registry.write_text('{"models": []}\n', encoding="utf-8")
+    monkeypatch.setenv("AGENT_MODEL_REGISTRY_PATH", str(empty_registry))
 
 
 @pytest.fixture

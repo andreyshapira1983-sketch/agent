@@ -40,6 +40,7 @@ import os
 import re
 import sys
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -445,6 +446,7 @@ def _run_agent_with_budget_guard(
     *,
     user_question: str,
     file_hint: str | None = None,
+    workspace: Path | None = None,
     stream: bool = True,
     deep_escalation=None,
 ) -> str:
@@ -474,6 +476,13 @@ def _run_agent_with_budget_guard(
         except ModelBudgetExceeded as exc:
             answer = f"Model budget exceeded: {exc}"
             agent.log.log("model_budget_blocked", {"error": str(exc)})
+            _persist_resumable_budget_stop(
+                agent,
+                workspace=workspace,
+                user_question=user_question,
+                file_hint=file_hint,
+                blocked=exc,
+            )
         # End the streaming line cleanly; the caller will print the formatted
         # version below (which strips Output Contract headers / citations).
         if _streaming_done:
@@ -484,7 +493,127 @@ def _run_agent_with_budget_guard(
     except ModelBudgetExceeded as exc:
         message = f"Model budget exceeded: {exc}"
         agent.log.log("model_budget_blocked", {"error": str(exc)})
+        _persist_resumable_budget_stop(
+            agent,
+            workspace=workspace,
+            user_question=user_question,
+            file_hint=file_hint,
+            blocked=exc,
+        )
         return message
+
+
+def _workspace_from_agent(agent: AgentLoop, workspace: Path | None) -> Path | None:
+    if workspace is not None:
+        return workspace
+    log_dir = getattr(getattr(agent, "log", None), "log_dir", None)
+    if log_dir is None:
+        return None
+    try:
+        return Path(log_dir).resolve().parent
+    except Exception:
+        return None
+
+
+def _budget_block_payload(
+    *,
+    agent: AgentLoop,
+    user_question: str,
+    file_hint: str | None,
+    blocked: ModelBudgetExceeded,
+) -> dict:
+    trace_id = getattr(getattr(agent, "log", None), "trace_id", "")
+    return {
+        "active_goal": f"Answer the question: {user_question}",
+        "goal_id": "",
+        "original_user_question": user_question,
+        "file_hint": file_hint,
+        "current_phase": "budget_guard",
+        "planned_steps": [],
+        "completed_steps": [],
+        "remaining_steps": [],
+        "stop_reason": "budget_exhausted",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "blocked_model": blocked.to_dict(),
+        "trace_id": trace_id,
+    }
+
+
+def _existing_paused_checkpoint(agent: AgentLoop) -> dict | None:
+    log = getattr(agent, "log", None)
+    trace_id = getattr(log, "trace_id", None)
+    log_dir = getattr(log, "log_dir", None)
+    if not trace_id or log_dir is None:
+        return None
+    try:
+        from core.checkpoint import CheckpointLoader, PHASE_PAUSED
+
+        ctx = CheckpointLoader(Path(log_dir)).load(trace_id)
+        if ctx is not None and ctx.last_phase == PHASE_PAUSED and ctx.paused:
+            payload = dict(ctx.paused)
+            payload.setdefault("trace_id", trace_id)
+            return payload
+    except Exception:
+        return None
+    return None
+
+
+def _persist_resumable_budget_stop(
+    agent: AgentLoop,
+    *,
+    workspace: Path | None,
+    user_question: str,
+    file_hint: str | None,
+    blocked: ModelBudgetExceeded,
+) -> None:
+    log = getattr(agent, "log", None)
+    trace_id = getattr(log, "trace_id", "")
+    payload = _existing_paused_checkpoint(agent) or _budget_block_payload(
+        agent=agent,
+        user_question=user_question,
+        file_hint=file_hint,
+        blocked=blocked,
+    )
+    if not payload.get("trace_id"):
+        payload["trace_id"] = trace_id
+
+    if payload.get("current_phase") == "budget_guard":
+        try:
+            from core.checkpoint import CheckpointWriter
+
+            CheckpointWriter(trace_id=trace_id, log_dir=log.log_dir).save_paused(payload)
+            agent.log.log(
+                "resumable_checkpoint_paused",
+                {
+                    "current_phase": payload["current_phase"],
+                    "stop_reason": payload["stop_reason"],
+                    "planned_steps": 0,
+                    "completed_steps": 0,
+                    "remaining_steps": 0,
+                    "blocked_model": payload["blocked_model"],
+                },
+            )
+        except Exception:
+            pass
+
+    resolved_workspace = _workspace_from_agent(agent, workspace)
+    if resolved_workspace is None:
+        return
+    try:
+        task = _task_queue_for(agent, resolved_workspace).add_paused_checkpoint(
+            goal=str(payload.get("active_goal") or user_question),
+            report=payload,
+        )
+        agent.log.log(
+            "resumable_task_paused",
+            {
+                "task_id": task.id,
+                "trace_id": payload.get("trace_id"),
+                "stop_reason": payload.get("stop_reason"),
+            },
+        )
+    except Exception:
+        pass
 
 
 _REPLY_ONLY_STOP_RE = re.compile(
@@ -2156,6 +2285,32 @@ def _preflight_file_hint(file_hint: str | None, workspace: Path) -> tuple[bool, 
     )
 
 
+def _resume_question_from_checkpoint(ctx) -> str:
+    paused = getattr(ctx, "paused", None) or {}
+    if not paused:
+        return ctx.question
+    original = str(paused.get("original_user_question") or ctx.question)
+    planned = paused.get("planned_steps") or []
+    completed = paused.get("completed_steps") or []
+    remaining = paused.get("remaining_steps") or []
+    blocked = paused.get("blocked_model") or {}
+    return "\n".join(
+        [
+            "Resume the interrupted task from this saved budget checkpoint.",
+            f"Original user question: {original}",
+            f"Active goal: {paused.get('active_goal') or original}",
+            f"Interrupted phase: {paused.get('current_phase') or ctx.last_phase}",
+            f"Stop reason: {paused.get('stop_reason') or 'budget_exhausted'}",
+            f"Blocked model/counter: {json.dumps(blocked, ensure_ascii=False)}",
+            f"Completed steps: {json.dumps(completed, ensure_ascii=False)}",
+            f"Remaining steps: {json.dumps(remaining, ensure_ascii=False)}",
+            f"Planned steps: {json.dumps(planned, ensure_ascii=False)}",
+            "Continue from the remaining steps when they are still relevant. "
+            "Do not repeat completed discovery unless it must be refreshed.",
+        ]
+    )
+
+
 def _handle_queue_status(agent: AgentLoop, workspace: Path) -> bool:
     summary = _task_queue_for(agent, workspace).summary()
     print("=== runtime task queue ===", file=sys.stderr)
@@ -2269,10 +2424,16 @@ def _handle_task_list(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         return True
     print(f"=== runtime tasks ({len(tasks)}; status={status}) ===", file=sys.stderr)
     for task in tasks:
+        report = task.last_report or {}
+        resume_hint = ""
+        if task.kind == "resume_checkpoint":
+            trace_id = report.get("trace_id") or "-"
+            stop_reason = report.get("stop_reason") or task.last_error or "-"
+            resume_hint = f" stop_reason={stop_reason} resume={trace_id}"
         print(
             f"  {task.id} [{task.status}] priority={task.priority} "
             f"attempts={task.attempts}/{task.max_attempts} run_after={task.run_after} "
-            f"goal={task.goal}",
+            f"goal={task.goal}{resume_hint}",
             file=sys.stderr,
         )
     return True
@@ -2430,6 +2591,22 @@ def _handle_schedule_list(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             f"next={schedule.next_run_at} name={schedule.name} goal={schedule.goal}",
             file=sys.stderr,
         )
+    return True
+
+
+def _schedule_disable_message(rest: str, workspace: Path) -> str:
+    schedule_id = rest.strip()
+    if not schedule_id:
+        return "Usage: :schedule-disable <schedule_id>"
+    try:
+        schedule = SchedulerStore(workspace / DEFAULT_RUNTIME_SCHEDULES_PATH).disable(schedule_id)
+    except KeyError:
+        return "SCHEDULE_NOT_FOUND"
+    return f"SCHEDULE_DISABLED {schedule.id}"
+
+
+def _handle_schedule_disable(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    print(_schedule_disable_message(rest, workspace), file=sys.stderr)
     return True
 
 
@@ -2756,6 +2933,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head == ":schedule-list":
         return _handle_schedule_list(rest.strip(), agent, workspace)
 
+    if head == ":schedule-disable":
+        return _handle_schedule_disable(rest.strip(), agent, workspace)
+
     if head == ":schedule-tick":
         return _handle_schedule_tick(rest.strip(), agent, workspace)
 
@@ -2856,6 +3036,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :schedule-add <min> <goal>      create recurring scheduler entry\n"
             "      flags: --name NAME  --no-tests  --limit N  --learning-limit N\n"
             "  :schedule-list [status|all]     list schedules\n"
+            "  :schedule-disable <id>          disable a runtime schedule without running it\n"
             "  :schedule-tick [--run]          enqueue due schedule tasks, optionally run them\n"
             "  :hygiene [subcmd] [--dry-run]   memory hygiene; subcmd:\n"
             "      backups    delete old .bak.<ts> files (keep last 3, >14d old)\n"
@@ -2936,7 +3117,8 @@ def main() -> int:
         help=(
             "Resume a previous run by trace ID. If the run completed synthesis, "
             "the cached answer is printed immediately (no LLM call). "
-            "If it crashed before synthesis, the full cycle is re-run from scratch."
+            "Budget-paused runs resume with saved phase/step context; "
+            "crash-partial runs are re-run from scratch."
         ),
     )
     parser.add_argument(
@@ -2967,6 +3149,9 @@ def main() -> int:
     if head.lower() == ":self-build-propose":
         _handle_self_build_propose(rest.strip(), None, workspace)  # type: ignore[arg-type]
         return 0
+    if head.lower() == ":schedule-disable":
+        print(_schedule_disable_message(rest.strip(), workspace), file=sys.stderr)
+        return 0
 
     load_dotenv()
 
@@ -2986,7 +3171,7 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 2
-        from core.checkpoint import CheckpointLoader as _CPLoader
+        from core.checkpoint import CheckpointLoader as _CPLoader, PHASE_PAUSED as _PHASE_PAUSED
         _log_dir = workspace / "logs"
         _loader = _CPLoader(_log_dir)
         _ctx = _loader.load(args.resume)
@@ -2996,6 +3181,16 @@ def main() -> int:
                 "Running fresh.",
                 file=sys.stderr,
             )
+        elif _ctx.last_phase == _PHASE_PAUSED and _ctx.paused:
+            print(
+                f"[resume] Resuming budget-paused checkpoint "
+                f"trace_id={args.resume!r} phase={_ctx.paused.get('current_phase')!r}.",
+                file=sys.stderr,
+            )
+            if not args.ask:
+                args.ask = _resume_question_from_checkpoint(_ctx)
+            if not args.file:
+                args.file = _ctx.file_hint
         elif _ctx.answer is not None:
             # Full cycle completed previously — replay the cached answer.
             print(
@@ -3076,6 +3271,7 @@ def main() -> int:
             agent,
             user_question=args.ask,
             file_hint=args.file,
+            workspace=workspace,
             stream=False,
             deep_escalation=deep_escalation,
         )
@@ -3108,7 +3304,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-triage  :best-next-action  :ack  :ack-list  :ack-clear  :approval-run  :task-add  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-triage  :best-next-action  :ack  :ack-list  :ack-clear  :approval-run  :task-add  :schedule-disable  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:
@@ -3224,6 +3420,7 @@ def main() -> int:
                 agent,
                 user_question=buffered,
                 file_hint=args.file,
+                workspace=workspace,
                 stream=False,
             )
             print("\n" + format_human_response(answer) + "\n")
@@ -3251,6 +3448,7 @@ def main() -> int:
             agent,
             user_question=q,
             file_hint=args.file,
+            workspace=workspace,
             stream=False,
         )
         print("\n" + format_human_response(answer) + "\n")

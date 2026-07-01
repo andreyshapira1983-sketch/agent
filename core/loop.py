@@ -24,6 +24,7 @@ import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -94,6 +95,7 @@ from core.redaction import (
     scan,
 )
 from core.model_router import ModelRole, ModelRouter
+from core.model_usage import ModelBudgetExceeded
 from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult
 from core.user_profile import UserProfile, UserProfileStore, profile_to_prompt_block
 from core.assumption_registry import (  # Layer 5
@@ -725,6 +727,7 @@ class AgentLoop:
                 def save_plan(self, **_kw: Any) -> None: pass
                 def save_act(self, **_kw: Any) -> None: pass
                 def save_respond(self, **_kw: Any) -> None: pass
+                def save_paused(self, _data: dict[str, Any]) -> None: pass
             _cp = _NoOpCP()
 
         # 1. Observe
@@ -1090,14 +1093,26 @@ class AgentLoop:
                         },
                     )
                 else:
-                    planner_out = self.planner.plan(
-                        question=user_question,
-                        file_hint=file_hint,
-                        history=planner_history,
-                        failure_context=failure_context,
-                        forbidden_actions=forbidden_actions,
-                        llm=_task_planner_llm,
-                    )
+                    try:
+                        planner_out = self.planner.plan(
+                            question=user_question,
+                            file_hint=file_hint,
+                            history=planner_history,
+                            failure_context=failure_context,
+                            forbidden_actions=forbidden_actions,
+                            llm=_task_planner_llm,
+                        )
+                    except ModelBudgetExceeded as exc:
+                        self._save_budget_pause_checkpoint(
+                            _cp,
+                            goal=goal,
+                            question=user_question,
+                            file_hint=file_hint,
+                            current_phase="planning",
+                            plan=plan,
+                            blocked=exc,
+                        )
+                        raise
                     if (
                         attempt == 1
                         and not failure_context.strip()
@@ -1450,17 +1465,29 @@ class AgentLoop:
         # worked. This is a much better UX than a bare error string.
         # Layer 5 — expose current-run assumptions to _synthesize via instance.
         self._run_assumptions_current = _run_assumptions
-        draft_answer = self._synthesize(
-            goal=goal,
-            artifacts=artifacts,
-            question=user_question,
-            planner_reasoning=planner_out.reasoning,
-            history=history,
-            persistent_block=persistent_block,
-            cycle_findings=list(self._cycle_findings),
-            failure_history=failure_history if replan_exhausted else None,
-            llm=_task_synth_llm,
-        )
+        try:
+            draft_answer = self._synthesize(
+                goal=goal,
+                artifacts=artifacts,
+                question=user_question,
+                planner_reasoning=planner_out.reasoning,
+                history=history,
+                persistent_block=persistent_block,
+                cycle_findings=list(self._cycle_findings),
+                failure_history=failure_history if replan_exhausted else None,
+                llm=_task_synth_llm,
+            )
+        except ModelBudgetExceeded as exc:
+            self._save_budget_pause_checkpoint(
+                _cp,
+                goal=goal,
+                question=user_question,
+                file_hint=file_hint,
+                current_phase="synthesis",
+                plan=plan,
+                blocked=exc,
+            )
+            raise
 
         # 7.5 — MVP-14.4 Verifier. LLM is the DRAFT writer; the Verifier
         # gates what reaches the user. Every claim must be cited (LLM
@@ -1667,13 +1694,25 @@ class AgentLoop:
                     forbidden_actions=decision.forbidden_actions,
                 )
 
-                planner_out = self.planner.plan(
-                    question=user_question,
-                    file_hint=file_hint,
-                    history=planner_history,
-                    failure_context=failure_context,
-                    forbidden_actions=decision.forbidden_actions,
-                )
+                try:
+                    planner_out = self.planner.plan(
+                        question=user_question,
+                        file_hint=file_hint,
+                        history=planner_history,
+                        failure_context=failure_context,
+                        forbidden_actions=decision.forbidden_actions,
+                    )
+                except ModelBudgetExceeded as exc:
+                    self._save_budget_pause_checkpoint(
+                        _cp,
+                        goal=goal,
+                        question=user_question,
+                        file_hint=file_hint,
+                        current_phase="verification_replan",
+                        plan=plan,
+                        blocked=exc,
+                    )
+                    raise
                 planner_out = self._force_file_hint_read_when_explicit(
                     planner_out,
                     question=user_question,
@@ -2834,6 +2873,75 @@ class AgentLoop:
             )
         plan.status = "in_progress"
         return plan
+
+    @staticmethod
+    def _checkpoint_step_summaries(plan: Plan | None) -> list[dict[str, Any]]:
+        if plan is None:
+            return []
+        summaries: list[dict[str, Any]] = []
+        for step in plan.steps:
+            action = step.action_spec or {}
+            summaries.append(
+                {
+                    "id": step.id,
+                    "order": step.order,
+                    "tool": action.get("tool_name") or action.get("tool"),
+                    "source_label": action.get("source_label"),
+                    "status": step.status,
+                    "expected_outcome": step.expected_outcome,
+                }
+            )
+        return summaries
+
+    def _save_budget_pause_checkpoint(
+        self,
+        checkpoint: Any,
+        *,
+        goal: Goal,
+        question: str,
+        file_hint: str | None,
+        current_phase: str,
+        plan: Plan | None,
+        blocked: ModelBudgetExceeded,
+    ) -> None:
+        save_paused = getattr(checkpoint, "save_paused", None)
+        if not callable(save_paused):
+            return
+        planned_steps = self._checkpoint_step_summaries(plan)
+        completed_steps = [
+            step for step in planned_steps if step.get("status") == "done"
+        ]
+        remaining_steps = [
+            step for step in planned_steps if step.get("status") != "done"
+        ]
+        payload = {
+            "active_goal": goal.description,
+            "goal_id": goal.id,
+            "original_user_question": question,
+            "file_hint": file_hint,
+            "current_phase": current_phase,
+            "planned_steps": planned_steps,
+            "completed_steps": completed_steps,
+            "remaining_steps": remaining_steps,
+            "stop_reason": "budget_exhausted",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "blocked_model": blocked.to_dict(),
+        }
+        try:
+            save_paused(payload)
+            self.log.log(
+                "resumable_checkpoint_paused",
+                {
+                    "current_phase": current_phase,
+                    "stop_reason": "budget_exhausted",
+                    "planned_steps": len(planned_steps),
+                    "completed_steps": len(completed_steps),
+                    "remaining_steps": len(remaining_steps),
+                    "blocked_model": payload["blocked_model"],
+                },
+            )
+        except Exception:
+            pass
 
     def _force_file_hint_read_when_explicit(
         self,

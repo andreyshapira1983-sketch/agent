@@ -31,6 +31,16 @@ class TestWritePolicyAccepts:
         )
         assert d.decision == "save"
 
+    def test_user_explicit_bug_note_passes(self):
+        policy = MemoryWritePolicy()
+        d = policy.decide(
+            content="BUG: project status text should be saved as an explicit note.",
+            tags=["bug"],
+            source="user-explicit",
+        )
+
+        assert d.decision == "save"
+
     def test_consent_tag_passes(self):
         policy = MemoryWritePolicy()
         d = policy.decide(
@@ -525,6 +535,136 @@ class TestRetrievalPolicy:
         # Only the first record shares strong tokens (python, javascript).
         assert len(picked) == 1
         assert "Python" in picked[0].content
+
+    def test_broad_project_question_selects_project_signal_tags(self):
+        policy = MemoryRetrievalPolicy(max_records=10)
+        recs = [
+            _make_record("Operator routing false-positive note.", tags=["bug"]),
+            _make_record("Project architecture facts.", tags=["project"]),
+            _make_record("Persistent retrieval lessons.", tags=["memory"]),
+            _make_record("Budget guardrail status.", tags=["budget"]),
+            _make_record("Weekend cooking note.", tags=["personal"]),
+        ]
+
+        picked = policy.select(recs, "What do you know about your project?")
+        picked_tags = {tag for rec in picked for tag in rec.tags}
+
+        assert {"bug", "project", "memory", "budget"} <= picked_tags
+        assert "personal" not in picked_tags
+
+    def test_broad_project_question_prefers_recent_memory_over_stale_readme_status(self):
+        policy = MemoryRetrievalPolicy(max_records=1)
+        recent = _make_record(
+            "Recent persistent memory: pytest passed=1840 and budget usage is current.",
+            tags=["project", "memory", "tests", "budget"],
+            age_s=60,
+        )
+        stale_readme = _make_record(
+            "README.md says current project status has 1200 passing tests.",
+            tags=["readme", "project", "status"],
+            age_s=90 * 24 * 3600,
+        )
+
+        picked = policy.select([stale_readme, recent], "What do you know about your project?")
+
+        assert picked == [recent]
+
+    def test_stale_readme_status_is_marked_historical_in_prompt(self):
+        policy = MemoryRetrievalPolicy()
+        stale_readme = _make_record(
+            "README.md says current project status has 1200 passing tests.",
+            tags=["readme", "project", "status"],
+            age_s=90 * 24 * 3600,
+        )
+
+        formatted = policy.format_for_prompt([stale_readme])
+
+        assert "historical README/reference" in formatted
+        assert "before treating as current" in formatted
+
+    def test_readme_architecture_reference_can_still_be_selected(self):
+        policy = MemoryRetrievalPolicy(max_records=1)
+        readme_architecture = _make_record(
+            "README.md describes the project architecture and tool loop.",
+            tags=["readme", "architecture", "project"],
+            age_s=90 * 24 * 3600,
+        )
+
+        picked = policy.select([readme_architecture], "What do you know about your project?")
+        formatted = policy.format_for_prompt(picked)
+
+        assert picked == [readme_architecture]
+        assert "README architecture/reference" in formatted
+
+    def test_broad_project_question_prefers_tech_debt_over_readme_overview(self):
+        policy = MemoryRetrievalPolicy(max_records=1)
+        tech_debt = _make_record(
+            "TECH_DEBT.md tracks the current operator-routing backlog.",
+            tags=["tech debt", "project"],
+            age_s=14 * 24 * 3600,
+        )
+        readme_overview = _make_record(
+            "README.md describes the project architecture overview.",
+            tags=["readme", "architecture", "project"],
+            age_s=60,
+        )
+
+        picked = policy.select([readme_overview, tech_debt], "What do you know about your project?")
+
+        assert picked == [tech_debt]
+
+    def test_unrelated_question_does_not_pull_bug_records(self):
+        policy = MemoryRetrievalPolicy()
+        recs = [
+            _make_record("Operator routing false-positive note.", tags=["bug"]),
+            _make_record("Patch proposal plan behavior.", tags=["patch-proposal"]),
+        ]
+
+        assert policy.select(recs, "What is the weather today?") == []
+
+    def test_russian_broad_project_question_selects_project_records(self):
+        policy = MemoryRetrievalPolicy(max_records=10)
+        recs = [
+            _make_record("Operator routing bug was fixed.", tags=["operator-routing"]),
+            _make_record("Autonomous runtime has pending debt.", tags=["autonomy"]),
+            _make_record("Tech debt backlog is tracked.", tags=["tech debt"]),
+            _make_record("Plain travel preference.", tags=["travel"]),
+        ]
+
+        picked = policy.select(recs, "Что ты уже знаешь о своём проекте?")
+        picked_tags = {tag for rec in picked for tag in rec.tags}
+
+        assert {"operator-routing", "autonomy", "tech debt"} <= picked_tags
+        assert "travel" not in picked_tags
+
+    def test_russian_broad_project_question_prefers_recent_status_memory(self):
+        policy = MemoryRetrievalPolicy(max_records=1)
+        recent = _make_record(
+            "Recent memory: model routing and budget status were checked today.",
+            tags=["project", "memory", "model", "budget"],
+            age_s=60,
+        )
+        stale_readme = _make_record(
+            "README.md says current model and budget status are from an old snapshot.",
+            tags=["readme", "project", "status"],
+            age_s=90 * 24 * 3600,
+        )
+
+        picked = policy.select([stale_readme, recent], "Что ты уже знаешь о своём проекте?")
+
+        assert picked == [recent]
+
+    def test_existing_exact_keyword_retrieval_still_works(self):
+        policy = MemoryRetrievalPolicy()
+        recs = [
+            _make_record("GraphQL connector uses cursor pagination."),
+            _make_record("Budget bug is unrelated here.", tags=["bug", "budget"]),
+        ]
+
+        picked = policy.select(recs, "GraphQL connector pagination")
+
+        assert len(picked) == 1
+        assert "GraphQL connector" in picked[0].content
 
     def test_caps_at_max_records(self):
         policy = MemoryRetrievalPolicy(max_records=2)

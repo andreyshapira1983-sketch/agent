@@ -41,6 +41,24 @@ def test_due_returns_only_active_due_schedules(workspace: Path):
     assert [schedule.id for schedule in due_now] == [due.id]
 
 
+def test_disable_marks_schedule_and_removes_it_from_due(workspace: Path):
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    store = SchedulerStore(workspace / "schedules.jsonl")
+    schedule = store.add(
+        name="health",
+        goal="project health",
+        every_minutes=10,
+        start_at=now - timedelta(minutes=1),
+    )
+
+    disabled = store.disable(schedule.id)
+
+    assert disabled.status == "disabled"
+    assert store.load()[0].status == "disabled"
+    assert store.list(status="disabled")[0].id == schedule.id
+    assert store.due(now=now) == []
+
+
 def test_tick_enqueues_due_tasks_and_advances_schedule(workspace: Path):
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     schedules = SchedulerStore(workspace / "schedules.jsonl")

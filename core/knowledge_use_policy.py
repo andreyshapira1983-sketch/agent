@@ -10,6 +10,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.memory_policy import _query_tokens as _retrieval_query_tokens
+from core.memory_policy import _tag_tokens as _retrieval_tag_tokens
 from core.models import MemoryRecord
 from core.role_router import RoleContext
 
@@ -80,13 +82,14 @@ class KnowledgeUsePolicy:
         question: str,
     ) -> KnowledgeUseReport:
         report = KnowledgeUseReport(role=role_context.role, total=len(records))
-        q_tokens = _tokens(question)
+        q_tokens = _retrieval_query_tokens(question)
         allowed_tags = {t.casefold() for t in role_context.allowed_memory_tags}
         allowed_types = {t.casefold() for t in role_context.allowed_memory_types}
 
         for record in records:
             tags = tuple(t.casefold() for t in (record.tags or []) if t)
             tags_set = set(tags)
+            tag_match_tokens = _retrieval_tag_tokens(tags)
             reasons: list[str] = []
 
             if record.type.casefold() not in allowed_types:
@@ -115,7 +118,7 @@ class KnowledgeUsePolicy:
             # Allow when the question itself references one of the record's tags.
             # This surfaces episodic/reflection records when the user asks about
             # them by tag name (e.g. "reflection", "lesson").
-            question_tag_match = q_tokens & tags_set
+            question_tag_match = q_tokens & tag_match_tokens
             if question_tag_match:
                 reasons.append(f"question matches tags: {sorted(question_tag_match)[:4]}")
 
