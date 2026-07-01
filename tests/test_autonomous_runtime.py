@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from core.approval import AutoApprover
 from core.approval_inbox import ApprovalInbox
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
@@ -673,6 +675,103 @@ def test_dry_run_goal_blocks_effect_tools_and_restores(workspace: Path):
     seen.clear()
     runtime._task_goal(task, AutonomousRuntimeConfig(dry_run=False))
     assert "file_write" not in seen["blocked"]
+    assert agent.policy.blocked_tools == frozenset()
+
+
+def test_no_tests_goal_blocks_run_tests_and_restores(workspace: Path):
+    """When tests are disabled (include_tests=False), run_tests must be blocked
+    during goal execution so the planner cannot run tests against operator
+    intent (:work-session / :auto-run --no-tests), then restored afterwards."""
+    from core.autonomous_runtime import AutonomousTask
+
+    agent = _agent(workspace, with_tests=False)
+
+    seen: dict[str, frozenset[str]] = {}
+
+    def _capture(*, user_question: str) -> str:
+        seen["blocked"] = frozenset(agent.policy.blocked_tools)
+        return "analysis"
+
+    agent.run = _capture  # type: ignore[method-assign]
+    runtime = AutonomousRuntime(agent, workspace=workspace)
+    task = AutonomousTask(kind="goal", description="analyze core/replan.py")
+
+    runtime._task_goal(
+        task, AutonomousRuntimeConfig(dry_run=False, include_tests=False)
+    )
+    assert "run_tests" in seen["blocked"]
+    # Effect tools stay untouched outside dry-run.
+    assert "file_write" not in seen["blocked"]
+    # And the block-list is restored once the run finishes.
+    assert agent.policy.blocked_tools == frozenset()
+
+
+def test_tests_enabled_goal_does_not_block_run_tests(workspace: Path):
+    """When tests are enabled (include_tests=True, the default), run_tests must
+    NOT be blocked during goal execution."""
+    from core.autonomous_runtime import AutonomousTask
+
+    agent = _agent(workspace, with_tests=False)
+
+    seen: dict[str, frozenset[str]] = {}
+
+    def _capture(*, user_question: str) -> str:
+        seen["blocked"] = frozenset(agent.policy.blocked_tools)
+        return "analysis"
+
+    agent.run = _capture  # type: ignore[method-assign]
+    runtime = AutonomousRuntime(agent, workspace=workspace)
+    task = AutonomousTask(kind="goal", description="analyze core/replan.py")
+
+    runtime._task_goal(
+        task, AutonomousRuntimeConfig(dry_run=False, include_tests=True)
+    )
+    assert "run_tests" not in seen["blocked"]
+    assert agent.policy.blocked_tools == frozenset()
+
+
+def test_dry_run_and_no_tests_block_combines_and_restores(workspace: Path):
+    """dry_run and include_tests=False together block both effect tools and
+    run_tests, and the original block-list is restored afterwards."""
+    from core.autonomous_runtime import AutonomousTask
+
+    agent = _agent(workspace, with_tests=False)
+
+    seen: dict[str, frozenset[str]] = {}
+
+    def _capture(*, user_question: str) -> str:
+        seen["blocked"] = frozenset(agent.policy.blocked_tools)
+        return "analysis"
+
+    agent.run = _capture  # type: ignore[method-assign]
+    runtime = AutonomousRuntime(agent, workspace=workspace)
+    task = AutonomousTask(kind="goal", description="analyze core/replan.py")
+
+    runtime._task_goal(
+        task, AutonomousRuntimeConfig(dry_run=True, include_tests=False)
+    )
+    assert {"file_write", "shell_exec", "run_tests"} <= seen["blocked"]
+    assert agent.policy.blocked_tools == frozenset()
+
+
+def test_no_tests_block_restored_after_exception(workspace: Path):
+    """If agent.run raises during a no-tests goal, blocked_tools must still be
+    restored (finally), leaving no run_tests block behind."""
+    from core.autonomous_runtime import AutonomousTask
+
+    agent = _agent(workspace, with_tests=False)
+
+    def _boom(*, user_question: str) -> str:
+        raise RuntimeError("goal blew up")
+
+    agent.run = _boom  # type: ignore[method-assign]
+    runtime = AutonomousRuntime(agent, workspace=workspace)
+    task = AutonomousTask(kind="goal", description="analyze core/replan.py")
+
+    with pytest.raises(RuntimeError, match="goal blew up"):
+        runtime._task_goal(
+            task, AutonomousRuntimeConfig(dry_run=False, include_tests=False)
+        )
     assert agent.policy.blocked_tools == frozenset()
 
 
