@@ -16,6 +16,7 @@ plan. Down the line a stricter mode could replan or demote confidence.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -71,13 +72,36 @@ class MismatchReport:
         }
 
 
+def _keyword_in_text(text: str, kw: str) -> bool:
+    """Does the lowercased ``text`` contain keyword ``kw``?
+
+    Matching mode depends on the keyword shape so that short, ambiguous
+    stems do not silently match inside unrelated words:
+
+    * Multi-word phrases ("read the file") keep substring semantics — a
+      whole phrase is already high-signal.
+    * Non-ASCII entries ("прочита", "содерж") are deliberate Cyrillic
+      stems meant to match inflected forms ("прочитаю"), so they also use
+      substring matching.
+    * A single ASCII token ("read", "ls", "url") requires a word boundary,
+      so it no longer matches inside "thread", "calls" or "curl".
+    """
+    kw = kw.strip().lower()
+    if not kw:
+        return False
+    if " " in kw or not kw.isascii():
+        return kw in text
+    pattern = r"(?<![0-9a-z])" + re.escape(kw) + r"(?![0-9a-z])"
+    return re.search(pattern, text) is not None
+
+
 def _reasoning_mentions(reasoning: str, tool: str) -> bool:
     """Does ``reasoning`` contain any keyword tied to ``tool``?"""
     text = reasoning.lower()
     if tool.lower() in text:
         return True
     for kw in _TOOL_KEYWORDS.get(tool, ()):
-        if kw.lower() in text:
+        if _keyword_in_text(text, kw):
             return True
     return False
 
@@ -129,7 +153,8 @@ def check_reasoning_actions(
         # High-signal keywords: those that are themselves tool-like
         # tokens (contain underscore or are >= 6 chars and unambiguous).
         for kw in keywords:
-            if (("_" in kw or len(kw.strip()) >= 6) and kw.lower() in text_lower):
+            if (("_" in kw or len(kw.strip()) >= 6)
+                    and _keyword_in_text(text_lower, kw)):
                 mentioned_extra.append(tool)
                 break
 
