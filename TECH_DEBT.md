@@ -217,6 +217,7 @@ for_task выбирал tier (LIGHT/STANDARD/DEEP) по сложности, но
 
 P2 — Будущее
 TD-011 — Live Model Discovery
+Статус: Done (read-only) — см. запись в конце файла.
 
 Автоматически узнавать:
 
@@ -226,8 +227,9 @@ Gemini;
 DeepSeek;
 Llama.
 TD-012 — Provider Catalog Refresh
+Статус: Partial — dry-run/read-only foundation сделан; write/apply отложены.
 
-Автоматически обновлять registry моделей.
+Автоматически обновлять registry/каталог моделей — write/apply пока отложен.
 
 TD-013 — Self Improvement
 
@@ -541,3 +543,65 @@ core/reasoning_action_check.py сверяет свободный текст reas
 - targeted: 13 passed.
 - full pytest: 3463 passed.
 
+----------------------------------------------------------------------
+
+TD-011 / TD-012 — Live Model Discovery + Provider Catalog Refresh (read-only)
+
+Статус:
+- TD-011 Live Model Discovery: Done
+- TD-012 Provider Catalog Refresh: Partial — dry-run/read-only foundation
+  сделан; write/apply refresh каталога отложены (не сделаны).
+
+Область (намеренно узкая, безопасная)
+Только read-only discovery + dry-run diff. По явному одобрению scope:
+- нет записи каталога;
+- нет автопереключения моделей;
+- нет self-update;
+- нет реальных inference-вызовов;
+- секреты не печатаются (только ИМЕНА env-переменных + booleans).
+Запрос списка моделей у провайдера — metadata-only / non-inference, но всё
+равно внешний сетевой вызов: делается только из явного dry-run пути, никогда
+из audit-пути или обычного прогона.
+
+Готово (TD-011)
+- core/model_catalog.py: выделен discover_catalog() — read-only половина
+  refresh_catalog() (запрос + классификация по тирам, без записи файла).
+  refresh_catalog() теперь тонкая обёртка = discover_catalog() + _save_catalog();
+  поведение и возвращаемое значение не изменились.
+- core/model_discovery.py (новый): dataclasses ProviderDiscovery / CatalogDiff /
+  DiscoveryReport; статусы провайдеров (queried / skipped_no_creds /
+  unsupported_no_fetcher / unsupported_provider / skipped_by_arg);
+  build_discovery_audit() — локально, без сети, ничего не пишет;
+  _diff_catalog() — чистый diff added/removed/changed (tier_best) против
+  config/model_catalog.json.
+- cli/commands_models.py: _handle_model_discovery_audit -> команда
+  :model-discovery-audit (алиас :discovery-audit), local-only, no-network.
+- main.py: dispatch/help/import (тот же deterministic bypass-путь, что и у
+  других :-команд — без Planner/Synthesizer/LLM). TD-010 routing не тронут.
+
+Готово как foundation (TD-012, dry-run only)
+- core/model_discovery.py: build_discovery_report() — dry-run discovery. Сеть
+  только для провайдеров, у которых supported + fetcher + credentials; всё
+  остальное репортится статусом и не контактируется. Каталог НЕ пишется.
+- cli/commands_models.py: _handle_provider_catalog_refresh -> команда
+  :provider-catalog-refresh --dry-run [--anthropic] [--openai] [--json].
+  Без --dry-run — только usage (сеть недостижима). Флаг --write намеренно
+  отклоняется (зарезервирован под будущий, отдельно одобряемый write/apply).
+
+Отложено / НЕ сделано (осознанно, вне текущего scope)
+- запись/обновление config/model_catalog.json новой командой (write/apply);
+- rollback-механика для применённого refresh;
+- huggingface / mock live-fetcher (сейчас unsupported_no_fetcher);
+- любое автопереключение модели или правка model_registry.
+
+Проверка
+- tests/test_model_discovery.py (новый, 16 тестов): discover_catalog не пишет
+  файл; refresh_catalog всё ещё пишет; diff added/removed/changed; audit —
+  локальный, fetcher'ы не вызываются; dry-run контактирует только провайдеров
+  с ключами (провайдер без ключа не контактируется — patched fetcher падает,
+  если вызван); секрет-значение ключа не утекает в вывод; --write отклоняется;
+  без --dry-run сети/записи/лог-события нет.
+- tests/test_cli.py: :model-discovery-audit добавлен в TD-002 local-only списки
+  (0 LLM-вызовов, нет model_call_start, Planner не вызывается).
+- targeted: 16 passed (discovery) / 149 passed (discovery+catalog+cli).
+- full pytest: 3482 passed.

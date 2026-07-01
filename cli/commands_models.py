@@ -178,3 +178,97 @@ def _handle_model_usage(rest: str, agent: AgentLoop) -> bool:
             file=sys.stderr,
         )
     return True
+
+
+# Flags that are options, not provider selectors, for the discovery commands.
+_DISCOVERY_OPTION_FLAGS = frozenset({"--json", "--dry-run", "--write"})
+
+
+def _handle_model_discovery_audit(rest: str, agent: AgentLoop) -> bool:
+    """LOCAL, no-network model discovery readiness audit (TD-011).
+
+    Usage: :model-discovery-audit [--json]
+
+    Reports which providers are supported, have a live fetcher, and have
+    credentials configured, plus what the current on-disk catalog knows. It
+    contacts NO provider and writes nothing — purely local. Use
+    ':provider-catalog-refresh --dry-run' to compare against live provider models.
+    """
+    from core.model_discovery import build_discovery_audit
+
+    tokens = _split_meta_args(rest)
+    as_json = "--json" in tokens
+    if any(token != "--json" for token in tokens):
+        print("Usage: :model-discovery-audit [--json]", file=sys.stderr)
+        return True
+
+    report = build_discovery_audit(getattr(agent, "model_router", None))
+    agent.log.log("model_discovery_audit", report.to_dict())
+    if as_json:
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(report.user_summary(), file=sys.stderr)
+    return True
+
+
+def _handle_provider_catalog_refresh(rest: str, agent: AgentLoop) -> bool:
+    """DRY-RUN live model discovery + catalog diff, read-only (TD-011/012).
+
+    Usage: :provider-catalog-refresh --dry-run [--anthropic] [--openai] [--json]
+
+    With --dry-run this queries the model lists of the providers that have
+    credentials (a metadata-only, non-inference provider call — still a network
+    call) and diffs them against config/model_catalog.json. It NEVER writes the
+    catalog and NEVER switches models. Without --dry-run it does nothing but
+    print usage, so it can never accidentally reach the network. The --write path
+    is intentionally not implemented here (reserved for a future, explicitly
+    approved change); use :refresh-models to persist a catalog.
+    """
+    from core.model_discovery import build_discovery_report
+
+    tokens = _split_meta_args(rest)
+
+    if "--write" in tokens:
+        print(
+            "(provider-catalog-refresh: --write is not supported here — this "
+            "command is read-only/dry-run by design.)",
+            file=sys.stderr,
+        )
+        print(
+            "  Use :refresh-models to query providers and persist "
+            "config/model_catalog.json.",
+            file=sys.stderr,
+        )
+        return True
+
+    if "--dry-run" not in tokens:
+        print(
+            "Usage: :provider-catalog-refresh --dry-run [--anthropic] [--openai] [--json]",
+            file=sys.stderr,
+        )
+        print(
+            "  --dry-run is required: without it no provider is contacted.",
+            file=sys.stderr,
+        )
+        return True
+
+    as_json = "--json" in tokens
+    requested = [
+        t.lstrip("-") for t in tokens
+        if t.startswith("--") and t not in _DISCOVERY_OPTION_FLAGS
+    ]
+    providers = requested if requested else None
+
+    try:
+        report = build_discovery_report(providers=providers)
+    except Exception as exc:  # noqa: BLE001
+        print(f"(provider-catalog-refresh error: {exc})", file=sys.stderr)
+        print("  Check ANTHROPIC_API_KEY / OPENAI_API_KEY in .env", file=sys.stderr)
+        return True
+
+    agent.log.log("provider_catalog_refresh_dry_run", report.to_dict())
+    if as_json:
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(report.user_summary(), file=sys.stderr)
+    return True

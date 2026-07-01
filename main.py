@@ -190,9 +190,11 @@ from cli.commands_memory import (
 # Model routing / registry / catalog / usage commands live in
 # cli/commands_models.py (model_router-driven, no main back-references).
 from cli.commands_models import (
+    _handle_model_discovery_audit,
     _handle_model_registry_audit,
     _handle_model_usage,
     _handle_models,
+    _handle_provider_catalog_refresh,
     _handle_refresh_models,
 )
 # Misc operator commands (audit / learn / team / connectors) live in
@@ -2791,6 +2793,12 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head in {":refresh-models", ":model-catalog-refresh", ":model-refresh"}:
         return _handle_refresh_models(rest.strip(), agent)
 
+    if head in {":model-discovery-audit", ":discovery-audit"}:
+        return _handle_model_discovery_audit(rest.strip(), agent)
+
+    if head in {":provider-catalog-refresh"}:
+        return _handle_provider_catalog_refresh(rest.strip(), agent)
+
     if head in {":architecture-audit", ":arch-audit", ":roadmap-audit"}:
         return _handle_architecture_audit(rest.strip(), agent, workspace)
 
@@ -2981,6 +2989,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "      flags: --limit N  --json\n"
             "  :models [--json]                inspect model routes and registry\n"
             "  :model-registry-audit [--json] inspect selected vs available model candidates\n"
+            "  :model-discovery-audit [--json] local (no-network) provider discovery readiness\n"
+            "  :provider-catalog-refresh --dry-run [--anthropic] [--openai] [--json]\n"
+            "                                 dry-run live model discovery + catalog diff (no write)\n"
             "  :architecture-audit [--json]   inspect layers and multi-agent gaps\n"
             "  :operator-check [--json]       conversational project/status digest\n"
             "  :operator-budget [--json]      concise budget + model usage digest\n"
@@ -3304,7 +3315,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :approval-list  :approval-triage  :best-next-action  :ack  :ack-list  :ack-clear  :approval-run  :task-add  :schedule-disable  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :model-discovery-audit  :provider-catalog-refresh  :approval-list  :approval-triage  :best-next-action  :ack  :ack-list  :ack-clear  :approval-run  :task-add  :schedule-disable  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:
