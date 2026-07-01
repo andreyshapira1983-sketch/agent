@@ -875,3 +875,62 @@ advisory-only и выдавал unified diff / NO_PATCH. Producer-разрыв: 
 - tests/test_cli.py (+2): :self-build-produce зарегистрирован; отклоняет
   аргументы/free-text.
 - Full pytest: 3609 passed.
+
+===============================================================================
+
+TD-026 — Daemon/supervisor wiring для self-build proposal producer
+
+Статус: Done
+
+Проблема
+produce_self_apply_proposal (TD-025) существовал, но вызывался только вручную
+через :self-build-produce. Daemon (agent_tick.run_tick) не порождал self-build
+proposal автономно по расписанию — последнее недостающее звено петли
+producer -> inbox -> bridge -> lane не было замкнуто в daemon.
+
+Готово
+- agent_tick.py: продюсер подключён к тику ОДИН раз за tick, после блока
+  задач/репейра, перед tally inbox. Аддитивно, изолированно.
+  * Новый persistent cooldown state: data/self_build_producer_state.json
+    (last_proposed_at). Дефолт окна 12 часов; override через
+    AGENT_SELF_BUILD_COOLDOWN_HOURS. Чистые helpers _read/_write_producer_state,
+    _cooldown_remaining_seconds, _self_build_cooldown_hours.
+  * _maybe_produce_self_build(...): cooldown-гейт — ЕДИНСТВЕННАЯ новая логика
+    этого слоя — проверяется ДО build_agent (cooldown_wait НЕ строит агента и
+    НЕ зовёт продюсер). Затем строит SafeVCS + ledger.snapshot() +
+    KillSwitchState и зовёт produce_self_apply_proposal РОВНО один раз.
+    Гейты kill-switch/budget/approval/dirty-tree остаются в самом продюсере —
+    tick их НЕ дублирует.
+  * last_proposed_at обновляется ТОЛЬКО при status="proposed". no_patch /
+    critic_veto / budget_wait / budget_kill_switch / approval_wait /
+    dirty_tree_wait / error cooldown НЕ сжигают -> следующий tick пробует снова.
+  * Любое исключение -> status="error", tick НЕ падает (return 0), heartbeat
+    записан.
+  * summary/heartbeat #2 и stderr несут self_build_status, approval_id и
+    next_human_action, когда доступны; событие self_build_produce в tick-логе.
+- dry_run: продюсер кладёт ТОЛЬКО human-gated approval item (никаких effects),
+  поэтому работает и в dry-run — как _maybe_propose_repair.
+
+Статусы (1:1 с ТЗ)
+budget_kill_switch | budget_wait | approval_wait | dirty_tree_wait |
+cooldown_wait (новый) | proposed | no_patch | critic_veto | error.
+
+Область НЕ тронута
+- НЕТ run_self_apply_lane / apply / test / commit / push / fetch / pull / merge /
+  remotes.
+- НЕ подключён approval auto-run; human approval НЕ обходится.
+- Максимум один producer-вызов и один approval item за tick.
+- Никаких изменений budget limits; config/budget_limits.json не тронут.
+- Продюсер остаётся source of truth для kill-switch/budget/approval/dirty-tree;
+  agent_tick добавляет ТОЛЬКО cooldown.
+- core/self_build_producer.py без изменений.
+
+Проверка
+- tests/test_agent_tick_self_build.py (20): cooldown-helpers, cooldown_wait не
+  строит агента и не зовёт продюсер, proposed пишет last_proposed_at и
+  прокидывает approval_id/next_human_action, non-proposed статусы cooldown не
+  сжигают, второй tick после proposed -> cooldown_wait, exception -> error без
+  падения, отсутствие run_self_apply_lane и git-вызовов в теле, реальный
+  продюсер с fake LLM -> no_patch без item и без git, config/budget_limits.json
+  не пишется.
+- Full pytest: 3629 passed.
