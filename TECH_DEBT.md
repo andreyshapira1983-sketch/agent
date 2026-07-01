@@ -989,3 +989,68 @@ data/self_build_producer_state.json.
   чистый formatter не падает на None-входах.
 - agent_tick targeted: 72 passed.
 - Full pytest: 3639 passed.
+
+==============================================================================
+TD-028 — Subagent Registry + Performance Ledger (read/write, advisory-only)
+
+Статус: Done
+
+Проблема
+Продюсер (TD-025) гоняет ролевой пайплайн Manager/Researcher/Builder/Critic/
+Reporter, демон умеет его запускать (TD-026), --status показывает self-build
+(TD-027). Но центральный агент не вёл персистентный реестр подагентов и их
+эффективности: нельзя сказать, какая роль полезна, дорога, часто фейлит или
+ветует. Без памяти о работе "сотрудников" управлять корпорацией агентов нельзя.
+
+Готово
+- core/subagent_registry.py (новый): RoleRecord (все метрики из ТЗ) +
+  SubagentRegistry (load/save одного JSON data/subagent_registry.json, атомарно
+  tmp+replace; битый/отсутствующий файл -> дефолтные 5 active-ролей).
+- Метрики роли: status(active/paused/retired), invocations, successes, failures,
+  vetoes, outputs_vetoed, proposals_created, proposals_approved, committed_local,
+  rolled_back, cost_units, cost_source, last_used_at, trust_score,
+  usefulness_score, recommendation(keep/watch/pause/retire).
+- Decision mapping (клариф. 4/5/6): manager selected=success, no_target=neutral;
+  researcher gathered=success; builder built=success, failed=failure; critic
+  pass=success, veto=useful (поднимает trust/usefulness Critic, НЕ failure);
+  reporter published=success. При status=proposed -> reporter.proposals_created++.
+  При critic_veto -> builder.outputs_vetoed++ (повторные заветованные выходы
+  Builder двигают ЕГО recommendation, но не Critic).
+- Скоринг чистый/детерминированный: trust = positives/(positives+negatives), где
+  positives=successes+vetoes, negatives=failures+outputs_vetoed, нейтральные
+  (manager no_target) игнорируются; usefulness = value-события на invocation;
+  recommendation по порогам trust с минимумом судимых событий.
+- recommendation — ТОЛЬКО совет: НИКОГДА не меняет status. Нет auto-pause,
+  auto-retire, изменений model routing.
+- Стоимость: cost_units=0.0 + cost_source="unknown" по умолчанию (клариф. 3);
+  общий счёт LLM НЕ делится по ролям.
+- record_lane_outcome(...) определён для будущей привязки TD-023/TD-024, но в
+  этом PR автоматически НЕ вызывается (клариф. 8).
+- core/self_build_producer.py: аддитивный опциональный параметр registry=None у
+  produce_self_apply_proposal; запись отчёта на каждом return через guarded
+  _record. При registry=None поведение байт-в-байт прежнее; ошибка записи
+  (клариф. 9) не ломает продюсер.
+- agent_tick.py: _maybe_produce_self_build грузит и передаёт registry (guarded,
+  сбой не ломает tick); в блок Self-build из TD-027 добавлена компактная строка
+  "subagents: N roles - keepxK ..." (ASCII, без mojibake). Новой CLI-команды нет.
+- status_report() — подробный read-only снапшот, оставлен в модуле для будущего.
+
+Область НЕ тронута
+- Записываем и рекомендуем — НЕ нанимаем/не увольняем; никаких авто-изменений
+  status/routing.
+- Нет запуска продюсера/линии из статуса; нет apply/commit/push/fetch/pull/
+  merge/network.
+- Нет изменений budget limits; config/budget_limits.json не тронут.
+
+Проверка
+- tests/test_subagent_registry.py (19): дефолты; счётчики по всем ролям;
+  gate-wait без ролей = no-op; успех поднимает trust/usefulness; failures Builder
+  -> pause/retire (status остаётся active); critic veto = useful, trust=1.0,
+  keep; заветованные выходы Builder двигают его recommendation; retire только
+  рекомендация; manager no_target нейтрален; round-trip персистентности; битый
+  JSON -> defaults; from_dict терпит мусор; producer-хук пишет исходы; без
+  registry — файл не создаётся; сбой записи не ломает продюсер; status_report
+  read-only; summary_line ASCII; record_lane_outcome не авто-вызывается;
+  cost_units=0/unknown.
+- Targeted (registry+producer+self_build+status): 70 passed.
+- Full pytest: 3658 passed.

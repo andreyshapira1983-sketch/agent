@@ -554,13 +554,21 @@ def _self_build_status_block(
             for i in inbox.list(status="approved")
             if getattr(i, "operation", "") == SELF_APPLY_OPERATION
         )
-        return _self_build_status_lines(
+        lines = _self_build_status_lines(
             heartbeat,
             state,
             cooldown_hours=cooldown_hours,
             pending_self_apply=pending_sa,
             approved_self_apply=approved_sa,
         )
+        # TD-028: compact subagent-ledger summary (read-only; never runs anything).
+        try:
+            from core.subagent_registry import SubagentRegistry
+
+            lines.append(f"  subagents: {SubagentRegistry.load(workspace).summary_line()}")
+        except Exception:  # noqa: BLE001
+            lines.append("  subagents: unavailable")
+        return lines
     except Exception as exc:  # noqa: BLE001 — operator status must never crash
         return [f"Self-build: status unavailable ({type(exc).__name__})"]
 
@@ -639,6 +647,16 @@ def _maybe_produce_self_build(
         agent = builder(workspace)
         llm = agent.model_router.for_role("synthesizer")
 
+        # TD-028: record role performance into the subagent ledger (best-effort).
+        # A registry load/write failure must never break the tick, so this is
+        # fully guarded; the producer additionally guards its own recording.
+        registry = None
+        try:
+            from core.subagent_registry import SubagentRegistry
+            registry = SubagentRegistry.load(workspace)
+        except Exception:  # noqa: BLE001
+            registry = None
+
         report = produce(
             workspace=workspace,
             inbox=inbox,
@@ -647,6 +665,7 @@ def _maybe_produce_self_build(
             budget_snapshot=budget_snapshot,
             kill_switch=kill_switch,
             now_iso=now_iso,
+            registry=registry,
         )
         result = report.to_dict() if hasattr(report, "to_dict") else dict(report)
         status = result.get("status", "error")

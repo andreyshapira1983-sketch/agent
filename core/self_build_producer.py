@@ -442,24 +442,38 @@ def produce_self_apply_proposal(
     candidate_targets: tuple[str, ...] | list[str] | None = None,
     confidence_threshold: float = _DEFAULT_CONFIDENCE_THRESHOLD,
     now_iso: str | None = None,
+    registry: Any = None,
 ) -> ProducerReport:
     """Run the Manager/Researcher/Builder/Critic/Reporter pipeline to produce at
     most one validated low-risk self-apply proposal into the approval inbox.
 
     Returns a :class:`ProducerReport`. The function never applies the patch,
     never runs the lane, and creates at most one inbox item per call.
+
+    If ``registry`` (a ``SubagentRegistry``) is provided, the run's role outcomes
+    are recorded into it as an additive, best-effort side effect (TD-028). When
+    ``registry is None`` — the default — behaviour is byte-identical to before,
+    and a registry write failure can never change or break this function.
     """
+    def _record(report: ProducerReport) -> ProducerReport:
+        if registry is not None:
+            try:
+                registry.record_report(report)
+            except Exception:  # noqa: BLE001 — recording must never break producer
+                pass
+        return report
+
     targets = tuple(candidate_targets) if candidate_targets else DEFAULT_CANDIDATE_TARGETS
     gates: list[str] = []
 
     # ── gate 1: budget kill-switch (before ANY LLM-heavy work) ──────────────
     if kill_switch is not None and getattr(kill_switch, "active", False):
-        return ProducerReport(
+        return _record(ProducerReport(
             status="budget_kill_switch",
             reason=str(getattr(kill_switch, "reason", "") or "kill-switch active"),
             checked_gates=["kill_switch"],
             next_human_action="Resolve budget kill-switch before self-build.",
-        )
+        ))
     gates.append("kill_switch")
 
     # ── gate 2: hour budget near-exhaustion ─────────────────────────────────
@@ -467,32 +481,32 @@ def produce_self_apply_proposal(
         headroom = hour_budget_headroom(budget_snapshot)
         near, reasons = is_budget_near_exhaustion(headroom)
         if near:
-            return ProducerReport(
+            return _record(ProducerReport(
                 status="budget_wait",
                 reason="; ".join(reasons) or "budget near exhaustion",
                 checked_gates=gates + ["budget"],
                 next_human_action="Wait for the budget window to refill.",
-            )
+            ))
     gates.append("budget")
 
     # ── gate 3: an unexecuted self_apply approval already exists ────────────
     if _has_pending_self_apply(inbox):
-        return ProducerReport(
+        return _record(ProducerReport(
             status="approval_wait",
             reason="a pending self_apply_lane.run approval item already exists",
             checked_gates=gates + ["approval"],
             next_human_action="Resolve the existing self-apply approval first.",
-        )
+        ))
     gates.append("approval")
 
     # ── gate 4: dirty working tree ──────────────────────────────────────────
     if vcs is not None and not vcs.is_clean():
-        return ProducerReport(
+        return _record(ProducerReport(
             status="dirty_tree_wait",
             reason="git working tree is not clean",
             checked_gates=gates + ["dirty_tree"],
             next_human_action="Commit or stash local changes, then retry.",
-        )
+        ))
     gates.append("dirty_tree")
 
     reader = file_reader or _default_file_reader(workspace)
@@ -502,13 +516,13 @@ def produce_self_apply_proposal(
     manager = _manager_select(llm, targets)
     roles.append(manager)
     if manager.decision != "selected":
-        return ProducerReport(
+        return _record(ProducerReport(
             status="no_patch",
             reason=manager.detail or "no low-risk candidate selected",
             checked_gates=gates,
             role_outputs=roles,
             next_human_action="No low-risk self-build candidate this run.",
-        )
+        ))
     target = manager.data["target"]
     diagnosis = manager.data.get("diagnosis", "")
 
@@ -531,7 +545,7 @@ def produce_self_apply_proposal(
     )
     roles.append(critic)
     if critic.decision == "veto":
-        return ProducerReport(
+        return _record(ProducerReport(
             status="critic_veto",
             reason=critic.detail,
             target_path=target,
@@ -539,13 +553,13 @@ def produce_self_apply_proposal(
             role_outputs=roles,
             veto_reasons=list(critic.data.get("veto_reasons", [])),
             next_human_action="Critic vetoed the candidate; no approval created.",
-        )
+        ))
 
     # ── Reporter ────────────────────────────────────────────────────────────
     reporter = _reporter_publish(inbox, target, builder.data, evidence)
     roles.append(reporter)
     approval_id = reporter.data["approval_id"]
-    return ProducerReport(
+    return _record(ProducerReport(
         status="proposed",
         reason=builder.data.get("reason") or diagnosis,
         target_path=target,
@@ -556,4 +570,4 @@ def produce_self_apply_proposal(
             f"Review approval item {approval_id} and run "
             f":self-apply-run {approval_id} to apply it."
         ),
-    )
+    ))
