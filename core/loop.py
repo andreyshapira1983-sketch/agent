@@ -1027,6 +1027,12 @@ class AgentLoop:
         planner_out: PlannerOutput | None = None
         plan: Plan | None = None
         replan_exhausted = False
+        # Cheap-path cost gate: set True only when the planner-skip branch
+        # below fires for a trivial no-tool turn. Downstream this trims the
+        # synthesizer context, forces the LIGHT (cheap) model tier and skips
+        # the per-turn knowledge pipeline + memory consolidation — none of
+        # which add value for a one-line greeting / config-flag echo.
+        cheap_path_active = False
         # MVP-12: advice + forbidden-actions list carried over from the
         # previous attempt's policy.decide() call. Empty on the first
         # attempt; populated on every replan.
@@ -1106,6 +1112,7 @@ class AgentLoop:
                             "reason": "trivial no-tool input",
                         },
                     )
+                    cheap_path_active = True
                 else:
                     # ── Planner cache ─────────────────────────────────────
                     # Cache key: (question hash, episodic store mtime, file_hint).
@@ -1476,18 +1483,29 @@ class AgentLoop:
         source_ranking = rank_chain(chain, question=user_question)
         self.last_source_ranking = source_ranking
         self.log.log("source_ranking", source_ranking.to_log_payload())
-        knowledge_result = self.knowledge_pipeline.run(
-            chain,
-            ranking=source_ranking,
-            source_store=self.source_registry_store,
-            remember=self._remember_from_knowledge,
-            auto_write_memory=self.knowledge_auto_write,
-        )
-        source_registry = knowledge_result.registry
-        self.last_source_registry = source_registry
-        self.log.log("source_registry", source_registry.to_log_payload())
-        self.last_knowledge_pipeline = knowledge_result
-        self.log.log("knowledge_pipeline", knowledge_result.to_log_payload())
+        if cheap_path_active:
+            # Cheap path: the chain is empty (no tools ran) so the knowledge
+            # pipeline and source-registry build have nothing to catalog.
+            # Skip them to avoid the per-turn cost the user flagged, and keep
+            # the empty registry reset at the top of run().
+            source_registry = self.last_source_registry
+            self.log.log(
+                "knowledge_pipeline_skipped",
+                {"reason": "cheap_path", "chain_size": len(chain)},
+            )
+        else:
+            knowledge_result = self.knowledge_pipeline.run(
+                chain,
+                ranking=source_ranking,
+                source_store=self.source_registry_store,
+                remember=self._remember_from_knowledge,
+                auto_write_memory=self.knowledge_auto_write,
+            )
+            source_registry = knowledge_result.registry
+            self.last_source_registry = source_registry
+            self.log.log("source_registry", source_registry.to_log_payload())
+            self.last_knowledge_pipeline = knowledge_result
+            self.log.log("knowledge_pipeline", knowledge_result.to_log_payload())
 
         # 7. Respond. When replan exhausted the synthesizer still produces
         # a structured Output Contract reply — it gets the failure history
@@ -1495,6 +1513,25 @@ class AgentLoop:
         # worked. This is a much better UX than a bare error string.
         # Layer 5 — expose current-run assumptions to _synthesize via instance.
         self._run_assumptions_current = _run_assumptions
+        # Cheap path: force the LIGHT (cheap/fast) synthesizer tier even when
+        # the complexity heuristic would return STANDARD (e.g. a config-flag
+        # echo carries no LIGHT signal), and trim the prompt to just the
+        # essentials — a one-line greeting/flag never needs long-term memory.
+        _synth_llm = _task_synth_llm
+        if cheap_path_active:
+            try:
+                from core.task_complexity import ComplexityTier
+                _synth_llm = self.model_router.for_task(
+                    ModelRole.SYNTHESIZER,
+                    user_question,
+                    force_tier=ComplexityTier.LIGHT,
+                )
+                self.log.log(
+                    "cheap_path_synth_model",
+                    {"model": getattr(_synth_llm, "model", None)},
+                )
+            except Exception:
+                _synth_llm = _task_synth_llm
         draft_answer = self._synthesize(
             goal=goal,
             artifacts=artifacts,
@@ -1504,7 +1541,8 @@ class AgentLoop:
             persistent_block=persistent_block,
             cycle_findings=list(self._cycle_findings),
             failure_history=failure_history if replan_exhausted else None,
-            llm=_task_synth_llm,
+            llm=_synth_llm,
+            lean_context=cheap_path_active,
         )
 
         # 7.5 — MVP-14.4 Verifier. LLM is the DRAFT writer; the Verifier
@@ -2013,6 +2051,7 @@ class AgentLoop:
             verified_chunks=verification.verified_chunks if verification else 0,
             unverified_chunks=verification.unverified_chunks if verification else 0,
             replan_exhausted=replan_exhausted,
+            skip_consolidation=cheap_path_active,
         )
 
         # Layer 4 — update user profile from this interaction.
@@ -2648,6 +2687,7 @@ class AgentLoop:
         verified_chunks: int,
         unverified_chunks: int,
         replan_exhausted: bool,
+        skip_consolidation: bool = False,
     ) -> None:
         """Write episodic/procedural/consolidation memory after a cycle.
 
@@ -2704,6 +2744,7 @@ class AgentLoop:
                 self.consolidation_store is not None
                 and self.episodic_store is not None
                 and self.procedural_store is not None
+                and not skip_consolidation
             ):
                 report = consolidate_memory(
                     episodes=self.episodic_store.load(),
@@ -2720,6 +2761,11 @@ class AgentLoop:
                         "needs_review_procedure_ids": list(report.needs_review_procedure_ids),
                         "notes": list(report.notes),
                     },
+                )
+            elif skip_consolidation and self.consolidation_store is not None:
+                self.log.log(
+                    "memory_consolidation_skipped",
+                    {"reason": "cheap_path"},
                 )
         except Exception as exc:  # noqa: BLE001
             self.log.log(
@@ -3803,28 +3849,39 @@ class AgentLoop:
         cycle_findings: list[dict[str, Any]] | None = None,
         failure_history: list[ReplanTrigger] | None = None,
         llm=None,
+        lean_context: bool = False,
     ) -> str:
         history_block = (
             f"<conversation_history>\n{history}\n</conversation_history>\n\n"
             if history.strip()
             else ""
         )
-        long_term_block = (
-            f"{persistent_block}\n\n" if persistent_block.strip() else ""
-        )
-        role_block = self.last_role_context.to_prompt_block() + "\n\n"
-        profile_block = (
-            profile_to_prompt_block(self.last_user_profile) + "\n\n"
-            if self.last_user_profile is not None
-            else ""
-        )
-        # Layer 5 — inject active assumptions into synthesizer.
-        _assumptions_src = getattr(self, "_run_assumptions_current", None)
-        assumptions_block = (
-            _assumptions_src.to_prompt_block() + "\n\n"
-            if _assumptions_src is not None and len(_assumptions_src) > 0
-            else ""
-        )
+        # Cheap path: drop the heavy, question-irrelevant injections
+        # (long-term memory, user profile, run assumptions). A trivial
+        # greeting / config-flag echo is answered from general knowledge;
+        # these blocks only inflate the prompt token count.
+        if lean_context:
+            long_term_block = ""
+            profile_block = ""
+            assumptions_block = ""
+            role_block = ""
+        else:
+            long_term_block = (
+                f"{persistent_block}\n\n" if persistent_block.strip() else ""
+            )
+            role_block = self.last_role_context.to_prompt_block() + "\n\n"
+            profile_block = (
+                profile_to_prompt_block(self.last_user_profile) + "\n\n"
+                if self.last_user_profile is not None
+                else ""
+            )
+            # Layer 5 — inject active assumptions into synthesizer.
+            _assumptions_src = getattr(self, "_run_assumptions_current", None)
+            assumptions_block = (
+                _assumptions_src.to_prompt_block() + "\n\n"
+                if _assumptions_src is not None and len(_assumptions_src) > 0
+                else ""
+            )
 
         # Kernel-built safety notes — the LLM is told to surface these in
         # the user-facing answer. The notes describe what was redacted

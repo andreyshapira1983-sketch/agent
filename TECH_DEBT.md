@@ -252,3 +252,55 @@ planner для них всегда возвращает пустой план (t
   planner-событие с пустым планом; test_cheap_path_disabled_still_calls_planner —
   при выключенном флаге planner вызывается (2 вызова).
 - full pytest: 3400 passed.
+
+TD-017 — Cheap Path Cost Reduction for General Questions
+
+Статус: Done
+
+Проблема
+Даже когда cheap-path (TD-016) пропускает planner, тривиальная реплика всё равно
+тратит больше, чем нужно: synthesizer идёт на STANDARD-модели (config-flag echo не
+несёт LIGHT-сигнала для assess_complexity), в промпт синтезатора инжектится тяжёлый
+<long_term_memory> блок (растёт от хода к ходу), а после ответа каждый ход гоняется
+полная memory_consolidation (перечитывает ВСЕ эпизоды + процедуры) и knowledge
+pipeline над пустой evidence-цепочкой. Для «привет» это чистые накладные расходы.
+
+Что должно быть
+На cheap-path-ходах (planner уже пропущен) удешевить оставшийся путь, не трогая
+сам planner-skip и не ломая поведение обычных tool-задач:
+1. дешёвая модель для synthesizer;
+2. урезанный контекст в промпте synthesizer;
+3. не гонять memory_consolidation и knowledge pipeline каждый такой ход.
+
+Готово
+- core/loop.py run(): флаг cheap_path_active выставляется только когда сработала
+  cheap-path-ветка. Он прокидывается в три места:
+  * synthesizer: model_router.for_task(SYNTHESIZER, q, force_tier=LIGHT) —
+    гарантирует дешёвый tier даже если assess_complexity дал STANDARD; логируется
+    событие cheap_path_synth_model.
+  * knowledge pipeline: на cheap-path-ходе knowledge_pipeline.run и source-registry
+    build пропускаются (цепочка пустая — каталогизировать нечего); логируется
+    knowledge_pipeline_skipped, self.last_source_registry остаётся пустым.
+  * consolidation: _record_experience_memory(skip_consolidation=True) — эпизод и
+    процедура пишутся как обычно (обучение не теряется), но полная
+    consolidate_memory пропускается; логируется memory_consolidation_skipped.
+- core/loop.py _synthesize(..., lean_context): при lean_context=True из промпта
+  убираются тяжёлые/нерелевантные блоки — <long_term_memory>, профиль пользователя,
+  run-assumptions и role-блок. conversation_history сохраняется (континуитет).
+- core/model_router.for_task(..., force_tier): опциональный явный tier. Более
+  дорогой tier по-прежнему проходит через штатный escalation-гейт (forced DEEP не
+  открывает Opus без оператора). Static/Fake LLM возвращается как есть (тесты не
+  затронуты).
+
+Проверка
+- tests/test_integration.py:
+  * test_cheap_path_skips_knowledge_pipeline_and_picks_light_synth — cheap-ход даёт
+    knowledge_pipeline_skipped, cheap_path_synth_model и НЕ даёт knowledge_pipeline.
+  * test_non_cheap_turn_still_runs_knowledge_pipeline — обычный tool-ход сохраняет
+    knowledge_pipeline (регрессия).
+  * test_synthesize_lean_context_drops_long_term_memory — lean_context=True убирает
+    <long_term_memory> из промпта, дефолт его сохраняет.
+- tests/test_smart_memory.py::test_cheap_path_skips_consolidation_but_still_records_episode
+  — cheap-ход пишет эпизод, но НЕ гоняет consolidation (memory_consolidation_skipped,
+  0 отчётов).
+- full pytest: 3404 passed.

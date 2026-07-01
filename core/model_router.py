@@ -769,7 +769,14 @@ class ModelRouter:
             ledger=self.usage_ledger,
         )
 
-    def for_task(self, role: ModelRole | str, task: str, *, escalation: Any = None) -> Any:
+    def for_task(
+        self,
+        role: ModelRole | str,
+        task: str,
+        *,
+        escalation: Any = None,
+        force_tier: Any = None,
+    ) -> Any:
         """Like :meth:`for_role` but auto-selects model based on task complexity.
 
         Model selection order
@@ -792,6 +799,12 @@ class ModelRouter:
         affects a DEEP request: without a valid operator reason the deep request
         gracefully downgrades to the standard tier (the agent can never open
         Opus for itself). LIGHT escalation is never gated.
+
+        ``force_tier`` lets a caller pin the tier explicitly (e.g. the loop's
+        cheap-path gate forcing LIGHT for a trivial no-tool turn) instead of
+        deriving it from ``assess_complexity``. It can never open a more
+        expensive tier without the normal escalation gate: a forced DEEP still
+        passes through the operator-escalation check below.
         """
         from core.task_complexity import ComplexityTier, assess_complexity
         from core.model_catalog import tier_model_for
@@ -800,7 +813,10 @@ class ModelRouter:
             return self._static_llm
 
         role_key = _coerce_role(role)
-        tier = assess_complexity(task, role=role_key)
+        if force_tier is not None:
+            tier = force_tier if isinstance(force_tier, ComplexityTier) else ComplexityTier(str(force_tier))
+        else:
+            tier = assess_complexity(task, role=role_key)
 
         # STANDARD → reuse normal role routing (backward-compatible path)
         if tier == ComplexityTier.STANDARD:

@@ -229,3 +229,75 @@ def test_cheap_path_disabled_still_calls_planner(workspace: Path) -> None:
     assert len(llm.calls) == 2
     events = _events(log_path)
     assert "planner_cheap_path" not in {e["event"] for e in events}
+
+
+def test_cheap_path_skips_knowledge_pipeline_and_picks_light_synth(
+    workspace: Path,
+) -> None:
+    """A cheap-path turn must not run the per-turn knowledge pipeline and must
+    route the synthesizer through the LIGHT (cheap) model tier."""
+    gk_answer = (
+        "Conclusion: The flag disables effects. [general-knowledge]\n"
+        "Facts:\n- A false flag turns a feature off. [general-knowledge]\n"
+        "Sources:\n1. general-knowledge - general-knowledge\n"
+        "Confidence: high\nUnverified: nothing\n"
+    )
+    llm = FakeLLM(responses=[gk_answer])
+    agent, log_path = _build_agent(workspace, llm)
+
+    agent.run(user_question="effects=disabled", file_hint=None)
+
+    names = {e["event"] for e in _events(log_path)}
+    # Cheap path fired.
+    assert "planner_cheap_path" in names
+    # Knowledge pipeline + source-registry build were skipped for this turn.
+    assert "knowledge_pipeline_skipped" in names
+    assert "knowledge_pipeline" not in names
+    assert "source_registry" not in names
+    # The synthesizer model choice was re-routed via the cheap-path gate.
+    assert "cheap_path_synth_model" in names
+
+
+def test_non_cheap_turn_still_runs_knowledge_pipeline(workspace: Path) -> None:
+    """Regression: a normal tool-using turn keeps the knowledge pipeline."""
+    (workspace / "doc.txt").write_text(
+        "1. alpha\n2. beta\n3. gamma\n", encoding="utf-8"
+    )
+    llm = FakeLLM(responses=[PLANNER_FILE_READ_RESPONSE, SYNTHESIZED_ANSWER])
+    agent, log_path = _build_agent(workspace, llm)
+
+    agent.run(user_question="What is in doc.txt?", file_hint="doc.txt")
+
+    names = {e["event"] for e in _events(log_path)}
+    assert "knowledge_pipeline" in names
+    assert "knowledge_pipeline_skipped" not in names
+    assert "cheap_path_synth_model" not in names
+
+
+def test_synthesize_lean_context_drops_long_term_memory(workspace: Path) -> None:
+    """`lean_context=True` must strip the heavy long-term-memory injection
+    from the synthesizer prompt; the default keeps it."""
+    answer = (
+        "Conclusion: ok. [general-knowledge]\nFacts:\n- ok [general-knowledge]\n"
+        "Sources:\n1. general-knowledge - general-knowledge\n"
+        "Confidence: high\nUnverified: nothing\n"
+    )
+    llm = FakeLLM(responses=[answer, answer])
+    agent, _log_path = _build_agent(workspace, llm)
+    agent.last_role_context = agent.role_router.route("hi")
+    agent._stream_on_token = None
+    block = "<long_term_memory>\nSECRET_MEMO_ALPHA\n</long_term_memory>"
+
+    # Default (non-lean) synthesis injects the long-term-memory block.
+    agent._synthesize(
+        goal=None, artifacts={}, question="hi", planner_reasoning="r",
+        persistent_block=block, llm=llm, lean_context=False,
+    )
+    assert "SECRET_MEMO_ALPHA" in llm.calls[-1]["user"]
+
+    # Lean synthesis (cheap path) drops it.
+    agent._synthesize(
+        goal=None, artifacts={}, question="hi", planner_reasoning="r",
+        persistent_block=block, llm=llm, lean_context=True,
+    )
+    assert "SECRET_MEMO_ALPHA" not in llm.calls[-1]["user"]
