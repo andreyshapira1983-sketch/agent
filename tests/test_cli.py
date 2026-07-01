@@ -192,6 +192,9 @@ def test_local_operator_reply_requires_explicit_llm_stop_marker():
         # self-build supervisor — read-only, no LLM/provider calls.
         ":self-build-supervisor",
         ":self-build-supervisor --json",
+        # TD-022 — read-only budget kill-switch status.
+        ":budget-kill-switch",
+        ":budget-kill-switch --json",
     ],
 )
 def test_local_meta_commands_do_not_start_model_calls(
@@ -217,6 +220,7 @@ def test_local_meta_commands_do_not_start_model_calls(
         ":source-registry",
         ":model-discovery-audit",
         ":self-build-supervisor",
+        ":budget-kill-switch",
     ],
 )
 def test_local_meta_commands_never_invoke_planner_or_synthesizer(

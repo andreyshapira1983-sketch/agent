@@ -397,3 +397,49 @@ def _handle_budget_window_status(rest: str, agent: AgentLoop) -> bool:
     else:
         print(ledger.user_summary(), file=sys.stderr)
     return True
+
+
+def _handle_budget_kill_switch(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """Operator view / reset for the persistent budget kill-switch (TD-022).
+
+    Read-only by default: reports whether the autonomous day budget kill-switch
+    is engaged and why. ``--clear`` resets a latched switch (operator action);
+    it does not change any budget limit, routing, or provider configuration.
+    """
+    from core.budget_kill_switch import BudgetKillSwitch, default_path
+
+    tokens = _split_meta_args(rest)
+    as_json = "--json" in tokens
+    do_clear = "--clear" in tokens
+    if any(token not in {"--json", "--clear"} for token in tokens):
+        print("Usage: :budget-kill-switch [--json] [--clear]", file=sys.stderr)
+        return True
+
+    kill_switch = BudgetKillSwitch(path=default_path(workspace))
+    if do_clear:
+        kill_switch.clear()
+        agent.log.log("budget_kill_switch_cleared", {"path": str(default_path(workspace))})
+
+    snapshot = _budget_ledger_snapshot(agent)
+    state = kill_switch.status(snapshot)
+    payload = state.to_dict()
+    agent.log.log("budget_kill_switch_status", payload)
+
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2), file=sys.stderr)
+        return True
+
+    lines = ["=== budget kill-switch ==="]
+    lines.append(f"active: {payload['active']}")
+    if payload["active"]:
+        lines.append(f"reason: {payload['reason']}")
+        lines.append(
+            f"triggering: {payload['window']} {payload['counter']} "
+            f"{payload['used']}/{payload['limit']} ({payload['limit_source']})"
+        )
+        lines.append(f"since: {payload['timestamp']}")
+        lines.append("clear with: :budget-kill-switch --clear")
+    else:
+        lines.append("autonomous day budget within limits")
+    print("\n".join(lines), file=sys.stderr)
+    return True

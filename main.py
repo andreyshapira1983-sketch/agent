@@ -160,6 +160,7 @@ from cli.commands_budget import (
     _format_autonomy_readiness,
     _format_operator_budget_digest,
     _handle_budget_config,
+    _handle_budget_kill_switch,
     _handle_budget_status,
     _handle_budget_window_status,
     _next_action_prerequisites,
@@ -2998,6 +2999,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head in {":budget-window-status", ":budget-windows", ":budget-ledger"}:
         return _handle_budget_window_status(rest.strip(), agent)
 
+    if head in {":budget-kill-switch", ":budget-killswitch", ":kill-switch"}:
+        return _handle_budget_kill_switch(rest.strip(), agent, workspace)
+
     if head in {":state-store-drill", ":state-drill", ":state-recovery-drill"}:
         return _handle_state_store_drill(rest.strip(), agent, workspace)
 
@@ -3165,6 +3169,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :conflicts [--limit N|--json]   inspect source claim conflicts and suggestions\n"
             "  :budget-status                  inspect default autonomous runtime budgets\n"
             "  :budget-window-status [--json] inspect persistent hour/day budget windows\n"
+            "  :budget-kill-switch [--json] [--clear] inspect/reset autonomous day-budget kill-switch\n"
             "  :state-store-drill [--json]    prove JSONL quarantine/recovery on an isolated file\n"
             "  :release-audit [--json]         inspect release artifact hygiene exclusions\n"
             "  :supply-chain-audit [--json]   inspect pinned deps and CI release gates\n"
@@ -3458,7 +3463,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :model-discovery-audit  :provider-catalog-refresh  :approval-list  :approval-triage  :best-next-action  :ack  :ack-list  :ack-clear  :approval-run  :task-add  :schedule-disable  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :self-build-supervisor  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :budget-kill-switch  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :model-discovery-audit  :provider-catalog-refresh  :approval-list  :approval-triage  :best-next-action  :ack  :ack-list  :ack-clear  :approval-run  :task-add  :schedule-disable  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :self-build-supervisor  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:
