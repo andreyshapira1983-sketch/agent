@@ -70,6 +70,23 @@ _TRUST_KEEP = 0.70
 _TRUST_WATCH = 0.40
 _TRUST_PAUSE = 0.20
 
+# TD-031 amendment — technical success is NOT confirmed value.
+#
+# A self-apply lane outcome tells us the change was *technically* accepted:
+#   - approved        : a human clicked approve in the inbox
+#   - committed_local : the patch applied and the test suite passed locally
+#   - rolled_back     : the lane reverted the change
+# None of these prove the change was *worth making*. The live self-build
+# experiment produced a ``committed_local`` proposal for core/redaction.py that
+# passed tests yet was only a comment-capitalization edit dressed up as a
+# "robustness improvement" — humans rejected it as low value. So technical
+# outcomes get a small reliability nudge in usefulness, never a full value point.
+#
+# ``confirmed_value`` (a human-accepted / merged / value-reviewed outcome) is a
+# *future* signal and is deliberately NOT wired in this PR; when it lands it will
+# carry full usefulness weight. Until then no counter feeds it.
+_TECHNICAL_SUCCESS_WEIGHT = 0.25
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -184,17 +201,29 @@ def _trust_score(rec: RoleRecord) -> float:
 def _usefulness_score(rec: RoleRecord) -> float:
     """Value delivered per invocation (0..1, capped).
 
-    Value events: proposals created/approved, local commits, and Critic vetoes
-    (catching a bad candidate is valuable). Rollbacks subtract. Normalised by
+    Two tiers of positive signal, deliberately weighted differently:
+
+    * **Producer-stage value** (full weight): proposals created and Critic
+      vetoes. These reflect the pipeline doing its judgement work up front and
+      do not depend on any downstream execution being *good*.
+    * **Technical success** (``_TECHNICAL_SUCCESS_WEIGHT``, a small nudge):
+      ``approved`` (``proposals_approved``) and ``committed_local``. These prove
+      a change was technically accepted/applied, NOT that it was valuable — so
+      they must not by themselves push a role to high usefulness. See the
+      ``_TECHNICAL_SUCCESS_WEIGHT`` note for the redaction.py evidence.
+
+    ``rolled_back`` subtracts at full weight (a reverted change is wasted work).
+    ``confirmed_value`` (human-accepted / merged / value-reviewed) is a future
+    signal not recorded yet; when added it will use full weight. Normalised by
     invocations so a role that adds value on most runs trends toward 1.0.
     """
     if rec.invocations <= 0:
         return 0.0
+    producer_stage_value = rec.proposals_created + rec.vetoes
+    technical_success = rec.proposals_approved + rec.committed_local
     value = (
-        rec.proposals_created
-        + rec.proposals_approved
-        + rec.committed_local
-        + rec.vetoes
+        producer_stage_value
+        + _TECHNICAL_SUCCESS_WEIGHT * technical_success
         - rec.rolled_back
     )
     if value <= 0:
