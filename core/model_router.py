@@ -147,6 +147,57 @@ _DEFAULT_PROVIDER_ENV: dict[str, tuple[str, ...]] = {
 }
 
 
+# ── TD-010: provider-by-complexity preference ─────────────────────────────────
+# Ordered provider preference per complexity tier, chosen only among providers
+# that are already supported. NO local/Ollama backend and NO fake-local alias:
+# a real local backend is a future extension point. Model names are never
+# hardcoded here — the concrete model always comes from
+# ``model_catalog.tier_model_for(tier, provider)``.
+#
+# Keyed by ComplexityTier.value so this module needs no task_complexity import.
+_TIER_PROVIDER_PREF: dict[str, tuple[str, ...]] = {
+    "light": ("huggingface", "openai"),
+    "standard": ("openai",),
+    "deep": ("anthropic",),
+}
+
+# Per-tier operator override. Comma-separated provider list, e.g.
+#   AGENT_TIER_PROVIDERS_LIGHT="huggingface,openai"
+_TIER_PROVIDERS_ENV: dict[str, str] = {
+    "light": "AGENT_TIER_PROVIDERS_LIGHT",
+    "standard": "AGENT_TIER_PROVIDERS_STANDARD",
+    "deep": "AGENT_TIER_PROVIDERS_DEEP",
+}
+
+
+def _tier_provider_prefs(tier_value: str) -> tuple[str, ...]:
+    """Provider preference list for a tier, honoring the env override."""
+    env_name = _TIER_PROVIDERS_ENV.get(tier_value)
+    raw = os.getenv(env_name, "").strip() if env_name else ""
+    if raw:
+        return tuple(p.strip() for p in raw.split(",") if p.strip())
+    return _TIER_PROVIDER_PREF.get(tier_value, ())
+
+
+def _provider_has_credentials(provider: str) -> bool:
+    """True when every required env var for *provider* is set (non-empty).
+
+    ``mock`` needs no credentials. Providers with no known env requirement are
+    treated as unavailable so the preference loop skips them gracefully.
+    """
+    if provider not in _DEFAULT_PROVIDER_ENV:
+        return False
+    required = _DEFAULT_PROVIDER_ENV[provider]
+    return all(os.getenv(var, "").strip() for var in required)
+
+
+def _append_skipped(reason: str, skipped: list[str]) -> str:
+    """Append skipped-provider details to a route reason, safely bounded."""
+    if not skipped:
+        return reason
+    return reason + "|skipped:" + ",".join(skipped)
+
+
 @dataclass(frozen=True)
 class ModelSelectionPolicy:
     """How the router may choose from the model registry.
@@ -769,6 +820,42 @@ class ModelRouter:
             ledger=self.usage_ledger,
         )
 
+    def _resolve_tier_provider(
+        self, tier: Any, role_key: str
+    ) -> tuple[str | None, str | None, list[str]]:
+        """TD-010: choose a provider for *tier* by complexity preference.
+
+        Returns ``(provider, reason, skipped)`` when a supported, credentialed
+        provider that also has a catalog/env tier model is found; otherwise
+        ``(None, None, skipped)`` so the caller keeps today's role-default
+        behavior. The concrete model is never decided here — only the provider;
+        callers still resolve the model via ``tier_model_for(tier, provider)``.
+
+        An explicit per-role provider (``AGENT_<ROLE>_PROVIDER``) disables the
+        preference entirely so the operator's choice always wins.
+        """
+        explicit = self._routes.get(role_key)
+        if explicit is not None and _normalise_provider(explicit.provider):
+            return None, None, []
+
+        from core.model_catalog import tier_model_for
+
+        tier_value = tier.value
+        skipped: list[str] = []
+        for prov in _tier_provider_prefs(tier_value):
+            norm = _normalise_provider(prov)
+            if not norm:
+                continue
+            if norm not in SUPPORTED_PROVIDERS or not _provider_has_credentials(norm):
+                # Unsupported (e.g. `local`) or missing credentials → skip.
+                skipped.append(f"provider_unavailable:{norm}")
+                continue
+            if not tier_model_for(tier, norm):
+                skipped.append(f"no_model:{norm}")
+                continue
+            return norm, f"complexity:{tier_value}:{norm}", skipped
+        return None, None, skipped
+
     def for_task(
         self,
         role: ModelRole | str,
@@ -818,31 +905,52 @@ class ModelRouter:
         else:
             tier = assess_complexity(task, role=role_key)
 
-        # STANDARD → reuse normal role routing (backward-compatible path)
-        if tier == ComplexityTier.STANDARD:
-            return self.for_role(role_key)
-
-        # Determine provider from existing role route or default
+        # ── TD-010: provider-by-complexity preference ────────────────────────
+        # Pick the PROVIDER by complexity tier among already-supported
+        # providers (LIGHT→huggingface/openai, STANDARD→openai, DEEP→anthropic;
+        # overridable via AGENT_TIER_PROVIDERS_*). Returns None when no
+        # preferred provider is credentialed AND has a catalog tier model, in
+        # which case we keep today's role-default behavior exactly.
         route = self.route_for(role_key)
-        provider = _normalise_provider(route.provider or self.default_provider) or "anthropic"
+        pref_provider, pref_reason, skipped = self._resolve_tier_provider(tier, role_key)
 
-        tier_model = tier_model_for(tier, provider)
-        tier_reason = f"complexity:{tier.value}"
+        if pref_provider is not None:
+            # A preferred provider won — model still comes from the catalog.
+            provider = pref_provider
+            tier_model = tier_model_for(tier, provider)
+            tier_reason = _append_skipped(pref_reason or f"complexity:{tier.value}:{provider}", skipped)
+        elif tier == ComplexityTier.STANDARD:
+            # STANDARD with no preferred provider → reuse normal role routing
+            # (backward-compatible fast path; no catalog query, identity kept).
+            return self.for_role(role_key)
+        else:
+            # LIGHT / DEEP fall back to the explicit/default role provider.
+            provider = _normalise_provider(route.provider or self.default_provider) or "anthropic"
+            tier_model = tier_model_for(tier, provider)
+            # If the preference loop actually skipped provider(s), this is a
+            # fallback to the role default; otherwise it's a plain complexity
+            # route to the (explicit or default) provider.
+            if skipped:
+                tier_reason = _append_skipped("fallback:role_default", skipped)
+            else:
+                tier_reason = f"complexity:{tier.value}:{provider}"
 
-        if tier == ComplexityTier.LIGHT and not tier_model:
-            light_spec = self.registry.best_for_role(
-                role_key,
-                policy=ModelSelectionPolicy(
-                    name="cost",
-                    max_cost_tier="low",
-                    allow_mock=self.selection_policy.allow_mock,
-                    require_available=self.selection_policy.require_available,
-                ),
-            )
-            if light_spec is not None:
-                provider = light_spec.provider
-                tier_model = light_spec.model
-                tier_reason = f"complexity:{tier.value}:{light_spec.id}"
+            if tier == ComplexityTier.LIGHT and not tier_model:
+                light_spec = self.registry.best_for_role(
+                    role_key,
+                    policy=ModelSelectionPolicy(
+                        name="cost",
+                        max_cost_tier="low",
+                        allow_mock=self.selection_policy.allow_mock,
+                        require_available=self.selection_policy.require_available,
+                    ),
+                )
+                if light_spec is not None:
+                    provider = light_spec.provider
+                    tier_model = light_spec.model
+                    tier_reason = _append_skipped(
+                        f"complexity:{tier.value}:{light_spec.id}", skipped
+                    )
 
         # ── Deep/Opus escalation gate ────────────────────────────────────────
         # DEEP is the only expensive direction; LIGHT (cheap) is never gated.

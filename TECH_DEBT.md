@@ -160,13 +160,60 @@ TD-009 — Source Registry
 изменений.
 TD-010 — Model Routing
 
-Добавить реальные правила выбора моделей:
+Статус: Done
 
-Local
-GPT
-Claude
+Проблема
+for_task выбирал tier (LIGHT/STANDARD/DEEP) по сложности, но PROVIDER всегда брался
+из фиксированной role-route/default-строки. Не было маршрутизации провайдера по
+сложности среди уже поддерживаемых провайдеров, и не было честного reason о том,
+почему выбран тот или иной провайдер (и что было пропущено).
 
-в зависимости от сложности.
+Что должно быть (согласованный scope)
+Маршрутизация ТОЛЬКО провайдера по сложности среди уже поддерживаемых провайдеров.
+Без Ollama/local backend, без fake-local alias, без хардкода имён моделей.
+- LIGHT    → huggingface → openai → role default
+- STANDARD → openai              → role default
+- DEEP     → anthropic           → role default
+
+Готово
+- core/model_router.py:
+  * _TIER_PROVIDER_PREF — упорядоченные списки провайдеров по tier (по value tier,
+    без импорта task_complexity). local НЕ входит в дефолты (реального backend нет).
+  * _TIER_PROVIDERS_ENV + _tier_provider_prefs — env-override
+    AGENT_TIER_PROVIDERS_{LIGHT,STANDARD,DEEP} (список через запятую) перекрывает
+    дефолтную преференцию.
+  * _provider_has_credentials — провайдер доступен только если он в
+    SUPPORTED_PROVIDERS и заданы все нужные env-ключи; неподдержанные (например
+    local) и без ключей → пропускаются gracefully.
+  * _resolve_tier_provider(tier, role_key) — идёт по преференции, первый
+    поддержанный+с ключами провайдер, у которого ЕСТЬ catalog/env tier-модель
+    (tier_model_for), выигрывает. Явный per-role provider (AGENT_<ROLE>_PROVIDER)
+    полностью отключает преференцию — выбор оператора важнее.
+  * for_task: сначала вызывает _resolve_tier_provider. Если провайдер выбран —
+    модель всё равно берётся из model_catalog.tier_model_for(tier, provider) (имена
+    не хардкодятся). Если нет — STANDARD уходит в for_role (как раньше), LIGHT/DEEP
+    падают на role-default с прежней LIGHT-registry-fallback логикой. DEEP в обоих
+    путях проходит существующий deep-escalation gate без изменений.
+- Reason строки (честные): complexity:{tier}:{provider}, fallback:role_default,
+  а пропуски добавляются как |skipped:provider_unavailable:<name>
+  (например |skipped:provider_unavailable:local) или no_model:<name>.
+
+Гарантии
+- Имена моделей не хардкодятся (источник истины — tier_model_for).
+- Static/mock LLM (ModelRouter.single) не затронут.
+- DEEP по-прежнему требует operator escalation; без причины — downgrade в standard.
+- Нет multi-provider config / ключей → поведение как раньше (role default).
+- Явный role-provider env выигрывает у преференции.
+
+Проверка
+- tests/test_provider_routing_td010.py (10 тестов, без реальных API-вызовов):
+  LIGHT→huggingface; LIGHT fallback→openai со skipped:hf; STANDARD→openai;
+  DEEP→anthropic c operator escalation; DEEP без причины → downgrade; env-override
+  провайдера; skipped:provider_unavailable:local; приоритет явного role-provider;
+  no-config → role default; static LLM без изменений.
+- Targeted: tests/test_model_router.py, test_adaptive_routing.py,
+  test_task_complexity.py, test_model_usage.py — 187 passed.
+- Full pytest: 3414 passed.
 
 P2 — Будущее
 TD-011 — Live Model Discovery
