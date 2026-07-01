@@ -265,8 +265,23 @@ def _recommendation(rec: RoleRecord) -> str:
     keep. Otherwise map trust to keep/watch/pause/retire. Because Critic vetoes
     count as positives in trust, a diligent Critic trends to ``keep``; a Builder
     with repeated failures or vetoed outputs trends toward watch/pause/retire.
+
+    Human value reviews (``confirmed_value`` / ``value_rejected``, TD-033/034)
+    count as judged evidence too, so that many human ``rejected_*`` verdicts can
+    move the recommendation even when the role has little producer-stage volume.
+    They already feed ``trust_score``; including them here lets the gate actually
+    open on human signal. Technical-only outcomes (``proposals_approved`` /
+    ``committed_local``) are deliberately NOT counted as judged evidence — they
+    prove a change was applied, not that it was judged good or bad.
     """
-    judged = rec.successes + rec.vetoes + rec.failures + rec.outputs_vetoed
+    judged = (
+        rec.successes
+        + rec.vetoes
+        + rec.failures
+        + rec.outputs_vetoed
+        + rec.confirmed_value
+        + rec.value_rejected
+    )
     if judged < _MIN_JUDGED_FOR_RECOMMENDATION:
         return "keep"
     trust = rec.trust_score
