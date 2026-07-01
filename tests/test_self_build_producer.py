@@ -294,3 +294,127 @@ def test_config_budget_limits_never_written(workspace: Path):
     report = _produce(workspace, llm=llm)
     assert report.status == "proposed"
     assert not (workspace / "config" / "budget_limits.json").exists()
+
+
+# ── value gate (TD-035): pre-publish no-effect veto + soft flags ──────────────
+
+
+def _builder_custom(content: str, reason: str, confidence: float = 0.9) -> str:
+    return json.dumps(
+        {
+            "content": content,
+            "test_paths": ["tests/test_redaction.py"],
+            "test_pattern": "redaction",
+            "reason": reason,
+            "confidence": confidence,
+        }
+    )
+
+
+def test_comment_only_change_is_value_vetoed_no_inbox_item(workspace: Path):
+    inbox = ApprovalInbox(path=None)
+    llm = FakeLLM([
+        _manager_ok(),
+        _builder_custom("VALUE = 1  # widest allowed span\n", "tidy comment"),
+    ])
+    report = _produce(
+        workspace,
+        llm=llm,
+        inbox=inbox,
+        file_reader=_reader({_TARGET: "VALUE = 1  # WIDEST allowed span\n"}),
+    )
+    assert report.status == "value_veto"
+    assert report.veto_reasons
+    assert report.approval_id is None
+    assert inbox.list() == []  # value veto blocks approval-item creation
+    # Critic still technically passed; the gate runs after it.
+    assert [r.role for r in report.role_outputs] == [
+        "manager", "researcher", "builder", "critic",
+    ]
+
+
+def test_widest_incident_is_value_vetoed_no_inbox_item(workspace: Path):
+    inbox = ApprovalInbox(path=None)
+    llm = FakeLLM([
+        _manager_ok(),
+        _builder_custom("MAX = 80  # widest\n", "robustness improvement"),
+    ])
+    report = _produce(
+        workspace,
+        llm=llm,
+        inbox=inbox,
+        file_reader=_reader({_TARGET: "MAX = 80  # WIDEST\n"}),
+    )
+    assert report.status == "value_veto"
+    assert inbox.list() == []
+
+
+def test_whitespace_only_change_is_value_vetoed(workspace: Path):
+    inbox = ApprovalInbox(path=None)
+    llm = FakeLLM([
+        _manager_ok(),
+        _builder_custom("def f():\n\n    return 1\n\n", "reflow"),
+    ])
+    report = _produce(
+        workspace,
+        llm=llm,
+        inbox=inbox,
+        file_reader=_reader({_TARGET: "def f():\n    return 1\n"}),
+    )
+    assert report.status == "value_veto"
+    assert inbox.list() == []
+
+
+def test_real_code_change_still_proposes(workspace: Path):
+    inbox = ApprovalInbox(path=None)
+    llm = FakeLLM([
+        _manager_ok(),
+        _builder_custom("def f():\n    return 2\n", "fix return value"),
+    ])
+    report = _produce(
+        workspace,
+        llm=llm,
+        inbox=inbox,
+        file_reader=_reader({_TARGET: "def f():\n    return 1\n"}),
+    )
+    assert report.status == "proposed"
+    assert len(inbox.list()) == 1
+
+
+def test_docs_target_text_change_is_not_value_vetoed(workspace: Path):
+    inbox = ApprovalInbox(path=None)
+    doc = "docs/self_build.md"
+    llm = FakeLLM([
+        _manager_ok(target=doc),
+        _builder_custom("# Title\n\nThis is widest.\n", "clarify wording"),
+    ])
+    report = _produce(
+        workspace,
+        llm=llm,
+        inbox=inbox,
+        candidate_targets=(doc,),
+        file_reader=_reader({doc: "# Title\n\nThis is WIDEST.\n"}),
+    )
+    assert report.status == "proposed"
+    assert len(inbox.list()) == 1
+
+
+def test_overclaim_summary_adds_soft_flag_without_blocking(workspace: Path):
+    inbox = ApprovalInbox(path=None)
+    hype = "revolutionary breakthrough that dramatically boosts performance"
+    llm = FakeLLM([
+        _manager_ok(),
+        _builder_custom("NEW = 1\n", hype),
+    ])
+    report = _produce(
+        workspace,
+        llm=llm,
+        inbox=inbox,
+        file_reader=_reader({_TARGET: "OLD = 0\n"}),
+    )
+    assert report.status == "proposed"  # soft flag never blocks
+    assert report.value_flags
+    assert any("overclaim" in f for f in report.value_flags)
+    # The flag is visible to a human reviewer on the approval item's reasons.
+    item = inbox.list()[0]
+    assert any("value-flag" in r for r in item.reasons)

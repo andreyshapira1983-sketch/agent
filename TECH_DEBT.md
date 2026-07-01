@@ -1287,3 +1287,50 @@ TD-034 — Recommendation gate includes human value evidence (P0 fix)
   -> keep); одиночный rejection не форсит pause/retire. Проекция/идемпотентность
   TD-033 по-прежнему зелёные.
 - Full pytest: 3720 passed.
+==============================================================================
+TD-035 — Producer Value Gate (Phase 1: deterministic pre-publish no-effect veto)
+Статус: Done
+
+Проблема
+- Critic в self_build_producer проверяет только техническую валидность патча
+  (парсится, не diff, не критичный файл, есть тесты, risk-класс ок), но не
+  ценность изменения. Живой прогон выдал предложение для core/redaction.py,
+  которое дошло до committed_local и прошло тесты, хотя было лишь сменой
+  регистра в комментарии (WIDEST -> widest) под вывеской «robustness
+  improvement». Технически валидно, ценности ноль.
+
+Готово
+- core/proposal_value_gate.py (новый, детерминированный, без LLM): гейт между
+  Critic-pass и Reporter. Hard veto (нет эффекта на код): whitespace-only,
+  formatting-only, comment-only Python, identical-after-normalization —
+  сравнение по token-скелету через stdlib tokenize (INDENT/DEDENT/NEWLINE по
+  идентичности, без точного whitespace; COMMENT/NL отброшены). Doc-таргеты
+  (*.md) освобождены от hard veto — для доки текст и есть содержимое. Soft flag
+  (не блокирует): overclaim summary на тривиальном диффе через
+  truth_hype_filter.evaluate(reason).is_hype (свойство, не LLM).
+- core/self_build_producer.py: новый статус producer value_veto — НЕ создаёт
+  approval-item; причины/флаги в отчёте. Добавлено поле ProducerReport
+  .value_flags. Soft-флаги дописываются в evidence -> видны человеку в reasons
+  approval-item. Инцидент WIDEST -> widest теперь value_veto без inbox-item.
+  Роли, записываемые в registry, не изменены (scoring не тронут).
+- docs/AGENT_ANATOMY.md: индекс модулей дополнен core/proposal_value_gate.
+
+Область НЕ тронута
+- LLM/network/git/apply — нет. approval/self_apply/agent_tick/daemon/CLI/model
+  routing/budget/registry-scoring/value_review — без изменений.
+  config/budget_limits.json не тронут. Поведение critic_veto не изменено.
+
+Проверка
+- tests/test_proposal_value_gate.py (новый, 20): comment-only/whitespace/
+  formatting/identical -> veto; WIDEST -> widest -> veto; реальный код -> pass;
+  docs/*.md -> не veto; overclaim на тривиальном диффе -> soft flag (не veto);
+  большой дифф/substantive reason -> без флага; non-.py; невалидный Python не
+  падает; инъекция hype_fn; no side effects.
+- tests/test_self_build_producer.py: +value_veto пути (comment-only, WIDEST,
+  whitespace) без inbox-item; реальный код -> proposed; docs-таргет -> proposed;
+  overclaim -> proposed + value_flags видны в reasons.
+- Full pytest: 3746 passed. Anatomy-check зелёный.
+
+Примечание по нумерации: пользователь запросил это как «TD-034», но TD-034 уже
+занят (Recommendation gate P0 fix, PR #21). Во избежание двойной нумерации
+запись оформлена как TD-035.
