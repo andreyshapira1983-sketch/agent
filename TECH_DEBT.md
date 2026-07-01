@@ -486,3 +486,58 @@ TD-010»: маршрутизация работает, но её не видно
 - tests/test_provider_routing_td010.py: 10 тестов TD-010 без изменений — passed.
 - routing/adaptive/escalation suites: 137 passed.
 - full pytest: 3431 passed.
+
+----------------------------------------------------------------------
+
+TD-020 — Reasoning ↔ Action Check: точность word-boundary matching
+
+Статус: Done
+
+Проблема
+core/reasoning_action_check.py сверяет свободный текст reasoning планировщика с
+выбранными tool'ами (MAST FM-2.6). Прямое направление `_reasoning_mentions`
+искало ключевые слова простым substring-ом. Из-за этого короткие ASCII-стемы
+ложно срабатывали внутри несвязанных слов:
+- `read ` матчилось внутри `thread`;
+- `ls ` матчилось внутри `calls` / `class`;
+- `url` матчилось внутри `curl`.
+Итог: действие помечалось как «обосновано», хотя reasoning его не упоминал —
+реальный reasoning↔action mismatch тихо скрывался. Обратное направление
+(mentioned_but_not_planned) уже имело strength-фильтр, прямое — нет
+(асимметрия).
+
+ВАЖНО: проверка остаётся сугубо наблюдательной (report only, вызывается под
+`except: pass` в loop). Это не self-repair и не блокировка плана — только
+точность диагностики. Никакого нового поведения, никаких LLM/provider-вызовов.
+
+Что должно быть
+Единый boundary-aware матчер ключевых слов, который:
+- сохраняет substring-семантику для кириллических стемов (`прочита` →
+  `прочитаю`) и многословных фраз (`read the file`) — это высокосигнальные
+  и намеренно инфлективные записи;
+- для одиночного ASCII-токена (`read`, `ls`, `url`) требует word-boundary,
+  чтобы он не матчился внутри `thread` / `calls` / `curl`.
+
+Готово
+- core/reasoning_action_check.py:
+  * добавлен helper `_keyword_in_text(text, kw)`: фразы и не-ASCII → substring;
+    одиночный ASCII-токен → regex с lookaround-границами
+    `(?<![0-9a-z])<kw>(?![0-9a-z])`.
+  * `_reasoning_mentions` (прямое направление) использует helper вместо
+    `kw.lower() in text`.
+  * обратное направление (strong-keyword gate, `_` или len>=6) тоже проходит
+    через helper — симметрия без изменения gate-логики.
+  * добавлен `import re`.
+- Стемы и фразы работают как раньше; ужесточены только короткие ASCII-токены —
+  ровно источник ложных срабатываний.
+
+Проверка
+- tests/test_reasoning_action_check.py (7 → 13 тестов):
+  * `read ` не матчит `thread` → file_read остаётся unjustified;
+  * `ls ` не матчит `calls`/`class` → list_dir unjustified;
+  * `url` не матчит `curl` → web_fetch unjustified;
+  * настоящие whole-word `read`/`url` всё ещё матчат (нет false negatives);
+  * кириллические стемы `содержим`/`каталог`/`прочита` не задеты фиксом.
+- targeted: 13 passed.
+- full pytest: 3463 passed.
+

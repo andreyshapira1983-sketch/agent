@@ -74,3 +74,54 @@ def test_weak_keyword_does_not_trigger_mentioned_but_not_planned():
         [],
     )
     assert "file_read" not in r.mentioned_but_not_planned
+
+
+def test_read_does_not_match_inside_thread():
+    # Regression: 'read ' must not match inside 'thread' and silently
+    # justify a file_read step that the reasoning never argued for.
+    r = check_reasoning_actions(
+        "I will spawn a worker thread to keep the UI responsive.",
+        ["file_read"],
+    )
+    assert r.has_mismatch
+    assert "file_read" in r.unjustified_actions
+    assert "file_read" not in r.matched_tools
+
+
+def test_ls_does_not_match_inside_calls_or_class():
+    # Regression: 'ls ' must not match inside 'calls'/'class'.
+    r = check_reasoning_actions(
+        "The class simply forwards all its calls to the base handler.",
+        ["list_dir"],
+    )
+    assert "list_dir" in r.unjustified_actions
+
+
+def test_url_does_not_match_inside_curl():
+    # Regression: 'url' must not match inside 'curl'.
+    r = check_reasoning_actions(
+        "Run curl against the health endpoint to confirm it is up.",
+        ["web_fetch"],
+    )
+    assert "web_fetch" in r.unjustified_actions
+
+
+def test_whole_word_read_and_url_still_match():
+    # The boundary fix must not create false negatives: real whole-word
+    # mentions still count as justified.
+    r = check_reasoning_actions(
+        "I will read the config and fetch the url it points to.",
+        ["file_read", "web_fetch"],
+    )
+    assert not r.has_mismatch
+    assert set(r.matched_tools) == {"file_read", "web_fetch"}
+
+
+def test_cyrillic_stems_unaffected_by_boundary_fix():
+    # Cyrillic stems must keep matching inflected forms after the fix.
+    r = check_reasoning_actions(
+        "Изучу содержимое каталога, затем прочитаю нужный файл.",
+        ["list_dir", "file_read"],
+    )
+    assert not r.has_mismatch
+    assert set(r.matched_tools) == {"list_dir", "file_read"}
