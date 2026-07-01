@@ -678,3 +678,82 @@ pre-flight уже есть, но как дефолтная граница авт
 - tests/test_cli.py: :budget-kill-switch в local-only параметрах.
 - targeted: 11 (kill-switch) / 197 (kill-switch+cli+daemon+ledger) passed.
 - full pytest: 3522 passed.
+
+----------------------------------------------------------------------
+
+TD-023 — Trusted Low-Risk Self-Apply Lane
+
+Статус: Done
+
+Проблема
+Self-build цикл был propose-only: :repair мог применять правки, но только за
+per-action human approval; git commit/push заблокированы. Не было замкнутой
+безопасной петли propose → apply → test → rollback-or-local-commit без
+одобрения на каждый шаг для узко определённой low-risk полосы.
+
+ЭТО НЕ общий autonomous write access. Полоса намеренно узкая.
+
+Разрешённая полоса
+- только low-risk self-build патчи (source/test/docs внутри репозитория);
+- только на выделенной временной ветке;
+- обязательный rollback-план;
+- targeted tests, затем full pytest ДО локального коммита;
+- fail → автоматический rollback; pass → локальный git commit;
+- НЕТ push, НЕТ merge в main, НЕТ provider/model/catalog записей, НЕТ
+  изменений budget-лимитов, НЕТ secrets/env/key файлов, НЕТ расширения
+  shell_exec.
+
+Hard safety-гейты (до любой записи файла, первый сработавший выигрывает)
+1. budget kill-switch active → status=budget_kill_switch;
+2. hour budget near-exhaustion → status=budget_wait;
+3. pending approvals → status=approval_wait;
+4. патч не low-risk / denylisted → status=rejected;
+5. рабочее дерево грязное → status=rejected.
+
+Готово
+- core/safe_vcs.py (новый): узкий git-front-end на один workspace. Каждый метод
+  — ровно один hard-coded git argv: current_branch/head_hash/status_porcelain/
+  is_clean/create_temp_branch/checkout/delete_branch/stage_all/commit/
+  reset_hard/clean_untracked. НЕТ методов push/fetch/pull/remote вообще (полоса
+  физически не может выйти в сеть). Валидация имени ветки, guard protected
+  веток (main/master/HEAD), commit-identity через -c (не трогает global git
+  config), injectable runner.
+- core/self_apply_lane.py (новый):
+  * FileChange / SelfApplyProposal (files + reason + evidence + test_paths).
+  * classify_patch_risk() — чистая: allowlist core|cli|tools|tests/*.py, docs/,
+    *.md; denylist (config/budget_limits.json, config/model_registry.json,
+    config/model_catalog.json, .env, secrets/, requirements/lock, .github/,
+    *.pem/*.key, *secret*/*credential*). Denylist проверяется первым; каждый
+    файл должен быть allowlisted И не denylisted; отклоняются абсолютные пути
+    и `..`.
+  * run_self_apply_lane() — оркестрация: гейты 1-5 → clean-tree → temp branch
+    → apply (full-content write внутри workspace) → targeted tests → full
+    pytest → rollback(reset_hard+clean+checkout original+delete temp) или
+    local commit(stage_all+commit, checkout обратно на исходную ветку). НИКОГДА
+    не push/merge, HEAD возвращается на исходную ветку, изменение живёт только
+    на temp-ветке.
+  * SelfApplyReport: status/reason/branch/files_changed/tests_run/
+    rollback_status/commit_hash/rejected_files/risks/next_human_action.
+  * Тяжёлые зависимости (git, test runner) инъектируются → полностью
+    юнит-тестируемо без реального pytest/provider/network.
+
+Область НЕ тронута
+- shell_exec остаётся read-only (git log/diff/status); полоса использует
+  отдельный SafeVCS, НЕ расширяет shell_exec.
+- полоса НЕ подключена к autonomous daemon-у (никакого авто-триггера) — это
+  осознанная граница: не general autonomous write access, вызывается
+  осознанно человеком/следующей задачей.
+
+Проверка
+- tests/test_safe_vcs.py (новый, 11): реальный temp git-repo — branch/commit/
+  checkout, reset_hard+clean восстанавливают дерево, delete protected refused,
+  invalid branch names refused, failed git → VcsError, нет push/fetch/pull/
+  remote методов.
+- tests/test_self_apply_lane.py (новый, 36): classifier allow/deny (13),
+  гейты kill-switch/budget_wait/approval_wait/denylist/dirty отказывают ДО
+  apply (RaisingRunner доказывает: тесты не запускаются), реальный repo —
+  low-risk патч применяется+коммитится локально, targeted-fail → rollback,
+  full-fail → rollback, main HEAD не меняется, budget_limits.json не тронут,
+  новый файл вычищается при rollback, нет push-метода.
+- targeted: 47 passed (safe_vcs + self_apply_lane).
+- full pytest: 3569 passed.
