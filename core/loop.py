@@ -1195,13 +1195,17 @@ class AgentLoop:
                 "plan_parse_failed" in (planner_out.warnings or ())
             )
             if plan_parse_failed:
+                _parse_diag = dict(getattr(planner_out, "diagnostics", {}) or {})
                 self.log.log(
                     "plan_parse_failed",
                     {
                         "attempt": attempt,
                         "warnings": list(planner_out.warnings),
                         "raw_chars": len(planner_out.raw_response),
-                        "raw_preview": planner_out.raw_response[:240],
+                        # Sanitised, length-capped preview (no full secrets).
+                        "raw_preview": _parse_diag.get("raw_preview")
+                        or planner_out.raw_response[:240],
+                        "diagnostics": _parse_diag,
                     },
                 )
                 attempt_failures.append(

@@ -547,6 +547,12 @@ class PlannerOutput:
     # silently down-scoped.  Surfaced via a ``plan_tool_drop`` log event
     # so operators can detect hallucination without digging through raw warnings.
     dropped_tools: list[str] = field(default_factory=list)
+    # Structured, human-readable JSON-parse diagnostics (TD-003). Populated by
+    # ``_parse_json`` so operators can see *why* an output failed to parse
+    # (brief reason, which stage broke, whether a JSON block was found, which
+    # fallback was chosen) plus a sanitised, length-limited preview of the raw
+    # output — without another LLM call and without leaking full secrets.
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 class LLMPlanner:
@@ -633,23 +639,26 @@ class LLMPlanner:
             max_tokens=1024,
             temperature=0.0,
         )
-        parsed, parse_warnings = self._parse_json(raw)
+        parsed, parse_warnings, parse_diag = self._parse_json(raw)
         if parsed is None:
             return PlannerOutput(
                 reasoning="(planner output did not parse — falling back to empty plan)",
                 sources=[],
                 raw_response=raw,
                 warnings=parse_warnings + ["plan_parse_failed"],
+                diagnostics=parse_diag,
             )
 
         reasoning = str(parsed.get("reasoning", "")).strip() or "(no reasoning provided)"
         raw_steps = parsed.get("steps") or []
         if not isinstance(raw_steps, list):
+            parse_diag = {**parse_diag, "reason": "steps field was not a list"}
             return PlannerOutput(
                 reasoning=reasoning,
                 sources=[],
                 raw_response=raw,
                 warnings=parse_warnings + ["steps_field_not_a_list"],
+                diagnostics=parse_diag,
             )
 
         sources, step_warnings, dropped_tools = self._validate_steps(
@@ -677,6 +686,7 @@ class LLMPlanner:
             raw_response=raw,
             warnings=parse_warnings + step_warnings,
             dropped_tools=dropped_tools,
+            diagnostics=parse_diag,
         )
 
     # ---------- prompt construction ----------
@@ -731,40 +741,106 @@ class LLMPlanner:
 
     # ---------- JSON parsing ----------
 
+    # Max characters of raw planner output echoed into diagnostics. Keeps trace
+    # logs bounded and, combined with DLP redaction, avoids leaking full secrets.
+    _RAW_PREVIEW_LIMIT = 200
+
     @staticmethod
-    def _parse_json(raw: str) -> tuple[dict[str, Any] | None, list[str]]:
+    def _sanitized_preview(raw: str, limit: int = _RAW_PREVIEW_LIMIT) -> str:
+        """Return a DLP-redacted, single-line, length-capped preview of *raw*.
+
+        Credentials/PII are redacted before truncation so a leaked secret can
+        never appear even partially, and newlines are escaped so the preview
+        stays on one trace line. Purely local (regex) — no LLM/provider call.
+        """
+        text = (raw or "").strip()
+        if not text:
+            return ""
+        try:
+            from core.redaction import redact_dlp_text  # local import: avoid cycles
+            safe, _secret_findings, _pii_findings = redact_dlp_text(text)
+        except Exception:  # noqa: BLE001 — preview must never crash planning
+            safe = text
+        safe = safe.replace("\r", "").replace("\n", "\\n")
+        if len(safe) > limit:
+            hidden = len(safe) - limit
+            safe = f"{safe[:limit]}… [+{hidden} chars truncated]"
+        return safe
+
+    @staticmethod
+    def _parse_json(
+        raw: str,
+    ) -> tuple[dict[str, Any] | None, list[str], dict[str, Any]]:
         warnings: list[str] = []
         text = raw.strip()
+
+        # Structured diagnostics (TD-003). Always populated so callers can show
+        # *why* parsing succeeded or failed without re-deriving it. `stage` names
+        # where parsing ended, `fallback` names which recovery path was used.
+        diagnostics: dict[str, Any] = {
+            "stage": "start",
+            "reason": "",
+            "json_block_found": False,
+            "fallback": "none",
+            "raw_preview": LLMPlanner._sanitized_preview(raw),
+            "raw_length": len(raw),
+        }
 
         # Strip a leading ```json or ``` fence if present.
         fence = re.match(r"^```(?:json)?\s*(.*?)\s*```\s*$", text, flags=re.DOTALL)
         if fence:
             text = fence.group(1).strip()
             warnings.append("stripped_markdown_fence")
+            diagnostics["json_block_found"] = True
+            diagnostics["fallback"] = "markdown_fence"
 
         # Direct parse first.
+        diagnostics["stage"] = "direct_parse"
         try:
             obj = json.loads(text)
             if isinstance(obj, dict):
-                return obj, warnings
+                diagnostics["stage"] = "parsed"
+                diagnostics["reason"] = "ok"
+                return obj, warnings, diagnostics
             warnings.append("top_level_not_object")
-        except json.JSONDecodeError:
-            pass
+            diagnostics["reason"] = (
+                f"top-level JSON was {type(obj).__name__}, expected an object"
+            )
+        except json.JSONDecodeError as exc:
+            diagnostics["reason"] = (
+                f"JSON decode error at line {exc.lineno} col {exc.colno}: {exc.msg}"
+            )
 
         # Fallback: find first '{' and matching last '}'.
         start = text.find("{")
         end = text.rfind("}")
         if start != -1 and end != -1 and end > start:
+            diagnostics["json_block_found"] = True
+            diagnostics["stage"] = "substring_extract"
             try:
                 obj = json.loads(text[start : end + 1])
                 if isinstance(obj, dict):
                     warnings.append("extracted_json_substring")
-                    return obj, warnings
-            except json.JSONDecodeError:
-                pass
+                    diagnostics["stage"] = "parsed"
+                    diagnostics["fallback"] = "substring"
+                    diagnostics["reason"] = "recovered JSON object from surrounding text"
+                    return obj, warnings, diagnostics
+                warnings.append("top_level_not_object")
+                diagnostics["reason"] = (
+                    f"extracted substring was {type(obj).__name__}, expected an object"
+                )
+            except json.JSONDecodeError as exc:
+                diagnostics["reason"] = (
+                    f"substring JSON decode error at line {exc.lineno} "
+                    f"col {exc.colno}: {exc.msg}"
+                )
 
         warnings.append("json_decode_error")
-        return None, warnings
+        diagnostics["stage"] = "failed"
+        diagnostics["fallback"] = "empty_plan"
+        if not diagnostics["reason"]:
+            diagnostics["reason"] = "no JSON object found in planner output"
+        return None, warnings, diagnostics
 
     # ---------- step validation ----------
 

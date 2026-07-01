@@ -63,12 +63,40 @@ TD-002 — Deterministic Bypass
 
 TD-003 — Planner JSON Parsing
 
+Статус: Done
+
 Исправить parser:
 
 принимать чистый JSON;
 принимать JSON внутри ```json;
 сохранять raw output;
 улучшить диагностику ошибок.
+
+Готово
+- парсер не переписан: чистый JSON, JSON внутри ```json-блоков и raw output
+  Planner принимаются как прежде; сохранение raw output (PlannerOutput.raw_response)
+  не тронуто.
+- при невалидном output _parse_json собирает structured diagnostics и кладёт их в
+  PlannerOutput.diagnostics: stage (start/direct_parse/substring_extract/parsed/
+  failed), reason (краткая причина, включая line/col JSONDecodeError), json_block_found
+  (найден ли markdown-fence / JSON-подстрока), fallback (none/markdown_fence/substring/
+  empty_plan) и raw_preview.
+- raw_preview безопасен: DLP-редакция секретов через core.redaction.redact_dlp_text,
+  экранирование переводов строк и жёсткий лимит длины (_RAW_PREVIEW_LIMIT=200) с
+  суффиксом "… [+N chars truncated]"; полный секрет никогда не попадает в preview.
+- loop.py логирует plan_parse_failed вместе с diagnostics и sanitized raw_preview.
+- без self-repair: ошибка парсинга приводит к чистому безопасному fallback
+  (пустой план + warning plan_parse_failed), без дополнительного LLM/provider-вызова.
+
+Проверка
+- tests/test_planner.py: malformed JSON, markdown-блок с битым JSON и обычный текст
+  без JSON дают понятную diagnostics (stage=failed, fallback=empty_plan, корректный
+  json_block_found, непустой reason); успешный парсинг — stage=parsed, fallback=none.
+- raw output сохраняется (out.raw_response), preview редактирует секреты
+  ([REDACTED:...]) и обрезается по длине.
+- отсутствие LLM side effects: len(llm.calls) == 1 (ни retry, ни self-repair).
+- full pytest: 3364 passed.
+
 TD-004 — Budget Enforcement
 
 Статус: Done
