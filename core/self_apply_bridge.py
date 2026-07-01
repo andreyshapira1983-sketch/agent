@@ -187,12 +187,16 @@ def run_approved_self_apply(
     approvals_pending: int | None = None,
     now_iso: str | None = None,
     lane: LaneFn = run_self_apply_lane,
+    registry: Any = None,
 ) -> dict:
     """Route one approved inbox item through the trusted self-apply lane.
 
     Returns a normalized result dict (always includes ``proposal_id`` and the
     lane report fields). Marks the item executed only on a terminal lane
     status. ``lane`` is injectable purely so tests can substitute a fake.
+    ``registry`` is an optional TD-031 :class:`SubagentRegistry`; when ``None``
+    (default) behaviour is unchanged. Lane outcomes are recorded best-effort and
+    a registry write failure never affects the self-apply flow.
     """
     item = inbox.get(item_id)
     if item is None:
@@ -276,8 +280,32 @@ def run_approved_self_apply(
     # item approved so the operator can retry once budget/queue recovers.
     if report.status in TERMINAL_LANE_STATUSES:
         inbox.mark_executed(item_id)
+        _record_lane_outcome(registry, item, report.status)
 
     return result
+
+
+def _record_lane_outcome(registry: Any, item: Any, status: str) -> None:
+    """Best-effort TD-031 ledger recording for a terminal lane outcome.
+
+    Guarded end to end: does nothing without a registry, only fires on terminal
+    statuses, strictly filters to producer-origin ``self_apply_lane.run`` items,
+    and swallows any registry write failure so the self-apply flow is untouched.
+    """
+    if registry is None:
+        return
+    if status not in TERMINAL_LANE_STATUSES:
+        return
+    if getattr(item, "operation", None) != SELF_APPLY_OPERATION:
+        return
+    try:
+        # Lazy import avoids a circular dependency (producer imports this module).
+        from core.self_build_producer import PRODUCER_ORIGIN
+        if _origin_of(item) != PRODUCER_ORIGIN:
+            return
+        registry.apply_lane_outcome(getattr(item, "id", None), status)
+    except Exception:
+        pass
 
 
 def _origin_of(item: Any) -> str:

@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from core.approval_inbox import ApprovalInbox
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
@@ -261,9 +261,33 @@ def _handle_approval_decision(
         print(f"(approval {decision} failed: {exc})", file=sys.stderr)
         return True
     agent.log.log("approval_inbox_decision", item.to_dict())
+    if decision == "approve":
+        _record_producer_approval(workspace, item)
     past = "approved" if decision == "approve" else "denied"
     print(f"(approval {past}: {item.id}; operation={item.operation})", file=sys.stderr)
     return True
+
+
+def _record_producer_approval(workspace: Path, item: Any) -> None:
+    """Best-effort TD-031 ledger recording of an ``approved`` outcome.
+
+    Only records for producer-origin ``self_apply_lane.run`` items, only the
+    ``approved`` outcome (this hook runs on the approve path only), and swallows
+    any registry failure so approval flow is never broken.
+    """
+    try:
+        if getattr(item, "operation", None) != "self_apply_lane.run":
+            return
+        from core.self_build_producer import PRODUCER_ORIGIN
+        payload = getattr(item, "payload", None)
+        origin = payload.get("origin") if isinstance(payload, dict) else None
+        if origin != PRODUCER_ORIGIN:
+            return
+        from core.subagent_registry import SubagentRegistry
+        registry = SubagentRegistry.load(workspace)
+        registry.apply_lane_outcome(getattr(item, "id", None), "approved")
+    except Exception:
+        pass
 
 
 def _handle_approval_abort(rest: str, agent: AgentLoop, workspace: Path) -> bool:

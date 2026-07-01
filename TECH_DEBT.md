@@ -1100,3 +1100,51 @@ TD-029 — Agent Anatomy / Cognitive Architecture Map — Done
   __init__; парсинг core/-токенов; doc и core синхронны (main()==0); drift
   детектируется через разность множеств; исходник не импортирует core/git/сеть.
 - Full pytest: см. прогон в PR (регресс-гейт).
+==============================================================================
+TD-031 — Lane Outcomes to Subagent Ledger
+Статус: Done
+
+Проблема
+- TD-028 писал в ledger только role-level producer-исходы (stage-сигналы).
+  Ledger не знал, был ли произведённый self_apply_lane.run item одобрен,
+  исполнен, committed_local или rolled_back — поэтому usefulness_score почти
+  не отражал подтверждённую ценность.
+
+Готово
+- core/subagent_registry.py — добавлен LANE_OUTCOME_ROLE (approved->reporter,
+  committed_local->builder, rolled_back->builder) и метод apply_lane_outcome(
+  item_id, outcome): резолвит каноничную роль, дедуп по persistent-ключу
+  f"{item_id}:{role_id}:{outcome}", делегирует в record_lane_outcome. Ledger
+  теперь хранит applied_outcomes (tolerant-load старого JSON без ключа).
+  Обновляет только счётчики/скоры/recommendation; status роли не мутируется.
+- core/self_apply_bridge.py — run_approved_self_apply получил optional
+  registry=None; на терминальном исходе (committed_local/rolled_back) вызывает
+  guarded _record_lane_outcome со строгим фильтром operation==self_apply_lane.run
+  и payload.origin==PRODUCER_ORIGIN (lazy-import, без дублирования строки).
+- cli/commands_self_apply.py — :self-apply-run грузит registry (guarded) и
+  прокидывает в bridge.
+- cli/commands_approval.py — approve-хук _record_producer_approval пишет только
+  outcome "approved" для producer-origin self_apply_lane.run item.
+- Каноничная атрибуция: approved->reporter, committed_local/rolled_back->builder;
+  остальные 4 роли не кредитуются в этом PR.
+
+Область НЕ тронута
+- Только запись исходов: нет auto-approve, auto self-apply, auto-retire/pause,
+  изменений model routing/budget/config; config/budget_limits.json не тронут.
+- Нет новой CLI-команды; нет запуска producer/lane из status; нет
+  push/fetch/pull/merge/network. Ошибки записи в ledger никогда не ломают
+  approval/self-apply flow (все хуки в try/except, best-effort). registry=None
+  -> поведение bridge не меняется. record_lane_outcome/apply_lane_outcome не
+  трогают role status.
+
+Проверка
+- tests/test_subagent_registry_lane.py (18): каноничный маппинг ролей; дедуп
+  (no double-count + persist через reload); dedup-ключ включает role+outcome;
+  unknown-outcome игнорируется; status роли не мутируется; tolerant-load старого
+  JSON; bridge пишет committed/rolled_back для producer-item; игнор non-producer
+  origin; registry=None -> без изменений/без файла; non-terminal статус ничего
+  не пишет; сбой записи не ломает flow; hook идемпотентен; approve-хук пишет
+  approved один раз, игнорит чужой origin/operation.
+- Targeted: test_subagent_registry, test_self_apply_approval_bridge,
+  test_self_apply_lane, test_approval* — зелёные.
+- Full pytest: 3682 passed (+18).
