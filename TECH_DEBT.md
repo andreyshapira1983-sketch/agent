@@ -30,6 +30,8 @@ local-only команды → 0 LLM
 
 TD-002 — Deterministic Bypass
 
+Статус: Done
+
 Пропуск Planner/Synthesizer для команд:
 
 :help
@@ -40,6 +42,25 @@ TD-002 — Deterministic Bypass
 :approval-list
 :schedule-list
 :source-registry
+
+Готово
+- :auto-status, :approval-list, :schedule-list, :source-registry разрешаются
+  детерминированно через handle_meta_command (существующий local-only bypass),
+  без Planner, без Synthesizer и без единого LLM/provider-вызова. Обработчики
+  read-only: читают runtime status / approval inbox / scheduler / source registry
+  и печатают результат.
+- механизм не менялся (без рефакторинга); поведение уже готовых local-only команд
+  (:help, :model-usage, :budget-window-status, :models) сохранено.
+
+Проверка
+- tests/test_cli.py::test_local_meta_commands_do_not_start_model_calls — список
+  расширен четырьмя командами (+ варианты с аргументами): команда обработана,
+  agent.llm.calls == 0, model_call_start отсутствует в логе.
+- tests/test_cli.py::test_local_meta_commands_never_invoke_planner_or_synthesizer
+  — spy на planner.plan доказывает 0 вызовов Planner; отсутствие model_call_start
+  и agent.llm.calls == 0 доказывают, что Synthesizer/LLM не вызывались.
+- full pytest: 3359 passed.
+
 TD-003 — Planner JSON Parsing
 
 Исправить parser:
