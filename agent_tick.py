@@ -296,10 +296,14 @@ def _print_status(workspace: Path) -> int:
     pending = inbox.pending()
     if not pending:
         print("Inbox: no pending items.", file=sys.stderr)
-        return 0
-    print(f"Inbox: {len(pending)} pending item(s):", file=sys.stderr)
-    for item in pending:
-        print(f"  [{item.id}] {item.operation}: {item.summary}", file=sys.stderr)
+    else:
+        print(f"Inbox: {len(pending)} pending item(s):", file=sys.stderr)
+        for item in pending:
+            print(f"  [{item.id}] {item.operation}: {item.summary}", file=sys.stderr)
+
+    # Self-build producer visibility (TD-027) — read-only, never raises.
+    for line in _self_build_status_block(workspace, heartbeat, pending, inbox):
+        print(line, file=sys.stderr)
     return 0
 
 
@@ -453,6 +457,112 @@ def _cooldown_remaining_seconds(
     elapsed = (now - when).total_seconds()
     remaining = cooldown_hours * 3600.0 - elapsed
     return remaining if remaining > 0 else 0.0
+
+
+def _format_remaining(seconds: float) -> str:
+    """Human-readable cooldown remaining, e.g. ``2h 5m`` / ``7m`` / ``<1m``."""
+    total = int(seconds) if seconds and seconds > 0 else 0
+    hours, rem = divmod(total, 3600)
+    minutes, _ = divmod(rem, 60)
+    if hours and minutes:
+        return f"{hours}h {minutes}m"
+    if hours:
+        return f"{hours}h"
+    if minutes:
+        return f"{minutes}m"
+    return "<1m"
+
+
+def _self_build_status_lines(
+    heartbeat: dict | None,
+    state: dict | None,
+    *,
+    cooldown_hours: float,
+    pending_self_apply: int,
+    approved_self_apply: int,
+    now: datetime | None = None,
+) -> list[str]:
+    """Render the read-only 'Self-build' block for the operator ``--status`` view.
+
+    Pure and fully defensive (TD-027): never raises on a missing/corrupt
+    heartbeat, missing/corrupt producer state, or an unparseable timestamp — it
+    degrades to a clear line instead. The last producer status is taken from the
+    heartbeat and is labelled explicitly as *historical* (the outcome of the last
+    completed tick), NOT a live gate. The ONLY value computed live here is the
+    remaining cooldown, derived from the producer state file.
+    """
+    hb = heartbeat if isinstance(heartbeat, dict) else {}
+    st = state if isinstance(state, dict) else {}
+    lines: list[str] = []
+
+    last_status = hb.get("self_build_status") or "none"
+    if last_status == "none":
+        lines.append("Self-build: last self-build status: never ran")
+    else:
+        lines.append(
+            f"Self-build: last self-build status: {last_status} "
+            "(historical, from last tick — not a live gate)"
+        )
+
+    last_proposed = st.get("last_proposed_at")
+    if not st:
+        health = "missing"
+    elif not last_proposed:
+        health = "no-timestamp"
+    else:
+        try:
+            datetime.fromisoformat(str(last_proposed))
+            health = "ok"
+        except (ValueError, TypeError):
+            health = "bad-timestamp"
+    lines.append(f"  last_proposed_at: {last_proposed or 'none'} (state file: {health})")
+
+    remaining = _cooldown_remaining_seconds(st, cooldown_hours=cooldown_hours, now=now)
+    if remaining <= 0:
+        lines.append("  cooldown: ready (live)")
+    else:
+        lines.append(f"  cooldown: {_format_remaining(remaining)} remaining (live)")
+
+    lines.append(f"  last approval_id: {hb.get('self_build_approval_id') or 'none'}")
+    lines.append(f"  next_human_action: {hb.get('self_build_next_human_action') or 'none'}")
+    lines.append(
+        f"  self_apply_lane.run: {pending_self_apply} pending, "
+        f"{approved_self_apply} approved ready for :self-apply-run"
+    )
+    return lines
+
+
+def _self_build_status_block(
+    workspace: Path, heartbeat: dict | None, pending_items: list, inbox: "ApprovalInbox"
+) -> list[str]:
+    """Gather producer state + inbox counts and format them; never raises.
+
+    Reuses the already-computed ``pending_items`` list so we do not trigger a
+    second ``inbox.pending()`` (which enforces TTL on read). Any unexpected error
+    degrades to a single 'status unavailable' line so ``--status`` cannot crash.
+    """
+    try:
+        from core.self_apply_bridge import SELF_APPLY_OPERATION
+
+        state = _read_producer_state(workspace)
+        cooldown_hours = _self_build_cooldown_hours()
+        pending_sa = sum(
+            1 for i in pending_items if getattr(i, "operation", "") == SELF_APPLY_OPERATION
+        )
+        approved_sa = sum(
+            1
+            for i in inbox.list(status="approved")
+            if getattr(i, "operation", "") == SELF_APPLY_OPERATION
+        )
+        return _self_build_status_lines(
+            heartbeat,
+            state,
+            cooldown_hours=cooldown_hours,
+            pending_self_apply=pending_sa,
+            approved_self_apply=approved_sa,
+        )
+    except Exception as exc:  # noqa: BLE001 — operator status must never crash
+        return [f"Self-build: status unavailable ({type(exc).__name__})"]
 
 
 def _maybe_produce_self_build(

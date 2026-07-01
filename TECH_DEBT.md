@@ -934,3 +934,58 @@ cooldown_wait (новый) | proposed | no_patch | critic_veto | error.
   продюсер с fake LLM -> no_patch без item и без git, config/budget_limits.json
   не пишется.
 - Full pytest: 3629 passed.
+
+==============================================================================
+TD-027 — Видимость self-build продюсера в operator --status (read-only)
+
+Статус: Done
+
+Проблема
+После TD-026 self-build продюсер работает автономно в daemon, но у оператора
+не было read-only окна в его состояние. agent_tick.py --status (_print_status)
+показывал liveness демона, dry-run режим и pending inbox — но НИЧЕГО про
+продюсер: был ли proposed, когда последний proposal, сколько осталось cooldown,
+что записал последний tick, сколько self_apply_lane.run ждут одобрения. Всё это
+приходилось читать руками из data/daemon_heartbeat.json и
+data/self_build_producer_state.json.
+
+Готово
+- Расширен ТОЛЬКО _print_status (без нового командного слова, как просил ТЗ):
+  read-only блок "Self-build:", источники — heartbeat + producer state file +
+  живой пересчёт cooldown + счётчики inbox. Никакого запуска продюсера/линии.
+- Показывает:
+  * last self-build status — из heartbeat, ЯВНО помечен как "historical, from
+    last tick — not a live gate". Только cooldown подаётся как live.
+  * last_proposed_at + здоровье state-файла (ok / missing / no-timestamp /
+    bad-timestamp).
+  * cooldown remaining — единственное live-значение, пересчитывается через
+    _cooldown_remaining_seconds + _self_build_cooldown_hours.
+  * last approval_id и next_human_action — из heartbeat.
+  * self_apply_lane.run: N pending, M approved ready for :self-apply-run —
+    оба дёшево через inbox.pending()/inbox.list(status="approved").
+- Полностью защищено: пустой/битый heartbeat, пустой/битый producer state,
+  кривой timestamp, невалидный AGENT_SELF_BUILD_COOLDOWN_HOURS — деградирует в
+  понятную строку, НИКОГДА не падает (весь gather обёрнут в try/except ->
+  "status unavailable").
+- Плейсхолдер отсутствующих значений — ASCII "none" (stderr демона попадает в
+  Task Scheduler-логи; em-dash давал mojibake).
+
+Область НЕ тронута
+- НЕТ запуска продюсера.
+- НЕТ запуска self_apply_lane.
+- НЕТ apply / commit / push / fetch / pull / merge.
+- НЕТ изменения поведения демона (запись self_build уже была в TD-026 — здесь
+  только ЧТЕНИЕ/показ).
+- Никаких изменений budget limits; config/budget_limits.json не тронут.
+- Новой команды нет — расширен существующий --status.
+- run_tick, гейты и core/self_build_producer.py без изменений.
+
+Проверка
+- tests/test_agent_tick_status.py (+10, всего 15): never-ran, proposed-поля
+  помечены historical, live-cooldown при свежем proposal, ready при старом,
+  block-reason показан как historical (не live), счёт pending+approved
+  self_apply_lane.run, битый state-файл -> missing без падения, кривой timestamp
+  -> bad-timestamp + cooldown ready, невалидный cooldown-env -> fallback 12h,
+  чистый formatter не падает на None-входах.
+- agent_tick targeted: 72 passed.
+- Full pytest: 3639 passed.
