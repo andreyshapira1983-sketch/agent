@@ -54,7 +54,9 @@ def _events(log_path: Path) -> list[dict]:
     return events
 
 
-def _build_agent(workspace: Path, llm: FakeLLM) -> tuple[AgentLoop, Path]:
+def _build_agent(
+    workspace: Path, llm: FakeLLM, *, cheap_path_enabled: bool = True
+) -> tuple[AgentLoop, Path]:
     registry = ToolRegistry()
     registry.register(FileReadTool(workspace_root=workspace))
 
@@ -72,6 +74,7 @@ def _build_agent(workspace: Path, llm: FakeLLM) -> tuple[AgentLoop, Path]:
         llm=llm,
         logger=logger,
         planner=planner,
+        cheap_path_enabled=cheap_path_enabled,
     )
     return agent, workspace / "logs" / f"{trace_id}.jsonl"
 
@@ -153,7 +156,7 @@ def test_full_cycle_no_tools_general_knowledge(workspace: Path) -> None:
         "Confidence: high\nUnverified: nothing\n"
     )
     llm = FakeLLM(responses=[empty_plan, gk_answer])
-    agent, log_path = _build_agent(workspace, llm)
+    agent, log_path = _build_agent(workspace, llm, cheap_path_enabled=False)
 
     answer = agent.run(user_question="What is 2+2?", file_hint=None)
 
@@ -169,3 +172,132 @@ def test_full_cycle_no_tools_general_knowledge(workspace: Path) -> None:
     # No tool execution events should appear for an empty plan
     assert "tool_call" not in {e["event"] for e in events}
     assert by_event["respond"]["payload"]["sources"] == ["general-knowledge"]
+
+
+def test_cheap_path_skips_planner_llm_call(workspace: Path) -> None:
+    """A trivial no-tool input must skip the planner LLM call entirely.
+
+    Only the synthesizer LLM call happens (session_calls halved), a
+    ``planner_cheap_path`` event is logged, and the planner event still
+    reports an empty plan so downstream observability is preserved.
+    """
+    gk_answer = (
+        "Conclusion: The flag disables effects. [general-knowledge]\n"
+        "Facts:\n- A false flag turns a feature off. [general-knowledge]\n"
+        "Sources:\n1. general-knowledge - general-knowledge\n"
+        "Confidence: high\nUnverified: nothing\n"
+    )
+    # Only ONE response queued: if the planner were called this would be
+    # consumed by the planner and synthesis would fall back to "{}".
+    llm = FakeLLM(responses=[gk_answer])
+    agent, log_path = _build_agent(workspace, llm)
+
+    answer = agent.run(user_question="effects=disabled", file_hint=None)
+
+    assert isinstance(answer, str) and answer.strip()
+    # Exactly one LLM call — the synthesizer. The planner call was skipped.
+    assert len(llm.calls) == 1, "planner LLM call must be skipped on the cheap path"
+    only_call = llm.calls[0]
+    assert "PLANNER_MODE" not in only_call["system"]
+    assert "planner of an autonomous" not in only_call["system"]
+
+    events = _events(log_path)
+    event_names = {e["event"] for e in events}
+    assert "planner_cheap_path" in event_names
+    by_event = {e["event"]: e for e in events}
+    assert by_event["planner"]["payload"]["tools_chosen"] == []
+    assert "planner_skipped_cheap_path" in by_event["planner"]["payload"]["warnings"]
+    assert by_event["plan"]["extra"]["steps"] == 0
+    assert "tool_call" not in event_names
+
+
+def test_cheap_path_disabled_still_calls_planner(workspace: Path) -> None:
+    """With the gate disabled the planner runs even for a trivial input."""
+    empty_plan = json.dumps({"reasoning": "no tools needed", "steps": []})
+    gk_answer = (
+        "Conclusion: The flag disables effects. [general-knowledge]\n"
+        "Facts:\n- A false flag turns a feature off. [general-knowledge]\n"
+        "Sources:\n1. general-knowledge - general-knowledge\n"
+        "Confidence: high\nUnverified: nothing\n"
+    )
+    llm = FakeLLM(responses=[empty_plan, gk_answer])
+    agent, log_path = _build_agent(workspace, llm, cheap_path_enabled=False)
+
+    agent.run(user_question="effects=disabled", file_hint=None)
+
+    # Planner + synthesizer both called.
+    assert len(llm.calls) == 2
+    events = _events(log_path)
+    assert "planner_cheap_path" not in {e["event"] for e in events}
+
+
+def test_cheap_path_skips_knowledge_pipeline_and_picks_light_synth(
+    workspace: Path,
+) -> None:
+    """A cheap-path turn must not run the per-turn knowledge pipeline and must
+    route the synthesizer through the LIGHT (cheap) model tier."""
+    gk_answer = (
+        "Conclusion: The flag disables effects. [general-knowledge]\n"
+        "Facts:\n- A false flag turns a feature off. [general-knowledge]\n"
+        "Sources:\n1. general-knowledge - general-knowledge\n"
+        "Confidence: high\nUnverified: nothing\n"
+    )
+    llm = FakeLLM(responses=[gk_answer])
+    agent, log_path = _build_agent(workspace, llm)
+
+    agent.run(user_question="effects=disabled", file_hint=None)
+
+    names = {e["event"] for e in _events(log_path)}
+    # Cheap path fired.
+    assert "planner_cheap_path" in names
+    # Knowledge pipeline + source-registry build were skipped for this turn.
+    assert "knowledge_pipeline_skipped" in names
+    assert "knowledge_pipeline" not in names
+    assert "source_registry" not in names
+    # The synthesizer model choice was re-routed via the cheap-path gate.
+    assert "cheap_path_synth_model" in names
+
+
+def test_non_cheap_turn_still_runs_knowledge_pipeline(workspace: Path) -> None:
+    """Regression: a normal tool-using turn keeps the knowledge pipeline."""
+    (workspace / "doc.txt").write_text(
+        "1. alpha\n2. beta\n3. gamma\n", encoding="utf-8"
+    )
+    llm = FakeLLM(responses=[PLANNER_FILE_READ_RESPONSE, SYNTHESIZED_ANSWER])
+    agent, log_path = _build_agent(workspace, llm)
+
+    agent.run(user_question="What is in doc.txt?", file_hint="doc.txt")
+
+    names = {e["event"] for e in _events(log_path)}
+    assert "knowledge_pipeline" in names
+    assert "knowledge_pipeline_skipped" not in names
+    assert "cheap_path_synth_model" not in names
+
+
+def test_synthesize_lean_context_drops_long_term_memory(workspace: Path) -> None:
+    """`lean_context=True` must strip the heavy long-term-memory injection
+    from the synthesizer prompt; the default keeps it."""
+    answer = (
+        "Conclusion: ok. [general-knowledge]\nFacts:\n- ok [general-knowledge]\n"
+        "Sources:\n1. general-knowledge - general-knowledge\n"
+        "Confidence: high\nUnverified: nothing\n"
+    )
+    llm = FakeLLM(responses=[answer, answer])
+    agent, _log_path = _build_agent(workspace, llm)
+    agent.last_role_context = agent.role_router.route("hi")
+    agent._stream_on_token = None
+    block = "<long_term_memory>\nSECRET_MEMO_ALPHA\n</long_term_memory>"
+
+    # Default (non-lean) synthesis injects the long-term-memory block.
+    agent._synthesize(
+        goal=None, artifacts={}, question="hi", planner_reasoning="r",
+        persistent_block=block, llm=llm, lean_context=False,
+    )
+    assert "SECRET_MEMO_ALPHA" in llm.calls[-1]["user"]
+
+    # Lean synthesis (cheap path) drops it.
+    agent._synthesize(
+        goal=None, artifacts={}, question="hi", planner_reasoning="r",
+        persistent_block=block, llm=llm, lean_context=True,
+    )
+    assert "SECRET_MEMO_ALPHA" not in llm.calls[-1]["user"]

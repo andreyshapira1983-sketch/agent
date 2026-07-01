@@ -96,7 +96,7 @@ from core.redaction import (
 )
 from core.model_router import ModelRole, ModelRouter
 from core.model_usage import ModelBudgetExceeded
-from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult
+from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult, RememberFn
 from core.user_profile import UserProfile, UserProfileStore, profile_to_prompt_block
 from core.assumption_registry import (  # Layer 5
     AssumptionRegistry,
@@ -121,6 +121,7 @@ from core.smart_memory import (
 from core.source_ranker import SourceRankingReport, rank_chain
 from core.source_registry import SourceRegistry
 from core.source_registry_store import SourceRegistryStore
+from core.task_complexity import can_skip_planner
 from tools.base import ToolRegistry
 from tools.file_read import MAX_BYTES as FILE_READ_MAX_BYTES
 
@@ -478,6 +479,7 @@ class AgentLoop:
         clarification_enabled: bool = True,
         clarification_gate_enabled: bool = True,
         odd_enabled: bool = True,
+        cheap_path_enabled: bool = True,
         user_profile_store: UserProfileStore | None = None,
         assumption_store: AssumptionStore | None = None,  # Layer 5
     ):
@@ -621,6 +623,10 @@ class AgentLoop:
         # out-of-domain request is refused or escalated BEFORE any planning.
         # `odd_enabled=False` skips the check for integration tests.
         self.odd_enabled = bool(odd_enabled)
+        # Cheap-path planner gate (TD — trivial no-tool input skips the planner
+        # LLM call and synthesises directly). `False` forces the planner to run
+        # for every input, preserving the pre-gate behaviour for tests/rollback.
+        self.cheap_path_enabled = bool(cheap_path_enabled)
         from core.verifier import VerificationReport as _VR
 
         self.last_verification: _VR | None = None
@@ -1024,6 +1030,12 @@ class AgentLoop:
         planner_out: PlannerOutput | None = None
         plan: Plan | None = None
         replan_exhausted = False
+        # Cheap-path cost gate: set True only when the planner-skip branch
+        # below fires for a trivial no-tool turn. Downstream this trims the
+        # synthesizer context, forces the LIGHT (cheap) model tier and skips
+        # the per-turn knowledge pipeline + memory consolidation — none of
+        # which add value for a one-line greeting / config-flag echo.
+        cheap_path_active = False
         # MVP-12: advice + forbidden-actions list carried over from the
         # previous attempt's policy.decide() call. Empty on the first
         # attempt; populated on every replan.
@@ -1069,56 +1081,92 @@ class AgentLoop:
                     warnings=forced_warnings,
                 )
             else:
-                # ── Planner cache ─────────────────────────────────────────
-                # Cache key: (question hash, episodic store mtime, file_hint).
-                # Mtime invalidates the cache whenever a new episode is written
-                # (the store changes → the planner might choose different tools).
-                # Only applied on the first attempt with no failure context.
-                _pc_key = (
-                    hash(user_question.lower().strip()),
-                    self._episodic_store_mtime(),
-                    file_hint or "",
-                )
+                # ── Cheap-path gate ───────────────────────────────────────
+                # Trivial, no-tool input (config-flag echoes, greetings, one
+                # line "what is X") never needs a tool: the planner would only
+                # spend a full LLM call to return an empty plan. Skip that call
+                # and let the normal empty-plan flow synthesise the answer.
+                # Gated to the first attempt with no failure/replan context so
+                # replans always get the real planner.
                 if (
-                    attempt == 1
+                    self.cheap_path_enabled
+                    and attempt == 1
                     and not failure_context.strip()
-                    and _pc_key in self._planner_cache
+                    and can_skip_planner(user_question, file_hint=file_hint)
                 ):
-                    planner_out = self._planner_cache[_pc_key]
-                    self.log.log(
-                        "planner_cache_hit",
-                        {
-                            "key_hash": _pc_key[0],
-                            "tools_cached": [s["tool"] for s in planner_out.sources],
+                    planner_out = PlannerOutput(
+                        reasoning=(
+                            "Cheap path: trivial no-tool input — answering from "
+                            "general knowledge and memory without a planner call."
+                        ),
+                        sources=[],
+                        raw_response="",
+                        warnings=["planner_skipped_cheap_path"],
+                        diagnostics={
+                            "stage": "skipped",
+                            "reason": "trivial no-tool input",
+                            "fallback": "cheap_path",
                         },
                     )
+                    self.log.log(
+                        "planner_cheap_path",
+                        {
+                            "question_chars": len(user_question),
+                            "reason": "trivial no-tool input",
+                        },
+                    )
+                    cheap_path_active = True
                 else:
-                    try:
-                        planner_out = self.planner.plan(
-                            question=user_question,
-                            file_hint=file_hint,
-                            history=planner_history,
-                            failure_context=failure_context,
-                            forbidden_actions=forbidden_actions,
-                            llm=_task_planner_llm,
-                        )
-                    except ModelBudgetExceeded as exc:
-                        self._save_budget_pause_checkpoint(
-                            _cp,
-                            goal=goal,
-                            question=user_question,
-                            file_hint=file_hint,
-                            current_phase="planning",
-                            plan=plan,
-                            blocked=exc,
-                        )
-                        raise
+                    # ── Planner cache ─────────────────────────────────────
+                    # Cache key: (question hash, episodic store mtime, file_hint).
+                    # Mtime invalidates the cache whenever a new episode is written
+                    # (the store changes → the planner might choose different tools).
+                    # Only applied on the first attempt with no failure context.
+                    _pc_key = (
+                        hash(user_question.lower().strip()),
+                        self._episodic_store_mtime(),
+                        file_hint or "",
+                    )
                     if (
                         attempt == 1
                         and not failure_context.strip()
-                        and "plan_parse_failed" not in planner_out.warnings
+                        and _pc_key in self._planner_cache
                     ):
-                        self._planner_cache[_pc_key] = planner_out
+                        planner_out = self._planner_cache[_pc_key]
+                        self.log.log(
+                            "planner_cache_hit",
+                            {
+                                "key_hash": _pc_key[0],
+                                "tools_cached": [s["tool"] for s in planner_out.sources],
+                            },
+                        )
+                    else:
+                        try:
+                            planner_out = self.planner.plan(
+                                question=user_question,
+                                file_hint=file_hint,
+                                history=planner_history,
+                                failure_context=failure_context,
+                                forbidden_actions=forbidden_actions,
+                                llm=_task_planner_llm,
+                            )
+                        except ModelBudgetExceeded as exc:
+                            self._save_budget_pause_checkpoint(
+                                _cp,
+                                goal=goal,
+                                question=user_question,
+                                file_hint=file_hint,
+                                current_phase="planning",
+                                plan=plan,
+                                blocked=exc,
+                            )
+                            raise
+                        if (
+                            attempt == 1
+                            and not failure_context.strip()
+                            and "plan_parse_failed" not in planner_out.warnings
+                        ):
+                            self._planner_cache[_pc_key] = planner_out
                 planner_out = self._force_file_hint_read_when_explicit(
                     planner_out,
                     question=user_question,
@@ -1210,13 +1258,17 @@ class AgentLoop:
                 "plan_parse_failed" in (planner_out.warnings or ())
             )
             if plan_parse_failed:
+                _parse_diag = dict(getattr(planner_out, "diagnostics", {}) or {})
                 self.log.log(
                     "plan_parse_failed",
                     {
                         "attempt": attempt,
                         "warnings": list(planner_out.warnings),
                         "raw_chars": len(planner_out.raw_response),
-                        "raw_preview": planner_out.raw_response[:240],
+                        # Sanitised, length-capped preview (no full secrets).
+                        "raw_preview": _parse_diag.get("raw_preview")
+                        or planner_out.raw_response[:240],
+                        "diagnostics": _parse_diag,
                     },
                 )
                 attempt_failures.append(
@@ -1446,18 +1498,29 @@ class AgentLoop:
         source_ranking = rank_chain(chain, question=user_question)
         self.last_source_ranking = source_ranking
         self.log.log("source_ranking", source_ranking.to_log_payload())
-        knowledge_result = self.knowledge_pipeline.run(
-            chain,
-            ranking=source_ranking,
-            source_store=self.source_registry_store,
-            remember=self._remember_from_knowledge,
-            auto_write_memory=self.knowledge_auto_write,
-        )
-        source_registry = knowledge_result.registry
-        self.last_source_registry = source_registry
-        self.log.log("source_registry", source_registry.to_log_payload())
-        self.last_knowledge_pipeline = knowledge_result
-        self.log.log("knowledge_pipeline", knowledge_result.to_log_payload())
+        if cheap_path_active:
+            # Cheap path: the chain is empty (no tools ran) so the knowledge
+            # pipeline and source-registry build have nothing to catalog.
+            # Skip them to avoid the per-turn cost the user flagged, and keep
+            # the empty registry reset at the top of run().
+            source_registry = self.last_source_registry
+            self.log.log(
+                "knowledge_pipeline_skipped",
+                {"reason": "cheap_path", "chain_size": len(chain)},
+            )
+        else:
+            knowledge_result = self.knowledge_pipeline.run(
+                chain,
+                ranking=source_ranking,
+                source_store=self.source_registry_store,
+                remember=self._knowledge_remember_batch(),
+                auto_write_memory=self.knowledge_auto_write,
+            )
+            source_registry = knowledge_result.registry
+            self.last_source_registry = source_registry
+            self.log.log("source_registry", source_registry.to_log_payload())
+            self.last_knowledge_pipeline = knowledge_result
+            self.log.log("knowledge_pipeline", knowledge_result.to_log_payload())
 
         # 7. Respond. When replan exhausted the synthesizer still produces
         # a structured Output Contract reply — it gets the failure history
@@ -1465,6 +1528,25 @@ class AgentLoop:
         # worked. This is a much better UX than a bare error string.
         # Layer 5 — expose current-run assumptions to _synthesize via instance.
         self._run_assumptions_current = _run_assumptions
+        # Cheap path: force the LIGHT (cheap/fast) synthesizer tier even when
+        # the complexity heuristic would return STANDARD (e.g. a config-flag
+        # echo carries no LIGHT signal), and trim the prompt to just the
+        # essentials — a one-line greeting/flag never needs long-term memory.
+        _synth_llm = _task_synth_llm
+        if cheap_path_active:
+            try:
+                from core.task_complexity import ComplexityTier
+                _synth_llm = self.model_router.for_task(
+                    ModelRole.SYNTHESIZER,
+                    user_question,
+                    force_tier=ComplexityTier.LIGHT,
+                )
+                self.log.log(
+                    "cheap_path_synth_model",
+                    {"model": getattr(_synth_llm, "model", None)},
+                )
+            except Exception:
+                _synth_llm = _task_synth_llm
         try:
             draft_answer = self._synthesize(
                 goal=goal,
@@ -1475,7 +1557,8 @@ class AgentLoop:
                 persistent_block=persistent_block,
                 cycle_findings=list(self._cycle_findings),
                 failure_history=failure_history if replan_exhausted else None,
-                llm=_task_synth_llm,
+                llm=_synth_llm,
+                lean_context=cheap_path_active,
             )
         except ModelBudgetExceeded as exc:
             self._save_budget_pause_checkpoint(
@@ -1813,7 +1896,7 @@ class AgentLoop:
                     chain,
                     ranking=source_ranking,
                     source_store=self.source_registry_store,
-                    remember=self._remember_from_knowledge,
+                    remember=self._knowledge_remember_batch(),
                     auto_write_memory=self.knowledge_auto_write,
                 )
                 source_registry = knowledge_result.registry
@@ -2007,6 +2090,7 @@ class AgentLoop:
             verified_chunks=verification.verified_chunks if verification else 0,
             unverified_chunks=verification.unverified_chunks if verification else 0,
             replan_exhausted=replan_exhausted,
+            skip_consolidation=cheap_path_active,
         )
 
         # Layer 4 — update user profile from this interaction.
@@ -2063,6 +2147,40 @@ class AgentLoop:
             owner=owner,
         )
 
+    def _knowledge_remember_batch(self) -> RememberFn:
+        """Return a ``remember`` callback that loads the persistent store ONCE.
+
+        The knowledge pipeline attempts a write for every extracted claim. On a
+        repeated read-only turn (e.g. a work-session re-running the same goal)
+        the same ~60 claims are re-extracted from the same files each cycle, and
+        each `remember()` used to reload the entire store to run the dedup gate —
+        an O(claims × records) disk reload every cycle whose writes are ~all
+        rejected as duplicates (TD-019). This closure loads the snapshot a single
+        time per pipeline pass and reuses it; ``remember`` keeps it current by
+        appending any saved record, so dedup/echo behavior is unchanged.
+        """
+        snapshot: list[MemoryRecord] = (
+            self.persistent_store.load() if self.persistent_store is not None else []
+        )
+
+        def _remember(
+            content: str,
+            tags: list[str],
+            source: str,
+            record_type: str,
+            owner: str,
+        ) -> tuple[MemoryWriteDecision, MemoryRecord | None]:
+            return self.remember(
+                content=content,
+                tags=tags,
+                source=source,
+                record_type=record_type,
+                owner=owner,
+                existing=snapshot,
+            )
+
+        return _remember
+
     def remember(
         self,
         content: str,
@@ -2070,6 +2188,7 @@ class AgentLoop:
         source: str = "user-explicit",
         record_type: str = "semantic",
         owner: str = "user",
+        existing: list[MemoryRecord] | None = None,
     ) -> tuple[MemoryWriteDecision, MemoryRecord | None]:
         """Run a `:remember`-style write through the Write Policy.
 
@@ -2078,6 +2197,15 @@ class AgentLoop:
 
         `owner` flows into the Write Policy. Anything outside the first-
         party whitelist needs a `cross-owner-consent` tag.
+
+        ``existing`` is an optional pre-loaded snapshot of the persistent
+        records used by the dedup gate. When a caller writes many records in
+        one pass (e.g. the knowledge pipeline attempting dozens of agent-auto
+        claims per cycle) it can load the store ONCE and pass the same list in,
+        avoiding a full store reload per write. When provided, any record saved
+        here is appended to it so later writes in the same pass still dedup
+        against it — matching the reload-every-time semantics exactly. When
+        ``None`` (the default) the store is loaded fresh, as before.
         """
         if self.persistent_store is None:
             decision = MemoryWriteDecision(
@@ -2087,9 +2215,10 @@ class AgentLoop:
             return decision, None
 
         tags = tags or []
-        # Dedup gate (MVP-10) needs the existing records — load them once
-        # and pass into the policy so the policy stays a pure function.
-        existing = self.persistent_store.load()
+        # Dedup gate (MVP-10) needs the existing records. Load them once and
+        # pass into the policy so the policy stays a pure function. A caller
+        # may supply the snapshot (TD-019) to avoid reloading per write.
+        existing = self.persistent_store.load() if existing is None else existing
         # Echo gate (A1) needs the recent agent-auto write-log, time-windowed.
         # Only consulted when a registry is wired; stays a pure input to the
         # policy. `user-explicit` writes are never echo-guarded.
@@ -2140,6 +2269,10 @@ class AgentLoop:
             owner=owner,
         )
         self.persistent_store.save(record)
+        # Keep a caller-supplied snapshot (TD-019) current so subsequent writes
+        # in the same pass dedup against this record, exactly as a fresh reload
+        # would have. Harmless when ``existing`` is a private freshly-loaded list.
+        existing.append(record)
         # Record this agent-auto write in the rolling echo-log so the next
         # cycle's echo gate can see it. Only agent-auto writes are logged —
         # the registry exists to catch the agent echoing *itself*.
@@ -2642,6 +2775,7 @@ class AgentLoop:
         verified_chunks: int,
         unverified_chunks: int,
         replan_exhausted: bool,
+        skip_consolidation: bool = False,
     ) -> None:
         """Write episodic/procedural/consolidation memory after a cycle.
 
@@ -2698,6 +2832,7 @@ class AgentLoop:
                 self.consolidation_store is not None
                 and self.episodic_store is not None
                 and self.procedural_store is not None
+                and not skip_consolidation
             ):
                 report = consolidate_memory(
                     episodes=self.episodic_store.load(),
@@ -2714,6 +2849,11 @@ class AgentLoop:
                         "needs_review_procedure_ids": list(report.needs_review_procedure_ids),
                         "notes": list(report.notes),
                     },
+                )
+            elif skip_consolidation and self.consolidation_store is not None:
+                self.log.log(
+                    "memory_consolidation_skipped",
+                    {"reason": "cheap_path"},
                 )
         except Exception as exc:  # noqa: BLE001
             self.log.log(
@@ -3866,28 +4006,39 @@ class AgentLoop:
         cycle_findings: list[dict[str, Any]] | None = None,
         failure_history: list[ReplanTrigger] | None = None,
         llm=None,
+        lean_context: bool = False,
     ) -> str:
         history_block = (
             f"<conversation_history>\n{history}\n</conversation_history>\n\n"
             if history.strip()
             else ""
         )
-        long_term_block = (
-            f"{persistent_block}\n\n" if persistent_block.strip() else ""
-        )
-        role_block = self.last_role_context.to_prompt_block() + "\n\n"
-        profile_block = (
-            profile_to_prompt_block(self.last_user_profile) + "\n\n"
-            if self.last_user_profile is not None
-            else ""
-        )
-        # Layer 5 — inject active assumptions into synthesizer.
-        _assumptions_src = getattr(self, "_run_assumptions_current", None)
-        assumptions_block = (
-            _assumptions_src.to_prompt_block() + "\n\n"
-            if _assumptions_src is not None and len(_assumptions_src) > 0
-            else ""
-        )
+        # Cheap path: drop the heavy, question-irrelevant injections
+        # (long-term memory, user profile, run assumptions). A trivial
+        # greeting / config-flag echo is answered from general knowledge;
+        # these blocks only inflate the prompt token count.
+        if lean_context:
+            long_term_block = ""
+            profile_block = ""
+            assumptions_block = ""
+            role_block = ""
+        else:
+            long_term_block = (
+                f"{persistent_block}\n\n" if persistent_block.strip() else ""
+            )
+            role_block = self.last_role_context.to_prompt_block() + "\n\n"
+            profile_block = (
+                profile_to_prompt_block(self.last_user_profile) + "\n\n"
+                if self.last_user_profile is not None
+                else ""
+            )
+            # Layer 5 — inject active assumptions into synthesizer.
+            _assumptions_src = getattr(self, "_run_assumptions_current", None)
+            assumptions_block = (
+                _assumptions_src.to_prompt_block() + "\n\n"
+                if _assumptions_src is not None and len(_assumptions_src) > 0
+                else ""
+            )
 
         # Kernel-built safety notes — the LLM is told to surface these in
         # the user-facing answer. The notes describe what was redacted

@@ -173,7 +173,20 @@ def test_local_operator_reply_requires_explicit_llm_stop_marker():
 
 @pytest.mark.parametrize(
     "cmd",
-    [":model-usage", ":budget-window-status", ":models", ":help"],
+    [
+        ":model-usage",
+        ":budget-window-status",
+        ":models",
+        ":help",
+        # TD-002 — deterministic local-only bypass for read-only status commands.
+        ":auto-status",
+        ":approval-list",
+        ":approval-list all",
+        ":schedule-list",
+        ":schedule-list active",
+        ":source-registry",
+        ":source-registry --claims",
+    ],
 )
 def test_local_meta_commands_do_not_start_model_calls(
     workspace: Path,
@@ -187,6 +200,46 @@ def test_local_meta_commands_do_not_start_model_calls(
     capsys.readouterr()
     assert len(agent.llm.calls) == 0
     assert "model_call_start" not in agent.log.path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        ":auto-status",
+        ":approval-list",
+        ":schedule-list",
+        ":source-registry",
+    ],
+)
+def test_local_meta_commands_never_invoke_planner_or_synthesizer(
+    workspace: Path,
+    capsys,
+    cmd: str,
+):
+    """TD-002: the four read-only status commands must resolve deterministically
+    without Planner, Synthesizer or any LLM/provider call."""
+    agent = _build_agent(workspace)
+
+    planner_calls = 0
+    original_plan = agent.planner.plan
+
+    def _spy_plan(*args, **kwargs):
+        nonlocal planner_calls
+        planner_calls += 1
+        return original_plan(*args, **kwargs)
+
+    agent.planner.plan = _spy_plan  # type: ignore[method-assign]
+
+    assert handle_meta_command(cmd, agent, workspace) is True
+
+    capsys.readouterr()
+    # 1. handled successfully (asserted above)
+    # 2. no LLM/provider calls at all (Synthesizer route + Planner share this LLM)
+    assert len(agent.llm.calls) == 0
+    # 3. no routed model call was ever started
+    assert "model_call_start" not in agent.log.path.read_text(encoding="utf-8")
+    # 4. Planner was never invoked
+    assert planner_calls == 0
 
 
 def test_quit_meta_command_does_not_start_model_call(workspace: Path):

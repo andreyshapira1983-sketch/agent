@@ -21,6 +21,7 @@ Env override (optional — otherwise auto-discovered):
 """
 from __future__ import annotations
 
+import re
 from enum import Enum
 
 
@@ -196,4 +197,127 @@ def needs_live_grounding(text: str) -> bool:
         return False
     normalized = text.strip().casefold()
     return any(sig in normalized for sig in _LIVE_GROUNDING_SIGNALS)
+
+
+# ── cheap-path planner gate ───────────────────────────────────────────────────
+#
+# Trivial operator chatter (config-flag echoes, greetings, one-line "what is X"
+# questions) never needs an external tool. Yet the loop still spends a full
+# planner LLM call (~7k input tokens in practice) only to have the planner
+# answer "no tools needed" and return an empty plan. ``can_skip_planner``
+# lets the loop bypass that wasted call and synthesise the answer directly.
+#
+# Safety contract
+# ---------------
+# * Pure function — no I/O, no LLM.
+# * POSITIVE-signal gate: returns True only when a trivial signal is present
+#   (config-flag pattern or a LIGHT-complexity signal). When in doubt it
+#   returns False so the planner still runs — a missed skip only costs one
+#   extra planner call, whereas a wrong skip could drop a needed tool step.
+# * Any hint that a tool might be required (file hint, tool keyword, live
+#   grounding, DEEP task) forces False.
+
+# Substrings that suggest the request may need a tool (read a file, search the
+# web, run a command, mutate state, …). Matching is deliberately broad: a false
+# positive here just means the planner runs as before (safe), never a wrong skip.
+_TOOL_SIGNALS: frozenset[str] = frozenset({
+    # EN — file / path / io
+    "read", "file", "path", "directory", "folder", "grep", "cat ",
+    # EN — web / net
+    "search", "google", "http", "url", "fetch", "download", "crawl", "scrape",
+    # EN — shell / exec / build
+    "run ", "execute", "exec", "shell", "terminal", "command", "install",
+    "build", "compile", "deploy", "clone", "commit", "ingest",
+    # EN — mutate
+    "write", "create", "delete", "remove", "patch", "edit", "modify",
+    "refactor", "save",
+    # RU — file / io
+    "прочит", "читай", "открой", "файл", "папк", "директори", "катал",
+    # RU — web
+    "поищи", "ищи", "найди", "скачай", "загрузи", "ссылк", "сайт", "загруз",
+    # RU — shell / exec / build
+    "запусти", "выполни", "установи", "собери", "скомпил", "разверн",
+    "склонир", "коммит", "команд", "ингест",
+    # RU — mutate
+    "напиши", "создай", "сделай", "удали", "исправ", "отредактир",
+    "измени", "рефактор", "пропатч", "сохрани",
+})
+
+# Config-flag echoes like ``effects=disabled``, ``budget_cap=250/day``,
+# ``auto_model_update=false`` — a single ``key=value`` token, no free text.
+_CONFIG_FLAG_RE = re.compile(r"^[A-Za-z_][\w.-]*\s*=\s*[^\s=]+$")
+
+# Whole-word greeting / thanks tokens. Matched on tokenized words (never as raw
+# substrings) so short tokens like "hi" can't match inside "this"/"which". A
+# message counts as a pure greeting only when EVERY word is in this set, so
+# "напиши привет" (has a tool verb) or "hi, read the file" never qualify.
+_GREETING_WORDS: frozenset[str] = frozenset({
+    # EN
+    "hello", "hi", "hey", "good", "morning", "evening", "afternoon",
+    "thanks", "thank", "you", "greetings",
+    # RU
+    "привет", "здравствуй", "здравствуйте", "хай", "добрый", "доброе",
+    "день", "вечер", "утро", "спасибо", "благодарю",
+})
+
+# Above this length an input is no longer "trivial chatter"; let the planner run.
+_CHEAP_PATH_MAX_CHARS = 200
+
+_WORD_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
+
+
+def _is_pure_greeting(normalized: str) -> bool:
+    """True when *normalized* is a 1–4 word message of only greeting/thanks words."""
+    words = _WORD_RE.findall(normalized)
+    if not words or len(words) > 4:
+        return False
+    return all(w in _GREETING_WORDS for w in words)
+
+
+def can_skip_planner(text: str, *, file_hint: str | None = None) -> bool:
+    """Return True when the planner LLM call can be safely skipped.
+
+    The loop uses this to route trivial, no-tool operator input straight to
+    the synthesizer (one LLM call) instead of paying for a planner call that
+    would only return an empty plan.
+
+    Returns True only when ALL hold:
+    * no explicit file hint,
+    * text is a short string (``<= _CHEAP_PATH_MAX_CHARS``),
+    * no tool-signal keyword is present,
+    * the task does not need live/fresh web grounding,
+    * the task is not DEEP complexity, AND
+    * a positive trivial signal is present — either a ``key=value`` config
+      flag echo or a pure greeting / thanks message.
+
+    The positive signal is intentionally narrow: ambiguous "what is X" / "list"
+    / "define" phrasing can legitimately require a tool (web_search, file read),
+    so those are NOT skipped — a missed skip only costs one extra planner call,
+    whereas a wrong skip could drop a needed tool step.
+
+    Pure and deterministic; never raises.
+    """
+    if file_hint:
+        return False
+    if not isinstance(text, str):
+        return False
+    stripped = text.strip()
+    if not stripped or len(stripped) > _CHEAP_PATH_MAX_CHARS:
+        return False
+
+    normalized = stripped.casefold()
+
+    # Disqualifiers — any hint a tool may be needed forces the planner to run.
+    if any(sig in normalized for sig in _TOOL_SIGNALS):
+        return False
+    if needs_live_grounding(stripped):
+        return False
+    if assess_complexity(stripped) is ComplexityTier.DEEP:
+        return False
+
+    # Positive trivial signal required.
+    if _CONFIG_FLAG_RE.match(stripped):
+        return True
+    return _is_pure_greeting(normalized)
+
 

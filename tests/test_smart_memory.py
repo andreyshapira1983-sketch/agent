@@ -211,6 +211,36 @@ def test_agent_loop_records_smart_memory_after_successful_cycle(workspace: Path)
     assert [e["event"] for e in events].count("memory_consolidation") == 1
 
 
+def test_cheap_path_skips_consolidation_but_still_records_episode(
+    workspace: Path,
+) -> None:
+    """A trivial cheap-path turn must NOT run the per-turn full memory
+    consolidation (which re-reads every episode + procedure), yet the episode
+    itself is still recorded so learning is not lost."""
+    gk_answer = (
+        "Conclusion: The flag disables effects. [general-knowledge]\n"
+        "Facts:\n- A false flag turns a feature off. [general-knowledge]\n"
+        "Sources:\n1. general-knowledge - general-knowledge\n"
+        "Confidence: high\nUnverified: nothing\n"
+    )
+    # Only the synthesizer response is queued — the planner is skipped.
+    agent, log_path = _build_agent(workspace, FakeLLM([gk_answer]))
+
+    answer = agent.run("effects=disabled")
+
+    assert answer.strip()
+    names = [e["event"] for e in _events(log_path)]
+    # Cheap path fired.
+    assert "planner_cheap_path" in names
+    # Episode is still written (learning preserved).
+    assert names.count("episodic_memory_write") == 1
+    # Consolidation was skipped for this turn.
+    assert "memory_consolidation" not in names
+    assert "memory_consolidation_skipped" in names
+    # No consolidation report was produced.
+    assert agent.smart_memory_summary()["consolidation"]["reports"] == 0
+
+
 def test_experience_memory_is_injected_into_next_planner_call(workspace: Path) -> None:
     (workspace / "doc.txt").write_text("alpha\n", encoding="utf-8")
     llm = FakeLLM([PLAN_FILE_READ, SYNTH_FILE, PLAN_FILE_READ, SYNTH_FILE])

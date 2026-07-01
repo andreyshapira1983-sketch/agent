@@ -325,6 +325,98 @@ def test_malformed_json_falls_back_to_empty_plan(workspace: Path) -> None:
     assert "plan_parse_failed" in out.warnings
 
 
+# ---------- TD-003: parse-failure diagnostics ----------
+
+def test_malformed_json_diagnostics_are_clear(workspace: Path) -> None:
+    llm = FakeLLM(responses=["this is not JSON at all"])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
+
+    out = planner.plan(question="something", file_hint=None)
+
+    # Safe fallback, not a crash and not a self-repair LLM retry.
+    assert out.sources == []
+    assert "plan_parse_failed" in out.warnings
+    # (6) no extra LLM/provider calls were triggered by the parse failure.
+    assert len(llm.calls) == 1
+
+    diag = out.diagnostics
+    # (1) brief reason, (2) stage, (4) json-block flag, (5) fallback choice.
+    assert diag["stage"] == "failed"
+    assert diag["fallback"] == "empty_plan"
+    assert diag["json_block_found"] is False
+    assert diag["reason"]  # non-empty human-readable reason
+    assert "decode error" in diag["reason"].lower()
+    # (3) sanitized preview present and (4) raw output preserved verbatim.
+    assert diag["raw_preview"] == "this is not JSON at all"
+    assert out.raw_response == "this is not JSON at all"
+
+
+def test_markdown_block_with_broken_json_diagnostics(workspace: Path) -> None:
+    raw = '```json\n{"reasoning": "x", "steps": [ }\n```'
+    llm = FakeLLM(responses=[raw])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
+
+    out = planner.plan(question="something", file_hint=None)
+
+    assert out.sources == []
+    assert "plan_parse_failed" in out.warnings
+    assert "stripped_markdown_fence" in out.warnings
+    assert len(llm.calls) == 1
+
+    diag = out.diagnostics
+    # A JSON block WAS found (the fence), but its contents did not parse.
+    assert diag["json_block_found"] is True
+    assert diag["stage"] == "failed"
+    assert diag["fallback"] == "empty_plan"
+    assert "decode error" in diag["reason"].lower()
+    # Raw output preserved exactly, including the fence.
+    assert out.raw_response == raw
+
+
+def test_plain_text_without_json_diagnostics(workspace: Path) -> None:
+    llm = FakeLLM(responses=["Sorry, I cannot help with that request."])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
+
+    out = planner.plan(question="something", file_hint=None)
+
+    diag = out.diagnostics
+    assert diag["json_block_found"] is False
+    assert diag["stage"] == "failed"
+    assert diag["fallback"] == "empty_plan"
+    assert diag["reason"]
+
+
+def test_parse_diagnostics_preview_redacts_secrets_and_truncates(workspace: Path) -> None:
+    secret = "sk-" + "A" * 40
+    long_raw = f"{secret} " + ("noise " * 100)  # well over the preview cap
+    llm = FakeLLM(responses=[long_raw])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
+
+    out = planner.plan(question="something", file_hint=None)
+    preview = out.diagnostics["raw_preview"]
+
+    # Secret never appears verbatim in the preview.
+    assert secret not in preview
+    assert "[REDACTED" in preview
+    # Length-capped and marked as truncated.
+    assert "truncated" in preview
+    assert len(preview) < len(long_raw)
+    # Full raw is still preserved on the record for post-hoc inspection.
+    assert out.raw_response == long_raw
+
+
+def test_parse_json_success_reports_parsed_stage(workspace: Path) -> None:
+    canned = json.dumps({"reasoning": "ok", "steps": []})
+    llm = FakeLLM(responses=[canned])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
+
+    out = planner.plan(question="What is 2+2?", file_hint=None)
+
+    assert out.diagnostics["stage"] == "parsed"
+    assert out.diagnostics["fallback"] == "none"
+    assert out.diagnostics["reason"] == "ok"
+
+
 # ---------- bonus: unknown tool name dropped ----------
 
 def test_unknown_tool_is_dropped(workspace: Path) -> None:

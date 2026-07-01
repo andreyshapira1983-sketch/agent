@@ -176,7 +176,7 @@ def test_model_usage_ledger_enforces_persistent_call_window_across_sessions(tmp_
 def test_model_usage_records_tokens_and_cost_units_to_persistent_budget(tmp_path: Path):
     budget = BudgetLedger(
         path=tmp_path / "budget.jsonl",
-        windows=(BudgetWindow("day", 86400, {"model_tokens": 100, "model_cost_units": 10}),),
+        windows=(BudgetWindow("day", 86400, {"model_tokens": 100_000, "model_cost_units": 10_000}),),
     )
     ledger = ModelUsageLedger(path=tmp_path / "usage.jsonl", budget_ledger=budget)
     router = ModelRouter(
@@ -191,3 +191,111 @@ def test_model_usage_records_tokens_and_cost_units_to_persistent_budget(tmp_path
 
     assert snapshot["totals"]["model_tokens"] == 18
     assert snapshot["totals"]["model_cost_units"] >= 1
+
+
+class ExplodingLLM(FakeLLM):
+    provider = "fake"
+    model = "fake-1"
+
+    def __init__(self):
+        super().__init__(["should-not-run"])
+        self.completed = False
+
+    def complete(self, *args, **kwargs) -> str:
+        self.completed = True
+        raise AssertionError("LLM.complete must not run when pre-flight blocks")
+
+
+def test_assert_can_start_blocks_oversized_call_on_session_cost_cap():
+    ledger = ModelUsageLedger(limits=ModelUsageLimits(max_cost_units=5))
+
+    # A large output cap on the (unknown-tier) call estimates well above 5 units.
+    with pytest.raises(ModelBudgetExceeded, match="model cost budget would exhaust"):
+        ledger.assert_can_start(
+            role="synthesizer",
+            provider="fake",
+            model="fake-1",
+            system="s",
+            user="u",
+            max_output_tokens=4096,
+            cost_tier="unknown",
+        )
+    # Nothing recorded — the phantom call never happened.
+    assert ledger.snapshot()["totals"]["calls"] == 0
+
+
+def test_assert_can_start_blocks_oversized_call_on_session_token_cap():
+    ledger = ModelUsageLedger(limits=ModelUsageLimits(max_tokens=100))
+
+    with pytest.raises(ModelBudgetExceeded, match="model token budget would exhaust"):
+        ledger.assert_can_start(
+            role="planner",
+            provider="fake",
+            model="fake-1",
+            system="s",
+            user="u",
+            max_output_tokens=2048,
+            cost_tier="unknown",
+        )
+
+
+def test_assert_can_start_allows_small_call_within_caps():
+    ledger = ModelUsageLedger(limits=ModelUsageLimits(max_tokens=10_000, max_cost_units=1_000))
+
+    # Should not raise for a modest estimate that fits inside the caps.
+    ledger.assert_can_start(
+        role="synthesizer",
+        provider="fake",
+        model="fake-1",
+        system="hi",
+        user="there",
+        max_output_tokens=100,
+        cost_tier="low",
+    )
+
+
+def test_assert_can_start_preflight_persistent_window_no_phantom_call(tmp_path: Path):
+    budget = BudgetLedger(
+        path=tmp_path / "budget.jsonl",
+        windows=(BudgetWindow("day", 86400, {"model_cost_units": 3, "llm_calls": 10}),),
+    )
+    ledger = ModelUsageLedger(
+        path=tmp_path / "usage.jsonl",
+        budget_ledger=budget,
+    )
+
+    with pytest.raises(ModelBudgetExceeded, match="persistent day model cost budget would exhaust"):
+        ledger.assert_can_start(
+            role="synthesizer",
+            provider="fake",
+            model="fake-1",
+            system="s",
+            user="u",
+            max_output_tokens=4096,
+            cost_tier="unknown",
+        )
+
+    # The blocked estimate must not consume the persistent llm_calls window.
+    assert budget.snapshot()["totals"].get("llm_calls", 0) == 0
+
+
+def test_router_complete_blocks_before_llm_call_when_estimate_exceeds_cap(tmp_path: Path):
+    exploding = ExplodingLLM()
+    ledger = ModelUsageLedger(
+        path=tmp_path / "usage.jsonl",
+        limits=ModelUsageLimits(max_cost_units=5),
+    )
+    router = ModelRouter(
+        default_provider="fake",
+        default_model="fake-1",
+        llm_factory=lambda provider, model: exploding,
+        usage_ledger=ledger,
+    )
+
+    with pytest.raises(ModelBudgetExceeded, match="would exhaust"):
+        router.for_role(ModelRole.SYNTHESIZER).complete(
+            system="s", user="u", max_tokens=4096
+        )
+
+    assert exploding.completed is False
+    assert ledger.snapshot()["totals"]["calls"] == 0

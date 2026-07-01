@@ -172,8 +172,31 @@ class ModelUsageLedger:
             budget_ledger=budget_ledger,
         )
 
-    def assert_can_start(self, *, role: str, provider: str, model: str) -> None:
+    def assert_can_start(
+        self,
+        *,
+        role: str,
+        provider: str,
+        model: str,
+        system: str = "",
+        user: str = "",
+        max_output_tokens: int = 0,
+        cost_tier: str = "unknown",
+    ) -> None:
+        """Pre-flight budget gate, run *before* an LLM call is dispatched.
+
+        In addition to the reactive checks against already-spent session totals,
+        this estimates the cost of the *upcoming* call from the prompt size plus
+        the requested output cap and blocks when ``totals + estimate`` would
+        exceed a configured session limit or a persistent budget window. This
+        prevents a single oversized call from blowing past the cap before any
+        tokens have been recorded. The estimate parameters are optional so
+        existing callers keep their previous behaviour.
+        """
         totals = _totals(self.records)
+        est_tokens = _estimate_tokens(system, user) + max(0, int(max_output_tokens))
+        est_cost = estimate_cost_units(est_tokens, cost_tier)
+
         if self.limits.max_calls and totals["calls"] >= self.limits.max_calls:
             raise ModelBudgetExceeded(
                 f"model call budget exhausted: {totals['calls']}/"
@@ -200,6 +223,16 @@ class ModelUsageLedger:
                 limit=self.limits.max_tokens,
             )
         if (
+            self.limits.max_tokens
+            and est_tokens > 0
+            and totals["total_tokens"] + est_tokens > self.limits.max_tokens
+        ):
+            raise ModelBudgetExceeded(
+                f"model token budget would exhaust: {totals['total_tokens']}+~"
+                f"{est_tokens}/{self.limits.max_tokens} before "
+                f"{role}:{provider}/{model}"
+            )
+        if (
             self.limits.max_cost_units
             and totals["cost_units"] >= self.limits.max_cost_units
         ):
@@ -213,7 +246,43 @@ class ModelUsageLedger:
                 used=totals["cost_units"],
                 limit=self.limits.max_cost_units,
             )
+        if (
+            self.limits.max_cost_units
+            and est_cost > 0
+            and totals["cost_units"] + est_cost > self.limits.max_cost_units
+        ):
+            raise ModelBudgetExceeded(
+                f"model cost budget would exhaust: {totals['cost_units']}+~"
+                f"{est_cost}/{self.limits.max_cost_units} before "
+                f"{role}:{provider}/{model}"
+            )
         if self.budget_ledger is not None:
+            # Read-only pre-flight peeks against persistent windows first, so a
+            # blocked estimate never records a phantom llm_call.
+            if est_tokens > 0:
+                token_peek = self.budget_ledger.check(
+                    "model_tokens",
+                    amount=est_tokens,
+                    reason=f"pre-flight model tokens: {role}:{provider}/{model}",
+                )
+                if not token_peek.allowed:
+                    raise ModelBudgetExceeded(
+                        f"persistent {token_peek.window} model token budget would "
+                        f"exhaust: {token_peek.used}+~{est_tokens}/{token_peek.limit} "
+                        f"before {role}:{provider}/{model}"
+                    )
+            if est_cost > 0:
+                cost_peek = self.budget_ledger.check(
+                    "model_cost_units",
+                    amount=est_cost,
+                    reason=f"pre-flight model cost: {role}:{provider}/{model}",
+                )
+                if not cost_peek.allowed:
+                    raise ModelBudgetExceeded(
+                        f"persistent {cost_peek.window} model cost budget would "
+                        f"exhaust: {cost_peek.used}+~{est_cost}/{cost_peek.limit} "
+                        f"before {role}:{provider}/{model}"
+                    )
             decision = self.budget_ledger.reserve(
                 "llm_calls",
                 amount=1,

@@ -72,6 +72,37 @@ def test_budget_ledger_records_actual_usage_without_enforcement(tmp_path: Path):
     }
 
 
+def test_budget_ledger_check_does_not_record(tmp_path: Path):
+    path = tmp_path / "budget.jsonl"
+    ledger = BudgetLedger(
+        path=path,
+        windows=(BudgetWindow("day", 86400, {"model_cost_units": 5}),),
+    )
+
+    allowed = ledger.check("model_cost_units", amount=3, now=NOW)
+    blocked = ledger.check("model_cost_units", amount=6, now=NOW)
+
+    assert allowed.allowed is True
+    assert blocked.allowed is False
+    assert blocked.window == "day"
+    assert blocked.used == 0
+    assert blocked.limit == 5
+    # check() must not write anything or consume budget.
+    assert not path.exists()
+    assert ledger.snapshot(now=NOW)["totals"] == {}
+
+
+def test_budget_ledger_check_accounts_for_existing_usage(tmp_path: Path):
+    ledger = BudgetLedger(
+        path=tmp_path / "budget.jsonl",
+        windows=(BudgetWindow("day", 86400, {"model_tokens": 100}),),
+    )
+    ledger.record("model_tokens", amount=90, now=NOW)
+
+    assert ledger.check("model_tokens", amount=10, now=NOW).allowed is True
+    assert ledger.check("model_tokens", amount=11, now=NOW).allowed is False
+
+
 def test_budget_ledger_skips_malformed_jsonl_records(tmp_path: Path):
     path = tmp_path / "budget.jsonl"
     path.write_text(
