@@ -138,6 +138,11 @@ def _produce(workspace: Path, **kwargs) -> ProducerReport:
         kill_switch=FakeKillSwitch(active=False),
         file_reader=_reader({_TARGET: "OLD = 0\n"}),
     )
+    # These legacy tests exercise the LLM Manager path directly. Since TD-036's
+    # follow-up made the grounded selector the default, opt them back into the
+    # legacy path explicitly unless the test drives a grounded selector itself.
+    if "grounded_selector" not in kwargs:
+        defaults["legacy_llm_manager"] = True
     defaults.update(kwargs)
     return produce_self_apply_proposal(**defaults)
 
@@ -432,14 +437,64 @@ class _Candidate:
         self.evidence_ref = evidence_ref
 
 
-def test_selector_none_preserves_existing_behavior(workspace: Path):
-    # Default path: Manager still selects via the LLM exactly as before.
+def test_legacy_llm_manager_flag_preserves_llm_selection(workspace: Path):
+    # Explicit legacy opt-in: Manager selects via the LLM exactly as before.
     llm = FakeLLM([_manager_ok(), _builder_ok()])
-    report = _produce(workspace, llm=llm)  # grounded_selector defaults to None
+    report = _produce(workspace, llm=llm)  # helper injects legacy_llm_manager=True
     assert report.status == "proposed"
     assert [r.role for r in report.role_outputs][0] == "manager"
     # The manager consulted the LLM (first canned response consumed).
     assert any("Manager" in c["system"] for c in llm.calls)
+
+
+def test_default_uses_grounded_selector_not_llm(workspace: Path):
+    # TD-036 follow-up: with neither a grounded_selector nor the legacy flag, the
+    # producer builds the default workspace-backed grounded selector. The tmp
+    # workspace has no TECH_DEBT.md / anatomy backlog, so the closed set is empty
+    # and the Manager refuses WITHOUT ever consulting the LLM.
+    inbox = ApprovalInbox(path=None)
+    llm = FakeLLM([_manager_ok(), _builder_ok()])  # must never be consulted
+    report = produce_self_apply_proposal(
+        workspace=workspace,
+        inbox=inbox,
+        llm=llm,
+        vcs=FakeVCS(clean=True),
+        budget_snapshot=_headroom_budget(),
+        kill_switch=FakeKillSwitch(active=False),
+    )
+    assert report.status == "no_patch"
+    assert [r.role for r in report.role_outputs] == ["manager"]
+    assert report.role_outputs[0].decision == "no_target"
+    assert llm.calls == []  # no LLM invention, no builder work
+    assert inbox.list() == []
+
+
+def test_default_grounded_selector_is_read_only(workspace: Path, monkeypatch):
+    # The default selector reads TECH_DEBT.md / anatomy / value-reviews strictly
+    # read-only; a broken backlog loader must degrade to "no candidate", never
+    # crash the producer and never reach the LLM.
+    import core.self_build_producer as mod
+
+    def _boom_loader(*a, **k):
+        raise RuntimeError("backlog load exploded")
+
+    # backlog_selector.load_backlog is imported lazily inside the selector.
+    import core.backlog_selector as bl
+    monkeypatch.setattr(bl, "load_backlog", _boom_loader)
+
+    inbox = ApprovalInbox(path=None)
+    llm = FakeLLM([_manager_ok(), _builder_ok()])
+    report = produce_self_apply_proposal(
+        workspace=workspace,
+        inbox=inbox,
+        llm=llm,
+        vcs=FakeVCS(clean=True),
+        budget_snapshot=_headroom_budget(),
+        kill_switch=FakeKillSwitch(active=False),
+    )
+    assert report.status == "no_patch"
+    assert report.role_outputs[0].decision == "no_target"
+    assert llm.calls == []
 
 
 def test_grounded_candidate_used_without_inventing_diagnosis(workspace: Path):

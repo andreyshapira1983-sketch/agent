@@ -533,9 +533,10 @@ class TestHandleMetaCommand:
         assert "Usage: :self-apply-run" in out.err
 
     def test_self_build_produce_registered(self, workspace: Path, capsys):
-        # Dispatcher recognizes :self-build-produce. With an empty FakeLLM the
-        # Manager selects no target, so the producer reports no_patch without
-        # creating any approval item, applying anything, or touching git state.
+        # Dispatcher recognizes :self-build-produce and runs the producer end to
+        # end (a safety gate may short-circuit in the tmp workspace). The
+        # grounded-default wiring itself is asserted in
+        # test_self_build_produce_uses_grounded_default below.
         import subprocess
 
         for args in (["init", "-q"], ["add", "-A"]):
@@ -550,6 +551,34 @@ class TestHandleMetaCommand:
         out = capsys.readouterr()
         assert "=== self-build produce ===" in out.err
         assert "status:" in out.err
+
+    def test_self_build_produce_uses_grounded_default(self, workspace: Path, capsys):
+        # TD-036 follow-up: the CLI must drive the producer on its grounded
+        # DEFAULT path — it never forces the legacy LLM manager and never pins a
+        # selector, so the producer's workspace-backed grounded selector runs.
+        import cli.commands_self_build as mod
+
+        captured: dict = {}
+
+        def _fake_produce(**kwargs):
+            captured.update(kwargs)
+            from core.self_build_producer import ProducerReport
+
+            return ProducerReport(status="no_patch", reason="stub")
+
+        mod_produce = mod.produce_self_apply_proposal
+        mod.produce_self_apply_proposal = _fake_produce
+        try:
+            agent = _build_agent(workspace)
+            assert (
+                mod._handle_self_build_produce("", agent, workspace) is True
+            )
+        finally:
+            mod.produce_self_apply_proposal = mod_produce
+
+        # No legacy opt-in and no forced selector => producer default (grounded).
+        assert captured.get("legacy_llm_manager") in (None, False)
+        assert "grounded_selector" not in captured
 
     def test_self_build_produce_rejects_args(self, workspace: Path, capsys):
         # Narrow trigger: it takes no arguments and no free-text patch.

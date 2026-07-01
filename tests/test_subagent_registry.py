@@ -210,6 +210,7 @@ def test_producer_hook_records_role_outcomes(tmp_path: Path):
         inbox=inbox,
         llm=_FakeLLM(),
         registry=reg,
+        legacy_llm_manager=True,
     )
     assert report.status == "no_patch"
     assert reg.roles["manager"].invocations == 1
@@ -227,7 +228,7 @@ def test_producer_without_registry_is_unchanged(tmp_path: Path):
 
     inbox = ApprovalInbox(path=None)
     report = produce_self_apply_proposal(
-        workspace=tmp_path, inbox=inbox, llm=_FakeLLM()
+        workspace=tmp_path, inbox=inbox, llm=_FakeLLM(), legacy_llm_manager=True
     )
     assert report.status == "no_patch"
     # Default None registry writes no ledger file at all.
@@ -252,6 +253,7 @@ def test_producer_hook_never_breaks_on_registry_write_failure(tmp_path: Path):
         inbox=inbox,
         llm=_FakeLLM(),
         registry=_BoomRegistry(),
+        legacy_llm_manager=True,
     )
     assert report.status == "no_patch"  # producer still returns normally
 

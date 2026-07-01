@@ -1,9 +1,14 @@
-"""``:self-build-produce`` REPL command (TD-025).
+"""``:self-build-produce`` REPL command (TD-025, grounded default TD-036).
 
 A single narrow operator trigger that runs the subagent-backed self-apply
 *producer*: a Manager/Researcher/Builder/Critic/Reporter pipeline that generates
 at most one validated low-risk full-content proposal and drops it into the
 approval inbox as an ``operation="self_apply_lane.run"`` item.
+
+The Manager picks its target + diagnosis from a *grounded* backlog candidate
+(TECH_DEBT.md / docs/AGENT_ANATOMY.md) by default — it never invents a diagnosis
+via the LLM. When the grounded backlog is empty the command returns ``no_patch``
+(surfaced as ``no_grounded_backlog``) instead of falling back to the LLM.
 
 It is deliberately narrow:
 
@@ -58,6 +63,22 @@ def _handle_self_build_produce(rest: str, agent: "AgentLoop", workspace: Path) -
     )
     result = report.to_dict()
 
+    # Surface the grounded Manager decision (TD-036) so the operator can see
+    # whether a verifiable backlog candidate drove the run, and why an empty
+    # backlog produced no patch.
+    manager = next(
+        (r for r in (result.get("roles") or []) if r.get("role") == "manager"),
+        None,
+    )
+    grounded = bool((manager or {}).get("data", {}).get("grounded"))
+    evidence_ref = (manager or {}).get("data", {}).get("evidence_ref") or ""
+    no_grounded_backlog = (
+        result.get("status") == "no_patch"
+        and manager is not None
+        and manager.get("decision") == "no_target"
+        and not grounded
+    )
+
     # Secret-free structured log (never dumps generated file content).
     agent.log.log(
         "self_build_produce",
@@ -67,6 +88,9 @@ def _handle_self_build_produce(rest: str, agent: "AgentLoop", workspace: Path) -
             "approval_id": result.get("approval_id"),
             "checked_gates": result.get("checked_gates"),
             "veto_reasons": result.get("veto_reasons"),
+            "grounded": grounded,
+            "evidence_ref": evidence_ref,
+            "no_grounded_backlog": no_grounded_backlog,
         },
     )
 
@@ -75,6 +99,12 @@ def _handle_self_build_produce(rest: str, agent: "AgentLoop", workspace: Path) -
         f"status: {result.get('status')}",
         f"reason: {result.get('reason')}",
     ]
+    if grounded:
+        lines.append("manager: grounded backlog candidate")
+        if evidence_ref:
+            lines.append(f"evidence_ref: {evidence_ref}")
+    elif no_grounded_backlog:
+        lines.append("manager: no_grounded_backlog (no verifiable candidate)")
     if result.get("target_path"):
         lines.append(f"target: {result.get('target_path')}")
     if result.get("approval_id"):

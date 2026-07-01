@@ -1397,3 +1397,49 @@ TD-036 — Grounded Backlog Selector (Phase 1: manager перестаёт выд
 Примечание: пользователь заказывал это как «TD-036»; номер в TECH_DEBT свободен
 (предыдущий shipped — TD-035 Producer Value Gate). anatomy-список TD-030+
 остаётся advisory-текстом.
+==============================================================================
+TD-036 follow-up — grounded selector как default в self-build production path
+
+Статус: Done.
+
+Проблема: TD-036 добавил grounded backlog selector, но реальные вызывающие —
+`:self-build-produce` (cli/commands_self_build.py) и daemon (agent_tick.py) —
+не передавали `grounded_selector`, поэтому по умолчанию срабатывал legacy
+LLM-manager путь: 2 LLM-вызова, выдуманный diagnosis, затем critic_veto.
+Тесты TD-036 проходили, потому что дёргали параметр напрямую, а не через
+production-вызов. По логам `:self-build-produce` всё ещё делал model_call_start
+и выбирал core/truth_hype_filter.py.
+
+Готово:
+- core/self_build_producer.py: grounded selector теперь DEFAULT для Manager.
+  * новый `_default_grounded_selector(workspace)` строит zero-arg callable,
+    который read-only читает TECH_DEBT.md / docs/AGENT_ANATOMY.md / value-review
+    ledger через load_backlog+select_top; любая ошибка загрузки -> None
+    (Manager отказывается, а не падает в LLM).
+  * новый параметр `legacy_llm_manager: bool = False`. Порядок выбора Manager:
+    legacy flag -> старый LLM `_manager_select`; иначе explicit `grounded_selector`
+    или default workspace-selector. LLM-fallback'а НЕТ: пустой backlog -> no_patch,
+    без выдуманного diagnosis.
+  * обновлён docstring produce_self_apply_proposal.
+- cli/commands_self_build.py: команда идёт по grounded default (без legacy flag,
+  без принудительного selector). Вывод/лог показывают grounded-путь:
+  `grounded`, `evidence_ref`, `no_grounded_backlog`. Обновлён docstring модуля.
+- agent_tick.py: изменений не потребовалось — daemon уже вызывает producer без
+  legacy flag/selector, значит теперь по умолчанию идёт grounded.
+- tests/test_self_build_producer.py: helper `_produce` явно ставит
+  legacy_llm_manager=True, когда тест не передаёт grounded_selector (legacy-тесты
+  сохранены). Новые тесты: default использует grounded (0 LLM-вызовов на пустом
+  workspace -> no_patch); default selector read-only и не падает при сломанном
+  load_backlog; явный legacy flag сохраняет LLM-выбор.
+- tests/test_subagent_registry.py: 3 producer-вызова, проверяющие LLM-manager
+  hook, получили явный legacy_llm_manager=True.
+- tests/test_cli.py: новый test_self_build_produce_uses_grounded_default —
+  команда не форсит legacy и не пинит selector (producer идёт по grounded default).
+
+Область НЕ тронута: approval/self_apply flow; model routing; budget/config;
+config/budget_limits.json (не менялся); auto-approve/apply/merge/retire; scoring;
+value_review; TD-035 value gate; новых CLI-команд/core-модулей нет (anatomy
+неизменна). Никаких LLM/network/git/apply side effects из-за нового default пути.
+
+Проверка: targeted (producer/registry/tick/cli self-build) зелёные;
+full pytest 3780 passed; git diff --check чист.
