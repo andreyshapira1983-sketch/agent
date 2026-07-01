@@ -9,6 +9,7 @@ break the REPL contract while refactoring downstream MVPs.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -29,6 +30,7 @@ from core.operator_intent import route_operator_intent
 from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
+from core.scheduler import SchedulerStore
 from core.source_registry import SourceRegistry
 from core.source_registry_store import SourceRegistryStore
 from main import (
@@ -770,6 +772,62 @@ class TestHandleMetaCommand:
         assert '"kind": "implementation_plan"' in out.err
         assert '"kind": "patch_proposal"' in out.err
         assert '"approval_boundary"' in out.err
+        assert agent.llm.calls == []
+
+    def test_patch_proposal_plan_uses_matched_targets_and_behavior_tests(
+        self,
+        workspace: Path,
+        capsys,
+    ):
+        agent = _build_agent(workspace)
+        registry = SourceRegistry()
+        routing_source = registry.register_source(
+            type="file",
+            title="operator_intent.py",
+            locator="core/operator_intent.py",
+            trust_level=0.9,
+        )
+        registry.register_claim(
+            source_id=routing_source.id,
+            text="BUG notes mentioning patch proposal must stay normal chat.",
+            confidence=0.87,
+        )
+        main_source = registry.register_source(
+            type="file",
+            title="main.py",
+            locator="main.py",
+            trust_level=0.9,
+        )
+        registry.register_claim(
+            source_id=main_source.id,
+            text="Patch proposal plans are dispatched locally and read-only.",
+            confidence=0.82,
+        )
+        assert agent.source_registry_store is not None
+        agent.source_registry_store.save_registry(registry)
+
+        assert handle_meta_command(
+            ":patch-proposal-plan fix BUG note routing in core/operator_intent.py and main.py --json",
+            agent,
+            workspace,
+        ) is True
+
+        out = capsys.readouterr()
+        payload = json.loads(out.err)
+        matched_locators = {
+            item["locator"]
+            for item in payload["source_evidence"]["matched_sources"]
+        }
+        targets = payload["files_functions_to_inspect_or_change"]
+        tests_to_add = "\n".join(payload["tests_to_add"]).casefold()
+
+        assert payload["kind"] == "patch_proposal"
+        assert {"core/operator_intent.py", "main.py"} <= matched_locators
+        assert any(item.startswith("core/operator_intent.py -") for item in targets)
+        assert any(item.startswith("main.py -") for item in targets)
+        assert "bug note routing" in tests_to_add
+        assert "source-review requests route to source_review_plan" not in tests_to_add
+        assert "implementation-plan requests route to implementation_plan" not in tests_to_add
         assert agent.llm.calls == []
 
     def test_self_build_propose_command_returns_unified_diff_without_writes(
@@ -1806,6 +1864,63 @@ Produce a patch proposal for the routing bug.
         assert "runtime schedules" in out.err
         assert "scheduler tick" in out.err
         assert "runtime tasks" in out.err
+
+    def test_schedule_disable_marks_schedule_and_handles_missing(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+        store = SchedulerStore(workspace / "data" / "runtime_schedules.jsonl")
+        schedule = store.add(name="health", goal="project health", every_minutes=60)
+        before_log_size = agent.log.path.stat().st_size
+
+        assert handle_meta_command(f":schedule-disable {schedule.id}", agent, workspace) is True
+        assert handle_meta_command(":schedule-list all", agent, workspace) is True
+        assert handle_meta_command(":schedule-disable sched_missing", agent, workspace) is True
+
+        out = capsys.readouterr()
+        assert f"SCHEDULE_DISABLED {schedule.id}" in out.err
+        assert "SCHEDULE_NOT_FOUND" in out.err
+        assert f"{schedule.id} [disabled]" in out.err
+        assert store.load()[0].status == "disabled"
+        assert agent.log.path.stat().st_size == before_log_size
+        assert not (workspace / "data" / "budget_ledger.jsonl").exists()
+        assert not (workspace / "data" / "model_usage.jsonl").exists()
+        assert not (workspace / "data" / "source_registry.jsonl").exists()
+
+    def test_schedule_disable_one_shot_short_circuits_before_agent_build(
+        self,
+        workspace: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
+    ):
+        store = SchedulerStore(workspace / "data" / "runtime_schedules.jsonl")
+        schedule = store.add(name="health", goal="project health", every_minutes=60)
+
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("schedule-disable must not build agent or load dotenv")
+
+        monkeypatch.setattr(main_module, "build_agent", fail_if_called)
+        monkeypatch.setattr(main_module, "load_dotenv", fail_if_called)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "main.py",
+                "--workspace",
+                str(workspace),
+                "--ask",
+                f":schedule-disable {schedule.id}",
+            ],
+        )
+
+        assert main_module.main() == 0
+
+        out = capsys.readouterr()
+        assert out.err.strip() == f"SCHEDULE_DISABLED {schedule.id}"
+        assert store.load()[0].status == "disabled"
+        assert not (workspace / "logs").exists()
+        assert not (workspace / "config").exists()
+        assert not (workspace / "data" / "budget_ledger.jsonl").exists()
+        assert not (workspace / "data" / "model_usage.jsonl").exists()
+        assert not (workspace / "data" / "source_registry.jsonl").exists()
 
     def test_quit_raises_system_exit(self, workspace: Path):
         agent = _build_agent(workspace)

@@ -66,6 +66,10 @@ def route_operator_intent(text: str) -> OperatorIntent | None:
     # normal planner instead.
     if _looks_like_meta_instruction(normalized):
         return None
+    if _looks_like_plain_bug_note(normalized):
+        return None
+    if _looks_like_explicit_non_routing_command(normalized):
+        return None
     if _looks_like_self_build_request(normalized):
         return None
     # P0 explicit inbox / proposed_task intent: creating an approval-inbox
@@ -245,6 +249,18 @@ def _looks_like_meta_instruction(text: str) -> bool:
     return _has_any(text, meta_markers)
 
 
+def _looks_like_plain_bug_note(text: str) -> bool:
+    stripped = text.strip()
+    return stripped.startswith("bug:")
+
+
+def _looks_like_explicit_non_routing_command(text: str) -> bool:
+    stripped = text.strip()
+    return stripped.startswith(":") and not (
+        stripped.startswith(":patch-proposal-plan") or stripped.startswith(":patch-plan")
+    )
+
+
 def _looks_like_self_build_request(text: str) -> bool:
     return _has_any(
         text,
@@ -326,17 +342,35 @@ def _explicit_documentation_requested(text: str) -> bool:
 
 
 def _matches_patch_proposal(text: str) -> bool:
+    stripped = text.strip()
+    if stripped.startswith(":patch-proposal-plan") or stripped.startswith(":patch-plan"):
+        return True
     return _has_any(
         text,
         (
-            "patch proposal",
-            "proposal for",
+            "propose a patch",
+            "propose patch",
+            "propose a diff",
+            "create a patch",
+            "create patch proposal",
+            "draft a patch",
+            "draft patch proposal",
+            "make a patch",
+            "make patch proposal",
+            "prepare a patch",
+            "prepare patch proposal",
+            "produce a patch",
+            "produce patch proposal",
+            "write a patch",
+            "write patch proposal",
             "предложи patch",
             "предложи патч",
             "составь patch",
             "составь патч",
-            "предложение исправ",
-            "план исправ",
+            "подготовь patch",
+            "подготовь патч",
+            "создай patch",
+            "создай патч",
         ),
     )
 

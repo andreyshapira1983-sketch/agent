@@ -255,6 +255,30 @@ def test_patch_proposal_requests_route_to_patch_proposal():
     assert intent.command == ":patch-proposal-plan"
 
 
+def test_bug_note_with_patch_proposal_phrase_does_not_route():
+    text = "BUG: plain note mentions patch proposal but is only recording a routing symptom"
+
+    assert route_operator_intent(text) is None
+
+
+def test_bug_note_with_project_status_words_does_not_route_to_operator_check():
+    text = "BUG: project status text is a note, not an operator-check request"
+
+    assert route_operator_intent(text) is None
+
+
+def test_explicit_remember_bug_note_is_not_operator_routed():
+    assert route_operator_intent(":remember bug BUG: project status should be saved") is None
+
+
+def test_explicit_patch_proposal_command_routes_to_patch_proposal():
+    intent = route_operator_intent(":patch-proposal-plan fix operator routing")
+
+    assert intent is not None
+    assert intent.kind == "patch_proposal"
+    assert intent.command == ":patch-proposal-plan"
+
+
 def test_does_not_capture_normal_chat():
     assert route_operator_intent("как дела") is None
     assert route_operator_intent("напиши короткое письмо") is None

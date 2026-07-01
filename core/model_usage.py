@@ -113,7 +113,40 @@ class ModelUsageRecord:
 
 
 class ModelBudgetExceeded(RuntimeError):
-    """Raised when a configured session budget blocks an LLM call."""
+    """Raised when a configured budget blocks an LLM call."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        counter: str = "",
+        role: str = "",
+        provider: str = "",
+        model: str = "",
+        used: int | None = None,
+        limit: int | None = None,
+        window: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.counter = counter
+        self.role = role
+        self.provider = provider
+        self.model = model
+        self.used = used
+        self.limit = limit
+        self.window = window
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "error": str(self),
+            "counter": self.counter,
+            "role": self.role,
+            "provider": self.provider,
+            "model": self.model,
+            "used": self.used,
+            "limit": self.limit,
+            "window": self.window,
+        }
 
 
 @dataclass
@@ -167,7 +200,13 @@ class ModelUsageLedger:
         if self.limits.max_calls and totals["calls"] >= self.limits.max_calls:
             raise ModelBudgetExceeded(
                 f"model call budget exhausted: {totals['calls']}/"
-                f"{self.limits.max_calls} before {role}:{provider}/{model}"
+                f"{self.limits.max_calls} before {role}:{provider}/{model}",
+                counter="llm_calls",
+                role=role,
+                provider=provider,
+                model=model,
+                used=totals["calls"],
+                limit=self.limits.max_calls,
             )
         if (
             self.limits.max_tokens
@@ -175,7 +214,13 @@ class ModelUsageLedger:
         ):
             raise ModelBudgetExceeded(
                 f"model token budget exhausted: {totals['total_tokens']}/"
-                f"{self.limits.max_tokens} before {role}:{provider}/{model}"
+                f"{self.limits.max_tokens} before {role}:{provider}/{model}",
+                counter="model_tokens",
+                role=role,
+                provider=provider,
+                model=model,
+                used=totals["total_tokens"],
+                limit=self.limits.max_tokens,
             )
         if (
             self.limits.max_tokens
@@ -193,7 +238,13 @@ class ModelUsageLedger:
         ):
             raise ModelBudgetExceeded(
                 f"model cost budget exhausted: {totals['cost_units']}/"
-                f"{self.limits.max_cost_units} before {role}:{provider}/{model}"
+                f"{self.limits.max_cost_units} before {role}:{provider}/{model}",
+                counter="model_cost_units",
+                role=role,
+                provider=provider,
+                model=model,
+                used=totals["cost_units"],
+                limit=self.limits.max_cost_units,
             )
         if (
             self.limits.max_cost_units
@@ -241,7 +292,14 @@ class ModelUsageLedger:
             if not decision.allowed:
                 raise ModelBudgetExceeded(
                     f"persistent {decision.window} model call budget exhausted: "
-                    f"{decision.used}/{decision.limit} before {role}:{provider}/{model}"
+                    f"{decision.used}/{decision.limit} before {role}:{provider}/{model}",
+                    counter=decision.counter,
+                    role=role,
+                    provider=provider,
+                    model=model,
+                    used=decision.used,
+                    limit=decision.limit,
+                    window=decision.window,
                 )
 
     def log_start(

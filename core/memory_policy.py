@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Iterable, Literal
 
 from core.dlp import contains_pii
@@ -274,9 +275,164 @@ _STOPWORDS: frozenset[str] = frozenset(
 
 _TOKEN_RE = re.compile(r"[\w]+", re.UNICODE)
 
+_BROAD_PROJECT_MEMORY_TOKENS: frozenset[str] = frozenset(
+    {
+        "bug", "bugs", "project", "memory", "budget",
+        "test", "tests", "pytest", "model", "models", "status",
+        "usage", "log", "logs",
+        "operator-routing", "operator", "routing",
+        "patch-proposal", "patch", "proposal",
+        "tech debt", "tech", "debt",
+        "autonomy", "autonomous",
+        "баг", "баги", "ошибка", "ошибки", "проект", "память",
+        "бюджет", "тест", "тесты", "модель", "модели", "статус",
+        "лог", "логи", "автономность", "автономия",
+    }
+)
+
+_BROAD_PROJECT_CONTEXT_TERMS: tuple[str, ...] = (
+    "your project",
+    "this project",
+    "our project",
+    "my project",
+    "current project",
+    "project status",
+    "project state",
+    "project overview",
+    "repo",
+    "repository",
+    "codebase",
+    "своем проект",
+    "своём проект",
+    "твоем проект",
+    "твоём проект",
+    "нашем проект",
+    "этом проект",
+    "о проект",
+    "про проект",
+    "статус проект",
+    "состояние проект",
+)
+
+_BROAD_PROJECT_QUESTION_TERMS: tuple[str, ...] = (
+    "what do you know",
+    "already know",
+    "tell me about",
+    "summarize",
+    "summary",
+    "overview",
+    "status",
+    "state",
+    "что ты",
+    "что уже",
+    "знаешь",
+    "расскажи",
+    "сводка",
+    "обзор",
+    "статус",
+    "состояние",
+)
+
 
 def _tokens(text: str) -> set[str]:
     return {t.lower() for t in _TOKEN_RE.findall(text or "") if t.lower() not in _STOPWORDS and len(t) > 1}
+
+
+def _query_tokens(text: str) -> set[str]:
+    tokens = _tokens(text)
+    if _is_broad_project_question(text):
+        tokens |= _BROAD_PROJECT_MEMORY_TOKENS
+    return tokens
+
+
+def _is_broad_project_question(text: str) -> bool:
+    lowered = (text or "").casefold()
+    return (
+        any(term in lowered for term in _BROAD_PROJECT_CONTEXT_TERMS)
+        and any(term in lowered for term in _BROAD_PROJECT_QUESTION_TERMS)
+    )
+
+
+def _tag_tokens(tags: Iterable[str]) -> set[str]:
+    out: set[str] = set()
+    for tag in tags or ():
+        lowered = str(tag).casefold().strip()
+        if not lowered:
+            continue
+        out.add(lowered)
+        out.update(_tokens(lowered.replace("-", " ").replace("_", " ")))
+    return out
+
+
+def _record_text(record: MemoryRecord) -> str:
+    return record.content if isinstance(record.content, str) else str(record.content)
+
+
+def _record_haystack(record: MemoryRecord) -> str:
+    return " ".join([_record_text(record), " ".join(record.tags or [])]).casefold()
+
+
+def _is_readme_record(record: MemoryRecord) -> bool:
+    haystack = _record_haystack(record)
+    return "readme" in haystack or "readme.md" in haystack
+
+
+def _is_tech_debt_record(record: MemoryRecord) -> bool:
+    haystack = _record_haystack(record).replace("_", " ").replace("-", " ")
+    return "tech debt" in haystack or "techdebt" in haystack
+
+
+def _is_live_status_record(record: MemoryRecord) -> bool:
+    tokens = _tokens(_record_haystack(record).replace("_", " ").replace("-", " "))
+    return bool(tokens & {
+        "status", "current", "latest", "recent", "now", "test", "tests",
+        "pytest", "passed", "failed", "model", "models", "budget", "usage",
+        "log", "logs", "runtime", "scheduler", "сейчас", "статус", "тест",
+        "тесты", "модель", "модели", "бюджет", "лог", "логи",
+    })
+
+
+def _is_reference_record(record: MemoryRecord) -> bool:
+    tokens = _tokens(_record_haystack(record).replace("_", " ").replace("-", " "))
+    return bool(tokens & {
+        "architecture", "reference", "overview", "design", "doctrine",
+        "архитектура", "архитектур", "справка", "описание",
+    })
+
+
+def _freshness_boost(record: MemoryRecord) -> int:
+    created_at = record.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    age = datetime.now(timezone.utc) - created_at
+    age_seconds = age.total_seconds()
+    if age_seconds <= 7 * 24 * 3600:
+        return 3
+    if age_seconds <= 30 * 24 * 3600:
+        return 1
+    return 0
+
+
+def _broad_project_score_adjustment(record: MemoryRecord, base_score: int) -> int:
+    score = _freshness_boost(record) if base_score > 0 else 0
+    if _is_tech_debt_record(record):
+        score += 4
+    if _is_live_status_record(record):
+        score += 2
+    if _is_readme_record(record):
+        if _is_live_status_record(record):
+            score -= 4
+        elif _is_reference_record(record):
+            score += 1
+    return score
+
+
+def _record_prompt_note(record: MemoryRecord) -> str:
+    if not _is_readme_record(record):
+        return ""
+    if _is_live_status_record(record):
+        return "[historical README/reference; confirm with recent memory/logs before treating as current] "
+    return "[README architecture/reference] "
 
 
 class MemoryRetrievalPolicy:
@@ -304,7 +460,7 @@ class MemoryRetrievalPolicy:
     ) -> list[MemoryRecord]:
         if not records or not question:
             return []
-        q_tokens = _tokens(question)
+        q_tokens = _query_tokens(question)
         if not q_tokens:
             return []
 
@@ -314,7 +470,7 @@ class MemoryRetrievalPolicy:
             r_tokens = _tokens(text)
             score = len(q_tokens & r_tokens)
             # Tags also count — weak signal but useful when content is terse.
-            tag_tokens = {t.lower() for t in (r.tags or [])}
+            tag_tokens = _tag_tokens(r.tags or [])
             score += len(q_tokens & tag_tokens)
             # Prefix match for inflected words (handles Russian morphology):
             # e.g. "уроки" matches tag "урок", "рефлексии" matches "рефлексия".
@@ -326,6 +482,8 @@ class MemoryRetrievalPolicy:
                             if len(rt) >= 4 and (rt.startswith(q[:4]) or q.startswith(rt[:4])):
                                 score += 1
                                 break
+            if _is_broad_project_question(question):
+                score += _broad_project_score_adjustment(r, score)
             if score >= self.min_score:
                 scored.append((score, r))
 
@@ -339,8 +497,9 @@ class MemoryRetrievalPolicy:
         lines: list[str] = []
         for r in records:
             text = r.content if isinstance(r.content, str) else str(r.content)
+            note = _record_prompt_note(r)
             if len(text) > self.per_record_chars:
                 text = text[: self.per_record_chars - 1].rstrip() + "…"
             tag_str = ",".join(r.tags) if r.tags else "-"
-            lines.append(f"- [{r.id} | tags: {tag_str}] {text}")
+            lines.append(f"- [{r.id} | tags: {tag_str}] {note}{text}")
         return "\n".join(lines)

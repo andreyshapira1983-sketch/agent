@@ -17,8 +17,8 @@ from core.state_integrity import read_state_jsonl_unlocked, rewrite_state_jsonl_
 from core.task_queue import RuntimeTask, TaskQueueStore
 
 
-ScheduleStatus = Literal["active", "paused"]
-_VALID_STATUSES = {"active", "paused"}
+ScheduleStatus = Literal["active", "paused", "disabled"]
+_VALID_STATUSES = {"active", "paused", "disabled"}
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _FALSE_VALUES = {"0", "false", "no", "off"}
 
@@ -238,6 +238,9 @@ class SchedulerStore:
 
     def resume(self, schedule_id: str) -> RuntimeSchedule:
         return self._update_one(schedule_id, lambda s: s.with_updates(status="active"))
+
+    def disable(self, schedule_id: str) -> RuntimeSchedule:
+        return self._update_one(schedule_id, lambda s: s.with_updates(status="disabled"))
 
     def summary(self) -> dict:
         schedules = self.load()

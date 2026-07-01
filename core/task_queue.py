@@ -17,10 +17,10 @@ from core.ids import new_id
 from core.state_integrity import read_state_jsonl_unlocked, rewrite_state_jsonl_unlocked
 
 
-RuntimeTaskKind = Literal["auto_run"]
-RuntimeTaskStatus = Literal["pending", "running", "done", "failed", "cancelled"]
-_VALID_KINDS = {"auto_run"}
-_VALID_STATUSES = {"pending", "running", "done", "failed", "cancelled"}
+RuntimeTaskKind = Literal["auto_run", "resume_checkpoint"]
+RuntimeTaskStatus = Literal["pending", "running", "done", "failed", "cancelled", "paused"]
+_VALID_KINDS = {"auto_run", "resume_checkpoint"}
+_VALID_STATUSES = {"pending", "running", "done", "failed", "cancelled", "paused"}
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _FALSE_VALUES = {"0", "false", "no", "off"}
 
@@ -148,6 +148,32 @@ class TaskQueueStore:
             include_tests=include_tests,
             limit=limit,
             learning_limit=learning_limit,
+        )
+        with exclusive_file_lock(self._lock_path):
+            tasks = self._load_unlocked()
+            tasks.append(task)
+            self._save_unlocked(tasks)
+        return task
+
+    def add_paused_checkpoint(
+        self,
+        *,
+        goal: str,
+        report: dict,
+        priority: int = 1,
+    ) -> RuntimeTask:
+        task = RuntimeTask(
+            kind="resume_checkpoint",
+            goal=goal.strip() or "resume interrupted task",
+            status="paused",
+            priority=priority,
+            max_attempts=1,
+            dry_run=True,
+            include_tests=False,
+            limit=1,
+            learning_limit=1,
+            last_error=str(report.get("stop_reason") or "budget_exhausted"),
+            last_report=report,
         )
         with exclusive_file_lock(self._lock_path):
             tasks = self._load_unlocked()
@@ -290,11 +316,27 @@ class TaskQueueStore:
         counts: dict[str, int] = {}
         for task in tasks:
             counts[task.status] = counts.get(task.status, 0) + 1
+        resumable = []
+        for task in tasks:
+            if task.kind != "resume_checkpoint" or task.status != "paused":
+                continue
+            report = task.last_report or {}
+            resumable.append(
+                {
+                    "id": task.id,
+                    "goal": task.goal,
+                    "trace_id": report.get("trace_id"),
+                    "stop_reason": report.get("stop_reason"),
+                    "current_phase": report.get("current_phase"),
+                    "updated_at": task.updated_at,
+                }
+            )
         return {
             "path": str(self.path),
             "total": len(tasks),
             "statuses": counts,
             "pending_due": len(self.pending()),
+            "resumable": resumable,
         }
 
     def _update_one(self, task_id: str, fn) -> RuntimeTask:

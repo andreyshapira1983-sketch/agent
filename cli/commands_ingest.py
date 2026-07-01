@@ -599,7 +599,7 @@ def _implementation_plan_payload(
             ],
         }
     suggested_files = source_review.get("suggested_files", [])
-    implementation_steps = _implementation_steps_for_kind(kind)
+    implementation_steps = _implementation_steps_for_kind(kind, goal, source_review)
     return {
         "kind": kind,
         "goal": goal or ("patch proposal plan" if kind == "patch_proposal" else "implementation plan"),
@@ -612,7 +612,7 @@ def _implementation_plan_payload(
         },
         "files_functions_to_inspect_or_change": suggested_files,
         "implementation_steps": implementation_steps,
-        "tests_to_add": _implementation_tests_for_kind(kind),
+        "tests_to_add": _implementation_tests_for_kind(kind, goal, source_review),
         "approval_boundary": [
             "This report is read-only planning.",
             "Do not edit files, run shell commands, apply repair, or enable allow-effects from this step.",
@@ -634,13 +634,20 @@ def _implementation_plan_payload(
     }
 
 
-def _implementation_steps_for_kind(kind: str) -> list[str]:
+def _implementation_steps_for_kind(
+    kind: str,
+    goal: str = "",
+    source_review: dict | None = None,
+) -> list[str]:
     if kind == "patch_proposal":
+        target_paths = _source_review_target_paths(source_review)
+        target_text = _format_target_list(target_paths) if target_paths else "the requested files"
+        behavior = _goal_behavior_label(goal)
         return [
-            "Collect explicit file evidence for every target file before proposing a diff.",
-            "Identify the smallest behavioral mismatch and map it to one code surface.",
+            f"Use matched Source Registry evidence for {target_text} before proposing a diff.",
+            f"Map the requested behavior ({behavior}) to the smallest code surface.",
             "Draft a minimal patch proposal with expected before/after behavior.",
-            "Name targeted tests and rollback expectations, then stop before applying.",
+            f"Name behavior-specific tests for {behavior}, then stop before applying.",
         ]
     return [
         "Separate source evidence from implementation assumptions.",
@@ -651,17 +658,107 @@ def _implementation_steps_for_kind(kind: str) -> list[str]:
     ]
 
 
-def _implementation_tests_for_kind(kind: str) -> list[str]:
+def _implementation_tests_for_kind(
+    kind: str,
+    goal: str = "",
+    source_review: dict | None = None,
+) -> list[str]:
+    if kind == "patch_proposal":
+        return _patch_proposal_tests(goal, source_review)
     tests = [
         "source-review requests route to source_review_plan, not project_health",
         "implementation-plan requests route to implementation_plan, not source_review_plan",
         "handler returns a local report without planner/LLM calls",
     ]
-    if kind == "patch_proposal":
-        tests.append("patch proposal requests return a patch proposal plan, not a generic source review")
-    else:
-        tests.append("implementation plan report lists files/functions, tests, risks and approval boundary")
+    tests.append("implementation plan report lists files/functions, tests, risks and approval boundary")
     return tests
+
+
+def _patch_proposal_tests(goal: str, source_review: dict | None) -> list[str]:
+    behavior = _goal_behavior_label(goal)
+    target_paths = _source_review_target_paths(source_review)
+    if target_paths:
+        tests = [
+            f"{path}: regression covers requested behavior ({behavior})"
+            for path in target_paths[:3]
+        ]
+    else:
+        tests = [f"regression covers requested patch behavior ({behavior})"]
+    tests.append(
+        "patch proposal command reports matched requested files and stays read-only without planner/LLM calls"
+    )
+    return tests
+
+
+def _source_review_target_paths(source_review: dict | None) -> list[str]:
+    if not source_review:
+        return []
+    return _target_paths_from_sources_and_mentions(
+        list(source_review.get("matched_sources", [])),
+        list(source_review.get("requested_mentions", [])),
+    )
+
+
+def _target_paths_from_sources_and_mentions(sources: list, mentions: list[str]) -> list[str]:
+    paths: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        path = _display_source_path(value)
+        if path is None:
+            return
+        key = path.casefold()
+        if key in seen:
+            return
+        seen.add(key)
+        paths.append(path)
+
+    for mention in mentions:
+        add(mention)
+    for source in sources:
+        for field in ("locator", "id", "title"):
+            value = _source_field(source, field)
+            if not value:
+                continue
+            before = len(paths)
+            add(value)
+            if len(paths) > before:
+                break
+    return paths
+
+
+def _source_field(source, field: str) -> str:
+    if isinstance(source, dict):
+        return str(source.get(field, ""))
+    return str(getattr(source, field, ""))
+
+
+def _display_source_path(value: str) -> str | None:
+    out = value.strip().strip("\"'")
+    if out.startswith("file:"):
+        out = out[len("file:"):]
+    out = out.replace("\\", "/")
+    while out.startswith("./"):
+        out = out[2:]
+    out = out.rstrip(".,;:!?)]}\"'")
+    if not re.search(r"\.(?:py|md|txt|json|yml|yaml|pdf)$", out, flags=re.IGNORECASE):
+        return None
+    return out
+
+
+def _format_target_list(paths: list[str]) -> str:
+    if len(paths) <= 3:
+        return ", ".join(paths)
+    return ", ".join(paths[:3]) + f", and {len(paths) - 3} more"
+
+
+def _goal_behavior_label(goal: str) -> str:
+    compact = " ".join(goal.split()).strip()
+    if not compact:
+        return "requested patch behavior"
+    if len(compact) > 120:
+        compact = compact[:117].rstrip() + "..."
+    return compact
 
 
 def _format_implementation_plan(payload: dict) -> str:
@@ -835,20 +932,20 @@ def _source_dedupe_key(source) -> str:
 
 
 def _suggest_implementation_files(sources: list, mentions: list[str]) -> list[str]:
-    names = {_normalize_source_key(item) for item in mentions}
-    for source in sources:
-        for value in (getattr(source, "id", ""), getattr(source, "locator", ""), getattr(source, "title", "")):
-            key = _normalize_source_key(str(value))
-            if key:
-                names.add(key)
+    target_paths = _target_paths_from_sources_and_mentions(sources, mentions)
     suggestions: list[str] = []
-    if any("core\\operator_intent.py" in name or "operator_intent.py" == name for name in names):
-        suggestions.append("core/operator_intent.py - route source-review and implementation-plan language")
-    if any("main.py" in name for name in names):
-        suggestions.append("main.py - dispatch the operator source-review plan command")
-    if any("test" in name for name in names) or suggestions:
-        suggestions.append("tests/test_operator_intent.py - routing regressions")
-        suggestions.append("tests/test_cli.py - command/handler regressions")
+    for path in target_paths:
+        lowered = path.casefold()
+        if lowered.endswith("core/operator_intent.py"):
+            suggestions.append(f"{path} - route requested operator intent behavior")
+        elif lowered == "main.py":
+            suggestions.append(f"{path} - dispatch/format the requested operator command behavior")
+        elif lowered.startswith("tests/") or "/test_" in lowered:
+            suggestions.append(f"{path} - add behavior-specific regression coverage")
+        elif lowered.endswith(".py"):
+            suggestions.append(f"{path} - inspect/change requested behavior")
+        else:
+            suggestions.append(f"{path} - review requested source evidence")
     if not suggestions:
         suggestions.append("Use explicit multi-file review mode or :ingest-source to inspect the relevant files before patching.")
     return suggestions

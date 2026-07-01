@@ -23,6 +23,7 @@ Phases saved
 ``plan``      — attempt number + list of step IDs (step tools and arg hashes).
 ``act``       — per-step outcome: label, tool, chars, status (done/failed).
 ``respond``   — final answer (text) + char count.
+``paused``    — resumable budget stop metadata.
 
 Recovery semantics
 ------------------
@@ -48,8 +49,9 @@ PHASE_OBSERVE = "observe"
 PHASE_PLAN    = "plan"
 PHASE_ACT     = "act"
 PHASE_RESPOND = "respond"
+PHASE_PAUSED  = "paused"
 
-_VALID_PHASES = {PHASE_OBSERVE, PHASE_PLAN, PHASE_ACT, PHASE_RESPOND}
+_VALID_PHASES = {PHASE_OBSERVE, PHASE_PLAN, PHASE_ACT, PHASE_RESPOND, PHASE_PAUSED}
 
 
 # ── data model ───────────────────────────────────────────────────────────────
@@ -103,6 +105,7 @@ class ResumeContext:
     answer: str | None               # set only if respond checkpoint exists
     artifacts: dict[str, dict[str, Any]]   # label → {tool, chars}
     attempt: int                     # last plan attempt recorded
+    paused: dict[str, Any] | None = None
 
 
 # ── writer ───────────────────────────────────────────────────────────────────
@@ -152,6 +155,9 @@ class CheckpointWriter:
 
     def save_respond(self, answer: str) -> CheckpointRecord:
         return self.save(PHASE_RESPOND, {"answer": answer, "chars": len(answer)})
+
+    def save_paused(self, data: dict[str, Any]) -> CheckpointRecord:
+        return self.save(PHASE_PAUSED, data)
 
 
 # ── loader ───────────────────────────────────────────────────────────────────
@@ -227,6 +233,8 @@ class CheckpointLoader:
         if respond_recs:
             answer = respond_recs[-1].data.get("answer")
 
+        paused_recs = [r for r in records if r.phase == PHASE_PAUSED]
+        paused = paused_recs[-1].data if paused_recs else None
         last_phase = records[-1].phase
 
         return ResumeContext(
@@ -237,4 +245,5 @@ class CheckpointLoader:
             answer=answer,
             artifacts=artifacts,
             attempt=attempt,
+            paused=paused,
         )

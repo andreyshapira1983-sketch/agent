@@ -25,6 +25,75 @@ from core.llm import LLM
 from tools.base import ToolRegistry
 
 
+_BROAD_PROJECT_CONTEXT_TERMS = (
+    "your project",
+    "this project",
+    "our project",
+    "my project",
+    "current project",
+    "project status",
+    "project state",
+    "project overview",
+    "repo",
+    "repository",
+    "codebase",
+    "своем проект",
+    "своём проект",
+    "твоем проект",
+    "твоём проект",
+    "нашем проект",
+    "этом проект",
+    "о проект",
+    "про проект",
+    "статус проект",
+    "состояние проект",
+)
+_BROAD_PROJECT_QUESTION_TERMS = (
+    "what do you know",
+    "already know",
+    "tell me about",
+    "summarize",
+    "summary",
+    "overview",
+    "status",
+    "state",
+    "что ты",
+    "что уже",
+    "знаешь",
+    "расскажи",
+    "сводка",
+    "обзор",
+    "статус",
+    "состояние",
+)
+_ARCHITECTURE_REFERENCE_TERMS = (
+    "architecture",
+    "architectural",
+    "design",
+    "reference",
+    "overview architecture",
+    "архитектура",
+    "архитектуре",
+    "архитектур",
+    "дизайн",
+)
+_PROJECT_MEMORY_TAG_TERMS = (
+    "tags: project",
+    "tags: bug",
+    "tags: memory",
+    "tags: budget",
+    "tags: operator-routing",
+    "tags: patch-proposal",
+    "tags: tech debt",
+    "tags: autonomy",
+    "tags: tests",
+    "tags: model",
+    "tags: status",
+    "tech_debt.md",
+    "tech-debt.md",
+)
+
+
 def _build_host_tools_block() -> str:
     """Read tool paths from env vars (loaded from .env) and return a planner
     context block listing what is actually installed on this host.
@@ -82,6 +151,63 @@ def _build_host_tools_block() -> str:
         "This ensures the user knows the exact command to execute the script.",
     ]
     return "\n".join(lines)
+
+
+def _is_broad_project_self_knowledge_question(question: str) -> bool:
+    lowered = (question or "").casefold()
+    return (
+        any(term in lowered for term in _BROAD_PROJECT_CONTEXT_TERMS)
+        and any(term in lowered for term in _BROAD_PROJECT_QUESTION_TERMS)
+    )
+
+
+def _explicitly_requests_readme(question: str) -> bool:
+    lowered = (question or "").casefold()
+    return "readme" in lowered or "readme.md" in lowered
+
+
+def _explicitly_requests_architecture_reference(question: str) -> bool:
+    lowered = (question or "").casefold()
+    return any(term in lowered for term in _ARCHITECTURE_REFERENCE_TERMS)
+
+
+def _history_has_project_status_memory(history: str) -> bool:
+    lowered = (history or "").casefold()
+    return "<long_term_memory>" in lowered and any(
+        term in lowered for term in _PROJECT_MEMORY_TAG_TERMS
+    )
+
+
+def _should_prefer_memory_over_readme(question: str, history: str) -> bool:
+    return (
+        _is_broad_project_self_knowledge_question(question)
+        and _history_has_project_status_memory(history)
+        and not _explicitly_requests_readme(question)
+        and not _explicitly_requests_architecture_reference(question)
+    )
+
+
+def _drop_readme_status_sources(
+    sources: list[dict[str, Any]],
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
+    for src in sources:
+        args = src.get("arguments") or {}
+        path = args.get("path") if isinstance(args, dict) else None
+        is_readme_file_read = (
+            src.get("tool") == "file_read"
+            and isinstance(path, str)
+            and path.strip().casefold().replace("\\", "/") == "readme.md"
+        )
+        if is_readme_file_read:
+            warnings.append(
+                "file_read README.md dropped for broad project status because "
+                "fresh long_term_memory is available"
+            )
+            continue
+        filtered.append(src)
+    return filtered
 
 
 PLANNER_SYSTEM = """You are the planner of an autonomous agent. PLANNER_MODE.
@@ -664,6 +790,8 @@ class LLMPlanner:
         sources, step_warnings, dropped_tools = self._validate_steps(
             raw_steps, file_hint, forbidden_actions
         )
+        if _should_prefer_memory_over_readme(question, history):
+            sources = _drop_readme_status_sources(sources, step_warnings)
         # Coverage enforcement: if the question is about test adequacy /
         # coverage and the planner produced a run_tests step without
         # coverage=True, inject it automatically so the synthesizer always
@@ -718,6 +846,15 @@ class LLMPlanner:
             if history.strip()
             else ""
         )
+        project_memory_block = ""
+        if _should_prefer_memory_over_readme(question, history):
+            project_memory_block = (
+                "[PROJECT_STATUS_MEMORY=preferred — long_term_memory already "
+                "contains recent project/status records. Do NOT plan "
+                "file_read README.md for live project status. README.md may "
+                "only be used when the user explicitly asks for README or "
+                "architecture/reference facts.]\n"
+            )
         # Replan context sits between history and question — close enough
         # to the question to be salient, but separated from old turns so
         # the model doesn't confuse "what I tried this cycle" with "what I
@@ -734,6 +871,7 @@ class LLMPlanner:
             f"{history_block}"
             f"{replan_block}"
             f"{grounding_block}"
+            f"{project_memory_block}"
             f"question: {question}\n"
             f"\n"
             f"Return your JSON plan now."

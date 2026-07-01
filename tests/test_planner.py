@@ -183,6 +183,137 @@ def test_empty_plan_passes_through(workspace: Path) -> None:
     assert out.warnings == []
 
 
+def test_broad_project_memory_drops_default_readme_status_source(workspace: Path) -> None:
+    canned = json.dumps(
+        {
+            "reasoning": "Use README for self knowledge.",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "README.md"},
+                    "rationale": "default self documentation",
+                }
+            ],
+        }
+    )
+    history = (
+        "<long_term_memory>\n"
+        "- [mem_recent | tags: project,memory,tests,budget] "
+        "Recent memory says pytest passed=1840 and budget status is current.\n"
+        "</long_term_memory>"
+    )
+    llm = FakeLLM(responses=[canned])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
+
+    out = planner.plan(
+        question="Что ты уже знаешь о своём проекте?",
+        file_hint=None,
+        history=history,
+    )
+
+    assert out.sources == []
+    assert any("README.md dropped" in warning for warning in out.warnings)
+
+
+def test_broad_project_memory_drops_readme_test_count_source(workspace: Path) -> None:
+    canned = json.dumps(
+        {
+            "reasoning": "README has a test count.",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "README.md"},
+                    "rationale": "read old test count",
+                }
+            ],
+        }
+    )
+    history = (
+        "<long_term_memory>\n"
+        "- [mem_tests | tags: project,memory,tests] "
+        "Recent persistent memory: pytest passed=1840 today.\n"
+        "</long_term_memory>"
+    )
+    llm = FakeLLM(responses=[canned])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
+
+    out = planner.plan(
+        question="What do you know about your project status?",
+        file_hint=None,
+        history=history,
+    )
+
+    assert all(src.get("arguments", {}).get("path") != "README.md" for src in out.sources)
+    assert any("fresh long_term_memory" in warning for warning in out.warnings)
+
+
+def test_readme_architecture_source_allowed_for_architecture_question(workspace: Path) -> None:
+    canned = json.dumps(
+        {
+            "reasoning": "README is architecture reference.",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "README.md"},
+                    "rationale": "architecture overview",
+                }
+            ],
+        }
+    )
+    history = (
+        "<long_term_memory>\n"
+        "- [mem_recent | tags: project,memory,tests,budget] "
+        "Recent memory says tests and budget were checked today.\n"
+        "</long_term_memory>"
+    )
+    llm = FakeLLM(responses=[canned])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
+
+    out = planner.plan(
+        question="Describe your project architecture",
+        file_hint=None,
+        history=history,
+    )
+
+    assert len(out.sources) == 1
+    assert out.sources[0]["tool"] == "file_read"
+    assert out.sources[0]["arguments"] == {"path": "README.md"}
+    assert not any("README.md dropped" in warning for warning in out.warnings)
+
+
+def test_explicit_readme_question_still_allows_file_read(workspace: Path) -> None:
+    canned = json.dumps(
+        {
+            "reasoning": "User explicitly asked for README.",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "README.md"},
+                    "rationale": "explicit README request",
+                }
+            ],
+        }
+    )
+    history = (
+        "<long_term_memory>\n"
+        "- [mem_recent | tags: project,memory,tests,budget] "
+        "Recent memory says tests and budget were checked today.\n"
+        "</long_term_memory>"
+    )
+    llm = FakeLLM(responses=[canned])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
+
+    out = planner.plan(
+        question="Read README.md and summarize it",
+        file_hint=None,
+        history=history,
+    )
+
+    assert len(out.sources) == 1
+    assert out.sources[0]["arguments"] == {"path": "README.md"}
+    assert not any("README.md dropped" in warning for warning in out.warnings)
+
+
 # ---------- bonus: malformed JSON falls back gracefully ----------
 
 def test_malformed_json_falls_back_to_empty_plan(workspace: Path) -> None:
