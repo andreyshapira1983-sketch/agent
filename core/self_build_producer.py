@@ -546,10 +546,73 @@ def _researcher_gather(
     )
 
 
+def _normalize_builder_files(
+    parsed: dict[str, Any], target: str
+) -> tuple[list[dict[str, str]], str]:
+    """Normalise a builder LLM reply into a canonical ``files`` list.
+
+    Returns ``(files, primary_content)`` where ``primary_content`` is the content
+    of the ``target`` file (used for the value gate, dedup digest, and legacy
+    single-file back-compat). Two reply shapes are accepted:
+
+    * legacy single-file ``{"content": "<full file>"}`` → one-element list
+      ``[{"path": target, "content": content}]`` (byte-identical to the previous
+      behaviour), and
+    * multi-file split ``{"files": [{"path","content"}, ...]}`` → the listed
+      files verbatim (paths normalised to forward slashes, deduped, target's own
+      content surfaced as ``primary_content``).
+
+    Malformed entries are dropped defensively; an empty/invalid result yields
+    ``([], "")`` so the Critic vetoes rather than the producer raising.
+    """
+    raw_files = parsed.get("files")
+    files: list[dict[str, str]] = []
+    if isinstance(raw_files, (list, tuple)) and raw_files:
+        seen: set[str] = set()
+        for entry in raw_files:
+            if not isinstance(entry, dict):
+                continue
+            path = entry.get("path")
+            content = entry.get("content")
+            if not isinstance(path, str) or not path.strip():
+                continue
+            if not isinstance(content, str):
+                content = ""
+            norm = path.replace("\\", "/").strip()
+            if norm in seen:
+                continue
+            seen.add(norm)
+            files.append({"path": norm, "content": content})
+    else:
+        content = parsed.get("content")
+        if not isinstance(content, str):
+            content = ""
+        files.append({"path": target, "content": content})
+
+    norm_target = target.replace("\\", "/").strip()
+    primary = next(
+        (f["content"] for f in files if f["path"] == norm_target),
+        "",
+    )
+    return files, primary
+
+
 def _builder_generate(
-    llm: Any, target: str, current_content: str, diagnosis: str
+    llm: Any,
+    target: str,
+    current_content: str,
+    diagnosis: str,
+    *,
+    split_mode: bool = False,
 ) -> RoleOutput:
-    """Generate the FULL proposed file content (never a diff)."""
+    """Generate the FULL proposed file content (never a diff).
+
+    When ``split_mode`` is True the Builder is asked to split the oversized
+    target module into several smaller files: it must return the shrunk target
+    plus one or more NEW sibling modules, each as complete file content. The
+    single-file path (``split_mode=False``) is unchanged and byte-identical to
+    the historical behaviour.
+    """
     safe_content, inj = prepare_untrusted_text_for_llm(
         current_content or "",
         source_label=f"self_build:{target}",
@@ -561,14 +624,31 @@ def _builder_generate(
             "file content blocked by injection guard",
             {"injection": inj.to_log_payload(), "target": target},
         )
-    system = (
-        "You are the Builder. Produce the COMPLETE new content of the target "
-        "file — the entire file, not a diff or patch. Keep the change small and "
-        "low-risk. Reply with strict JSON only: "
-        '{"content": "<full file content>", "test_paths": ["tests"], '
-        '"test_pattern": "<optional pytest -k pattern or null>", '
-        '"reason": "<one sentence>", "confidence": <0..1>}.'
-    )
+    if split_mode:
+        system = (
+            "You are the Builder. Split the oversized target Python module into "
+            "several SMALLER, cohesive files to reduce its size while preserving "
+            "behaviour and its public API exactly. Return the COMPLETE content of "
+            "the shrunk target file AND one or more NEW sibling modules (in the "
+            "same package directory) that it imports from. Do NOT modify any other "
+            "existing file. Every file must be the entire file content, never a "
+            "diff. Reply with strict JSON only: "
+            '{"files": [{"path": "<repo-relative path>", "content": "<full file>"}], '
+            '"test_paths": ["tests"], '
+            '"test_pattern": "<optional pytest -k pattern or null>", '
+            '"reason": "<one sentence>", "confidence": <0..1>}. '
+            "Exactly one file path must equal the target; the rest must be new "
+            "modules. Keep every file well under the size limit."
+        )
+    else:
+        system = (
+            "You are the Builder. Produce the COMPLETE new content of the target "
+            "file — the entire file, not a diff or patch. Keep the change small and "
+            "low-risk. Reply with strict JSON only: "
+            '{"content": "<full file content>", "test_paths": ["tests"], '
+            '"test_pattern": "<optional pytest -k pattern or null>", '
+            '"reason": "<one sentence>", "confidence": <0..1>}.'
+        )
     if _is_self_build_doc_target(target):
         system = f"{system}\n\n{_SELF_BUILD_DOC_GUIDANCE}"
     user = (
@@ -581,9 +661,7 @@ def _builder_generate(
         return RoleOutput(
             "builder", "failed", "builder returned no parseable JSON"
         )
-    content = parsed.get("content")
-    if not isinstance(content, str):
-        content = ""
+    files, content = _normalize_builder_files(parsed, target)
     test_paths = parsed.get("test_paths") or ["tests"]
     if not isinstance(test_paths, (list, tuple)) or not test_paths:
         test_paths = ["tests"]
@@ -595,12 +673,20 @@ def _builder_generate(
         confidence = float(parsed.get("confidence", 0.0))
     except (TypeError, ValueError):
         confidence = 0.0
+    extra = len(files) - 1
+    detail = f"generated {len(content)} chars (confidence {confidence:.2f})"
+    if extra > 0:
+        detail = (
+            f"generated {len(content)} chars for target + {extra} new file(s) "
+            f"(confidence {confidence:.2f})"
+        )
     return RoleOutput(
         "builder",
         "built" if content else "failed",
-        f"generated {len(content)} chars (confidence {confidence:.2f})",
+        detail,
         {
             "content": content,
+            "files": files,
             "test_paths": [str(p) for p in test_paths],
             "test_pattern": test_pattern,
             "reason": reason,
@@ -647,8 +733,35 @@ def _critic_review(
             f"confidence {confidence:.2f} below threshold {confidence_threshold:.2f}"
         )
 
+    files = build.get("files") or [{"path": target, "content": content}]
+    norm_target = target.replace("\\", "/").strip()
+    # Multi-file (split) guard: validate every EXTRA file the same way the target
+    # is validated above. The target itself is already checked, so it is skipped
+    # here — keeping the single-file path byte-identical (no extra files).
+    for entry in files:
+        path = str(entry.get("path") or "").replace("\\", "/").strip()
+        if not path or path == norm_target:
+            continue
+        body = entry.get("content") or ""
+        if not isinstance(body, str) or not body.strip():
+            veto.append(f"new file {path} has empty content")
+        if _is_critical(path):
+            veto.append(f"file {path} is a critical file")
+        if body and _looks_like_diff(body):
+            veto.append(f"file {path} looks like a diff, not full content")
+        if len(body.encode("utf-8")) > _MAX_CONTENT_BYTES:
+            veto.append(f"file {path} exceeds {_MAX_CONTENT_BYTES} bytes")
+        if path.lower().endswith(".py") and body and not _looks_like_diff(body):
+            try:
+                ast.parse(body)
+            except SyntaxError as exc:
+                veto.append(f"new file {path} does not parse: {exc.msg}")
+
     ok, risk_reason, rejected = classify_patch_risk(
-        [FileChange(path=target, content=content)]
+        [
+            FileChange(path=str(f.get("path") or ""), content=f.get("content") or "")
+            for f in files
+        ]
     )
     if not ok:
         veto.append(f"risk classification failed: {risk_reason}")
@@ -681,8 +794,12 @@ def _reporter_publish(
 ) -> RoleOutput:
     """Create exactly one approval inbox item for the TD-024 bridge."""
     content = build["content"]
+    files = build.get("files") or [{"path": target, "content": content}]
     payload = build_self_apply_payload(
-        files=[{"path": target, "content": content}],
+        files=[
+            {"path": str(f.get("path") or ""), "content": f.get("content") or ""}
+            for f in files
+        ],
         reason=build.get("reason") or "",
         evidence=evidence,
         test_paths=build.get("test_paths") or ["tests"],
@@ -692,9 +809,13 @@ def _reporter_publish(
     )
     digest = hashlib.sha1(content.encode("utf-8")).hexdigest()[:12]
     dedup_key = f"self_apply:{target}:{digest}"
+    extra = len(files) - 1
+    summary = f"self-apply proposal for {target}"
+    if extra > 0:
+        summary = f"self-apply split proposal for {target} (+{extra} new file(s))"
     item = inbox.add(
         operation=SELF_APPLY_OPERATION,
-        summary=f"self-apply proposal for {target}",
+        summary=summary,
         risk="reversible",
         reasons=tuple(evidence),
         payload=payload,
@@ -840,6 +961,7 @@ def produce_self_apply_proposal(
         ))
     target = manager.data["target"]
     diagnosis = manager.data.get("diagnosis", "")
+    split_mode = manager.data.get("mapping_rule") == "split_module"
 
     # ── Researcher ──────────────────────────────────────────────────────────
     researcher = _researcher_gather(reader, target, diagnosis)
@@ -848,7 +970,9 @@ def produce_self_apply_proposal(
     evidence = list(researcher.data["evidence"])
 
     # ── Builder ─────────────────────────────────────────────────────────────
-    builder = _builder_generate(llm, target, current_content, diagnosis)
+    builder = _builder_generate(
+        llm, target, current_content, diagnosis, split_mode=split_mode
+    )
     roles.append(builder)
 
     # ── Critic ──────────────────────────────────────────────────────────────
