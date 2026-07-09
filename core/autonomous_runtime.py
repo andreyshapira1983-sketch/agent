@@ -32,6 +32,9 @@ from core.reflection import ReflectionConfig, ReflectionEngine
 from core.tool_receipts import ReceiptPath, receipt_context
 from core.actuation_gateway import GatewayPath, gateway_path_from_receipt
 from core.budget_kill_switch import BudgetKillSwitch, default_path
+from core.safe_vcs import SafeVCS
+from core.self_build_producer import produce_self_apply_proposal
+from core.self_build_memory import record_self_build_episode
 from core.clarification_gate import clarification_for_replan_exhausted
 from core.gateway_consult import budget_ledger_snapshot, readiness_blockers
 
@@ -161,6 +164,11 @@ class AutonomousRuntimeConfig:
     # Run ReflectionEngine after the health pass to persist lessons from logs.
     enable_reflection: bool = True
     reflection: ReflectionConfig = field(default_factory=ReflectionConfig)
+    # After the health pass, autonomously PROPOSE (never apply) at most one
+    # low-risk self-build split into the approval inbox. Applying stays behind
+    # the human :self-apply-run gate, so this only ever creates a pending item
+    # for review. Skipped during dry runs (no real approval artifacts).
+    enable_self_build: bool = True
     # When True, append a 'propose' task that asks the LLM for 1-3 bounded
     # task ideas and writes them to the approval inbox WITHOUT executing
     # any of them. Off by default — proposals are an opt-in autonomy feature.
@@ -475,6 +483,9 @@ class AutonomousRuntime:
 
         if config.enable_reflection:
             report.reflection = self._run_reflection(config)
+
+        if config.enable_self_build:
+            self._run_self_build_proposal(config)
 
         if status == "stopped":
             self._record_incident(stop_reason, tasks)
@@ -1188,6 +1199,97 @@ class AutonomousRuntime:
         except Exception as exc:
             self._log("reflection_error", {"error": f"{type(exc).__name__}: {exc}"})
             return {"error": str(exc)}
+
+    def _has_pending_self_build_proposal(self) -> bool:
+        """True when a self-apply proposal is already awaiting human review.
+
+        Prevents the tick from stacking a fresh (expensive) LLM-produced split on
+        top of one the operator has not decided on yet.
+        """
+        try:
+            return any(
+                item.operation == "self_apply_lane.run"
+                for item in self.approval_inbox.pending()
+            )
+        except Exception:
+            return False
+
+    def _run_self_build_proposal(self, config: AutonomousRuntimeConfig) -> dict | None:
+        """Autonomously PROPOSE (never apply) one low-risk self-build split.
+
+        Mirrors the manual ``:self-build-produce`` trigger but runs inside the
+        autonomous tick. It only ever writes a *pending* approval-inbox item;
+        applying stays behind the human ``:self-apply-run`` gate. The outcome
+        (proposed / vetoed / no target, and why) is journalled to episodic
+        memory so the agent accumulates its own lessons. Best-effort: never
+        raises back into the run path.
+        """
+        # Never create real approval artifacts during a dry run.
+        if config.dry_run:
+            self._log("self_build_proposal_skipped", {"reason": "dry_run"})
+            return None
+
+        agent = self.agent
+        model_router = getattr(agent, "model_router", None)
+        llm = None
+        if model_router is not None:
+            try:
+                llm = model_router.for_role("synthesizer")
+            except Exception:
+                llm = None
+        if llm is None:
+            llm = getattr(agent, "llm", None)
+        if llm is None:
+            self._log("self_build_proposal_skipped", {"reason": "no llm"})
+            return None
+
+        # De-duplicate: do not run the expensive producer while an undecided
+        # self-build proposal is still sitting in the inbox.
+        if self._has_pending_self_build_proposal():
+            self._log(
+                "self_build_proposal_skipped",
+                {"reason": "pending proposal exists"},
+            )
+            return None
+
+        try:
+            usage_ledger = getattr(model_router, "usage_ledger", None)
+            budget_ledger = getattr(usage_ledger, "budget_ledger", None)
+            budget_snapshot = (
+                budget_ledger.snapshot() if budget_ledger is not None else None
+            )
+            kill_state = BudgetKillSwitch(
+                path=default_path(self.workspace)
+            ).status(budget_snapshot)
+            report = produce_self_apply_proposal(
+                workspace=self.workspace,
+                inbox=self.approval_inbox,
+                llm=llm,
+                vcs=SafeVCS(workspace=self.workspace),
+                budget_snapshot=budget_snapshot,
+                kill_switch=kill_state,
+            )
+            result = report.to_dict()
+            self._log(
+                "self_build_proposal",
+                {
+                    "status": result.get("status"),
+                    "target_path": result.get("target_path"),
+                    "approval_id": result.get("approval_id"),
+                    "veto_reasons": result.get("veto_reasons"),
+                },
+            )
+            # Journal the outcome (and WHY) so the agent remembers this attempt.
+            record_self_build_episode(
+                agent, kind="self-build-produce", result=result
+            )
+            return result
+        except Exception as exc:
+            self._log(
+                "self_build_proposal_error",
+                {"error": f"{type(exc).__name__}: {exc}"},
+            )
+            return None
 
     def _receipt_trace_id(self) -> str:
         log = getattr(self.agent, "log", None)
