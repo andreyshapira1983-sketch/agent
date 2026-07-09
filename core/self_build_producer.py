@@ -467,6 +467,16 @@ def _default_grounded_selector(workspace: str | Path) -> Callable[[], Any]:
             except Exception:  # noqa: BLE001 — reviews are an optional signal
                 reviews = None
             candidates = load_backlog(workspace, value_reviews=reviews)
+            # Provod #1 follow-up: candidates are ranked highest-first. Prefer the
+            # top-ranked candidate the producer can actually act on (passes the
+            # critical-deny + lane low-risk gates), so a higher-ranked but
+            # non-actionable target (e.g. a missing ``.github/workflows/ci.yml``)
+            # does not shadow an actionable one (e.g. a missing ``README.md``).
+            # If nothing is actionable, fall back to the #1 for an honest refusal.
+            for candidate in candidates:
+                target = str(getattr(candidate, "target_path", "") or "")
+                if _is_self_build_target_allowed(target):
+                    return candidate
             return select_top(candidates)
         except Exception:  # noqa: BLE001 — a broken backlog must never break producer
             return None
