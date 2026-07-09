@@ -324,6 +324,63 @@ def test_self_issue_verify_matching_regression_resolves_issue(
     assert "issue resolved" in capsys.readouterr().err
 
 
+def test_self_issue_verify_resolved_transition_conflict_stays_unresolved(
+    workspace, monkeypatch, capsys
+):
+    registry, issue = _open_duplicate_issue(workspace)
+    monkeypatch.setattr(
+        "tools.run_tests.RunTestsTool", _PassingDuplicateMixinVerifier
+    )
+    original_transition = SelfImprovementIssueRegistry.transition
+
+    def _refuse_resolution(self, *, status, **kwargs):
+        if status == "resolved":
+            return None
+        return original_transition(self, status=status, **kwargs)
+
+    monkeypatch.setattr(SelfImprovementIssueRegistry, "transition", _refuse_resolution)
+    log = _IssueLog()
+
+    assert _handle_self_issue_verify(
+        issue.fingerprint, SimpleNamespace(log=log), workspace
+    ) is True
+
+    assert registry.list()[0].status == "verified"
+    assert [event for event, _payload in log.events] == [
+        "self_improvement_issue_verified",
+    ]
+    error = capsys.readouterr().err
+    assert "remains unresolved" in error
+    assert "issue resolved" not in error
+
+
+def test_self_issue_verify_infrastructure_error_stays_open(
+    workspace, monkeypatch, capsys
+):
+    registry, issue = _open_duplicate_issue(workspace)
+
+    class _BrokenVerifier:
+        def __init__(self, workspace_root):
+            self.workspace_root = workspace_root
+
+        def run(self, *, paths, pattern):
+            raise OSError("python launch failed")
+
+    monkeypatch.setattr("tools.run_tests.RunTestsTool", _BrokenVerifier)
+    log = _IssueLog()
+
+    assert _handle_self_issue_verify(
+        issue.fingerprint, SimpleNamespace(log=log), workspace
+    ) is True
+
+    assert registry.list()[0].status == "open"
+    assert log.events == []
+    error = capsys.readouterr().err
+    assert "remains unresolved" in error
+    assert "verifier infrastructure error: OSError" in error
+    assert "python launch failed" not in error
+
+
 def test_self_issue_verify_wrong_fingerprint_or_action_cannot_resolve(
     workspace, monkeypatch, capsys
 ):
@@ -334,7 +391,8 @@ def test_self_issue_verify_wrong_fingerprint_or_action_cannot_resolve(
             raise AssertionError("unmatched issue must not run tests")
 
     monkeypatch.setattr("tools.run_tests.RunTestsTool", _MustNotRun)
-    agent = SimpleNamespace(log=_IssueLog())
+    log = _IssueLog()
+    agent = SimpleNamespace(log=log)
     _handle_self_issue_verify("sii_wrong", agent, workspace)
     assert registry.list()[0].status == "open"
 
@@ -345,7 +403,10 @@ def test_self_issue_verify_wrong_fingerprint_or_action_cannot_resolve(
     _handle_self_issue_verify(generic.fingerprint, agent, workspace)
     states = {item.fingerprint: item.status for item in registry.list()}
     assert states[issue.fingerprint] == states[generic.fingerprint] == "open"
-    assert "unknown fingerprint" in capsys.readouterr().err
+    assert log.events == []
+    error = capsys.readouterr().err
+    assert "unknown fingerprint" in error
+    assert "no targeted verifier" in error
 
 
 def test_resolved_registry_suppresses_stale_raw_duplicate_mixin_history():

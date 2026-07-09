@@ -202,9 +202,17 @@ def _handle_self_issue_verify(rest: str, agent: AgentLoop, workspace: Path) -> b
         return True
 
     test_path, pattern = spec
-    runner = RunTestsTool(workspace_root=workspace)
-    result = runner.run(paths=[test_path], pattern=pattern)
-    valid, _validation_issues = runner.validate_output(result)
+    try:
+        runner = RunTestsTool(workspace_root=workspace)
+        result = runner.run(paths=[test_path], pattern=pattern)
+        valid, _validation_issues = runner.validate_output(result)
+    except Exception as exc:  # noqa: BLE001 - verifier infrastructure is fallible
+        print(
+            f"self-improvement issue remains unresolved: {fingerprint}\n"
+            f"  verifier infrastructure error: {type(exc).__name__}",
+            file=sys.stderr,
+        )
+        return True
     passed = (
         valid
         and result.get("exit_code") == 0
@@ -226,6 +234,11 @@ def _handle_self_issue_verify(rest: str, agent: AgentLoop, workspace: Path) -> b
 
     observed_at = datetime.now(timezone.utc).isoformat()
     evidence = f"{test_path} -k {pattern}: {result.get('passed')} passed"
+    payload = {
+        "fingerprint": issue.fingerprint,
+        "action": issue.action,
+        "evidence": evidence,
+    }
     verified = registry.transition(
         status="verified",
         observed_at=observed_at,
@@ -236,19 +249,23 @@ def _handle_self_issue_verify(rest: str, agent: AgentLoop, workspace: Path) -> b
     if verified is None:
         print(f"(self-issue verify refused: lifecycle mismatch for {fingerprint})", file=sys.stderr)
         return True
-    registry.transition(
+    agent.log.log("self_improvement_issue_verified", payload)
+
+    resolved = registry.transition(
         status="resolved",
         observed_at=observed_at,
         fingerprint=issue.fingerprint,
         action=issue.action,
         evidence=evidence,
     )
-    payload = {
-        "fingerprint": issue.fingerprint,
-        "action": issue.action,
-        "evidence": evidence,
-    }
-    agent.log.log("self_improvement_issue_verified", payload)
+    if resolved is None:
+        print(
+            f"self-improvement issue remains unresolved: {fingerprint}\n"
+            "  durable registry accepted verification but refused resolution; "
+            "registry state changed or became stale",
+            file=sys.stderr,
+        )
+        return True
     agent.log.log("self_improvement_issue_resolved", payload)
     print(
         f"self-improvement issue resolved: {fingerprint}\n"
