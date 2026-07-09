@@ -30,15 +30,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install --require-hashes -r requirements.lock
 
-      - name: Run tests
-        run: python -m pytest -q
+      - name: Verify dependency tree is consistent
+        # Fails if the installed set has conflicting or missing dependencies.
+        run: pip check
+
+      - name: Verify SBOM is in sync
+        # Fails if sbom.cdx.json drifts from requirements.lock, keeping the
+        # software bill of materials honest on every change.
+        run: python scripts/generate_sbom.py --check
 
       - name: Release / supply-chain gate
         # Deterministic, no API keys required. Exits non-zero if the release
         # manifest leaks local secrets or the supply-chain audit fails.
         run: python scripts/audit_release.py
 
-      - name: Verify SBOM is in sync
-        # Fails if sbom.cdx.json drifts from requirements.lock, keeping the
-        # software bill of materials honest on every change.
-        run: python scripts/generate_sbom.py --check
+      - name: Run tests with branch coverage
+        run: coverage run --branch -m pytest
+
+      - name: Coverage report (fail under threshold)
+        # Enforces the minimum branch-coverage bar; fails the build below 85%.
+        run: coverage report --fail-under=85
