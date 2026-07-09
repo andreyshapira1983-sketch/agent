@@ -31,9 +31,12 @@ SPLIT_TARGET_PREFIX = "split:"
 # Upper line budget for a single-pass (one model reply) module split. The Builder
 # must emit the shrunk target plus all new sibling modules in one JSON reply,
 # which is capped by the provider's output-token ceiling (~16k for the default
-# model). Modules above this stay report-only until an incremental splitter is
-# built. Tunable: raise once a chunked/multi-pass split lane exists.
-SPLIT_ONE_SHOT_MAX_LINES = 1000
+# model). NOTE: this is a proxy for "fits in one model reply", NOT a hard
+# guarantee — files well above ~1500 lines will usually TRUNCATE in the Builder's
+# reply and fail (safe rollback), because the token ceiling, not this number, is
+# the real limit. Raised to 10000 to let the agent ATTEMPT larger modules; the
+# true fix is still an incremental/multi-pass split lane.
+SPLIT_ONE_SHOT_MAX_LINES = 10000
 
 _MODEL_DISCOVERY_RULE = "td_011_012_model_discovery"
 _MODEL_DISCOVERY_TITLES = frozenset(
