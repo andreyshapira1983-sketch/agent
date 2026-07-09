@@ -1,0 +1,11 @@
+# Direct project dependencies.
+# Regenerate requirements.txt intentionally after reviewing upgrades.
+# Optional HTTP server extras (api/server.py) are installed separately and are
+# intentionally kept out of the core hash-locked set: pip install fastapi uvicorn[standard]
+anthropic
+openai
+pydantic
+python-dotenv
+ddgs
+pytest
+coverage
