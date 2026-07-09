@@ -47,378 +47,38 @@ inject deterministic fakes and assert on the real record shapes.
 """
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional
 
 from core.best_next_action import BestNextAction
+from core.campaign_io import (
+    _action_focused_goal,
+    _cost_totals,
+    _default_execute_action,
+    _default_gather_signals,
+    _log,
+)
+from core.campaign_ledger import (
+    CampaignCycleRecord,
+    CampaignLedger,
+    _format_ledger_row,
+    load_ledger_rows,
+    summarise_ledger,
+)
+from core.campaign_types import CampaignActionOutcome, CampaignConfig, CampaignResult
 
 
 CampaignStatus = Literal["completed", "stopped"]
 
 
 def _utc_now() -> datetime:
+    from datetime import timezone
+
     return datetime.now(timezone.utc)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Configuration
-# ─────────────────────────────────────────────────────────────────────────────
-
-@dataclass(frozen=True)
-class CampaignConfig:
-    """Immutable configuration for one autonomous campaign.
-
-    A limit of ``0`` means "unlimited / off" for the two spend caps, matching
-    the :class:`~core.budget_governor.BudgetLimits` convention. ``max_cycles``
-    and ``max_idle_streak`` must be >= 1 (a campaign with zero cycles, or one
-    that can never stop on idle, is a configuration error).
-    """
-
-    goal: str = "project health"
-    max_cycles: int = 24
-    max_llm_calls: int = 100      # 0 = unlimited
-    max_cost_units: int = 0       # 0 = unlimited
-    max_idle_streak: int = 3
-    dry_run: bool = True
-    report_every: int = 1
-    idle_recheck_seconds: int = 600
-    # Real wall-clock controls for multi-hour runs. A campaign with the two
-    # defaults below behaves exactly as before: cycles run back-to-back with no
-    # sleep and stop only on the cycle/idle/spend caps. Set them to pace a
-    # genuine 24-48h run and to give the operator a hard real-time ceiling.
-    max_wall_clock_seconds: int = 0   # 0 = unlimited (no real-time ceiling)
-    cycle_pause_seconds: int = 0      # 0 = back-to-back (no inter-cycle sleep)
-    # Per-cycle fault tolerance for a long unattended run. A single cycle that
-    # raises (a flaky model error, a momentary file lock, a network blip) must
-    # NOT end a 24-48h campaign: the cycle is recorded as an error and the loop
-    # continues. But a PERSISTENTLY broken state must still stop honestly rather
-    # than burn the rest of the wall-clock looping on the same exception, so
-    # this many *consecutive* cycle errors stops the campaign (error_stall). A
-    # single good cycle resets the streak. Must be >= 1.
-    max_consecutive_errors: int = 3
-    # Loop-suspicion brake (the general "usefulness" detector). A *useful*
-    # (executed) cycle that produces NO useful state change — no new artifact,
-    # no new proposal, and no change in result_status vs the previous executed
-    # cycle — is "movement without progress". This many such cycles IN A ROW
-    # stops the campaign with stop_reason=loop_suspected and a report that
-    # recommends asking the operator. It is the broad, cheap immune signal that
-    # catches loops no narrower brake does: the agent keeps finding new-looking
-    # actions, keeps spending, but nothing useful comes out. ``0`` = off (the
-    # 0=off convention used by the spend caps) so the pure loop stays backward
-    # compatible; every real operator-facing entry point turns it on.
-    max_unproductive_streak: int = 0
-
-    def __post_init__(self) -> None:
-        if self.max_cycles < 1:
-            raise ValueError("max_cycles must be >= 1")
-        if self.max_idle_streak < 1:
-            raise ValueError("max_idle_streak must be >= 1")
-        if self.max_llm_calls < 0:
-            raise ValueError("max_llm_calls must be >= 0 (0 = unlimited)")
-        if self.max_cost_units < 0:
-            raise ValueError("max_cost_units must be >= 0 (0 = unlimited)")
-        if self.report_every < 1:
-            raise ValueError("report_every must be >= 1")
-        if self.idle_recheck_seconds < 0:
-            raise ValueError("idle_recheck_seconds must be >= 0")
-        if self.max_wall_clock_seconds < 0:
-            raise ValueError("max_wall_clock_seconds must be >= 0 (0 = unlimited)")
-        if self.cycle_pause_seconds < 0:
-            raise ValueError("cycle_pause_seconds must be >= 0 (0 = no pause)")
-        if self.max_consecutive_errors < 1:
-            raise ValueError("max_consecutive_errors must be >= 1")
-        if self.max_unproductive_streak < 0:
-            raise ValueError("max_unproductive_streak must be >= 0 (0 = off)")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Per-cycle outcome of executing a useful action (returned by the collaborator)
-# ─────────────────────────────────────────────────────────────────────────────
-
-@dataclass(frozen=True)
-class CampaignActionOutcome:
-    """What one useful (non-idle) cycle produced.
-
-    ``result`` is the run status of the bounded pass (e.g. "completed" /
-    "stopped" / "blocked"). ``proposal`` / ``artifact`` are short human-readable
-    references when the cycle produced one; both stay ``None`` for a pass that
-    only observed.
-    """
-
-    result: str
-    llm_calls_spent: int = 0
-    cost_units_spent: int = 0
-    proposal: Optional[str] = None
-    artifact: Optional[str] = None
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Ledger record + ledger
-# ─────────────────────────────────────────────────────────────────────────────
-
-@dataclass(frozen=True)
-class CampaignCycleRecord:
-    """One immutable row of the campaign ledger.
-
-    Every cycle — idle or working — produces exactly one record so the ledger
-    is a complete, greppable account of where the keys went.
-    """
-
-    cycle: int
-    ts: str
-    goal: str
-    action: str
-    action_title: str
-    severity: str
-    priority: int
-    risk: str
-    idle: bool
-    llm_calls_spent: int
-    cost_units_spent: int
-    result: str
-    reason: str
-    proposal: Optional[str] = None
-    artifact: Optional[str] = None
-    next_check_at: Optional[str] = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "cycle": self.cycle,
-            "ts": self.ts,
-            "goal": self.goal,
-            "action": self.action,
-            "action_title": self.action_title,
-            "severity": self.severity,
-            "priority": self.priority,
-            "risk": self.risk,
-            "idle": self.idle,
-            "llm_calls_spent": self.llm_calls_spent,
-            "cost_units_spent": self.cost_units_spent,
-            "result": self.result,
-            "reason": self.reason,
-            "proposal": self.proposal,
-            "artifact": self.artifact,
-            "next_check_at": self.next_check_at,
-        }
-
-    def user_summary(self) -> str:
-        if self.idle:
-            return (
-                f"[cycle {self.cycle}] IDLE (no LLM) "
-                f"action={self.action} reason={self.reason}"
-            )
-        if self.result == "repeat":
-            return (
-                f"[cycle {self.cycle}] REPEAT (no LLM, skipped) "
-                f"action={self.action} reason={self.reason}"
-            )
-        if self.result == "error":
-            return (
-                f"[cycle {self.cycle}] ERROR (no LLM, recovered) "
-                f"reason={self.reason}"
-            )
-        return (
-            f"[cycle {self.cycle}] {self.result} "
-            f"action={self.action} llm={self.llm_calls_spent} "
-            f"cost={self.cost_units_spent}"
-            + (f" proposal={self.proposal}" if self.proposal else "")
-            + (f" artifact={self.artifact}" if self.artifact else "")
-        )
-
-
-class CampaignLedger:
-    """Append-only ledger of campaign cycles.
-
-    Plain JSONL (not the state-integrity envelope) on purpose: this is an audit
-    trail an operator reads/greps directly to answer "what did it do with my
-    keys?". The path lives under ``data/`` (gitignored runtime state).
-    """
-
-    def __init__(self, path: Optional[Path] = None):
-        self.path = path
-        self.records: list[CampaignCycleRecord] = []
-
-    def append(self, record: CampaignCycleRecord) -> None:
-        self.records.append(record)
-        if self.path is not None:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self.path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Ledger reader — answers "what did it do with my keys?" from the audit trail
-# ─────────────────────────────────────────────────────────────────────────────
-
-def load_ledger_rows(path: Path) -> list[dict[str, Any]]:
-    """Read the append-only campaign ledger JSONL into plain dict rows.
-
-    Honest and tolerant: a missing file yields ``[]`` and a malformed line is
-    skipped (the ledger is plain JSONL an operator may have hand-edited). The
-    rows are the per-cycle ``CampaignCycleRecord.to_dict()`` shape, accumulated
-    across every campaign that ever wrote to this file.
-    """
-    if not path.exists():
-        return []
-    rows: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            row = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if isinstance(row, dict):
-            rows.append(row)
-    return rows
-
-
-def _format_ledger_row(row: dict[str, Any]) -> str:
-    """Render one ledger row the way CampaignCycleRecord.user_summary would."""
-    cycle = row.get("cycle", "?")
-    action = row.get("action", "?")
-    reason = row.get("reason", "")
-    if row.get("idle"):
-        return f"[cycle {cycle}] IDLE (no LLM) action={action} reason={reason}"
-    if row.get("result") == "repeat":
-        return f"[cycle {cycle}] REPEAT (no LLM, skipped) action={action} reason={reason}"
-    if row.get("result") == "error":
-        return f"[cycle {cycle}] ERROR (no LLM, recovered) reason={reason}"
-    proposal = row.get("proposal")
-    artifact = row.get("artifact")
-    return (
-        f"[cycle {cycle}] {row.get('result', '?')} action={action} "
-        f"llm={row.get('llm_calls_spent', 0)} cost={row.get('cost_units_spent', 0)}"
-        + (f" proposal={proposal}" if proposal else "")
-        + (f" artifact={artifact}" if artifact else "")
-    )
-
-
-def summarise_ledger(rows: list[dict[str, Any]], *, recent: int = 10) -> str:
-    """Build an operator-readable digest of the campaign ledger.
-
-    Pure (no I/O): takes the rows from :func:`load_ledger_rows` so it can be
-    unit-tested without a file. Reports all-time totals, a per-result count,
-    the distinct goals seen, and the most recent ``recent`` cycle rows.
-    """
-    if not rows:
-        return (
-            "=== campaign ledger ===\n"
-            "(empty — no campaign cycles have been recorded yet)"
-        )
-
-    def _as_int(value: Any) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return 0
-
-    total = len(rows)
-    llm_calls = sum(_as_int(r.get("llm_calls_spent")) for r in rows)
-    cost_units = sum(_as_int(r.get("cost_units_spent")) for r in rows)
-    idle = sum(1 for r in rows if r.get("idle"))
-    repeats = sum(1 for r in rows if r.get("result") == "repeat")
-    errors = sum(1 for r in rows if r.get("result") == "error")
-    artifacts = sum(1 for r in rows if r.get("artifact"))
-    proposals = sum(1 for r in rows if r.get("proposal"))
-    useful = total - idle - repeats - errors
-
-    result_counts: dict[str, int] = {}
-    for r in rows:
-        key = "idle" if r.get("idle") else str(r.get("result", "?"))
-        result_counts[key] = result_counts.get(key, 0) + 1
-    by_result = ", ".join(f"{k}={v}" for k, v in sorted(result_counts.items()))
-
-    goals: list[str] = []
-    for r in rows:
-        goal = str(r.get("goal", ""))
-        if goal and goal not in goals:
-            goals.append(goal)
-
-    lines = [
-        "=== campaign ledger ===",
-        (
-            f"cycles_logged={total}  useful={useful}  idle={idle}  "
-            f"repeats={repeats}  errors={errors}  llm_calls={llm_calls}  "
-            f"cost_units={cost_units}  "
-            f"proposals={proposals}  artifacts={artifacts}"
-        ),
-        f"by_result: {by_result}",
-        f"goals_seen ({len(goals)}): " + "; ".join(goals[:5])
-        + (" …" if len(goals) > 5 else ""),
-    ]
-    tail = rows[-recent:] if recent > 0 else rows
-    lines.append(f"recent {len(tail)} cycle(s):")
-    for r in tail:
-        lines.append(f"  {_format_ledger_row(r)}")
-    return "\n".join(lines)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Final result
-# ─────────────────────────────────────────────────────────────────────────────
-
-@dataclass
-class CampaignResult:
-    status: CampaignStatus
-    goal: str
-    stop_reason: str
-    cycles_run: int
-    records: list[CampaignCycleRecord] = field(default_factory=list)
-    totals: dict[str, int] = field(default_factory=dict)
-    # Populated only when the run stopped into clarify mode (loop_suspected):
-    # the operator-facing question + the actions forbidden while unclear.
-    clarification: Optional[dict[str, Any]] = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "status": self.status,
-            "goal": self.goal,
-            "stop_reason": self.stop_reason,
-            "cycles_run": self.cycles_run,
-            "totals": self.totals,
-            "records": [r.to_dict() for r in self.records],
-            "clarification": self.clarification,
-        }
-
-    def user_summary(self) -> str:
-        lines = [
-            "=== autonomous campaign ===",
-            f"status={self.status}  goal={self.goal!r}  "
-            f"stop_reason={self.stop_reason or '-'}",
-            (
-                f"cycles={self.cycles_run}  "
-                f"useful={self.totals.get('useful_cycles', 0)}  "
-                f"idle={self.totals.get('idle_cycles', 0)}  "
-                f"repeats={self.totals.get('repeat_cycles', 0)}  "
-                f"errors={self.totals.get('error_cycles', 0)}  "
-                f"llm_calls={self.totals.get('llm_calls', 0)}  "
-                f"cost_units={self.totals.get('cost_units', 0)}  "
-                f"proposals={self.totals.get('proposals', 0)}  "
-                f"artifacts={self.totals.get('artifacts', 0)}"
-            ),
-        ]
-        for record in self.records:
-            lines.append(f"  {record.user_summary()}")
-        if self.clarification and self.clarification.get("questions"):
-            lines.append("--- нужно уточнение (режим вопроса) ---")
-            lines.append("Я не могу безопасно продолжить. Уточни:")
-            for question in self.clarification["questions"]:
-                lines.append(f"  - {question}")
-            forbidden = self.clarification.get("forbidden_actions") or []
-            if forbidden:
-                lines.append(f"  (пока запрещено: {', '.join(forbidden)})")
-        return "\n".join(lines)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# The pure loop
-# ─────────────────────────────────────────────────────────────────────────────
 
 GatherSignals = Callable[[Any, Any, Any], dict[str, Any]]
 ExecuteAction = Callable[..., CampaignActionOutcome]
@@ -481,9 +141,6 @@ def run_campaign(
     started_at = now_fn()
 
     def _emit_cycle(record: CampaignCycleRecord) -> None:
-        # Liveness seam: hand the daemon a small snapshot after each recorded
-        # cycle. Reads the running counters from the enclosing scope at call
-        # time. The pure loop stays oblivious to what the hook does with it.
         if on_cycle is None:
             return
         on_cycle({
@@ -508,9 +165,6 @@ def run_campaign(
     })
 
     for cycle in range(1, config.max_cycles + 1):
-        # ── pace: a real wall-clock gap between cycles (never before the
-        #    first). Capped to whatever real time is left so the pause itself
-        #    can never sleep meaningfully past the hard ceiling. ────────────
         if cycle > 1 and config.cycle_pause_seconds:
             pause = float(config.cycle_pause_seconds)
             if config.max_wall_clock_seconds:
@@ -521,8 +175,6 @@ def run_campaign(
             if pause > 0:
                 sleep_fn(pause)
 
-        # ── wall-clock budget: stop BEFORE starting new work past the
-        #    deadline (a hard real-time ceiling for a 24-48h run). ──────────
         if config.max_wall_clock_seconds:
             elapsed = (now_fn() - started_at).total_seconds()
             if elapsed >= config.max_wall_clock_seconds:
@@ -533,7 +185,6 @@ def run_campaign(
                 status = "stopped"
                 break
 
-        # ── budget pre-check: stop BEFORE the next spend, never after ────────
         if config.max_llm_calls and llm_calls_used >= config.max_llm_calls:
             stop_reason = f"budget_exhausted:llm_calls={llm_calls_used}/{config.max_llm_calls}"
             status = "stopped"
@@ -543,25 +194,16 @@ def run_campaign(
             status = "stopped"
             break
 
-        # ── per-cycle resilience: a single cycle that raises (flaky model,
-        #    momentary file lock, network blip) must NOT end a 24-48h run. The
-        #    body below is wrapped so one exception is recorded as an error
-        #    cycle and the loop continues; ``max_consecutive_errors`` in a row
-        #    still stops honestly (error_stall) so a persistently broken state
-        #    can't burn the rest of the wall-clock. A good cycle resets the
-        #    streak. KeyboardInterrupt/SystemExit (BaseException) are NOT caught
-        #    — an operator interrupt still stops immediately. ─────────────────
         try:
             signals = gather(agent, workspace, approval_inbox)
             action: BestNextAction = signals["action"]
             now = now_fn()
 
-            # ── IDLE cycle: no high-priority action -> do NOT call the LLM ───
             if action.priority <= 0:
                 idle_streak += 1
                 idle_cycles += 1
                 next_check = (
-                    (now + timedelta(seconds=config.idle_recheck_seconds)).isoformat()
+                    (now + __import__("datetime").timedelta(seconds=config.idle_recheck_seconds)).isoformat()
                     if config.idle_recheck_seconds
                     else None
                 )
@@ -593,14 +235,6 @@ def run_campaign(
                     break
                 continue
 
-            # ── USEFUL cycle: a real action -> one bounded, gated pass ───────
-            # B — signal dedup: an action already attempted this campaign whose
-            # earlier pass did not clear the signal is a REPEAT. Re-running it
-            # identically would spend again to reach the same dead end (the
-            # smoke showed two identical `restore_daemon_liveness` cycles), so
-            # skip execution, record it honestly, and let the no-progress streak
-            # stop the campaign — the same "empty cycles -> ask the operator"
-            # guarantee as idle, just for "nothing NEW to do" vs "nothing to do".
             signature = action.action
             if signature in attempted_signatures:
                 idle_streak += 1
@@ -635,7 +269,6 @@ def run_campaign(
                     break
                 continue
 
-            # ── genuinely NEW action: reset the no-progress streak and run ───
             idle_streak = 0
             attempted_signatures.add(signature)
             useful_cycles += 1
@@ -676,16 +309,6 @@ def run_campaign(
             _emit_cycle(record)
             consecutive_errors = 0
 
-            # ── usefulness brake (loop_suspected): did this executed cycle
-            #    actually move the system forward? A NEW artifact, a NEW
-            #    proposal, or a CHANGE in result_status vs the previous executed
-            #    cycle counts as useful. Otherwise the agent spent a cycle (and
-            #    possibly money) finding a new-looking action that produced
-            #    nothing — "movement without progress". N such cycles in a row
-            #    stop the campaign with a report that recommends asking the
-            #    operator. Exact-repeat actions never reach here (the repeat
-            #    path above handles them via no_progress_stall); this catches
-            #    the broader case the narrower brakes miss. ──────────────────
             recent_actions.append(action.action)
             productive = (
                 outcome.artifact is not None
@@ -707,10 +330,6 @@ def run_campaign(
                         f"{unproductive_streak}_cycles_without_useful_change"
                     )
                     status = "stopped"
-                    # Stuck → switch to the question mode, not more building.
-                    # The clarification gate forbids the chaos actions (spawn
-                    # subagents, write modules/memory, spray proposals, burn
-                    # LLM) and hands the operator one clear question instead.
                     from core.clarification_gate import for_loop_suspected
                     clarification = for_loop_suspected().to_dict()
                     _log(agent, "campaign_loop_suspected", {
@@ -729,10 +348,6 @@ def run_campaign(
                     })
                     break
         except Exception as exc:  # noqa: BLE001 — per-cycle resilience seam
-            # One cycle raising must not end the run. Record it honestly, count
-            # it toward the consecutive-error streak, and continue. Every audit
-            # write here is best-effort so a broken sink (full disk, locked
-            # file, dead heartbeat) can't escalate one cycle error into a crash.
             consecutive_errors += 1
             error_cycles += 1
             err_now = now_fn()
@@ -754,7 +369,7 @@ def run_campaign(
             records.append(err_record)
             try:
                 ledger.append(err_record)
-            except Exception:  # noqa: BLE001 — best-effort audit write
+            except Exception:  # noqa: BLE001
                 pass
             try:
                 _log(agent, "campaign_cycle_error", {
@@ -763,11 +378,11 @@ def run_campaign(
                     "consecutive_errors": consecutive_errors,
                     "max_consecutive_errors": config.max_consecutive_errors,
                 })
-            except Exception:  # noqa: BLE001 — best-effort audit log
+            except Exception:  # noqa: BLE001
                 pass
             try:
                 _emit_cycle(err_record)
-            except Exception:  # noqa: BLE001 — best-effort liveness ping
+            except Exception:  # noqa: BLE001
                 pass
             if consecutive_errors >= config.max_consecutive_errors:
                 stop_reason = (
@@ -806,172 +421,3 @@ def run_campaign(
         "totals": totals,
     })
     return result
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Default collaborators (lazily import the heavy runtime pieces)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _default_gather_signals(agent: Any, workspace: Any, approval_inbox: Any) -> dict[str, Any]:
-    """Collect every signal READ-ONLY, then pick the single best next action.
-
-    Reuses a passed approval inbox when supplied. No mutation, no execution,
-    no network.
-    """
-    import agent_tick
-    from core.alert_ack import AlertAckStore
-    from core.approval_inbox import ApprovalInbox
-    from core.approval_triage import triage_inbox
-    from core.best_next_action import select_best_next_action
-
-    ws = Path(workspace)
-    heartbeat = agent_tick._read_heartbeat(ws)
-    age = agent_tick._heartbeat_age_seconds(heartbeat)
-    hb = heartbeat or {}
-
-    inbox = approval_inbox or ApprovalInbox(path=ws / "data" / "approval_inbox.jsonl")
-    triage = triage_inbox(inbox.pending())
-
-    ack_store = AlertAckStore(path=ws / "data" / "alert_acknowledgements.jsonl")
-    acknowledged = ack_store.active_actions()
-
-    action = select_best_next_action(
-        result_status=str(hb.get("result_status", "none")),
-        tests_health=str(hb.get("tests_health", "none")),
-        dry_run_streak=int(hb.get("dry_run_streak", 0) or 0),
-        heartbeat_missing=heartbeat is None,
-        heartbeat_stale=agent_tick._is_stale(age),
-        heartbeat_age_seconds=age,
-        last_event=str(hb.get("event", "")),
-        tick_error=hb.get("error"),
-        triage=triage,
-        inbox_pending=triage.total_pending,
-        acknowledged=acknowledged,
-    )
-    return {"heartbeat": hb, "age": age, "triage": triage, "action": action}
-
-
-def _cost_totals(agent: Any) -> tuple[int, int]:
-    """Read (llm_calls, cost_units) totals from the agent's persistent ledger.
-
-    Defensive at the boundary: an arbitrary agent may not expose the full
-    router->usage_ledger->budget_ledger chain. Returns (0, 0) when it is
-    absent rather than guessing a shape.
-    """
-    try:
-        usage_ledger = getattr(agent.model_router, "usage_ledger", None)
-        ledger = getattr(usage_ledger, "budget_ledger", None)
-        if ledger is None:
-            return (0, 0)
-        totals = ledger.snapshot().get("totals", {})
-        return (int(totals.get("llm_calls", 0)), int(totals.get("model_cost_units", 0)))
-    except (AttributeError, TypeError, ValueError):
-        return (0, 0)
-
-
-def _action_focused_goal(goal: str, action: BestNextAction) -> str:
-    """Turn the picked action into a focused, read-only reasoning question.
-
-    GAP A — the campaign cycle is action-COUPLED: instead of running a generic
-    health pass decoupled from the picked signal, the agent reasons about the
-    SINGLE highest-priority action toward the campaign goal. Effects are blocked
-    in dry-run, so this asks the model "what is the one useful next step here?"
-    without performing it. Pure string builder so it can be unit-tested without
-    a live agent.
-    """
-    reason = (action.reason or "").strip()
-    evidence = "; ".join(e for e in action.evidence[:3] if e)
-    parts = [
-        f"Campaign goal: {goal.strip()}.",
-        f"The single highest-priority signal right now is '{action.action}' — {action.title}.",
-    ]
-    if reason:
-        parts.append(f"Why it matters: {reason}")
-    if evidence:
-        parts.append(f"Evidence: {evidence}.")
-    parts.append(
-        "Decide the ONE most useful next step a human should take to move the "
-        "goal forward, and justify it with the evidence. Reason read-only — do "
-        "not perform any effects."
-    )
-    return " ".join(parts)
-
-
-def _default_execute_action(
-    *,
-    agent: Any,
-    workspace: Any,
-    action: BestNextAction,
-    config: CampaignConfig,
-    approval_inbox: Any = None,
-) -> CampaignActionOutcome:
-    """Run ONE bounded, action-coupled pass through the existing AutonomousRuntime.
-
-    GAP A fix: the pass is driven by the PICKED action (not a generic health
-    sweep). The action becomes a focused read-only question answered by the
-    ``goal`` task — real LLM reasoning about the single highest-priority signal.
-    Opens no new effect path: effects flow only through the runtime's PolicyGate
-    + approval inbox, and ``dry_run`` (gateway ``simulate`` on effectful tools inside
-    the goal task via ``gateway_dry_run``) follows the campaign config. Cost is measured as the delta of
-    the agent's persistent budget ledger around the pass, so the ledger records
-    the REAL spend, not a guess.
-    """
-    from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
-    from core.budget_governor import BudgetLimits
-
-    llm_before, cost_before = _cost_totals(agent)
-
-    focused_goal = _action_focused_goal(config.goal, action)
-    runtime = AutonomousRuntime(agent, workspace=workspace, approval_inbox=approval_inbox)
-    report = runtime.run(
-        AutonomousRuntimeConfig(
-            goal=focused_goal,
-            dry_run=config.dry_run,
-            # status, learn, goal — the goal task does the action-coupled
-            # reasoning; the two read-only preambles cost nothing.
-            limit=3,
-            include_tests=False,
-            include_goal=True,
-            budgets=BudgetLimits(max_agent_runs=1),
-            enable_reflection=False,
-        )
-    )
-
-    llm_after, cost_after = _cost_totals(agent)
-
-    pending = 0
-    try:
-        pending = int(report.approvals.get("pending", 0) or 0)
-    except (AttributeError, TypeError, ValueError):
-        pending = 0
-    proposal = f"approvals_pending={pending}" if pending else None
-
-    # The goal task's answer is the cycle's measurable output — surface a short
-    # digest in the ledger so an operator can read what the agent concluded.
-    artifact = None
-    for task_report in getattr(report, "tasks", []) or []:
-        if getattr(task_report.task, "kind", "") == "goal":
-            answer = (task_report.details or {}).get("answer")
-            if answer:
-                digest = " ".join(str(answer).split())[:160]
-                if digest:
-                    artifact = f"reasoning: {digest}"
-            break
-
-    return CampaignActionOutcome(
-        result=report.status,
-        llm_calls_spent=max(0, llm_after - llm_before),
-        cost_units_spent=max(0, cost_after - cost_before),
-        proposal=proposal,
-        artifact=artifact,
-    )
-
-
-def _log(agent: Any, event: str, payload: dict[str, Any]) -> None:
-    log = getattr(agent, "log", None)
-    if log is None:
-        return
-    try:
-        log.log(event, payload)
-    except (AttributeError, TypeError):
-        pass
