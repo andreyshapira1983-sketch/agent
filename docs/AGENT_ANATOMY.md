@@ -139,6 +139,7 @@ _Autonomous loop, scheduling, budgets, state durability._
 | `core/backlog_target_mapper` | Deterministic mapper from abstract backlog items to concrete self-build targets. |
 | `core/dependency_map` | Project import/dependency map: who imports a module, which symbols, which tests — contract input for self-build changes. |
 | `core/self_build_rules` | Hard rules learned from rollbacks (e.g. ImportError symbols that must stay importable), enforced deterministically by the self-build critic. |
+| `core/incremental_splitter` | Deterministic (no-LLM) incremental splitter for oversized modules: moves one dependency-closed block per step verbatim into a sibling module (or a class mixin), keeping every import path working. |
 
 ## Security, Policy & Autonomy Governance (§7)
 
