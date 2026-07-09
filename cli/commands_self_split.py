@@ -85,13 +85,16 @@ def _handle_self_split(rest: str, agent: "AgentLoop", workspace: Path) -> bool:
         pass
 
     # Targeted tests: importer tests from the dependency map, plus the full
-    # suite fallback the lane always accepts.
+    # suite fallback the lane always accepts. The test runner rejects argv
+    # lists above its MAX_PATHS cap, so a heavily-imported target (core/loop.py
+    # has dozens of importer tests) falls back to the whole tests/ dir.
     test_paths: list[str] = ["tests"]
     try:
         from core.dependency_map import build_dependency_map
+        from tools.run_tests import MAX_PATHS
 
         related = build_dependency_map(workspace, step.target).related_tests
-        if related:
+        if related and len(related) <= MAX_PATHS:
             test_paths = sorted(related)
     except Exception:  # noqa: BLE001 -- dep scan is advisory only
         pass
