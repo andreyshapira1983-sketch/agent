@@ -76,6 +76,21 @@ def _handle_self_apply_run(rest: str, agent: "AgentLoop", workspace: Path) -> bo
     # memory so the agent remembers its own failed/succeeded attempts.
     record_self_build_episode(agent, kind="self-apply-run", result=result)
 
+    # Rollback -> HARD RULE: machine-readable failure causes (e.g. ImportError:
+    # cannot import name 'X' from 'core.y') become durable rules the Critic
+    # enforces deterministically on every later produce run for that target.
+    try:
+        from core.self_build_rules import record_rules_from_result
+
+        added = record_rules_from_result(workspace, result)
+        if added:
+            agent.log.log(
+                "self_build_rules_recorded",
+                {"proposal_id": result.get("proposal_id"), "rules_added": added},
+            )
+    except Exception:  # noqa: BLE001 — rule recording must never break the command
+        pass
+
     if "--json" in parts:  # never true (len==1 guard) but keep symmetry cheap
         print(json.dumps(result, ensure_ascii=False, indent=2), file=sys.stderr)
         return True

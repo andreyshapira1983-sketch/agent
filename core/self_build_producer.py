@@ -792,6 +792,7 @@ def _critic_review(
     *,
     confidence_threshold: float,
     imported_symbols: dict[str, list[str]] | None = None,
+    required_symbols: dict[str, str] | None = None,
 ) -> RoleOutput:
     """Validate the built content; any failing check is a hard veto."""
     veto: list[str] = []
@@ -902,6 +903,30 @@ def _critic_review(
             ast.parse(content)
         except SyntaxError as exc:
             veto.append(f"generated python does not parse: {exc.msg}")
+
+    # HARD RULES from past rollbacks: every symbol that once caused a
+    # rolled-back ImportError on this target must stay importable (defined or
+    # re-exported) in ANY new content — split or plain rewrite. Deterministic:
+    # the same rollback can never happen twice for the same symbol.
+    if (
+        required_symbols
+        and target.lower().endswith(".py")
+        and content
+        and not _looks_like_diff(content)
+    ):
+        try:
+            exposed = _top_level_bound_names(ast.parse(content))
+        except SyntaxError:
+            exposed = None
+        if exposed is not None:
+            for symbol in sorted(required_symbols):
+                if symbol not in exposed:
+                    veto.append(
+                        f"HARD RULE violated ({required_symbols[symbol]}): "
+                        f"symbol {symbol} must remain importable from {target} "
+                        f"- a previous apply was rolled back for exactly this "
+                        f"ImportError"
+                    )
 
     decision = "veto" if veto else "pass"
     return RoleOutput(
@@ -1212,6 +1237,34 @@ def produce_self_apply_proposal(
             dep_map = None
             dep_context = None
 
+    # ── Hard rules from past rollbacks ──────────────────────────────────────
+    # Machine-extracted lessons (e.g. "ImportError: cannot import name 'X'")
+    # persisted by the apply command. The Builder sees them as non-negotiable
+    # constraints and the Critic enforces them deterministically.
+    required_symbols: dict[str, str] = {}
+    if target.lower().endswith(".py"):
+        try:
+            from core.self_build_rules import RuleStore, default_rules_path
+
+            for rule in RuleStore(default_rules_path(workspace)).rules_for(target):
+                if rule.kind == "keep_importable":
+                    required_symbols[rule.symbol] = rule.source
+            if required_symbols:
+                evidence.append(
+                    "hard_rules=" + ", ".join(sorted(required_symbols))
+                )
+                rules_block = (
+                    "HARD RULES (learned from rolled-back applies; violating "
+                    "any of these guarantees a veto): the following symbols "
+                    "MUST remain importable from the target file: "
+                    + ", ".join(sorted(required_symbols))
+                )
+                dep_context = (
+                    f"{rules_block}\n\n{dep_context}" if dep_context else rules_block
+                )
+        except Exception:  # noqa: BLE001 — rules must never break the producer
+            required_symbols = {}
+
     # ── Builder ─────────────────────────────────────────────────────────────
     builder = _builder_generate(
         llm, target, current_content, diagnosis,
@@ -1247,6 +1300,7 @@ def produce_self_apply_proposal(
         builder.data,
         confidence_threshold=confidence_threshold,
         imported_symbols=dep_map.imported_symbols if dep_map is not None else None,
+        required_symbols=required_symbols or None,
     )
     roles.append(critic)
     if critic.decision == "veto":
