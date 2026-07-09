@@ -42,6 +42,44 @@ def _default_model(provider: str) -> str:
 
 DEFAULT_MAX_TOKENS = int(os.getenv("AGENT_MAX_TOKENS", "2048"))
 
+# Provider stop/finish reasons that mean "I ran out of output budget mid-answer"
+# rather than "I finished naturally". When we see one of these we can ask the
+# model to continue where it left off instead of returning a truncated answer.
+_TRUNCATION_REASONS = frozenset({"max_tokens", "length"})
+
+
+def _auto_continue_enabled() -> bool:
+    """Whether truncated answers are auto-continued. Defaults to ON.
+
+    Disable with ``AGENT_AUTO_CONTINUE=0`` (or false/no/off).
+    """
+    value = os.getenv("AGENT_AUTO_CONTINUE")
+    if value is None:
+        return True
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _max_continuations() -> int:
+    """Max follow-up rounds when an answer is truncated (default 4).
+
+    A value of 0 disables continuation. Bounded so a misbehaving model can
+    never loop forever; the budget governor is the other backstop.
+    """
+    raw = os.getenv("AGENT_MAX_CONTINUATIONS", "4")
+    try:
+        return max(0, int(str(raw).strip()))
+    except (TypeError, ValueError):
+        return 4
+
+
+# Instruction appended for OpenAI-compatible continuation turns. Anthropic does
+# not need this — it continues an assistant prefill natively.
+_CONTINUE_INSTRUCTION = (
+    "Continue the previous response exactly where it stopped. "
+    "Output only the continuation — no repetition of earlier text, no preamble, "
+    "no explanation."
+)
+
 
 class LLM:
     """Minimal synchronous LLM wrapper with pluggable provider."""
@@ -139,14 +177,73 @@ class LLM:
 
         `temperature` should be 0.0 for the planner (deterministic JSON) and
         0.5..0.9 for synthesis (a little stylistic freedom).
+
+        Large answers: when the provider stops because it hit ``max_tokens``
+        (Anthropic ``stop_reason='max_tokens'`` / OpenAI ``finish_reason=
+        'length'``) the answer is auto-continued — the partial text is fed back
+        and the model resumes where it left off — until it finishes naturally or
+        ``AGENT_MAX_CONTINUATIONS`` rounds are reached. Token usage is summed
+        across every round so the budget ledger sees the full spend.
+        """
+        text, stop_reason = self._complete_once(
+            system, user, max_tokens, temperature, prior=None
+        )
+        if self.provider == "mock" or not _auto_continue_enabled():
+            return text
+
+        max_rounds = _max_continuations()
+        if max_rounds <= 0:
+            return text
+
+        combined = text
+        agg_in = int(self.last_usage.get("input_tokens", 0))
+        agg_out = int(self.last_usage.get("output_tokens", 0))
+        rounds = 0
+        while stop_reason in _TRUNCATION_REASONS and rounds < max_rounds:
+            rounds += 1
+            cont_text, stop_reason = self._complete_once(
+                system, user, max_tokens, temperature, prior=combined
+            )
+            agg_in += int(self.last_usage.get("input_tokens", 0))
+            agg_out += int(self.last_usage.get("output_tokens", 0))
+            if not cont_text:
+                break
+            combined += cont_text
+
+        # Expose the aggregate usage of the whole continuation chain so the
+        # budget wrapper records one honest total instead of just the last leg.
+        self.last_usage = {
+            "input_tokens": agg_in,
+            "output_tokens": agg_out,
+            "total_tokens": agg_in + agg_out,
+        }
+        return combined
+
+    def _complete_once(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int,
+        temperature: float,
+        *,
+        prior: Optional[str],
+    ) -> tuple[str, str]:
+        """One provider call. Returns ``(text, stop_reason)``.
+
+        When *prior* is set this is a continuation round: the partial answer so
+        far is supplied so the provider resumes instead of restarting.
         """
         if self.provider == "anthropic":
-            return self._complete_anthropic(system, user, max_tokens, temperature)
+            return self._complete_anthropic(system, user, max_tokens, temperature, prior)
         if self.provider == "openai":
-            return self._complete_openai_compatible(system, user, max_tokens, temperature, self.model)
+            return self._complete_openai_compatible(
+                system, user, max_tokens, temperature, self.model, prior
+            )
         if self.provider == "huggingface":
-            return self._complete_openai_compatible(system, user, max_tokens, temperature, self.model)
-        return self._complete_mock(system, user, max_tokens)
+            return self._complete_openai_compatible(
+                system, user, max_tokens, temperature, self.model, prior
+            )
+        return self._complete_mock(system, user, max_tokens), "stop"
 
     def stream_complete(
         self,
@@ -258,12 +355,25 @@ class LLM:
         # Match "claude-*-4" or "claude-*-4-N" patterns (generation 4+)
         return not bool(re.search(r"claude-\w+-4", model.casefold()))
 
-    def _complete_anthropic(self, system: str, user: str, max_tokens: int, temperature: float) -> str:
+    def _complete_anthropic(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int,
+        temperature: float,
+        prior: Optional[str] = None,
+    ) -> tuple[str, str]:
+        messages: list[dict] = [{"role": "user", "content": user}]
+        if prior:
+            # Anthropic continues an assistant prefill natively. The prefill must
+            # not end with trailing whitespace, so send it rstripped; the raw
+            # continuation text is appended to the full answer by the caller.
+            messages.append({"role": "assistant", "content": prior.rstrip()})
         kwargs: dict = dict(
             model=self.model,
             system=system,
             max_tokens=max_tokens,
-            messages=[{"role": "user", "content": user}],
+            messages=messages,
         )
         if self._anthropic_supports_temperature(self.model):
             kwargs["temperature"] = temperature
@@ -273,7 +383,8 @@ class LLM:
         in_tok = getattr(usage, "input_tokens", 0) if usage is not None else 0
         out_tok = getattr(usage, "output_tokens", 0) if usage is not None else 0
         self._record_usage(in_tok, out_tok)
-        return "".join(parts).strip()
+        stop_reason = str(getattr(message, "stop_reason", "") or "")
+        return "".join(parts).strip(), stop_reason
 
     @staticmethod
     def _is_o_series(model: str) -> bool:
@@ -294,32 +405,45 @@ class LLM:
             return True
         return False
 
-    def _complete_openai_compatible(self, system: str, user: str, max_tokens: int, temperature: float, model: str) -> str:
+    def _complete_openai_compatible(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int,
+        temperature: float,
+        model: str,
+        prior: Optional[str] = None,
+    ) -> tuple[str, str]:
+        messages: list[dict] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        if prior:
+            # OpenAI-compatible APIs have no native assistant-prefill continue,
+            # so replay the partial answer and ask the model to resume from it.
+            messages.append({"role": "assistant", "content": prior})
+            messages.append({"role": "user", "content": _CONTINUE_INSTRUCTION})
         # o-series reasoning models: use max_completion_tokens, no temperature param
         if self._is_o_series(model):
             response = self._client.chat.completions.create(
                 model=model,
                 max_completion_tokens=max_tokens,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
+                messages=messages,
             )
         else:
             response = self._client.chat.completions.create(
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
+                messages=messages,
             )
         usage = getattr(response, "usage", None)
         in_tok = getattr(usage, "prompt_tokens", 0) if usage is not None else 0
         out_tok = getattr(usage, "completion_tokens", 0) if usage is not None else 0
         self._record_usage(in_tok, out_tok)
-        return (response.choices[0].message.content or "").strip()
+        choice = response.choices[0]
+        finish_reason = str(getattr(choice, "finish_reason", "") or "")
+        return (choice.message.content or "").strip(), finish_reason
 
     def _complete_mock(self, system: str, user: str, max_tokens: int) -> str:
         """Deterministic offline stub.
