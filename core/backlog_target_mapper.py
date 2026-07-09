@@ -28,6 +28,13 @@ MODEL_DISCOVERY_TEST_TARGET = "tests/test_model_discovery.py"
 # signal module (avoids an import cycle) while staying a single source of truth.
 SPLIT_TARGET_PREFIX = "split:"
 
+# Upper line budget for a single-pass (one model reply) module split. The Builder
+# must emit the shrunk target plus all new sibling modules in one JSON reply,
+# which is capped by the provider's output-token ceiling (~16k for the default
+# model). Modules above this stay report-only until an incremental splitter is
+# built. Tunable: raise once a chunked/multi-pass split lane exists.
+SPLIT_ONE_SHOT_MAX_LINES = 1000
+
 _MODEL_DISCOVERY_RULE = "td_011_012_model_discovery"
 _MODEL_DISCOVERY_TITLES = frozenset(
     {
@@ -168,6 +175,22 @@ def _map_split_candidate(
         return TargetMappingResult(
             "no_target",
             f"split target {rel!r} does not exist ({read.status})",
+            target_path=target,
+        )
+    # One-shot feasibility guard: the Builder rewrites the shrunk target PLUS the
+    # new sibling modules in a SINGLE model reply, which is bounded by the model's
+    # output-token ceiling. A module far above this line budget cannot be split in
+    # one pass (the reply truncates and parses to nothing), so it stays
+    # report-only — like a critical file — until an incremental splitter exists.
+    line_count = read.text.count("\n") + 1
+    if line_count > SPLIT_ONE_SHOT_MAX_LINES:
+        return TargetMappingResult(
+            "no_target",
+            (
+                f"split target {rel!r} is too large for a single-pass split "
+                f"({line_count} lines > {SPLIT_ONE_SHOT_MAX_LINES}); needs an "
+                "incremental splitter"
+            ),
             target_path=target,
         )
     mapped = _copy_candidate(candidate, target_path=rel, mapping_rule="split_module")

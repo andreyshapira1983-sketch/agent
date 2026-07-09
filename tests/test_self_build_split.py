@@ -114,6 +114,32 @@ def test_mapper_refuses_non_python_split_target(workspace: Path):
     assert result.decision == "no_target"
 
 
+def test_mapper_refuses_split_target_too_large_for_one_shot(workspace: Path):
+    from core.backlog_target_mapper import SPLIT_ONE_SHOT_MAX_LINES
+
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    big = "\n".join(f"x{i} = {i}" for i in range(SPLIT_ONE_SHOT_MAX_LINES + 50)) + "\n"
+    (workspace / "core" / "huge_mod.py").write_text(big, encoding="utf-8")
+    result = map_backlog_candidate(
+        _candidate("split:core/huge_mod.py"), workspace=workspace
+    )
+    assert result.decision == "no_target"
+    assert "too large for a single-pass split" in result.reason
+
+
+def test_mapper_allows_split_target_within_one_shot_budget(workspace: Path):
+    from core.backlog_target_mapper import SPLIT_ONE_SHOT_MAX_LINES
+
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    ok = "\n".join(f"x{i} = {i}" for i in range(SPLIT_ONE_SHOT_MAX_LINES - 100)) + "\n"
+    (workspace / "core" / "okay_mod.py").write_text(ok, encoding="utf-8")
+    result = map_backlog_candidate(
+        _candidate("split:core/okay_mod.py"), workspace=workspace
+    )
+    assert result.decision == "mapped"
+    assert result.candidate.target_path == "core/okay_mod.py"
+
+
 # ── normaliser ───────────────────────────────────────────────────────────────
 
 
