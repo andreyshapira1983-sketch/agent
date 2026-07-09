@@ -43,6 +43,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH
+
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 
@@ -51,7 +53,7 @@ WORKSPACE_DEFAULT = Path(os.environ.get("AGENT_WORKSPACE", Path(__file__).parent
 DATA_DIR           = "data"
 LOGS_DIR           = "logs"
 TICK_LOG_FILE      = "daemon_tick.jsonl"
-APPROVAL_INBOX_PATH = "data/approval_inbox.jsonl"
+APPROVAL_INBOX_PATH = DEFAULT_APPROVAL_INBOX_PATH
 SCHEDULES_PATH     = "data/runtime_schedules.jsonl"
 TASK_QUEUE_PATH    = "data/task_queue.jsonl"
 INCIDENT_LOG_PATH  = "data/incidents.jsonl"

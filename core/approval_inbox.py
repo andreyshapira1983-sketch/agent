@@ -21,6 +21,11 @@ ApprovalInboxRisk = Literal["read_only", "reversible", "irreversible", "external
 _VALID_STATUSES = {"pending", "approved", "denied", "aborted", "executed"}
 _VALID_RISKS = {"read_only", "reversible", "irreversible", "external"}
 
+# Canonical location of the approval inbox file, relative to the workspace root.
+# Single source of truth: agent_tick and the CLI health/approval commands import
+# this instead of re-declaring the path, so it can never drift between callers.
+DEFAULT_APPROVAL_INBOX_PATH = Path("data") / "approval_inbox.jsonl"
+
 # Default TTL for approval requests.  After this many hours without a human
 # decision the item is automatically aborted by expire_stale().
 # Prevents the inbox from accumulating stale items indefinitely when the
