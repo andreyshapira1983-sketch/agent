@@ -60,12 +60,18 @@ _SELF_BUILD_DOC_QUOTE_RE = re.compile(
 @dataclass(frozen=True)
 class SignalRecord:
     """One grounded backlog signal. ``problem_quote`` is an exact substring of
-    the source text; ``evidence_ref`` is ``<file>:<line>``."""
+    the source text; ``evidence_ref`` is ``<file>:<line>``.
+
+    ``rank_hint`` is an optional within-source tiebreak added to the score by the
+    selector (default ``0.0`` — existing organs are unaffected). It lets an organ
+    order its own emissions (e.g. worst-first) without crossing into another
+    source's score tier."""
 
     signal_source: str
     target_path: str
     evidence_ref: str
     problem_quote: str
+    rank_hint: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -400,6 +406,77 @@ def code_todo_candidates(
             )
             if len(records) >= _MAX_CODE_TODO_RECORDS:
                 return records, "\n".join(quotes)
+    return records, "\n".join(quotes)
+
+
+OVERSIZED_MODULE_SOURCE = "oversized_module"
+
+# A module past this many lines is a "split me" advisory. The threshold is a soft
+# structural budget, not a hard rule: it only surfaces the file for a human to
+# consider splitting into focused modules. Bounded like the code-TODO organ so a
+# repo full of large files cannot flood the backlog.
+_OVERSIZED_MODULE_MIN_LINES = 800
+_MAX_OVERSIZED_RECORDS = 25
+
+# Report-only prefix. The emitted target is deliberately abstract (``split:<file>``)
+# so it has NO deterministic mapper: the producer will *name* the bloated module in
+# its refusal reason but never auto-rewrite it. Splitting a large organ is a risky
+# multi-file refactor that must stay human-driven for now.
+_OVERSIZED_TARGET_PREFIX = "split:"
+
+
+def oversized_module_candidates(
+    files: Iterable[tuple[str, str]],
+) -> tuple[list[SignalRecord], str]:
+    """Turn oversized source modules into grounded, report-only backlog signals.
+
+    ``files`` is an iterable of ``(rel_path, content)`` pairs already read by the
+    caller (this function performs NO IO, so it stays pure/deterministic and
+    unit-testable). Every file whose line count is at or above
+    :data:`_OVERSIZED_MODULE_MIN_LINES` becomes one :class:`SignalRecord` whose
+    ``target_path`` is the abstract ``split:<rel_path>`` (report-only — see
+    :data:`_OVERSIZED_TARGET_PREFIX`), ``evidence_ref`` is ``<rel_path>:1``, and
+    ``problem_quote`` states the concrete line count.
+
+    Records are sorted worst-first (largest line count, then path) and the total
+    is capped at :data:`_MAX_OVERSIZED_RECORDS`. Returns ``(records, source_text)``
+    where ``source_text`` joins every quote verbatim so the selector's provenance
+    check (``quote in source_text``) passes by construction.
+    """
+    measured: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    for rel_path, content in files:
+        rel = str(rel_path or "").replace("\\", "/").strip()
+        if not rel or content is None or rel in seen:
+            continue
+        seen.add(rel)
+        line_count = content.count("\n") + 1 if content else 0
+        if line_count >= _OVERSIZED_MODULE_MIN_LINES:
+            measured.append((line_count, rel))
+
+    measured.sort(key=lambda pair: (-pair[0], pair[1]))
+
+    records: list[SignalRecord] = []
+    quotes: list[str] = []
+    kept = measured[:_MAX_OVERSIZED_RECORDS]
+    count = len(kept)
+    for index, (line_count, rel) in enumerate(kept):
+        quote = (
+            f"{rel} has {line_count} lines (soft limit "
+            f"{_OVERSIZED_MODULE_MIN_LINES}); split into focused modules"
+        )
+        quotes.append(quote)
+        records.append(
+            SignalRecord(
+                signal_source=OVERSIZED_MODULE_SOURCE,
+                target_path=f"{_OVERSIZED_TARGET_PREFIX}{rel}",
+                evidence_ref=f"{rel}:1",
+                problem_quote=quote,
+                # Worst-first: the biggest module gets the largest bump so it
+                # ranks ahead of its peers while staying below the next tier.
+                rank_hint=(count - index) * 0.001,
+            )
+        )
     return records, "\n".join(quotes)
 
 
