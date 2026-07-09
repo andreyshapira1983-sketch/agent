@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+from cli.commands_approval import _handle_self_issue_verify
 from core.approval_inbox import ApprovalInboxItem
 from core.approval_triage import triage_inbox
 from core.best_next_action import (
@@ -14,6 +15,10 @@ from core.best_next_action import (
 from core.self_build_memory import (
     recent_unresolved_self_improvement_failures,
     sync_self_improvement_issue_registry,
+)
+from core.self_improvement_issues import (
+    DEFAULT_ISSUE_PATH,
+    SelfImprovementIssueRegistry,
 )
 from core.smart_memory import EpisodeRecord, EpisodicMemoryStore
 
@@ -260,6 +265,100 @@ def test_best_next_action_prefers_open_registry_issue_over_raw_history():
     assert action.action == "registry_specific_action"
     assert any("sii_registry" in item for item in action.evidence)
     assert all("AgentLoopExtractedMethods" not in item for item in action.evidence)
+
+
+class _IssueLog:
+    def __init__(self):
+        self.events = []
+
+    def log(self, event, payload):
+        self.events.append((event, payload))
+
+
+class _PassingDuplicateMixinVerifier:
+    def __init__(self, workspace_root):
+        self.workspace_root = workspace_root
+
+    def run(self, *, paths, pattern):
+        assert paths == ["tests/test_incremental_splitter.py"]
+        assert pattern == "test_repeated_mixin_split_uses_unique_base_class"
+        return {
+            "exit_code": 0,
+            "timed_out": False,
+            "passed": 1,
+            "failed": 0,
+            "errors": 0,
+        }
+
+    def validate_output(self, output):
+        return True, []
+
+
+def _open_duplicate_issue(workspace):
+    registry = SelfImprovementIssueRegistry(workspace / DEFAULT_ISSUE_PATH)
+    issue = registry.upsert_failure(
+        "TypeError: duplicate base class AgentLoopExtractedMethods",
+        datetime.now(timezone.utc).isoformat(),
+    )
+    return registry, issue
+
+
+def test_self_issue_verify_matching_regression_resolves_issue(
+    workspace, monkeypatch, capsys
+):
+    registry, issue = _open_duplicate_issue(workspace)
+    monkeypatch.setattr(
+        "tools.run_tests.RunTestsTool", _PassingDuplicateMixinVerifier
+    )
+    log = _IssueLog()
+
+    assert _handle_self_issue_verify(
+        issue.fingerprint, SimpleNamespace(log=log), workspace
+    ) is True
+
+    assert registry.list()[0].status == "resolved"
+    assert [event for event, _payload in log.events] == [
+        "self_improvement_issue_verified",
+        "self_improvement_issue_resolved",
+    ]
+    assert "issue resolved" in capsys.readouterr().err
+
+
+def test_self_issue_verify_wrong_fingerprint_or_action_cannot_resolve(
+    workspace, monkeypatch, capsys
+):
+    registry, issue = _open_duplicate_issue(workspace)
+
+    class _MustNotRun:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("unmatched issue must not run tests")
+
+    monkeypatch.setattr("tools.run_tests.RunTestsTool", _MustNotRun)
+    agent = SimpleNamespace(log=_IssueLog())
+    _handle_self_issue_verify("sii_wrong", agent, workspace)
+    assert registry.list()[0].status == "open"
+
+    generic = registry.upsert_failure(
+        "self-build failed with an unsupported generic error",
+        (datetime.now(timezone.utc) + timedelta(seconds=1)).isoformat(),
+    )
+    _handle_self_issue_verify(generic.fingerprint, agent, workspace)
+    states = {item.fingerprint: item.status for item in registry.list()}
+    assert states[issue.fingerprint] == states[generic.fingerprint] == "open"
+    assert "unknown fingerprint" in capsys.readouterr().err
+
+
+def test_resolved_registry_suppresses_stale_raw_duplicate_mixin_history():
+    action = select_best_next_action(
+        tests_health="pass",
+        result_status="done",
+        self_improvement_registry_available=True,
+        open_self_improvement_issues=(),
+        recent_self_improvement_failures=(
+            "TypeError: duplicate base class AgentLoopExtractedMethods",
+        ),
+    )
+    assert action.action == "observe"
 
 
 def test_large_backlog_without_duplicates_recommends_review():

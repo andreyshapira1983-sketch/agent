@@ -101,6 +101,7 @@ from cli.commands_approval import (
     _handle_approval_run,
     _handle_approval_triage,
     _handle_best_next_action,
+    _handle_self_issue_verify,
 )
 # Memory / hygiene / rollback commands live in cli/commands_memory.py
 # (agent-method driven, no main back-references, so no cycle).
@@ -1377,6 +1378,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head in {":best-next-action", ":next-action", ":bna"}:
         return _handle_best_next_action(rest.strip(), agent, workspace)
 
+    if head == ":self-issue-verify":
+        return _handle_self_issue_verify(rest.strip(), agent, workspace)
+
     if head in {":ack", ":acknowledge"}:
         return _handle_alert_ack(rest.strip(), agent, workspace)
 
@@ -1543,6 +1547,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :approval-list [status|all]     list pending/approved/denied approval items\n"
             "  :approval-triage                read-only triage: clusters/duplicates/stale + advice\n"
             "  :best-next-action [--json]      choose the single most important next action (advisory)\n"
+            "  :self-issue-verify <fingerprint> run the issue's fixed targeted verifier and resolve on green\n"
             "  :ack <action> [--ttl H] [why]   acknowledge an advisory alert so it stops dominating BNA\n"
             "  :ack-list                       list active acknowledgements\n"
             "  :ack-clear <action>             restore an acknowledged alert to the top-pick race\n"
@@ -1837,7 +1842,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :dry-health-pass  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :budget-kill-switch  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :model-discovery-audit  :provider-catalog-refresh  :approval-list  :approval-triage  :best-next-action  :ack  :ack-list  :ack-clear  :approval-run  :self-apply-run  :self-build-produce  :self-split  :self-task-propose  :self-task-build  :value-review  :value-review-list  :task-add  :schedule-disable  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :self-build-supervisor  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :dry-health-pass  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :budget-kill-switch  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :model-discovery-audit  :provider-catalog-refresh  :approval-list  :approval-triage  :best-next-action  :self-issue-verify  :ack  :ack-list  :ack-clear  :approval-run  :self-apply-run  :self-build-produce  :self-split  :self-task-propose  :self-task-build  :value-review  :value-review-list  :task-add  :schedule-disable  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :self-build-supervisor  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:

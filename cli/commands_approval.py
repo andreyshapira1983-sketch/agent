@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +22,13 @@ if TYPE_CHECKING:
 
 
 DEFAULT_ALERT_ACK_PATH = Path("data") / "alert_acknowledgements.jsonl"
+
+_SELF_ISSUE_VERIFIERS = {
+    "repair_incremental_splitter_duplicate_mixin": (
+        "tests/test_incremental_splitter.py",
+        "test_repeated_mixin_split_uses_unique_base_class",
+    ),
+}
 
 
 def _approval_inbox_for(agent: AgentLoop, workspace: Path | None = None) -> ApprovalInbox:
@@ -142,6 +150,7 @@ def _handle_best_next_action(rest: str, agent: AgentLoop, workspace: Path) -> bo
         triage=triage,
         inbox_pending=triage.total_pending,
         acknowledged=acknowledged,
+        self_improvement_registry_available=bool(all_issues),
         open_self_improvement_issues=open_issues,
         recent_self_improvement_failures=raw_failures,
     )
@@ -157,6 +166,95 @@ def _handle_best_next_action(rest: str, agent: AgentLoop, workspace: Path) -> bo
                 file=sys.stderr,
             )
     agent.log.log("best_next_action", action.to_dict())
+    return True
+
+
+def _handle_self_issue_verify(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """Run the issue's fixed regression test and record a matching resolution."""
+    from core.self_improvement_issues import (
+        DEFAULT_ISSUE_PATH,
+        SelfImprovementIssueRegistry,
+    )
+    from tools.run_tests import RunTestsTool
+
+    parts = rest.split()
+    if len(parts) != 1:
+        print("Usage: :self-issue-verify <issue_fingerprint>", file=sys.stderr)
+        return True
+    fingerprint = parts[0]
+    registry = SelfImprovementIssueRegistry(workspace / DEFAULT_ISSUE_PATH)
+    issue = next(
+        (item for item in registry.list() if item.fingerprint == fingerprint),
+        None,
+    )
+    if issue is None:
+        print(f"(self-issue verify refused: unknown fingerprint {fingerprint})", file=sys.stderr)
+        return True
+    if issue.status == "resolved":
+        print(f"self-improvement issue already resolved: {fingerprint}", file=sys.stderr)
+        return True
+    spec = _SELF_ISSUE_VERIFIERS.get(issue.action)
+    if spec is None:
+        print(
+            f"(self-issue verify refused: no targeted verifier for action {issue.action})",
+            file=sys.stderr,
+        )
+        return True
+
+    test_path, pattern = spec
+    runner = RunTestsTool(workspace_root=workspace)
+    result = runner.run(paths=[test_path], pattern=pattern)
+    valid, _validation_issues = runner.validate_output(result)
+    passed = (
+        valid
+        and result.get("exit_code") == 0
+        and not result.get("timed_out")
+        and int(result.get("passed") or 0) > 0
+        and int(result.get("failed") or 0) == 0
+        and int(result.get("errors") or 0) == 0
+    )
+    if not passed:
+        print(
+            f"self-improvement issue remains open: {fingerprint}\n"
+            f"  verifier: {test_path} -k {pattern}\n"
+            f"  result: exit_code={result.get('exit_code')} passed={result.get('passed')} "
+            f"failed={result.get('failed')} errors={result.get('errors')} "
+            f"timed_out={result.get('timed_out')}",
+            file=sys.stderr,
+        )
+        return True
+
+    observed_at = datetime.now(timezone.utc).isoformat()
+    evidence = f"{test_path} -k {pattern}: {result.get('passed')} passed"
+    verified = registry.transition(
+        status="verified",
+        observed_at=observed_at,
+        fingerprint=issue.fingerprint,
+        action=issue.action,
+        evidence=evidence,
+    )
+    if verified is None:
+        print(f"(self-issue verify refused: lifecycle mismatch for {fingerprint})", file=sys.stderr)
+        return True
+    registry.transition(
+        status="resolved",
+        observed_at=observed_at,
+        fingerprint=issue.fingerprint,
+        action=issue.action,
+        evidence=evidence,
+    )
+    payload = {
+        "fingerprint": issue.fingerprint,
+        "action": issue.action,
+        "evidence": evidence,
+    }
+    agent.log.log("self_improvement_issue_verified", payload)
+    agent.log.log("self_improvement_issue_resolved", payload)
+    print(
+        f"self-improvement issue resolved: {fingerprint}\n"
+        f"  evidence: {evidence}",
+        file=sys.stderr,
+    )
     return True
 
 
