@@ -23,6 +23,11 @@ from core.self_apply_lane import FileChange, classify_patch_risk
 MODEL_DISCOVERY_TARGET = "core/model_discovery.py"
 MODEL_DISCOVERY_TEST_TARGET = "tests/test_model_discovery.py"
 
+# Oversized-module organ emits ``split:<rel>`` abstract targets. The prefix is
+# duplicated as a module constant here so the mapper does not depend on the
+# signal module (avoids an import cycle) while staying a single source of truth.
+SPLIT_TARGET_PREFIX = "split:"
+
 _MODEL_DISCOVERY_RULE = "td_011_012_model_discovery"
 _MODEL_DISCOVERY_TITLES = frozenset(
     {
@@ -120,10 +125,59 @@ def map_backlog_candidate(
     if _is_model_discovery_candidate(candidate):
         return _map_model_discovery_candidate(candidate, workspace=workspace)
 
+    if target.startswith(SPLIT_TARGET_PREFIX):
+        return _map_split_candidate(candidate, target, workspace=workspace)
+
     return TargetMappingResult(
         "no_target",
         f"no deterministic mapper for abstract target {target!r}",
         target_path=target,
+    )
+
+
+def _map_split_candidate(
+    candidate: Any, target: str, *, workspace: str | Path
+) -> TargetMappingResult:
+    """Map an oversized-module ``split:<rel>`` signal to its concrete .py file.
+
+    A split target becomes *actionable* only when the underlying module really
+    exists, is a low-risk editable ``.py`` file, and is not a critical/denied
+    path. Critical modules (e.g. ``core/loop.py``) still resolve here so the
+    ranking is honest, but the producer's Manager critical-gate blocks the
+    actual edit — mirroring the report-only contract for the riskiest files.
+    """
+    rel = target[len(SPLIT_TARGET_PREFIX):].strip().replace("\\", "/")
+    if not rel:
+        return TargetMappingResult(
+            "no_target", "split target has no module path", target_path=target
+        )
+    if not rel.endswith(".py"):
+        return TargetMappingResult(
+            "no_target",
+            f"split target {rel!r} is not a Python module",
+            target_path=target,
+        )
+    if not _patch_target_is_low_risk(rel):
+        return TargetMappingResult(
+            "no_target",
+            f"split target {rel!r} is not a low-risk editable file",
+            target_path=target,
+        )
+    read = _read_project_text(workspace, rel)
+    if read.status != "known":
+        return TargetMappingResult(
+            "no_target",
+            f"split target {rel!r} does not exist ({read.status})",
+            target_path=target,
+        )
+    mapped = _copy_candidate(candidate, target_path=rel, mapping_rule="split_module")
+    return TargetMappingResult(
+        "mapped",
+        f"oversized module split resolved to concrete file {rel!r}",
+        mapped,
+        target_path=rel,
+        evidence_ref=mapped.evidence_ref,
+        mapping_rule="split_module",
     )
 
 
