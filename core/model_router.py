@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from core.llm import LLM
 from core.model_usage import (
@@ -342,17 +342,43 @@ class UsageTrackedLLM:
         route: ModelRoute,
         cost_tier: str,
         ledger: ModelUsageLedger,
+        llm_factory: Callable[[str | None, str | None], Any] | None = None,
     ):
         self._llm = llm
         self.role = role
         self.route = route
         self.cost_tier = cost_tier
         self.ledger = ledger
+        # Factory used to rebuild the client on another provider during
+        # failover. When ``None`` (e.g. no ledger / static LLM paths) failover
+        # is disabled and behaviour is unchanged.
+        self._llm_factory = llm_factory
         self.provider = getattr(llm, "provider", route.provider)
         self.model = getattr(llm, "model", route.model)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._llm, name)
+
+    def _failover_llm(self, exc: BaseException, tried: Sequence[str]) -> Any | None:
+        """Return a replacement LLM on another credentialed provider, or None.
+
+        Only fires when failover is enabled, a factory is available, the error
+        looks like a key/quota/auth problem, and another credentialed provider
+        exists that hasn't been tried yet.
+        """
+        if self._llm_factory is None or not _provider_failover_enabled():
+            return None
+        if not _is_switch_key_error(exc):
+            return None
+        nxt = _next_failover_provider(tried)
+        if nxt is None:
+            return None
+        try:
+            # Drop the model so the substitute provider's own default is used
+            # instead of a model name that belongs to the original provider.
+            return self._llm_factory(nxt, None)
+        except Exception:  # pragma: no cover - defensive
+            return None
 
     def complete(
         self,
@@ -361,73 +387,84 @@ class UsageTrackedLLM:
         max_tokens: int = 2048,
         temperature: float = 0.7,
     ) -> str:
-        provider = str(getattr(self._llm, "provider", self.route.provider) or "")
-        model = str(getattr(self._llm, "model", self.route.model) or "")
-        self.ledger.assert_can_start(
-            role=self.role,
-            provider=provider,
-            model=model,
-            system=system,
-            user=user,
-            max_output_tokens=max_tokens,
-            cost_tier=self.cost_tier,
-        )
-        self.ledger.log_start(
-            role=self.role,
-            provider=provider,
-            model=model,
-            route_reason=self.route.reason,
-            cost_tier=self.cost_tier,
-        )
-        started_at = utc_now_iso()
-        started = time.perf_counter()
-        try:
-            output = self._llm.complete(
+        route_reason = self.route.reason
+        tried: list[str] = []
+        while True:
+            provider = str(getattr(self._llm, "provider", self.route.provider) or "")
+            model = str(getattr(self._llm, "model", self.route.model) or "")
+            self.ledger.assert_can_start(
+                role=self.role,
+                provider=provider,
+                model=model,
                 system=system,
                 user=user,
-                max_tokens=max_tokens,
-                temperature=temperature,
+                max_output_tokens=max_tokens,
+                cost_tier=self.cost_tier,
             )
-        except Exception as exc:
+            self.ledger.log_start(
+                role=self.role,
+                provider=provider,
+                model=model,
+                route_reason=route_reason,
+                cost_tier=self.cost_tier,
+            )
+            started_at = utc_now_iso()
+            started = time.perf_counter()
+            try:
+                output = self._llm.complete(
+                    system=system,
+                    user=user,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+            except Exception as exc:
+                completed_at = utc_now_iso()
+                self.ledger.record(
+                    role=self.role,
+                    provider=provider,
+                    model=model,
+                    route_reason=route_reason,
+                    cost_tier=self.cost_tier,
+                    status="error",
+                    input_tokens=0,
+                    output_tokens=0,
+                    estimated=True,
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                tried.append(provider)
+                replacement = self._failover_llm(exc, tried)
+                if replacement is not None:
+                    self._llm = replacement
+                    self.provider = getattr(replacement, "provider", None) or ""
+                    self.model = getattr(replacement, "model", None) or ""
+                    route_reason = f"provider_failover:{provider}->{self.provider}"
+                    continue
+                raise
             completed_at = utc_now_iso()
+            input_tokens, output_tokens, estimated = usage_from_llm_or_estimate(
+                self._llm,
+                system=system,
+                user=user,
+                output=output,
+            )
             self.ledger.record(
                 role=self.role,
                 provider=provider,
                 model=model,
-                route_reason=self.route.reason,
+                route_reason=route_reason,
                 cost_tier=self.cost_tier,
-                status="error",
-                input_tokens=0,
-                output_tokens=0,
-                estimated=True,
+                status="success",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                estimated=estimated,
                 started_at=started_at,
                 completed_at=completed_at,
                 duration_ms=int((time.perf_counter() - started) * 1000),
-                error=f"{type(exc).__name__}: {exc}",
             )
-            raise
-        completed_at = utc_now_iso()
-        input_tokens, output_tokens, estimated = usage_from_llm_or_estimate(
-            self._llm,
-            system=system,
-            user=user,
-            output=output,
-        )
-        self.ledger.record(
-            role=self.role,
-            provider=provider,
-            model=model,
-            route_reason=self.route.reason,
-            cost_tier=self.cost_tier,
-            status="success",
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            estimated=estimated,
-            started_at=started_at,
-            completed_at=completed_at,
-            duration_ms=int((time.perf_counter() - started) * 1000),
-        )
-        return output
+            return output
 
 
 def _clean_env(name: str) -> str | None:
@@ -473,6 +510,96 @@ def _first_credentialed_provider() -> str | None:
         if _provider_has_credentials(provider):
             return provider
     return None
+
+
+# --- Provider/key failover ---------------------------------------------------
+#
+# When a routed provider's key runs out of money, hits its rate limit, or is
+# rejected for auth reasons *mid-task*, we transparently switch to the next
+# credentialed provider and retry the same call rather than crashing. This is
+# distinct from ``_llm_factory`` (which heals an un-credentialed choice *before*
+# the first call); failover reacts to live errors *during* a call.
+
+# HTTP status codes that indicate the current key can't serve the request but a
+# different key/provider might: unauthorized, payment required, forbidden,
+# too-many-requests.
+_SWITCH_KEY_STATUS: frozenset[int] = frozenset({401, 402, 403, 429})
+
+# Exception *class name* fragments (lower-cased) raised by provider SDKs that
+# mean "this key is out of quota / not authorised". Duck-typed so we never have
+# to import the openai / anthropic SDKs here.
+_SWITCH_KEY_NAME_MARKERS: tuple[str, ...] = (
+    "ratelimit",
+    "authentication",
+    "permissiondenied",
+    "insufficientquota",
+)
+
+# Error *message* fragments (lower-cased) that indicate a switch-key condition.
+_SWITCH_KEY_TEXT_MARKERS: tuple[str, ...] = (
+    "insufficient_quota",
+    "insufficient quota",
+    "exceeded your current quota",
+    "rate limit",
+    "rate_limit",
+    "ratelimit",
+    "quota",
+    "invalid api key",
+    "incorrect api key",
+    "invalid_api_key",
+    "authentication",
+    "unauthorized",
+    "permission denied",
+    "billing",
+    "payment required",
+    "credit balance",
+    "insufficient funds",
+)
+
+
+def _is_switch_key_error(exc: BaseException) -> bool:
+    """True when *exc* looks like "this key can't pay for / isn't allowed to
+    serve this request" — i.e. a *different* credentialed provider might succeed.
+
+    Deliberately conservative: content-policy, validation and generic
+    network/timeout errors do NOT match, so failover only fires for genuine
+    key/quota/auth problems.
+    """
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(exc, "status", None)
+    try:
+        if isinstance(status, int) and status in _SWITCH_KEY_STATUS:
+            return True
+    except Exception:  # pragma: no cover - defensive
+        pass
+    name = type(exc).__name__.lower()
+    if any(marker in name for marker in _SWITCH_KEY_NAME_MARKERS):
+        return True
+    text = str(exc).lower()
+    return any(marker in text for marker in _SWITCH_KEY_TEXT_MARKERS)
+
+
+def _next_failover_provider(tried: Sequence[str]) -> str | None:
+    """Next credentialed provider (by preference order) not already attempted."""
+    tried_lower = {str(t).strip().lower() for t in tried}
+    for provider in _PROVIDER_FALLBACK_ORDER:
+        if provider in tried_lower:
+            continue
+        if _provider_has_credentials(provider):
+            return provider
+    return None
+
+
+def _provider_failover_enabled() -> bool:
+    """Whether live provider/key failover is active. Defaults to ON.
+
+    Set ``AGENT_PROVIDER_FAILOVER=0`` (or false/no/off) to disable.
+    """
+    value = _clean_env("AGENT_PROVIDER_FAILOVER")
+    if value is None:
+        return True
+    return value.lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _default_provider_name(provider: str | None) -> str:
@@ -841,6 +968,7 @@ class ModelRouter:
             route=route,
             cost_tier=self._cost_tier_for_route(route),
             ledger=self.usage_ledger,
+            llm_factory=self._llm_factory,
         )
         self._tracked_cache[role_key] = tracked
         return tracked
@@ -876,6 +1004,7 @@ class ModelRouter:
             route=stamped,
             cost_tier=self._cost_tier_for_route(route),
             ledger=self.usage_ledger,
+            llm_factory=self._llm_factory,
         )
 
     def _resolve_tier_provider(
@@ -1069,6 +1198,7 @@ class ModelRouter:
             route=tier_route,
             cost_tier=tier.value,
             ledger=self.usage_ledger,
+            llm_factory=self._llm_factory,
         )
 
     def routing_summary(
