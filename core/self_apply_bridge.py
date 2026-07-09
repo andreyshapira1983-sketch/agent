@@ -30,6 +30,7 @@ inbox item executed; transient refusals (``budget_kill_switch`` /
 """
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from typing import Any, Callable
 
@@ -100,21 +101,39 @@ def _normalize_files(files: Any) -> list[dict]:
         path = entry.get("path")
         if not isinstance(path, str) or not path.strip():
             raise InvalidProposalError("file change missing a non-empty 'path'")
-        if "content" not in entry:
-            # Explicitly reject diff-only payloads: the lane overwrites whole
-            # files, so it needs the full post-image, never a unified diff.
-            if "diff" in entry:
+        # A file change is SOURCE CODE the lane writes verbatim, but the durable
+        # inbox runs every payload through the DLP/secret redactor
+        # (approval_inbox._redact_durable_payload). That would corrupt code that
+        # legitimately contains example PII/secret-shaped text (e.g. an email in
+        # a test fixture). We therefore keep a redaction-inert base64 copy
+        # (``content_b64``) and treat it as authoritative when present, so the
+        # applied bytes always match what was proposed.
+        content: str | None = None
+        b64 = entry.get("content_b64")
+        if isinstance(b64, str) and b64.strip():
+            try:
+                content = base64.b64decode(b64.encode("ascii")).decode("utf-8")
+            except Exception:  # noqa: BLE001 — fall back to the plaintext field
+                content = None
+        if content is None:
+            if "content" not in entry:
+                # Explicitly reject diff-only payloads: the lane overwrites whole
+                # files, so it needs the full post-image, never a unified diff.
+                if "diff" in entry:
+                    raise InvalidProposalError(
+                        f"diff-only change for {path!r} is not supported; full "
+                        "'content' is required"
+                    )
                 raise InvalidProposalError(
-                    f"diff-only change for {path!r} is not supported; full "
-                    "'content' is required"
+                    f"file change for {path!r} missing 'content'"
                 )
-            raise InvalidProposalError(f"file change for {path!r} missing 'content'")
-        content = entry.get("content")
-        if not isinstance(content, str):
-            raise InvalidProposalError(
-                f"file change for {path!r} must carry string 'content'"
-            )
-        out.append({"path": path, "content": content})
+            content = entry.get("content")
+            if not isinstance(content, str):
+                raise InvalidProposalError(
+                    f"file change for {path!r} must carry string 'content'"
+                )
+        encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+        out.append({"path": path, "content": content, "content_b64": encoded})
     return out
 
 
