@@ -20,12 +20,14 @@ from typing import Any, Mapping
 from core.backlog_signals import (
     ARCHITECTURE_AUDIT_SOURCE,
     CODE_TODO_SOURCE,
+    OVERSIZED_MODULE_SOURCE,
     SignalRecord,
     ValuePenalties,
     anatomy_candidates,
     architecture_audit_candidates,
     code_todo_candidates,
     open_tech_debt,
+    oversized_module_candidates,
     self_build_docs_candidate,
     value_review_penalties,
 )
@@ -43,6 +45,9 @@ _SOURCE_BASE_SCORE = {
     # a concrete, line-anchored TODO is more actionable than an advisory heading.
     CODE_TODO_SOURCE: 1.1,
     "anatomy": 1.0,
+    # Oversized-module advisories sit at the very bottom: they are report-only
+    # (abstract ``split:`` target, no mapper) and never displace actionable work.
+    OVERSIZED_MODULE_SOURCE: 0.9,
 }
 _SOURCE_CONFIDENCE = {
     "tech_debt": 0.7,
@@ -50,6 +55,7 @@ _SOURCE_CONFIDENCE = {
     ARCHITECTURE_AUDIT_SOURCE: 0.55,
     CODE_TODO_SOURCE: 0.5,
     "anatomy": 0.5,
+    OVERSIZED_MODULE_SOURCE: 0.4,
 }
 _PENALTY_SCORE = 1.0
 
@@ -110,6 +116,7 @@ def _finalize(
             continue  # a human said this target was the wrong one
         base = _SOURCE_BASE_SCORE.get(rec.signal_source, 0.0)
         score = base - (_PENALTY_SCORE if rec.target_path in penalties.penalized else 0.0)
+        score += getattr(rec, "rank_hint", 0.0)
         candidates.append(
             BacklogCandidate(
                 target_path=rec.target_path,
@@ -145,6 +152,8 @@ def build_backlog(
     architecture_audit_text: str = "",
     code_todo_records: list[SignalRecord] | None = None,
     code_todo_text: str = "",
+    oversized_records: list[SignalRecord] | None = None,
+    oversized_text: str = "",
     include_self_build_docs: bool = True,
     penalties: ValuePenalties | None = None,
 ) -> list[BacklogCandidate]:
@@ -159,6 +168,7 @@ def build_backlog(
         + anatomy_candidates(anatomy_text)
         + list(architecture_audit_records or [])
         + list(code_todo_records or [])
+        + list(oversized_records or [])
     )
     sources = {
         "tech_debt": tech_debt_text,
@@ -166,6 +176,7 @@ def build_backlog(
         "anatomy": anatomy_text,
         ARCHITECTURE_AUDIT_SOURCE: architecture_audit_text,
         CODE_TODO_SOURCE: code_todo_text,
+        OVERSIZED_MODULE_SOURCE: oversized_text,
     }
     return _finalize(records, sources, penalties)
 
@@ -244,6 +255,36 @@ def _scan_code_todos(root: Path) -> tuple[list[SignalRecord], str]:
     return code_todo_candidates(files)
 
 
+# Directories scanned for oversized modules. Kept to the product code homes
+# (not ``tests``): splitting large test files is not the modularity goal.
+_OVERSIZED_SCAN_DIRS: tuple[str, ...] = ("core", "cli", "tools")
+
+
+def _scan_oversized_modules(root: Path) -> tuple[list[SignalRecord], str]:
+    """Read the agent's own ``*.py`` modules and flag oversized ones as
+    report-only backlog advisories. Read-only, deterministic (sorted), and fully
+    best-effort: an unreadable file degrades to empty rather than raising.
+    """
+    files: list[tuple[str, str]] = []
+    for name in _OVERSIZED_SCAN_DIRS:
+        base = root / name
+        if not base.is_dir():
+            continue
+        try:
+            paths = sorted(base.rglob("*.py"))
+        except OSError:
+            continue
+        for path in paths:
+            if "__pycache__" in path.parts:
+                continue
+            try:
+                rel = path.relative_to(root).as_posix()
+            except ValueError:
+                continue
+            files.append((rel, _read_text(path)))
+    return oversized_module_candidates(files)
+
+
 def load_backlog(
     workspace: str | Path,
     *,
@@ -266,6 +307,7 @@ def load_backlog(
     include_self_build_docs = not _path_exists(root / "docs" / "self_build.md")
     audit_records, audit_text = _load_architecture_audit(root)
     code_todo_records, code_todo_text = _scan_code_todos(root)
+    oversized_records, oversized_text = _scan_oversized_modules(root)
     penalties = None
     if value_reviews is not None:
         penalties = value_review_penalties(value_reviews, item_target_map)
@@ -277,6 +319,8 @@ def load_backlog(
         architecture_audit_text=audit_text,
         code_todo_records=code_todo_records,
         code_todo_text=code_todo_text,
+        oversized_records=oversized_records,
+        oversized_text=oversized_text,
         include_self_build_docs=include_self_build_docs,
         penalties=penalties,
     )
