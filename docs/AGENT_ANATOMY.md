@@ -19,6 +19,7 @@ _Operator-facing I/O, intent routing, output shaping._
 | Module | Purpose |
 | ------ | ------- |
 | `core/operator_intent` | Conversational routing for operator-control requests. |
+| `core/operator_intent_patterns` | Extracted from `core/operator_intent` by autonomous self-build module split. |
 | `core/output_policy` | Ranker-to-output policy. |
 | `core/user_profile` | User Profile — Layer 4 (User Mental Model). |
 | `core/truth_hype_filter` | Truth/Hype Filter — the first LEARNING antibody (правда vs шумиха). |
