@@ -26,6 +26,7 @@ Design constraints mirrored from the self-build producer:
 from __future__ import annotations
 
 import ast
+import base64
 import hashlib
 import re
 from pathlib import Path
@@ -58,6 +59,24 @@ TASK_PRODUCER_ORIGIN = "subagent_self_task_producer"
 # ``# TODO``/``# FIXME``/``# XXX`` comments. Broader sources (TECH_DEBT.md,
 # architecture audit) can be added later once the loop is proven.
 _CODE_TODO_SOURCE = "code_todo"
+
+
+def decode_frozen_test(payload: dict[str, Any]) -> str:
+    """Return the exact frozen acceptance test from a Stage-A approval payload.
+
+    Prefers the redaction-inert ``test_content_b64`` blob (the byte-for-byte
+    copy) and falls back to the human-readable ``test_content`` field for
+    legacy items created before base64 preservation existed. Stage B MUST use
+    this so it never feeds a redaction-mangled test to the builder/lane.
+    """
+    b64 = payload.get("test_content_b64")
+    if isinstance(b64, str) and b64.strip():
+        try:
+            return base64.b64decode(b64.encode("ascii")).decode("utf-8")
+        except Exception:  # noqa: BLE001 — fall back to the plaintext preview
+            pass
+    raw = payload.get("test_content")
+    return raw if isinstance(raw, str) else ""
 
 
 def _default_task_selector(workspace: str | Path) -> Callable[[], Any]:
@@ -238,6 +257,8 @@ def _task_critic_review(
             veto.append(f"test does not parse: {exc.msg}")
         if "def test" not in test_content:
             veto.append("test content defines no test function")
+        if "[REDACTED:" in test_content:
+            veto.append("test content contains redaction markers")
         if impl_path and not _test_references_module(test_content, impl_path):
             veto.append("test does not reference the implementation module")
         if not _has_meaningful_assert(test_content):
@@ -269,12 +290,22 @@ def _task_reporter_publish(
     impl_path = build["impl_path"]
     test_path = build["test_path"]
     test_content = build["test_content"]
+    # The durable inbox runs every payload through the DLP/secret redactor
+    # (approval_inbox._redact_durable_payload). A frozen acceptance test is
+    # SOURCE CODE that must survive byte-for-byte — but it legitimately contains
+    # example PII (e.g. "alice@mail.ru") that the redactor would scrub, breaking
+    # the test. We therefore persist an exact base64 copy (redaction-inert: no
+    # "@"/email/token patterns) alongside the human-readable preview. Stage B
+    # reads the exact test via ``decode_frozen_test``; the raw ``test_content``
+    # field is only a (possibly redacted) preview for humans.
+    test_content_b64 = base64.b64encode(test_content.encode("utf-8")).decode("ascii")
     payload = {
         "task_title": build.get("task_title") or "",
         "task_summary": build.get("task_summary") or "",
         "impl_path": impl_path,
         "test_path": test_path,
         "test_content": test_content,
+        "test_content_b64": test_content_b64,
         "evidence": list(evidence),
         "evidence_ref": evidence_ref,
         "confidence": float(build.get("confidence") or 0.0),
