@@ -1995,10 +1995,27 @@ class AgentLoop:
         # this is the structural enforcement paired with it.
         if self.last_verification is not None:
             try:
+                _ranking = self.last_source_ranking
+                # Evidence is only "expected" for factual / realtime questions.
+                # A pure reasoning or design question produces an empty evidence
+                # chain and carries no realtime intent; suppressing it would
+                # throw away a legitimate answer (even a costly Opus one).
+                # Default to expecting evidence whenever we cannot tell, so the
+                # gate stays fully in force for factual and realtime queries.
+                _chain_empty = bool(
+                    getattr(self.last_verification, "chain_was_empty", False)
+                )
+                _realtime = (
+                    bool(getattr(_ranking, "realtime_required", True))
+                    if _ranking is not None
+                    else True
+                )
+                _evidence_expected = not (_chain_empty and not _realtime)
                 _le = evaluate_low_evidence_policy(
                     answer=answer,
                     report=self.last_verification,
                     question=user_question,
+                    evidence_expected=_evidence_expected,
                 )
                 if _le.triggered:
                     self.log.log(

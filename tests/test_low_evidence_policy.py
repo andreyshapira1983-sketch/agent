@@ -147,6 +147,49 @@ class TestLowEvidenceTrigger:
         assert result.triggered is False
         assert result.reason == "unverified_mass_below_floor"
 
+    def test_not_triggered_when_evidence_not_expected(self):
+        # A design / pure-reasoning answer: would normally trigger the
+        # truncation hammer (0 verified, high unverified mass), but because
+        # the task never needed external evidence the gate is bypassed and
+        # the full answer survives.
+        report = _Report(
+            total_chunks=23,
+            verified_chunks=0,
+            unverified_chunks=6,
+            chunks=tuple(
+                _Chunk(text=f"design point {i}.", verdict="self_declared")
+                for i in range(23)
+            ),
+        )
+        result = evaluate_low_evidence_policy(
+            answer=_SAMPLE_LONG_ANSWER,
+            report=report,
+            question="спроектируй архитектуру системы очередей",
+            evidence_expected=False,
+        )
+        assert result.triggered is False
+        assert result.reason == "no_evidence_expected"
+        assert result.answer == _SAMPLE_LONG_ANSWER
+
+    def test_still_triggered_when_evidence_expected_default(self):
+        # Same distribution, but evidence WAS expected (factual/realtime):
+        # the gate must still fire, so the default protects factual answers.
+        report = _Report(
+            total_chunks=23,
+            verified_chunks=0,
+            unverified_chunks=6,
+            chunks=tuple(
+                _Chunk(text=f"claim {i}.", verdict="unverified")
+                for i in range(23)
+            ),
+        )
+        result = evaluate_low_evidence_policy(
+            answer=_SAMPLE_LONG_ANSWER,
+            report=report,
+            question="what is the dollar rate today?",
+        )
+        assert result.triggered is True
+
     def test_topic_supported_counts_as_unverified_mass(self):
         # 0 verified + 8 topic-only claims should trigger because
         # topic_supported is part of the unverified_total.

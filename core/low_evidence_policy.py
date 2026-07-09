@@ -182,6 +182,7 @@ def evaluate_low_evidence_policy(
     min_total_chunks: int = _DEFAULT_MIN_TOTAL,
     max_verified_ratio: float = _DEFAULT_MAX_VERIFIED_RATIO,
     unverified_floor: int = _DEFAULT_UNVERIFIED_FLOOR,
+    evidence_expected: bool = True,
 ) -> LowEvidencePolicyResult:
     """Decide whether to truncate the answer because evidence is too thin.
 
@@ -219,6 +220,21 @@ def evaluate_low_evidence_policy(
         unverified + cited_unmatched + topic_supported + subagent_asserted
     )
     verified_ratio = (verified / total) if total > 0 else 0.0
+
+    if not evidence_expected:
+        # The task never needed external evidence (pure reasoning / design
+        # question with an empty evidence chain and no realtime intent).
+        # Truncating here would suppress a legitimate answer just because it
+        # has nothing to cite — the model's synthesis IS the deliverable.
+        # Factual / realtime questions keep the full gate (evidence_expected
+        # stays True for them).
+        return LowEvidencePolicyResult(
+            triggered=False, answer=answer,
+            verified_chunks=verified, total_chunks=total,
+            verified_ratio=verified_ratio,
+            unverified_total=unverified_total,
+            reason="no_evidence_expected",
+        )
 
     if total < min_total_chunks:
         return LowEvidencePolicyResult(
