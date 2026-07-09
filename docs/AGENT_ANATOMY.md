@@ -79,6 +79,8 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/knowledge_use_policy` | Contextual memory-use policy. |
 | `core/knowledge_pipeline` | Knowledge pipeline integration. |
 | `core/ingestion` | Controlled document/code ingestion. |
+| `core/ingestion_reports` | Extracted from `core/ingestion` by autonomous self-build module split. |
+| `core/ingestion_utils` | Extracted from `core/ingestion` by autonomous self-build module split. |
 | `core/structured_facts` | Structured fact extraction for tool outputs. |
 | `core/evidence` | MVP-14.1 — Evidence + Provenance model. |
 | `core/evidence_budget` | Evidence Budget — caps context sent to the synthesizer LLM. |
