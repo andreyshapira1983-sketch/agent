@@ -23,8 +23,20 @@ from core.backlog_target_mapper import map_backlog_candidate
 from core.self_build_producer import (
     _builder_generate,
     _critic_review,
+    _new_core_module_stems,
     _normalize_builder_files,
+    _sync_anatomy_index,
     produce_self_apply_proposal,
+)
+
+
+_ANATOMY_DOC = (
+    "# Agent anatomy\n\n"
+    "## Module index\n\n"
+    "| Module | Role |\n"
+    "| --- | --- |\n"
+    "| `core/loop` | main loop. |\n"
+    "| `core/sample_big` | sample engine. |\n"
 )
 
 
@@ -290,3 +302,118 @@ def test_split_critical_target_is_refused(workspace: Path):
     assert report.status == "no_patch"
     assert llm.calls == []  # refused before any builder work
     assert inbox.list() == []
+
+
+# ── anatomy-index auto-sync ──────────────────────────────────────────────────
+
+
+def test_new_core_module_stems_lists_only_core_py_files():
+    files = [
+        {"path": "core/x.py", "content": ""},
+        {"path": "core/x_helpers.py", "content": ""},
+        {"path": "docs/AGENT_ANATOMY.md", "content": ""},
+        {"path": "cli/thing.py", "content": ""},
+        {"path": "core/sub/pkg.py", "content": ""},
+    ]
+    assert _new_core_module_stems(files) == ["x", "x_helpers"]
+
+
+def test_sync_anatomy_index_appends_row_for_new_module():
+    build = {
+        "content": "wrapper\n",
+        "files": [
+            {"path": "core/sample_big.py", "content": "wrapper\n"},
+            {"path": "core/sample_big_helpers.py", "content": "def a():\n    return 1\n"},
+        ],
+    }
+    reader = lambda p: _ANATOMY_DOC if p == "docs/AGENT_ANATOMY.md" else None
+    _sync_anatomy_index(build, "core/sample_big.py", reader)
+    doc = next(
+        f["content"] for f in build["files"] if f["path"] == "docs/AGENT_ANATOMY.md"
+    )
+    import re
+
+    documented = set(re.findall(r"core/([a-zA-Z0-9_]+)", doc))
+    # new module registered AND no existing rows dropped
+    assert "sample_big_helpers" in documented
+    assert {"loop", "sample_big"} <= documented
+
+
+def test_sync_anatomy_index_noop_when_already_documented():
+    doc = _ANATOMY_DOC + "| `core/sample_big_helpers` | already here. |\n"
+    build = {
+        "content": "wrapper\n",
+        "files": [
+            {"path": "core/sample_big.py", "content": "wrapper\n"},
+            {"path": "core/sample_big_helpers.py", "content": "x = 1\n"},
+        ],
+    }
+    reader = lambda p: doc if p == "docs/AGENT_ANATOMY.md" else None
+    _sync_anatomy_index(build, "core/sample_big.py", reader)
+    # no anatomy doc added to the proposal (already in sync)
+    assert all(f["path"] != "docs/AGENT_ANATOMY.md" for f in build["files"])
+
+
+def test_sync_anatomy_index_skips_when_doc_unavailable():
+    build = {
+        "content": "wrapper\n",
+        "files": [
+            {"path": "core/sample_big.py", "content": "wrapper\n"},
+            {"path": "core/sample_big_helpers.py", "content": "x = 1\n"},
+        ],
+    }
+    _sync_anatomy_index(build, "core/sample_big.py", lambda p: None)
+    assert all(f["path"] != "docs/AGENT_ANATOMY.md" for f in build["files"])
+
+
+def test_split_registers_new_core_module_in_anatomy_index_end_to_end(workspace: Path):
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    target_rel = "core/sample_big.py"
+    current = "def a():\n    return 1\n\n\ndef b():\n    return 2\n"
+    (workspace / target_rel).write_text(current, encoding="utf-8")
+
+    inbox = ApprovalInbox(path=None)
+    reply = json.dumps(
+        {
+            "files": [
+                {"path": target_rel, "content": "from core.sample_big_helpers import a, b\n"},
+                {
+                    "path": "core/sample_big_helpers.py",
+                    "content": "def a():\n    return 1\n\n\ndef b():\n    return 2\n",
+                },
+            ],
+            "test_paths": ["tests"],
+            "reason": "split oversized module into helpers",
+            "confidence": 0.9,
+        }
+    )
+    llm = FakeLLM([reply])
+
+    def reader(p: str):
+        if p == target_rel:
+            return current
+        if p == "docs/AGENT_ANATOMY.md":
+            return _ANATOMY_DOC
+        return None
+
+    report = produce_self_apply_proposal(
+        workspace=workspace,
+        inbox=inbox,
+        llm=llm,
+        vcs=FakeVCS(clean=True),
+        budget_snapshot=_headroom_budget(),
+        kill_switch=FakeKillSwitch(),
+        file_reader=reader,
+        grounded_selector=lambda: _candidate(f"split:{target_rel}"),
+    )
+
+    assert report.status == "proposed", report.reason
+    files = inbox.list()[0].payload["files"]
+    paths = sorted(f["path"] for f in files)
+    assert paths == [
+        "core/sample_big.py",
+        "core/sample_big_helpers.py",
+        "docs/AGENT_ANATOMY.md",
+    ]
+    doc = next(f["content"] for f in files if f["path"] == "docs/AGENT_ANATOMY.md")
+    assert "core/sample_big_helpers" in doc

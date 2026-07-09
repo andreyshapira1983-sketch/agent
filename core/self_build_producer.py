@@ -97,6 +97,11 @@ _MAX_CONTENT_BYTES = 60_000
 # enough headroom for real files while staying under _MAX_CONTENT_BYTES.
 _BUILDER_MAX_TOKENS = 16_000
 
+# The repo enforces (scripts/agent_anatomy_check.py) that every core/*.py module
+# is referenced as a ``core/<name>`` token in this index. A module split creates
+# new core modules, so the head keeps this doc in sync automatically.
+_ANATOMY_DOC_PATH = "docs/AGENT_ANATOMY.md"
+
 _DEFAULT_CONFIDENCE_THRESHOLD = 0.6
 
 # Lines/markers that betray a diff/patch instead of full file content. The
@@ -638,7 +643,9 @@ def _builder_generate(
             '"test_pattern": "<optional pytest -k pattern or null>", '
             '"reason": "<one sentence>", "confidence": <0..1>}. '
             "Exactly one file path must equal the target; the rest must be new "
-            "modules. Keep every file well under the size limit."
+            "modules. Keep every file well under the size limit. Do NOT modify "
+            "docs/AGENT_ANATOMY.md — the self-build head registers new core "
+            "modules in that index automatically."
         )
     else:
         system = (
@@ -784,6 +791,87 @@ def _critic_review(
             "rejected_files": rejected,
         },
     )
+
+
+def _new_core_module_stems(files: list[dict[str, Any]]) -> list[str]:
+    """Bare stems of every ``core/<name>.py`` file carried in the proposal."""
+    stems: list[str] = []
+    for entry in files:
+        path = str(entry.get("path") or "").replace("\\", "/").strip()
+        if path.startswith("core/") and path.endswith(".py"):
+            stem = path[len("core/"):-len(".py")]
+            if stem and "/" not in stem and stem != "__init__":
+                stems.append(stem)
+    return stems
+
+
+def _sync_anatomy_index(
+    build: dict[str, Any], target: str, reader: Callable[[str], str | None]
+) -> None:
+    """Keep ``docs/AGENT_ANATOMY.md`` in sync when the proposal adds NEW core modules.
+
+    The repo enforces (``scripts/agent_anatomy_check.py``) that every core/*.py
+    module is referenced as a ``core/<name>`` token in the anatomy index. A module
+    split introduces new core modules, so this deterministically appends one index
+    row per new module whose token is missing — teaching the self-build head to
+    maintain the invariant instead of hoping the LLM remembers it.
+
+    The base is ALWAYS the on-disk doc (never an LLM-supplied version), so no
+    existing rows can be dropped. Any LLM-provided anatomy doc is replaced by this
+    deterministic result. Best-effort: if the doc can't be read it is left alone
+    and the Critic/lane still catches the drift and rolls back.
+    """
+    files = build.get("files") or []
+    stems = _new_core_module_stems(files)
+    if not stems:
+        return
+    doc_text = reader(_ANATOMY_DOC_PATH) or ""
+    if not doc_text.strip():
+        return
+    documented = set(re.findall(r"core/([a-zA-Z0-9_]+)", doc_text))
+    target_stem = (
+        target[len("core/"):-len(".py")]
+        if target.startswith("core/") and target.endswith(".py")
+        else ""
+    )
+    # A split target may itself be new-ish or renamed; only add rows for modules
+    # not already documented, and never re-add the target's own row.
+    missing = [s for s in stems if s not in documented and s != target_stem]
+    if not missing:
+        return
+
+    def _row(stem: str) -> str:
+        parent = target_stem or "self-build"
+        return (
+            f"| `core/{stem}` | Extracted from `core/{parent}` by autonomous "
+            "self-build module split. |"
+        )
+
+    lines = doc_text.splitlines()
+    anchor = -1
+    last_row = -1
+    for i, line in enumerate(lines):
+        if re.search(r"\|\s*`core/[a-zA-Z0-9_]+`", line):
+            last_row = i
+            if target_stem and f"`core/{target_stem}`" in line:
+                anchor = i
+    insert_at = anchor if anchor >= 0 else last_row
+    new_rows = [_row(s) for s in missing]
+    if insert_at >= 0:
+        lines[insert_at + 1: insert_at + 1] = new_rows
+    else:
+        lines.extend([""] + new_rows)
+    new_doc = "\n".join(lines)
+    if doc_text.endswith("\n"):
+        new_doc += "\n"
+
+    for entry in files:
+        if str(entry.get("path") or "").replace("\\", "/").strip() == _ANATOMY_DOC_PATH:
+            entry["content"] = new_doc
+            break
+    else:
+        files.append({"path": _ANATOMY_DOC_PATH, "content": new_doc})
+    build["files"] = files
 
 
 def _reporter_publish(
@@ -974,6 +1062,15 @@ def produce_self_apply_proposal(
         llm, target, current_content, diagnosis, split_mode=split_mode
     )
     roles.append(builder)
+
+    # Self-build head keeps the anatomy index in sync: a split that adds new
+    # core/*.py modules must also register them in docs/AGENT_ANATOMY.md, or the
+    # repo's anatomy-sync test fails and the lane rolls the whole apply back.
+    if builder.decision == "built":
+        try:
+            _sync_anatomy_index(builder.data, target, reader)
+        except Exception:  # noqa: BLE001 — doc sync must never break the producer
+            pass
 
     # ── Critic ──────────────────────────────────────────────────────────────
     critic = _critic_review(
