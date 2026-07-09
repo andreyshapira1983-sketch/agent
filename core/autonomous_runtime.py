@@ -34,7 +34,7 @@ from core.actuation_gateway import GatewayPath, gateway_path_from_receipt
 from core.budget_kill_switch import BudgetKillSwitch, default_path
 from core.safe_vcs import SafeVCS
 from core.self_build_producer import produce_self_apply_proposal
-from core.self_build_memory import record_self_build_episode
+from core.self_build_memory import record_self_build_episode, recent_self_build_lessons
 from core.clarification_gate import clarification_for_replan_exhausted
 from core.gateway_consult import budget_ledger_snapshot, readiness_blockers
 
@@ -1268,6 +1268,9 @@ class AutonomousRuntime:
                 vcs=SafeVCS(workspace=self.workspace),
                 budget_snapshot=budget_snapshot,
                 kill_switch=kill_state,
+                lessons_provider=lambda target: recent_self_build_lessons(
+                    agent, target
+                ),
             )
             result = report.to_dict()
             self._log(

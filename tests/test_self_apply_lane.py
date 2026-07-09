@@ -315,6 +315,35 @@ def test_failing_targeted_tests_trigger_rollback(repo: Path):
     assert "self-apply/" not in branches
 
 
+def test_rollback_reason_names_failing_tests_and_error(repo: Path):
+    # A failing targeted run that carries the same shape the real runner emits:
+    # failing test node ids plus an ImportError left behind by a bad split.
+    detailed_fail = {
+        "exit_code": 1, "timed_out": False, "failed": 0, "errors": 11, "passed": 0,
+        "failed_tests": ["tests/test_smart_memory.py::test_a"],
+        "stdout_tail": (
+            "tests/test_smart_memory.py:22: in <module>\n"
+            "E   ImportError: cannot import name '_ToolRun' from "
+            "'core.self_repair_types'\n"
+        ),
+        "stderr_tail": "",
+    }
+    vcs = SafeVCS(workspace=repo)
+    runner = FakeRunner([detailed_fail])
+
+    report = run_self_apply_lane(
+        _proposal(content="x = 42\n"), workspace=repo, vcs=vcs,
+        test_runner=runner, budget_snapshot=_snapshot(),
+    )
+
+    assert report.status == "rolled_back"
+    # The coarse prefix stays for compatibility, but the WHY is now appended.
+    assert report.reason.startswith("targeted tests failed")
+    assert "test_smart_memory" in report.reason
+    assert "ImportError" in report.reason
+    assert "_ToolRun" in report.reason
+
+
 def test_failing_full_suite_triggers_rollback(repo: Path):
     vcs = SafeVCS(workspace=repo)
     runner = FakeRunner([_pass(), _fail()])  # targeted green, full red
