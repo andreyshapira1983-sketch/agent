@@ -13,14 +13,13 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from core.approval_inbox import ApprovalInbox
+from core.approval_inbox import ApprovalInbox, DEFAULT_APPROVAL_INBOX_PATH
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
 
 if TYPE_CHECKING:
     from core.loop import AgentLoop
 
 
-DEFAULT_APPROVAL_INBOX_PATH = Path("data") / "approval_inbox.jsonl"
 DEFAULT_ALERT_ACK_PATH = Path("data") / "alert_acknowledgements.jsonl"
 
 
