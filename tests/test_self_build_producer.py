@@ -692,6 +692,52 @@ def test_grounded_candidate_used_without_inventing_diagnosis(workspace: Path):
     assert not any("Manager" in c["system"] for c in llm.calls)
 
 
+def test_lessons_provider_warns_builder_with_past_failures(workspace: Path):
+    inbox = ApprovalInbox(path=None)
+    candidate = _Candidate(_TARGET, "grounded: split it", "TECH_DEBT.md:7")
+    llm = FakeLLM([_builder_ok()])
+    seen_targets: list[str] = []
+
+    def lessons_provider(target: str) -> list[str]:
+        seen_targets.append(target)
+        return ["self-apply rolled_back: ImportError: cannot import name '_ToolRun'"]
+
+    report = _produce(
+        workspace,
+        llm=llm,
+        inbox=inbox,
+        grounded_selector=lambda: candidate,
+        lessons_provider=lessons_provider,
+    )
+
+    assert report.status == "proposed"
+    # The provider was consulted for the exact selected target.
+    assert seen_targets == [_TARGET]
+    # The past-failure lesson reached the Builder's prompt so it can avoid it.
+    builder_calls = [c for c in llm.calls if "Builder" in c["system"]]
+    assert builder_calls, "builder must have been prompted"
+    assert "_ToolRun" in builder_calls[0]["user"]
+
+
+def test_lessons_provider_failure_never_breaks_producer(workspace: Path):
+    inbox = ApprovalInbox(path=None)
+    candidate = _Candidate(_TARGET, "grounded: split it", "TECH_DEBT.md:7")
+    llm = FakeLLM([_builder_ok()])
+
+    def boom(_target: str) -> list[str]:
+        raise RuntimeError("memory unavailable")
+
+    report = _produce(
+        workspace,
+        llm=llm,
+        inbox=inbox,
+        grounded_selector=lambda: candidate,
+        lessons_provider=boom,
+    )
+    # A recall failure is swallowed; the run proceeds exactly as before.
+    assert report.status == "proposed"
+
+
 def test_grounded_td_011_012_maps_to_concrete_target_without_manager_llm(
     workspace: Path,
 ):

@@ -134,3 +134,55 @@ def test_record_swallows_store_errors() -> None:
     # Journaling must never break the operator command.
     assert record_self_build_episode(agent, kind="self-apply-run",
                                      result={"status": "rolled_back"}) is False
+
+
+# ── recent_self_build_lessons (recall past failures before a new attempt) ──────
+
+
+class _FakeEpisode:
+    def __init__(self, summary: str) -> None:
+        self.summary = summary
+
+
+class _RecallStore:
+    def __init__(self, episodes) -> None:
+        self._episodes = list(episodes)
+        self.queried_tags = None
+
+    def search_by_tags(self, tags, *, limit: int = 5):
+        self.queried_tags = list(tags)
+        return self._episodes[:limit]
+
+
+def test_recent_lessons_returns_past_failure_summaries() -> None:
+    from cli.self_build_memory import recent_self_build_lessons
+
+    store = _RecallStore([
+        _FakeEpisode("self-apply rolled_back: targeted tests failed: "
+                     "ImportError: cannot import name '_ToolRun'"),
+    ])
+    agent = _FakeAgent(store)
+    lessons = recent_self_build_lessons(agent, "core/self_repair.py")
+    assert len(lessons) == 1
+    assert "_ToolRun" in lessons[0]
+    # Query is scoped to failed self-build lessons for the exact target.
+    assert "self-build" in store.queried_tags
+    assert "failed" in store.queried_tags
+    assert "core/self_repair.py" in store.queried_tags
+
+
+def test_recent_lessons_is_empty_without_store_or_target() -> None:
+    from cli.self_build_memory import recent_self_build_lessons
+
+    assert recent_self_build_lessons(_FakeAgent(None), "core/x.py") == []
+    assert recent_self_build_lessons(_FakeAgent(_RecallStore([])), "") == []
+
+
+def test_recent_lessons_swallows_store_errors() -> None:
+    from cli.self_build_memory import recent_self_build_lessons
+
+    class _Boom:
+        def search_by_tags(self, tags, *, limit: int = 5):  # noqa: ARG002
+            raise RuntimeError("disk full")
+
+    assert recent_self_build_lessons(_FakeAgent(_Boom()), "core/x.py") == []

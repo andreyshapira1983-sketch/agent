@@ -109,3 +109,29 @@ def record_self_build_episode(agent: Any, *, kind: str, result: dict[str, Any]) 
         return True
     except Exception:  # noqa: BLE001 — journaling must never break the caller
         return False
+
+
+def recent_self_build_lessons(agent: Any, target: str, *, limit: int = 3) -> list[str]:
+    """Return short summaries of PAST FAILED self-build attempts for ``target``.
+
+    Reads the agent's episodic memory for lesson episodes tagged with the target
+    path AND a failed outcome, newest first, so the Builder can be warned not to
+    repeat a mistake it already made on this exact file (e.g. "left a dangling
+    import to a class it forgot to move"). Best-effort: returns ``[]`` when memory
+    is unavailable or empty, and never raises.
+    """
+    try:
+        store = getattr(agent, "episodic_store", None)
+        if store is None or not target:
+            return []
+        episodes = store.search_by_tags(
+            ["self-build", "failed", target], limit=limit
+        )
+        lessons: list[str] = []
+        for episode in episodes:
+            summary = str(getattr(episode, "summary", "") or "").strip()
+            if summary:
+                lessons.append(summary[:300])
+        return lessons
+    except Exception:  # noqa: BLE001 — lesson recall must never break the caller
+        return []
