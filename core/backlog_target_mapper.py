@@ -31,12 +31,12 @@ SPLIT_TARGET_PREFIX = "split:"
 # Upper line budget for a single-pass (one model reply) module split. The Builder
 # must emit the shrunk target plus all new sibling modules in one JSON reply,
 # which is capped by the provider's output-token ceiling (~16k for the default
-# model). NOTE: this is a proxy for "fits in one model reply", NOT a hard
-# guarantee — files well above ~1500 lines will usually TRUNCATE in the Builder's
-# reply and fail (safe rollback), because the token ceiling, not this number, is
-# the real limit. Raised to 10000 to let the agent ATTEMPT larger modules; the
-# true fix is still an incremental/multi-pass split lane.
-SPLIT_ONE_SHOT_MAX_LINES = 10000
+# model). ~1500 lines is the realistic edge of what fits in one reply: smaller
+# oversized modules can be split, while 2000+ line files (planner.py, loop.py)
+# truncate and fail — and the selector is worst-first, so too high a cap makes
+# the agent fixate on the biggest impossible file and burn tokens. The true fix
+# for the giants is still an incremental/multi-pass split lane.
+SPLIT_ONE_SHOT_MAX_LINES = 1500
 
 _MODEL_DISCOVERY_RULE = "td_011_012_model_discovery"
 _MODEL_DISCOVERY_TITLES = frozenset(
