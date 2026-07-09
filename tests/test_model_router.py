@@ -303,6 +303,14 @@ def test_standard_task_stays_on_anthropic_balanced_route(monkeypatch):
     monkeypatch.setenv("AGENT_MODEL_POLICY", "balanced")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
     monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    # Isolate from the ambient config/model_catalog.json: its contents (and its
+    # freshness/TTL) must not steer this test. Without a live catalog the router
+    # falls back to the builtin registry's balanced routes, which is exactly the
+    # decision under test. This keeps the test deterministic across
+    # `:refresh-models` runs and calendar time.
+    monkeypatch.setenv("AGENT_MODEL_CATALOG_PATH", "/nonexistent/path/catalog.json")
+    for tier in ("LIGHT", "STANDARD", "DEEP"):
+        monkeypatch.delenv(f"AGENT_MODEL_TIER_{tier}", raising=False)
 
     def factory(provider: str | None, model: str | None) -> FakeLLM:
         llm = FakeLLM()
@@ -313,8 +321,11 @@ def test_standard_task_stays_on_anthropic_balanced_route(monkeypatch):
     router = ModelRouter.from_env(llm_factory=factory)
     llm = router.for_task(ModelRole.PLANNER, "напиши функцию сортировки для списка чисел")
 
+    # Intent: a standard-tier task stays on Anthropic under the balanced policy.
+    # Assert the routing decision (provider), not a specific model version, so a
+    # newer Claude model never breaks this test.
     assert llm.provider == "anthropic"
-    assert llm.model == "claude-sonnet-4-5"
+    assert llm.model.startswith("claude-")
 
 
 def test_cost_policy_respects_max_cost_and_model_availability(monkeypatch):
