@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from typing import Any, Iterable, Mapping
 
 # Verdicts that mark a target as weak. ``rejected_wrong_target`` fully suppresses
 # a repeat; the others reduce its rank.
@@ -209,6 +209,61 @@ def self_build_docs_candidate(proposal_text: str) -> list[SignalRecord]:
                 )
             ]
     return []
+
+
+# ── Architecture-audit signal (TD-036 follow-up) ──────────────────────────────
+# Source constant for backlog signals derived from the agent's own architecture
+# audit (core.architecture_audit.audit_architecture). This is what lets the agent
+# find its own work from self-analysis instead of only human-written docs.
+ARCHITECTURE_AUDIT_SOURCE = "architecture_audit"
+
+
+def architecture_audit_candidates(
+    priority_gaps: Iterable[Mapping[str, Any]],
+) -> tuple[list[SignalRecord], str]:
+    """Turn an architecture audit's priority gaps into grounded backlog signals.
+
+    Pure and deterministic: takes the already-computed priority-gap mappings
+    (``ArchitectureAudit.to_dict()["priority_gaps"]``) and returns
+    ``(records, source_text)``. Each gap becomes one :class:`SignalRecord` whose
+    ``problem_quote`` is the gap ``title`` verbatim and whose ``target_path`` is
+    the gap's first evidence file (so the producer's mapper/allowlist can decide
+    whether it is actionable yet). ``source_text`` contains every quote verbatim
+    so the selector's provenance check passes by construction.
+
+    Gaps without a usable title are skipped. Best-effort per-gap: a malformed gap
+    entry is skipped rather than raising, so a bad audit never breaks the backlog.
+    """
+    records: list[SignalRecord] = []
+    quotes: list[str] = []
+    seen: set[str] = set()
+    for gap in priority_gaps or []:
+        try:
+            title = str(gap.get("title") or "").strip()
+            if not title:
+                continue
+            gap_id = str(gap.get("id") or _slug(title)).strip() or _slug(title)
+            if gap_id in seen:
+                continue
+            evidence_files = [
+                str(f).strip()
+                for f in (gap.get("evidence_files") or [])
+                if str(f).strip()
+            ]
+            target = evidence_files[0] if evidence_files else "architecture:" + _slug(title)
+        except AttributeError:
+            continue  # not a mapping-shaped gap
+        seen.add(gap_id)
+        quotes.append(title)
+        records.append(
+            SignalRecord(
+                signal_source=ARCHITECTURE_AUDIT_SOURCE,
+                target_path=target,
+                evidence_ref=f"architecture_audit:{gap_id}",
+                problem_quote=title,
+            )
+        )
+    return records, "\n".join(quotes)
 
 
 def value_review_penalties(
