@@ -172,3 +172,54 @@ def test_default_selector_falls_back_to_top_when_none_actionable(tmp_path, monke
 
     assert selected.target_path == ".github/workflows/ci.yml"  # honest #1 refusal
 
+
+_TD_011_012_TITLE = (
+    "TD-011 / TD-012 \u2014 Live Model Discovery + Provider Catalog Refresh "
+    "(read-only)"
+)
+
+
+def _write_model_discovery_evidence(workspace):
+    (workspace / "TECH_DEBT.md").write_text(
+        f"{_TD_011_012_TITLE}\nStatus: Partial.\n", encoding="utf-8"
+    )
+    (workspace / "core").mkdir(exist_ok=True)
+    (workspace / "core" / "model_discovery.py").write_text(
+        '"""Live Model Discovery + Provider Catalog diff -- read-only / dry-run '
+        '(TD-011/012).\nUses build_discovery_audit and build_discovery_report.\n'
+        'It NEVER writes the catalog.\n"""\nOLD = 0\n',
+        encoding="utf-8",
+    )
+    (workspace / "tests").mkdir(exist_ok=True)
+    (workspace / "tests" / "test_model_discovery.py").write_text(
+        '"""Tests for TD-011/012 read-only Live Model Discovery + catalog diff.\n'
+        'The discovery never writes and exposes no secret values.\n"""\n'
+        "from core.model_discovery import build_discovery_audit, "
+        "build_discovery_report\n",
+        encoding="utf-8",
+    )
+
+
+def test_default_selector_keeps_mappable_tech_debt_first(tmp_path, monkeypatch):
+    # Regression (PR #8 review): a tech-debt item with an abstract target
+    # (TD-011 / TD-012) that the mapper resolves to an allowed concrete file must
+    # NOT be skipped in favour of a lower-ranked actionable audit item.
+    import core.backlog_selector as bs
+    from core.self_build_producer import _default_grounded_selector
+
+    _write_model_discovery_evidence(tmp_path)
+    tech_debt = _Candidate(
+        "TD-011 / TD-012",
+        _TD_011_012_TITLE,
+        evidence_ref="TECH_DEBT.md:1",
+        signal_source="tech_debt",
+    )
+    audit = _Candidate("README.md", "Doctrine and Architecture Source of Truth")
+    # Ranked highest-first: tech_debt (2.0) then audit (1.25).
+    monkeypatch.setattr(bs, "load_backlog", lambda *a, **k: [tech_debt, audit])
+
+    selected = _default_grounded_selector(tmp_path)()
+
+    assert selected.target_path == "TD-011 / TD-012"
+
+
