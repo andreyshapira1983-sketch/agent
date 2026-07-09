@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 from core.budget_kill_switch import BudgetKillSwitch, default_path
 from core.safe_vcs import SafeVCS
-from core.self_task_producer import produce_coding_task
+from core.self_task_producer import decode_frozen_test, produce_coding_task
 
 from cli.commands_approval import _approval_inbox_for
 from cli.commands_budget import _budget_ledger_snapshot
@@ -85,4 +85,20 @@ def _handle_self_task_propose(rest: str, agent: "AgentLoop", workspace: Path) ->
         )
     lines.append(f"next: {result.get('next_human_action')}")
     print("\n".join(lines), file=sys.stderr)
+
+    # Show the FULL proposed acceptance test so the human can read the yardstick
+    # BEFORE approving it (the Stage-A anti-cheating guarantee). We decode the
+    # exact, redaction-inert copy so example PII in fixtures is shown verbatim.
+    approval_id = result.get("approval_id")
+    if approval_id:
+        item = next((i for i in inbox.list() if i.id == approval_id), None)
+        if item is not None:
+            frozen = decode_frozen_test(item.payload)
+            if frozen.strip():
+                print(
+                    "\n--- proposed acceptance test (READ before approving) ---\n"
+                    f"# {item.payload.get('test_path', '')}\n{frozen}"
+                    "--- end of test ---",
+                    file=sys.stderr,
+                )
     return True
