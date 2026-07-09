@@ -818,3 +818,24 @@ class TestLargeOutputContinuation:
         assert out == "AAAA"
         assert len(llm._client.messages.calls) == 2
 
+    # --- boundary whitespace preservation --------------------------------
+
+    def test_anthropic_continuation_preserves_boundary_whitespace(self):
+        # A truncation boundary must not merge lines/tokens: trailing whitespace
+        # of an earlier leg and leading whitespace of a later leg must survive so
+        # a faithfully-continued answer reads correctly.
+        llm = _scripted_anthropic_llm([
+            ("Line one\n\n", 10, 5, "max_tokens"),
+            ("Line two", 3, 4, "end_turn"),
+        ])
+        out = llm.complete(system="s", user="u")
+        assert out == "Line one\n\nLine two"
+
+    def test_openai_continuation_preserves_boundary_whitespace(self):
+        llm = _scripted_openai_llm([
+            ("the quick brown ", 9, 4, "length"),
+            ("fox jumps", 2, 3, "stop"),
+        ])
+        out = llm.complete(system="s", user="u")
+        assert out == "the quick brown fox jumps"
+

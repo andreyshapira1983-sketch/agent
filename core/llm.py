@@ -188,12 +188,18 @@ class LLM:
         text, stop_reason = self._complete_once(
             system, user, max_tokens, temperature, prior=None
         )
-        if self.provider == "mock" or not _auto_continue_enabled():
+        # The per-leg provider calls now return RAW text (no .strip()) so that
+        # whitespace at a truncation boundary is preserved when legs are
+        # concatenated below. Trimming happens once, centrally, on the final
+        # answer. Mock text is returned verbatim to keep its deterministic shape.
+        if self.provider == "mock":
             return text
+        if not _auto_continue_enabled():
+            return text.strip()
 
         max_rounds = _max_continuations()
         if max_rounds <= 0:
-            return text
+            return text.strip()
 
         combined = text
         agg_in = int(self.last_usage.get("input_tokens", 0))
@@ -217,7 +223,7 @@ class LLM:
             "output_tokens": agg_out,
             "total_tokens": agg_in + agg_out,
         }
-        return combined
+        return combined.strip()
 
     def _complete_once(
         self,
@@ -384,7 +390,7 @@ class LLM:
         out_tok = getattr(usage, "output_tokens", 0) if usage is not None else 0
         self._record_usage(in_tok, out_tok)
         stop_reason = str(getattr(message, "stop_reason", "") or "")
-        return "".join(parts).strip(), stop_reason
+        return "".join(parts), stop_reason
 
     @staticmethod
     def _is_o_series(model: str) -> bool:
@@ -443,7 +449,7 @@ class LLM:
         self._record_usage(in_tok, out_tok)
         choice = response.choices[0]
         finish_reason = str(getattr(choice, "finish_reason", "") or "")
-        return (choice.message.content or "").strip(), finish_reason
+        return (choice.message.content or ""), finish_reason
 
     def _complete_mock(self, system: str, user: str, max_tokens: int) -> str:
         """Deterministic offline stub.
