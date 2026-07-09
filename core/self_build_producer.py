@@ -609,6 +609,7 @@ def _builder_generate(
     diagnosis: str,
     *,
     split_mode: bool = False,
+    lessons: list[str] | None = None,
 ) -> RoleOutput:
     """Generate the FULL proposed file content (never a diff).
 
@@ -663,6 +664,19 @@ def _builder_generate(
         f"Diagnosis: {diagnosis or '(none)'}\n\n"
         f"Current content:\n{safe_content or '(empty / new file)'}"
     )
+    if lessons:
+        lesson_block = "\n".join(
+            f"- {str(item).strip()}" for item in lessons if str(item).strip()
+        )
+        if lesson_block:
+            user = (
+                "IMPORTANT — earlier attempts on this exact target FAILED. Do NOT "
+                "repeat these mistakes. In particular, when splitting a module, "
+                "move the DEFINITION of every symbol you reference (classes, "
+                "dataclasses, functions) into a new module — never leave an import "
+                "pointing to a name that no module actually defines. Past failures:\n"
+                f"{lesson_block}\n\n"
+            ) + user
     parsed = _llm_json(llm, system=system, user=user, max_tokens=_BUILDER_MAX_TOKENS)
     if not parsed:
         return RoleOutput(
@@ -944,6 +958,7 @@ def produce_self_apply_proposal(
     registry: Any = None,
     grounded_selector: Callable[[], Any] | None = None,
     legacy_llm_manager: bool = False,
+    lessons_provider: Callable[[str], list[str]] | None = None,
 ) -> ProducerReport:
     """Run the Manager/Researcher/Builder/Critic/Reporter pipeline to produce at
     most one validated low-risk self-apply proposal into the approval inbox.
@@ -1051,6 +1066,16 @@ def produce_self_apply_proposal(
     diagnosis = manager.data.get("diagnosis", "")
     split_mode = manager.data.get("mapping_rule") == "split_module"
 
+    # Recall past FAILED attempts on this exact target so the Builder is warned
+    # not to repeat a mistake already recorded in episodic memory (best-effort;
+    # a recall failure must never change or break the producer).
+    lessons: list[str] = []
+    if lessons_provider is not None:
+        try:
+            lessons = list(lessons_provider(target) or [])
+        except Exception:  # noqa: BLE001 — lesson recall must never break producer
+            lessons = []
+
     # ── Researcher ──────────────────────────────────────────────────────────
     researcher = _researcher_gather(reader, target, diagnosis)
     roles.append(researcher)
@@ -1059,7 +1084,8 @@ def produce_self_apply_proposal(
 
     # ── Builder ─────────────────────────────────────────────────────────────
     builder = _builder_generate(
-        llm, target, current_content, diagnosis, split_mode=split_mode
+        llm, target, current_content, diagnosis,
+        split_mode=split_mode, lessons=lessons,
     )
     roles.append(builder)
 

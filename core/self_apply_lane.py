@@ -22,6 +22,7 @@ unit-testable with fakes — no real provider/network/LLM call ever happens here
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -218,6 +219,54 @@ def _tests_ok(result: Any) -> bool:
     )
 
 
+# Matches pytest's error-prefixed traceback tail lines, e.g.
+#   "E   ImportError: cannot import name '_ToolRun' from 'core.self_repair_types'"
+_PYTEST_ERROR_LINE_RE = re.compile(
+    r"^E\s+(\w*(?:Error|Exception|Warning)\b.*)$", re.MULTILINE
+)
+# Fallback: a bare "SomethingError: ..." line without pytest's "E " prefix.
+_BARE_ERROR_LINE_RE = re.compile(
+    r"^\s*(\w*(?:Error|Exception)\b:.*)$", re.MULTILINE
+)
+
+
+def _first_error_line(text: str) -> str:
+    """Return the first Python error/exception line found in captured output."""
+    if not text:
+        return ""
+    match = _PYTEST_ERROR_LINE_RE.search(text) or _BARE_ERROR_LINE_RE.search(text)
+    if match:
+        return match.group(1).strip()[:200]
+    return ""
+
+
+def _failure_detail(result: Any) -> str:
+    """Build a short, human-readable reason for a failed test stage.
+
+    Names the failing tests (when pytest reported FAILED lines) and/or the first
+    error line from the captured output (e.g. an ImportError left behind by a bad
+    split), so the rollback reason recorded to episodic memory says WHY, not just
+    "tests failed". Best-effort: returns "" when nothing useful can be extracted.
+    """
+    if not isinstance(result, dict):
+        return ""
+    parts: list[str] = []
+    failed_tests = result.get("failed_tests") or []
+    if isinstance(failed_tests, (list, tuple)) and failed_tests:
+        shown = [str(t) for t in list(failed_tests)[:3]]
+        extra = len(failed_tests) - len(shown)
+        label = "tests=" + ", ".join(shown)
+        if extra > 0:
+            label += f" (+{extra} more)"
+        parts.append(label)
+    err = _first_error_line(
+        f"{result.get('stdout_tail') or ''}\n{result.get('stderr_tail') or ''}"
+    )
+    if err:
+        parts.append(err)
+    return "; ".join(parts)[:400]
+
+
 def _write_file(workspace: Path, rel: str, content: str) -> None:
     target = (workspace / rel).resolve()
     root = workspace.resolve()
@@ -379,9 +428,10 @@ def run_self_apply_lane(
     tests_run.append("targeted")
     if not _tests_ok(targeted):
         rollback_status = _rollback()
+        detail = _failure_detail(targeted)
         return SelfApplyReport(
             status="rolled_back",
-            reason="targeted tests failed",
+            reason="targeted tests failed" + (f": {detail}" if detail else ""),
             branch=branch,
             files_changed=files_changed,
             tests_run=tests_run,
@@ -395,9 +445,10 @@ def run_self_apply_lane(
     tests_run.append("full")
     if not _tests_ok(full):
         rollback_status = _rollback()
+        detail = _failure_detail(full)
         return SelfApplyReport(
             status="rolled_back",
-            reason="full pytest failed",
+            reason="full pytest failed" + (f": {detail}" if detail else ""),
             branch=branch,
             files_changed=files_changed,
             tests_run=tests_run,
