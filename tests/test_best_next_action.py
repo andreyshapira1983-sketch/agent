@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
 from core.approval_inbox import ApprovalInboxItem
 from core.approval_triage import triage_inbox
 from core.best_next_action import (
@@ -7,6 +11,8 @@ from core.best_next_action import (
     format_best_next_action,
     select_best_next_action,
 )
+from core.self_build_memory import recent_unresolved_self_improvement_failures
+from core.smart_memory import EpisodeRecord, EpisodicMemoryStore
 
 
 def _triage_with_duplicates(n_dupes: int):
@@ -110,6 +116,51 @@ def test_short_dry_run_streak_does_not_trigger_stall():
         dry_run_streak=2,
     )
     assert action.action == "observe"
+
+
+def test_recent_self_improvement_failure_beats_clean_observe_state():
+    action = select_best_next_action(
+        tests_health="pass",
+        result_status="done",
+        inbox_pending=0,
+        recent_self_improvement_failures=(
+            "self-apply rolled_back: TypeError: duplicate base class AgentLoopExtractedMethods",
+            "repair proposal rejected: proposal changes too many lines (480 > 200)",
+        ),
+    )
+    assert action.action == "repair_incremental_splitter_duplicate_mixin"
+    assert action.risk == "read_only"
+    assert "incremental_splitter.py" in (action.recommended_command or "")
+    assert any("too many lines" in item for item in action.evidence)
+
+
+def test_recent_failure_scanner_reads_rollback_memory_and_rejected_repair(workspace):
+    now = datetime.now(timezone.utc).isoformat()
+    store = EpisodicMemoryStore(workspace / "data" / "episodic_memory.jsonl")
+    store.save(EpisodeRecord(
+        goal="apply self-build proposal",
+        question="self-apply-run",
+        outcome="failed",
+        summary="self-apply rolled_back: TypeError: duplicate base class AgentLoopExtractedMethods",
+        tags=("self-build", "lesson", "rolled_back", "failed"),
+        created_at=now,
+    ))
+    log_dir = workspace / "logs"
+    log_dir.mkdir()
+    (log_dir / "recent.jsonl").write_text(json.dumps({
+        "ts": now,
+        "event": "repair_proposal_result",
+        "payload": {
+            "status": "rejected",
+            "warnings": ["proposal changes too many lines (480 > 200)"],
+        },
+    }) + "\n", encoding="utf-8")
+
+    signals = recent_unresolved_self_improvement_failures(
+        SimpleNamespace(episodic_store=store), workspace
+    )
+    assert any("duplicate base class" in item for item in signals)
+    assert any("too many lines" in item for item in signals)
 
 
 def test_large_backlog_without_duplicates_recommends_review():

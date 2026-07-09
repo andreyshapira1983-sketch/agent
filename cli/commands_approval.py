@@ -102,6 +102,7 @@ def _handle_best_next_action(rest: str, agent: AgentLoop, workspace: Path) -> bo
         format_best_next_action,
         select_best_next_action,
     )
+    from core.self_build_memory import recent_unresolved_self_improvement_failures
 
     heartbeat = agent_tick._read_heartbeat(workspace)
     age = agent_tick._heartbeat_age_seconds(heartbeat)
@@ -125,6 +126,9 @@ def _handle_best_next_action(rest: str, agent: AgentLoop, workspace: Path) -> bo
         triage=triage,
         inbox_pending=triage.total_pending,
         acknowledged=acknowledged,
+        recent_self_improvement_failures=(
+            recent_unresolved_self_improvement_failures(agent, workspace)
+        ),
     )
 
     if rest.strip() == "--json":

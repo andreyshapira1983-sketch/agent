@@ -36,6 +36,7 @@ _P_DAEMON_DOWN = 100      # heartbeat missing/stale: agent may not be running
 _P_TICK_ERROR = 90        # last tick raised: the loop itself is broken
 _P_TESTS_FAIL = 80        # concrete failing tests: minimal repair is provable
 _P_TESTS_INCONCLUSIVE = 60  # timed-out/unknown: must not be read as healthy
+_P_SELF_IMPROVEMENT_FAILURE = 55  # recent rollback/rejection despite clean health
 _P_INBOX_DEBT = 50        # duplicate proposals accumulating into admin debt
 _P_DRY_RUN_STUCK = 40     # many dry-run ticks: never applied anything, ask why
 _P_INBOX_BACKLOG = 30     # large pending queue with no clear duplicates
@@ -109,6 +110,7 @@ def select_best_next_action(
     triage: Optional[TriageReport] = None,
     inbox_pending: int = 0,
     acknowledged: frozenset[str] = frozenset(),
+    recent_self_improvement_failures: tuple[str, ...] = (),
 ) -> BestNextAction:
     """Pick the single most important next action from the current signals.
 
@@ -140,6 +142,12 @@ def select_best_next_action(
     tests = _candidate_tests(tests_health, result_status, failed_tests)
     if tests is not None:
         candidates.append(tests)
+
+    improvement = _candidate_self_improvement_failure(
+        recent_self_improvement_failures
+    )
+    if improvement is not None:
+        candidates.append(improvement)
 
     debt = _candidate_inbox_debt(triage)
     if debt is not None:
@@ -309,6 +317,54 @@ def _candidate_inbox_debt(triage: Optional[TriageReport]) -> Optional[BestNextAc
         risk="read_only",
         recommended_command=":approval-triage",
         confidence=0.6,
+    )
+
+
+def _candidate_self_improvement_failure(
+    failures: tuple[str, ...],
+) -> Optional[BestNextAction]:
+    evidence = tuple(str(item).strip()[:300] for item in failures if str(item).strip())
+    if not evidence:
+        return None
+    combined = " ".join(evidence).casefold()
+    duplicate_mixin = "duplicate base class" in combined or (
+        "duplicate" in combined and "mixin" in combined
+    )
+    if duplicate_mixin:
+        action = "repair_incremental_splitter_duplicate_mixin"
+        title = "Fix the incremental splitter duplicate mixin base class issue"
+        if "too many lines" in combined:
+            reason = (
+                "A recent self-split rolled back on a duplicate mixin base class, "
+                "and the follow-up repair proposal was rejected as too large."
+            )
+        else:
+            reason = (
+                "A recent self-split rolled back on a duplicate mixin base class; "
+                "the failure remains actionable even though current health is clean."
+            )
+        command = "inspect core/incremental_splitter.py tests/test_incremental_splitter.py"
+    else:
+        action = "improve_failure_to_idea_pipeline"
+        title = "Turn the recent self-improvement failure into a bounded repair"
+        reason = (
+            "Recent self-improvement history contains a rollback, rejection, or "
+            "failure lesson that has not been followed by a successful apply."
+        )
+        command = "review recent self-build history and propose one small read-only fix"
+    return BestNextAction(
+        action=action,
+        title=title,
+        severity="medium",
+        priority=_P_SELF_IMPROVEMENT_FAILURE,
+        reason=reason,
+        evidence=evidence,
+        unknowns=(
+            "whether the recorded failure still reproduces without a focused read-only check",
+        ),
+        risk="read_only",
+        recommended_command=command,
+        confidence=0.7 if duplicate_mixin else 0.55,
     )
 
 

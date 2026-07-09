@@ -20,6 +20,9 @@ strictly best-effort: it never raises and never blocks the caller.
 """
 from __future__ import annotations
 
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 # Map each command status to a coarse episodic outcome the agent already
@@ -135,3 +138,80 @@ def recent_self_build_lessons(agent: Any, target: str, *, limit: int = 3) -> lis
         return lessons
     except Exception:  # noqa: BLE001 — lesson recall must never break the caller
         return []
+
+
+def recent_unresolved_self_improvement_failures(
+    agent: Any,
+    workspace: Path,
+    *,
+    max_age_days: int = 7,
+    limit: int = 4,
+) -> tuple[str, ...]:
+    """Read compact recent failure evidence from existing logs and memory.
+
+    A later successful self-apply resolves older signals. Best-effort and
+    read-only: malformed or unavailable history simply contributes no signal.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, max_age_days))
+    records: list[tuple[datetime, str, bool]] = []
+
+    def add(created_at: object, text: object, success: bool = False) -> None:
+        try:
+            stamp = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            return
+        message = " ".join(str(text or "").split())
+        if stamp >= cutoff and message:
+            records.append((stamp, message[:300], success))
+
+    try:
+        store = getattr(agent, "episodic_store", None)
+        for episode in (store.load()[-40:] if store is not None else []):
+            text = f"{getattr(episode, 'question', '')}: {getattr(episode, 'summary', '')}"
+            lowered = text.casefold()
+            self_improvement = any(
+                term in lowered
+                for term in ("self-apply", "self-build", "self-split", "splitter", "mixin", "repair")
+            )
+            failed = getattr(episode, "outcome", "") == "failed" or any(
+                term in lowered
+                for term in ("rolled_back", "rollback", "failed", "rejected", "duplicate base class", "too many lines")
+            )
+            success = (
+                getattr(episode, "question", "") == "self-apply-run"
+                and getattr(episode, "outcome", "") == "success"
+            )
+            if success or (self_improvement and failed):
+                add(getattr(episode, "created_at", ""), text, success)
+    except Exception:  # noqa: BLE001 — advisory history must never break CLI
+        pass
+
+    try:
+        paths = sorted((workspace / "logs").glob("*.jsonl"), key=lambda p: p.stat().st_mtime)[-12:]
+        for path in paths:
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines()[-300:]:
+                try:
+                    row = json.loads(line)
+                except (TypeError, ValueError):
+                    continue
+                event = str(row.get("event") or "")
+                payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+                status = str(payload.get("status") or "")
+                if event == "self_apply_run" and status == "committed_local":
+                    add(row.get("ts"), "self-apply committed successfully", True)
+                elif event == "self_apply_run" and status in {"rolled_back", "blocked", "error"}:
+                    add(row.get("ts"), f"self-apply {status}: {payload}")
+                elif event == "repair_proposal_result" and status == "rejected":
+                    warnings = "; ".join(str(x) for x in payload.get("warnings") or ())
+                    add(row.get("ts"), f"repair proposal rejected: {warnings}")
+                elif event == "self_split_plan" and status not in {"planned", ""}:
+                    add(row.get("ts"), f"self-split {status}: {payload.get('reason', '')}")
+    except Exception:  # noqa: BLE001 — malformed traces are ignored best-effort
+        pass
+
+    latest_success = max((stamp for stamp, _text, ok in records if ok), default=cutoff)
+    failures = [(stamp, text) for stamp, text, ok in records if not ok and stamp > latest_success]
+    failures.sort(reverse=True)
+    return tuple(dict.fromkeys(text for _stamp, text in failures))[: max(1, limit)]
