@@ -25,6 +25,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from core.self_improvement_issues import (
+    DEFAULT_ISSUE_PATH,
+    SelfImprovementIssueRegistry,
+)
+
 # Map each command status to a coarse episodic outcome the agent already
 # understands (success / partial / failed).
 _OUTCOME_BY_STATUS: dict[str, str] = {
@@ -140,22 +145,16 @@ def recent_self_build_lessons(agent: Any, target: str, *, limit: int = 3) -> lis
         return []
 
 
-def recent_unresolved_self_improvement_failures(
+def _recent_self_improvement_events(
     agent: Any,
     workspace: Path,
     *,
     max_age_days: int = 7,
-    limit: int = 4,
-) -> tuple[str, ...]:
-    """Read compact recent failure evidence from existing logs and memory.
-
-    A later successful self-apply resolves older signals. Best-effort and
-    read-only: malformed or unavailable history simply contributes no signal.
-    """
+) -> list[dict[str, Any]]:
     cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, max_age_days))
-    records: list[tuple[datetime, str, bool]] = []
+    records: list[dict[str, Any]] = []
 
-    def add(created_at: object, text: object, success: bool = False) -> None:
+    def add(created_at: object, text: object, kind: str = "failure", **extra: Any) -> None:
         try:
             stamp = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
             if stamp.tzinfo is None:
@@ -164,7 +163,7 @@ def recent_unresolved_self_improvement_failures(
             return
         message = " ".join(str(text or "").split())
         if stamp >= cutoff and message:
-            records.append((stamp, message[:300], success))
+            records.append({"stamp": stamp, "text": message[:500], "kind": kind, **extra})
 
     try:
         store = getattr(agent, "episodic_store", None)
@@ -179,12 +178,8 @@ def recent_unresolved_self_improvement_failures(
                 term in lowered
                 for term in ("rolled_back", "rollback", "failed", "rejected", "duplicate base class", "too many lines")
             )
-            success = (
-                getattr(episode, "question", "") == "self-apply-run"
-                and getattr(episode, "outcome", "") == "success"
-            )
-            if success or (self_improvement and failed):
-                add(getattr(episode, "created_at", ""), text, success)
+            if self_improvement and failed:
+                add(getattr(episode, "created_at", ""), text)
     except Exception:  # noqa: BLE001 — advisory history must never break CLI
         pass
 
@@ -199,19 +194,83 @@ def recent_unresolved_self_improvement_failures(
                 event = str(row.get("event") or "")
                 payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
                 status = str(payload.get("status") or "")
-                if event == "self_apply_run" and status == "committed_local":
-                    add(row.get("ts"), "self-apply committed successfully", True)
-                elif event == "self_apply_run" and status in {"rolled_back", "blocked", "error"}:
+                fingerprint = str(payload.get("issue_fingerprint") or payload.get("fingerprint") or "")
+                action = str(payload.get("issue_action") or payload.get("action") or "")
+                if event == "self_apply_run" and status in {"rolled_back", "blocked", "error"}:
                     add(row.get("ts"), f"self-apply {status}: {payload}")
+                elif event == "self_apply_run" and status == "committed_local" and (fingerprint or action):
+                    add(row.get("ts"), "matching self-apply committed successfully", "resolved",
+                        fingerprint=fingerprint, action=action)
                 elif event == "repair_proposal_result" and status == "rejected":
                     warnings = "; ".join(str(x) for x in payload.get("warnings") or ())
-                    add(row.get("ts"), f"repair proposal rejected: {warnings}")
+                    add(row.get("ts"), f"repair proposal rejected: {warnings}", attach=True,
+                        fingerprint=fingerprint, action=action)
                 elif event == "self_split_plan" and status not in {"planned", ""}:
                     add(row.get("ts"), f"self-split {status}: {payload.get('reason', '')}")
+                elif event in {"self_improvement_issue_verified", "self_improvement_issue_resolved"}:
+                    kind = "verified" if event.endswith("verified") else "resolved"
+                    add(row.get("ts"), payload.get("evidence") or event, kind,
+                        fingerprint=fingerprint, action=action)
     except Exception:  # noqa: BLE001 — malformed traces are ignored best-effort
         pass
 
-    latest_success = max((stamp for stamp, _text, ok in records if ok), default=cutoff)
-    failures = [(stamp, text) for stamp, text, ok in records if not ok and stamp > latest_success]
+    records.sort(key=lambda record: record["stamp"])
+    return records
+
+
+def recent_unresolved_self_improvement_failures(
+    agent: Any,
+    workspace: Path,
+    *,
+    max_age_days: int = 7,
+    limit: int = 4,
+) -> tuple[str, ...]:
+    """Return recent failure evidence; unrelated successes never erase it."""
+    failures = [
+        (record["stamp"], record["text"])
+        for record in _recent_self_improvement_events(
+            agent, workspace, max_age_days=max_age_days
+        )
+        if record["kind"] == "failure"
+    ]
     failures.sort(reverse=True)
     return tuple(dict.fromkeys(text for _stamp, text in failures))[: max(1, limit)]
+
+
+def sync_self_improvement_issue_registry(
+    agent: Any,
+    workspace: Path,
+    *,
+    max_age_days: int = 7,
+) -> SelfImprovementIssueRegistry:
+    """Persist recent failures and apply only explicitly matching transitions."""
+    registry = SelfImprovementIssueRegistry(workspace / DEFAULT_ISSUE_PATH)
+    for record in _recent_self_improvement_events(
+        agent, workspace, max_age_days=max_age_days
+    ):
+        observed_at = record["stamp"].isoformat()
+        if record["kind"] == "failure":
+            fingerprint = str(record.get("fingerprint") or "")
+            action = str(record.get("action") or "")
+            if record.get("attach") and (fingerprint or action):
+                matched = registry.transition(
+                    status="open", observed_at=observed_at,
+                    fingerprint=fingerprint, action=action, evidence=record["text"],
+                )
+                if matched is not None:
+                    continue
+            if record.get("attach") and registry.unresolved():
+                current = registry.unresolved()[0]
+                registry.transition(
+                    status=current.status, observed_at=observed_at,
+                    fingerprint=current.fingerprint, evidence=record["text"],
+                )
+            else:
+                registry.upsert_failure(record["text"], observed_at)
+        else:
+            registry.transition(
+                status=record["kind"], observed_at=observed_at,
+                fingerprint=str(record.get("fingerprint") or ""),
+                action=str(record.get("action") or ""), evidence=record["text"],
+            )
+    return registry

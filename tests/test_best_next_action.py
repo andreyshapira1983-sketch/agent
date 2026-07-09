@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from core.approval_inbox import ApprovalInboxItem
@@ -11,7 +11,10 @@ from core.best_next_action import (
     format_best_next_action,
     select_best_next_action,
 )
-from core.self_build_memory import recent_unresolved_self_improvement_failures
+from core.self_build_memory import (
+    recent_unresolved_self_improvement_failures,
+    sync_self_improvement_issue_registry,
+)
 from core.smart_memory import EpisodeRecord, EpisodicMemoryStore
 
 
@@ -161,6 +164,102 @@ def test_recent_failure_scanner_reads_rollback_memory_and_rejected_repair(worksp
     )
     assert any("duplicate base class" in item for item in signals)
     assert any("too many lines" in item for item in signals)
+
+
+def _agent_with_duplicate_mixin_failure(workspace, created_at: str):
+    store = EpisodicMemoryStore(workspace / "data" / "episodic_memory.jsonl")
+    store.save(EpisodeRecord(
+        goal="apply self-build proposal",
+        question="self-apply-run",
+        outcome="failed",
+        summary="self-apply rolled_back: TypeError: duplicate base class AgentLoopExtractedMethods",
+        tags=("self-build", "lesson", "rolled_back", "failed"),
+        created_at=created_at,
+    ))
+    return SimpleNamespace(episodic_store=store)
+
+
+def test_duplicate_mixin_failure_creates_one_durable_open_issue(workspace):
+    now = datetime.now(timezone.utc).isoformat()
+    agent = _agent_with_duplicate_mixin_failure(workspace, now)
+
+    registry = sync_self_improvement_issue_registry(agent, workspace)
+    first = registry.list()
+    sync_self_improvement_issue_registry(agent, workspace)
+    second = registry.list()
+
+    assert len(first) == len(second) == 1
+    assert first[0].fingerprint == second[0].fingerprint
+    assert first[0].status == "open"
+    assert first[0].title
+    assert first[0].action == "repair_incremental_splitter_duplicate_mixin"
+    assert first[0].first_seen == first[0].last_seen == now
+    assert first[0].evidence
+    assert "duplicate base class" in first[0].related_error_text
+    assert first[0].suggested_next_action
+    assert first[0].related_files == (
+        "core/incremental_splitter.py",
+        "tests/test_incremental_splitter.py",
+    )
+    assert registry.path.is_file()
+
+
+def test_unrelated_successful_self_apply_does_not_resolve_issue(workspace):
+    now = datetime.now(timezone.utc)
+    agent = _agent_with_duplicate_mixin_failure(workspace, now.isoformat())
+    agent.episodic_store.save(EpisodeRecord(
+        goal="apply unrelated self-build proposal",
+        question="self-apply-run",
+        outcome="success",
+        summary="self-apply committed_local: unrelated tests passed",
+        tags=("self-build", "self-apply-run", "success"),
+        created_at=(now + timedelta(seconds=1)).isoformat(),
+    ))
+
+    registry = sync_self_improvement_issue_registry(agent, workspace)
+    assert [issue.status for issue in registry.list()] == ["open"]
+    assert len(registry.unresolved()) == 1
+
+
+def test_matching_resolution_marker_resolves_issue(workspace):
+    now = datetime.now(timezone.utc)
+    agent = _agent_with_duplicate_mixin_failure(workspace, now.isoformat())
+    registry = sync_self_improvement_issue_registry(agent, workspace)
+    fingerprint = registry.unresolved()[0].fingerprint
+    log_dir = workspace / "logs"
+    log_dir.mkdir()
+    (log_dir / "resolution.jsonl").write_text(json.dumps({
+        "ts": (now + timedelta(seconds=1)).isoformat(),
+        "event": "self_improvement_issue_resolved",
+        "payload": {
+            "fingerprint": fingerprint,
+            "evidence": "targeted duplicate-mixin regression test passed",
+        },
+    }) + "\n", encoding="utf-8")
+
+    registry = sync_self_improvement_issue_registry(agent, workspace)
+    assert registry.list()[0].status == "resolved"
+    assert registry.unresolved() == []
+
+
+def test_best_next_action_prefers_open_registry_issue_over_raw_history():
+    action = select_best_next_action(
+        open_self_improvement_issues=({
+            "fingerprint": "sii_registry",
+            "title": "Registry-owned issue",
+            "action": "registry_specific_action",
+            "status": "open",
+            "evidence": ["durable evidence"],
+            "related_files": ["core/specific.py"],
+            "suggested_next_action": "inspect core/specific.py",
+        },),
+        recent_self_improvement_failures=(
+            "TypeError: duplicate base class AgentLoopExtractedMethods",
+        ),
+    )
+    assert action.action == "registry_specific_action"
+    assert any("sii_registry" in item for item in action.evidence)
+    assert all("AgentLoopExtractedMethods" not in item for item in action.evidence)
 
 
 def test_large_backlog_without_duplicates_recommends_review():

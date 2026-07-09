@@ -102,7 +102,10 @@ def _handle_best_next_action(rest: str, agent: AgentLoop, workspace: Path) -> bo
         format_best_next_action,
         select_best_next_action,
     )
-    from core.self_build_memory import recent_unresolved_self_improvement_failures
+    from core.self_build_memory import (
+        recent_unresolved_self_improvement_failures,
+        sync_self_improvement_issue_registry,
+    )
 
     heartbeat = agent_tick._read_heartbeat(workspace)
     age = agent_tick._heartbeat_age_seconds(heartbeat)
@@ -113,6 +116,19 @@ def _handle_best_next_action(rest: str, agent: AgentLoop, workspace: Path) -> bo
 
     ack_store = _alert_ack_store_for(workspace)
     acknowledged = ack_store.active_actions()
+
+    try:
+        issue_registry = sync_self_improvement_issue_registry(agent, workspace)
+        all_issues = issue_registry.list()
+        open_issues = tuple(issue.to_dict() for issue in issue_registry.unresolved())
+    except Exception:  # noqa: BLE001 — lifecycle storage must not break advice
+        all_issues = []
+        open_issues = ()
+    raw_failures = (
+        ()
+        if all_issues
+        else recent_unresolved_self_improvement_failures(agent, workspace)
+    )
 
     action = select_best_next_action(
         result_status=str(hb.get("result_status", "none")),
@@ -126,9 +142,8 @@ def _handle_best_next_action(rest: str, agent: AgentLoop, workspace: Path) -> bo
         triage=triage,
         inbox_pending=triage.total_pending,
         acknowledged=acknowledged,
-        recent_self_improvement_failures=(
-            recent_unresolved_self_improvement_failures(agent, workspace)
-        ),
+        open_self_improvement_issues=open_issues,
+        recent_self_improvement_failures=raw_failures,
     )
 
     if rest.strip() == "--json":

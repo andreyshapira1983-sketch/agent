@@ -110,6 +110,7 @@ def select_best_next_action(
     triage: Optional[TriageReport] = None,
     inbox_pending: int = 0,
     acknowledged: frozenset[str] = frozenset(),
+    open_self_improvement_issues: tuple[dict, ...] = (),
     recent_self_improvement_failures: tuple[str, ...] = (),
 ) -> BestNextAction:
     """Pick the single most important next action from the current signals.
@@ -143,9 +144,11 @@ def select_best_next_action(
     if tests is not None:
         candidates.append(tests)
 
-    improvement = _candidate_self_improvement_failure(
-        recent_self_improvement_failures
-    )
+    improvement = _candidate_open_self_improvement_issue(open_self_improvement_issues)
+    if improvement is None:
+        improvement = _candidate_self_improvement_failure(
+            recent_self_improvement_failures
+        )
     if improvement is not None:
         candidates.append(improvement)
 
@@ -366,6 +369,40 @@ def _candidate_self_improvement_failure(
         recommended_command=command,
         confidence=0.7 if duplicate_mixin else 0.55,
     )
+
+
+def _candidate_open_self_improvement_issue(
+    issues: tuple[dict, ...],
+) -> Optional[BestNextAction]:
+    for issue in issues:
+        status = str(issue.get("status") or "open")
+        if status == "resolved":
+            continue
+        fingerprint = str(issue.get("fingerprint") or "unknown")
+        raw_evidence = issue.get("evidence") or ()
+        evidence = [f"durable issue {fingerprint} status={status}"]
+        evidence.extend(str(item)[:300] for item in raw_evidence if str(item).strip())
+        files = [str(item) for item in issue.get("related_files") or () if str(item)]
+        if files:
+            evidence.append("related files: " + ", ".join(files))
+        return BestNextAction(
+            action=str(issue.get("action") or "improve_failure_to_idea_pipeline"),
+            title=str(issue.get("title") or "Resolve the open self-improvement issue"),
+            severity="medium",
+            priority=_P_SELF_IMPROVEMENT_FAILURE,
+            reason=(
+                "A durable self-improvement issue remains unresolved; unrelated "
+                "successful applies cannot clear its lifecycle state."
+            ),
+            evidence=tuple(evidence[:6]),
+            unknowns=(
+                "whether the issue still reproduces until matching verification is recorded",
+            ),
+            risk="read_only",
+            recommended_command=str(issue.get("suggested_next_action") or "") or None,
+            confidence=0.75,
+        )
+    return None
 
 
 def _candidate_dry_run_stuck(dry_run_streak: int) -> Optional[BestNextAction]:
