@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 # Verdicts that mark a target as weak. ``rejected_wrong_target`` fully suppresses
 # a repeat; the others reduce its rank.
@@ -218,21 +218,53 @@ def self_build_docs_candidate(proposal_text: str) -> list[SignalRecord]:
 ARCHITECTURE_AUDIT_SOURCE = "architecture_audit"
 
 
+def _select_audit_target(
+    evidence_files: list[str],
+    exists: "Callable[[str], bool] | None",
+) -> str:
+    """Pick the concrete target for an audit gap.
+
+    A gap's check is green only when *all* its evidence files exist, so the most
+    actionable target is the first one that is still MISSING. When an ``exists``
+    predicate is supplied we return that first-missing file; otherwise (or if all
+    files already exist) we fall back to the first evidence file. This is what
+    lets the agent go after ``README.md`` instead of re-targeting an
+    already-present ``AGENT_DOCTRINE.md``.
+    """
+    if not evidence_files:
+        return ""
+    if exists is not None:
+        for path in evidence_files:
+            try:
+                present = exists(path)
+            except Exception:  # noqa: BLE001 — a bad predicate must not break audit
+                present = True
+            if not present:
+                return path
+    return evidence_files[0]
+
+
 def architecture_audit_candidates(
     priority_gaps: Iterable[Mapping[str, Any]],
+    *,
+    exists: "Callable[[str], bool] | None" = None,
 ) -> tuple[list[SignalRecord], str]:
     """Turn an architecture audit's priority gaps into grounded backlog signals.
 
-    Pure and deterministic: takes the already-computed priority-gap mappings
+    Deterministic: takes the already-computed priority-gap mappings
     (``ArchitectureAudit.to_dict()["priority_gaps"]``) and returns
     ``(records, source_text)``. Each gap becomes one :class:`SignalRecord` whose
     ``problem_quote`` is the gap ``title`` verbatim and whose ``target_path`` is
-    the gap's first evidence file (so the producer's mapper/allowlist can decide
-    whether it is actionable yet). ``source_text`` contains every quote verbatim
-    so the selector's provenance check passes by construction.
+    the gap's first **missing** evidence file when an ``exists`` predicate is
+    given (else its first evidence file), so the producer targets the file that
+    actually needs to be created rather than one already present.
+    ``source_text`` contains every quote verbatim so the selector's provenance
+    check passes by construction.
 
-    Gaps without a usable title are skipped. Best-effort per-gap: a malformed gap
-    entry is skipped rather than raising, so a bad audit never breaks the backlog.
+    ``exists`` is an optional ``(rel_path) -> bool`` predicate (kept injectable so
+    the function stays pure/testable). Gaps without a usable title are skipped.
+    Best-effort per-gap: a malformed gap entry is skipped rather than raising, so
+    a bad audit never breaks the backlog.
     """
     records: list[SignalRecord] = []
     quotes: list[str] = []
@@ -250,7 +282,9 @@ def architecture_audit_candidates(
                 for f in (gap.get("evidence_files") or [])
                 if str(f).strip()
             ]
-            target = evidence_files[0] if evidence_files else "architecture:" + _slug(title)
+            target = _select_audit_target(evidence_files, exists) or (
+                "architecture:" + _slug(title)
+            )
         except AttributeError:
             continue  # not a mapping-shaped gap
         seen.add(gap_id)
