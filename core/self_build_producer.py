@@ -59,9 +59,12 @@ from core.self_build_supervisor import (
 # a manual or repair-produced one.
 PRODUCER_ORIGIN = "subagent_self_build_producer"
 
-# Narrow, hardcoded allowlist of small low-risk candidate targets for the first
-# PR. The Manager may only pick from this list; it is NOT allowed to freely scan
-# or choose across the whole repository yet (that is a later, daemon-wired step).
+# Seed allowlist of small low-risk candidate targets. Historically this was the
+# ONLY set the Manager could pick from. As of Provod #2 it is just a seed: a
+# grounded backlog candidate may also target any file that clears both hard
+# safety layers (see ``_is_self_build_target_allowed``) — the critical-organ
+# denylist below and the self-apply lane's low-risk classifier. Apply authority
+# is unchanged: every patch is still dry-run + human-approved + test-gated.
 DEFAULT_CANDIDATE_TARGETS: tuple[str, ...] = (
     "core/redaction.py",
     "core/truth_hype_filter.py",
@@ -244,6 +247,35 @@ def _is_critical(rel: str) -> bool:
     return False
 
 
+def _is_self_build_target_allowed(target: str) -> bool:
+    """Provod #2 (bold-mode) acceptance policy for a grounded backlog target.
+
+    Instead of the narrow hardcoded :data:`DEFAULT_CANDIDATE_TARGETS` trio, a
+    grounded target is now accepted when it clears BOTH hard safety layers that
+    already exist:
+
+    * it is not a critical "organ" (:data:`CRITICAL_DENY` — main.py, loop.py,
+      autonomous_runtime.py, safe_vcs.py, the self-apply/self-build machinery,
+      config/, ...); and
+    * the self-apply lane's own low-risk classifier would accept it
+      (``core``/``cli``/``tools``/``tests`` ``*.py``, anything under ``docs/``,
+      any ``*.md``; never ``.github``/``config``/``secrets``/lockfiles/keys).
+
+    This only widens *candidate discovery* so the agent can act on its own
+    architecture-audit findings. It does NOT widen apply authority: every
+    produced patch is still dry-run, placed in the approval inbox for a human to
+    approve, and applied only via the lane (which re-runs tests and auto-rolls
+    back on red). Pure/deterministic; never raises.
+    """
+    rel = str(target or "").replace("\\", "/").strip()
+    if not rel or _is_critical(rel):
+        return False
+    ok, _reason, _rejected = classify_patch_risk(
+        [FileChange(path=rel, content="pass\n")]
+    )
+    return bool(ok)
+
+
 def _default_file_reader(workspace: str | Path) -> Callable[[str], str | None]:
     root = Path(workspace).resolve()
 
@@ -339,10 +371,22 @@ def _manager_from_grounded(
         candidate = None
     if candidate is None:
         return RoleOutput("manager", "no_target", "no grounded backlog candidate")
+
+    # Provod #2: widen the effective allowlist beyond the hardcoded trio to any
+    # grounded target that clears BOTH hard safety layers (critical-organ deny +
+    # the self-apply lane's low-risk classifier). Apply authority is unchanged —
+    # every produced patch still needs human approval and passing tests.
+    candidate_target = str(getattr(candidate, "target_path", "") or "").replace(
+        "\\", "/"
+    ).strip()
+    effective_allowed = set(candidate_targets)
+    if candidate_target and _is_self_build_target_allowed(candidate_target):
+        effective_allowed.add(candidate_target)
+
     mapping = map_backlog_candidate(
         candidate,
         workspace=workspace,
-        allowed_targets=candidate_targets,
+        allowed_targets=effective_allowed,
     )
     if not mapping.ok or mapping.candidate is None:
         rejected = str(getattr(candidate, "target_path", "") or "").strip()
@@ -360,7 +404,7 @@ def _manager_from_grounded(
     evidence_ref = mapped_candidate.evidence_ref
     if not target:
         return RoleOutput("manager", "no_target", "grounded candidate has no target")
-    if mapping.decision != "mapped" and target not in candidate_targets:
+    if mapping.decision != "mapped" and target not in effective_allowed:
         return RoleOutput(
             "manager",
             "no_target",
