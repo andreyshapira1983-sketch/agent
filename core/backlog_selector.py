@@ -18,19 +18,32 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from core.backlog_signals import (
+    ARCHITECTURE_AUDIT_SOURCE,
     SignalRecord,
     ValuePenalties,
     anatomy_candidates,
+    architecture_audit_candidates,
     open_tech_debt,
     self_build_docs_candidate,
     value_review_penalties,
 )
 
 # Deterministic per-source base rank and confidence. Human-authored TECH_DEBT
-# work outranks the docs pilot, which outranks the advisory anatomy follow-up
-# list so TD-030...TD-036 remain blocked unless explicitly mapped later.
-_SOURCE_BASE_SCORE = {"tech_debt": 2.0, "self_build_docs": 1.5, "anatomy": 1.0}
-_SOURCE_CONFIDENCE = {"tech_debt": 0.7, "self_build_docs": 0.65, "anatomy": 0.5}
+# work outranks the docs pilot, which outranks the agent's own architecture-audit
+# findings, which outrank the advisory anatomy follow-up list so TD-030...TD-036
+# remain blocked unless explicitly mapped later.
+_SOURCE_BASE_SCORE = {
+    "tech_debt": 2.0,
+    "self_build_docs": 1.5,
+    ARCHITECTURE_AUDIT_SOURCE: 1.25,
+    "anatomy": 1.0,
+}
+_SOURCE_CONFIDENCE = {
+    "tech_debt": 0.7,
+    "self_build_docs": 0.65,
+    ARCHITECTURE_AUDIT_SOURCE: 0.55,
+    "anatomy": 0.5,
+}
 _PENALTY_SCORE = 1.0
 
 
@@ -121,6 +134,8 @@ def build_backlog(
     tech_debt_text: str = "",
     anatomy_text: str = "",
     self_build_proposal_text: str = "",
+    architecture_audit_records: list[SignalRecord] | None = None,
+    architecture_audit_text: str = "",
     include_self_build_docs: bool = True,
     penalties: ValuePenalties | None = None,
 ) -> list[BacklogCandidate]:
@@ -133,11 +148,13 @@ def build_backlog(
             else []
         )
         + anatomy_candidates(anatomy_text)
+        + list(architecture_audit_records or [])
     )
     sources = {
         "tech_debt": tech_debt_text,
         "self_build_docs": self_build_proposal_text,
         "anatomy": anatomy_text,
+        ARCHITECTURE_AUDIT_SOURCE: architecture_audit_text,
     }
     return _finalize(records, sources, penalties)
 
@@ -154,6 +171,31 @@ def _path_exists(path: Path) -> bool:
         return path.exists()
     except OSError:
         return True
+
+
+def _load_architecture_audit(root: Path) -> tuple[list[SignalRecord], str]:
+    """Run the read-only architecture audit and turn its priority gaps into
+    grounded backlog signals. This is the wire that lets the agent find its own
+    work from self-analysis, not only from human-authored docs.
+
+    The audit only makes sense against a genuine checkout of this agent, so it is
+    gated on a sentinel (``core/architecture_audit.py``). For any other workspace
+    (e.g. a throwaway tmp dir in a unit test) it degrades to empty instead of
+    reporting every missing repo file as a spurious gap.
+
+    Best-effort: any import/audit failure degrades to an empty backlog so a bad
+    audit never breaks self-build. The audit itself performs read-only file IO.
+    """
+    if not _path_exists(root / "core" / "architecture_audit.py"):
+        return [], ""
+    try:
+        from core.architecture_audit import audit_architecture
+
+        audit = audit_architecture(root)
+        gaps = audit.to_dict().get("priority_gaps", [])
+        return architecture_audit_candidates(gaps)
+    except Exception:
+        return [], ""
 
 
 def load_backlog(
@@ -176,6 +218,7 @@ def load_backlog(
         root / "docs" / "proposals" / "self-build-grounded-target-coverage-proposal.md"
     )
     include_self_build_docs = not _path_exists(root / "docs" / "self_build.md")
+    audit_records, audit_text = _load_architecture_audit(root)
     penalties = None
     if value_reviews is not None:
         penalties = value_review_penalties(value_reviews, item_target_map)
@@ -183,6 +226,8 @@ def load_backlog(
         tech_debt_text=tech_debt_text,
         anatomy_text=anatomy_text,
         self_build_proposal_text=self_build_proposal_text,
+        architecture_audit_records=audit_records,
+        architecture_audit_text=audit_text,
         include_self_build_docs=include_self_build_docs,
         penalties=penalties,
     )
