@@ -137,6 +137,7 @@ _Autonomous loop, scheduling, budgets, state durability._
 | `core/backlog_selector` | Grounded backlog selector for the self-build producer (TD-036, Phase 1). |
 | `core/backlog_signals` | Read-only parsers for grounded self-build backlog signals (TD-036, Phase 1). |
 | `core/backlog_target_mapper` | Deterministic mapper from abstract backlog items to concrete self-build targets. |
+| `core/dependency_map` | Project import/dependency map: who imports a module, which symbols, which tests — contract input for self-build changes. |
 
 ## Security, Policy & Autonomy Governance (§7)
 
