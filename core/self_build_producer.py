@@ -222,6 +222,69 @@ def _looks_like_diff(content: str) -> bool:
     return False
 
 
+def _top_level_defined_names(tree: ast.Module) -> set[str]:
+    """Names *defined* at module top level (functions, classes, assignments).
+
+    These form the import surface of the module: anything another module or a
+    test can reach via ``from core.<mod> import <name>``. Dunder names are
+    excluded — they are never a meaningful cross-module import target.
+    """
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for tgt in node.targets:
+                if isinstance(tgt, ast.Name):
+                    names.add(tgt.id)
+        elif isinstance(node, ast.AnnAssign):
+            if isinstance(node.target, ast.Name):
+                names.add(node.target.id)
+    return {n for n in names if not (n.startswith("__") and n.endswith("__"))}
+
+
+def _top_level_bound_names(tree: ast.Module) -> set[str]:
+    """Names *bound* at module top level: definitions plus imported aliases.
+
+    A split module keeps a name importable either by still defining it or by
+    re-importing (re-exporting) it — ``from .<new_module> import <name>``. Both
+    count as "exposed", so imports are included here.
+    """
+    names = set(_top_level_defined_names(tree))
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add((alias.asname or alias.name).split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "__future__":
+                continue
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                names.add(alias.asname or alias.name)
+    return names
+
+
+def _split_dropped_api(current_content: str, target_content: str) -> list[str]:
+    """Return top-level names present in the original target but no longer
+    defined *or* re-exported in the proposed (shrunk) target.
+
+    When a module is split, every symbol that used to live at its top level must
+    remain importable from it — otherwise external importers and tests that do
+    ``from core.<target> import <name>`` break with ImportError (exactly the
+    failure mode that repeatedly rolled back the verifier split). The Builder is
+    expected to leave a re-export shim for anything it moves out.
+    """
+    try:
+        old = ast.parse(current_content)
+        new = ast.parse(target_content)
+    except SyntaxError:
+        return []
+    required = _top_level_defined_names(old)
+    exposed = _top_level_bound_names(new)
+    return sorted(required - exposed)
+
+
 def _is_self_build_doc_target(target: str) -> bool:
     return target.replace("\\", "/").strip().lower() == _SELF_BUILD_DOC_TARGET
 
@@ -644,9 +707,12 @@ def _builder_generate(
             '"test_pattern": "<optional pytest -k pattern or null>", '
             '"reason": "<one sentence>", "confidence": <0..1>}. '
             "Exactly one file path must equal the target; the rest must be new "
-            "modules. Keep every file well under the size limit. Do NOT modify "
-            "docs/AGENT_ANATOMY.md — the self-build head registers new core "
-            "modules in that index automatically."
+            "modules. Keep every file well under the size limit. For any symbol "
+            "you move out of the target, keep it importable FROM the target by "
+            "re-exporting it (e.g. `from .<new_module> import <name>`), so existing "
+            "importers and tests that do `from core.<target> import <name>` keep "
+            "working. Do NOT modify docs/AGENT_ANATOMY.md — the self-build head "
+            "registers new core modules in that index automatically."
         )
     else:
         system = (
@@ -786,6 +852,34 @@ def _critic_review(
     )
     if not ok:
         veto.append(f"risk classification failed: {risk_reason}")
+
+    # Split-integrity guard: when the Builder splits a module into several files,
+    # every top-level name that used to live in the target must remain importable
+    # from it (defined or re-exported). Otherwise external importers/tests that do
+    # `from core.<target> import <name>` break with ImportError — the exact churn
+    # that kept rolling back the verifier split. Only runs on real splits (extra
+    # files present), so the single-file path stays byte-identical.
+    has_extra = any(
+        str(e.get("path") or "").replace("\\", "/").strip() != norm_target
+        for e in files
+    )
+    if (
+        has_extra
+        and target.lower().endswith(".py")
+        and current_content
+        and content
+        and not _looks_like_diff(content)
+    ):
+        dropped = _split_dropped_api(current_content, content)
+        if dropped:
+            shown = ", ".join(dropped[:6])
+            more = "" if len(dropped) <= 6 else f" (+{len(dropped) - 6} more)"
+            veto.append(
+                f"split drops top-level name(s) from {target} that other modules "
+                f"or tests may import: {shown}{more}; keep them importable by "
+                f"re-exporting from the target (e.g. `from .<new_module> import "
+                f"<name>`)"
+            )
 
     if target.lower().endswith(".py") and content and not _looks_like_diff(content):
         try:
