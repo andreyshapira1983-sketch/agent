@@ -34,6 +34,7 @@ from core.self_build_producer import produce_self_apply_proposal
 
 from cli.commands_approval import _approval_inbox_for
 from cli.commands_budget import _budget_ledger_snapshot
+from cli.self_build_memory import record_self_build_episode
 
 if TYPE_CHECKING:
     from core.loop import AgentLoop
@@ -100,6 +101,11 @@ def _handle_self_build_produce(rest: str, agent: "AgentLoop", workspace: Path) -
             "no_grounded_target": no_grounded_target,
         },
     )
+
+    # Journal the attempt (and WHY it did/didn't produce a patch) into episodic
+    # memory so the agent accumulates its own lessons instead of relying on a
+    # human to re-investigate every outcome.
+    record_self_build_episode(agent, kind="self-build-produce", result=result)
 
     lines = [
         "=== self-build produce ===",

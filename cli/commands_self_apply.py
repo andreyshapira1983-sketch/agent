@@ -23,6 +23,7 @@ from tools.run_tests import RunTestsTool
 
 from cli.commands_approval import _approval_inbox_for
 from cli.commands_budget import _budget_ledger_snapshot
+from cli.self_build_memory import record_self_build_episode
 
 if TYPE_CHECKING:
     from core.loop import AgentLoop
@@ -70,6 +71,10 @@ def _handle_self_apply_run(rest: str, agent: "AgentLoop", workspace: Path) -> bo
             "origin": result.get("origin"),
         },
     )
+
+    # Journal the apply outcome (committed vs rolled back, and WHY) into episodic
+    # memory so the agent remembers its own failed/succeeded attempts.
+    record_self_build_episode(agent, kind="self-apply-run", result=result)
 
     if "--json" in parts:  # never true (len==1 guard) but keep symmetry cheap
         print(json.dumps(result, ensure_ascii=False, indent=2), file=sys.stderr)
