@@ -438,6 +438,36 @@ def _manager_from_grounded(
     )
 
 
+def _grounded_candidate_actionable(candidate: Any, workspace: str | Path) -> bool:
+    """True if the producer could actually act on this ranked candidate.
+
+    Either its raw target is directly low-risk and non-critical, OR the
+    deterministic mapper resolves its abstract target (e.g. ``TD-011 / TD-012``)
+    to an allowed, non-critical concrete file. Checking BOTH is essential: a
+    tech-debt item's raw target is an abstract id that fails the low-risk file
+    check, yet it is genuinely actionable once mapped — so a raw-only check would
+    wrongly skip a high-ranked tech-debt item in favour of a lower-ranked audit
+    item, breaking tech-debt-first ranking. Best-effort: a raising mapper is
+    treated as not actionable.
+    """
+    target = str(getattr(candidate, "target_path", "") or "")
+    if _is_self_build_target_allowed(target):
+        return True
+    try:
+        mapping = map_backlog_candidate(
+            candidate,
+            workspace=workspace,
+            allowed_targets=DEFAULT_CANDIDATE_TARGETS,
+        )
+    except Exception:  # noqa: BLE001 — a broken mapper must never break selection
+        return False
+    return bool(
+        mapping.ok
+        and mapping.candidate is not None
+        and not _is_critical(mapping.candidate.target_path)
+    )
+
+
 def _default_grounded_selector(workspace: str | Path) -> Callable[[], Any]:
     """Build the DEFAULT grounded backlog selector for a workspace (TD-036
     follow-up).
@@ -468,14 +498,14 @@ def _default_grounded_selector(workspace: str | Path) -> Callable[[], Any]:
                 reviews = None
             candidates = load_backlog(workspace, value_reviews=reviews)
             # Provod #1 follow-up: candidates are ranked highest-first. Prefer the
-            # top-ranked candidate the producer can actually act on (passes the
-            # critical-deny + lane low-risk gates), so a higher-ranked but
-            # non-actionable target (e.g. a missing ``.github/workflows/ci.yml``)
-            # does not shadow an actionable one (e.g. a missing ``README.md``).
-            # If nothing is actionable, fall back to the #1 for an honest refusal.
+            # top-ranked candidate the producer can actually act on — directly
+            # low-risk OR mapper-resolvable to an allowed concrete file — so a
+            # higher-ranked but non-actionable target (e.g. a missing
+            # ``.github/workflows/ci.yml``) does not shadow an actionable one, yet
+            # a mappable tech-debt item is NOT skipped for a lower-ranked audit
+            # item. If nothing is actionable, fall back to the #1 (honest refusal).
             for candidate in candidates:
-                target = str(getattr(candidate, "target_path", "") or "")
-                if _is_self_build_target_allowed(target):
+                if _grounded_candidate_actionable(candidate, workspace):
                     return candidate
             return select_top(candidates)
         except Exception:  # noqa: BLE001 — a broken backlog must never break producer
