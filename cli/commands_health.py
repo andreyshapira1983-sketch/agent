@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from cli.parsers import _split_meta_args
+from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH as APPROVAL_INBOX_PATH
 from core.backlog_target_mapper import map_backlog_candidate
 from core.budget_ledger import BudgetLedger, DEFAULT_COUNTERS
 from core.budget_kill_switch import BudgetKillSwitch, default_path as kill_switch_path
@@ -23,7 +24,6 @@ from core.state_integrity import StateIntegrityError, decode_state_row
 from core.value_review import VALID_VERDICTS
 
 
-APPROVAL_INBOX_PATH = Path("data") / "approval_inbox.jsonl"
 RUNTIME_TASKS_PATH = Path("data") / "runtime_tasks.jsonl"
 RUNTIME_SCHEDULES_PATH = Path("data") / "runtime_schedules.jsonl"
 BUDGET_LEDGER_PATH = Path("data") / "budget_ledger.jsonl"
