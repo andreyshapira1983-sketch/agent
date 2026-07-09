@@ -47,7 +47,7 @@ from core.self_apply_bridge import (
     SELF_APPLY_OPERATION,
     build_self_apply_payload,
 )
-from core.self_apply_lane import FileChange, classify_patch_risk
+from core.self_apply_lane import FileChange, _normalize_rel, classify_patch_risk
 from core.proposal_value_gate import evaluate_proposal_value
 from core.self_build_supervisor import (
     hour_budget_headroom,
@@ -268,10 +268,19 @@ def _is_self_build_target_allowed(target: str) -> bool:
     back on red). Pure/deterministic; never raises.
     """
     rel = str(target or "").replace("\\", "/").strip()
-    if not rel or _is_critical(rel):
+    if not rel:
+        return False
+    # Canonicalize exactly the way the lane classifier does (drop ``.`` segments,
+    # reject ``..``/absolute/drive paths) BEFORE the critical-organ check. Without
+    # this, an alias like ``./core/loop.py`` or ``core/./loop.py`` slips past
+    # _is_critical (raw-string match) yet classify_patch_risk normalizes it to the
+    # critical ``core/loop.py`` and accepts it — admitting a critical organ the
+    # fixed allowlist blocked. A path _normalize_rel rejects is never low-risk.
+    canonical = _normalize_rel(rel)
+    if canonical is None or _is_critical(canonical):
         return False
     ok, _reason, _rejected = classify_patch_risk(
-        [FileChange(path=rel, content="pass\n")]
+        [FileChange(path=canonical, content="pass\n")]
     )
     return bool(ok)
 

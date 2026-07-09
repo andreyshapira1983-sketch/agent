@@ -55,7 +55,23 @@ def test_policy_rejects_critical_organs():
         assert not _is_self_build_target_allowed(organ), organ
 
 
-def test_policy_rejects_lane_denied_files():
+def test_policy_rejects_critical_organ_path_aliases():
+    # Bug: _is_critical matched the RAW string while classify_patch_risk
+    # canonicalizes via _normalize_rel. Path aliases that normalize to a
+    # critical organ must still be rejected (organ must not slip through).
+    for alias in (
+        "./core/loop.py",
+        "core/./loop.py",
+        "core//loop.py",
+        ".\\core\\loop.py",
+        "./main.py",
+        "config/./app.yaml",
+        "./config/app.yaml",
+    ):
+        assert not _is_self_build_target_allowed(alias), alias
+
+
+
     for denied in (
         ".github/workflows/ci.yml",
         "secrets/token.txt",
