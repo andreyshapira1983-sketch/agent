@@ -216,6 +216,59 @@ def test_mixin_split_adds_base_and_import(workspace: Path):
     ast.parse(step.new_content)
 
 
+def test_repeated_mixin_split_uses_unique_base_class(workspace: Path):
+    _write(workspace, "core/engine.py", _make_dominant_class_src())
+    first_plan = plan_incremental_split(
+        workspace, "core/engine.py", max_move_lines=12
+    )
+    assert first_plan.status == "planned", first_plan.reason
+    first = first_plan.step
+    assert "class EngineExtractedMethods:" in first.new_content
+    _write(workspace, first.target, first.target_content)
+    _write(workspace, first.new_module, first.new_content)
+
+    second_plan = plan_incremental_split(
+        workspace, "core/engine.py", max_move_lines=12
+    )
+    assert second_plan.status == "planned", second_plan.reason
+    second = second_plan.step
+    assert second.new_module == "core/engine_methods2.py"
+    assert "class EngineExtractedMethods2:" in second.new_content
+    assert "class Engine(EngineExtractedMethods2, EngineExtractedMethods):" in (
+        second.target_content
+    )
+
+    engine_class = next(
+        node
+        for node in ast.parse(second.target_content).body
+        if isinstance(node, ast.ClassDef) and node.name == "Engine"
+    )
+    bases = [ast.unparse(base) for base in engine_class.bases]
+    assert len(bases) == len(set(bases))
+
+    import sys
+    import types
+
+    pkg = types.ModuleType("splitcheck_core")
+    pkg.__path__ = []
+    sys.modules["splitcheck_core"] = pkg
+    try:
+        for name, content in (
+            ("splitcheck_core.engine_methods", first.new_content),
+            ("splitcheck_core.engine_methods2", second.new_content),
+        ):
+            module = types.ModuleType(name)
+            exec(compile(content, f"{name}.py", "exec"), module.__dict__)
+            sys.modules[name] = module
+        target_src = second.target_content.replace("from core.", "from splitcheck_core.")
+        target_module = types.ModuleType("splitcheck_core.engine")
+        exec(compile(target_src, "engine.py", "exec"), target_module.__dict__)
+    finally:
+        sys.modules.pop("splitcheck_core", None)
+        sys.modules.pop("splitcheck_core.engine_methods", None)
+        sys.modules.pop("splitcheck_core.engine_methods2", None)
+
+
 def test_mixin_split_executes_correctly(workspace: Path, tmp_path: Path):
     _write(workspace, "core/engine.py", _make_dominant_class_src())
     plan = plan_incremental_split(workspace, "core/engine.py")

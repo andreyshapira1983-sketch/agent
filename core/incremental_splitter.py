@@ -478,6 +478,7 @@ def _plan_mixin_split(
         for node in tree.body
         if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
     }
+    existing_names |= _import_names(tree)
     while mixin_name in existing_names:
         mixin_name = f"{cls.name}ExtractedMethods{n}"
         n += 1
