@@ -33,7 +33,7 @@ from core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 WorkSessionStatus = Literal["completed", "stopped", "interrupted"]
 WorkSessionStopReason = Literal[
     "max_cycles", "time_budget", "circuit_open", "converged", "budget_exhausted",
-    "interrupted", ""
+    "awaiting_approval", "interrupted", ""
 ]
 
 
@@ -233,6 +233,24 @@ def run_work_session(
             )
             cycle_reports.append(cr)
 
+            # ── approval-pause stop ──────────────────────────────────────────
+            # A cycle that blocked waiting for human approval is NOT a failure —
+            # it is the safety design working. Park the session with an explicit
+            # "awaiting_approval" stop_reason and event, WITHOUT recording a
+            # circuit-breaker failure. Otherwise two approval-blocked cycles in a
+            # row would exhaust the failure budget and open the breaker, hiding
+            # the real reason behind a scary "circuit_open" message. Checked
+            # before the budget/convergence/circuit updates so an approval pause
+            # is never mis-recorded as a failure.
+            if _is_approval_blocked(run_report):
+                _log(agent, "work_session_awaiting_approval", {
+                    "cycle": cycle,
+                    "goal": config.goal,
+                })
+                stop_reason = "awaiting_approval"
+                status = "stopped"
+                break
+
             # ── budget-exhaustion stop ───────────────────────────────────────
             # If the cycle's goal task died on a model/token budget limit
             # (ModelBudgetExceeded surfaces as a failed task carrying
@@ -364,6 +382,37 @@ def _is_budget_exhausted(run_report: Any) -> bool:
                 continue
             details = getattr(t, "details", None) or {}
             if details.get("error_type") == "ModelBudgetExceeded":
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _is_approval_blocked(run_report: Any) -> bool:
+    """True when the runtime paused waiting on human approval rather than failing.
+
+    An approval pause is the safety design working, not a malfunction, so it must
+    not count as a circuit-breaker failure. Detected structurally (not by exact
+    message text) so tests can inject a blocked run report robustly:
+
+    * the runtime returns status="blocked" with a stop_reason that mentions
+      approval (AutonomousRuntime stamps "approval required: <id>"), or
+    * a failed task carries an approval marker in its details.
+
+    Best-effort: any unexpected shape returns False so detection never raises.
+    """
+    try:
+        if getattr(run_report, "status", "") == "blocked":
+            reason = getattr(run_report, "stop_reason", "") or ""
+            if "approval" in reason.lower():
+                return True
+        for t in getattr(run_report, "tasks", []) or []:
+            if getattr(t, "status", "") != "failed":
+                continue
+            details = getattr(t, "details", None) or {}
+            if details.get("error_type") == "ApprovalRequired":
+                return True
+            if "approval" in str(details.get("reason", "")).lower():
                 return True
         return False
     except Exception:
