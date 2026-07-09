@@ -46,6 +46,10 @@ _Planning, verification, clarification, control loop._
 | `core/loop` | Control Loop — Observe -> Interpret -> Plan -> Act -> Verify -> Respond. |
 | `core/planner` | LLM-driven Planner (§3 Cognitive Core: Planning). |
 | `core/verifier` | MVP-14.4 — Verifier. |
+| `core/verifier_patterns` | Extracted from `core/verifier` by autonomous self-build module split. |
+| `core/verifier_models` | Extracted from `core/verifier` by autonomous self-build module split. |
+| `core/verifier_utils` | Extracted from `core/verifier` by autonomous self-build module split. |
+| `core/verifier_core` | Extracted from `core/verifier` by autonomous self-build module split. |
 | `core/replan` | MVP-12 — Re-planning policy: structured failure types + retry budgets. |
 | `core/reflection` | Reflection engine — self-improvement feedback loop. |
 | `core/clarification_gate` | Clarification Gate — режим переспроса (ask, don't build). |
