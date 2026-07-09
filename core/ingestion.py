@@ -12,19 +12,28 @@ the existing KnowledgePipeline + MemoryWritePolicy.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
-from urllib.parse import urlparse
 
 from core.evidence import ProvenanceChain, evidence_from_tool_result, make_evidence
+from core.ingestion_reports import IngestReport, RssIngestReport, WebIngestReport
+from core.ingestion_utils import (
+    _candidate_urls,
+    _chunk_text,
+    _ensure_inside_workspace,
+    _is_http_url,
+    _iter_project_files,
+    _relative_label,
+    _resolve_inside_workspace,
+    _skip,
+)
 from core.knowledge_pipeline import KnowledgePipelineResult
+from core.source_library import resolve_source_library
 from core.source_ranker import rank_chain
-from core.source_library import SourceLibraryEntry, resolve_source_library
 from core.source_registry import SourceRegistry
 
 
-TEXT_EXTENSIONS: frozenset[str] = frozenset({
+TEXT_EXTENSIONS = frozenset({
     ".cfg",
     ".ini",
     ".json",
@@ -38,7 +47,7 @@ TEXT_EXTENSIONS: frozenset[str] = frozenset({
     ".yml",
 })
 
-SKIP_DIR_NAMES: frozenset[str] = frozenset({
+SKIP_DIR_NAMES = frozenset({
     ".git",
     ".mypy_cache",
     ".pytest_cache",
@@ -60,208 +69,6 @@ PROJECT_MAX_CHUNKS_PER_FILE = 3
 CHUNK_CHARS = 800
 
 
-@dataclass
-class IngestReport:
-    mode: str
-    requested_path: str
-    files_seen: int = 0
-    files_ingested: int = 0
-    files_skipped: int = 0
-    bytes_read: int = 0
-    chunks: int = 0
-    source_count: int = 0
-    claim_count: int = 0
-    source_store: dict[str, int] = field(default_factory=dict)
-    memory_saved: int = 0
-    memory_rejected: int = 0
-    memory_skipped: int = 0
-    conflicts: int = 0
-    dry_run: bool = False
-    auto_write_memory: bool = False
-    ingested_paths: list[str] = field(default_factory=list)
-    skipped_paths: list[str] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
-
-    def to_log_payload(self) -> dict[str, Any]:
-        return {
-            "mode": self.mode,
-            "requested_path": self.requested_path,
-            "files_seen": self.files_seen,
-            "files_ingested": self.files_ingested,
-            "files_skipped": self.files_skipped,
-            "bytes_read": self.bytes_read,
-            "chunks": self.chunks,
-            "source_count": self.source_count,
-            "claim_count": self.claim_count,
-            "source_store": dict(self.source_store),
-            "memory_saved": self.memory_saved,
-            "memory_rejected": self.memory_rejected,
-            "memory_skipped": self.memory_skipped,
-            "conflicts": self.conflicts,
-            "dry_run": self.dry_run,
-            "auto_write_memory": self.auto_write_memory,
-            "ingested_paths": list(self.ingested_paths),
-            "skipped_paths": list(self.skipped_paths[:20]),
-            "error_count": len(self.errors),
-            "errors": list(self.errors[:20]),
-        }
-
-    def user_summary(self) -> str:
-        store = self.source_store or {}
-        parts = [
-            f"ingest {self.mode}: files={self.files_ingested}/{self.files_seen}",
-            f"chunks={self.chunks}",
-            f"sources={self.source_count}",
-            f"claims={self.claim_count}",
-            f"saved_sources={store.get('sources_saved', 0)}",
-            f"saved_claims={store.get('claims_saved', 0)}",
-            f"memory_saved={self.memory_saved}",
-            f"memory_skipped={self.memory_skipped}",
-            f"memory_rejected={self.memory_rejected}",
-            f"conflicts={self.conflicts}",
-        ]
-        if self.dry_run:
-            parts.append("dry_run=True")
-        if self.errors:
-            parts.append(f"errors={len(self.errors)}")
-        return "(" + "; ".join(parts) + ")"
-
-
-@dataclass
-class WebIngestReport:
-    mode: str
-    topic: str
-    source_ids: list[str] = field(default_factory=list)
-    searches: int = 0
-    search_results: int = 0
-    pages_fetched: int = 0
-    bytes_read: int = 0
-    chunks: int = 0
-    source_count: int = 0
-    claim_count: int = 0
-    source_store: dict[str, int] = field(default_factory=dict)
-    memory_saved: int = 0
-    memory_rejected: int = 0
-    memory_skipped: int = 0
-    conflicts: int = 0
-    dry_run: bool = False
-    auto_write_memory: bool = False
-    fetched_urls: list[str] = field(default_factory=list)
-    skipped_urls: list[str] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
-
-    def to_log_payload(self) -> dict[str, Any]:
-        return {
-            "mode": self.mode,
-            "topic": self.topic,
-            "source_ids": list(self.source_ids),
-            "searches": self.searches,
-            "search_results": self.search_results,
-            "pages_fetched": self.pages_fetched,
-            "bytes_read": self.bytes_read,
-            "chunks": self.chunks,
-            "source_count": self.source_count,
-            "claim_count": self.claim_count,
-            "source_store": dict(self.source_store),
-            "memory_saved": self.memory_saved,
-            "memory_rejected": self.memory_rejected,
-            "memory_skipped": self.memory_skipped,
-            "conflicts": self.conflicts,
-            "dry_run": self.dry_run,
-            "auto_write_memory": self.auto_write_memory,
-            "fetched_urls": list(self.fetched_urls),
-            "skipped_urls": list(self.skipped_urls[:20]),
-            "error_count": len(self.errors),
-            "errors": list(self.errors[:20]),
-        }
-
-    def user_summary(self) -> str:
-        store = self.source_store or {}
-        parts = [
-            f"ingest web: topic={self.topic!r}",
-            f"sources={','.join(self.source_ids) or '-'}",
-            f"searches={self.searches}",
-            f"results={self.search_results}",
-            f"pages={self.pages_fetched}",
-            f"claims={self.claim_count}",
-            f"saved_sources={store.get('sources_saved', 0)}",
-            f"saved_claims={store.get('claims_saved', 0)}",
-            f"memory_saved={self.memory_saved}",
-            f"memory_skipped={self.memory_skipped}",
-            f"conflicts={self.conflicts}",
-        ]
-        if self.dry_run:
-            parts.append("dry_run=True")
-        if self.errors:
-            parts.append(f"errors={len(self.errors)}")
-        if self.fetched_urls:
-            parts.append(f"fetched={self.fetched_urls[:5]}")
-        return "(" + "; ".join(parts) + ")"
-
-
-@dataclass
-class RssIngestReport:
-    mode: str
-    feed_url: str
-    entries_seen: int = 0
-    entries_ingested: int = 0
-    bytes_read: int = 0
-    source_count: int = 0
-    claim_count: int = 0
-    source_store: dict[str, int] = field(default_factory=dict)
-    memory_saved: int = 0
-    memory_rejected: int = 0
-    memory_skipped: int = 0
-    conflicts: int = 0
-    dry_run: bool = False
-    auto_write_memory: bool = False
-    feed_title: str = ""
-    entry_urls: list[str] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
-
-    def to_log_payload(self) -> dict[str, Any]:
-        return {
-            "mode": self.mode,
-            "feed_url": self.feed_url,
-            "entries_seen": self.entries_seen,
-            "entries_ingested": self.entries_ingested,
-            "bytes_read": self.bytes_read,
-            "source_count": self.source_count,
-            "claim_count": self.claim_count,
-            "source_store": dict(self.source_store),
-            "memory_saved": self.memory_saved,
-            "memory_rejected": self.memory_rejected,
-            "memory_skipped": self.memory_skipped,
-            "conflicts": self.conflicts,
-            "dry_run": self.dry_run,
-            "auto_write_memory": self.auto_write_memory,
-            "feed_title": self.feed_title,
-            "entry_urls": list(self.entry_urls),
-            "error_count": len(self.errors),
-            "errors": list(self.errors[:20]),
-        }
-
-    def user_summary(self) -> str:
-        store = self.source_store or {}
-        parts = [
-            f"ingest rss: url={self.feed_url}",
-            f"entries={self.entries_ingested}/{self.entries_seen}",
-            f"claims={self.claim_count}",
-            f"saved_sources={store.get('sources_saved', 0)}",
-            f"saved_claims={store.get('claims_saved', 0)}",
-            f"memory_saved={self.memory_saved}",
-            f"memory_skipped={self.memory_skipped}",
-            f"conflicts={self.conflicts}",
-        ]
-        if self.dry_run:
-            parts.append("dry_run=True")
-        if self.errors:
-            parts.append(f"errors={len(self.errors)}")
-        if self.entry_urls:
-            parts.append(f"entries={self.entry_urls[:5]}")
-        return "(" + "; ".join(parts) + ")"
-
-
 def ingest_source(
     *,
     agent: Any,
@@ -271,7 +78,7 @@ def ingest_source(
     auto_write_memory: bool | None = None,
 ) -> IngestReport:
     target = _resolve_inside_workspace(workspace, path)
-    report = _ingest_paths(
+    return _ingest_paths(
         agent=agent,
         workspace=workspace,
         paths=[target],
@@ -281,7 +88,6 @@ def ingest_source(
         auto_write_memory=auto_write_memory,
         max_chunks_per_file=SOURCE_MAX_CHUNKS,
     )
-    return report
 
 
 def ingest_project(
@@ -296,11 +102,8 @@ def ingest_project(
     root = _resolve_inside_workspace(workspace, path)
     if not root.exists():
         raise FileNotFoundError(f"Path not found: {root}")
-    if root.is_file():
-        paths = [root]
-    else:
-        paths = list(_iter_project_files(root, limit=limit))
-    report = _ingest_paths(
+    paths = [root] if root.is_file() else list(_iter_project_files(root, limit=limit))
+    return _ingest_paths(
         agent=agent,
         workspace=workspace,
         paths=paths,
@@ -310,7 +113,6 @@ def ingest_project(
         auto_write_memory=auto_write_memory,
         max_chunks_per_file=PROJECT_MAX_CHUNKS_PER_FILE,
     )
-    return report
 
 
 def ingest_web_topic(
@@ -323,6 +125,8 @@ def ingest_web_topic(
     dry_run: bool = False,
     auto_write_memory: bool | None = None,
 ) -> WebIngestReport:
+    from core.source_library import SourceLibraryEntry
+
     topic = (topic or "").strip()
     if not topic:
         raise ValueError("topic is required")
@@ -331,7 +135,7 @@ def ingest_web_topic(
     if per_source < 1:
         raise ValueError("per_source must be >= 1")
 
-    entries = resolve_source_library(source_selection)
+    entries: list[SourceLibraryEntry] = resolve_source_library(source_selection)
     write_memory = bool(getattr(agent, "knowledge_auto_write", False))
     if auto_write_memory is not None:
         write_memory = bool(auto_write_memory)
@@ -608,29 +412,6 @@ def ingest_files(
     )
 
 
-def _candidate_urls(search_output: Any, *, entry: SourceLibraryEntry) -> list[str]:
-    if not isinstance(search_output, list):
-        return []
-    urls: list[str] = []
-    for item in search_output:
-        if not isinstance(item, dict):
-            continue
-        url = str(item.get("url") or item.get("href") or "").strip()
-        if not url:
-            continue
-        if not _is_http_url(url):
-            continue
-        if not entry.allows_url(url):
-            continue
-        urls.append(url)
-    return urls
-
-
-def _is_http_url(url: str) -> bool:
-    parsed = urlparse(url)
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
-
-
 def _ingest_paths(
     *,
     agent: Any,
@@ -701,10 +482,6 @@ def _ingest_paths(
                 excerpt=chunk,
             ))
 
-    # Do not feed raw filenames into `is_realtime_question`: names like
-    # "knowledge.txt" contain the substring "now" and can accidentally
-    # trigger realtime-source downgrades. Ingestion is a local document
-    # task, not a live market/weather query.
     ranking = rank_chain(chain, question="controlled document ingestion")
     knowledge_result: KnowledgePipelineResult = agent.knowledge_pipeline.run(
         chain,
@@ -751,81 +528,3 @@ def _ingest_paths(
         })
 
     return report
-
-
-def _resolve_inside_workspace(workspace: Path, raw: str) -> Path:
-    if not raw or not raw.strip():
-        raise ValueError("path is required")
-    workspace = workspace.resolve()
-    candidate = Path(raw.strip().strip('"').strip("'"))
-    target = candidate.resolve() if candidate.is_absolute() else (workspace / candidate).resolve()
-    _ensure_inside_workspace(workspace, target)
-    return target
-
-
-def _ensure_inside_workspace(workspace: Path, target: Path) -> None:
-    try:
-        target.relative_to(workspace)
-    except ValueError as exc:
-        raise PermissionError(f"Path escapes workspace: {target}") from exc
-
-
-def _iter_project_files(root: Path, *, limit: int) -> Iterable[Path]:
-    yielded = 0
-    for path in sorted(root.rglob("*"), key=lambda p: p.as_posix().casefold()):
-        if yielded >= limit:
-            break
-        if any(part in SKIP_DIR_NAMES for part in path.parts):
-            continue
-        if not path.is_file():
-            continue
-        if path.suffix.lower() not in TEXT_EXTENSIONS:
-            continue
-        yield path
-        yielded += 1
-
-
-def _chunk_text(text: str, *, max_chunks: int) -> list[str]:
-    chunks: list[str] = []
-    current = ""
-    for paragraph in text.replace("\r\n", "\n").split("\n\n"):
-        paragraph = paragraph.strip()
-        if not paragraph:
-            continue
-        if len(paragraph) > CHUNK_CHARS:
-            if current:
-                chunks.append(current)
-                current = ""
-            for start in range(0, len(paragraph), CHUNK_CHARS):
-                piece = paragraph[start:start + CHUNK_CHARS].strip()
-                if piece:
-                    chunks.append(piece)
-                if len(chunks) >= max_chunks:
-                    return chunks
-            continue
-        candidate = (current + "\n\n" + paragraph).strip() if current else paragraph
-        if len(candidate) <= CHUNK_CHARS:
-            current = candidate
-        else:
-            if current:
-                chunks.append(current)
-                if len(chunks) >= max_chunks:
-                    return chunks
-            current = paragraph
-    if current and len(chunks) < max_chunks:
-        chunks.append(current)
-    return chunks[:max_chunks]
-
-
-def _skip(report: IngestReport, path: Path, workspace: Path, reason: str) -> None:
-    report.files_skipped += 1
-    label = _relative_label(workspace, path)
-    report.skipped_paths.append(f"{label} ({reason})")
-    report.errors.append(f"{label}: {reason}")
-
-
-def _relative_label(workspace: Path, path: Path) -> str:
-    try:
-        return path.resolve().relative_to(workspace.resolve()).as_posix()
-    except Exception:
-        return str(path)
