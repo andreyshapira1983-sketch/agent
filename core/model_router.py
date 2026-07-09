@@ -461,8 +461,66 @@ def _coerce_role(role: ModelRole | str) -> str:
     return value
 
 
+# Preference order for auto-selecting a credentialed provider when the routed
+# provider cannot authenticate. ``mock`` is intentionally excluded — it is only
+# used as a fallback when explicitly allowed via ``AGENT_ALLOW_MOCK_ROUTING``.
+_PROVIDER_FALLBACK_ORDER: tuple[str, ...] = ("openai", "anthropic", "huggingface")
+
+
+def _first_credentialed_provider() -> str | None:
+    """First real provider (by preference order) whose API key is present."""
+    for provider in _PROVIDER_FALLBACK_ORDER:
+        if _provider_has_credentials(provider):
+            return provider
+    return None
+
+
+def _default_provider_name(provider: str | None) -> str:
+    """Resolve the provider that ``llm.LLM`` would actually use.
+
+    Mirrors ``llm._provider()``: an unset provider falls back to
+    ``AGENT_PROVIDER`` and then to ``anthropic``.
+    """
+    resolved = _normalise_provider(provider)
+    if resolved:
+        return resolved
+    env = (os.getenv("AGENT_PROVIDER", "") or "").strip().lower()
+    return env or "anthropic"
+
+
 def _llm_factory(provider: str | None, model: str | None) -> LLM:
-    return LLM(provider=provider, model=model)
+    """Build an LLM client, healing an un-credentialed provider choice.
+
+    The router can fall back to a real provider (historically hardcoded to
+    ``anthropic``) even when no matching API key is set. Constructing that
+    client and calling it later crashes deep inside the provider SDK with an
+    opaque authentication ``TypeError``. Instead, when the resolved provider is
+    a known real provider with no credentials we transparently switch to the
+    first credentialed provider, or to ``mock`` when offline mock routing is
+    allowed, or raise a clear, actionable error.
+
+    ``mock``, already-credentialed providers and unknown providers are built
+    unchanged (the latter still raise ``ValueError`` loudly in ``LLM``), so the
+    hermetic mock-based test suite is unaffected.
+    """
+    resolved = _default_provider_name(provider)
+    known_real_provider = resolved in _DEFAULT_PROVIDER_ENV and resolved != "mock"
+    if not known_real_provider or _provider_has_credentials(resolved):
+        return LLM(provider=provider, model=model)
+
+    substitute = _first_credentialed_provider()
+    if substitute is not None:
+        # Switch provider; drop the model so the substitute's own default is
+        # used instead of a model name that belongs to the original provider.
+        return LLM(provider=substitute, model=None)
+    if _env_bool("AGENT_ALLOW_MOCK_ROUTING"):
+        return LLM(provider="mock", model="mock-1")
+    raise RuntimeError(
+        f"No API credentials found for model provider '{resolved}'. "
+        "Set one of OPENAI_API_KEY, ANTHROPIC_API_KEY or HF_TOKEN "
+        "(and optionally AGENT_PROVIDER to choose which), or set "
+        "AGENT_ALLOW_MOCK_ROUTING=1 to run the offline mock model."
+    )
 
 
 def _builtin_model_specs() -> tuple[ModelSpec, ...]:
