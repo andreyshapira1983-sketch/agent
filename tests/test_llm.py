@@ -625,3 +625,196 @@ class TestHuggingFaceFallsBackToComplete:
         assert out == "hello from gpt"
         assert llm._client.last_kwargs.get("stream") is None
 
+
+# ============================================================
+# Plan A — large answers are auto-continued instead of truncated
+#
+# When a provider stops on its output cap (Anthropic
+# stop_reason='max_tokens' / OpenAI finish_reason='length') complete()
+# feeds the partial answer back and resumes until a natural stop or the
+# AGENT_MAX_CONTINUATIONS cap. Usage is summed across every leg.
+# ============================================================
+
+import pytest
+
+from core.llm import _auto_continue_enabled, _max_continuations
+
+
+class _ScriptedAnthropicMessages:
+    def __init__(self, script):
+        self._script = list(script)
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        text, in_tok, out_tok, stop = self._script.pop(0)
+        msg = _AnthropicMessage(text, in_tok, out_tok)
+        msg.stop_reason = stop
+        return msg
+
+
+class _ScriptedAnthropicClient:
+    def __init__(self, script):
+        self.messages = _ScriptedAnthropicMessages(script)
+
+
+def _scripted_anthropic_llm(script, model="claude-sonnet-4-5"):
+    llm = LLM(provider="mock")
+    llm.provider = "anthropic"
+    llm.model = model
+    llm._client = _ScriptedAnthropicClient(script)
+    return llm
+
+
+class _ScriptedChoice:
+    def __init__(self, content, finish_reason):
+        self.message = _Usage(content=content)
+        self.finish_reason = finish_reason
+
+
+class _ScriptedOAIResponse:
+    def __init__(self, content, in_tok, out_tok, finish_reason):
+        self.choices = [_ScriptedChoice(content, finish_reason)]
+        self.usage = _Usage(prompt_tokens=in_tok, completion_tokens=out_tok)
+
+
+class _ScriptedCompletions:
+    def __init__(self, script):
+        self._script = list(script)
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        content, in_tok, out_tok, finish = self._script.pop(0)
+        return _ScriptedOAIResponse(content, in_tok, out_tok, finish)
+
+
+class _ScriptedChat:
+    def __init__(self, script):
+        self.completions = _ScriptedCompletions(script)
+
+
+class _ScriptedOpenAIClient:
+    def __init__(self, script):
+        self.chat = _ScriptedChat(script)
+        self.last_kwargs = None
+
+
+def _scripted_openai_llm(script, model="gpt-4o-mini"):
+    llm = LLM(provider="mock")
+    llm.provider = "openai"
+    llm.model = model
+    llm._client = _ScriptedOpenAIClient(script)
+    return llm
+
+
+class TestLargeOutputContinuation:
+    @pytest.fixture(autouse=True)
+    def _clean_env(self, monkeypatch):
+        monkeypatch.delenv("AGENT_AUTO_CONTINUE", raising=False)
+        monkeypatch.delenv("AGENT_MAX_CONTINUATIONS", raising=False)
+
+    # --- config helpers ---------------------------------------------------
+
+    def test_auto_continue_default_on(self):
+        assert _auto_continue_enabled() is True
+
+    def test_auto_continue_disabled(self, monkeypatch):
+        monkeypatch.setenv("AGENT_AUTO_CONTINUE", "0")
+        assert _auto_continue_enabled() is False
+
+    def test_max_continuations_default_and_override(self, monkeypatch):
+        assert _max_continuations() == 4
+        monkeypatch.setenv("AGENT_MAX_CONTINUATIONS", "2")
+        assert _max_continuations() == 2
+        monkeypatch.setenv("AGENT_MAX_CONTINUATIONS", "garbage")
+        assert _max_continuations() == 4
+
+    # --- anthropic --------------------------------------------------------
+
+    def test_anthropic_continues_until_natural_stop(self):
+        llm = _scripted_anthropic_llm([
+            ("AAAA", 10, 5, "max_tokens"),
+            ("BBBB", 3, 4, "end_turn"),
+        ])
+        out = llm.complete(system="s", user="u")
+        assert out == "AAAABBBB"
+        assert len(llm._client.messages.calls) == 2
+        # second call carried the partial answer back as an assistant prefill
+        second = llm._client.messages.calls[1]["messages"]
+        assert second[-1]["role"] == "assistant"
+        assert second[-1]["content"] == "AAAA"
+        # usage is summed across both legs
+        assert llm.last_usage == {
+            "input_tokens": 13, "output_tokens": 9, "total_tokens": 22
+        }
+
+    def test_anthropic_no_continuation_on_natural_stop(self):
+        llm = _scripted_anthropic_llm([("AAAA", 10, 5, "end_turn")])
+        out = llm.complete(system="s", user="u")
+        assert out == "AAAA"
+        assert len(llm._client.messages.calls) == 1
+
+    # --- openai -----------------------------------------------------------
+
+    def test_openai_continues_until_natural_stop(self):
+        llm = _scripted_openai_llm([
+            ("AAAA", 9, 4, "length"),
+            ("BBBB", 2, 3, "stop"),
+        ])
+        out = llm.complete(system="s", user="u")
+        assert out == "AAAABBBB"
+        assert len(llm._client.chat.completions.calls) == 2
+        # second call replays the partial answer + a continue instruction
+        msgs = llm._client.chat.completions.calls[1]["messages"]
+        assert msgs[-2]["role"] == "assistant"
+        assert msgs[-2]["content"] == "AAAA"
+        assert msgs[-1]["role"] == "user"
+        assert llm.last_usage == {
+            "input_tokens": 11, "output_tokens": 7, "total_tokens": 18
+        }
+
+    # --- caps / disable ---------------------------------------------------
+
+    def test_respects_max_continuations_cap(self, monkeypatch):
+        monkeypatch.setenv("AGENT_MAX_CONTINUATIONS", "1")
+        llm = _scripted_openai_llm([
+            ("AAAA", 5, 5, "length"),
+            ("BBBB", 5, 5, "length"),   # still truncated, but cap=1 stops here
+            ("CCCC", 5, 5, "stop"),     # must never be reached
+        ])
+        out = llm.complete(system="s", user="u")
+        assert out == "AAAABBBB"
+        assert len(llm._client.chat.completions.calls) == 2
+
+    def test_disabled_by_env_returns_truncated(self, monkeypatch):
+        monkeypatch.setenv("AGENT_AUTO_CONTINUE", "0")
+        llm = _scripted_openai_llm([
+            ("AAAA", 5, 5, "length"),
+            ("BBBB", 5, 5, "stop"),
+        ])
+        out = llm.complete(system="s", user="u")
+        assert out == "AAAA"
+        assert len(llm._client.chat.completions.calls) == 1
+
+    def test_zero_cap_disables_continuation(self, monkeypatch):
+        monkeypatch.setenv("AGENT_MAX_CONTINUATIONS", "0")
+        llm = _scripted_anthropic_llm([
+            ("AAAA", 5, 5, "max_tokens"),
+            ("BBBB", 5, 5, "end_turn"),
+        ])
+        out = llm.complete(system="s", user="u")
+        assert out == "AAAA"
+        assert len(llm._client.messages.calls) == 1
+
+    def test_empty_continuation_breaks_loop(self):
+        # A model that reports truncation but returns no further text must not
+        # loop; the chain stops and returns what we have.
+        llm = _scripted_anthropic_llm([
+            ("AAAA", 5, 5, "max_tokens"),
+            ("", 1, 0, "max_tokens"),
+        ])
+        out = llm.complete(system="s", user="u")
+        assert out == "AAAA"
+        assert len(llm._client.messages.calls) == 2
+
