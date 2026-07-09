@@ -13,201 +13,30 @@ applying it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from core.governance import (
-    AgentMode,
-    GovernedOperation,
-    GovernanceDecision,
-    GovernancePolicy,
-)
-from core.models import (
-    Action,
-    ApprovalDecision,
-    ApprovalRequest,
-    ErrorObject,
-    PlanStep,
-    PolicyDecision,
-)
+from core.governance import AgentMode, GovernedOperation, GovernancePolicy
+from core.models import Action, ApprovalDecision, ApprovalRequest, ErrorObject, PlanStep, PolicyDecision
 from core.redaction import redact_payload
 from core.smart_memory import EpisodeRecord
 
+from .self_repair_models import RepairProposal, RepairReport, RepairStatus, RepairStepRecord, _ToolRun
+from .self_repair_utils import (
+    _approval_summary,
+    _blocked_status,
+    _diff_summary,
+    _diagnosis_verified,
+    _extract_pass_count,
+    _first_output,
+    _is_empty_diff,
+    _new_compensation_plan_id,
+    _test_summary,
+    _tests_passed,
+)
 
-RepairStatus = Literal[
-    "repaired",
-    "rolled_back",
-    "blocked",
-    "low_confidence",
-    "approval_denied",
-    "approval_aborted",
-    "approval_unavailable",
-    "no_changes",
-    "failed",
-]
 
 _DEFAULT_MIN_REPAIR_CONFIDENCE = 0.60
-
-
-@dataclass(frozen=True)
-class RepairProposal:
-    """A concrete replacement patch to route through self-repair safety."""
-
-    path: str
-    proposed_content: str
-    test_paths: tuple[str, ...] = ("tests",)
-    test_pattern: str | None = None
-    trace_id: str | None = None
-    reason: str = ""
-    context_lines: int = 3
-    confidence: float = 1.0
-    evidence: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        if self.confidence < 0.0 or self.confidence > 1.0:
-            raise ValueError("confidence must be in [0, 1]")
-        object.__setattr__(self, "test_paths", tuple(self.test_paths))
-        object.__setattr__(self, "evidence", tuple(self.evidence))
-
-    def test_arguments(self) -> dict[str, Any]:
-        args: dict[str, Any] = {"paths": list(self.test_paths)}
-        if self.test_pattern:
-            args["pattern"] = self.test_pattern
-        return args
-
-    def to_log_payload(self) -> dict[str, Any]:
-        return {
-            "path": self.path,
-            "proposed_bytes": len(self.proposed_content.encode("utf-8")),
-            "test_paths": list(self.test_paths),
-            "test_pattern": self.test_pattern,
-            "trace_id": self.trace_id,
-            "reason": self.reason,
-            "context_lines": self.context_lines,
-            "confidence": self.confidence,
-            "evidence": list(self.evidence),
-        }
-
-
-@dataclass
-class RepairStepRecord:
-    name: str
-    status: str
-    tool: str | None = None
-    output: Any = None
-    issues: tuple[str, ...] = ()
-    error: str = ""
-    governance: dict[str, Any] | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "status": self.status,
-            "tool": self.tool,
-            "output": redact_payload(self.output),
-            "issues": list(self.issues),
-            "error": self.error,
-            "governance": self.governance,
-        }
-
-
-@dataclass
-class RepairReport:
-    proposal: RepairProposal
-    status: RepairStatus
-    steps: list[RepairStepRecord] = field(default_factory=list)
-    compensation_plan_id: str | None = None
-    rollback_summary: dict[str, Any] | None = None
-    # Measured confidence computed from actual baseline vs post-repair test
-    # counts.  None until post_tests completes.
-    measured_confidence: float | None = None
-
-    @property
-    def ok(self) -> bool:
-        return self.status == "repaired"
-
-    def summary(self) -> dict[str, Any]:
-        diff = _first_output(self.steps, "diff")
-        baseline = _first_output(self.steps, "baseline_tests")
-        post = _first_output(self.steps, "post_tests")
-        return {
-            "status": self.status,
-            "path": self.proposal.path,
-            "test_paths": list(self.proposal.test_paths),
-            "test_pattern": self.proposal.test_pattern,
-            "reason": self.proposal.reason,
-            "confidence": self.proposal.confidence,
-            "measured_confidence": self.measured_confidence,
-            "evidence": list(self.proposal.evidence),
-            "diff": _diff_summary(diff),
-            "baseline_tests": _test_summary(baseline),
-            "post_tests": _test_summary(post),
-            "approval": _approval_summary(self.steps),
-            "compensation_plan_id": self.compensation_plan_id,
-            "rollback": self.rollback_summary,
-            "steps": [
-                {
-                    "name": step.name,
-                    "status": step.status,
-                    "tool": step.tool,
-                    "issues": list(step.issues),
-                    "error": step.error,
-                }
-                for step in self.steps
-            ],
-        }
-
-    def user_summary(self) -> str:
-        """Compact human-facing repair report."""
-        s = self.summary()
-        lines = [
-            f"self-repair status={s['status']} path={s['path']}",
-            f"confidence={s['confidence']:.2f}  measured_confidence={s['measured_confidence'] if s['measured_confidence'] is not None else 'n/a'}",
-        ]
-        if s.get("reason"):
-            lines.append(f"reason={s['reason']}")
-        baseline = s.get("baseline_tests")
-        if baseline:
-            lines.append(
-                "baseline_tests="
-                f"exit={baseline.get('exit_code')} passed={baseline.get('passed')} "
-                f"failed={baseline.get('failed')} errors={baseline.get('errors')}"
-            )
-            failed = baseline.get("failed_tests") or []
-            if failed:
-                lines.append("failed_tests=" + ", ".join(failed[:5]))
-        diff = s.get("diff")
-        if diff:
-            lines.append(
-                f"diff=+{diff.get('additions')} -{diff.get('deletions')} "
-                f"truncated={diff.get('diff_truncated')}"
-            )
-        if s.get("approval"):
-            lines.append(f"approval={s['approval']}")
-        post = s.get("post_tests")
-        if post:
-            lines.append(
-                "post_tests="
-                f"exit={post.get('exit_code')} passed={post.get('passed')} "
-                f"failed={post.get('failed')} errors={post.get('errors')}"
-            )
-        if s.get("rollback"):
-            r = s["rollback"]
-            lines.append(
-                f"rollback=ok:{r.get('ok')} noop:{r.get('noop')} error:{r.get('error')}"
-            )
-        return "\n".join(lines)
-
-
-@dataclass
-class _ToolRun:
-    ok: bool
-    status: str
-    step: RepairStepRecord
-    output: Any = None
-    policy_decision: PolicyDecision | None = None
-    governance_decision: GovernanceDecision | None = None
 
 
 class SelfRepairController:
@@ -342,16 +171,6 @@ class SelfRepairController:
         )
         report.steps.append(post.step)
 
-        # ── Measured-confidence gate (T9 / §7 Self-repair) ──────────────────
-        # Compute confidence from REAL test outcomes rather than trusting the
-        # caller-supplied proposal.confidence alone.
-        #
-        # measured_confidence = post_passed / max(baseline_passed, 1)
-        #
-        # < 1.0 means the patch broke at least one test that was passing
-        #        before (regression).
-        # < self.min_confidence means too many tests broke → rollback.
-        # == 1.0 means test count held steady or improved.
         baseline_passed = _extract_pass_count(baseline.output)
         post_passed = _extract_pass_count(post.output)
         measured_confidence = post_passed / max(baseline_passed, 1)
@@ -374,7 +193,6 @@ class SelfRepairController:
             self._finish(report)
             return report
 
-        # Either tests failed outright OR measured confidence fell below threshold
         if measured_confidence < self.min_confidence:
             report.steps.append(
                 RepairStepRecord(
@@ -566,7 +384,7 @@ class SelfRepairController:
         action: Action,
         plan_step: PlanStep,
         policy_decision: PolicyDecision,
-        governance_decision: GovernanceDecision,
+        governance_decision,
         summary: str,
     ) -> Literal["approve", "deny", "abort", "unavailable"]:
         provider = self.agent.approval_provider
@@ -656,19 +474,10 @@ class SelfRepairController:
 
     def _finish(self, report: RepairReport) -> None:
         self.agent.log.log("self_repair_result", report.summary())
-        # After a successful repair, persist a regression-guard lesson so the
-        # agent never silently reintroduces the same bug across sessions.
         if report.status == "repaired":
             self._write_repair_lesson(report)
 
     def _write_repair_lesson(self, report: RepairReport) -> None:
-        """Persist a lesson to long-term memory after a confirmed repair.
-
-        The lesson is tagged "fact"+"insight" so it passes the Write Policy
-        consent gate without requiring an explicit user directive. It is also
-        tagged "regression-guard" and "bug-fix" so the retrieval policy can
-        surface it when similar files are touched in future cycles.
-        """
         try:
             if not hasattr(self.agent, "remember"):
                 return
@@ -687,9 +496,6 @@ class SelfRepairController:
                 record_type="episodic",
                 owner="self",
             )
-            # Also write directly into episodic_store so search_by_tags(["lesson"])
-            # and path-aware lesson injection in _retrieve_experience_memory work.
-            # (agent.remember() goes to persistent_store, not episodic_store.)
             if hasattr(self.agent, "episodic_store") and self.agent.episodic_store is not None:
                 ep = EpisodeRecord(
                     goal="repair",
@@ -709,7 +515,6 @@ class SelfRepairController:
                 },
             )
         except Exception:
-            # Lesson writing must never abort the repair report flow.
             pass
 
     def _log_error(
@@ -731,106 +536,3 @@ class SelfRepairController:
                 context=context,
             ),
         )
-
-
-def _diagnosis_verified(output: Any) -> bool:
-    return isinstance(output, dict) and output.get("timed_out") is False
-
-
-def _tests_passed(output: Any) -> bool:
-    if not isinstance(output, dict):
-        return False
-    return (
-        output.get("timed_out") is False
-        and output.get("exit_code") == 0
-        and int(output.get("failed") or 0) == 0
-        and int(output.get("errors") or 0) == 0
-    )
-
-
-def _extract_pass_count(output: Any) -> int:
-    """Return the number of passing tests from a run_tests output dict.
-
-    Returns 0 when the output is unavailable or missing the ``passed`` key.
-    """
-    if not isinstance(output, dict):
-        return 0
-    try:
-        return int(output.get("passed") or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _is_empty_diff(output: Any) -> bool:
-    if not isinstance(output, dict):
-        return False
-    return int(output.get("additions") or 0) == 0 and int(output.get("deletions") or 0) == 0
-
-
-def _new_compensation_plan_id(before_ids: set[str], plans: list[Any]) -> str | None:
-    for plan in reversed(plans):
-        if plan.id not in before_ids:
-            return plan.id
-    return None
-
-
-def _blocked_status(status: str) -> RepairStatus:
-    if status == "approval_deny":
-        return "approval_denied"
-    if status == "approval_abort":
-        return "approval_aborted"
-    if status == "approval_unavailable":
-        return "approval_unavailable"
-    if status in {"tool_error", "verify_failed"}:
-        return "failed"
-    return "blocked"
-
-
-def _first_output(steps: list[RepairStepRecord], name: str) -> Any:
-    for step in steps:
-        if step.name == name:
-            return step.output
-    return None
-
-
-def _approval_summary(steps: list[RepairStepRecord]) -> str | None:
-    for step in steps:
-        if step.name != "write":
-            continue
-        if step.status == "ok":
-            return "approved"
-        if step.status == "approval_deny":
-            return "denied"
-        if step.status == "approval_abort":
-            return "aborted"
-        if step.status == "approval_unavailable":
-            return "unavailable"
-        return step.status
-    return None
-
-
-def _test_summary(output: Any) -> dict[str, Any] | None:
-    if not isinstance(output, dict):
-        return None
-    return {
-        "exit_code": output.get("exit_code"),
-        "timed_out": output.get("timed_out"),
-        "passed": output.get("passed"),
-        "failed": output.get("failed"),
-        "errors": output.get("errors"),
-        "skipped": output.get("skipped"),
-        "total": output.get("total"),
-        "failed_tests": output.get("failed_tests") or [],
-    }
-
-
-def _diff_summary(output: Any) -> dict[str, Any] | None:
-    if not isinstance(output, dict):
-        return None
-    return {
-        "path": output.get("path"),
-        "file_exists": output.get("file_exists"),
-        "additions": output.get("additions"),
-        "deletions": output.get("deletions"),
-        "diff_truncated": output.get("diff_truncated"),
-    }
