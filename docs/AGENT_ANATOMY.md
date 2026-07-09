@@ -165,6 +165,8 @@ _Reflection-driven repair, self-build, value gating._
 | Module | Purpose |
 | ------ | ------- |
 | `core/self_repair` | MVP-13.2 self-repair controller. |
+| `core/self_repair_models` | Extracted from `core/self_repair` by autonomous self-build module split. |
+| `core/self_repair_utils` | Extracted from `core/self_repair` by autonomous self-build module split. |
 | `core/repair_proposal` | MVP-13.3 repair proposal generation. |
 | `core/self_apply_bridge` | Approval -> trusted self-apply lane bridge (TD-024). |
 | `core/self_apply_lane` | Trusted low-risk self-apply lane (TD-023). |
