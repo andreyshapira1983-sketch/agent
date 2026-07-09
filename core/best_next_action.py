@@ -110,6 +110,7 @@ def select_best_next_action(
     triage: Optional[TriageReport] = None,
     inbox_pending: int = 0,
     acknowledged: frozenset[str] = frozenset(),
+    self_improvement_registry_available: bool = False,
     open_self_improvement_issues: tuple[dict, ...] = (),
     recent_self_improvement_failures: tuple[str, ...] = (),
 ) -> BestNextAction:
@@ -145,7 +146,7 @@ def select_best_next_action(
         candidates.append(tests)
 
     improvement = _candidate_open_self_improvement_issue(open_self_improvement_issues)
-    if improvement is None:
+    if improvement is None and not self_improvement_registry_available:
         improvement = _candidate_self_improvement_failure(
             recent_self_improvement_failures
         )
