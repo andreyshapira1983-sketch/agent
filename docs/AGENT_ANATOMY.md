@@ -44,6 +44,7 @@ _Planning, verification, clarification, control loop._
 | Module | Purpose |
 | ------ | ------- |
 | `core/loop` | Control Loop — Observe -> Interpret -> Plan -> Act -> Verify -> Respond. |
+| `core/loop_helpers` | Extracted from `core/loop` by autonomous self-build module split. |
 | `core/planner` | LLM-driven Planner (§3 Cognitive Core: Planning). |
 | `core/verifier` | MVP-14.4 — Verifier. |
 | `core/verifier_patterns` | Extracted from `core/verifier` by autonomous self-build module split. |
