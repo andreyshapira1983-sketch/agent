@@ -24,6 +24,7 @@ from core.approval_inbox import ApprovalInbox
 from core.self_task_producer import (
     SELF_TASK_OPERATION,
     TASK_PRODUCER_ORIGIN,
+    decode_frozen_test,
     produce_coding_task,
 )
 
@@ -199,6 +200,50 @@ def test_happy_path_never_touches_git(workspace: Path):
     vcs = FakeVCS()
     _run(workspace, vcs=vcs)
     assert vcs.mutations == []
+
+
+def test_payload_carries_exact_base64_frozen_test(workspace: Path):
+    inbox, report = _run(workspace)
+    assert report.status == "proposed"
+    item = inbox.list()[0]
+    # The exact test is preserved byte-for-byte in the redaction-inert blob.
+    import base64
+
+    assert base64.b64decode(item.payload["test_content_b64"]).decode() == _GOOD_TEST
+    assert decode_frozen_test(item.payload) == _GOOD_TEST
+
+
+def test_frozen_test_survives_durable_redaction(workspace: Path):
+    # A test that legitimately embeds an example email would be scrubbed by the
+    # DLP redactor in the raw field, but must survive exactly via base64.
+    pii_test = (
+        "from core.redaction import mask_email\n\n\n"
+        "def test_mask():\n"
+        '    assert mask_email("alice@mail.ru") == "a***@mail.ru"\n'
+    )
+    inbox, report = _run(workspace, llm=FakeLLM([_builder(test_content=pii_test)]))
+    assert report.status == "proposed"
+    # ApprovalInbox.add() redacts the payload in-memory before persisting.
+    item = inbox.list()[0]
+    assert "[REDACTED:" in item.payload["test_content"]  # preview is scrubbed
+    assert decode_frozen_test(item.payload) == pii_test  # exact test intact
+
+
+def test_decode_frozen_test_falls_back_to_plaintext():
+    assert decode_frozen_test({"test_content": "def test_x():\n    assert 1\n"}) == (
+        "def test_x():\n    assert 1\n"
+    )
+
+
+def test_veto_test_with_redaction_markers(workspace: Path):
+    bad = (
+        "from core.redaction import redact\n\n\n"
+        "def test_x():\n    assert redact() == \"[REDACTED:pii-email]\"\n"
+    )
+    inbox, report = _run(workspace, llm=FakeLLM([_builder(test_content=bad)]))
+    assert report.status == "task_veto"
+    assert any("redaction markers" in r for r in report.veto_reasons)
+    assert inbox.list() == []
 
 
 # ── critic vetoes (anti-garbage) ─────────────────────────────────────────────
