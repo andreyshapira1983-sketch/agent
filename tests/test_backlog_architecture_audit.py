@@ -57,6 +57,40 @@ def test_gap_without_evidence_uses_synthetic_target():
     assert records[0].target_path == "architecture:some-missing-layer"
 
 
+def test_targets_first_missing_evidence_file():
+    # With an exists predicate, the target is the first file that is still
+    # missing (README.md), not the first evidence file (AGENT_DOCTRINE.md).
+    present = {"AGENT_DOCTRINE.md", "архитектура автономного Агента.txt"}
+    gap = {
+        "id": "doctrine_and_architecture_docs",
+        "title": "Doctrine and Architecture Source of Truth",
+        "evidence_files": [
+            "AGENT_DOCTRINE.md",
+            "архитектура автономного Агента.txt",
+            "README.md",
+        ],
+    }
+    records, _ = architecture_audit_candidates(
+        [gap], exists=lambda p: p in present
+    )
+    assert records[0].target_path == "README.md"
+
+
+def test_all_evidence_present_falls_back_to_first():
+    gap = {
+        "id": "g",
+        "title": "T",
+        "evidence_files": ["a.md", "b.md"],
+    }
+    records, _ = architecture_audit_candidates([gap], exists=lambda p: True)
+    assert records[0].target_path == "a.md"
+
+
+def test_no_predicate_keeps_first_evidence_file():
+    records, _ = architecture_audit_candidates(_GAPS)
+    assert records[0].target_path == "AGENT_DOCTRINE.md"
+
+
 def test_empty_and_titleless_gaps_yield_nothing():
     assert architecture_audit_candidates([]) == ([], "")
     records, text = architecture_audit_candidates([{"id": "x", "title": "  "}])

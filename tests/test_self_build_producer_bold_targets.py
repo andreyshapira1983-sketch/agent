@@ -139,3 +139,36 @@ def test_grounded_abstract_non_file_target_still_refused(tmp_path):
     )
 
     assert out.decision == "no_target"
+
+
+# ── selector prefers the first ACTIONABLE ranked candidate ────────────────────
+
+
+def test_default_selector_skips_non_actionable_higher_ranked(tmp_path, monkeypatch):
+    # A higher-ranked but denied target (.github/...) must not shadow a lower-
+    # ranked but actionable one (README.md). The selector returns the actionable.
+    import core.backlog_selector as bs
+    from core.self_build_producer import _default_grounded_selector
+
+    denied = _Candidate(".github/workflows/ci.yml", "Release / Supply-Chain Guard")
+    actionable = _Candidate("README.md", "Doctrine and Architecture Source of Truth")
+    monkeypatch.setattr(bs, "load_backlog", lambda *a, **k: [denied, actionable])
+
+    selected = _default_grounded_selector(tmp_path)()
+
+    assert selected.target_path == "README.md"
+
+
+def test_default_selector_falls_back_to_top_when_none_actionable(tmp_path, monkeypatch):
+    import core.backlog_selector as bs
+    from core.self_build_producer import _default_grounded_selector
+
+    denied1 = _Candidate(".github/workflows/ci.yml", "gap one")
+    denied2 = _Candidate("requirements.lock", "gap two")
+    monkeypatch.setattr(bs, "load_backlog", lambda *a, **k: [denied1, denied2])
+    monkeypatch.setattr(bs, "select_top", lambda c: c[0] if c else None)
+
+    selected = _default_grounded_selector(tmp_path)()
+
+    assert selected.target_path == ".github/workflows/ci.yml"  # honest #1 refusal
+

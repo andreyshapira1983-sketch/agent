@@ -193,7 +193,9 @@ def _load_architecture_audit(root: Path) -> tuple[list[SignalRecord], str]:
 
         audit = audit_architecture(root)
         gaps = audit.to_dict().get("priority_gaps", [])
-        return architecture_audit_candidates(gaps)
+        return architecture_audit_candidates(
+            gaps, exists=lambda rel: _path_exists(root / rel)
+        )
     except Exception:
         return [], ""
 
