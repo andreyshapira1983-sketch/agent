@@ -174,6 +174,7 @@ _Reflection-driven repair, self-build, value gating._
 | `core/self_apply_lane` | Trusted low-risk self-apply lane (TD-023). |
 | `core/self_build_producer` | Subagent-backed full self-apply proposal producer (TD-025). |
 | `core/self_build_memory` | Journals self-build/self-apply outcomes (and why) into episodic memory. |
+| `core/self_task_producer` | Stage-A coding-task producer: turns a code TODO/FIXME into a task + failing acceptance test for human approval (roadmap Ступень 1). |
 | `core/self_build_supervisor` | Lightweight, read-only self-build supervisor cycle. |
 | `core/learning_planner` | Learning planner. |
 | `core/value_review` | TD-032 — human value-review verdicts for self-build / self-apply outcomes. |
