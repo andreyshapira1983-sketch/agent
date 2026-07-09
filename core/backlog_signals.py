@@ -42,6 +42,12 @@ _TD_TITLE_RE = re.compile(r"^(TD-\d+(?:\s*/\s*TD-\d+)*|P\d+[A-Za-z]?)\s+—\s+\S
 _TD_ID_RE = re.compile(r"^(TD-\d+(?:\s*/\s*TD-\d+)*|P\d+[A-Za-z]?)")
 # A numbered anatomy candidate item: "1. **TD-030 (candidate): Unify ...**  rest"
 _ANATOMY_ITEM_RE = re.compile(r"^\d+\.\s+\*\*(.+?)\*\*")
+# A self-flagged code problem left in the agent's OWN source as a comment marker
+# in the conventional leading form: "# TODO: rewire", "# FIXME handle None",
+# "# XXX broken". Anchored to the comment start so a comment that merely mentions
+# a marker mid-sentence does not match. Case-sensitive uppercase only, so prose
+# ("todo list") never matches.
+_CODE_TODO_MARKER_RE = re.compile(r"^#\s*(TODO|FIXME|XXX)\b")
 _SELF_BUILD_DOC_TARGET = "docs/self_build.md"
 _SELF_BUILD_DOC_SOURCE = (
     "docs/proposals/self-build-grounded-target-coverage-proposal.md"
@@ -297,6 +303,103 @@ def architecture_audit_candidates(
                 problem_quote=title,
             )
         )
+    return records, "\n".join(quotes)
+
+
+# ── Code self-inspection signal (self-perception organ) ───────────────────────
+# Source constant for backlog signals the agent derives by reading its OWN source
+# files and finding self-flagged problems (TODO/FIXME/XXX comments). This is the
+# first "eye": instead of only human docs or a presence checklist, the agent can
+# see concrete, line-anchored problems in the code it is allowed to edit.
+CODE_TODO_SOURCE = "code_todo"
+
+# Keep the scan bounded and the emitted quote small: a runaway file of markers
+# should not flood the backlog, and a very long comment line should not bloat the
+# signal. Both limits are deterministic.
+_MAX_CODE_TODO_QUOTE_LEN = 200
+_MAX_CODE_TODO_RECORDS = 50
+
+
+def _comment_markers(content: str) -> list[tuple[int, str]]:
+    """Return ``(lineno, comment_text)`` for real ``#`` comment tokens that carry
+    a TODO/FIXME/XXX marker.
+
+    Uses the stdlib tokenizer so markers that merely appear inside a string
+    literal, docstring, or regex (e.g. this module documenting ``# TODO``) are
+    NOT mistaken for a self-flagged problem — only genuine comment tokens count.
+    Best-effort: if the file cannot be fully tokenized (e.g. a syntax error), we
+    keep whatever comment tokens were emitted before the failure and fall back to
+    a line scan for the rest so a broken file still surfaces its markers.
+    """
+    import io
+    import tokenize
+
+    found: list[tuple[int, str]] = []
+    seen_lines: set[int] = set()
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(content).readline)
+        for tok in tokens:
+            if tok.type == tokenize.COMMENT and _CODE_TODO_MARKER_RE.search(tok.string):
+                lineno = tok.start[0]
+                seen_lines.add(lineno)
+                found.append((lineno, tok.string.strip()))
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        # Tokenizer bailed partway; scan any not-yet-seen lines textually so a
+        # syntactically broken file still reveals its comment markers.
+        for lineno, raw in enumerate(content.splitlines(), start=1):
+            if lineno in seen_lines:
+                continue
+            stripped = raw.strip()
+            if stripped.startswith("#") and _CODE_TODO_MARKER_RE.search(stripped):
+                found.append((lineno, stripped))
+    return found
+
+
+def code_todo_candidates(
+    files: Iterable[tuple[str, str]],
+) -> tuple[list[SignalRecord], str]:
+    """Turn self-flagged code comments into grounded backlog signals.
+
+    ``files`` is an iterable of ``(rel_path, content)`` pairs already read by the
+    caller (this function performs NO IO, so it stays pure/deterministic and
+    unit-testable). Every real ``#`` comment carrying a ``TODO`` / ``FIXME`` /
+    ``XXX`` marker becomes one :class:`SignalRecord` whose ``target_path`` is the
+    file, ``evidence_ref`` is ``<rel_path>:<line>`` (so a human can jump to it),
+    and ``problem_quote`` is the exact stripped comment.
+
+    Returns ``(records, source_text)`` where ``source_text`` joins every quote
+    verbatim, so the selector's provenance check (`quote in source_text`) passes
+    by construction. Records are de-duplicated by ``<rel_path>:<line>`` and the
+    total is capped at :data:`_MAX_CODE_TODO_RECORDS` for a bounded backlog.
+    """
+    records: list[SignalRecord] = []
+    quotes: list[str] = []
+    seen: set[str] = set()
+    for rel_path, content in files:
+        rel = str(rel_path or "").replace("\\", "/").strip()
+        if not rel or not content:
+            continue
+        for lineno, comment in _comment_markers(content):
+            quote = comment.strip()
+            if not quote:
+                continue
+            if len(quote) > _MAX_CODE_TODO_QUOTE_LEN:
+                quote = quote[:_MAX_CODE_TODO_QUOTE_LEN].rstrip()
+            evidence_ref = f"{rel}:{lineno}"
+            if evidence_ref in seen:
+                continue
+            seen.add(evidence_ref)
+            quotes.append(quote)
+            records.append(
+                SignalRecord(
+                    signal_source=CODE_TODO_SOURCE,
+                    target_path=rel,
+                    evidence_ref=evidence_ref,
+                    problem_quote=quote,
+                )
+            )
+            if len(records) >= _MAX_CODE_TODO_RECORDS:
+                return records, "\n".join(quotes)
     return records, "\n".join(quotes)
 
 
