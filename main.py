@@ -158,6 +158,10 @@ from cli.commands_self_apply import _handle_self_apply_run
 # :self-build-produce runs the subagent producer that generates one low-risk
 # self-apply proposal into the approval inbox (cli/commands_self_build.py).
 from cli.commands_self_build import _handle_self_build_produce
+# :self-task-propose runs the Stage-A coding-task producer that turns a real code
+# TODO/FIXME into a task + failing acceptance test approval item
+# (cli/commands_self_task.py, roadmap Ступень 1).
+from cli.commands_self_task import _handle_self_task_propose
 # :value-review / :value-review-list capture a human value verdict for an applied
 # self-build proposal (cli/commands_value_review.py, TD-032, capture-only).
 from cli.commands_value_review import (
@@ -1400,6 +1404,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head == ":self-build-produce":
         return _handle_self_build_produce(rest.strip(), agent, workspace)
 
+    if head == ":self-task-propose":
+        return _handle_self_task_propose(rest.strip(), agent, workspace)
+
     if head == ":value-review":
         return _handle_value_review(rest.strip(), agent, workspace)
 
@@ -1531,6 +1538,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :approval-run <id>              execute one approved whitelisted operation\n"
             "  :self-apply-run <id>            run one approved low-risk self-apply proposal\n"
         "  :self-build-produce             produce one low-risk self-apply proposal into the inbox\n"
+            "  :self-task-propose              propose one coding task + failing test for approval (Stage A)\n"
             "  :value-review <id> <verdict> [note]  record a human value verdict for an applied proposal\n"
             "  :value-review-list              list applied self-build proposals and their value verdicts\n"
             "  :approval-abort <id>            mark an approval inbox item aborted\n"
@@ -1814,7 +1822,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :dry-health-pass  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :budget-kill-switch  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :model-discovery-audit  :provider-catalog-refresh  :approval-list  :approval-triage  :best-next-action  :ack  :ack-list  :ack-clear  :approval-run  :self-apply-run  :self-build-produce  :value-review  :value-review-list  :task-add  :schedule-disable  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :self-build-supervisor  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :dry-health-pass  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :budget-kill-switch  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :model-discovery-audit  :provider-catalog-refresh  :approval-list  :approval-triage  :best-next-action  :ack  :ack-list  :ack-clear  :approval-run  :self-apply-run  :self-build-produce  :self-task-propose  :value-review  :value-review-list  :task-add  :schedule-disable  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :self-build-supervisor  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:

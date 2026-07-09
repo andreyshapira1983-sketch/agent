@@ -594,6 +594,34 @@ class TestHandleMetaCommand:
         out = capsys.readouterr()
         assert "Usage: :self-build-produce" in out.err
 
+    def test_self_task_propose_registered(self, workspace: Path, capsys):
+        # Dispatcher recognizes :self-task-propose and runs the Stage-A producer
+        # end to end (a gate short-circuits to no_task in the tmp workspace, which
+        # has no code TODO/FIXME backlog).
+        import subprocess
+
+        for args in (["init", "-q"], ["add", "-A"]):
+            subprocess.run(["git", *args], cwd=workspace, check=True)
+        subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@e",
+             "commit", "-q", "--allow-empty", "-m", "init"],
+            cwd=workspace, check=True,
+        )
+        agent = _build_agent(workspace)
+        assert handle_meta_command(":self-task-propose", agent, workspace) is True
+        out = capsys.readouterr()
+        assert "=== self-task propose ===" in out.err
+        assert "status:" in out.err
+
+    def test_self_task_propose_rejects_args(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+        assert (
+            handle_meta_command(":self-task-propose extra words", agent, workspace)
+            is True
+        )
+        out = capsys.readouterr()
+        assert "Usage: :self-task-propose" in out.err
+
 
     def test_mem_prints_working_and_persistent(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
