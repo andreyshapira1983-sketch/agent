@@ -1054,3 +1054,40 @@ def test_critic_single_file_rewrite_ignores_split_guard():
     }
     out = _critic_review("core/keep.py", old, build, confidence_threshold=0.6)
     assert out.decision == "pass", out.data["veto_reasons"]
+
+
+def test_critic_names_real_importer_when_split_breaks_import():
+    from core.self_build_producer import _critic_review
+
+    old = "def keep():\n    return 1\n\n\ndef _helper():\n    return 2\n"
+    target_content = "def keep():\n    return 1\n"
+    extra = [{"path": "core/keep_helpers.py", "content": "def _helper():\n    return 2\n"}]
+    out = _critic_review(
+        "core/keep.py",
+        old,
+        _split_build("core/keep.py", target_content, extra),
+        confidence_threshold=0.6,
+        imported_symbols={"_helper": ["core/consumer.py", "tests/test_keep.py"]},
+    )
+    assert out.decision == "veto"
+    joined = " | ".join(out.data["veto_reasons"])
+    assert "breaks a REAL import" in joined
+    assert "core/consumer.py" in joined
+
+
+def test_critic_no_importer_naming_without_dep_map():
+    from core.self_build_producer import _critic_review
+
+    old = "def keep():\n    return 1\n\n\ndef _helper():\n    return 2\n"
+    target_content = "def keep():\n    return 1\n"
+    extra = [{"path": "core/keep_helpers.py", "content": "def _helper():\n    return 2\n"}]
+    out = _critic_review(
+        "core/keep.py",
+        old,
+        _split_build("core/keep.py", target_content, extra),
+        confidence_threshold=0.6,
+    )
+    assert out.decision == "veto"
+    joined = " | ".join(out.data["veto_reasons"])
+    assert "breaks a REAL import" not in joined
+    assert "re-export" in joined

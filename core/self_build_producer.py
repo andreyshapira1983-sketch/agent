@@ -673,6 +673,7 @@ def _builder_generate(
     *,
     split_mode: bool = False,
     lessons: list[str] | None = None,
+    dep_context: str | None = None,
 ) -> RoleOutput:
     """Generate the FULL proposed file content (never a diff).
 
@@ -730,6 +731,8 @@ def _builder_generate(
         f"Diagnosis: {diagnosis or '(none)'}\n\n"
         f"Current content:\n{safe_content or '(empty / new file)'}"
     )
+    if dep_context:
+        user = f"{dep_context.strip()}\n\n{user}"
     if lessons:
         lesson_block = "\n".join(
             f"- {str(item).strip()}" for item in lessons if str(item).strip()
@@ -788,6 +791,7 @@ def _critic_review(
     build: dict[str, Any],
     *,
     confidence_threshold: float,
+    imported_symbols: dict[str, list[str]] | None = None,
 ) -> RoleOutput:
     """Validate the built content; any failing check is a hard veto."""
     veto: list[str] = []
@@ -872,6 +876,18 @@ def _critic_review(
     ):
         dropped = _split_dropped_api(current_content, content)
         if dropped:
+            # Name the real importers first: a dropped symbol that another
+            # project file actually imports is a guaranteed ImportError, so the
+            # message points the Builder at the exact consumer files.
+            hard_broken = [
+                n for n in dropped if imported_symbols and n in imported_symbols
+            ]
+            for name in hard_broken[:4]:
+                users = ", ".join(sorted(imported_symbols[name])[:3])
+                veto.append(
+                    f"split breaks a REAL import: {name} is imported by {users} "
+                    f"but is no longer importable from {target}"
+                )
             shown = ", ".join(dropped[:6])
             more = "" if len(dropped) <= 6 else f" (+{len(dropped) - 6} more)"
             veto.append(
@@ -1176,12 +1192,44 @@ def produce_self_apply_proposal(
     current_content = researcher.data["current_content"]
     evidence = list(researcher.data["evidence"])
 
+    # ── Dependency map ───────────────────────────────────────────────────────
+    # Before the Builder touches a Python module, measure its real consumers:
+    # which project files import it, which symbols they take, and which test
+    # files exercise it. The Builder gets this as an explicit contract, the
+    # Critic cross-checks dropped names against REAL imports, and the importer
+    # tests are appended to the targeted-test list. Best-effort: a scan failure
+    # must never break the producer.
+    dep_map = None
+    dep_context: str | None = None
+    if target.lower().endswith(".py"):
+        try:
+            from core.dependency_map import build_dependency_map
+
+            dep_map = build_dependency_map(workspace, target)
+            dep_context = dep_map.builder_context()
+            evidence.extend(dep_map.summary_lines())
+        except Exception:  # noqa: BLE001 — dep scan must never break the producer
+            dep_map = None
+            dep_context = None
+
     # ── Builder ─────────────────────────────────────────────────────────────
     builder = _builder_generate(
         llm, target, current_content, diagnosis,
-        split_mode=split_mode, lessons=lessons,
+        split_mode=split_mode, lessons=lessons, dep_context=dep_context,
     )
     roles.append(builder)
+
+    # Importer test files are part of the change's blast radius: run them as
+    # targeted tests so a contract break fails fast inside the lane.
+    if builder.decision == "built" and dep_map is not None and dep_map.related_tests:
+        try:
+            paths = [str(p) for p in (builder.data.get("test_paths") or [])]
+            for test_file in dep_map.related_tests[:10]:
+                if test_file not in paths:
+                    paths.append(test_file)
+            builder.data["test_paths"] = paths
+        except Exception:  # noqa: BLE001 — test enrichment must never break produce
+            pass
 
     # Self-build head keeps the anatomy index in sync: a split that adds new
     # core/*.py modules must also register them in docs/AGENT_ANATOMY.md, or the
@@ -1198,6 +1246,7 @@ def produce_self_apply_proposal(
         current_content,
         builder.data,
         confidence_threshold=confidence_threshold,
+        imported_symbols=dep_map.imported_symbols if dep_map is not None else None,
     )
     roles.append(critic)
     if critic.decision == "veto":
