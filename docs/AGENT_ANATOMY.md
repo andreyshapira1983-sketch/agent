@@ -111,6 +111,9 @@ _Autonomous loop, scheduling, budgets, state durability._
 | `core/autonomous_runtime` | Autonomous runtime orchestrator. |
 | `core/scheduler` | Persistent scheduler for autonomous runtime tasks. |
 | `core/campaign` | 24/48h autonomous work campaign engine. |
+| `core/campaign_types` | Extracted from `core/campaign` by autonomous self-build module split. |
+| `core/campaign_ledger` | Extracted from `core/campaign` by autonomous self-build module split. |
+| `core/campaign_io` | Extracted from `core/campaign` by autonomous self-build module split. |
 | `core/work_session` | MVP-17.1  Long Work Session Skeleton. |
 | `core/task_queue` | Persistent task queue for autonomous runtime work. |
 | `core/checkpoint` | §3.5 Checkpoint / Resume — durable mid-run state. |
