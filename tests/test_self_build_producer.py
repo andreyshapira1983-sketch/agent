@@ -971,3 +971,86 @@ def test_broken_selector_does_not_break_producer(workspace: Path):
     # A raising selector is treated as "no grounded candidate", never a crash.
     assert report.status == "no_patch"
     assert report.role_outputs[0].decision == "no_target"
+
+
+# ── split-integrity guard ─────────────────────────────────────────────────────
+
+
+def _split_build(target, content, extra_files):
+    files = [{"path": target, "content": content}]
+    files.extend(extra_files)
+    return {
+        "content": content,
+        "files": files,
+        "test_paths": ["tests"],
+        "test_pattern": None,
+        "reason": "split module",
+        "confidence": 0.9,
+    }
+
+
+def test_split_dropped_api_flags_moved_symbol_without_reexport():
+    from core.self_build_producer import _split_dropped_api
+
+    old = "def keep():\n    return 1\n\n\ndef moved():\n    return 2\n"
+    # target no longer defines `moved` and does not re-import it
+    new = "def keep():\n    return 1\n"
+    assert _split_dropped_api(old, new) == ["moved"]
+
+
+def test_split_dropped_api_ok_when_reexported():
+    from core.self_build_producer import _split_dropped_api
+
+    old = "_MIN = 3\n\n\ndef moved():\n    return 2\n"
+    new = "from .helpers import moved, _MIN\n"
+    assert _split_dropped_api(old, new) == []
+
+
+def test_critic_vetoes_split_that_drops_importable_name():
+    from core.self_build_producer import _critic_review
+
+    old = "def keep():\n    return 1\n\n\ndef _helper():\n    return 2\n"
+    # split moves _helper out but target forgets to re-export it
+    target_content = "def keep():\n    return 1\n"
+    extra = [{"path": "core/keep_helpers.py", "content": "def _helper():\n    return 2\n"}]
+    out = _critic_review(
+        "core/keep.py",
+        old,
+        _split_build("core/keep.py", target_content, extra),
+        confidence_threshold=0.6,
+    )
+    assert out.decision == "veto"
+    assert any("re-export" in r for r in out.data["veto_reasons"])
+
+
+def test_critic_passes_split_with_reexport_shim():
+    from core.self_build_producer import _critic_review
+
+    old = "def keep():\n    return 1\n\n\ndef _helper():\n    return 2\n"
+    target_content = "from .keep_helpers import _helper\n\n\ndef keep():\n    return 1\n"
+    extra = [{"path": "core/keep_helpers.py", "content": "def _helper():\n    return 2\n"}]
+    out = _critic_review(
+        "core/keep.py",
+        old,
+        _split_build("core/keep.py", target_content, extra),
+        confidence_threshold=0.6,
+    )
+    assert out.decision == "pass", out.data["veto_reasons"]
+
+
+def test_critic_single_file_rewrite_ignores_split_guard():
+    from core.self_build_producer import _critic_review
+
+    old = "def keep():\n    return 1\n\n\ndef gone():\n    return 2\n"
+    # single-file rewrite that removes a function must NOT trigger the split guard
+    new = "def keep():\n    return 1\n"
+    build = {
+        "content": new,
+        "files": [{"path": "core/keep.py", "content": new}],
+        "test_paths": ["tests"],
+        "test_pattern": None,
+        "reason": "rewrite",
+        "confidence": 0.9,
+    }
+    out = _critic_review("core/keep.py", old, build, confidence_threshold=0.6)
+    assert out.decision == "pass", out.data["veto_reasons"]
