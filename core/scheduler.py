@@ -6,15 +6,20 @@ run time, and exits. A future service can call the same tick periodically.
 """
 from __future__ import annotations
 
+import asyncio
+import inspect
+import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Awaitable, Callable, Literal, Optional
 
 from core.file_lock import exclusive_file_lock
 from core.ids import new_id
 from core.state_integrity import read_state_jsonl_unlocked, rewrite_state_jsonl_unlocked
 from core.task_queue import RuntimeTask, TaskQueueStore
+
+logger = logging.getLogger(__name__)
 
 
 ScheduleStatus = Literal["active", "paused", "disabled"]
@@ -290,3 +295,229 @@ class SchedulerStore:
 
     def _save_unlocked(self, schedules: list[RuntimeSchedule]) -> None:
         rewrite_state_jsonl_unlocked(self.path, [schedule.to_dict() for schedule in schedules])
+
+
+# ── in-loop timer scheduler (plan item 2.1) ──────────────────────────────────
+
+NowFn = Callable[[], datetime]
+SleepFn = Callable[[float], Awaitable[None]]
+TickCallback = Callable[[ScheduleTickReport], "Optional[Awaitable[None]]"]
+
+# Fallback wait (seconds) used when no active schedule has a next-run time yet.
+# The service still re-evaluates after this bound, so a schedule added by an
+# out-of-band writer is picked up without an unbounded sleep — but it is long
+# enough to avoid busy polling.
+DEFAULT_IDLE_INTERVAL = 3600.0
+
+
+class SchedulerService:
+    """Drive :class:`SchedulerStore.tick` from inside an asyncio event loop.
+
+    This is the in-loop replacement for calling the scheduler tick from an
+    external cron: the service sleeps precisely until the next schedule is due
+    (no busy polling), fires the tick, and repeats. It cooperates with the
+    daemon event loop (plan items 1.1/1.2) rather than owning it — a caller can
+    ``spawn`` :meth:`run` as a task and ``stop`` / cancel it during shutdown.
+
+    Time is fully injectable so tests use a controllable clock instead of real
+    sleeps:
+
+    - ``now`` supplies the current time (defaults to UTC ``datetime.now``).
+    - ``sleep`` performs the actual waiting (defaults to :func:`asyncio.sleep`).
+      A test can pass a fake ``sleep`` that advances a fake ``now`` and returns
+      immediately, exercising many simulated hours in milliseconds.
+
+    Backward compatibility: the persisted schedule format and
+    :class:`SchedulerStore` semantics are unchanged; existing schedules are
+    honoured as-is.
+
+    Parameters
+    ----------
+    store:
+        The schedule store to tick.
+    task_queue:
+        Queue that due schedules enqueue :class:`RuntimeTask` items into.
+    now:
+        Injectable clock returning a timezone-aware ``datetime``.
+    sleep:
+        Injectable awaitable sleep. Defaults to :func:`asyncio.sleep`.
+    on_tick:
+        Optional callback (sync or async) invoked with the
+        :class:`ScheduleTickReport` whenever a tick enqueues at least one task.
+        This is the hook the daemon loop uses to wake its dispatcher.
+    limit:
+        Optional per-tick cap forwarded to :meth:`SchedulerStore.tick`.
+    idle_interval:
+        Upper bound on a single sleep when no schedule is pending. Must be > 0.
+    """
+
+    def __init__(
+        self,
+        store: SchedulerStore,
+        task_queue: TaskQueueStore,
+        *,
+        now: NowFn = _now,
+        sleep: Optional[SleepFn] = None,
+        on_tick: Optional[TickCallback] = None,
+        limit: Optional[int] = None,
+        idle_interval: float = DEFAULT_IDLE_INTERVAL,
+    ) -> None:
+        if idle_interval <= 0:
+            raise ValueError("idle_interval must be positive")
+        if limit is not None and limit < 0:
+            raise ValueError("limit must be >= 0 or None")
+        self._store = store
+        self._task_queue = task_queue
+        self._now = now
+        self._sleep: SleepFn = sleep or asyncio.sleep
+        self._on_tick = on_tick
+        self._limit = limit
+        self._idle_interval = float(idle_interval)
+        self._wake_event = asyncio.Event()
+        self._stopped = False
+        self._running = False
+        self._ticks = 0
+
+    # ── observability ────────────────────────────────────────────────────
+
+    @property
+    def running(self) -> bool:
+        """True while :meth:`run` is executing."""
+        return self._running
+
+    @property
+    def stopped(self) -> bool:
+        """True once :meth:`stop` has been requested."""
+        return self._stopped
+
+    @property
+    def ticks(self) -> int:
+        """Number of completed tick cycles that enqueued at least one task."""
+        return self._ticks
+
+    # ── control ──────────────────────────────────────────────────────────
+
+    def notify(self) -> None:
+        """Wake the service so it re-evaluates the next due time immediately.
+
+        Call this after adding or changing a schedule so a newly-due entry is
+        not delayed until the current sleep elapses. Idempotent and safe to
+        call before :meth:`run` starts.
+        """
+        self._wake_event.set()
+
+    def stop(self) -> None:
+        """Ask the service to exit after the current wait. Idempotent."""
+        self._stopped = True
+        self._wake_event.set()
+
+    # ── scheduling maths ─────────────────────────────────────────────────
+
+    def seconds_until_next(self, now: Optional[datetime] = None) -> Optional[float]:
+        """Seconds until the earliest active schedule is due.
+
+        Returns ``None`` when there is no active schedule (the caller should
+        idle-wait), ``0.0`` or a negative value when something is already due.
+        """
+        moment = (now or self._now()).astimezone(timezone.utc)
+        upcoming = [
+            _parse_iso(schedule.next_run_at)
+            for schedule in self._store.list(status="active")
+        ]
+        if not upcoming:
+            return None
+        return (min(upcoming) - moment).total_seconds()
+
+    def _clamp_wait(self, delay: Optional[float]) -> float:
+        if delay is None:
+            return self._idle_interval
+        if delay <= 0:
+            return 0.0
+        return min(delay, self._idle_interval)
+
+    # ── main loop ────────────────────────────────────────────────────────
+
+    async def run(self) -> None:
+        """Run until :meth:`stop` is called or the task is cancelled.
+
+        Each iteration computes the exact wait to the next due schedule, sleeps
+        (cooperatively, so a :meth:`notify` or cancellation interrupts it), then
+        ticks the store when something is due. Cancellation propagates so the
+        daemon's graceful shutdown can drain/cancel it.
+        """
+        if self._running:
+            raise RuntimeError("SchedulerService is already running")
+        self._running = True
+        logger.info(
+            "scheduler service started (idle_interval=%.0fs)", self._idle_interval
+        )
+        try:
+            while not self._stopped:
+                wait = self._clamp_wait(self.seconds_until_next())
+                if wait > 0:
+                    await self._sleep_or_wake(wait)
+                    continue
+                report = self._store.tick(
+                    task_queue=self._task_queue,
+                    now=self._now(),
+                    limit=self._limit,
+                )
+                if report.enqueued_count:
+                    self._ticks += 1
+                    logger.info(
+                        "scheduler tick enqueued %d task(s): %s",
+                        report.enqueued_count,
+                        list(report.task_ids),
+                    )
+                    await self._emit(report)
+                else:
+                    # Nothing became due after all (e.g. the schedule was paused
+                    # or removed by an out-of-band writer between our two reads).
+                    # Yield, then loop: the next read recomputes a real wait, so
+                    # this can never hot-spin.
+                    await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            logger.info("scheduler service cancelled")
+            raise
+        finally:
+            self._running = False
+            logger.info("scheduler service stopped after %d tick(s)", self._ticks)
+
+    async def _sleep_or_wake(self, delay: float) -> bool:
+        """Sleep up to ``delay`` seconds or until notified/stopped.
+
+        Returns True if woken early (by :meth:`notify` / :meth:`stop`) rather
+        than by the sleep elapsing. Any pending child futures are cancelled and
+        awaited so no work is left dangling — including when this coroutine is
+        itself cancelled.
+        """
+        if self._stopped or self._wake_event.is_set():
+            self._wake_event.clear()
+            return True
+        sleeper = asyncio.ensure_future(self._sleep(delay))
+        waiter = asyncio.ensure_future(self._wake_event.wait())
+        try:
+            done, _pending = await asyncio.wait(
+                {sleeper, waiter}, return_when=asyncio.FIRST_COMPLETED
+            )
+        finally:
+            for future in (sleeper, waiter):
+                if not future.done():
+                    future.cancel()
+            await asyncio.gather(sleeper, waiter, return_exceptions=True)
+        woke = waiter in done
+        if woke:
+            self._wake_event.clear()
+        return woke
+
+    async def _emit(self, report: ScheduleTickReport) -> None:
+        if self._on_tick is None:
+            return
+        try:
+            result = self._on_tick(report)
+            if inspect.isawaitable(result):
+                await result
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — callback bugs must not kill the loop
+            logger.exception("scheduler on_tick callback failed for %s", report)
