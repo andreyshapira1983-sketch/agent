@@ -3,11 +3,18 @@
 Tracker for the incremental asyncio-daemon plan. One sub-item per run, one PR
 per sub-item. `agent_tick.py` stays as the single-shot fallback mode throughout.
 
+Each sub-item reports four independent fields so the status is unambiguous:
+
+- **implementation** — is the code for the sub-item done (`completed` / `partial` / `not started`)
+- **main_pr** — state of the primary PR (`merged` / `open` / `none`)
+- **hotfix** — state of any follow-up fix PR (`merged` / `awaiting_review` / `none`)
+- **acceptance** — has the sub-item been verified as accepted per the plan's
+  Definition of Done (`accepted` / `pending`)
+
 ## 1.1 Main async event loop
 
-- **Status:** completed
+- **implementation:** completed | **main_pr:** #35 merged | **hotfix:** none | **acceptance:** pending
 - **Branch:** `andreyshapira1983-sketch-daemon-1-1-async-event-loop`
-- **Pull Request:** #35 (merged)
 - **Last updated:** 2026-07-10
 - **Implementation:** New `app/daemon.py` with `DaemonLoop` — a persistent
   asyncio loop that sleeps on an internal `asyncio.Event`, wakes via
@@ -28,13 +35,13 @@ per sub-item. `agent_tick.py` stays as the single-shot fallback mode throughout.
   - `coverage run --branch -m pytest && coverage report --fail-under=85` → see PR description
 - **Known limitations:** No signal handling, no task draining, no
   single-instance lock, no CLI entry point — those are sub-items 1.2/1.3.
-- **Blockers:** none. **Human action:** review and merge the PR.
+- **Blockers:** none. **Human action:** none -- PR merged; plan acceptance (Definition of Done sign-off) still pending.
 
 ## 1.2 Lifecycle and graceful shutdown
 
-- **Status:** ready for review
+- **implementation:** completed | **main_pr:** #36 merged | **hotfix:** none | **acceptance:** pending
 - **Branch:** `andreyshapira1983-sketch-daemon-1-2-graceful-shutdown`
-- **Pull Request:** (see PR titled "Daemon 1.2: lifecycle and graceful shutdown")
+- **Pull Request:** #36 (merged)
 - **Last updated:** 2026-07-10
 - **Implementation:** Extended `app/daemon.py`:
   - `spawn(coro)` starts and tracks in-flight tasks; refuses new tasks once
@@ -68,13 +75,13 @@ per sub-item. `agent_tick.py` stays as the single-shot fallback mode throughout.
 - **Known limitations:** SIGTERM is defined but effectively never delivered
   on Windows; Ctrl+C uses the `signal.signal` fallback there. No
   single-instance lock or CLI entry point yet (sub-items 1.3/1.4).
-- **Blockers:** none. **Human action:** review and merge the PR.
+- **Blockers:** none. **Human action:** none -- PR merged; plan acceptance (Definition of Done sign-off) still pending.
 
 ## 1.4 Windows service shell (architecture-only)
 
-- **Status:** ready for review
+- **implementation:** completed | **main_pr:** #40 merged | **hotfix:** none | **acceptance:** pending
 - **Branch:** `codex/daemon-1-4-windows-service-shell`
-- **Pull Request:** #40
+- **Pull Request:** #40 (merged)
 - **Last updated:** 2026-07-10
 - **Implementation:** New `app/windows_service.py` fixing the Windows service
   *contract* around the single selected mechanism (`pywin32`) without yet
@@ -113,15 +120,14 @@ per sub-item. `agent_tick.py` stays as the single-shot fallback mode throughout.
 - **Known limitations:** No real service install/uninstall/start/stop or Windows
   recovery configuration yet -- this sub-item deliberately fixes only the
   contract/shell. Those actions are separate later roadmap tasks.
-- **Blockers:** none. **Human action:** review and merge the PR.
+- **Blockers:** none. **Human action:** none -- PR merged; plan acceptance (Definition of Done sign-off) still pending.
 
 ## 1.3 Single-instance guarantee
 
-- **Status:** ready for review
+- **implementation:** completed | **main_pr:** #37 merged | **hotfix:** #38 merged | **acceptance:** pending
 - **Branch:** `andreyshapira1983-sketch-daemon-1-3-single-instance` (feature),
   `fix/single-instance-release-race` (hotfix)
-- **Pull Request:** #37 (merged); hotfix PR (see PR titled
-  "Hotfix: single-instance release() must not unlink the lock file")
+- **Pull Request:** #37 (merged); hotfix #38 (merged)
 - **Last updated:** 2026-07-10
 - **Hotfix (release() race):** The original `release()` unlinked
   `data/daemon.lock` after dropping the OS lock. On POSIX this is racy: the
@@ -170,15 +176,16 @@ per sub-item. `agent_tick.py` stays as the single-shot fallback mode throughout.
 - **Known limitations:** No CLI entry point or daemon wiring yet — the lock is
   a standalone building block a future runner (1.4) will wrap around
   `DaemonLoop.run`. Windows SIGTERM caveats from 1.2 are unchanged.
-- **Blockers:** none. **Human action:** review and merge the PR.
+- **Blockers:** none. **Human action:** none -- PR merged; plan acceptance (Definition of Done sign-off) still pending.
 
 ## Remaining sub-items
 
 | Item | Title | Status |
 | --- | --- | --- |
-| 1.2 | Lifecycle and graceful shutdown | completed |
-| 1.3 | Single-instance guarantee | ready for review |
-| 1.4 | Windows service launch | ready for review |
+| 1.1 | Main async event loop | merged (acceptance pending) |
+| 1.2 | Lifecycle and graceful shutdown | merged (acceptance pending) |
+| 1.3 | Single-instance guarantee | merged incl. hotfix (acceptance pending) |
+| 1.4 | Windows service launch | merged (acceptance pending) |
 | 2.1 | Timer events (in-loop scheduler) | not started |
 | 2.2 | File watcher | not started |
 | 2.3 | Instant wake on new RuntimeTask | not started |
