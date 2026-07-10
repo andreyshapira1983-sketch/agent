@@ -180,8 +180,9 @@ Each sub-item reports four independent fields so the status is unambiguous:
 
 ## 2.1 Timer events (in-loop scheduler)
 
-- **implementation:** completed | **main_pr:** open (draft) | **hotfix:** none | **acceptance:** pending
+- **implementation:** completed | **main_pr:** #44 open (draft) | **hotfix:** none | **acceptance:** pending
 - **Branch:** `andreyshapira1983-sketch-daemon-2-1-timer-events`
+- **Pull Request:** #44 (draft)
 - **Last updated:** 2026-07-10
 - **Implementation:** Added `SchedulerService` to `core/scheduler.py` — an
   async component that drives the existing `SchedulerStore.tick` from *inside*
@@ -236,7 +237,7 @@ Each sub-item reports four independent fields so the status is unambiguous:
 | 1.2 | Lifecycle and graceful shutdown | merged (acceptance pending) |
 | 1.3 | Single-instance guarantee | merged incl. hotfix (acceptance pending) |
 | 1.4 | Windows service launch | merged (acceptance pending) |
-| 2.1 | Timer events (in-loop scheduler) | implemented, PR open (draft) |
+| 2.1 | Timer events (in-loop scheduler) | PR #44 open (draft) |
 | 2.2 | File watcher | not started |
 | 2.3 | Instant wake on new RuntimeTask | not started |
 | 2.4 | External events | skipped (explicitly deferred) |
