@@ -1,3 +1,36 @@
+Architecture Evolution (a map of direction, not an implementation status)
+
+   This document describes the *target* infrastructure of an autonomous agent
+   moving toward multitasking and, later, a coordinated multi-agent system.
+   The levels below are a development ladder, not a list of what already works.
+   The actual, current state of implementation lives ONLY in
+   docs/daemon-progress.md.
+
+   - Level 0 — Reactive agent.
+      One command in, one result out. No plan, no memory between steps.
+   - Level 1 — Multi-step agent.
+      Builds its own plan and executes several sequential steps toward one goal.
+   - Level 2 — Multitasking agent.   <-- current achieved level
+      Task queue, scheduling, priorities, an active-goal stack, and recovery
+      after restart. A single agent holds several tasks and chooses their order.
+   - Level 3 — Role separation.
+      Planner, Executor, Verifier, Critic and Supervisor exist as separate
+      logical roles that may still share one model. Subagents can be *proposed*
+      (SubagentProposal), but real isolated subagent execution does not exist
+      yet — that is the 3 -> 4 boundary.
+   - Level 4 — Multi-agent system.
+      Separate child agents receive isolated tasks, tools, memory and budget.
+      Inter-agent communication (A2A), conflict resolution, and agent identity
+      and trust appear here.
+   - Level 5 — Autonomous organization ("home corporation").
+      A top orchestrator distributes work across specialized agents, evaluates
+      results, manages resources, and looks for the next useful task itself.
+      The human stays the owner of policy, the kill-switch and merge.
+
+   Reading rule: an item mentioned anywhere below means "foreseen by the target
+   architecture", NOT "already implemented". Implementation is verified only
+   against docs/daemon-progress.md.
+
 Architecture Views (Meta / Preface — how to read this architecture)
    - Logical View
    - Runtime View
@@ -6,51 +39,24 @@ Architecture Views (Meta / Preface — how to read this architecture)
    - Deployment View
    - Failure / Recovery View
 
-Current Implementation Snapshot (2026-06-02)
-   - Doctrine source of truth
-      - AGENT_DOCTRINE.md is the operator-facing execution semantics document.
-      - README.md maps implemented commands and tests.
-      - This architecture inventory remains the broad target model.
-   - Work Session
-      - Exists as core/work_session.py and :work-session.
-      - Current skeleton mainly runs bounded dry-run/status cycles through AutonomousRuntime.
-      - It proves minutes/max-cycles/reporting/circuit-stop mechanics.
-      - It must not be described as open-ended unattended autonomy.
-   - SubagentProposal
-      - Exists as core/subagent_memory_scope.py and :subagent-proposal.
-      - The agent can propose subagents with explicit memory, tool and budget scopes.
-      - Submitting a proposal creates a pending Approval Inbox item.
-      - Real subagent execution must not be implied unless a later runner is implemented.
-   - CapabilityRequest
-      - Exists as core/capability_request.py and :capability-request.
-      - The agent can infer missing capabilities from natural language and submit bounded requests.
-      - Connectors are not activated automatically by these requests.
-   - Smart Memory
-      - Persistent memory exists and remains policy-gated.
-      - Episodic memory exists for completed cycle outcomes.
-      - Procedural memory exists for successful reusable tool workflows.
-      - Consolidation reports exist to connect episodes and procedures.
-   - Dynamic Model Catalog
-      - Provider API model discovery exists for supported providers.
-      - Cached catalog exists at config/model_catalog.json.
-      - Task-complexity tier selection exists for light/standard/deep routing.
-      - Operator tier overrides remain explicit.
-   - Approval Inbox daemon notice
-      - REPL startup can surface pending approval items discovered while the operator was away.
-      - The notice is review-only and does not approve or execute items.
-   - Current operator state
-      - Architecture audit reported present=17 and gap=1 before this doctrine refresh.
-      - The gap was stale Doctrine and Architecture Source of Truth documentation.
-      - Source registry reported 64 sources and 473 claims.
-      - Persistent memory reported 21 records.
-      - Approvals reported 3 pending out of 5 total.
-      - scheduler_due=1.
-      - Budget tracking is active, but hour/day enforcement is disabled while limits are unset.
-      - Pending approvals include OperatorRoutingBugfixer, UpworkJobMonitor and an Upwork capability request.
-   - Long unattended autonomy blockers
-      - Pending approval items block long unattended autonomy.
-      - Unset persistent hour/day budget enforcement limits block long unattended autonomy.
-      - Documentation updates must not approve items, activate capabilities, run subagents or change memory data.
+Current Implementation State
+
+   The dated runtime snapshot that used to live here (source/claim counts,
+   memory records, pending approvals, scheduler state, etc.) has been removed
+   on purpose: this document is a stable target-architecture map and must not
+   carry time-specific operational numbers that go stale.
+
+   For the actual, current state of implementation — which daemon sub-items are
+   merged, in review or not started, and what is really running — see:
+      docs/daemon-progress.md
+
+   Two timeless facts worth keeping here as properties of the target model:
+      - Subagents can only be *proposed*; real isolated subagent execution is
+        not implemented (this is the Level 3 -> 4 boundary above).
+      - Doctrine and command/behaviour authority follow the hierarchy in
+        README.md (AGENT_DOCTRINE.md -> target architecture -> roadmap.md ->
+        docs/daemon-progress.md -> README.md). This file is the target
+        architecture layer of that hierarchy.
 
 1. Interface & Communication
    - Communication Layer
