@@ -70,12 +70,51 @@ per sub-item. `agent_tick.py` stays as the single-shot fallback mode throughout.
   single-instance lock or CLI entry point yet (sub-items 1.3/1.4).
 - **Blockers:** none. **Human action:** review and merge the PR.
 
+## 1.3 Single-instance guarantee
+
+- **Status:** ready for review
+- **Branch:** `andreyshapira1983-sketch-daemon-1-3-single-instance`
+- **Pull Request:** (see PR titled "Daemon 1.3: single-instance guarantee")
+- **Last updated:** 2026-07-10
+- **Implementation:** New `app/single_instance.py` with `SingleInstanceLock`
+  and `AlreadyRunningError`. The lock is backed by an OS advisory exclusive
+  lock on an open file descriptor — `fcntl.flock` on POSIX, `msvcrt.locking`
+  on Windows — reusing the project idiom from `core/file_lock.py`. Because the
+  OS releases the lock automatically when the holder exits (including a crash
+  or `kill -9`), a *stale* lock left by a crashed process is acquired
+  transparently with no racy PID-liveness checks. The file additionally stores
+  small JSON diagnostics (pid, hostname, started_at) so the "already running"
+  error message and operators can identify the live holder; those are advisory
+  only — correctness comes from the OS lock. On Windows, which uses *mandatory*
+  byte-range locking, the lock byte is placed far past the payload
+  (`_WINDOWS_LOCK_OFFSET`) so the diagnostics at offset 0 stay readable.
+  `acquire()`/`release()` are idempotent; `release()` only removes the file it
+  owns, so it can never delete a lock held by another live process. Usable as a
+  context manager. `agent_tick.py` is untouched and needs no lock.
+- **Tests added:** `tests/test_single_instance.py` (15 tests): acquire/release
+  basics, relative default path, mutual exclusion, holder pid/hostname in the
+  error, re-acquire after release, idempotent acquire/release, release without
+  acquire, stale-lock recovery (simulated crash), corrupt-file graceful
+  degradation, context manager (incl. refused nested instance), restart loop,
+  and a bystander object not deleting a live lock. No real sleeps, no second
+  process required (two lock objects conflict via the OS lock).
+- **Checks run:**
+  - `python -m pytest tests/test_single_instance.py -q` → 15 passed
+  - `coverage run --branch -m pytest` → see PR description
+  - `coverage report --fail-under=85` → see PR description
+  - `python scripts/generate_sbom.py --check` → see PR description
+  - `python scripts/audit_release.py` → see PR description
+- **Known limitations:** No CLI entry point or daemon wiring yet — the lock is
+  a standalone building block a future runner (1.4) will wrap around
+  `DaemonLoop.run`. Windows SIGTERM caveats from 1.2 are unchanged.
+- **Blockers:** none. **Human action:** review and merge the PR.
+
 ## Remaining sub-items
 
 | Item | Title | Status |
 | --- | --- | --- |
-| 1.2 | Lifecycle and graceful shutdown | ready for review |
-| 1.3 | Single-instance guarantee | not started |
+| 1.2 | Lifecycle and graceful shutdown | completed |
+| 1.3 | Single-instance guarantee | ready for review |
 | 1.4 | Windows service launch | not started |
 | 2.1 | Timer events (in-loop scheduler) | not started |
 | 2.2 | File watcher | not started |
