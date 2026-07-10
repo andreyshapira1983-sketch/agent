@@ -994,7 +994,7 @@ def test_run_reflection_honors_frozen_write_policy(workspace: Path):
     )
     runtime = AutonomousRuntime(agent, workspace=workspace)
 
-    result = runtime._run_reflection(AutonomousRuntimeConfig(limit=1, dry_run=True))
+    result = runtime._run_reflection(AutonomousRuntimeConfig(limit=1, dry_run=False))
 
     assert result is not None
     # A lesson was synthesised (honest visibility) ...
@@ -1004,8 +1004,8 @@ def test_run_reflection_honors_frozen_write_policy(workspace: Path):
     assert agent.persistent_store.load() == []
 
 
-def test_run_reflection_saves_with_default_policy(workspace: Path):
-    """Without the operator brake, reflection persists its lessons as before."""
+def test_run_reflection_dry_run_keeps_lessons_in_process(workspace: Path):
+    """Dry-run reflection may report lessons but must not persist them."""
     _seed_failure_logs(workspace)
     agent = _agent_with_policy(
         workspace,
@@ -1015,6 +1015,24 @@ def test_run_reflection_saves_with_default_policy(workspace: Path):
     runtime = AutonomousRuntime(agent, workspace=workspace)
 
     result = runtime._run_reflection(AutonomousRuntimeConfig(limit=1, dry_run=True))
+
+    assert result is not None
+    assert len(result["lessons"]) == 1
+    assert result["memory_records_saved"] == 0
+    assert agent.persistent_store.load() == []
+
+
+def test_run_reflection_saves_with_default_policy_in_live_mode(workspace: Path):
+    """Without dry-run or the operator brake, reflection persists as before."""
+    _seed_failure_logs(workspace)
+    agent = _agent_with_policy(
+        workspace,
+        write_policy=MemoryWritePolicy(),
+        llm_responses=[_LESSONS_JSON],
+    )
+    runtime = AutonomousRuntime(agent, workspace=workspace)
+
+    result = runtime._run_reflection(AutonomousRuntimeConfig(limit=1, dry_run=False))
 
     assert result is not None
     assert len(result["lessons"]) == 1

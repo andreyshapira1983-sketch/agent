@@ -251,6 +251,7 @@ class AgentLoop(AgentLoopExtractedMethods):
         self.policy = policy
         self.gateway_dry_run = gateway_dry_run
         self.gateway_path = gateway_path
+        self.suppress_durable_learning_writes = False
         self.model_router = model_router or ModelRouter.single(llm)
         self.llm = self.model_router.for_role(ModelRole.SYNTHESIZER)
         self.log = logger
@@ -439,6 +440,9 @@ class AgentLoop(AgentLoopExtractedMethods):
         self.last_source_ranking = None
         self.last_source_registry = SourceRegistry()
         self.last_knowledge_pipeline = None
+        durable_learning_writes = not bool(
+            getattr(self, "suppress_durable_learning_writes", False)
+        )
 
         # Layer 4 — load the user profile for this cycle.
         if self.user_profile_store is not None:
@@ -1281,9 +1285,11 @@ class AgentLoop(AgentLoopExtractedMethods):
             knowledge_result = self.knowledge_pipeline.run(
                 chain,
                 ranking=source_ranking,
-                source_store=self.source_registry_store,
-                remember=self._knowledge_remember_batch(),
-                auto_write_memory=self.knowledge_auto_write,
+                source_store=self.source_registry_store if durable_learning_writes else None,
+                remember=self._knowledge_remember_batch() if durable_learning_writes else None,
+                auto_write_memory=(
+                    self.knowledge_auto_write if durable_learning_writes else False
+                ),
             )
             source_registry = knowledge_result.registry
             self.last_source_registry = source_registry
@@ -1674,9 +1680,17 @@ class AgentLoop(AgentLoopExtractedMethods):
                 knowledge_result = self.knowledge_pipeline.run(
                     chain,
                     ranking=source_ranking,
-                    source_store=self.source_registry_store,
-                    remember=self._knowledge_remember_batch(),
-                    auto_write_memory=self.knowledge_auto_write,
+                    source_store=(
+                        self.source_registry_store if durable_learning_writes else None
+                    ),
+                    remember=(
+                        self._knowledge_remember_batch()
+                        if durable_learning_writes
+                        else None
+                    ),
+                    auto_write_memory=(
+                        self.knowledge_auto_write if durable_learning_writes else False
+                    ),
                 )
                 source_registry = knowledge_result.registry
                 self.last_source_registry = source_registry
@@ -1877,20 +1891,26 @@ class AgentLoop(AgentLoopExtractedMethods):
                 pass
 
         verification = self.last_verification
-        self._record_experience_memory(
-            goal_description=goal.description,
-            question=user_question,
-            answer=answer,
-            tools_used=[s["tool"] for s in planner_out.sources],
-            source_labels=list(artifacts.keys()) or ["general-knowledge"],
-            verified_chunks=verification.verified_chunks if verification else 0,
-            unverified_chunks=verification.unverified_chunks if verification else 0,
-            replan_exhausted=replan_exhausted,
-            skip_consolidation=cheap_path_active,
-        )
+        if durable_learning_writes:
+            self._record_experience_memory(
+                goal_description=goal.description,
+                question=user_question,
+                answer=answer,
+                tools_used=[s["tool"] for s in planner_out.sources],
+                source_labels=list(artifacts.keys()) or ["general-knowledge"],
+                verified_chunks=verification.verified_chunks if verification else 0,
+                unverified_chunks=verification.unverified_chunks if verification else 0,
+                replan_exhausted=replan_exhausted,
+                skip_consolidation=cheap_path_active,
+            )
+        else:
+            self.log.log(
+                "durable_learning_writes_skipped",
+                {"reason": "dry_run"},
+            )
 
         # Layer 4 — update user profile from this interaction.
-        if self.user_profile_store is not None:
+        if durable_learning_writes and self.user_profile_store is not None:
             try:
                 updated = self.user_profile_store.update_from_interaction(
                     question=user_question,
@@ -1915,7 +1935,11 @@ class AgentLoop(AgentLoopExtractedMethods):
 
         # Layer 5 — persist assumptions and expose via last_assumptions.
         self.last_assumptions = _run_assumptions
-        if self.assumption_store is not None and _run_assumptions.new_assumptions:
+        if (
+            durable_learning_writes
+            and self.assumption_store is not None
+            and _run_assumptions.new_assumptions
+        ):
             try:
                 self.assumption_store.save_many(_run_assumptions.new_assumptions)
             except Exception:
@@ -2013,7 +2037,11 @@ class AgentLoop(AgentLoopExtractedMethods):
         # Bump access stats on every retrieved record so the archive scorer
         # knows which records are actively useful (≠ junk that was saved but
         # never used again).
-        if self.persistent_store is not None and selected:
+        if (
+            not bool(getattr(self, "suppress_durable_learning_writes", False))
+            and self.persistent_store is not None
+            and selected
+        ):
             from datetime import datetime, timezone as _tz
             _now_dt = datetime.now(_tz.utc)
             for rec in selected:
@@ -2172,6 +2200,12 @@ class AgentLoop(AgentLoopExtractedMethods):
         Experience memory is best-effort. A malformed local state file should
         be quarantined by the state layer, not crash the user-facing answer.
         """
+        if self.suppress_durable_learning_writes:
+            self.log.log(
+                "durable_learning_writes_skipped",
+                {"reason": "dry_run", "sink": "experience_memory"},
+            )
+            return
         if (
             self.episodic_store is None
             and self.procedural_store is None
@@ -3852,4 +3886,3 @@ class AgentLoop(AgentLoopExtractedMethods):
         while out.startswith(".\\"):
             out = out[2:]
         return out.casefold()
-
