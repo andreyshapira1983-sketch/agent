@@ -1,6 +1,20 @@
-# Doctrine and Architecture Source of Truth
+# Repository Entry Point and Navigation
 
-This repository's source of truth for doctrine and architecture is intentionally kept in this README.
+This README is the entry point and short navigation map for the repository. It
+does **not** own doctrine or architecture itself; it points at the documents
+that do. When a document below conflicts with this README, that document wins.
+
+## Source-of-truth hierarchy
+
+Read these in priority order; a higher entry overrides a lower one:
+
+1. **`AGENT_DOCTRINE.md`** — authoritative rules for how agents must behave.
+2. **Target architecture and component boundaries** — the intended design and
+   the responsibilities/limits of each component.
+3. **`roadmap.md`** — the order in which capabilities are developed.
+4. **`docs/daemon-progress.md`** — the actual implementation state (which
+   sub-items are merged, in review, or not started).
+5. **`README.md`** (this file) — entry point and brief navigation only.
 
 ## Purpose
 
@@ -33,4 +47,6 @@ Run the project's tests after making changes, and focus on the specific area aff
 
 ## Maintenance
 
-When in doubt, update this document so it continues to reflect the current doctrine and architecture decisions.
+When in doubt, keep this README limited to navigation, and update the
+authoritative document (doctrine, architecture, roadmap, or progress) that
+actually owns the decision.
