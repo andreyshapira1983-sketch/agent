@@ -178,7 +178,58 @@ Each sub-item reports four independent fields so the status is unambiguous:
   `DaemonLoop.run`. Windows SIGTERM caveats from 1.2 are unchanged.
 - **Blockers:** none. **Human action:** none -- PR merged; plan acceptance (Definition of Done sign-off) still pending.
 
-## Remaining sub-items
+## 2.1 Timer events (in-loop scheduler)
+
+- **implementation:** completed | **main_pr:** #44 open (draft) | **hotfix:** none | **acceptance:** pending
+- **Branch:** `andreyshapira1983-sketch-daemon-2-1-timer-events`
+- **Pull Request:** #44 (draft)
+- **Last updated:** 2026-07-10
+- **Implementation:** Added `SchedulerService` to `core/scheduler.py` — an
+  async component that drives the existing `SchedulerStore.tick` from *inside*
+  the asyncio event loop instead of from an external cron. Each iteration
+  computes the exact seconds until the earliest active schedule is due
+  (`seconds_until_next`), sleeps precisely that long (clamped to a bounded
+  `idle_interval`, default 1 h, when nothing is pending) and only then ticks —
+  no busy polling. The wait is cooperative: `notify()` shortens it the moment a
+  schedule is added/changed, `stop()` ends the loop, and task cancellation
+  propagates so the daemon's graceful shutdown (1.2) can drain/cancel it. Time
+  is fully injectable (`now` + `sleep`) so tests use a fake clock rather than
+  real sleeps. An optional `on_tick` callback (sync or async; errors logged,
+  never swallowed silently) is the hook the daemon loop uses to `wake` its
+  dispatcher. `SchedulerStore`, the persisted schedule format, and every
+  existing schedule are unchanged (backward compatible). `agent_tick.py` and
+  its single-shot path are untouched — the service is opt-in and not wired into
+  any entry point in this sub-item.
+- **Tests added:** `tests/test_scheduler_service.py` (22 tests) using a
+  `FakeClock` (fake `now` + instant `sleep` that advances the clock):
+  construction validation (idle_interval/limit), `seconds_until_next`
+  (empty/future/overdue/paused), single due-tick + next-run advance, multi-period
+  firing over simulated time, async `on_tick` awaited, `on_tick` error survival,
+  `limit` forwarding, instant wake via `notify` beating a 30 s sleep,
+  sleep-elapsed vs woken return values, pre-set stop, stop-before-run (no tick),
+  cancellation propagation clearing `running`, run-twice guard, zero-enqueue
+  recovery without hot-spin (out-of-band schedule removal), no-callback run, a
+  cancellation-in-callback path, and observability properties. All bounded by a
+  5 s `run_async` timeout; no real long sleeps, no leftover tasks.
+- **Checks run:**
+  - `python -m pytest tests/test_scheduler_service.py tests/test_scheduler.py -q` → 29 passed
+  - `coverage run --branch -m pytest` → 4273 passed
+  - `coverage report --fail-under=85` → TOTAL 92%
+  - `coverage report --include=core/scheduler.py` → `SchedulerService` fully
+    covered (remaining misses are pre-existing `SchedulerStore` lines exercised
+    elsewhere)
+  - `python scripts/generate_sbom.py --check` → in sync
+  - `python scripts/audit_release.py` → no warnings
+  - pylint/pyflakes: not installed locally and not part of CI; skipped.
+- **Known limitations:** The service is a standalone building block; it is not
+  yet spawned by `DaemonLoop.run` (that wiring lands with the worker/dispatcher
+  sub-items). `SchedulerStore.tick` still does brief synchronous local-file I/O
+  inline on the loop thread; it is fast and deterministic, but a future
+  sub-item may move it to an executor if profiling warrants. No external-cron
+  removal beyond providing the in-loop replacement.
+- **Blockers:** none. **Human action:** review and merge the PR into `main`.
+
+
 
 | Item | Title | Status |
 | --- | --- | --- |
@@ -186,7 +237,7 @@ Each sub-item reports four independent fields so the status is unambiguous:
 | 1.2 | Lifecycle and graceful shutdown | merged (acceptance pending) |
 | 1.3 | Single-instance guarantee | merged incl. hotfix (acceptance pending) |
 | 1.4 | Windows service launch | merged (acceptance pending) |
-| 2.1 | Timer events (in-loop scheduler) | not started |
+| 2.1 | Timer events (in-loop scheduler) | PR #44 open (draft) |
 | 2.2 | File watcher | not started |
 | 2.3 | Instant wake on new RuntimeTask | not started |
 | 2.4 | External events | skipped (explicitly deferred) |
