@@ -10,7 +10,6 @@ error paths -- without requiring Windows or pywin32.
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -174,7 +173,9 @@ def test_as_dict_is_shell_only_and_json_serialisable():
 
 
 def test_validate_runtime_off_windows_raises(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(os, "name", "posix")
+    import app.windows_service as mod
+
+    monkeypatch.setattr(mod, "_is_windows", lambda: False)
     with pytest.raises(WindowsServiceShellError, match="only on Windows"):
         WindowsServiceContract().validate_runtime()
 
@@ -184,9 +185,9 @@ def test_validate_runtime_reports_missing_pywin32(
 ):
     # Pretend we are on Windows but pywin32 is absent: clear, actionable error
     # naming the missing modules, and still no service mutation performed.
-    monkeypatch.setattr(os, "name", "nt")
     import app.windows_service as mod
 
+    monkeypatch.setattr(mod, "_is_windows", lambda: True)
     monkeypatch.setattr(mod.importlib.util, "find_spec", lambda name: None)
     contract = WindowsServiceContract(workspace=tmp_path)
     with pytest.raises(WindowsServiceShellError, match="pywin32"):
@@ -196,9 +197,9 @@ def test_validate_runtime_reports_missing_pywin32(
 def test_validate_runtime_reports_missing_workspace(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    monkeypatch.setattr(os, "name", "nt")
     import app.windows_service as mod
 
+    monkeypatch.setattr(mod, "_is_windows", lambda: True)
     # pywin32 present, but the workspace directory does not exist.
     monkeypatch.setattr(mod.importlib.util, "find_spec", lambda name: object())
     contract = WindowsServiceContract(workspace=tmp_path / "missing")
@@ -209,9 +210,9 @@ def test_validate_runtime_reports_missing_workspace(
 def test_validate_runtime_reports_missing_interpreter(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    monkeypatch.setattr(os, "name", "nt")
     import app.windows_service as mod
 
+    monkeypatch.setattr(mod, "_is_windows", lambda: True)
     monkeypatch.setattr(mod.importlib.util, "find_spec", lambda name: object())
     # Workspace exists but the venv interpreter does not.
     contract = WindowsServiceContract(workspace=tmp_path)
@@ -249,7 +250,9 @@ def test_main_unknown_arg_prints_usage_and_returns_2(
 def test_main_check_runtime_off_windows_returns_1(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ):
-    monkeypatch.setattr(os, "name", "posix")
+    import app.windows_service as mod
+
+    monkeypatch.setattr(mod, "_is_windows", lambda: False)
     rc = main(["--check-runtime"])
     assert rc == 1
     assert "windows service shell error" in capsys.readouterr().err
@@ -262,10 +265,10 @@ def test_main_check_runtime_success_path(
 ):
     # Simulate a fully-provisioned Windows host so the happy path is covered
     # without a real service call.
-    monkeypatch.setattr(os, "name", "nt")
-    monkeypatch.setenv("AGENT_SERVICE_WORKSPACE", str(tmp_path))
     import app.windows_service as mod
 
+    monkeypatch.setattr(mod, "_is_windows", lambda: True)
+    monkeypatch.setenv("AGENT_SERVICE_WORKSPACE", str(tmp_path))
     monkeypatch.setattr(mod.importlib.util, "find_spec", lambda name: object())
     scripts = tmp_path / ".venv" / "Scripts"
     scripts.mkdir(parents=True)

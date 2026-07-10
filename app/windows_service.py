@@ -31,6 +31,17 @@ RESTART_POLICY_DESCRIPTION = (
 )
 
 
+def _is_windows() -> bool:
+    """Return whether the current host is Windows.
+
+    Kept as a single indirection so tests can simulate the host OS without
+    mutating the global ``os.name`` (which would make ``pathlib.Path`` build
+    ``WindowsPath`` on POSIX and crash).
+    """
+
+    return os.name == "nt"
+
+
 class WindowsServiceShellError(RuntimeError):
     """Raised when the architecture shell cannot be used in this environment."""
 
@@ -129,7 +140,7 @@ class WindowsServiceContract:
         """Validate the future service host environment without changing it."""
 
         self.validate_contract()
-        if os.name != "nt":
+        if not _is_windows():
             raise WindowsServiceShellError(
                 "Windows service runtime validation is available only on Windows"
             )
