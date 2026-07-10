@@ -8,8 +8,19 @@ Only one continuous-service daemon may run at a time. This module provides
   (the operating system releases the lock when the owning process dies, so a
   new instance can acquire it without manual clean-up);
 - never removes a lock that another *live* process still holds;
-- releases the lock on normal shutdown;
+- releases the OS lock on normal shutdown but leaves the lock *file* on disk;
 - reports a clear, actionable message identifying the running instance.
+
+Source of truth
+---------------
+The **OS lock is the only source of truth** for whether a daemon is running.
+The presence of ``data/daemon.lock`` on disk does **not** mean a daemon is
+alive: the file is a permanent service artefact that persists after the daemon
+exits. ``release()`` deliberately never unlinks it — deleting the pathname is
+racy on POSIX and could permit two simultaneous owners (see
+:meth:`SingleInstanceLock.release`). A leftover, unlocked file is therefore the
+normal, healthy resting state; the next :meth:`SingleInstanceLock.acquire`
+re-locks it and rewrites the diagnostics.
 
 Mechanism
 ---------
@@ -152,7 +163,22 @@ class SingleInstanceLock:
         return self
 
     def release(self) -> None:
-        """Release the lock and remove the lock file. Idempotent."""
+        """Release the lock but keep the lock file on disk. Idempotent.
+
+        Releasing only drops the OS lock, closes the file handle, and clears
+        internal state. The lock *file* is intentionally **not** unlinked.
+
+        Deleting the pathname in ``release()`` is racy on POSIX: the OS lock is
+        tied to the open file *description* (inode), not to the name. Between
+        our unlock and our ``unlink`` a second process can open the same file
+        and take the lock on that inode; our ``unlink`` then removes the name
+        out from under it, and a third process is free to create a brand-new
+        ``daemon.lock`` and acquire a *second, simultaneous* lock — two live
+        owners at once. Leaving the file in place closes that window: the OS
+        lock (not the file's presence) is the single source of truth, so a
+        leftover, unlocked file is the normal, healthy resting state and the
+        next :meth:`acquire` simply re-locks and rewrites its diagnostics.
+        """
         fh = self._fh
         if fh is None:
             return
@@ -161,16 +187,6 @@ class SingleInstanceLock:
             self._unlock_file(fh)
         finally:
             fh.close()
-            # Only the current holder reaches here, so removing the file cannot
-            # delete a lock owned by another live process. Missing file is fine.
-            try:
-                self._path.unlink()
-            except FileNotFoundError:
-                pass
-            except OSError:
-                # On Windows another just-started instance may already have the
-                # file open; leaving it in place is harmless (it is unlocked).
-                pass
 
     # ── context manager ──────────────────────────────────────────────────
 
