@@ -344,9 +344,10 @@ class DaemonLoop:
             wanted.append(sigterm)
         assert self._loop is not None
         for sig in wanted:
+            previous = signal.getsignal(sig)
             try:
                 self._loop.add_signal_handler(sig, self._on_signal, sig)
-                installed.append((sig, "loop", None))
+                installed.append((sig, "loop", previous))
             except (NotImplementedError, RuntimeError):
                 try:
                     previous = signal.signal(sig, self._signal_fallback)
@@ -364,8 +365,7 @@ class DaemonLoop:
                 if kind == "loop":
                     assert self._loop is not None
                     self._loop.remove_signal_handler(sig)
-                else:
-                    signal.signal(sig, previous)
+                signal.signal(sig, previous)
             except (ValueError, OSError, RuntimeError) as exc:
                 logger.warning("cannot remove handler for %s: %s", sig, exc)
 
