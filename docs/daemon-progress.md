@@ -70,6 +70,51 @@ per sub-item. `agent_tick.py` stays as the single-shot fallback mode throughout.
   single-instance lock or CLI entry point yet (sub-items 1.3/1.4).
 - **Blockers:** none. **Human action:** review and merge the PR.
 
+## 1.4 Windows service shell (architecture-only)
+
+- **Status:** ready for review
+- **Branch:** `codex/daemon-1-4-windows-service-shell`
+- **Pull Request:** #40
+- **Last updated:** 2026-07-10
+- **Implementation:** New `app/windows_service.py` fixing the Windows service
+  *contract* around the single selected mechanism (`pywin32`) without yet
+  installing, removing, starting, stopping, or configuring recovery for a real
+  service -- those are deferred to later roadmap items and are intentionally not
+  implemented here. `WindowsServiceContract` (frozen dataclass) resolves all
+  machine-local paths at runtime (workspace, `.venv` interpreter, `data/`,
+  `logs/`, launch command `python -m app.daemon`) so no absolute machine path
+  is baked into the repo; `from_environment()` applies optional non-secret
+  overrides (`AGENT_SERVICE_WORKSPACE`, `AGENT_SERVICE_VENV`,
+  `AGENT_SERVICE_ACCOUNT`, `AGENT_SERVICE_STOP_TIMEOUT_SECONDS`).
+  `validate_contract()` checks OS-independent invariants; `validate_runtime()`
+  additionally verifies the host is Windows, pywin32 modules are importable, and
+  the workspace/interpreter exist -- all read-only, never mutating the service.
+  `as_dict()` exposes an honest shell-only contract (every
+  `*_implemented` flag is `False`). The module is import-safe on any OS:
+  `pywin32` is never imported at module import time; a small CLI
+  (`--show-contract` / `--check-runtime`) prints the contract or checks
+  prerequisites. `agent_tick.py` is untouched.
+- **Tests added:** `tests/test_windows_service.py` (26 tests): import safety
+  (no pywin32 pulled in), default contract shape, repo-root workspace not
+  hardcoded, workspace-relative derived paths, explicit venv override,
+  `from_environment` defaults + overrides + bad/zero timeout rejection,
+  `validate_contract` rejection matrix, JSON-serialisable shell-only `as_dict`,
+  `validate_runtime` error paths (off-Windows, missing pywin32, missing
+  workspace, missing interpreter) via monkeypatched `os.name`/`find_spec` with
+  no real service call, and full CLI coverage (show-contract, default, unknown
+  arg -> usage/2, off-Windows check -> 1, simulated success path, config error
+  -> 1). Module coverage 98%.
+- **Checks run:**
+  - `python -m pytest tests/test_windows_service.py -q` -> 26 passed
+  - `coverage run --branch -m pytest` -> 4251 passed
+  - `coverage report --fail-under=85` -> TOTAL 92%
+  - `python scripts/generate_sbom.py --check` -> in sync
+  - `python scripts/audit_release.py` -> no warnings
+- **Known limitations:** No real service install/uninstall/start/stop or Windows
+  recovery configuration yet -- this sub-item deliberately fixes only the
+  contract/shell. Those actions are separate later roadmap tasks.
+- **Blockers:** none. **Human action:** review and merge the PR.
+
 ## 1.3 Single-instance guarantee
 
 - **Status:** ready for review
@@ -133,7 +178,7 @@ per sub-item. `agent_tick.py` stays as the single-shot fallback mode throughout.
 | --- | --- | --- |
 | 1.2 | Lifecycle and graceful shutdown | completed |
 | 1.3 | Single-instance guarantee | ready for review |
-| 1.4 | Windows service launch | not started |
+| 1.4 | Windows service launch | ready for review |
 | 2.1 | Timer events (in-loop scheduler) | not started |
 | 2.2 | File watcher | not started |
 | 2.3 | Instant wake on new RuntimeTask | not started |
