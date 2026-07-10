@@ -783,6 +783,9 @@ class AutonomousRuntime:
         previous_gateway_check_readiness = bool(
             getattr(self.agent, "gateway_check_readiness", False)
         )
+        previous_suppress_learning_writes = bool(
+            getattr(self.agent, "suppress_durable_learning_writes", False)
+        )
         gateway_path = self._gateway_path()
         snapshot = budget_ledger_snapshot(self.workspace)
         self.agent.gateway_dry_run = bool(config.dry_run)
@@ -792,6 +795,9 @@ class AutonomousRuntime:
         )
         self.agent.gateway_budget_snapshot = snapshot
         self.agent.gateway_check_readiness = not bool(config.dry_run)
+        self.agent.suppress_durable_learning_writes = (
+            previous_suppress_learning_writes or bool(config.dry_run)
+        )
         self.agent.gateway_readiness_blockers = (
             readiness_blockers(
                 pending_approvals=len(self.approval_inbox.pending()),
@@ -821,6 +827,7 @@ class AutonomousRuntime:
                 "gateway_path": gateway_path,
                 "blocked_tools": sorted(to_block),
                 "no_tests": not config.include_tests,
+                "durable_learning_writes_suppressed": bool(config.dry_run),
             },
         )
         try:
@@ -832,6 +839,7 @@ class AutonomousRuntime:
             self.agent.gateway_budget_snapshot = previous_gateway_budget_snapshot
             self.agent.gateway_readiness_blockers = previous_gateway_readiness_blockers
             self.agent.gateway_check_readiness = previous_gateway_check_readiness
+            self.agent.suppress_durable_learning_writes = previous_suppress_learning_writes
             if planner_supports_hidden:
                 planner.hidden_tools = previous_hidden
             if block:
@@ -1152,7 +1160,7 @@ class AutonomousRuntime:
         # the runtime never re-reads the environment.
         write_policy = getattr(self.agent, "write_policy", None)
         frozen_sources = getattr(write_policy, "frozen_sources", frozenset())
-        freeze_writes = "agent-auto" in frozen_sources
+        freeze_writes = config.dry_run or "agent-auto" in frozen_sources
         engine = ReflectionEngine(
             workspace=self.workspace,
             persistent_memory=persistent_store,
