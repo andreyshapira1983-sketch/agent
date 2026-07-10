@@ -267,6 +267,116 @@ def test_best_next_action_prefers_open_registry_issue_over_raw_history():
     assert all("AgentLoopExtractedMethods" not in item for item in action.evidence)
 
 
+def _linked_generic_and_specific_issues(
+    workspace, *, resolved_specific: bool, shared_rejection: bool = False
+):
+    registry = SelfImprovementIssueRegistry(workspace / DEFAULT_ISSUE_PATH)
+    generic_id = "ain_generic" if shared_rejection else "ain_shared"
+    specific_id = "ain_specific" if shared_rejection else "ain_shared"
+    generic = registry.upsert_failure(
+        f"self-apply rolled_back: proposal_id={generic_id}",
+        "2026-07-09T20:25:04+00:00",
+    )
+    specific = registry.upsert_failure(
+        "TypeError: duplicate base class AgentLoopExtractedMethods "
+        f"proposal_id={specific_id}",
+        "2026-07-09T20:25:05+00:00",
+    )
+    if shared_rejection:
+        rejection = "repair proposal rejected: proposal changes too many lines (480 > 200)"
+        generic = registry.transition(
+            status="open",
+            observed_at="2026-07-09T20:25:06+00:00",
+            fingerprint=generic.fingerprint,
+            evidence=rejection,
+        )
+        specific = registry.transition(
+            status="open",
+            observed_at="2026-07-09T20:25:06+00:00",
+            fingerprint=specific.fingerprint,
+            evidence=rejection,
+        )
+        assert generic is not None and specific is not None
+    if resolved_specific:
+        specific = registry.transition(
+            status="resolved",
+            observed_at="2026-07-09T20:25:07+00:00",
+            fingerprint=specific.fingerprint,
+            evidence="targeted regression passed",
+        )
+    assert specific is not None
+    return registry, generic, specific
+
+
+def test_unresolved_generic_issue_surfaces_without_specific_issue(workspace):
+    registry = SelfImprovementIssueRegistry(workspace / DEFAULT_ISSUE_PATH)
+    generic = registry.upsert_failure(
+        "self-build failed for proposal_id=ain_generic_only",
+        "2026-07-09T20:25:04+00:00",
+    )
+
+    unresolved = registry.unresolved()
+    action = select_best_next_action(
+        self_improvement_registry_available=True,
+        open_self_improvement_issues=tuple(issue.to_dict() for issue in unresolved),
+    )
+
+    assert [issue.fingerprint for issue in unresolved] == [generic.fingerprint]
+    assert action.action == "improve_failure_to_idea_pipeline"
+
+
+def test_specific_open_issue_suppresses_linked_generic_issue(workspace):
+    registry, generic, specific = _linked_generic_and_specific_issues(
+        workspace, resolved_specific=False
+    )
+
+    unresolved = registry.unresolved()
+    action = select_best_next_action(
+        self_improvement_registry_available=True,
+        open_self_improvement_issues=tuple(issue.to_dict() for issue in unresolved),
+    )
+
+    assert generic.fingerprint not in {issue.fingerprint for issue in unresolved}
+    assert [issue.fingerprint for issue in unresolved] == [specific.fingerprint]
+    assert action.action == "repair_incremental_splitter_duplicate_mixin"
+
+
+def test_specific_resolved_issue_suppresses_linked_generic_issue(workspace):
+    registry, generic, specific = _linked_generic_and_specific_issues(
+        workspace, resolved_specific=True, shared_rejection=True
+    )
+
+    assert generic.status == "open"
+    assert specific.status == "resolved"
+    assert registry.unresolved() == []
+    action = select_best_next_action(
+        self_improvement_registry_available=True,
+        open_self_improvement_issues=tuple(
+            issue.to_dict() for issue in registry.unresolved()
+        ),
+    )
+    assert action.action == "observe"
+
+
+def test_unrelated_generic_issue_remains_after_specific_resolution(workspace):
+    registry, _linked_generic, _specific = _linked_generic_and_specific_issues(
+        workspace, resolved_specific=True, shared_rejection=True
+    )
+    unrelated = registry.upsert_failure(
+        "self-build failed for proposal_id=ain_unrelated formatter crash",
+        "2026-07-09T20:25:08+00:00",
+    )
+
+    unresolved = registry.unresolved()
+    action = select_best_next_action(
+        self_improvement_registry_available=True,
+        open_self_improvement_issues=tuple(issue.to_dict() for issue in unresolved),
+    )
+
+    assert [issue.fingerprint for issue in unresolved] == [unrelated.fingerprint]
+    assert action.action == "improve_failure_to_idea_pipeline"
+
+
 class _IssueLog:
     def __init__(self):
         self.events = []

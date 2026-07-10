@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Iterable, Literal
 
 from core.state_integrity import read_state_jsonl, rewrite_state_jsonl
 
@@ -14,6 +14,17 @@ from core.state_integrity import read_state_jsonl, rewrite_state_jsonl
 IssueStatus = Literal["open", "verified", "resolved"]
 DEFAULT_ISSUE_PATH = Path("data") / "self_improvement_issues.jsonl"
 _DUPLICATE_MIXIN_KEY = "incremental_splitter:duplicate_mixin_base_class"
+_GENERIC_ACTION = "improve_failure_to_idea_pipeline"
+_PROPOSAL_ID_RE = re.compile(r"\bain_[a-z0-9]+\b", re.IGNORECASE)
+_ROLLBACK_BRANCH_RE = re.compile(r"\bself-apply/[a-z0-9._/-]+\b", re.IGNORECASE)
+_ERROR_TEXT_RE = re.compile(
+    r"\b([a-z_][a-z0-9_]*(?:error|exception)):\s*([^;(|\n]{1,200})",
+    re.IGNORECASE,
+)
+_REJECTED_REPAIR_RE = re.compile(
+    r"repair proposal rejected:\s*([^\n]{1,300})",
+    re.IGNORECASE,
+)
 
 
 def _now() -> str:
@@ -78,6 +89,48 @@ class SelfImprovementIssue:
         )
 
 
+def _root_evidence_keys(issue: SelfImprovementIssue) -> frozenset[str]:
+    """Return explicit correlation keys shared by records from one failure."""
+    keys: set[str] = set()
+    texts = (*issue.evidence, issue.related_error_text)
+    for text in texts:
+        normalized = " ".join(str(text).casefold().split())
+        keys.update(f"proposal:{value}" for value in _PROPOSAL_ID_RE.findall(normalized))
+        keys.update(f"branch:{value}" for value in _ROLLBACK_BRANCH_RE.findall(normalized))
+        keys.update(
+            f"error:{kind}:{message.strip()}"
+            for kind, message in _ERROR_TEXT_RE.findall(normalized)
+        )
+        keys.update(
+            f"rejected-repair:{message.strip()}"
+            for message in _REJECTED_REPAIR_RE.findall(normalized)
+        )
+    return frozenset(keys)
+
+
+def suppress_generic_issue_duplicates(
+    issues: Iterable[SelfImprovementIssue],
+) -> list[SelfImprovementIssue]:
+    """Hide generic issues already covered by a linked specific issue."""
+    materialized = list(issues)
+    specific_keys = [
+        _root_evidence_keys(issue)
+        for issue in materialized
+        if issue.action != _GENERIC_ACTION
+    ]
+    return [
+        issue
+        for issue in materialized
+        if not (
+            issue.action == _GENERIC_ACTION
+            and any(
+                keys and keys.intersection(_root_evidence_keys(issue))
+                for keys in specific_keys
+            )
+        )
+    ]
+
+
 def issue_from_failure(text: str, observed_at: str) -> SelfImprovementIssue:
     lowered = text.casefold()
     duplicate_mixin = "duplicate base class" in lowered or (
@@ -117,7 +170,11 @@ class SelfImprovementIssueRegistry:
 
     def unresolved(self) -> list[SelfImprovementIssue]:
         return sorted(
-            (issue for issue in self.list() if issue.status != "resolved"),
+            (
+                issue
+                for issue in suppress_generic_issue_duplicates(self.list())
+                if issue.status != "resolved"
+            ),
             key=lambda issue: issue.last_seen,
             reverse=True,
         )

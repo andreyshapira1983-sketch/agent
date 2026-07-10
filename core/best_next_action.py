@@ -24,6 +24,10 @@ from dataclasses import dataclass
 from typing import Literal, Optional
 
 from core.approval_triage import TriageReport
+from core.self_improvement_issues import (
+    SelfImprovementIssue,
+    suppress_generic_issue_duplicates,
+)
 
 
 Severity = Literal["critical", "high", "medium", "low", "none"]
@@ -375,7 +379,11 @@ def _candidate_self_improvement_failure(
 def _candidate_open_self_improvement_issue(
     issues: tuple[dict, ...],
 ) -> Optional[BestNextAction]:
-    for issue in issues:
+    dominant = suppress_generic_issue_duplicates(
+        SelfImprovementIssue.from_dict(issue) for issue in issues
+    )
+    for model in dominant:
+        issue = model.to_dict()
         status = str(issue.get("status") or "open")
         if status == "resolved":
             continue
