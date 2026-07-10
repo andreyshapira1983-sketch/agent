@@ -5,9 +5,9 @@ per sub-item. `agent_tick.py` stays as the single-shot fallback mode throughout.
 
 ## 1.1 Main async event loop
 
-- **Status:** ready for review
+- **Status:** completed
 - **Branch:** `andreyshapira1983-sketch-daemon-1-1-async-event-loop`
-- **Pull Request:** (see PR titled "Daemon 1.1: add async event loop")
+- **Pull Request:** #35 (merged)
 - **Last updated:** 2026-07-10
 - **Implementation:** New `app/daemon.py` with `DaemonLoop` — a persistent
   asyncio loop that sleeps on an internal `asyncio.Event`, wakes via
@@ -30,11 +30,51 @@ per sub-item. `agent_tick.py` stays as the single-shot fallback mode throughout.
   single-instance lock, no CLI entry point — those are sub-items 1.2/1.3.
 - **Blockers:** none. **Human action:** review and merge the PR.
 
+## 1.2 Lifecycle and graceful shutdown
+
+- **Status:** ready for review
+- **Branch:** `andreyshapira1983-sketch-daemon-1-2-graceful-shutdown`
+- **Pull Request:** (see PR titled "Daemon 1.2: lifecycle and graceful shutdown")
+- **Last updated:** 2026-07-10
+- **Implementation:** Extended `app/daemon.py`:
+  - `spawn(coro)` starts and tracks in-flight tasks; refuses new tasks once
+    shutdown has begun (`DaemonLoopError`).
+  - `shutdown(drain_timeout=…)` — idempotent, concurrent-safe graceful stop:
+    requests loop exit, drains tracked tasks for a bounded `drain_timeout`
+    (constructor default 10 s), cancels stragglers with a bounded
+    `CANCEL_GRACE_SECONDS` grace, then runs registered close callbacks
+    (`add_close_callback`, sync or async; errors logged, never swallowed
+    silently). Repeated / concurrent shutdown calls all return safely.
+  - `run(handle_signals=True)` installs Ctrl+C (SIGINT) and SIGTERM handlers
+    via `loop.add_signal_handler` on Unix, falling back to `signal.signal`
+    where the loop API is unsupported (Windows Proactor); handlers are
+    restored on exit. Finalization runs exactly once in `run()`'s `finally`,
+    so cancellation of `run()` also drains and closes resources.
+  - Observability: `shutting_down`, `active_tasks` properties.
+- **Tests added:** `tests/test_daemon_shutdown.py` (16 tests): task
+  tracking/untracking, spawn refusal during shutdown, drain of in-flight
+  task, cancellation past drain timeout, failing task survival, repeated and
+  concurrent shutdown, shutdown without run, close-callback order and error
+  isolation, signal callback + fallback paths, handler install/restore,
+  invalid timeouts, wake-after-shutdown ignored. Bounded timeouts throughout;
+  no real signals sent, no long sleeps.
+- **Checks run:**
+  - `python -m pytest tests/test_daemon_shutdown.py tests/test_daemon_loop.py -q` → 29 passed
+  - `coverage run --branch -m pytest` → 4205 passed
+  - `coverage report --fail-under=85` → TOTAL 92%
+  - `python scripts/generate_sbom.py --check` → in sync
+  - `python scripts/audit_release.py` → no warnings
+  - pylint: not installed in the local environment and not part of CI; skipped.
+- **Known limitations:** SIGTERM is defined but effectively never delivered
+  on Windows; Ctrl+C uses the `signal.signal` fallback there. No
+  single-instance lock or CLI entry point yet (sub-items 1.3/1.4).
+- **Blockers:** none. **Human action:** review and merge the PR.
+
 ## Remaining sub-items
 
 | Item | Title | Status |
 | --- | --- | --- |
-| 1.2 | Lifecycle and graceful shutdown | not started |
+| 1.2 | Lifecycle and graceful shutdown | ready for review |
 | 1.3 | Single-instance guarantee | not started |
 | 1.4 | Windows service launch | not started |
 | 2.1 | Timer events (in-loop scheduler) | not started |
