@@ -73,9 +73,23 @@ per sub-item. `agent_tick.py` stays as the single-shot fallback mode throughout.
 ## 1.3 Single-instance guarantee
 
 - **Status:** ready for review
-- **Branch:** `andreyshapira1983-sketch-daemon-1-3-single-instance`
-- **Pull Request:** (see PR titled "Daemon 1.3: single-instance guarantee")
+- **Branch:** `andreyshapira1983-sketch-daemon-1-3-single-instance` (feature),
+  `fix/single-instance-release-race` (hotfix)
+- **Pull Request:** #37 (merged); hotfix PR (see PR titled
+  "Hotfix: single-instance release() must not unlink the lock file")
 - **Last updated:** 2026-07-10
+- **Hotfix (release() race):** The original `release()` unlinked
+  `data/daemon.lock` after dropping the OS lock. On POSIX this is racy: the
+  lock lives on the open file *description* (inode), not the pathname, so
+  between our unlock and unlink a second process could open the same file and
+  lock the inode, our unlink would then remove the name, and a third process
+  could create a fresh `daemon.lock` and acquire a *second, simultaneous*
+  lock — two live owners at once. Fix: `release()` now only drops the OS lock,
+  closes the handle, and clears internal state; it **never** unlinks the file.
+  `data/daemon.lock` is a permanent service artefact; a leftover, unlocked file
+  is the normal resting state and the next `acquire()` re-locks it and rewrites
+  the diagnostics (pid, hostname, started_at). The OS lock — not the file's
+  presence — is the single source of truth.
 - **Implementation:** New `app/single_instance.py` with `SingleInstanceLock`
   and `AlreadyRunningError`. The lock is backed by an OS advisory exclusive
   lock on an open file descriptor — `fcntl.flock` on POSIX, `msvcrt.locking`
@@ -91,15 +105,19 @@ per sub-item. `agent_tick.py` stays as the single-shot fallback mode throughout.
   `acquire()`/`release()` are idempotent; `release()` only removes the file it
   owns, so it can never delete a lock held by another live process. Usable as a
   context manager. `agent_tick.py` is untouched and needs no lock.
-- **Tests added:** `tests/test_single_instance.py` (15 tests): acquire/release
+- **Tests added:** `tests/test_single_instance.py` (17 tests): acquire/release
   basics, relative default path, mutual exclusion, holder pid/hostname in the
   error, re-acquire after release, idempotent acquire/release, release without
   acquire, stale-lock recovery (simulated crash), corrupt-file graceful
   degradation, context manager (incl. refused nested instance), restart loop,
-  and a bystander object not deleting a live lock. No real sleeps, no second
-  process required (two lock objects conflict via the OS lock).
+  a bystander object not deleting a live lock, diagnostics rewritten on each
+  fresh acquire, and a **real multiprocessing** mutual-exclusion test (holder
+  process A refuses concurrent B and C, then a fresh process D wins after A
+  releases) with bounded queue/join timeouts so it can never hang. After the
+  hotfix, release keeps the file: tests assert `held is False` while the file
+  may remain and a new lock still acquires successfully.
 - **Checks run:**
-  - `python -m pytest tests/test_single_instance.py -q` → 15 passed
+  - `python -m pytest tests/test_single_instance.py -q` → 17 passed
   - `coverage run --branch -m pytest` → see PR description
   - `coverage report --fail-under=85` → see PR description
   - `python scripts/generate_sbom.py --check` → see PR description
