@@ -34,7 +34,11 @@ from core.self_build_producer import produce_self_apply_proposal
 
 from cli.commands_approval import _approval_inbox_for
 from cli.commands_budget import _budget_ledger_snapshot
-from cli.self_build_memory import record_self_build_episode, recent_self_build_lessons
+from cli.self_build_memory import (
+    recent_self_build_lessons,
+    recently_vetoed_self_build_targets,
+    record_self_build_episode,
+)
 
 if TYPE_CHECKING:
     from core.loop import AgentLoop
@@ -63,6 +67,8 @@ def _handle_self_build_produce(rest: str, agent: "AgentLoop", workspace: Path) -
         budget_snapshot=snapshot,
         kill_switch=kill_state,
         lessons_provider=lambda target: recent_self_build_lessons(agent, target),
+        recently_vetoed_targets=recently_vetoed_self_build_targets(agent),
+        max_builder_attempts=2,
     )
     result = report.to_dict()
 
@@ -100,6 +106,7 @@ def _handle_self_build_produce(rest: str, agent: "AgentLoop", workspace: Path) -
             "grounded": grounded,
             "evidence_ref": evidence_ref,
             "no_grounded_target": no_grounded_target,
+            "attempts": result.get("attempts"),
         },
     )
 
