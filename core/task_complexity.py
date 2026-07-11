@@ -106,11 +106,16 @@ def assess_complexity(
 
     Priority order
     ──────────────
-    1. Role-level overrides  (memory_summary → always LIGHT)
-    2. DEEP signals          (substring match in normalized text)
-    3. LIGHT signals         (substring match) AND short text
-    4. Very short text       (< threshold characters)
+    1. Role-level overrides  (e.g. memory_summary → always LIGHT)
+    2. Empty / non-string    → STANDARD
+    3. DEEP signals          (substring match in normalized text) → DEEP
+    4. LIGHT signals         (substring match) AND text shorter than
+       ``_SHORT_TEXT_THRESHOLD * 4`` (~180 chars) → LIGHT
     5. Default               → STANDARD
+
+    There is intentionally NO "any very short text → LIGHT" rule: short text
+    with no recognized LIGHT signal still falls through to STANDARD (the
+    conservative default). See ``test_very_short_text_no_signals_is_standard``.
     """
     if role in _ALWAYS_LIGHT_ROLES:
         return ComplexityTier.LIGHT
