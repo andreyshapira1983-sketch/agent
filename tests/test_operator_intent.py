@@ -184,6 +184,35 @@ def test_approval_status_not_triggered_by_without_approval_en():
     assert intent is None or intent.kind != "approval_status"
 
 
+def test_approval_status_not_triggered_by_confirmed_facts_phrase():
+    # Regression: a bare "подтвержд" stem used to hijack ordinary requests that
+    # merely mention "подтверждённые факты" (= confirmed/verified facts) and
+    # route them to `:approval-list all` instead of doing the real task.
+    samples = [
+        "Напиши о себе текст без галлюцинаций с подтверждёнными фактами, файл txt",
+        "Составь рассказ о своей архитектуре, используя только подтверждённые факты",
+        "Дай подтверждённую версию расчёта",
+    ]
+    for text in samples:
+        intent = route_operator_intent(text)
+        assert intent is None or intent.kind != "approval_status", text
+
+
+def test_approval_status_still_matches_real_inbox_queries():
+    # The narrowed matcher must keep routing genuine approval-inbox questions.
+    samples = [
+        "Есть ли ожидающие approval или разрешения",
+        "Покажи очередь одобрений",
+        "Что ожидает подтверждения в инбоксе",
+        "pending approval list",
+    ]
+    for text in samples:
+        intent = route_operator_intent(text)
+        assert intent is not None, text
+        assert intent.kind == "approval_status", text
+        assert intent.command == ":approval-list all", text
+
+
 def test_routes_urgent_status_phrases():
     intent = route_operator_intent("Есть ли что-то срочное")
 

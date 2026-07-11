@@ -650,18 +650,54 @@ def _matches_smart_memory_status(text: str) -> bool:
     )
 
 
+# Words that unambiguously refer to the approval inbox/queue on their own.
+_APPROVAL_STRONG = (
+    "approval",
+    "approve",
+    "pending approval",
+    "одобр",  # одобрение / одобрить / одобрения — approval-specific in RU
+    "ожидает разреш",
+    "апрув",
+)
+
+# Stems that *can* mean "approval" but are ambiguous in everyday phrasing:
+#   "подтверждённые факты"  = confirmed / verified facts (NOT an approval query)
+#   "разрешение экрана"     = screen resolution
+#   "разрешение конфликта"  = conflict resolution
+# They only signal an approval-inbox query when an approval/inbox context word
+# is also present. Bug: a bare "подтвержд" hijacked normal requests such as
+# "напиши текст с подтверждёнными фактами" into `:approval-list all`.
+_APPROVAL_AMBIGUOUS = (
+    "подтвержд",
+    "разрешени",
+)
+
+_APPROVAL_CONTEXT = (
+    "approval",
+    "approve",
+    "одобр",
+    "инбокс",
+    "inbox",
+    "очеред",  # очередь
+    "queue",
+    "список",
+    "list",
+    "заявк",  # заявка
+    "запрос",
+    "pending",
+    "ожида",  # ожидает / ожидающие
+    "runtime",
+)
+
+
 def _matches_approval_status(text: str) -> bool:
     if _has_any(text, ("без одобр", "without approval", "no approval", "без явного")):
         return False
-    return _has_any(
-        text,
-        (
-            "approval",
-            "approve",
-            "pending approval",
-            "одобр",
-            "подтвержд",
-            "разрешени",
-            "ожидает разреш",
-        ),
-    )
+    if _has_any(text, _APPROVAL_STRONG):
+        return True
+    # Ambiguous stems ("подтвержд", "разрешени") only count when paired with an
+    # approval/inbox context word — otherwise phrases like "подтверждённые
+    # факты" must NOT be routed to the approval inbox.
+    if _has_any(text, _APPROVAL_AMBIGUOUS) and _has_any(text, _APPROVAL_CONTEXT):
+        return True
+    return False
