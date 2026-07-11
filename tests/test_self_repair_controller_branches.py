@@ -303,6 +303,35 @@ def test_successful_repair_without_memory_does_not_crash(tmp_path: Path):
     assert agent.episodic_saved == []
 
 
+def test_lesson_save_failure_is_logged_not_silent(tmp_path: Path):
+    # A repaired fix already landed; if persisting the LESSON raises, the
+    # controller must NOT crash the repair — but the failure must be SURFACED
+    # (repair_lesson_save_failed), never swallowed silently. Regression for the
+    # trace where the agent flagged a `try/except: pass` around the repair
+    # lesson write as a silent-memory-loss risk.
+    agent = _FakeAgent(tool_outputs=_success_tool_outputs(), with_memory=True)
+
+    def _boom(episode: Any) -> None:
+        raise RuntimeError("episodic store unavailable")
+
+    agent.save = _boom  # type: ignore[assignment]
+
+    controller = SelfRepairController(agent, workspace_root=tmp_path)
+    report = controller.run(_proposal(path="core/widget.py", reason="off-by-one"))
+
+    # The repair itself still succeeds — the lesson write is best-effort.
+    assert report.status == "repaired"
+    # remember() ran before the failing episodic save.
+    assert len(agent.remembered) == 1
+    # The failure is observable, not silent: no success log, an explicit
+    # failure event carrying the error type.
+    assert not any(e == "repair_lesson_saved" for e, _ in agent.log.events)
+    failures = [p for e, p in agent.log.events if e == "repair_lesson_save_failed"]
+    assert len(failures) == 1
+    assert failures[0]["error_type"] == "RuntimeError"
+    assert failures[0]["path"] == "core/widget.py"
+
+
 # --------------------------------------------------------------------------- #
 # trace_id diagnostic-logs path                                                 #
 # --------------------------------------------------------------------------- #

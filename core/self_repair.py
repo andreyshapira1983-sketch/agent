@@ -522,8 +522,24 @@ class SelfRepairController:
                     "content_chars": len(content),
                 },
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            # A confirmed repair already landed on disk; failing to persist the
+            # LESSON must not crash the repair flow, so we still swallow the
+            # exception here. But it must NOT be silent: a swallowed memory
+            # write means the agent quietly fails to learn from the repair and
+            # nobody ever finds out. Surface it as an error event so the loss is
+            # observable (telemetry / audit) instead of invisible.
+            try:
+                self.agent.log.log(
+                    "repair_lesson_save_failed",
+                    {
+                        "path": getattr(report.proposal, "path", None),
+                        "error_type": type(exc).__name__,
+                        "error": str(exc)[:200],
+                    },
+                )
+            except Exception:
+                pass
 
     def _log_error(
         self,
