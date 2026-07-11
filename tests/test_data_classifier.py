@@ -75,3 +75,42 @@ class TestEdgeCases:
     def test_result_has_reasons(self):
         r = classify("API_KEY=foo123", source="file")
         assert r.reasons, "every classification should carry at least one reason"
+
+
+class TestKeywordSecretsToggle:
+    """Trusted-internal tool output (our own logs/files/diffs) must not be
+    quarantined as SECRET just because it *mentions* a credential word.
+
+    Regression for the trace where ``read_logs:latest`` was classified
+    ``class=secret`` on the keyword ``api_key`` while the real scanner found
+    ``count=0`` — a naive-substring false positive. Regex credential SHAPES
+    must still classify as SECRET even with keywords disabled.
+    """
+
+    def test_bare_keyword_is_secret_by_default(self):
+        text = 'log reason=["contains secret keyword api_key"]'
+        assert classify(text, source="tool_output").cls is DataClass.SECRET
+
+    def test_bare_keyword_not_secret_when_keywords_disabled(self):
+        text = 'log reason=["contains secret keyword api_key"]'
+        r = classify(text, source="tool_output", keyword_secrets=False)
+        assert r.cls is DataClass.PRIVATE
+
+    def test_regex_shape_still_secret_when_keywords_disabled(self):
+        # A real credential value has a redactable span -> still SECRET.
+        text = "token sk-abcdefghijklmnopqrstuvwxyz012345 leaked"
+        assert (
+            classify(text, source="tool_output", keyword_secrets=False).cls
+            is DataClass.SECRET
+        )
+
+    def test_key_value_assignment_still_secret_when_keywords_disabled(self):
+        # KEY=VALUE is a regex rule, not a bare keyword -> still SECRET.
+        assert (
+            classify("api_key=hunter2value", source="file", keyword_secrets=False).cls
+            is DataClass.SECRET
+        )
+
+    def test_pii_still_wins_when_keywords_disabled(self):
+        r = classify("Contact andre@example.com", source="tool_output", keyword_secrets=False)
+        assert r.cls is DataClass.SENSITIVE
