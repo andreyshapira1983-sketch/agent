@@ -140,6 +140,59 @@ are also reachable one-shot via `--ask ":command args"`.
 | `:subagent-proposal \| :propose-subagent <…>` | Propose a subagent contract. |
 | `:team-run \| :team-execute \| :subagents-run <goal>` | Execute bounded subagent contracts. |
 
+## Natural-language routing (intent parity)
+
+> **Status of this section:** authoritative map of the **real** deterministic
+> operator-intent router in `core/operator_intent.py` (the ordered
+> `if _matches_…` chain) and its detectors in
+> `core/operator_intent_patterns.py`. Only routes that exist in code are
+> listed. When this section and those modules disagree, the code wins.
+
+Operators do not have to type `:commands`. A plain-language message is first
+run through a **deterministic, no-LLM** matcher. If it matches one of the
+narrow patterns below, the equivalent operator command is invoked directly
+(logged as `operator_intent kind=… command=…`). If nothing matches, the
+message falls through to the normal model-backed agent loop unchanged.
+
+| Natural-language phrasing (examples) | Routed to | Intent kind |
+| ------------------------------------ | --------- | ----------- |
+| "start building yourself", "начни программировать себя" | `:self-build-produce` | `self_build_request` |
+| "propose/design a subagent for …" | `:subagent-proposal` | `subagent_proposal` |
+| "audit / review the architecture" | `:architecture-audit` | `architecture_audit` |
+| "you're missing a connector/capability for …" | `:capability-request` | `capability_request` |
+| "find a TODO/FIXME and propose a task with a failing test" | `:self-task-propose` | `self_task_proposal` |
+| "draft a patch proposal for …" | `:patch-proposal-plan` | `patch_proposal` |
+| "plan a source review for …" | `:source-review-plan` | `source_review_plan` |
+| "plan an implementation of …" | `:implementation-plan` | `implementation_plan` |
+| "run a safe self-check" | `:operator-check` | `safe_self_check` |
+| "are you ready to code / programming readiness" | `:coding-readiness` | `programming_readiness` |
+| "what can you do / your capabilities" | `operator-capabilities` | `capability_check` |
+| "what are your current gaps" | `operator-gaps` | `current_gaps_check` |
+| "find your live weaknesses" | `operator-weaknesses` | `weakness_finder` |
+| "what's the next safe test" | `operator-next-safe-test` | `next_safe_test` |
+| "check the project health/status" | `:operator-check` | `project_health` |
+| "memory status / what do you remember" | `:smart-memory` | `smart_memory_status` |
+| "anything urgent" | `:urgent-status` | `urgent_status` |
+| "single most important next action" | `:best-next-action` | `best_next_action` |
+| "what should I do next" | `:next-actions` | `next_actions` |
+| "are you ready to run autonomously" | `:autonomy-readiness` | `autonomy_readiness` |
+| "which model / model routing status" | `:models` | `model_status` |
+| "budget / token / spend status" | `:operator-budget` | `budget_status` |
+| "what's in the approval inbox" | `:approval-list all` | `approval_status` |
+
+**Safety guarantees (verified in code):** the router is intentionally narrow.
+Before any positive match it returns `None` (falls through to the model) for:
+empty/very long input, plain bug notes (`_looks_like_plain_bug_note`),
+meta-instructions that only *describe* routing (`_looks_like_meta_instruction`),
+explicit "do not route / just answer" commands
+(`_looks_like_explicit_non_routing_command`), and explicit documentation
+requests (`_explicit_documentation_requested`). None of these routes writes
+code or applies changes on its own — the self-build / self-task / patch routes
+still land on the same human-gated approval flow as their `:command` twins.
+Matchers are kept deliberately conservative: broadening one has regressed the
+planner before, so every matcher carries paired negative tests in
+`tests/test_operator_intent*.py`.
+
 ## Help
 
 | Command | Purpose |
