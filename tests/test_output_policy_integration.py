@@ -51,7 +51,7 @@ def _events(path: Path) -> list[dict[str, Any]]:
 def test_loop_downgrades_realtime_answer_when_ranker_marks_source_insufficient(
     workspace: Path,
 ) -> None:
-    url = "https://example.com/bitcoin"
+    url = "https://coinmarketcap.com/currencies/bitcoin"
     planner_response = json.dumps(
         {
             "reasoning": "Need to fetch the cited market page.",
