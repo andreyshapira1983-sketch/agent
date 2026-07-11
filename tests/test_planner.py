@@ -438,15 +438,15 @@ def test_corporate_doctrine_implementation_question_keeps_code_after_docs(
         for src in out.sources
         if src["tool"] == "file_read"
     ]
-    assert paths[:6] == [
+    assert paths[:5] == [
         "docs/future/CORPORATE_MODEL.md",
         "docs/CENTRAL_AGENT_GOVERNANCE.md",
         "docs/AGENT_ANATOMY.md",
         "docs/ROADMAP.md",
         "docs/COMMANDS_MAP.md",
-        "docs/SUBAGENT_LIFECYCLE.md",
     ]
-    assert paths[6:] == ["core/autonomous_runtime.py"]
+    assert paths[5:] == ["core/autonomous_runtime.py"]
+    assert "docs/SUBAGENT_LIFECYCLE.md" not in paths
 
 
 def test_confidence_evidence_question_forces_verifier_confidence_sources(
@@ -1157,3 +1157,92 @@ class TestDroppedTools:
         out = self._plan_with_hallucinated_tool(workspace, "phantom")
         assert any("phantom" in w for w in out.warnings)
         assert "phantom" in out.dropped_tools
+
+
+# ---------- thematic sub-agent governance doc routing (conditional) ----------
+
+from core.planner import _is_subagent_governance_question
+
+
+def test_subagent_governance_detector_strong_terms() -> None:
+    for q in (
+        "How do subagents get retired?",
+        "explain sub-agent delegation",
+        "what does the team executor do",
+        "как работает делегирование подагентам",
+        "жизненный цикл субагента",
+    ):
+        assert _is_subagent_governance_question(q), q
+
+
+def test_subagent_governance_detector_contextual_pair() -> None:
+    # weak action term only counts with an agent/role context word
+    assert _is_subagent_governance_question("when do we quarantine an agent?")
+    assert _is_subagent_governance_question("retire this role")
+    assert _is_subagent_governance_question("карантин для агента")
+
+
+def test_subagent_governance_detector_does_not_overfire() -> None:
+    for q in (
+        "explain the corporate model",
+        "what is on the roadmap",
+        "pause the build and retire the old feature flag",
+        "fix the bug in core/loop.py",
+        "central agent governance policy gate",
+    ):
+        assert not _is_subagent_governance_question(q), q
+
+
+def test_subagent_question_injects_lifecycle_doc(workspace: Path) -> None:
+    canned = json.dumps(
+        {
+            "reasoning": "answer directly",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "core/subagent_runner.py"},
+                    "rationale": "mechanics",
+                }
+            ],
+        }
+    )
+    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
+    out = planner.plan(
+        question="How does delegation to a subagent work, and when is it retired?",
+        file_hint=None,
+    )
+    paths = [
+        src["arguments"]["path"]
+        for src in out.sources
+        if src["tool"] == "file_read"
+    ]
+    assert "docs/SUBAGENT_LIFECYCLE.md" in paths
+    # a pure sub-agent question (not a broad doctrine question) → the thematic
+    # doc leads the source list.
+    assert paths[0] == "docs/SUBAGENT_LIFECYCLE.md"
+
+
+def test_non_subagent_doctrine_question_omits_lifecycle_doc(workspace: Path) -> None:
+    canned = json.dumps(
+        {
+            "reasoning": "doctrine",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "docs/ROADMAP.md"},
+                    "rationale": "roadmap",
+                }
+            ],
+        }
+    )
+    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
+    out = planner.plan(
+        question="Explain the corporate model and what is on the roadmap.",
+        file_hint=None,
+    )
+    paths = [
+        src["arguments"]["path"]
+        for src in out.sources
+        if src["tool"] == "file_read"
+    ]
+    assert "docs/SUBAGENT_LIFECYCLE.md" not in paths
