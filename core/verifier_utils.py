@@ -251,16 +251,31 @@ def _tool_citation_for(ev: Evidence) -> str:
 
 
 def _is_derivative_subagent_evidence(ev: Evidence) -> bool:
+    """Is this evidence merely a sub-agent's own synthesis (a witness)?
+
+    The parent loop embeds only a sub-agent's *answer text* (via
+    ``SubAgentRunResult.to_evidence_text()``) into its provenance chain —
+    never the sub-agent's raw file / web evidences. So the parent can
+    never independently inspect what a sub-agent looked at; it holds only
+    the child's prose conclusion.
+
+    Therefore any sub-agent-origin evidence is derivative: promoting it to
+    ``verified`` would be "trusting one LLM that trusted another LLM".
+
+    The ``external_evidence_count`` in the meta marker is the child's own
+    self-report — it proves the child *looked at* N external sources, not
+    that the child's conclusion is faithful to them. A real trace showed a
+    sub-agent read 7 repo files and still asserted a non-existent code bug
+    (``EpisodeRecord.to_dict`` "dropping" ``full_answer``); with the old
+    ``count > 0 -> not derivative`` shortcut that fabrication was minted as
+    ``verified``. Likewise, ``[web:...]`` / ``[file:...]`` tokens a
+    sub-agent embeds in its answer are still the child's unverifiable
+    claims, not evidence the parent holds. Both are treated as derivative.
+    """
     excerpt = ev.excerpt or ""
-    m = _SUBAGENT_META_RE.search(excerpt)
-    if m is None:
-        sid = ev.source_id or ""
-        if "subagent_" in sid or sid == "tool_output:spawn_subagent":
-            if any(tok in excerpt for tok in ("[web:", "[file:", "[search:", "[test:")):
-                return False
-            return True
-        return False
-    try:
-        return int(m.group(1)) == 0
-    except ValueError:
-        return False
+    if _SUBAGENT_META_RE.search(excerpt) is not None:
+        return True
+    sid = ev.source_id or ""
+    if "subagent_" in sid or sid == "tool_output:spawn_subagent":
+        return True
+    return False
