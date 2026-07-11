@@ -38,6 +38,7 @@ from .operator_intent_patterns import (
     _matches_project_health,
     _matches_safe_self_check,
     _matches_self_task_propose,
+    _matches_self_build_request,
     _matches_smart_memory_status,
     _matches_source_review,
     _matches_subagent_proposal,
@@ -48,6 +49,7 @@ from .operator_intent_patterns import (
 
 OperatorIntentKind = Literal[
     "shell_command_hint",
+    "self_build_request",
     "subagent_proposal",
     "architecture_audit",
     "capability_request",
@@ -99,6 +101,12 @@ def route_operator_intent(text: str) -> OperatorIntent | None:
         return None
     if _looks_like_explicit_non_routing_command(normalized):
         return None
+    if _matches_self_build_request(normalized):
+        return OperatorIntent(
+            kind="self_build_request",
+            command=":self-build-produce",
+            reason="explicit start self-build wording",
+        )
     if _looks_like_self_build_request(normalized):
         return None
     if _matches_inbox_task_request(normalized):

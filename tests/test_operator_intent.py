@@ -450,3 +450,35 @@ def test_subagent_capability_wish_still_routes_to_capability_request():
     assert intent is not None
     assert intent.kind == "capability_request"
     assert intent.command == ":capability-request"
+
+
+def test_routes_self_build_request_phrases_locally():
+    for phrase in (
+        "Начни программировать себя",
+        "Начни безопасно программировать себя",
+        "Начни безопасно программировать себя и передай исправление на проверку",
+        "Start programming yourself safely",
+        "Запусти self-build",
+    ):
+        intent = route_operator_intent(phrase)
+        assert intent is not None, phrase
+        assert intent.kind == "self_build_request", phrase
+        assert intent.command == ":self-build-produce", phrase
+
+
+def test_self_build_request_ignores_questions_and_negations():
+    # Descriptions, questions and negations must NOT trigger the producer.
+    for phrase in (
+        "Расскажи, как агент может программировать себя",
+        "Может ли агент программировать себя?",
+        "Не начинай программировать себя",
+    ):
+        assert route_operator_intent(phrase) is None, phrase
+
+
+def test_self_build_mention_without_start_verb_still_falls_through():
+    # A self-build mention with only analysis wording keeps its old behaviour:
+    # not routed to the producer (falls through to the planner).
+    assert route_operator_intent(
+        "проанализируй self-build и предложи улучшение кода"
+    ) is None
