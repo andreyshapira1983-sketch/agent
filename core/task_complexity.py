@@ -91,7 +91,9 @@ _LIGHT_SIGNALS: frozenset[str] = frozenset({
     "версия",   "version",   "changelog",
 })
 
-# Short text under this many characters always → LIGHT (unless DEEP signal).
+# Base length unit for the LIGHT gate. LIGHT is chosen only when a LIGHT
+# signal is present AND the text is shorter than _SHORT_TEXT_THRESHOLD * 4
+# (~180 chars); short text alone never forces LIGHT. See assess_complexity.
 _SHORT_TEXT_THRESHOLD = 45
 
 
