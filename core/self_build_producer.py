@@ -104,6 +104,19 @@ _ANATOMY_DOC_PATH = "docs/AGENT_ANATOMY.md"
 
 _DEFAULT_CONFIDENCE_THRESHOLD = 0.6
 
+# A single-shot Builder cannot safely split a very large module — it keeps
+# dropping public API and getting vetoed. Above this many lines a ``split_module``
+# candidate is refused up-front ("too large for a single-shot split") instead of
+# burning a doomed generation; it needs a human-scoped incremental split.
+_MAX_SPLIT_TARGET_LINES = 900
+
+# Default number of Builder attempts per run. ``1`` preserves the historical
+# single-shot behaviour (and every existing producer test). The real
+# ``:self-build-produce`` command opts into ``2`` so ONE Critic veto is retried
+# with the exact veto reasons fed back before the run gives up — a vetoed
+# candidate is still NEVER applied.
+_DEFAULT_MAX_BUILDER_ATTEMPTS = 1
+
 # Lines/markers that betray a diff/patch instead of full file content. The
 # Builder must return the whole post-image; a diff-only answer is vetoed.
 _DIFF_MARKERS = ("--- ", "+++ ", "@@ ", "diff --git", "index ")
@@ -170,6 +183,7 @@ class ProducerReport:
     role_outputs: list[RoleOutput] = field(default_factory=list)
     veto_reasons: list[str] = field(default_factory=list)
     value_flags: list[str] = field(default_factory=list)
+    attempts: int = 1
     next_human_action: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -182,6 +196,7 @@ class ProducerReport:
             "roles": [r.to_dict() for r in self.role_outputs],
             "veto_reasons": list(self.veto_reasons),
             "value_flags": list(self.value_flags),
+            "attempts": self.attempts,
             "next_human_action": self.next_human_action,
         }
 
@@ -301,6 +316,18 @@ def _missing_self_build_doc_topics(content: str) -> list[str]:
         if not any(marker in low for marker in markers):
             missing.append(label)
     return missing
+
+
+def _split_target_too_large(content: str) -> tuple[bool, int]:
+    """(too_large, line_count) for a would-be module split.
+
+    The single-shot Builder cannot safely split a very large module — it keeps
+    dropping public API and getting vetoed. Above :data:`_MAX_SPLIT_TARGET_LINES`
+    the producer refuses the split up-front instead of burning a doomed
+    generation. Pure; used only for ``split_module`` targets.
+    """
+    line_count = len((content or "").splitlines())
+    return line_count > _MAX_SPLIT_TARGET_LINES, line_count
 
 
 def _is_critical(rel: str) -> bool:
@@ -545,7 +572,39 @@ def _grounded_candidate_actionable(candidate: Any, workspace: str | Path) -> boo
     )
 
 
-def _default_grounded_selector(workspace: str | Path) -> Callable[[], Any]:
+def _candidate_concrete_targets(candidate: Any, workspace: str | Path) -> set[str]:
+    """Best-effort set of concrete paths a backlog candidate resolves to.
+
+    Includes the candidate's own raw target and — when the deterministic mapper
+    resolves an abstract target (e.g. ``TD-011``) to a concrete file — the mapped
+    path. Used so the recently-vetoed cooldown matches regardless of whether the
+    backlog lists a raw path or an abstract id. A raising mapper degrades to the
+    raw target only.
+    """
+    out: set[str] = set()
+    raw = str(getattr(candidate, "target_path", "") or "").replace("\\", "/").strip()
+    if raw:
+        out.add(raw)
+    try:
+        mapping = map_backlog_candidate(
+            candidate,
+            workspace=workspace,
+            allowed_targets=DEFAULT_CANDIDATE_TARGETS,
+        )
+        if mapping.ok and mapping.candidate is not None:
+            concrete = str(mapping.candidate.target_path or "").replace("\\", "/").strip()
+            if concrete:
+                out.add(concrete)
+    except Exception:  # noqa: BLE001 — a broken mapper must never break selection
+        pass
+    return out
+
+
+def _default_grounded_selector(
+    workspace: str | Path,
+    *,
+    exclude_targets: frozenset[str] = frozenset(),
+) -> Callable[[], Any]:
     """Build the DEFAULT grounded backlog selector for a workspace (TD-036
     follow-up).
 
@@ -556,6 +615,11 @@ def _default_grounded_selector(workspace: str | Path) -> Callable[[], Any]:
     read-only and returns a zero-arg
     callable yielding the top-ranked backlog candidate, or ``None`` when the
     closed backlog set is empty.
+
+    ``exclude_targets`` is a cooldown set of concrete paths that were just
+    critic-vetoed: candidates resolving to one of them are skipped so the run
+    advances to the NEXT grounded candidate instead of re-picking the same wall
+    (which would only be vetoed again). An empty set (the default) is a no-op.
 
     It never calls an LLM, never touches the network/git, and is fully
     best-effort: any import/load failure yields a selector that returns
@@ -574,6 +638,16 @@ def _default_grounded_selector(workspace: str | Path) -> Callable[[], Any]:
             except Exception:  # noqa: BLE001 — reviews are an optional signal
                 reviews = None
             candidates = load_backlog(workspace, value_reviews=reviews)
+            # Cooldown (A): a target that was just critic-vetoed is temporarily
+            # excluded so the run advances to the NEXT grounded candidate rather
+            # than banging on the same wall. Matching is on the concrete path so
+            # an abstract backlog id that maps to a vetoed file is also skipped.
+            if exclude_targets:
+                candidates = [
+                    c
+                    for c in candidates
+                    if not (_candidate_concrete_targets(c, workspace) & exclude_targets)
+                ]
             # Provod #1 follow-up: candidates are ranked highest-first. Prefer the
             # top-ranked candidate the producer can actually act on — directly
             # low-risk OR mapper-resolvable to an allowed concrete file — so a
@@ -1094,6 +1168,8 @@ def produce_self_apply_proposal(
     grounded_selector: Callable[[], Any] | None = None,
     legacy_llm_manager: bool = False,
     lessons_provider: Callable[[str], list[str]] | None = None,
+    recently_vetoed_targets: frozenset[str] | set[str] | tuple[str, ...] | None = None,
+    max_builder_attempts: int = _DEFAULT_MAX_BUILDER_ATTEMPTS,
 ) -> ProducerReport:
     """Run the Manager/Researcher/Builder/Critic/Reporter pipeline to produce at
     most one validated low-risk self-apply proposal into the approval inbox.
@@ -1186,7 +1262,10 @@ def produce_self_apply_proposal(
     if legacy_llm_manager:
         manager = _manager_select(llm, targets)
     else:
-        selector = grounded_selector or _default_grounded_selector(workspace)
+        selector = grounded_selector or _default_grounded_selector(
+            workspace,
+            exclude_targets=frozenset(recently_vetoed_targets or ()),
+        )
         manager = _manager_from_grounded(selector, targets, workspace=workspace)
     roles.append(manager)
     if manager.decision != "selected":
@@ -1216,6 +1295,31 @@ def produce_self_apply_proposal(
     roles.append(researcher)
     current_content = researcher.data["current_content"]
     evidence = list(researcher.data["evidence"])
+
+    # ── Scale filter (C): refuse an oversized single-shot split ─────────────
+    # A split of a very large module cannot be done safely in one Builder shot —
+    # it keeps dropping public API and getting vetoed. Refuse it up-front with a
+    # precise reason (rather than burning a doomed generation) so a
+    # "find a small problem" run does not treat splitting a 1000+ line file as a
+    # small fix. The debt is still visible; it just needs a human-scoped split.
+    if split_mode:
+        too_large, line_count = _split_target_too_large(current_content)
+        if too_large:
+            return _record(ProducerReport(
+                status="no_patch",
+                reason=(
+                    f"split target {target} has {line_count} lines "
+                    f"(> {_MAX_SPLIT_TARGET_LINES}); too large for a safe "
+                    "single-shot split — needs a human-scoped incremental split"
+                ),
+                target_path=target,
+                checked_gates=gates,
+                role_outputs=roles,
+                next_human_action=(
+                    "Scope an incremental split by hand (e.g. :self-split) — the "
+                    "single-shot Builder cannot safely split a module this large."
+                ),
+            ))
 
     # ── Dependency map ───────────────────────────────────────────────────────
     # Before the Builder touches a Python module, measure its real consumers:
@@ -1265,52 +1369,83 @@ def produce_self_apply_proposal(
         except Exception:  # noqa: BLE001 — rules must never break the producer
             required_symbols = {}
 
-    # ── Builder ─────────────────────────────────────────────────────────────
-    builder = _builder_generate(
-        llm, target, current_content, diagnosis,
-        split_mode=split_mode, lessons=lessons, dep_context=dep_context,
-    )
-    roles.append(builder)
+    # ── Builder → Critic (with optional single retry on veto, B) ────────────
+    # When ``max_builder_attempts > 1`` a Critic veto is retried ONCE with the
+    # exact veto reasons fed back to the Builder as hard constraints, before the
+    # run gives up. Two attempts total, never more. This NEVER applies anything —
+    # a vetoed candidate is still blocked and no inbox item is created. Default
+    # is a single attempt (byte-identical to the historical behaviour); the real
+    # ``:self-build-produce`` command opts into two.
+    max_attempts = max(1, int(max_builder_attempts))
+    builder_lessons = list(lessons)
+    attempts_used = 0
+    builder = None
+    critic = None
+    for attempt in range(1, max_attempts + 1):
+        attempts_used = attempt
 
-    # Importer test files are part of the change's blast radius: run them as
-    # targeted tests so a contract break fails fast inside the lane.
-    if builder.decision == "built" and dep_map is not None and dep_map.related_tests:
-        try:
-            paths = [str(p) for p in (builder.data.get("test_paths") or [])]
-            for test_file in dep_map.related_tests[:10]:
-                if test_file not in paths:
-                    paths.append(test_file)
-            builder.data["test_paths"] = paths
-        except Exception:  # noqa: BLE001 — test enrichment must never break produce
-            pass
+        # ── Builder ─────────────────────────────────────────────────────────
+        builder = _builder_generate(
+            llm, target, current_content, diagnosis,
+            split_mode=split_mode, lessons=builder_lessons, dep_context=dep_context,
+        )
+        roles.append(builder)
 
-    # Self-build head keeps the anatomy index in sync: a split that adds new
-    # core/*.py modules must also register them in docs/AGENT_ANATOMY.md, or the
-    # repo's anatomy-sync test fails and the lane rolls the whole apply back.
-    if builder.decision == "built":
-        try:
-            _sync_anatomy_index(builder.data, target, reader)
-        except Exception:  # noqa: BLE001 — doc sync must never break the producer
-            pass
+        # Importer test files are part of the change's blast radius: run them as
+        # targeted tests so a contract break fails fast inside the lane.
+        if builder.decision == "built" and dep_map is not None and dep_map.related_tests:
+            try:
+                paths = [str(p) for p in (builder.data.get("test_paths") or [])]
+                for test_file in dep_map.related_tests[:10]:
+                    if test_file not in paths:
+                        paths.append(test_file)
+                builder.data["test_paths"] = paths
+            except Exception:  # noqa: BLE001 — test enrichment must never break produce
+                pass
 
-    # ── Critic ──────────────────────────────────────────────────────────────
-    critic = _critic_review(
-        target,
-        current_content,
-        builder.data,
-        confidence_threshold=confidence_threshold,
-        imported_symbols=dep_map.imported_symbols if dep_map is not None else None,
-        required_symbols=required_symbols or None,
-    )
-    roles.append(critic)
-    if critic.decision == "veto":
+        # Self-build head keeps the anatomy index in sync: a split that adds new
+        # core/*.py modules must also register them in docs/AGENT_ANATOMY.md, or
+        # the repo's anatomy-sync test fails and the lane rolls the apply back.
+        if builder.decision == "built":
+            try:
+                _sync_anatomy_index(builder.data, target, reader)
+            except Exception:  # noqa: BLE001 — doc sync must never break the producer
+                pass
+
+        # ── Critic ──────────────────────────────────────────────────────────
+        critic = _critic_review(
+            target,
+            current_content,
+            builder.data,
+            confidence_threshold=confidence_threshold,
+            imported_symbols=dep_map.imported_symbols if dep_map is not None else None,
+            required_symbols=required_symbols or None,
+        )
+        roles.append(critic)
+        if critic.decision != "veto":
+            break
+
+        veto_now = list(critic.data.get("veto_reasons", []))
+        if attempt < max_attempts:
+            # Feed the exact veto reasons back so the retry targets them directly
+            # instead of blindly regenerating the same defective candidate.
+            retry_note = (
+                "A previous attempt on this exact target was REJECTED by the "
+                "Critic for: "
+                + ("; ".join(str(v) for v in veto_now) or "unspecified reasons")
+                + ". Fix ALL of these and do not reintroduce them."
+            )
+            builder_lessons = list(lessons) + [retry_note]
+            continue
+
         return _record(ProducerReport(
             status="critic_veto",
             reason=critic.detail,
             target_path=target,
             checked_gates=gates,
             role_outputs=roles,
-            veto_reasons=list(critic.data.get("veto_reasons", [])),
+            veto_reasons=veto_now,
+            attempts=attempts_used,
             next_human_action="Critic vetoed the candidate; no approval created.",
         ))
 
@@ -1352,6 +1487,7 @@ def produce_self_apply_proposal(
         checked_gates=gates,
         role_outputs=roles,
         value_flags=list(value.flags),
+        attempts=attempts_used,
         next_human_action=(
             f"Review approval item {approval_id} and run "
             f":self-apply-run {approval_id} to apply it."

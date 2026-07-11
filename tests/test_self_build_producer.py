@@ -1091,3 +1091,204 @@ def test_critic_no_importer_naming_without_dep_map():
     joined = " | ".join(out.data["veto_reasons"])
     assert "breaks a REAL import" not in joined
     assert "re-export" in joined
+
+
+# ── A/B/C: cooldown, retry, scale-filter (self-build hardening) ──────────────
+
+import types  # noqa: E402 — used only by the hardening tests below
+
+
+def _grounded_full_kwargs(workspace: Path, **overrides):
+    """Direct produce_self_apply_proposal kwargs driving a grounded candidate
+    (no legacy LLM manager); ready for A/B/C overrides."""
+    base = dict(
+        workspace=workspace,
+        inbox=ApprovalInbox(path=None),
+        vcs=FakeVCS(clean=True),
+        budget_snapshot=_headroom_budget(),
+        kill_switch=FakeKillSwitch(active=False),
+        file_reader=_reader({_TARGET: "OLD = 0\n"}),
+    )
+    base.update(overrides)
+    return base
+
+
+_DIFF_CONTENT = "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-OLD\n+NEW\n"
+
+
+def test_builder_retry_succeeds_after_first_veto(workspace: Path):
+    # B: attempt 1 returns a diff (vetoed); attempt 2 returns valid full content.
+    inbox = ApprovalInbox(path=None)
+    cand = _Candidate(_TARGET, "grounded: tidy", "TECH_DEBT.md:1")
+    llm = FakeLLM([_builder_ok(content=_DIFF_CONTENT), _builder_ok(content="VALUE = 9\n")])
+    report = produce_self_apply_proposal(
+        **_grounded_full_kwargs(
+            workspace,
+            inbox=inbox,
+            llm=llm,
+            grounded_selector=lambda: cand,
+            max_builder_attempts=2,
+        )
+    )
+    assert report.status == "proposed", report.reason
+    assert report.attempts == 2
+    builder_calls = [c for c in llm.calls if "Builder" in c["system"]]
+    assert len(builder_calls) == 2
+    # the retry prompt carried the exact veto reason back to the Builder
+    assert "REJECTED by the Critic" in builder_calls[1]["user"]
+    assert len(inbox.list()) == 1  # published on the successful retry
+
+
+def test_builder_retry_exhausted_still_vetoes(workspace: Path):
+    # B: both attempts fail → critic_veto, attempts=2, nothing published.
+    inbox = ApprovalInbox(path=None)
+    cand = _Candidate(_TARGET, "grounded: tidy", "TECH_DEBT.md:1")
+    llm = FakeLLM([_builder_ok(content=_DIFF_CONTENT), _builder_ok(content=_DIFF_CONTENT)])
+    report = produce_self_apply_proposal(
+        **_grounded_full_kwargs(
+            workspace,
+            inbox=inbox,
+            llm=llm,
+            grounded_selector=lambda: cand,
+            max_builder_attempts=2,
+        )
+    )
+    assert report.status == "critic_veto"
+    assert report.attempts == 2
+    assert any("diff" in r for r in report.veto_reasons)
+    builder_calls = [c for c in llm.calls if "Builder" in c["system"]]
+    assert len(builder_calls) == 2
+    assert inbox.list() == []
+
+
+def test_default_single_attempt_does_not_retry(workspace: Path):
+    # B: default max_builder_attempts=1 keeps the historical single-shot behaviour
+    # even though a valid 2nd response is queued.
+    inbox = ApprovalInbox(path=None)
+    cand = _Candidate(_TARGET, "grounded: tidy", "TECH_DEBT.md:1")
+    llm = FakeLLM([_builder_ok(content=_DIFF_CONTENT), _builder_ok(content="VALUE = 9\n")])
+    report = produce_self_apply_proposal(
+        **_grounded_full_kwargs(
+            workspace,
+            inbox=inbox,
+            llm=llm,
+            grounded_selector=lambda: cand,
+        )
+    )
+    assert report.status == "critic_veto"
+    assert report.attempts == 1
+    builder_calls = [c for c in llm.calls if "Builder" in c["system"]]
+    assert len(builder_calls) == 1
+    assert inbox.list() == []
+
+
+def test_oversized_split_is_refused_before_builder(workspace: Path):
+    # C: a split of a very large module is refused up-front (no_patch) before any
+    # Builder work — a "small problem" run must not treat it as a small fix.
+    from core.self_build_producer import _MAX_SPLIT_TARGET_LINES
+
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    target_rel = "core/huge_mod.py"
+    big = "".join(f"x{i} = {i}\n" for i in range(_MAX_SPLIT_TARGET_LINES + 50))
+    (workspace / target_rel).write_text(big, encoding="utf-8")
+    cand = types.SimpleNamespace(
+        target_path=f"split:{target_rel}",
+        signal_source="oversized_module",
+        evidence_ref=f"oversized_module:{target_rel}",
+        problem_quote="module is oversized",
+        proposed_change="split into smaller modules",
+        proof_of_value="",
+        expected_effect="",
+        confidence=0.4,
+    )
+    inbox = ApprovalInbox(path=None)
+    llm = FakeLLM(["{}"])  # the Builder must never be consulted
+    report = produce_self_apply_proposal(
+        workspace=workspace,
+        inbox=inbox,
+        llm=llm,
+        vcs=FakeVCS(clean=True),
+        budget_snapshot=_headroom_budget(),
+        kill_switch=FakeKillSwitch(active=False),
+        file_reader=lambda p: big if p == target_rel else None,
+        grounded_selector=lambda: cand,
+    )
+    assert report.status == "no_patch"
+    assert "too large" in report.reason
+    assert not any("Builder" in c["system"] for c in llm.calls)
+    assert inbox.list() == []
+
+
+def test_small_split_still_proceeds_past_scale_filter(workspace: Path):
+    # C guard must NOT fire on a normal-sized split: this one publishes.
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    target_rel = "core/sample_small.py"
+    current = "def a():\n    return 1\n\n\ndef b():\n    return 2\n"
+    (workspace / target_rel).write_text(current, encoding="utf-8")
+    inbox = ApprovalInbox(path=None)
+    reply = json.dumps(
+        {
+            "files": [
+                {"path": target_rel, "content": "from core.sample_small_helpers import a, b\n"},
+                {
+                    "path": "core/sample_small_helpers.py",
+                    "content": "def a():\n    return 1\n\n\ndef b():\n    return 2\n",
+                },
+            ],
+            "test_paths": ["tests"],
+            "reason": "split oversized module into helpers",
+            "confidence": 0.9,
+        }
+    )
+    llm = FakeLLM([reply])
+    report = produce_self_apply_proposal(
+        workspace=workspace,
+        inbox=inbox,
+        llm=llm,
+        vcs=FakeVCS(clean=True),
+        budget_snapshot=_headroom_budget(),
+        kill_switch=FakeKillSwitch(active=False),
+        file_reader=lambda p: current if p == target_rel else None,
+        grounded_selector=lambda: types.SimpleNamespace(
+            target_path=f"split:{target_rel}",
+            signal_source="oversized_module",
+            evidence_ref=f"oversized_module:{target_rel}",
+            problem_quote="module is oversized",
+            proposed_change="split",
+            proof_of_value="",
+            expected_effect="",
+            confidence=0.4,
+        ),
+    )
+    assert report.status == "proposed", report.reason
+
+
+def test_cooldown_selector_skips_recently_vetoed_target(workspace: Path, monkeypatch):
+    # A: the default grounded selector skips a target on cooldown and advances to
+    # the next candidate instead of re-picking the same wall.
+    import core.self_build_producer as mod
+    import core.backlog_selector as bl
+
+    vetoed = _Candidate("core/model_router.py", "split it", "TECH_DEBT.md:1")
+    nxt = _Candidate("core/redaction.py", "tidy a helper", "TECH_DEBT.md:2")
+    monkeypatch.setattr(bl, "load_backlog", lambda *a, **k: [vetoed, nxt])
+    monkeypatch.setattr(mod, "_grounded_candidate_actionable", lambda c, w: True)
+
+    selector = mod._default_grounded_selector(
+        workspace, exclude_targets=frozenset({"core/model_router.py"})
+    )
+    assert selector() is nxt
+
+
+def test_cooldown_selector_noop_without_exclusions(workspace: Path, monkeypatch):
+    # A: with no cooldown set the selector is byte-identical to before (picks #1).
+    import core.self_build_producer as mod
+    import core.backlog_selector as bl
+
+    first = _Candidate("core/model_router.py", "split it", "TECH_DEBT.md:1")
+    second = _Candidate("core/redaction.py", "tidy", "TECH_DEBT.md:2")
+    monkeypatch.setattr(bl, "load_backlog", lambda *a, **k: [first, second])
+    monkeypatch.setattr(mod, "_grounded_candidate_actionable", lambda c, w: True)
+
+    selector = mod._default_grounded_selector(workspace)
+    assert selector() is first
