@@ -59,6 +59,11 @@ from core.self_build_supervisor import (
 # a manual or repair-produced one.
 PRODUCER_ORIGIN = "subagent_self_build_producer"
 
+# Origin tag for a deterministic (no-LLM) incremental-split step. Shared by the
+# ``:self-split`` command and the ``:self-build-produce`` producer so both emit
+# an identical, already-trusted approval artifact for an oversized-module split.
+INCREMENTAL_SPLIT_ORIGIN = "incremental_splitter"
+
 # Seed allowlist of small low-risk candidate targets. Historically this was the
 # ONLY set the Manager could pick from. As of Provod #2 it is just a seed: a
 # grounded backlog candidate may also target any file that clears both hard
@@ -1184,6 +1189,166 @@ def _reporter_publish(
     )
 
 
+def _incremental_split_test_paths(workspace: str | Path, target: str) -> list[str]:
+    """Targeted tests for a split step: importer tests from the dependency map,
+    capped to the runner's argv limit, else the whole ``tests/`` suite."""
+    test_paths: list[str] = ["tests"]
+    try:
+        from core.dependency_map import build_dependency_map
+        from tools.run_tests import MAX_PATHS
+
+        related = build_dependency_map(workspace, target).related_tests
+        if related and len(related) <= MAX_PATHS:
+            test_paths = sorted(related)
+    except Exception:  # noqa: BLE001 — dependency scan is advisory only
+        pass
+    return test_paths
+
+
+def publish_incremental_split_step(
+    *,
+    inbox: Any,
+    workspace: str | Path,
+    step: Any,
+    reason: str,
+    reader: Callable[[str], str | None] | None = None,
+) -> tuple[Any, list[str]]:
+    """Publish ONE deterministic incremental-split step as a self-apply approval.
+
+    Shared source of truth for ``:self-split`` and ``:self-build-produce`` so both
+    emit a byte-identical, already-trusted approval item: the shrunk target plus
+    the new sibling module, an anatomy-index sync, dependency-scoped targeted
+    tests, and the ``incremental_splitter`` origin. Applies nothing itself — the
+    human approves and runs it via the self-apply lane (targeted + full tests,
+    auto-rollback on red). Returns ``(inbox_item, evidence)``.
+    """
+    build: dict[str, Any] = {
+        "files": [
+            {"path": step.target, "content": step.target_content},
+            {"path": step.new_module, "content": step.new_content},
+        ],
+    }
+    # Keep docs/AGENT_ANATOMY.md in sync (its drift check would fail otherwise).
+    try:
+        _sync_anatomy_index(build, step.target, reader or _default_file_reader(workspace))
+    except Exception:  # noqa: BLE001 — doc sync is best-effort; lane catches drift
+        pass
+    test_paths = _incremental_split_test_paths(workspace, step.target)
+    evidence = [
+        f"mode={step.mode}",
+        f"target={step.target}",
+        f"new_module={step.new_module}",
+        f"lines_moved={step.lines_moved}",
+        f"moved_names={', '.join(step.moved_names)}",
+        "generator=deterministic AST slice (no LLM)",
+        *step.notes,
+    ]
+    payload = build_self_apply_payload(
+        files=build["files"],
+        reason=reason,
+        evidence=evidence,
+        test_paths=test_paths,
+        origin=INCREMENTAL_SPLIT_ORIGIN,
+    )
+    digest = hashlib.sha1(step.target_content.encode("utf-8")).hexdigest()[:12]
+    item = inbox.add(
+        operation=SELF_APPLY_OPERATION,
+        summary=(
+            f"incremental split step for {step.target}: move "
+            f"{len(step.moved_names)} name(s) into {step.new_module}"
+        ),
+        risk="reversible",
+        reasons=tuple(evidence),
+        payload=payload,
+        dedup_key=f"self_split:{step.target}:{digest}",
+    )
+    return item, evidence
+
+
+_SPLIT_TARGET_PREFIX = "split:"
+
+
+def _concrete_split_target(raw: str) -> str | None:
+    """Concrete ``core/x.py`` path behind a ``split:core/x.py`` backlog target,
+    or ``None`` when ``raw`` is not a split target."""
+    s = str(raw or "").replace("\\", "/").strip()
+    if s.startswith(_SPLIT_TARGET_PREFIX):
+        rest = s[len(_SPLIT_TARGET_PREFIX):].strip()
+        return rest or None
+    return None
+
+
+def _deterministic_split_report(
+    *,
+    workspace: str | Path,
+    concrete_target: str,
+    inbox: Any,
+    reader: Callable[[str], str | None],
+    gates: list[str],
+    roles: list[RoleOutput],
+) -> ProducerReport | None:
+    """Route an oversized-module split that the one-shot LLM path cannot handle to
+    the deterministic incremental splitter and publish its step (identical to
+    ``:self-split``).
+
+    Returns a ``proposed`` :class:`ProducerReport` when the planner proves one
+    safe extraction step, a ``no_patch`` report (carrying the planner's precise
+    reason) when it cannot, or ``None`` when the splitter itself is unavailable so
+    the caller keeps its prior refusal. The Builder/Critic/LLM are never consulted
+    on this path — the code is moved verbatim by AST slicing and the planner
+    refuses any step it cannot prove safe.
+    """
+    try:
+        from core.incremental_splitter import plan_incremental_split
+    except Exception:  # noqa: BLE001 — splitter unavailable → keep prior behaviour
+        return None
+    try:
+        plan = plan_incremental_split(workspace, concrete_target)
+    except Exception:  # noqa: BLE001 — a raising planner → keep prior behaviour
+        return None
+    if plan.status != "planned" or plan.step is None:
+        return ProducerReport(
+            status="no_patch",
+            reason=(
+                f"incremental splitter could not plan a safe step for "
+                f"{concrete_target}: {plan.reason}"
+            ),
+            target_path=concrete_target,
+            checked_gates=gates,
+            role_outputs=roles,
+            next_human_action=(
+                "No safe incremental split step this run — the deterministic "
+                "planner only proposes steps it can prove safe."
+            ),
+        )
+    step = plan.step
+    item, _evidence = publish_incremental_split_step(
+        inbox=inbox,
+        workspace=workspace,
+        step=step,
+        reason=plan.reason,
+        reader=reader,
+    )
+    roles.append(RoleOutput(
+        "reporter",
+        "published",
+        f"created approval item {item.id}",
+        {"approval_id": item.id, "generator": "incremental_splitter"},
+    ))
+    return ProducerReport(
+        status="proposed",
+        reason=plan.reason,
+        target_path=step.target,
+        approval_id=item.id,
+        checked_gates=gates,
+        role_outputs=roles,
+        next_human_action=(
+            f"Review approval {item.id}; approve then run :self-apply-run "
+            "(deterministic AST split — targeted + full tests, auto-rollback)."
+        ),
+    )
+
+
 # ── orchestration ───────────────────────────────────────────────────────────
 
 
@@ -1313,6 +1478,27 @@ def produce_self_apply_proposal(
         manager = _manager_from_grounded(selector, targets, workspace=workspace)
     roles.append(manager)
     if manager.decision != "selected":
+        # An oversized-module split that the one-shot mapper refused (e.g.
+        # core/loop.py at 4010 lines > the single-pass ceiling) is not a
+        # dead-end: hand it to the deterministic incremental splitter, which is
+        # built for exactly these modules and publishes one provably-safe
+        # extraction step for human approval. Only if the splitter is
+        # unavailable/can't plan do we fall through to the honest refusal.
+        rejected = ""
+        if manager.data:
+            rejected = str(manager.data.get("rejected_target", "") or "")
+        concrete = _concrete_split_target(rejected)
+        if concrete is not None:
+            det = _deterministic_split_report(
+                workspace=workspace,
+                concrete_target=concrete,
+                inbox=inbox,
+                reader=reader,
+                gates=gates,
+                roles=roles,
+            )
+            if det is not None:
+                return _record(det)
         return _record(ProducerReport(
             status="no_patch",
             reason=manager.detail or "no low-risk candidate selected",
@@ -1340,15 +1526,28 @@ def produce_self_apply_proposal(
     current_content = researcher.data["current_content"]
     evidence = list(researcher.data["evidence"])
 
-    # ── Scale filter (C): refuse an oversized single-shot split ─────────────
-    # A split of a very large module cannot be done safely in one Builder shot —
-    # it keeps dropping public API and getting vetoed. Refuse it up-front with a
-    # precise reason (rather than burning a doomed generation) so a
-    # "find a small problem" run does not treat splitting a 1000+ line file as a
-    # small fix. The debt is still visible; it just needs a human-scoped split.
+    # ── Scale filter (C) → deterministic incremental split ──────────────────
+    # A split of a very large module cannot be done safely in ONE Builder shot —
+    # it keeps dropping public API and getting vetoed. Instead of refusing (which
+    # dead-ended the run), hand it to the deterministic incremental splitter: it
+    # moves one dependency-closed block verbatim by AST slicing (no LLM, no
+    # token ceiling) and publishes one provably-safe extraction step for human
+    # approval. Only if the splitter is unavailable/can't plan do we fall back to
+    # the honest refusal below. Small splits (<= the one-shot budget) still take
+    # the LLM Builder path unchanged.
     if split_mode:
         too_large, line_count = _split_target_too_large(current_content)
         if too_large:
+            det = _deterministic_split_report(
+                workspace=workspace,
+                concrete_target=target,
+                inbox=inbox,
+                reader=reader,
+                gates=gates,
+                roles=roles,
+            )
+            if det is not None:
+                return _record(det)
             return _record(ProducerReport(
                 status="no_patch",
                 reason=(

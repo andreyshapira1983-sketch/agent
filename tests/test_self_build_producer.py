@@ -1182,16 +1182,24 @@ def test_default_single_attempt_does_not_retry(workspace: Path):
     assert inbox.list() == []
 
 
-def test_oversized_split_is_refused_before_builder(workspace: Path):
-    # C: a split of a very large module is refused up-front (no_patch) before any
-    # Builder work — a "small problem" run must not treat it as a small fix.
-    from core.self_build_producer import _MAX_SPLIT_TARGET_LINES
+def _fake_split_plan(target, *, status="planned", reason="mixin extraction of 1 name", step=True):
+    step_obj = None
+    if step:
+        step_obj = types.SimpleNamespace(
+            mode="functions",
+            target=target,
+            target_content="SHRUNK = 1\n",
+            new_module="core/huge_mod_helpers.py",
+            new_content="def moved():\n    return 1\n",
+            moved_names=["moved"],
+            lines_moved=2,
+            notes=["deterministic AST slice"],
+        )
+    return types.SimpleNamespace(status=status, reason=reason, step=step_obj)
 
-    (workspace / "core").mkdir(parents=True, exist_ok=True)
-    target_rel = "core/huge_mod.py"
-    big = "".join(f"x{i} = {i}\n" for i in range(_MAX_SPLIT_TARGET_LINES + 50))
-    (workspace / target_rel).write_text(big, encoding="utf-8")
-    cand = types.SimpleNamespace(
+
+def _oversized_split_cand(target_rel):
+    return types.SimpleNamespace(
         target_path=f"split:{target_rel}",
         signal_source="oversized_module",
         evidence_ref=f"oversized_module:{target_rel}",
@@ -1201,6 +1209,23 @@ def test_oversized_split_is_refused_before_builder(workspace: Path):
         expected_effect="",
         confidence=0.4,
     )
+
+
+def test_oversized_split_manager_refusal_routes_to_deterministic(workspace, monkeypatch):
+    # Site 1 (the real core/loop.py case): the one-shot mapper refuses an
+    # oversized split, but instead of dead-ending the run is handed to the
+    # deterministic incremental splitter, which publishes ONE provably-safe step.
+    # The LLM Builder is never consulted.
+    import core.incremental_splitter as isp
+    import core.backlog_target_mapper as btm
+
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    target_rel = "core/huge_mod.py"
+    (workspace / target_rel).write_text("A = 1\nB = 2\nC = 3\nD = 4\n", encoding="utf-8")
+    # Force the mapper to treat this small file as "too large for one pass".
+    monkeypatch.setattr(btm, "SPLIT_ONE_SHOT_MAX_LINES", 2)
+    monkeypatch.setattr(isp, "plan_incremental_split", lambda ws, tgt, **k: _fake_split_plan(tgt))
+
     inbox = ApprovalInbox(path=None)
     llm = FakeLLM(["{}"])  # the Builder must never be consulted
     report = produce_self_apply_proposal(
@@ -1210,13 +1235,122 @@ def test_oversized_split_is_refused_before_builder(workspace: Path):
         vcs=FakeVCS(clean=True),
         budget_snapshot=_headroom_budget(),
         kill_switch=FakeKillSwitch(active=False),
-        file_reader=lambda p: big if p == target_rel else None,
-        grounded_selector=lambda: cand,
+        file_reader=lambda p: (workspace / p).read_text() if (workspace / p).exists() else None,
+        grounded_selector=lambda: _oversized_split_cand(target_rel),
+    )
+    assert report.status == "proposed", report.reason
+    assert report.target_path == target_rel
+    assert report.approval_id
+    assert not any("Builder" in c["system"] for c in llm.calls)
+    items = inbox.list()
+    assert len(items) == 1
+    assert "incremental split step" in items[0].summary
+
+
+def test_oversized_split_scale_gate_routes_to_deterministic(workspace, monkeypatch):
+    # Site 2: a split the mapper accepts but that exceeds the single-shot Builder
+    # budget is also routed to the deterministic splitter rather than refused.
+    import core.incremental_splitter as isp
+    import core.self_build_producer as mod
+
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    target_rel = "core/huge_mod.py"
+    (workspace / target_rel).write_text("A = 1\nB = 2\nC = 3\nD = 4\n", encoding="utf-8")
+    # Mapper accepts (default 1500), but the scale gate fires (tiny threshold).
+    monkeypatch.setattr(mod, "_MAX_SPLIT_TARGET_LINES", 2)
+    monkeypatch.setattr(isp, "plan_incremental_split", lambda ws, tgt, **k: _fake_split_plan(tgt))
+
+    inbox = ApprovalInbox(path=None)
+    llm = FakeLLM(["{}"])
+    report = produce_self_apply_proposal(
+        workspace=workspace,
+        inbox=inbox,
+        llm=llm,
+        vcs=FakeVCS(clean=True),
+        budget_snapshot=_headroom_budget(),
+        kill_switch=FakeKillSwitch(active=False),
+        file_reader=lambda p: (workspace / p).read_text() if (workspace / p).exists() else None,
+        grounded_selector=lambda: _oversized_split_cand(target_rel),
+    )
+    assert report.status == "proposed", report.reason
+    assert report.approval_id
+    assert not any("Builder" in c["system"] for c in llm.calls)
+    assert len(inbox.list()) == 1
+
+
+def test_oversized_split_no_patch_when_planner_cannot(workspace, monkeypatch):
+    # If even the deterministic planner cannot prove a safe step, we honestly
+    # refuse (no_patch) with the planner's reason — still no Builder, no apply.
+    import core.incremental_splitter as isp
+    import core.backlog_target_mapper as btm
+
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    target_rel = "core/huge_mod.py"
+    (workspace / target_rel).write_text("A = 1\nB = 2\nC = 3\nD = 4\n", encoding="utf-8")
+    monkeypatch.setattr(btm, "SPLIT_ONE_SHOT_MAX_LINES", 2)
+    monkeypatch.setattr(
+        isp,
+        "plan_incremental_split",
+        lambda ws, tgt, **k: _fake_split_plan(
+            tgt, status="no_safe_step", reason="no dependency-closed block fits", step=False
+        ),
+    )
+
+    inbox = ApprovalInbox(path=None)
+    llm = FakeLLM(["{}"])
+    report = produce_self_apply_proposal(
+        workspace=workspace,
+        inbox=inbox,
+        llm=llm,
+        vcs=FakeVCS(clean=True),
+        budget_snapshot=_headroom_budget(),
+        kill_switch=FakeKillSwitch(active=False),
+        file_reader=lambda p: (workspace / p).read_text() if (workspace / p).exists() else None,
+        grounded_selector=lambda: _oversized_split_cand(target_rel),
     )
     assert report.status == "no_patch"
-    assert "too large" in report.reason
+    assert "incremental splitter could not plan" in report.reason
     assert not any("Builder" in c["system"] for c in llm.calls)
     assert inbox.list() == []
+
+
+def test_oversized_split_real_planner_end_to_end(workspace, monkeypatch):
+    # Integration: the REAL deterministic planner (not monkeypatched) runs on a
+    # small real module and its step is published through produce as a normal
+    # self-apply approval. Only the routing threshold is lowered so a tiny file
+    # takes the oversized path.
+    import core.self_build_producer as mod
+
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    target_rel = "core/mini.py"
+    (workspace / target_rel).write_text(
+        "import os\n\n\ndef alpha():\n    return os.getpid()\n\n\n"
+        "def beta():\n    return 2\n\n\ndef gamma():\n    return 3\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mod, "_MAX_SPLIT_TARGET_LINES", 2)  # force the oversized path
+
+    inbox = ApprovalInbox(path=None)
+    llm = FakeLLM(["{}"])  # Builder must never be consulted
+    report = produce_self_apply_proposal(
+        workspace=workspace,
+        inbox=inbox,
+        llm=llm,
+        vcs=FakeVCS(clean=True),
+        budget_snapshot=_headroom_budget(),
+        kill_switch=FakeKillSwitch(active=False),
+        file_reader=lambda p: (workspace / p).read_text() if (workspace / p).exists() else None,
+        grounded_selector=lambda: _oversized_split_cand(target_rel),
+    )
+    assert report.status == "proposed", report.reason
+    assert report.target_path == target_rel
+    assert not any("Builder" in c["system"] for c in llm.calls)
+    items = inbox.list()
+    assert len(items) == 1
+    # The published files are the shrunk target plus a new helper sibling module.
+    paths = {f["path"] for f in items[0].payload["files"]}
+    assert target_rel in paths
+    assert any(p.endswith("_helpers.py") for p in paths)
 
 
 def test_small_split_still_proceeds_past_scale_filter(workspace: Path):

@@ -15,20 +15,22 @@ target shrinks, every moved top-level name stays importable).
 """
 from __future__ import annotations
 
-import hashlib
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from core.incremental_splitter import plan_incremental_split
-from core.self_apply_bridge import SELF_APPLY_OPERATION, build_self_apply_payload
+from core.self_build_producer import (
+    INCREMENTAL_SPLIT_ORIGIN,
+    publish_incremental_split_step,
+)
 
 from cli.commands_approval import _approval_inbox_for
 
 if TYPE_CHECKING:
     from core.loop import AgentLoop
 
-SELF_SPLIT_ORIGIN = "incremental_splitter"
+SELF_SPLIT_ORIGIN = INCREMENTAL_SPLIT_ORIGIN
 
 
 def _handle_self_split(rest: str, agent: "AgentLoop", workspace: Path) -> bool:
@@ -70,63 +72,12 @@ def _handle_self_split(rest: str, agent: "AgentLoop", workspace: Path) -> bool:
         return True
 
     step = plan.step
-    build = {
-        "files": [
-            {"path": step.target, "content": step.target_content},
-            {"path": step.new_module, "content": step.new_content},
-        ],
-    }
-    # Keep docs/AGENT_ANATOMY.md in sync (its drift check would fail otherwise).
-    try:
-        from core.self_build_producer import _default_file_reader, _sync_anatomy_index
-
-        _sync_anatomy_index(build, step.target, _default_file_reader(workspace))
-    except Exception:  # noqa: BLE001 -- doc sync is best-effort; lane catches drift
-        pass
-
-    # Targeted tests: importer tests from the dependency map, plus the full
-    # suite fallback the lane always accepts. The test runner rejects argv
-    # lists above its MAX_PATHS cap, so a heavily-imported target (core/loop.py
-    # has dozens of importer tests) falls back to the whole tests/ dir.
-    test_paths: list[str] = ["tests"]
-    try:
-        from core.dependency_map import build_dependency_map
-        from tools.run_tests import MAX_PATHS
-
-        related = build_dependency_map(workspace, step.target).related_tests
-        if related and len(related) <= MAX_PATHS:
-            test_paths = sorted(related)
-    except Exception:  # noqa: BLE001 -- dep scan is advisory only
-        pass
-
-    evidence = [
-        f"mode={step.mode}",
-        f"target={step.target}",
-        f"new_module={step.new_module}",
-        f"lines_moved={step.lines_moved}",
-        f"moved_names={', '.join(step.moved_names)}",
-        "generator=deterministic AST slice (no LLM)",
-        *step.notes,
-    ]
-    payload = build_self_apply_payload(
-        files=build["files"],
-        reason=plan.reason,
-        evidence=evidence,
-        test_paths=test_paths,
-        origin=SELF_SPLIT_ORIGIN,
-    )
-    digest = hashlib.sha1(step.target_content.encode("utf-8")).hexdigest()[:12]
     inbox = _approval_inbox_for(agent, workspace)
-    item = inbox.add(
-        operation=SELF_APPLY_OPERATION,
-        summary=(
-            f"incremental split step for {step.target}: move "
-            f"{len(step.moved_names)} name(s) into {step.new_module}"
-        ),
-        risk="reversible",
-        reasons=tuple(evidence),
-        payload=payload,
-        dedup_key=f"self_split:{step.target}:{digest}",
+    item, _evidence = publish_incremental_split_step(
+        inbox=inbox,
+        workspace=workspace,
+        step=step,
+        reason=plan.reason,
     )
 
     print(
