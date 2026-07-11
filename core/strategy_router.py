@@ -48,6 +48,7 @@ class OperatorStrategy(str, Enum):
 
     safe_self_check       = "safe_self_check"
     capability_request    = "capability_request"
+    self_build_request    = "self_build_request"
     subagent_proposal     = "subagent_proposal"
     architecture_audit    = "architecture_audit"
     self_task_proposal    = "self_task_proposal"

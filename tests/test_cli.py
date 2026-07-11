@@ -1745,6 +1745,57 @@ Produce a patch proposal for the routing bug.
         assert "operator digest" in out.err
         assert "attention:" in out.err
 
+    def test_conversational_self_build_request_calls_producer_without_llm(
+        self,
+        workspace: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
+    ):
+        # "Начни программировать себя" must reach the deterministic self-build
+        # producer directly — never the general planner (agent.run).
+        agent = _build_agent(workspace)
+
+        calls: list[str] = []
+
+        def _spy_produce(rest, ag, ws) -> bool:
+            calls.append(rest)
+            return True
+
+        def _run_must_not_be_called(*args, **kwargs):
+            raise AssertionError("agent.run (planner) must not run for self_build_request")
+
+        monkeypatch.setattr(main_module, "_handle_self_build_produce", _spy_produce)
+        monkeypatch.setattr(agent, "run", _run_must_not_be_called)
+
+        assert handle_conversational_operator_input(
+            "Начни безопасно программировать себя",
+            agent,
+            workspace,
+        ) is True
+
+        assert calls == [""]  # producer invoked exactly once, no residual args
+        assert "operator intent: self_build_request" in capsys.readouterr().err
+
+    def test_conversational_self_build_question_is_not_routed_to_producer(
+        self,
+        workspace: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        # A question / description about self-programming must NOT trigger the
+        # producer; it falls through to the normal path (handled=False here).
+        agent = _build_agent(workspace)
+
+        def _produce_must_not_run(*args, **kwargs):
+            raise AssertionError("producer must not run for a self-build question")
+
+        monkeypatch.setattr(main_module, "_handle_self_build_produce", _produce_must_not_run)
+
+        assert handle_conversational_operator_input(
+            "Может ли агент программировать себя?",
+            agent,
+            workspace,
+        ) is False
+
     def test_deliberation_strategy_router_handles_live_operator_phrases_locally(
         self,
         workspace: Path,

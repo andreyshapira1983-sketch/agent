@@ -64,6 +64,79 @@ def _looks_like_self_build_request(text: str) -> bool:
     )
 
 
+def _matches_self_build_request(text: str) -> bool:
+    # Explicit imperative to KICK OFF the deterministic self-build producer
+    # (:self-build-produce), which creates at most ONE approval item and stops —
+    # it never applies code (apply is a separate human-gated step). Requires an
+    # explicit start/begin verb next to a self-programming target, and rejects
+    # questions, descriptions and negations so "как агент программирует себя?"
+    # and "не начинай …" stay out. Routed BEFORE the _looks_like_self_build_request
+    # None-guard so ONLY these explicit start phrases reach the producer;
+    # every other self-build mention still falls through to the planner.
+    target = _has_any(
+        text,
+        (
+            "программировать себя",
+            "программируй себя",
+            "программированию себя",
+            "self-build",
+            "selfbuild",
+            "self build",
+            "самостро",
+            "program yourself",
+            "programming yourself",
+            "code yourself",
+            "coding yourself",
+            "build yourself",
+            "improve your own code",
+        ),
+    )
+    start = _has_any(
+        text,
+        (
+            "начни",
+            "начина",
+            "начать",
+            "запусти",
+            "запуск",
+            "приступ",
+            "start",
+            "begin",
+            "kick off",
+            "kickoff",
+        ),
+    )
+    if not (target and start):
+        return False
+    blockers = (
+        "не начин",
+        "не запуск",
+        "не программир",
+        "не пиши",
+        "не надо",
+        "don't",
+        "do not",
+        "расскажи",
+        "объясни",
+        "как ",
+        "каким образом",
+        "может ли",
+        "можешь ли",
+        "умеет ли",
+        "способен ли",
+        "почему",
+        "зачем",
+        "how do",
+        "how can",
+        "can you",
+        "could you",
+        "is it possible",
+    )
+    if _has_any(text, blockers):
+        return False
+    return True
+
+
 def _matches_inbox_task_request(text: str) -> bool:
     inbox_markers = (
         "создай заявку в inbox",
