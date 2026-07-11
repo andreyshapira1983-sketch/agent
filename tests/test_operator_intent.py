@@ -346,3 +346,51 @@ def test_symptom_report_with_budget_and_approval_words_is_not_routed():
         "ограничение: не применяй патч"
     )
     assert route_operator_intent(text) is None
+
+
+def test_routes_best_next_action_phrases_locally():
+    ru = route_operator_intent("Выбери одно важнейшее действие прямо сейчас")
+    ru2 = route_operator_intent("Что сейчас важнее всего")
+    en = route_operator_intent("Pick the single most important action to take now")
+
+    assert ru is not None
+    assert ru.kind == "best_next_action"
+    assert ru.command == ":best-next-action"
+    assert ru2 is not None
+    assert ru2.kind == "best_next_action"
+    assert en is not None
+    assert en.kind == "best_next_action"
+
+
+def test_best_next_action_does_not_steal_next_actions_list():
+    # A LIST of next steps must still go to :next-actions, not :best-next-action.
+    intent = route_operator_intent("Что делать дальше")
+    assert intent is not None
+    assert intent.kind == "next_actions"
+    assert intent.command == ":next-actions"
+
+
+def test_routes_self_task_propose_phrases_locally():
+    ru = route_operator_intent("Найди TODO в коде и предложи задачу с падающим тестом")
+    en = route_operator_intent("Find a FIXME and propose a coding task with a failing test")
+
+    assert ru is not None
+    assert ru.kind == "self_task_proposal"
+    assert ru.command == ":self-task-propose"
+    assert en is not None
+    assert en.kind == "self_task_proposal"
+
+
+def test_self_task_propose_needs_both_debt_and_propose_signal():
+    # Debt marker alone must not route (bare "do we have TODOs?").
+    assert route_operator_intent("Есть ли в проекте TODO?") is None
+    # Propose signal alone (no code-debt marker) must not route.
+    assert route_operator_intent("Предложи тест для калькулятора") is None
+
+
+def test_self_task_propose_survives_filename_in_text():
+    # "TODO in foo.py + предложи тесты" must NOT fall into implementation_plan.
+    intent = route_operator_intent("Найди TODO в core/foo.py и предложи тесты")
+    assert intent is not None
+    assert intent.kind == "self_task_proposal"
+    assert intent.command == ":self-task-propose"
