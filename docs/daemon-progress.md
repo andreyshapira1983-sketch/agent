@@ -180,9 +180,9 @@ Each sub-item reports four independent fields so the status is unambiguous:
 
 ## 2.1 Timer events (in-loop scheduler)
 
-- **implementation:** completed | **main_pr:** #44 open (draft) | **hotfix:** none | **acceptance:** pending
+- **implementation:** completed | **main_pr:** #44 merged | **hotfix:** none | **acceptance:** pending
 - **Branch:** `andreyshapira1983-sketch-daemon-2-1-timer-events`
-- **Pull Request:** #44 (draft)
+- **Pull Request:** #44 (merged)
 - **Last updated:** 2026-07-10
 - **Implementation:** Added `SchedulerService` to `core/scheduler.py` — an
   async component that drives the existing `SchedulerStore.tick` from *inside*
@@ -227,9 +227,75 @@ Each sub-item reports four independent fields so the status is unambiguous:
   inline on the loop thread; it is fast and deterministic, but a future
   sub-item may move it to an executor if profiling warrants. No external-cron
   removal beyond providing the in-loop replacement.
+- **Blockers:** none. **Human action:** none -- PR #44 merged; plan acceptance (Definition of Done sign-off) still pending.
+
+## 2.2 File watcher
+
+- **implementation:** completed | **main_pr:** open (draft) | **hotfix:** none | **acceptance:** pending
+- **Branch:** `andreyshapira1983-sketch-daemon-2-2-file-watcher` (created via the
+  branch-rename tool; the tool prefixed/truncated the stored ref, but the PR
+  title and this entry are the source of truth for the sub-item mapping)
+- **Last updated:** 2026-07-11
+- **Implementation:** New `app/file_watcher.py` with `FileWatcher` — the second
+  daemon event source (after the 2.1 timer scheduler). It watches a set of files
+  and/or directories (e.g. the approval inbox and applicable config files) and
+  emits a coalesced batch of `FileChange(kind, path)` (created/modified/deleted)
+  whenever the watched set changes, giving the daemon loop a `wake` hook so a
+  human dropping an approval or editing config is picked up without waiting for
+  the next scheduler tick. Design decisions matching the plan and repo idioms:
+  - **No heavy dependency.** Instead of pulling in `watchdog` (a native,
+    platform-specific dependency needing lock-file/SBOM churn and justification),
+    it uses a lightweight `stat`-snapshot diff over a cooperative poll — each poll
+    is a cheap `stat` of a small known path set and yields the loop between polls,
+    so it never blocks the loop and never busy-spins. Time is fully injectable
+    (`now` + `sleep`), the same pattern as `SchedulerService`.
+  - **Debounced / coalesced.** A burst of rapid writes collapses into a single
+    batch: the watcher only emits once the set has been quiet for a bounded
+    `debounce` window (`created`+`modified` coalesce to `created`;
+    `created`+`deleted` cancels out).
+  - **Survives a missing directory.** A watched path that does not exist yet is
+    treated as empty; when it appears its entries are reported as created. A path
+    that vanishes mid-scan is treated as absent, never an error.
+  - **No self-echo.** The watcher only ever reads (`stat`); it never writes to the
+    paths it watches, and unchanged signatures produce no event.
+  - Cooperates with the daemon loop rather than owning it: `stop()` / `notify()`
+    mirror `SchedulerService`, cancellation propagates for graceful shutdown, and
+    a settled pending batch is flushed on clean exit. `agent_tick.py` is untouched
+    and does not import this module; the watcher is a standalone opt-in building
+    block not yet wired into any entry point.
+- **Tests added:** `tests/test_file_watcher.py` (27 tests) using a `StepClock`
+  (fake `now` + instant `sleep` that advances the clock and runs a per-poll hook
+  so files are mutated deterministically between polls): construction/validation
+  (empty paths, non-positive poll_interval, negative debounce, exposed defaults),
+  pure `scan`/`_diff`/`_merge_pending` logic (directory listing, pattern filter,
+  missing target, created/modified/deleted diff, created+deleted cancel,
+  created+modified stays created), and async behaviour — new file, modified file,
+  deleted file, burst coalesced into one batch, stable set emits nothing (no
+  self-echo), missing-directory tolerance then later creation, `emit_existing`
+  baseline, recursive nested detection, callback error survival, run-twice guard,
+  cancellation propagation, stop-before-run short-circuit, `notify` early-wake,
+  idempotent stop, flush-pending-on-stop before debounce, and no-callback run.
+  All bounded by a 5 s `run_async` timeout; no real long sleeps, no leftover tasks.
+- **Checks run:**
+  - `python -m pytest tests/test_file_watcher.py -q` → 27 passed
+  - `coverage run --branch -m pytest` → 4300 passed
+  - `coverage report --fail-under=85` → TOTAL 92%
+  - `coverage report -m --include=app/file_watcher.py` → 94% (remaining misses are
+    defensive `stat`-race / cancellation branches)
+  - `python scripts/generate_sbom.py --check` → in sync
+  - `python scripts/audit_release.py` → no warnings
+  - `pip check` equivalent / lint: CI has no lint/format/type gates (only tests,
+    pip-check, SBOM, audit, coverage); all local equivalents pass. pylint not
+    installed locally and not part of CI; skipped.
+- **Known limitations:** The watcher is a standalone building block; it is not yet
+  spawned by `DaemonLoop.run` (that wiring lands with the worker/dispatcher
+  sub-items). It is poll-based (bounded `stat` diff), not kernel-notification
+  based; the default 1 s cadence is a deliberate trade-off avoiding a native
+  dependency and is adequate for the approval-inbox / config use case. Signatures
+  use `(mtime_ns, size)`, so an in-place edit that preserves both would be missed
+  — not a concern for append-only JSONL inboxes or config edits, and a future
+  sub-item can add a content hash if needed.
 - **Blockers:** none. **Human action:** review and merge the PR into `main`.
-
-
 
 | Item | Title | Status |
 | --- | --- | --- |
@@ -237,8 +303,8 @@ Each sub-item reports four independent fields so the status is unambiguous:
 | 1.2 | Lifecycle and graceful shutdown | merged (acceptance pending) |
 | 1.3 | Single-instance guarantee | merged incl. hotfix (acceptance pending) |
 | 1.4 | Windows service launch | merged (acceptance pending) |
-| 2.1 | Timer events (in-loop scheduler) | PR #44 open (draft) |
-| 2.2 | File watcher | not started |
+| 2.1 | Timer events (in-loop scheduler) | merged (acceptance pending) |
+| 2.2 | File watcher | PR open (draft) |
 | 2.3 | Instant wake on new RuntimeTask | not started |
 | 2.4 | External events | skipped (explicitly deferred) |
 | 3.1 | Priority event queue | not started |
