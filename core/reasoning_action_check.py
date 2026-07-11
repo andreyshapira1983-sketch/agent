@@ -52,6 +52,18 @@ _TOOL_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 
+# Single-token keywords that are precise enough to signal, on their own,
+# that the reasoning is advocating for a specific tool in the reverse
+# (mentioned-but-not-planned) direction. These are product/library names
+# or otherwise unambiguous — unlike generic verb/noun stems, they do not
+# appear in ordinary planner prose by accident. Everything else in the
+# reverse direction must be a tool token ("_") or a multi-word phrase.
+_STRONG_SINGLE_TOKENS: frozenset[str] = frozenset({
+    "pytest", "google", "powershell", "scholar", "publication",
+    "subagent", "субагент", "delegate",
+})
+
+
 @dataclass(frozen=True)
 class MismatchReport:
     """Outcome of one consistency check."""
@@ -150,11 +162,22 @@ def check_reasoning_actions(
         if tool.lower() in text_lower:
             mentioned_extra.append(tool)
             continue
-        # High-signal keywords: those that are themselves tool-like
-        # tokens (contain underscore or are >= 6 chars and unambiguous).
+        # High-signal keywords only. A bare ">= 6 chars" rule used to
+        # accept generic verb/noun stems ("выполн", "запуст", "команд",
+        # "загруз", "содерж", "содержим", "сегодн", ...) that appear in
+        # ordinary planner prose even when the tool was never intended —
+        # so the reverse check fired on almost every turn. We now accept a
+        # keyword as strong advocacy only when it is genuinely tool-like:
+        #   * contains an underscore (a tool token, e.g. "run_tests"), or
+        #   * is a multi-word phrase (inherently specific, e.g.
+        #     "search the web"), or
+        #   * is one of a curated set of unambiguous single tokens.
         for kw in keywords:
-            if (("_" in kw or len(kw.strip()) >= 6)
-                    and _keyword_in_text(text_lower, kw)):
+            k = kw.strip().lower()
+            if not k:
+                continue
+            is_strong = ("_" in k or " " in k or k in _STRONG_SINGLE_TOKENS)
+            if is_strong and _keyword_in_text(text_lower, k):
                 mentioned_extra.append(tool)
                 break
 
