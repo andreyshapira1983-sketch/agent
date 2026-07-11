@@ -135,6 +135,43 @@ class TestArgumentValidation:
 
 
 # ============================================================
+# Unfilled placeholder refusal (defence in depth)
+# ============================================================
+
+class TestPlaceholderRefusal:
+    @pytest.mark.parametrize(
+        "placeholder",
+        [
+            "<to be synthesized from the three files only>",
+            "  <to be synthesized from the three files>  ",
+            "<fill in the summary here>",
+            "<TODO>",
+            "<placeholder>",
+        ],
+    )
+    def test_unfilled_placeholder_rejected_before_io(self, workspace: Path, placeholder):
+        tool = FileWriteTool(workspace_root=workspace)
+        with pytest.raises(ValueError, match="unfilled placeholder"):
+            tool.run(path="about_me.txt", content=placeholder)
+        assert not (workspace / "about_me.txt").exists(), "must not create a stub file"
+
+    @pytest.mark.parametrize(
+        "real_content",
+        [
+            "# About\n\nThis agent reads files and answers grounded questions.",
+            "<html>\n<body>hello</body>\n</html>\n",
+            "The value is < 5 and > 1.",
+            "plain prose without any brackets",
+        ],
+    )
+    def test_real_content_is_not_flagged(self, workspace: Path, real_content):
+        tool = FileWriteTool(workspace_root=workspace)
+        out = tool.run(path="doc.txt", content=real_content)
+        assert out["bytes_written"] == len(real_content.encode("utf-8"))
+        assert (workspace / "doc.txt").read_text(encoding="utf-8") == real_content
+
+
+# ============================================================
 # Size limit
 # ============================================================
 
