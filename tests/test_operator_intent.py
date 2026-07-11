@@ -394,3 +394,59 @@ def test_self_task_propose_survives_filename_in_text():
     assert intent is not None
     assert intent.kind == "self_task_proposal"
     assert intent.command == ":self-task-propose"
+
+
+def test_routes_architecture_audit_phrases_locally():
+    ru = route_operator_intent("Проведи аудит архитектуры и покажи разрывы")
+    en = route_operator_intent("Audit the architecture and report the gaps")
+
+    assert ru is not None
+    assert ru.kind == "architecture_audit"
+    assert ru.command == ":architecture-audit"
+    assert en is not None
+    assert en.kind == "architecture_audit"
+
+
+def test_architecture_audit_outranks_project_health_when_both_apply():
+    # "проверь архитектуру проекта" satisfies the broad project_health branch
+    # (проект + проверь) too; architecture audit must win.
+    intent = route_operator_intent("Проверь архитектуру проекта")
+    assert intent is not None
+    assert intent.kind == "architecture_audit"
+    assert intent.command == ":architecture-audit"
+
+
+def test_plain_project_check_still_routes_to_project_health():
+    intent = route_operator_intent("Проверь проект и скажи что требует внимания")
+    assert intent is not None
+    assert intent.kind == "project_health"
+
+
+def test_architecture_mention_without_audit_verb_does_not_route():
+    # No audit/review verb -> not an architecture audit request.
+    assert route_operator_intent("Расскажи про архитектуру этого агента") is None
+
+
+def test_routes_subagent_proposal_phrases_locally():
+    ru = route_operator_intent("Предложи ограниченного субагента для мониторинга почты")
+    en = route_operator_intent("Propose a scoped subagent for the ingestion goal")
+
+    assert ru is not None
+    assert ru.kind == "subagent_proposal"
+    assert ru.command == ":subagent-proposal"
+    assert en is not None
+    assert en.kind == "subagent_proposal"
+
+
+def test_subagent_proposal_needs_a_propose_verb():
+    # Bare mention / question about a subagent must not route to the proposal.
+    assert route_operator_intent("Что такое субагент") is None
+
+
+def test_subagent_capability_wish_still_routes_to_capability_request():
+    # "хочу subagent" is a missing-capability wish (no propose verb), so it must
+    # keep going to :capability-request, not :subagent-proposal.
+    intent = route_operator_intent("Хочу чтобы ты сам мог запускать subagent")
+    assert intent is not None
+    assert intent.kind == "capability_request"
+    assert intent.command == ":capability-request"
