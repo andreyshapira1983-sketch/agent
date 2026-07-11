@@ -257,6 +257,19 @@ class AgentLoop(AgentLoopExtractedMethods):
         self.gateway_dry_run = gateway_dry_run
         self.gateway_path = gateway_path
         self.suppress_durable_learning_writes = False
+        # Audit / read-only execution brake. When True, the loop performs NO
+        # durable learning writes (episodic, procedural, consolidation, user
+        # profile, persistent access-stat bumps) and freezes 'agent-auto'
+        # persistent/semantic writes on the shared write policy. This is a
+        # deterministic operator control (see :audit) — set BEFORE planning so
+        # an investigation of memory cannot silently contaminate the store it
+        # is auditing. It is independent of `suppress_durable_learning_writes`
+        # (which the dry-run path save/restores) so an autonomous cycle cannot
+        # accidentally lift the audit brake mid-run.
+        self.audit_read_only = False
+        # Records whether *this* audit toggle installed the agent-auto freeze,
+        # so turning audit off never lifts an AGENT_FREEZE_AUTO_MEMORY env brake.
+        self._audit_froze_agent_auto = False
         self.model_router = model_router or ModelRouter.single(llm)
         self.llm = self.model_router.for_role(ModelRole.SYNTHESIZER)
         self.log = logger
@@ -416,6 +429,50 @@ class AgentLoop(AgentLoopExtractedMethods):
         self.last_source_registry: SourceRegistry = SourceRegistry()
         self.last_knowledge_pipeline: KnowledgePipelineResult | None = None
 
+    # ---------- audit / read-only execution brake ----------
+
+    def _durable_learning_suppressed(self) -> bool:
+        """True when durable learning writes must be skipped this cycle.
+
+        Combines the dry-run brake (`suppress_durable_learning_writes`) with
+        the deterministic audit/read-only brake so both are honoured at every
+        durable-write site with one check.
+        """
+        return bool(getattr(self, "suppress_durable_learning_writes", False)) or bool(
+            getattr(self, "audit_read_only", False)
+        )
+
+    def set_audit_read_only(self, enabled: bool) -> bool:
+        """Enable/disable audit read-only mode. Returns the resulting state.
+
+        Idempotent. Engaging it (a) blocks every durable learning write via
+        `_durable_learning_suppressed` and (b) freezes 'agent-auto' writes on
+        the shared write policy (covering persistent/semantic writes and, on
+        the autonomous path, reflection which reads `frozen_sources` live).
+        Operator `:remember` (source='user-explicit') is never frozen, so the
+        human keeps explicit control during an audit.
+        """
+        enabled = bool(enabled)
+        if enabled == self.audit_read_only:
+            return self.audit_read_only
+        if enabled:
+            self.audit_read_only = True
+            froze = False
+            if self.write_policy is not None:
+                froze = self.write_policy.add_frozen_source("agent-auto")
+            self._audit_froze_agent_auto = froze
+            self.log.log(
+                "audit_read_only_enabled",
+                {"agent_auto_frozen_by_audit": froze},
+            )
+        else:
+            self.audit_read_only = False
+            if self._audit_froze_agent_auto and self.write_policy is not None:
+                self.write_policy.remove_frozen_source("agent-auto")
+            self._audit_froze_agent_auto = False
+            self.log.log("audit_read_only_disabled", {})
+        return self.audit_read_only
+
     # ---------- public entry point ----------
 
     def run(
@@ -448,9 +505,7 @@ class AgentLoop(AgentLoopExtractedMethods):
         self.last_source_ranking = None
         self.last_source_registry = SourceRegistry()
         self.last_knowledge_pipeline = None
-        durable_learning_writes = not bool(
-            getattr(self, "suppress_durable_learning_writes", False)
-        )
+        durable_learning_writes = not self._durable_learning_suppressed()
 
         # Layer 4 — load the user profile for this cycle.
         if self.user_profile_store is not None:
@@ -2076,7 +2131,7 @@ class AgentLoop(AgentLoopExtractedMethods):
         # knows which records are actively useful (≠ junk that was saved but
         # never used again).
         if (
-            not bool(getattr(self, "suppress_durable_learning_writes", False))
+            not self._durable_learning_suppressed()
             and self.persistent_store is not None
             and selected
         ):
@@ -2239,10 +2294,15 @@ class AgentLoop(AgentLoopExtractedMethods):
         Experience memory is best-effort. A malformed local state file should
         be quarantined by the state layer, not crash the user-facing answer.
         """
-        if self.suppress_durable_learning_writes:
+        if self._durable_learning_suppressed():
             self.log.log(
                 "durable_learning_writes_skipped",
-                {"reason": "dry_run", "sink": "experience_memory"},
+                {
+                    "reason": "audit_read_only"
+                    if getattr(self, "audit_read_only", False)
+                    else "dry_run",
+                    "sink": "experience_memory",
+                },
             )
             return
         if (

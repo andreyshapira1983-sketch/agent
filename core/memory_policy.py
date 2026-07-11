@@ -89,6 +89,28 @@ class MemoryWritePolicy:
             (s or "").strip().lower() for s in frozen_sources if s
         )
 
+    def add_frozen_source(self, source: str) -> bool:
+        """Freeze ``source`` at runtime (run-scoped operator/audit brake).
+
+        Returns True if the source was newly frozen, False if it was already
+        frozen. Callers that later unfreeze can use this so they only lift a
+        freeze they themselves installed — e.g. an audit toggle must not
+        release the ``AGENT_FREEZE_AUTO_MEMORY`` env brake it did not set.
+        """
+        key = (source or "").strip().lower()
+        if not key or key in self.frozen_sources:
+            return False
+        self.frozen_sources = self.frozen_sources | {key}
+        return True
+
+    def remove_frozen_source(self, source: str) -> bool:
+        """Unfreeze ``source`` at runtime. Returns True if it was removed."""
+        key = (source or "").strip().lower()
+        if not key or key not in self.frozen_sources:
+            return False
+        self.frozen_sources = self.frozen_sources - {key}
+        return True
+
     def decide(
         self,
         content: str,
