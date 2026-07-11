@@ -55,13 +55,24 @@ _SOURCE_DEFAULTS: dict[SourceHint, DataClass] = {
 }
 
 
-def classify(text: str, source: SourceHint = "unknown") -> ClassificationResult:
+def classify(
+    text: str,
+    source: SourceHint = "unknown",
+    *,
+    keyword_secrets: bool = True,
+) -> ClassificationResult:
     """Assign a DataClass to `text` with explanatory reasons.
 
     Decision rules, in order:
       1. Secret signals (regex or keyword) -> SECRET
       2. Any PII match  -> SENSITIVE
       3. Otherwise the per-source default (web=public, everything else=private)
+
+    ``keyword_secrets`` forwards to :func:`core.secret_scanner.contains_secret`.
+    Set it False for output that originates inside the trusted boundary (the
+    agent's own logs, files, diffs) so a bare mention of a credential word
+    like ``api_key`` does not falsely elevate the agent's own evidence to
+    SECRET. Real credential *shapes* (regex spans) still classify as SECRET.
     """
     reasons: list[str] = []
 
@@ -72,7 +83,7 @@ def classify(text: str, source: SourceHint = "unknown") -> ClassificationResult:
             source=source,
         )
 
-    is_secret, secret_reasons = contains_secret(text)
+    is_secret, secret_reasons = contains_secret(text, include_keywords=keyword_secrets)
     if is_secret:
         return ClassificationResult(
             cls=DataClass.SECRET,

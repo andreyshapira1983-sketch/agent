@@ -106,6 +106,23 @@ class TestContainsSecret:
         assert any("credential-assignment" in r for r in reasons)
         assert any("api_key" in r for r in reasons)
 
+    def test_include_keywords_false_drops_bare_keyword(self):
+        """With the soft keyword layer disabled, a bare mention of a
+        credential word is NOT a secret (no redactable span)."""
+        flag, reasons = contains_secret(
+            "log: contains secret keyword api_key", include_keywords=False
+        )
+        assert flag is False
+        assert reasons == []
+
+    def test_include_keywords_false_keeps_regex(self):
+        """Disabling keywords must never suppress a real credential shape."""
+        flag, reasons = contains_secret(
+            "token ghp_aaaaaaaaaaaaaaaaaaaaXXX", include_keywords=False
+        )
+        assert flag is True
+        assert any("github-pat" in r for r in reasons)
+
 
 # ============================================================
 # Sanity / contract
