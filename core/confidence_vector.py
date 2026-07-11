@@ -63,6 +63,11 @@ _STOPWORDS_EN = frozenset({
     "should", "will", "shall", "may", "might", "must", "not", "no",
     "yes", "what", "when", "where", "who", "whom", "why", "how",
     "which", "there", "here", "than", "so", "too", "very",
+    # Request/framing verbs: they describe *how* something was asked, not
+    # *what* about, so an answer never echoes them — counting them as
+    # question content systematically depresses the coverage score.
+    "tell", "explain", "show", "list", "find", "give", "check", "please",
+    "describe", "need", "want", "make", "help", "my", "me",
 })
 _STOPWORDS_RU = frozenset({
     "и", "в", "во", "не", "на", "я", "что", "тот", "это", "как",
@@ -71,10 +76,30 @@ _STOPWORDS_RU = frozenset({
     "были", "есть", "будет", "или", "если", "только", "там", "тут",
     "ли", "бы", "о", "об", "для", "от", "до", "при", "со", "с",
     "вот", "ну", "да", "нет", "уже", "ещё", "еще",
+    # Interrogatives / determiners.
+    "какой", "какая", "какие", "каком", "какую", "каких", "каким",
+    "сколько", "почему", "зачем", "когда", "кто", "чей", "где",
+    # Possessive / demonstrative pronouns.
+    "мой", "моя", "мое", "моё", "мои", "моего", "моей", "моих", "моим",
+    "твой", "ваш", "наш", "свой", "мне", "меня",
+    # Common request/framing verbs (imperative + infinitive forms).
+    "проверь", "проверить", "скажи", "сказать", "покажи", "показать",
+    "объясни", "объяснить", "расскажи", "рассказать", "посмотри",
+    "посмотреть", "найди", "найти", "опиши", "описать", "перечисли",
+    "дай", "дать", "сделай", "сделать", "помоги", "помочь",
 })
 _STOPWORDS = _STOPWORDS_EN | _STOPWORDS_RU
 
 _TOKEN_RE = re.compile(r"[\w']+", re.UNICODE)
+
+# Morphological fuzzy-match tuning. Two tokens are treated as the same
+# content word when they share a long common prefix — this collapses
+# inflected forms ("репозиторий"/"репозитории", "problem"/"problems")
+# that exact-token matching would miss. The thresholds are deliberately
+# strict so unrelated words sharing a short Russian prefix ("про-",
+# "пере-") or an English stem do not match spuriously.
+_FUZZY_MIN_PREFIX = 4
+_FUZZY_MIN_RATIO = 0.75
 
 
 def _tokenise(text: str) -> set[str]:
@@ -126,24 +151,58 @@ def coherence_score(disagreements: Sequence[dict] | None) -> float:
     return max(0.0, min(1.0, 1.0 - penalty))
 
 
+def _common_prefix_len(a: str, b: str) -> int:
+    n = min(len(a), len(b))
+    i = 0
+    while i < n and a[i] == b[i]:
+        i += 1
+    return i
+
+
+def _same_word(q_tok: str, a_tok: str) -> bool:
+    """Do two tokens denote the same content word up to inflection?
+
+    True on an exact match, or when the tokens share a common prefix that
+    is both long (>= ``_FUZZY_MIN_PREFIX`` chars) and covers most of the
+    longer token (>= ``_FUZZY_MIN_RATIO``). This lets inflected forms
+    ("проблема"/"проблемы", "problem"/"problems") count as one word
+    without matching unrelated words that merely share a short prefix.
+    """
+    if q_tok == a_tok:
+        return True
+    cp = _common_prefix_len(q_tok, a_tok)
+    if cp < _FUZZY_MIN_PREFIX:
+        return False
+    return cp / max(len(q_tok), len(a_tok)) >= _FUZZY_MIN_RATIO
+
+
 def relevance_score(question: str | None, answer: str | None) -> float:
-    """Jaccard-style overlap between question and answer content tokens.
+    """Morphology-aware overlap between question and answer content tokens.
 
     Returns ``0.5`` when either side is empty after stopword removal —
     we cannot judge alignment in either direction, so we stay neutral
     rather than punish a short answer to a vague prompt.
+
+    Coverage is the fraction of question content words the answer
+    addresses. Matching is fuzzy on a shared prefix (see :func:`_same_word`)
+    so inflected forms — pervasive in Russian and common in English
+    plurals — are not miscounted as misses, which previously pinned the
+    score near ~0.3 even for on-topic answers.
     """
     q_tokens = _tokenise(question or "")
     a_tokens = _tokenise(answer or "")
     if not q_tokens or not a_tokens:
         return 0.5
-    inter = q_tokens & a_tokens
-    if not inter:
+    covered = 0
+    for q_tok in q_tokens:
+        if any(_same_word(q_tok, a_tok) for a_tok in a_tokens):
+            covered += 1
+    if not covered:
         return 0.0
     # Coverage of the question vocabulary by the answer is the more
     # operator-meaningful direction (did the answer address what was
-    # asked?), so we use |q ∩ a| / |q| rather than full Jaccard.
-    coverage = len(inter) / len(q_tokens)
+    # asked?), so we use |covered| / |q| rather than full Jaccard.
+    coverage = covered / len(q_tokens)
     return max(0.0, min(1.0, coverage))
 
 

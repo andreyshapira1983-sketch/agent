@@ -108,6 +108,44 @@ class TestRelevanceScore:
             score = relevance_score(q, a)
             assert 0.0 <= score <= 1.0
 
+    def test_russian_inflected_forms_match(self):
+        # Morphology: the answer uses different case endings than the
+        # question ("репозитория" -> "репозитории", "проблемы" present).
+        # Exact-token matching scored this ~0.25; fuzzy prefix matching
+        # plus framing stopwords should now recognise it as on-topic.
+        score = relevance_score(
+            "какие проблемы есть у моего репозитория",
+            "В репозитории найдены проблемы: падающий тест и нет документации.",
+        )
+        assert score >= 0.8
+
+    def test_framing_verbs_do_not_depress_score(self):
+        # Imperative request verbs ("проверь", "скажи") and possessives
+        # ("мой") describe how the question was asked, not its topic, so
+        # they must not count against coverage.
+        score = relevance_score(
+            "проверь мой репозиторий и скажи какие проблемы",
+            "Проверка репозитория: найдены проблемы в тестах.",
+        )
+        assert score >= 0.8
+
+    def test_english_plural_matches_singular(self):
+        score = relevance_score(
+            "which tests are failing",
+            "One failing test was found in the suite.",
+        )
+        assert score >= 0.5
+
+    def test_fuzzy_match_no_false_positive_on_short_shared_prefix(self):
+        # Unrelated words that merely share a short prefix must not match:
+        # "программа" vs "проблема" share only "про" (< min prefix), and
+        # none of the answer words are on-topic.
+        score = relevance_score(
+            "столица франции",
+            "программа проверяет структуру каталога.",
+        )
+        assert score == 0.0
+
 
 class TestComputeVector:
     def test_all_strong_overall_high(self):
