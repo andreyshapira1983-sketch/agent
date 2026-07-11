@@ -22,6 +22,7 @@ from .operator_intent_patterns import (
     _looks_like_shell_command,
     _matches_approval_status,
     _matches_autonomy_readiness,
+    _matches_best_next_action,
     _matches_budget_status,
     _matches_capability_check,
     _matches_capability_request,
@@ -35,6 +36,7 @@ from .operator_intent_patterns import (
     _matches_programming_readiness,
     _matches_project_health,
     _matches_safe_self_check,
+    _matches_self_task_propose,
     _matches_smart_memory_status,
     _matches_source_review,
     _matches_urgent_status,
@@ -45,6 +47,7 @@ from .operator_intent_patterns import (
 OperatorIntentKind = Literal[
     "shell_command_hint",
     "capability_request",
+    "self_task_proposal",
     "safe_self_check",
     "capability_check",
     "programming_readiness",
@@ -57,6 +60,7 @@ OperatorIntentKind = Literal[
     "budget_status",
     "approval_status",
     "urgent_status",
+    "best_next_action",
     "next_actions",
     "autonomy_readiness",
     "source_review_plan",
@@ -106,6 +110,12 @@ def route_operator_intent(text: str) -> OperatorIntent | None:
             kind="capability_request",
             command=":capability-request",
             reason="missing capability / connector proposal wording",
+        )
+    if _matches_self_task_propose(normalized):
+        return OperatorIntent(
+            kind="self_task_proposal",
+            command=":self-task-propose",
+            reason="TODO/FIXME + propose-task/failing-test wording",
         )
     if _matches_patch_proposal(normalized):
         return OperatorIntent(
@@ -180,6 +190,12 @@ def route_operator_intent(text: str) -> OperatorIntent | None:
             kind="urgent_status",
             command=":urgent-status",
             reason="urgent attention wording",
+        )
+    if _matches_best_next_action(normalized):
+        return OperatorIntent(
+            kind="best_next_action",
+            command=":best-next-action",
+            reason="single most important action wording",
         )
     if _matches_next_actions(normalized):
         return OperatorIntent(

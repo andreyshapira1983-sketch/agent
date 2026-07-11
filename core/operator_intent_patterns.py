@@ -476,6 +476,69 @@ def _matches_next_actions(text: str) -> bool:
     return _has_any(text, direct_phrases)
 
 
+def _matches_best_next_action(text: str) -> bool:
+    # The SINGLE most important action to take right now. Deliberately narrow
+    # and kept distinct from _matches_next_actions (a LIST of next steps) by
+    # requiring singular / top-priority wording. Must be routed BEFORE
+    # _matches_next_actions because the English form "most important next
+    # action" contains the "next action" trigger that matcher fires on.
+    return _has_any(
+        text,
+        (
+            "важнее всего",
+            "важнейшее действие",
+            "самое важное действие",
+            "самое приоритетное действие",
+            "одно важнейшее",
+            "одно самое важное",
+            "одно самое приоритетное",
+            "какое одно действие",
+            "приоритет номер один",
+            "single most important",
+            "most important next action",
+            "most important action",
+            "most important thing to do",
+            "one most important",
+            "highest priority action",
+            "top priority action",
+        ),
+    )
+
+
+def _matches_self_task_propose(text: str) -> bool:
+    # Stage-A coding-task producer: take a real TODO/FIXME and propose ONE
+    # coding task + failing acceptance test for human approval. Requires BOTH a
+    # code-debt marker AND a propose-task/test signal so it never steals plain
+    # "find X" traffic or a bare bug note. Routed BEFORE the plan/source-review
+    # matchers so a "TODO in foo.py + предложи тесты" phrasing does not fall
+    # into the generic implementation-plan (.py + тесты) branch.
+    debt = _has_any(
+        text,
+        ("todo", "fixme", "tech debt", "техдолг", "технический долг"),
+    )
+    propose = _has_any(
+        text,
+        (
+            "предложи задач",
+            "предложи один",
+            "предложи тест",
+            "предложи acceptance",
+            "предложи падающий",
+            "создай задач",
+            "создай тест",
+            "падающий тест",
+            "failing test",
+            "acceptance test",
+            "propose a task",
+            "propose one",
+            "propose a test",
+            "coding task",
+            "self-task",
+        ),
+    )
+    return debt and propose
+
+
 def _matches_autonomy_readiness(text: str) -> bool:
     return _has_any(
         text,
