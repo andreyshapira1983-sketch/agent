@@ -202,6 +202,7 @@ _Model discovery, routing, usage accounting._
 | `core/model_discovery` | Live Model Discovery + Provider Catalog diff — read-only / dry-run (TD-011/012). |
 | `core/model_router` | Role-based model routing. |
 | `core/model_usage` | Model usage ledger and budget checks. |
+| `core/synth_resilience` | Synthesizer resilience ladder — retry, adapt, then honest degraded answer on model failure. |
 | `core/model_registry_audit` | Operator-facing audit for model registry and active routes. |
 
 ## Multi-Agent / Subagents (§6)
