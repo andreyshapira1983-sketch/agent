@@ -1292,11 +1292,14 @@ def _deterministic_split_report(
     ``:self-split``).
 
     Returns a ``proposed`` :class:`ProducerReport` when the planner proves one
-    safe extraction step, a ``no_patch`` report (carrying the planner's precise
-    reason) when it cannot, or ``None`` when the splitter itself is unavailable so
-    the caller keeps its prior refusal. The Builder/Critic/LLM are never consulted
-    on this path — the code is moved verbatim by AST slicing and the planner
-    refuses any step it cannot prove safe.
+    safe extraction step, a ``no_patch`` report when it cannot — carrying either
+    the planner's precise decline reason or, if the planner *raised*, the
+    exception type/message (veto ``incremental_splitter_error``) so a crash is
+    never disguised as a clean decline — or ``None`` only when the splitter module
+    itself cannot be imported (capability genuinely absent) so the caller keeps
+    its prior refusal. The Builder/Critic/LLM are never consulted on this path —
+    the code is moved verbatim by AST slicing and the planner refuses any step it
+    cannot prove safe.
     """
     try:
         from core.incremental_splitter import plan_incremental_split
@@ -1304,8 +1307,35 @@ def _deterministic_split_report(
         return None
     try:
         plan = plan_incremental_split(workspace, concrete_target)
-    except Exception:  # noqa: BLE001 — a raising planner → keep prior behaviour
-        return None
+    except Exception as exc:  # noqa: BLE001 — a crashing planner must be surfaced, not disguised
+        # The splitter IS present but threw on this input — that is a splitter
+        # bug, NOT a genuine "no safe step" outcome. Returning None here would let
+        # the caller fall back to its generic refusal ("no low-risk candidate" /
+        # "too large for a safe single-pass split"), hiding a real crash. Surface
+        # it as a distinct no_patch carrying the exception so the operator (and the
+        # journaled report) can tell a crash from a clean decline. Nothing applied.
+        roles.append(RoleOutput(
+            "reporter",
+            "error",
+            f"incremental splitter crashed: {type(exc).__name__}",
+            {"error_type": type(exc).__name__, "target": concrete_target},
+        ))
+        return ProducerReport(
+            status="no_patch",
+            reason=(
+                f"incremental splitter crashed on {concrete_target}: "
+                f"{type(exc).__name__}: {exc}"
+            ),
+            target_path=concrete_target,
+            checked_gates=gates,
+            role_outputs=roles,
+            veto_reasons=["incremental_splitter_error"],
+            next_human_action=(
+                "The deterministic splitter raised an exception on this target — "
+                "investigate it as a splitter bug, not a genuine 'no safe step'. "
+                "Nothing was applied."
+            ),
+        )
     if plan.status != "planned" or plan.step is None:
         return ProducerReport(
             status="no_patch",

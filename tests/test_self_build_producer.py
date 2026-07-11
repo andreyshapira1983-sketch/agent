@@ -1314,6 +1314,51 @@ def test_oversized_split_no_patch_when_planner_cannot(workspace, monkeypatch):
     assert inbox.list() == []
 
 
+def test_oversized_split_planner_crash_is_surfaced_not_disguised(workspace, monkeypatch):
+    # A CRASHING planner (splitter present but raising) must NOT be silently
+    # swallowed into the caller's generic refusal. It surfaces as a distinct
+    # no_patch carrying the exception type + an incremental_splitter_error veto,
+    # so an operator can tell a crash from a clean "no safe step" decline.
+    import core.incremental_splitter as isp
+    import core.backlog_target_mapper as btm
+
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    target_rel = "core/huge_mod.py"
+    (workspace / target_rel).write_text("A = 1\nB = 2\nC = 3\nD = 4\n", encoding="utf-8")
+    monkeypatch.setattr(btm, "SPLIT_ONE_SHOT_MAX_LINES", 2)
+
+    def _boom(ws, tgt, **k):
+        raise RuntimeError("planner exploded")
+
+    monkeypatch.setattr(isp, "plan_incremental_split", _boom)
+
+    inbox = ApprovalInbox(path=None)
+    llm = FakeLLM(["{}"])
+    report = produce_self_apply_proposal(
+        workspace=workspace,
+        inbox=inbox,
+        llm=llm,
+        vcs=FakeVCS(clean=True),
+        budget_snapshot=_headroom_budget(),
+        kill_switch=FakeKillSwitch(active=False),
+        file_reader=lambda p: (workspace / p).read_text() if (workspace / p).exists() else None,
+        grounded_selector=lambda: _oversized_split_cand(target_rel),
+    )
+    assert report.status == "no_patch"
+    # The crash is named, not disguised as "no low-risk candidate" / "too large".
+    assert "incremental splitter crashed" in report.reason
+    assert "RuntimeError" in report.reason
+    assert "planner exploded" in report.reason
+    assert "incremental_splitter_error" in report.veto_reasons
+    assert "no low-risk candidate" not in report.reason
+    assert any(
+        r.role == "reporter" and r.decision == "error" for r in report.role_outputs
+    )
+    # Still fail-safe: nothing published, Builder never consulted.
+    assert inbox.list() == []
+    assert not any("Builder" in c["system"] for c in llm.calls)
+
+
 def test_oversized_split_real_planner_end_to_end(workspace, monkeypatch):
     # Integration: the REAL deterministic planner (not monkeypatched) runs on a
     # small real module and its step is published through produce as a normal
