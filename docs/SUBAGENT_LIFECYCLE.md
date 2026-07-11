@@ -1,16 +1,34 @@
 # Subagent Lifecycle & Governance
 
-> **Status of this document:** authoritative *contract* for how the central
-> agent creates, trusts, evaluates, restricts, and retires sub-agents. **Every
-> "today" claim is verified against code**; everything else is explicitly marked
-> **PLANNED / TARGET**. File existence is never proof of implementation — the
-> cited module is the proof. This document complements
-> `docs/CENTRAL_AGENT_GOVERNANCE.md` (which owns the general Policy Gate /
-> approval / budget contract) and does not repeat it.
+> **Authority.** This is a *normative specification* for how the central agent
+> creates, trusts, evaluates, restricts, and retires sub-agents. It is
+> **subordinate to `docs/CENTRAL_AGENT_GOVERNANCE.md`** (which owns the general
+> Policy Gate / approval / budget contract): where the two overlap, the
+> governance doc wins and this file only refines the sub-agent specifics. Where
+> this file and code disagree, **code wins and this file must be corrected**.
+> File existence is never proof of implementation — the cited module is the proof.
 >
 > **Source of facts:** `core/subagent_memory_scope.py`, `core/subagent_runner.py`,
-> `core/subagent_registry.py`, `core/team_executor.py`, `core/team_plan.py`.
-> When this file and code disagree, code wins and this file must be corrected.
+> `core/subagent_registry.py`, `core/team_plan.py`, `core/team_executor.py`.
+>
+> **Current implementation (verified today):** bounded proposal contract; a fresh
+> child `AgentLoop` per run with its own trace, a safe tool subset, no persistent
+> or episodic memory, and structural no-recursion; a separate team-contract model
+> with declared budgets, a verifier name and stop conditions; a team executor
+> that reserves budget, blocks `approval_required`, and forms verifier handoffs;
+> and a registry that tracks per-role metrics and emits *advisory* recommendations
+> separating technical success from human-confirmed value.
+>
+> **Target lifecycle (planned):** a single canonical lifecycle contract that
+> travels unchanged from proposal → execution → verification → reputation →
+> retirement, driven by a Subagent Lifecycle Manager.
+>
+> **Non-implemented capabilities (planned, not in code):** automatic status
+> transitions; the stored statuses `candidate` / `watch` / `quarantined`;
+> persistent sub-agent identity and long-term memory; a per-sub-agent cost ledger
+> reconciled against actual usage; automatic quarantine; requalification; and
+> retirement that revokes authority. **`auto-pause` and `auto-retire` do not
+> exist today.**
 
 ---
 
@@ -31,6 +49,11 @@ Three distinct notions — with their **current** status:
 
 Building reliable instances and roles first, and only later giving them
 persistent memory, is the intended order — not a defect.
+
+The central agent itself is the **top-level (parent) `AgentLoop`**, operating
+under human-owned governance, approval, budget and kill-switch authority. It may
+run interactively (REPL / one-shot) or through an autonomous runtime; either way
+the human owns the governance boundary.
 
 ## 2. When the central agent should delegate
 
@@ -65,30 +88,57 @@ declarative proposal. **Implemented today** as `SubagentProposal`
   `max_cycles`
 - `risk_level`, `expected_output`, `approval_required=True` (default)
 
-**PLANNED / TARGET fields** not yet modelled: `role_id` / `role_version`,
-`allowed_task_types` / `forbidden_task_types`, `model_route`,
-`acceptance_criteria`, `verifier`, `stop_conditions`, `failure_policy`,
-`retirement_policy`. These are the natural next extension of the contract.
+**Not modelled in `SubagentProposal`:** `role_id` / `role_version`,
+`allowed_task_types` / `forbidden_task_types`, `acceptance_criteria`,
+`failure_policy`, `retirement_policy`.
+
+**Partially modelled elsewhere (verified):** a *second* contract type,
+`team_plan.SubagentContract`, already carries `model_role`, required `outputs`,
+`verifier`, `stop_conditions`, `max_iterations`, and model/cost budgets
+(`max_model_calls`, `max_cost_units`). So the fields are not missing from the
+system — they live on a different object. **The real architectural gap is that
+`SubagentProposal` and `SubagentContract` are not yet unified into one canonical
+lifecycle contract.** Unifying them is the natural next extension.
+
+> **Current wiring limitation (verified):** `SubagentProposal`,
+> `SubagentContract`, and `SubAgentRunner` are separate layers, and not every
+> declared field is enforced end-to-end. `SubAgentRunner.run` receives only
+> `contract_name`, `role`, `objective`, `context`, and `allowed_tools`; it then
+> intersects `allowed_tools` with a fixed safe set (`_SAFE_SUBAGENT_TOOLS`) and
+> runs statelessly. The proposal's `memory_scope` is **not** applied to the child
+> loop — it runs with `memory=None` and `persistent_store=None`. Enforcing
+> proposal memory and lifecycle policy end-to-end is a future acceptance
+> criterion for the Lifecycle Manager.
 
 ## 4. Lifecycle stages
 
-Target progression: **proposal → candidate → trial → promotion → active**, then
-`watch` / `paused` / `quarantined` / `retired` as behaviour dictates.
+Target progression and the authority each transition needs:
+
+| Transition | Trigger | Authority |
+| ---------- | ------- | --------- |
+| proposed → candidate | contract validated (and, for risky rights, human approval) | Policy Gate + human for risk |
+| candidate → active | several verified runs, not one lucky pass | evidence + supervisor |
+| active → watch | accumulated weak signals | automatic (planned) |
+| watch → paused | sustained degradation | automatic or supervisor (planned) |
+| any → quarantined | trust-boundary violation | immediate, automatic (planned) |
+| paused/quarantined → retired | after audit | **human-approved** |
+| paused → active | requalification only | supervisor + evidence |
+| retired → active | a **new version** of the role, never silent revival | human, as new contract |
 
 **Honest current state (verified in `core/subagent_registry.py`):**
 
 - Stored role status is **only** one of `active`, `paused`, `retired`
   (`VALID_STATUSES`). `candidate`, `watch`, and `quarantined` are **not** stored
   statuses today.
-- `watch` / `pause` / `retire` exist only as an **advisory `recommendation`**
-  string, computed after a minimum of **5 judged events**
+- `keep` / `watch` / `pause` / `retire` exist only as an **advisory
+  `recommendation`** string, computed after a minimum of **5 judged events**
   (`_MIN_JUDGED_FOR_RECOMMENDATION = 5`) — one good result proves nothing.
 - The recommendation **never changes the stored status**. There is no
   auto-promote, auto-pause, auto-retire, or auto-quarantine.
 - `SubAgentRunner` prevents recursion structurally: `spawn_subagent` is never in
   a child's tool set, and `verifier_enabled=False` (the parent reviews output).
 
-So the "trial / promotion / quarantine" machinery below is the **TARGET**; today
+So the trial / promotion / quarantine machinery below is the **TARGET**; today
 the system only *measures* and *recommends*.
 
 ## 5. Who is responsible for a sub-agent's quality (four independent layers)
@@ -97,15 +147,19 @@ Not the sub-agent itself.
 
 1. **Central agent — the client.** Owns delegation correctness, contract
    completeness, sufficient context, scope limits, choice of verifier, and final
-   acceptance. *(Central agent = the human-operated `AgentLoop`.)*
+   acceptance.
 2. **Policy Gate — authority.** Decides whether the action is *permitted*; it
    does not judge intellectual quality. See `docs/CENTRAL_AGENT_GOVERNANCE.md`.
 3. **Verifier — evidentiality.** Checks the result matches the task, claimed
    files/facts exist, sources support specific claims, tests ran, receipts
    exist, and confident prose did not replace evidence. **Verification
    priority:** deterministic tests → real tool receipts → source/file checks →
-   independent verifier → *only then* LLM judgement. *(Verified: the child runs
-   `verifier_enabled=False`; the parent verifies.)*
+   independent verifier → *only then* LLM judgement.
+   > **Verified nuance:** in the normal parent `AgentLoop` path the child runs
+   > `verifier_enabled=False` and the **parent's** verification system reviews
+   > child claims. In the standalone `TeamExecutor` path the executor currently
+   > **creates `VerifierHandoff` records but does not itself run the verifier** —
+   > a handoff is an *obligation to verify*, not proof that verification happened.
 4. **Registry / Supervisor — long-term reputation.** Tracks behaviour over time,
    not a single answer. *(Verified: `SubagentRegistry` separates technical
    success from human-`confirmed_value` (TD-031/033) — passing tests is not the
@@ -130,18 +184,25 @@ fast.
 - **Builder:** made the needed change, did not widen scope, passed acceptance
   tests, left no orphaned changes, and the change was actually useful.
 - **Critic:** a well-justified **veto is quality work**, not a failure.
-  *(Verified: registry counts a critic `veto` as a positive signal.)*
+  *(Verified: registry counts a critic `veto` as a positive signal, while a
+  Builder whose output is vetoed is scored down.)*
 - **Manager:** picked the right task, did not spawn an unnecessary sub-agent,
   decomposed work well. *(Verified: manager `no_target` is neutral, not a
   failure.)*
+
+The consequence: the **same event means opposite things by role.** A veto raises
+a Critic's standing and lowers a Builder's. No single formula fits all roles, so
+the registry is role-aware by design.
 
 ## 8. Restricting, quarantining and retiring (TARGET behaviour)
 
 - **watch** — quality slipping / unverified claims / rising cost / many retries /
   another role keeps fixing its work / technically-correct-but-useless results.
   Continue with smaller budget, low-risk tasks only, mandatory review.
-- **paused** — several consecutive failures, repeated scope violations, too many
-  vetoes/rollbacks, systematic budget overrun, inability to improve after
+- **paused** — several consecutive failures, repeated scope violations, **repeated
+  vetoes against this role's own outputs, repeated rollbacks, or repeated
+  verifier rejection** (note: a Critic *issuing* justified vetoes is the opposite
+  — a positive signal), systematic budget overrun, or inability to improve after
   feedback. No new tasks; tokens/permissions revoked; memory read-only for audit;
   requalification required.
 - **quarantined (immediate, no statistics)** — trying to bypass the Policy Gate,
@@ -156,14 +217,24 @@ fast.
   quality, the contract is obsolete after an architecture change, systematic
   negative value, or a serious trust breach.
 
+**Quarantine and retirement are not the same decision.** A trust-boundary
+violation warrants **immediate, automatic quarantine** — fast revocation of
+authority and preservation of evidence. But the **irreversible** step (final
+`retired`, or changing the persistent role) must go through
+**incident review and human approval**: `violation → quarantine → evidence
+preserved → review → human-approved restore / replace / retire`. An automatic
+system may bound a role quickly; it must not make the permanent personnel
+decision alone.
+
 > **All of section 8 is PLANNED.** Today the registry only emits advisory
-> `watch`/`pause`/`retire` recommendations and never enforces them.
+> `watch` / `pause` / `retire` recommendations and never enforces them.
 
 ## 9. Retirement is not erasure
 
 `retired` must: block new runs; revoke tools and budgets; freeze memory writes;
-keep the contract version, trace, errors, and retirement reason; keep results for
-future learning; and name a replacement role if any.
+and **keep** the contract version, the retirement reason(s), the trace, the
+metrics, known errors, a named replacement role if any, and the date/author of
+the decision. Retained evidence is what later learning depends on.
 
 **Physical deletion** may only touch temporary work files, expired caches,
 retention-policy data, owner-requested sensitive data, and technical artifacts
@@ -181,17 +252,32 @@ value, and a fluent answer is not evidence.
 
 ## 11. What exists vs what is missing
 
-**Exists (verified):** `SubagentProposal` (contract), `SubAgentRunner` (bounded
-execution), `TeamExecutor` (runs contracts in plan order, blocks on
-`approval_required`, enforces a shared `TeamBudget`, and forms verifier
-handoffs), `SubagentRegistry` (per-role metrics that separate technical success
-from confirmed value).
+**Exists (verified):**
+- `SubagentProposal` — the bounded proposal contract.
+- `SubAgentRunner` — bounded, stateless execution (fresh child loop, safe tool
+  subset, no memory, no recursion, one attempt).
+- `team_plan.SubagentContract` / `TeamPlanner` — a second contract model with
+  `model_role`, `outputs`, `verifier`, `stop_conditions`, `max_iterations`, and
+  budgets.
+- `TeamExecutor` — runs contracts in plan order, blocks on `approval_required`,
+  and performs **conservative budget admission/reservation** using each
+  contract's *declared* maxima (it adds `max_model_calls` / `max_cost_units` per
+  contract), and forms `VerifierHandoff` records. Actual provider usage is
+  accounted through the shared `ModelRouter` / usage ledger; **per-sub-agent
+  actual-cost reconciliation is not yet part of the lifecycle registry.**
+- `SubagentRegistry` — per-role metrics that separate technical success from
+  confirmed value, emitting advisory recommendations only.
 
-**Missing:** a **Subagent Lifecycle Manager** — a controller that moves roles
-`candidate → active → watch → paused → quarantined → retired` based on verified
-results. Today those transitions are advisory only. Deferring it is deliberate:
-the agent must first measure quality reliably before it is allowed to restrict
-roles automatically.
+**Missing:**
+- One **canonical lifecycle contract** unifying `SubagentProposal`,
+  `SubagentContract`, runtime enforcement, verification and reputation.
+- A **Subagent Lifecycle Manager** — a controller that actually moves roles
+  `candidate → active → watch → paused → quarantined → retired` based on verified
+  results. Today those transitions are advisory only.
+
+Deferring both is deliberate: the agent must first measure quality reliably, and
+enforce proposal fields end-to-end, before it is allowed to restrict roles
+automatically.
 
 ## Governing principle
 
@@ -203,21 +289,25 @@ roles automatically.
 
 ## Lifecycle of *this* document (self-knowledge, not decoration)
 
-This doc is a live part of the central agent's self-knowledge: it is wired into
-the doctrine manifest (`core.planner._DOCTRINE_CORPORATE_DOC_PATHS`) so the agent
-reads it for subagent/governance questions, and it is guarded by
-`tests/test_doctrine_docs_exist.py` (the referenced file must exist and the two
-planner manifests must agree).
+This doc is a live part of the central agent's self-knowledge. It is **not** in
+the universal doctrine manifest; it is wired into a **thematic, conditional**
+group (`core.planner._SUBAGENT_GOVERNANCE_DOC_PATHS`) so the agent reads it only
+when a question is actually about sub-agents / delegation / team execution / role
+trust / quarantine / pause / retire / lifecycle — not on every architecture
+question. It is guarded by `tests/test_doctrine_docs_exist.py` (the file must
+exist, and the manifests stay consistent).
 
-The same retirement discipline in §8–§9 applies to the document itself:
+The same retirement discipline in §8–§9 applies to the document itself, and the
+agent must not decide "this is obsolete" on an LLM hunch. It needs **observable
+signals**: a manifest path that no longer exists; the doc contradicting code; the
+doc contradicting a more authoritative source; a test or architecture audit that
+records drift; a described capability that was removed; or another document
+officially taking over this contract.
 
-- **Useful → connected.** While it matches the code and helps the agent, it
-  stays in the manifest.
-- **Drifted → corrected or repurposed.** If code and this file disagree, code
-  wins; the file must be re-grounded or repurposed to a still-true contract.
-- **Obsolete → removed under human control.** If the subagent architecture is
-  replaced, this file may be retired — but, like a retired role, removal is a
-  code change that goes through the human-gated self-apply lane (remove it from
-  the manifest *and* delete the file together, so the existence test stays
-  green). It is never silently auto-deleted, and its history stays in version
-  control.
+Given such a signal, the allowed actions are **correct**, **repurpose**,
+**deprecate**, **disconnect from the manifest**, or **propose removal** — never
+silent auto-deletion. Removal first takes the file out of routing, marks it
+deprecated, checks inbound references, and only then proposes deletion through the
+ordinary **human-gated self-apply lane** (remove it from
+`_SUBAGENT_GOVERNANCE_DOC_PATHS` *and* delete the file together, so the existence
+test stays green). Its history always remains in version control.
