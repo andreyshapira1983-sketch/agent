@@ -122,17 +122,26 @@ def keyword_hits(text: str) -> list[str]:
     return [kw for kw in KEYWORD_RULES if kw in lower]
 
 
-def contains_secret(text: str) -> tuple[bool, list[str]]:
+def contains_secret(text: str, *, include_keywords: bool = True) -> tuple[bool, list[str]]:
     """High-level check: does this text contain ANY secret signal?
 
     Returns (flag, reasons). Reasons follow the format the existing
     MemoryWritePolicy reasons used so existing audit consumers keep working:
       - "matches secret pattern '<kind>'"
       - "contains secret keyword '<kw>'"
+
+    ``include_keywords`` controls the soft KEYWORD layer. When False, only
+    the high-confidence REGEX rules (real credential *shapes* with a
+    redactable span) count. Callers that scan content originating inside
+    the trusted boundary — e.g. the agent's own logs, files and diffs —
+    pass False so that merely *mentioning* a credential word (``api_key``,
+    ``password``) does not mark their own evidence as a secret. Regex hits
+    are never suppressed, so real leaked keys are still caught.
     """
     reasons: list[str] = []
     for f in scan(text):
         reasons.append(f"matches secret pattern '{f.kind}'")
-    for kw in keyword_hits(text):
-        reasons.append(f"contains secret keyword '{kw}'")
+    if include_keywords:
+        for kw in keyword_hits(text):
+            reasons.append(f"contains secret keyword '{kw}'")
     return bool(reasons), reasons
