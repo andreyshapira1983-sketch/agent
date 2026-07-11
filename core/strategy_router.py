@@ -48,6 +48,7 @@ class OperatorStrategy(str, Enum):
 
     safe_self_check       = "safe_self_check"
     capability_request    = "capability_request"
+    self_task_proposal    = "self_task_proposal"
     capability_check      = "capability_check"
     programming_readiness = "programming_readiness"
     current_gaps_check    = "current_gaps_check"
@@ -58,6 +59,7 @@ class OperatorStrategy(str, Enum):
     budget_status         = "budget_status"
     approval_status       = "approval_status"
     urgent_status         = "urgent_status"
+    best_next_action      = "best_next_action"
     next_actions          = "next_actions"
     autonomy_readiness    = "autonomy_readiness"
     source_review_plan    = "source_review_plan"
