@@ -38,10 +38,16 @@ def _clean_text(text: str, *, max_chars: int = 800) -> str:
     return redacted
 
 
-def _compute_quality_score(verified: int, unverified: int) -> float:
-    """Fraction of evidence chunks that were verified. Returns 1.0 when no
-    chunks exist (general-knowledge answer — neutral, not penalised)."""
-    total = verified + unverified
+def _compute_quality_score(verified: int, unverified: int, weak: int = 0) -> float:
+    """Fraction of evidence chunks that stood up as verified support.
+
+    ``weak`` counts claims the verifier could NOT confirm as faithful support —
+    sub-agent-asserted, cited-but-unmatched, receipt-missing and topic-only
+    chunks. They belong in the denominator, never in the numerator: an answer
+    resting on unconfirmed support must not score as if it were verified.
+    Returns 1.0 only when NO evidence chunks of any kind exist (a pure
+    general-knowledge answer — neutral, not penalised)."""
+    total = verified + unverified + weak
     if total == 0:
         return 1.0
     return round(verified / total, 3)
@@ -75,10 +81,15 @@ class EpisodeRecord:
     source_labels: tuple[str, ...] = ()
     verified_chunks: int = 0
     unverified_chunks: int = 0
+    # Chunks the verifier could not confirm as faithful support: sub-agent
+    # asserted, cited-but-unmatched, receipt-missing, topic-only. They lower
+    # quality and block a clean "success" — an answer leaning on unconfirmed
+    # support is not a reusable skill.
+    weak_chunks: int = 0
     replan_exhausted: bool = False
-    # Quality score: verified / (verified + unverified), clamped to [0, 1].
+    # Quality score: verified / (verified + unverified + weak), clamped to [0, 1].
     # 1.0 when no evidence chunks were seen (general-knowledge answer — neutral).
-    # Computed from verified/unverified; not stored separately in the JSONL.
+    # Computed from the chunk counts; not stored separately in the JSONL.
     answer_quality_score: float = 1.0
     tags: tuple[str, ...] = ()
     # Full answer text — stored verbatim for the episodic fast path.
@@ -99,6 +110,7 @@ class EpisodeRecord:
             "source_labels": list(self.source_labels),
             "verified_chunks": self.verified_chunks,
             "unverified_chunks": self.unverified_chunks,
+            "weak_chunks": self.weak_chunks,
             "replan_exhausted": self.replan_exhausted,
             "tags": list(self.tags),
             "created_at": self.created_at,
@@ -116,10 +128,12 @@ class EpisodeRecord:
             source_labels=tuple(str(x) for x in data.get("source_labels") or ()),
             verified_chunks=max(0, int(data.get("verified_chunks") or 0)),
             unverified_chunks=max(0, int(data.get("unverified_chunks") or 0)),
+            weak_chunks=max(0, int(data.get("weak_chunks") or 0)),
             replan_exhausted=bool(data.get("replan_exhausted", False)),
             answer_quality_score=_compute_quality_score(
                 max(0, int(data.get("verified_chunks") or 0)),
                 max(0, int(data.get("unverified_chunks") or 0)),
+                max(0, int(data.get("weak_chunks") or 0)),
             ),
             tags=tuple(str(x) for x in data.get("tags") or ()),
             full_answer=str(data.get("full_answer") or ""),
@@ -489,12 +503,22 @@ def episode_from_agent_cycle(
     source_labels: Iterable[str],
     verified_chunks: int = 0,
     unverified_chunks: int = 0,
+    weak_chunks: int = 0,
     replan_exhausted: bool = False,
 ) -> EpisodeRecord:
+    verified = max(0, int(verified_chunks))
+    unverified = max(0, int(unverified_chunks))
+    weak = max(0, int(weak_chunks))
     outcome: EpisodeOutcome
     if replan_exhausted:
         outcome = "failed"
-    elif unverified_chunks > verified_chunks and verified_chunks == 0:
+    elif unverified > verified and verified == 0:
+        outcome = "partial"
+    elif weak > 0 and weak >= verified:
+        # The answer leans at least as much on support the verifier could not
+        # confirm (sub-agent claims, unmatched citations, missing receipts) as
+        # on verified evidence. Not a clean success — do NOT let it graduate to
+        # a reusable procedure or bank a 1.0 quality score.
         outcome = "partial"
     else:
         outcome = "success"
@@ -509,12 +533,11 @@ def episode_from_agent_cycle(
         full_answer=answer,
         tools_used=tools,
         source_labels=labels,
-        verified_chunks=max(0, int(verified_chunks)),
-        unverified_chunks=max(0, int(unverified_chunks)),
+        verified_chunks=verified,
+        unverified_chunks=unverified,
+        weak_chunks=weak,
         replan_exhausted=bool(replan_exhausted),
-        answer_quality_score=_compute_quality_score(
-            max(0, int(verified_chunks)), max(0, int(unverified_chunks))
-        ),
+        answer_quality_score=_compute_quality_score(verified, unverified, weak),
         tags=tags,
     )
 

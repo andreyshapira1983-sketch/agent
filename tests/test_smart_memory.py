@@ -117,6 +117,69 @@ def test_failed_or_partial_episode_does_not_become_procedure() -> None:
     assert procedure_from_episode(partial) is None
 
 
+def test_weak_verdicts_block_success_and_procedure() -> None:
+    """Regression: an answer resting on sub-agent-asserted / cited-but-unmatched
+    claims must not be banked as a perfect success or minted into a skill.
+
+    Mirrors the real trace where a sub-agent hallucinated a code bug: the
+    verifier reported verified=4 alongside weak chunks (cited_but_unmatched=4,
+    subagent_asserted=1). Before this fix the turn scored quality 1.0,
+    outcome=success and was consolidated into procedural memory.
+    """
+    episode = episode_from_agent_cycle(
+        goal="introspect the repo",
+        question="what changed and are there bugs?",
+        answer="Confirmed defect: EpisodeRecord.full_answer is dropped.",
+        tools_used=["spawn_subagent"],
+        source_labels=["subagent:bughunter"],
+        verified_chunks=4,
+        unverified_chunks=0,
+        weak_chunks=5,
+    )
+
+    assert episode.outcome == "partial"
+    assert episode.answer_quality_score < 0.5
+    assert episode.weak_chunks == 5
+    assert procedure_from_episode(episode) is None
+
+
+def test_weak_verdicts_dent_quality_but_keep_success_when_dominated() -> None:
+    """A single stray unmatched citation among mostly verified evidence lowers
+    quality without flipping a clean turn to partial."""
+    episode = episode_from_agent_cycle(
+        goal="read a file",
+        question="what is in the file?",
+        answer="the file lists the modules",
+        tools_used=["file_read"],
+        source_labels=["file:doc.txt"],
+        verified_chunks=5,
+        unverified_chunks=0,
+        weak_chunks=1,
+    )
+
+    assert episode.outcome == "success"
+    assert episode.answer_quality_score == round(5 / 6, 3)
+    assert procedure_from_episode(episode) is not None
+
+
+def test_weak_chunks_survive_serialization_round_trip() -> None:
+    episode = episode_from_agent_cycle(
+        goal="g",
+        question="q",
+        answer="a",
+        tools_used=["spawn_subagent"],
+        source_labels=["subagent:x"],
+        verified_chunks=1,
+        unverified_chunks=0,
+        weak_chunks=3,
+    )
+    restored = EpisodeRecord.from_dict(episode.to_dict())
+
+    assert restored.weak_chunks == 3
+    assert restored.answer_quality_score == episode.answer_quality_score
+    assert restored.outcome == episode.outcome
+
+
 def test_procedural_store_upserts_successful_tool_workflow(workspace: Path) -> None:
     store = ProceduralMemoryStore(workspace / "procedures.jsonl")
     episode1 = episode_from_agent_cycle(
