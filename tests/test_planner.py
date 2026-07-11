@@ -401,6 +401,7 @@ def test_corporate_doctrine_question_forces_docs_first_over_core_defaults(
         "docs/AGENT_ANATOMY.md",
         "docs/ROADMAP.md",
         "docs/COMMANDS_MAP.md",
+        "docs/SUBAGENT_LIFECYCLE.md",
     ]
     assert "README.md" not in paths
     assert "core/planner.py" not in paths
@@ -437,14 +438,15 @@ def test_corporate_doctrine_implementation_question_keeps_code_after_docs(
         for src in out.sources
         if src["tool"] == "file_read"
     ]
-    assert paths[:5] == [
+    assert paths[:6] == [
         "docs/future/CORPORATE_MODEL.md",
         "docs/CENTRAL_AGENT_GOVERNANCE.md",
         "docs/AGENT_ANATOMY.md",
         "docs/ROADMAP.md",
         "docs/COMMANDS_MAP.md",
+        "docs/SUBAGENT_LIFECYCLE.md",
     ]
-    assert paths[5:] == ["core/autonomous_runtime.py"]
+    assert paths[6:] == ["core/autonomous_runtime.py"]
 
 
 def test_confidence_evidence_question_forces_verifier_confidence_sources(
