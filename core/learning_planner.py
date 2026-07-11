@@ -23,6 +23,7 @@ _DOCTRINE_CORPORATE_DOC_PATHS: tuple[str, ...] = (
     "docs/AGENT_ANATOMY.md",
     "docs/ROADMAP.md",
     "docs/COMMANDS_MAP.md",
+    "docs/SUBAGENT_LIFECYCLE.md",
 )
 _DOCTRINE_CORPORATE_DOC_PRIORITY: dict[str, int] = {
     path.casefold(): len(_DOCTRINE_CORPORATE_DOC_PATHS) - idx

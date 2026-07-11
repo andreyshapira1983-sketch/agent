@@ -245,6 +245,7 @@ _DOCTRINE_CORPORATE_DOC_PATHS = (
     "docs/AGENT_ANATOMY.md",
     "docs/ROADMAP.md",
     "docs/COMMANDS_MAP.md",
+    "docs/SUBAGENT_LIFECYCLE.md",
 )
 _DOCTRINE_LOW_SIGNAL_DEFAULT_PATHS = (
     "README.md",
@@ -937,7 +938,8 @@ Decision rules:
           file_read docs/CENTRAL_AGENT_GOVERNANCE.md,
           file_read docs/AGENT_ANATOMY.md,
           file_read docs/ROADMAP.md,
-          file_read docs/COMMANDS_MAP.md]
+          file_read docs/COMMANDS_MAP.md,
+          file_read docs/SUBAGENT_LIFECYCLE.md]
 
     Do NOT start with README.md or central mechanics code such as
     core/planner.py, core/loop.py, core/autonomous_runtime.py,
@@ -1394,7 +1396,8 @@ class LLMPlanner:
                 "governance, subagents, self-build, night observation, and "
                 "safe autonomy questions, start with docs/future/CORPORATE_MODEL.md, "
                 "docs/CENTRAL_AGENT_GOVERNANCE.md, docs/AGENT_ANATOMY.md, "
-                "docs/ROADMAP.md, and docs/COMMANDS_MAP.md before central "
+                "docs/ROADMAP.md, docs/COMMANDS_MAP.md, and "
+                "docs/SUBAGENT_LIFECYCLE.md before central "
                 "core/*.py mechanics.]\n"
             )
         confidence_evidence_block = ""
