@@ -100,3 +100,19 @@ class TestRussianIntrospectionMorphology:
     def test_self_comparison_against_own_past_is_not_external(self):
         q = "сравни своё текущее поведение с состоянием до этих PR"
         assert _wants_external_lookup(q) is False
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            # Over-breadth guard: a self-pronoun and a domain-ish noun both occur,
+            # but the pronoun does NOT directly modify the domain noun — these are
+            # about the outside world and must stay eligible for a web lookup.
+            "в своей стране какая архитектура власти",
+            "в своём городе где сдают тесты на covid",
+            "своими руками собрал модуль питания для дома",
+            "в своей компании внедрил реестр клиентов, как лучше",
+            "расскажи про свой любимый язык и его код",
+        ],
+    )
+    def test_pronoun_and_domain_without_adjacency_not_flagged(self, question):
+        assert _is_self_repo_introspection_question(question) is False
