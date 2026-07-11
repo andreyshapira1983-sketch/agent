@@ -53,6 +53,29 @@ def _compute_quality_score(verified: int, unverified: int, weak: int = 0) -> flo
     return round(verified / total, 3)
 
 
+# Laplace (add-one) smoothing prior for procedure confidence. A procedure is a
+# reusable skill distilled from episodes; its confidence must reflect how much
+# EVIDENCE backs it, not just the raw success ratio. Without smoothing a single
+# successful episode yields success/total = 1/1 = 1.0 — the agent would treat a
+# workflow it has seen work exactly once as a certainty. Beta(1,1) smoothing
+# makes one success land at (1+1)/(1+2) = 0.667 (active but modest) and lets
+# confidence climb toward — but never reach — 1.0 as successes accumulate.
+_CONF_PRIOR_SUCCESS: float = 1.0
+_CONF_PRIOR_FAILURE: float = 1.0
+
+
+def _smoothed_confidence(success_count: int, failure_count: int) -> float:
+    """Beta(1,1)-smoothed success probability, rounded to 3 dp.
+
+    ``(success + 1) / (success + failure + 2)`` — a single observation is weak
+    evidence, so one success stays well below 1.0 and grows asymptotically as
+    the workflow keeps succeeding.
+    """
+    numerator = success_count + _CONF_PRIOR_SUCCESS
+    denominator = success_count + failure_count + _CONF_PRIOR_SUCCESS + _CONF_PRIOR_FAILURE
+    return round(numerator / denominator, 3)
+
+
 def _tokens(text: str) -> set[str]:
     normalized = (
         str(text or "")
@@ -195,8 +218,7 @@ class ProcedureRecord:
         episode_ids = tuple(dict.fromkeys([*self.source_episode_ids, episode.id]))
         success_count = self.success_count + (1 if episode.outcome == "success" else 0)
         failure_count = self.failure_count + (1 if episode.outcome == "failed" else 0)
-        total = max(1, success_count + failure_count)
-        confidence = round(success_count / total, 3)
+        confidence = _smoothed_confidence(success_count, failure_count)
         status: ProcedureStatus = "active" if confidence >= 0.6 else "needs_review"
         return ProcedureRecord(
             id=self.id,
