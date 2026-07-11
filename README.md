@@ -11,7 +11,7 @@ Read these in priority order; a higher entry overrides a lower one:
 1. **`AGENT_DOCTRINE.md`** — authoritative rules for how agents must behave.
 2. **Target architecture and component boundaries** — the intended design and
    the responsibilities/limits of each component.
-3. **`roadmap.md`** — the order in which capabilities are developed.
+3. **`docs/ROADMAP.md`** — the order in which capabilities are developed.
 4. **`docs/daemon-progress.md`** — the actual implementation state (which
    sub-items are merged, in review, or not started).
 5. **`README.md`** (this file) — entry point and brief navigation only.
