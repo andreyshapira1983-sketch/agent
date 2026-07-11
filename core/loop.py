@@ -97,6 +97,11 @@ from core.redaction import (
 )
 from core.model_router import ModelRole, ModelRouter
 from core.model_usage import ModelBudgetExceeded
+from core.synth_resilience import (
+    SynthAttempt,
+    build_degraded_synthesis_answer,
+    run_synthesizer_ladder,
+)
 from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult, RememberFn
 from core.user_profile import UserProfile, UserProfileStore, profile_to_prompt_block
 from core.assumption_registry import (  # Layer 5
@@ -340,6 +345,9 @@ class AgentLoop(AgentLoopExtractedMethods):
         # passes `on_token`; read by `_synthesize()`. Reset to None at
         # the end of each cycle so leaking across turns is impossible.
         self._stream_on_token: Any = None
+        # Set by the synthesizer resilience ladder when every synthesis attempt
+        # failed and the turn fell back to an honest degraded answer.
+        self._last_synth_degraded: bool = False
         # MVP-14.1 — provenance scratch state. `_retrieve_persistent`
         # stashes the records it injected so `run()` can fold them into
         # the Evidence chain. `last_provenance` is set at the end of
@@ -1322,8 +1330,15 @@ class AgentLoop(AgentLoopExtractedMethods):
                 )
             except Exception:
                 _synth_llm = _task_synth_llm
-        try:
-            draft_answer = self._synthesize(
+        _saved_on_token = getattr(self, "_stream_on_token", None)
+
+        def _do_synthesize(_attempt: "SynthAttempt") -> str:
+            # Retries must not double-stream tokens: only the first attempt may
+            # stream to the console; adapted/retry attempts render silently and
+            # the final answer is returned normally.
+            if _attempt.index > 0:
+                self._stream_on_token = None
+            return self._synthesize(
                 goal=goal,
                 artifacts=artifacts,
                 question=user_question,
@@ -1333,8 +1348,20 @@ class AgentLoop(AgentLoopExtractedMethods):
                 cycle_findings=list(self._cycle_findings),
                 failure_history=failure_history if replan_exhausted else None,
                 llm=_synth_llm,
-                lean_context=cheap_path_active,
+                # Shrink the prompt/output on the adapted attempt — this is the
+                # recovery for a request the model "could not finish".
+                lean_context=cheap_path_active or _attempt.adapt_context,
             )
+
+        try:
+            _ladder = run_synthesizer_ladder(
+                _do_synthesize,
+                build_degraded_answer=build_degraded_synthesis_answer,
+                on_event=self.log.log,
+                fatal_types=(ModelBudgetExceeded,),
+            )
+            draft_answer = _ladder.answer
+            self._last_synth_degraded = _ladder.degraded
         except ModelBudgetExceeded as exc:
             self._save_budget_pause_checkpoint(
                 _cp,
@@ -1346,6 +1373,8 @@ class AgentLoop(AgentLoopExtractedMethods):
                 blocked=exc,
             )
             raise
+        finally:
+            self._stream_on_token = _saved_on_token
 
         # 7.5 — MVP-14.4 Verifier. LLM is the DRAFT writer; the Verifier
         # gates what reaches the user. Every claim must be cited (LLM
