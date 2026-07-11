@@ -153,15 +153,23 @@ class SelfRepairController:
             ),
         )
         report.steps.append(write.step)
-        if not write.ok:
-            report.status = _blocked_status(write.status)
-            self._finish(report)
-            return report
-
+        # The write tool physically applies the change and registers its
+        # compensation plan *inside* `_call_tool`, which runs before this
+        # controller's own post-call validation gate (see `_execute_tool`).
+        # So a write that ultimately reports not-ok (e.g. output validation
+        # failed) may already have modified the file on disk. Resolve the
+        # registered plan first, and if one exists, roll it back on abort so
+        # a failed write never leaves an orphaned change behind.
         report.compensation_plan_id = _new_compensation_plan_id(
             before_plan_ids,
             self.agent.compensation_log,
         )
+        if not write.ok:
+            report.status = _blocked_status(write.status)
+            if report.compensation_plan_id:
+                self._rollback(report)
+            self._finish(report)
+            return report
 
         post = self._execute_tool(
             name="post_tests",
