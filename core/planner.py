@@ -245,6 +245,14 @@ _DOCTRINE_CORPORATE_DOC_PATHS = (
     "docs/AGENT_ANATOMY.md",
     "docs/ROADMAP.md",
     "docs/COMMANDS_MAP.md",
+)
+# Thematic (conditional) doc group. Unlike the corporate manifest above, this is
+# NOT injected on every doctrine question — only when the question is actually
+# about sub-agents / delegation / team execution / role trust / quarantine /
+# pause / retire / lifecycle. Keeping it out of the universal manifest stops the
+# central agent from reading a growing pile of files on unrelated architecture
+# questions. SUBAGENT_LIFECYCLE.md is the normative sub-agent lifecycle contract.
+_SUBAGENT_GOVERNANCE_DOC_PATHS = (
     "docs/SUBAGENT_LIFECYCLE.md",
 )
 _DOCTRINE_LOW_SIGNAL_DEFAULT_PATHS = (
@@ -442,6 +450,54 @@ def _is_doctrine_corporate_question(question: str) -> bool:
     return len(topic_hits) >= 2 and has_context
 
 
+# Sub-agent governance is a THEMATIC sub-topic. A single strong term (subagent,
+# delegation, team executor, …) is enough; weaker action terms (quarantine,
+# retire, pause, trust boundary, lifecycle) only count when paired with an
+# agent/role context word, so ordinary uses ("pause the build", "retire this
+# feature flag") do not drag in the sub-agent doc. Deliberately two-tier to
+# avoid the over-broadening that plain substring matching causes.
+_SUBAGENT_DOC_STRONG_TERMS = (
+    "subagent",
+    "sub-agent",
+    "sub agent",
+    "spawn_subagent",
+    "team executor",
+    "team_executor",
+    "delegation",
+    "субагент",
+    "сабагент",
+    "подагент",
+    "делегир",
+)
+_SUBAGENT_DOC_CONTEXT_TERMS = (
+    "agent",
+    "агент",
+    "role",
+    "роль",
+)
+_SUBAGENT_DOC_ACTION_TERMS = (
+    "quarantine",
+    "карантин",
+    "retire",
+    "retirement",
+    "requalif",
+    "trust boundary",
+    "довери",
+    "lifecycle",
+    "жизненн",
+    "уволить",
+)
+
+
+def _is_subagent_governance_question(question: str) -> bool:
+    lowered = (question or "").casefold()
+    if any(term in lowered for term in _SUBAGENT_DOC_STRONG_TERMS):
+        return True
+    has_context = any(term in lowered for term in _SUBAGENT_DOC_CONTEXT_TERMS)
+    has_action = any(term in lowered for term in _SUBAGENT_DOC_ACTION_TERMS)
+    return has_context and has_action
+
+
 def _is_confidence_evidence_diagnostic_question(question: str) -> bool:
     lowered = (question or "").casefold()
     return any(term in lowered for term in _CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS)
@@ -609,6 +665,63 @@ def _ensure_doctrine_docs_first(
             + ", ".join(dropped_paths)
         )
     return ordered_docs + remainder
+
+
+def _ensure_subagent_governance_docs_first(
+    sources: list[dict[str, Any]],
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    """Ensure the thematic sub-agent lifecycle doc leads a sub-agent question.
+
+    Placed right after any leading doctrine/corporate docs (so a broad
+    doctrine+subagent question keeps corporate docs first, then the sub-agent
+    contract), or at the very front when no corporate docs are present.
+    """
+    target_norms = {
+        _norm_source_path(path): path for path in _SUBAGENT_GOVERNANCE_DOC_PATHS
+    }
+    corporate_norms = {
+        _norm_source_path(path) for path in _DOCTRINE_CORPORATE_DOC_PATHS
+    }
+
+    found: dict[str, dict[str, Any]] = {}
+    rest: list[dict[str, Any]] = []
+    for src in sources:
+        args = src.get("arguments") or {}
+        path = args.get("path") if isinstance(args, dict) else None
+        norm = _norm_source_path(path) if isinstance(path, str) else ""
+        if src.get("tool") == "file_read" and norm in target_norms and norm not in found:
+            found[norm] = src
+            continue
+        rest.append(src)
+
+    insert_at = 0
+    for src in rest:
+        args = src.get("arguments") or {}
+        path = args.get("path") if isinstance(args, dict) else None
+        norm = _norm_source_path(path) if isinstance(path, str) else ""
+        if src.get("tool") == "file_read" and norm in corporate_norms:
+            insert_at += 1
+        else:
+            break
+
+    ordered_target: list[dict[str, Any]] = []
+    injected: list[str] = []
+    for path in _SUBAGENT_GOVERNANCE_DOC_PATHS:
+        norm = _norm_source_path(path)
+        existing = found.get(norm)
+        if existing is not None:
+            ordered_target.append(existing)
+        else:
+            ordered_target.append(_file_read_source_spec(path))
+            injected.append(path)
+
+    if injected:
+        warnings.append(
+            "subagent governance docs injected for a sub-agent question: "
+            + ", ".join(injected)
+        )
+    return rest[:insert_at] + ordered_target + rest[insert_at:]
 
 
 def _drop_readme_status_sources(
@@ -938,8 +1051,13 @@ Decision rules:
           file_read docs/CENTRAL_AGENT_GOVERNANCE.md,
           file_read docs/AGENT_ANATOMY.md,
           file_read docs/ROADMAP.md,
-          file_read docs/COMMANDS_MAP.md,
-          file_read docs/SUBAGENT_LIFECYCLE.md]
+          file_read docs/COMMANDS_MAP.md]
+
+    SUB-AGENT SUB-TOPIC — if (and only if) the question is specifically about
+    sub-agents, delegation, the team executor, role trust, quarantine, pausing,
+    retiring, or the sub-agent lifecycle, ALSO read docs/SUBAGENT_LIFECYCLE.md
+    (the normative sub-agent lifecycle contract). Do NOT read it for unrelated
+    corporate-model / roadmap / governance questions.
 
     Do NOT start with README.md or central mechanics code such as
     core/planner.py, core/loop.py, core/autonomous_runtime.py,
@@ -1310,6 +1428,17 @@ class LLMPlanner:
                             and not _explicitly_requests_readme(question)
                         ),
                     )
+        if _is_subagent_governance_question(question):
+            if "file_read" not in self.hidden_tools:
+                try:
+                    self.registry.get("file_read")
+                except KeyError:
+                    pass
+                else:
+                    sources = _ensure_subagent_governance_docs_first(
+                        sources,
+                        step_warnings,
+                    )
         # Coverage enforcement: if the question is about test adequacy /
         # coverage and the planner produced a run_tests step without
         # coverage=True, inject it automatically so the synthesizer always
@@ -1396,9 +1525,17 @@ class LLMPlanner:
                 "governance, subagents, self-build, night observation, and "
                 "safe autonomy questions, start with docs/future/CORPORATE_MODEL.md, "
                 "docs/CENTRAL_AGENT_GOVERNANCE.md, docs/AGENT_ANATOMY.md, "
-                "docs/ROADMAP.md, docs/COMMANDS_MAP.md, and "
-                "docs/SUBAGENT_LIFECYCLE.md before central "
+                "docs/ROADMAP.md, and docs/COMMANDS_MAP.md before central "
                 "core/*.py mechanics.]\n"
+            )
+        subagent_docs_block = ""
+        if _is_subagent_governance_question(question):
+            subagent_docs_block = (
+                "[SUBAGENT_DOCS=required — this question is about sub-agents / "
+                "delegation / team executor / role trust / quarantine / pause / "
+                "retire / lifecycle. Read docs/SUBAGENT_LIFECYCLE.md first (the "
+                "normative sub-agent lifecycle contract) before core/*.py "
+                "mechanics.]\n"
             )
         confidence_evidence_block = ""
         if _is_confidence_evidence_diagnostic_question(question):
@@ -1431,6 +1568,7 @@ class LLMPlanner:
             f"{project_memory_block}"
             f"{confidence_evidence_block}"
             f"{doctrine_docs_block}"
+            f"{subagent_docs_block}"
             f"question: {question}\n"
             f"\n"
             f"Return your JSON plan now."
