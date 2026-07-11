@@ -555,6 +555,14 @@ def _grounded_candidate_actionable(candidate: Any, workspace: str | Path) -> boo
     treated as not actionable.
     """
     target = str(getattr(candidate, "target_path", "") or "")
+    # Scale filter at SELECTION time: an oversized module-split cannot be done
+    # safely in one Builder shot, so treat it as non-actionable here. This lets
+    # the default grounded selector advance to the NEXT candidate within the same
+    # run instead of picking a doomed split that the produce-phase gate would only
+    # refuse (ending the run with no progress). The produce gate stays as a
+    # defense-in-depth backstop for callers that inject a candidate directly.
+    if _oversized_split_candidate(candidate, workspace):
+        return False
     if _is_self_build_target_allowed(target):
         return True
     try:
@@ -598,6 +606,42 @@ def _candidate_concrete_targets(candidate: Any, workspace: str | Path) -> set[st
     except Exception:  # noqa: BLE001 — a broken mapper must never break selection
         pass
     return out
+
+
+def _oversized_split_candidate(candidate: Any, workspace: str | Path) -> bool:
+    """True if this candidate is a module-split whose concrete target is too large
+    for a safe single-shot Builder split.
+
+    Used to mark such a candidate NON-actionable at selection time so the default
+    grounded selector advances to the next candidate WITHIN the same run, instead
+    of picking a doomed 1000+ line split that the produce-phase scale gate would
+    only refuse — which would end the run with no progress. The produce-phase gate
+    (see the scale filter in :func:`produce_self_apply_proposal`) remains as a
+    defense-in-depth backstop for callers that inject a specific candidate
+    directly. Best-effort: any mapper/read failure returns ``False`` (treated as
+    not oversized), and it never raises.
+    """
+    try:
+        mapping = map_backlog_candidate(
+            candidate,
+            workspace=workspace,
+            allowed_targets=DEFAULT_CANDIDATE_TARGETS,
+        )
+    except Exception:  # noqa: BLE001 — a broken mapper must never break selection
+        return False
+    if not (mapping.ok and mapping.candidate is not None):
+        return False
+    if getattr(mapping, "mapping_rule", None) != "split_module":
+        return False
+    concrete = str(mapping.candidate.target_path or "").replace("\\", "/").strip()
+    if not concrete:
+        return False
+    try:
+        content = (Path(workspace) / concrete).read_text(encoding="utf-8")
+    except Exception:  # noqa: BLE001 — an unreadable target is not "oversized"
+        return False
+    too_large, _ = _split_target_too_large(content)
+    return too_large
 
 
 def _default_grounded_selector(
