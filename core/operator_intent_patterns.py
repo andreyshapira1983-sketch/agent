@@ -69,10 +69,14 @@ def _matches_self_build_request(text: str) -> bool:
     # (:self-build-produce), which creates at most ONE approval item and stops —
     # it never applies code (apply is a separate human-gated step). Requires an
     # explicit start/begin verb next to a self-programming target, and rejects
-    # questions, descriptions and negations so "как агент программирует себя?"
-    # and "не начинай …" stay out. Routed BEFORE the _looks_like_self_build_request
-    # None-guard so ONLY these explicit start phrases reach the producer;
-    # every other self-build mention still falls through to the planner.
+    # questions, descriptions, negations and meta/rule/test-phrase discussion so
+    # "как ты программируешь себя?", "не начинай …" and "добавь matcher для этой
+    # формулировки" stay out. Checked BEFORE _looks_like_meta_instruction so a
+    # real command may still say "ничего не применяй без моего согласия" (an
+    # apply-consent clause) without being swallowed by that shared guard, and
+    # BEFORE the _looks_like_self_build_request None-guard so ONLY these explicit
+    # start phrases reach the producer; every other self-build mention still
+    # falls through to the planner.
     target = _has_any(
         text,
         (
@@ -108,6 +112,7 @@ def _matches_self_build_request(text: str) -> bool:
     )
     if not (target and start):
         return False
+    # Questions / descriptions / self-build negations / meta-authoring wording.
     blockers = (
         "не начин",
         "не запуск",
@@ -128,11 +133,35 @@ def _matches_self_build_request(text: str) -> bool:
         "зачем",
         "how do",
         "how can",
+        "how does",
         "can you",
         "could you",
         "is it possible",
+        # rule / discussion / test-phrase / matcher-authoring contexts
+        "правил",
+        "обсужд",
+        "тестовой фраз",
+        "тестовая фраз",
+        "тестовую фраз",
+        "matcher",
+        "формулировк",
     )
     if _has_any(text, blockers):
+        return False
+    # Reuse the shared meta-instruction guard to reject genuine rule/spec text,
+    # but first neutralize the apply-consent phrasing that is legitimate inside a
+    # real self-build command ("ничего не применяй без моего согласия").
+    consent_stripped = text
+    for consent in (
+        "не применяй",
+        "не применяя",
+        "не применить",
+        "не примени",
+        "без моего согласия",
+        "без согласия",
+    ):
+        consent_stripped = consent_stripped.replace(consent, " ")
+    if _looks_like_meta_instruction(consent_stripped):
         return False
     return True
 
