@@ -120,17 +120,23 @@ _SELF_REPO_INTROSPECTION_TERMS = (
 # appears (e.g. "compare your architecture with AutoGen").
 _EXTERNAL_LOOKUP_TERMS = (
     "http://", "https://", "www.",
-    "compare with", "compared to", "compare against", "versus", " vs ",
     "latest news", "current news", "on the web", "on the internet",
     "search the web", "search online", "look it up", "look up online",
     "autogen", "metagpt", "langchain", "langgraph", "crewai", "autogpt",
     "arxiv", "research paper", "papers on", "state of the art", "state-of-the-art",
     # Russian
-    "сравни с", "сравнить с", "сравни со", "в сравнении с",
     "в интернете", "в сети интернет", "в вебе", "в вэбе",
     "последние новости", "поиск в интернете", "на рынке", "в открытых источник",
-    "научн", "arxiv", "статью", "статьи про",
+    "научн", "статью", "статьи про",
 )
+# Comparison verbs ("compare", "сравни") do NOT by themselves imply an external
+# lookup — you can compare the agent against its OWN past state ("сравни своё
+# поведение с состоянием до этих PR"). A genuine *external* comparison is
+# signalled by the comparison TARGET (a named framework above, a URL, or a web
+# phrase). Treating a bare comparison verb as external caused a real regression:
+# the substring "сравни с" matched inside "сравни своё…", so a purely
+# introspective question was mis-flagged as external and web_search was allowed
+# to run, polluting the source registry. See _wants_external_lookup.
 
 _DOCTRINE_CORPORATE_STRONG_TERMS = (
     "corporate model",
