@@ -1042,6 +1042,8 @@ def _dispatch_operator_intent(
 ) -> bool:
     if intent.kind == "capability_request":
         return _handle_capability_request(original_text, agent, workspace)
+    if intent.kind == "self_task_proposal":
+        return _handle_self_task_propose("", agent, workspace)
     if intent.kind == "safe_self_check":
         return _handle_operator_check("", agent, workspace)
     if intent.kind == "capability_check":
@@ -1066,6 +1068,8 @@ def _dispatch_operator_intent(
         return _handle_approval_list("all", agent, workspace)
     if intent.kind == "urgent_status":
         return _handle_urgent_status("", agent, workspace)
+    if intent.kind == "best_next_action":
+        return _handle_best_next_action("", agent, workspace)
     if intent.kind == "next_actions":
         return _handle_next_actions("", agent, workspace)
     if intent.kind == "autonomy_readiness":
