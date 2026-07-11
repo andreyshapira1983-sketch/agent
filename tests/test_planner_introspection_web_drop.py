@@ -85,6 +85,23 @@ class TestIntrospectionDetector:
         assert _wants_external_lookup(q) is True
         assert _is_self_repo_introspection_question(q) is False
 
+    @pytest.mark.parametrize(
+        "question",
+        [
+            # Regression: a bare comparison verb against the agent's OWN past must
+            # NOT be treated as external. "сравни с" used to substring-match inside
+            # "сравни своё…", mis-flagging a purely introspective question and
+            # letting web_search run (polluting the source registry).
+            "Сравни своё текущее поведение с состоянием до этих трёх PR в своём репозитории",
+            "Сравни свою архитектуру с тем, что было раньше",
+            "Compare your codebase behavior with the state before these PRs, look at your repository",
+            "Compared to before, what changed in your codebase?",
+        ],
+    )
+    def test_self_comparison_is_not_external(self, question: str) -> None:
+        assert _wants_external_lookup(question) is False
+        assert _is_self_repo_introspection_question(question) is True
+
 
 class TestDropHelper:
     def test_drops_all_web_egress_keeps_local(self) -> None:
