@@ -107,6 +107,10 @@ budget, and self-directed multi-agent coordination. See
 **Status: IMPLEMENTED.**
 
 - REPL `:command` surface — see `docs/COMMANDS_MAP.md` (built from `main.py`).
+- Natural-language routing (intent parity): plain-language operator messages
+  are mapped to their `:command` equivalents by the deterministic no-LLM router
+  in `core/operator_intent.py` / `core/operator_intent_patterns.py`. See the
+  "Natural-language routing (intent parity)" section in `docs/COMMANDS_MAP.md`.
 - Structured JSONL logging: `core/logger`; trace ids: `core/ids`.
 - Read-only audits: `core/architecture_audit` (`:architecture-audit`),
   `core/model_registry_audit`, `core/release_hygiene`, `core/supply_chain`.
