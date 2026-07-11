@@ -51,6 +51,39 @@ _DEFAULT_MAX_VERIFIED_RATIO = 0.20
 _DEFAULT_UNVERIFIED_FLOOR = 6
 
 
+# Roles whose deliverable is NEW synthesized code / docstring / diff rather than
+# factual claims about the world. Such output can never appear verbatim in the
+# source file it was derived from, so the factual verifier marks it "unverified"
+# and the low-evidence gate would delete exactly what the user asked to create.
+# For these roles the synthesis IS the deliverable — evidence is not expected.
+_GENERATIVE_ROLES: frozenset[str] = frozenset({"programmer"})
+
+
+def is_evidence_expected(
+    *,
+    role: str = "",
+    chain_was_empty: bool = False,
+    realtime_required: bool = True,
+) -> bool:
+    """Whether the low-evidence truncation gate should apply to this turn.
+
+    Evidence is NOT expected (gate disabled) when either:
+
+      * the deliverable is generative code (``role`` in ``_GENERATIVE_ROLES``) —
+        a docstring/diff/code turn that read a file as *input* still produces new
+        text that cannot be verbatim-verified against that file; or
+      * the evidence chain is empty AND the question carries no realtime intent
+        (a pure reasoning/design answer where the model's synthesis is the whole
+        deliverable and there is nothing to cite).
+
+    Factual / realtime turns (researcher, technical_report, operator_chat, …)
+    keep the full gate, so unsupported factual answers are still suppressed.
+    """
+    if role in _GENERATIVE_ROLES:
+        return False
+    return not (chain_was_empty and not realtime_required)
+
+
 @dataclass(frozen=True)
 class LowEvidencePolicyResult:
     """Outcome of one evaluation."""
