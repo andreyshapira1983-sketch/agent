@@ -466,12 +466,40 @@ def test_routes_self_build_request_phrases_locally():
         assert intent.command == ":self-build-produce", phrase
 
 
+def test_self_build_request_routes_despite_apply_consent_clause():
+    # The full operator command carries an apply-consent clause ("ничего не
+    # применяй без моего согласия"). "не применяй" would trip the shared
+    # meta-instruction guard, so the self-build matcher must run BEFORE it and
+    # tolerate the consent phrasing.
+    intent = route_operator_intent(
+        "Начни безопасно программировать себя. Найди одну реальную небольшую "
+        "проблему в своём коде, подготовь одно исправление и передай его мне "
+        "на проверку. Ничего не применяй без моего согласия"
+    )
+    assert intent is not None
+    assert intent.kind == "self_build_request"
+    assert intent.command == ":self-build-produce"
+
+
 def test_self_build_request_ignores_questions_and_negations():
     # Descriptions, questions and negations must NOT trigger the producer.
     for phrase in (
-        "Расскажи, как агент может программировать себя",
-        "Может ли агент программировать себя?",
+        "Расскажи, как ты программируешь себя",
+        "Можешь ли ты программировать себя?",
+        "Как работает self-build?",
         "Не начинай программировать себя",
+        "Не запускай self-build",
+    ):
+        assert route_operator_intent(phrase) is None, phrase
+
+
+def test_self_build_request_ignores_rule_and_matcher_discussion():
+    # Meta / rule / test-phrase / matcher-authoring text that merely QUOTES the
+    # trigger phrase must not route to the producer.
+    for phrase in (
+        'правило: если пользователь пишет "начни программировать себя", не маршрутизируй',
+        'Обсудим тестовую фразу "начни программировать себя"',
+        'Просьба добавить matcher для формулировки "начни программировать себя"',
     ):
         assert route_operator_intent(phrase) is None, phrase
 

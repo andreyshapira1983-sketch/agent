@@ -1751,29 +1751,38 @@ Produce a patch proposal for the routing bug.
         monkeypatch: pytest.MonkeyPatch,
         capsys,
     ):
-        # "Начни программировать себя" must reach the deterministic self-build
-        # producer directly — never the general planner (agent.run).
+        # The full natural-language command must reach the deterministic
+        # self-build producer directly — never the general planner (agent.run)
+        # and never the self-apply lane (no code is applied). The command even
+        # contains an apply-consent clause ("ничего не применяй без моего
+        # согласия") that must NOT block routing.
         agent = _build_agent(workspace)
 
-        calls: list[str] = []
+        produce_calls: list[str] = []
 
         def _spy_produce(rest, ag, ws) -> bool:
-            calls.append(rest)
+            produce_calls.append(rest)
             return True
 
         def _run_must_not_be_called(*args, **kwargs):
             raise AssertionError("agent.run (planner) must not run for self_build_request")
 
+        def _apply_must_not_be_called(*args, **kwargs):
+            raise AssertionError("_handle_self_apply_run must not run — no code may be applied")
+
         monkeypatch.setattr(main_module, "_handle_self_build_produce", _spy_produce)
+        monkeypatch.setattr(main_module, "_handle_self_apply_run", _apply_must_not_be_called)
         monkeypatch.setattr(agent, "run", _run_must_not_be_called)
 
         assert handle_conversational_operator_input(
-            "Начни безопасно программировать себя",
+            "Начни безопасно программировать себя. Найди одну реальную небольшую "
+            "проблему в своём коде, подготовь одно исправление и передай его мне "
+            "на проверку. Ничего не применяй без моего согласия",
             agent,
             workspace,
         ) is True
 
-        assert calls == [""]  # producer invoked exactly once, no residual args
+        assert produce_calls == [""]  # producer invoked exactly once, no residual args
         assert "operator intent: self_build_request" in capsys.readouterr().err
 
     def test_conversational_self_build_question_is_not_routed_to_producer(
