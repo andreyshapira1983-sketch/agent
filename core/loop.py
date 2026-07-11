@@ -3252,7 +3252,16 @@ class AgentLoop(AgentLoopExtractedMethods):
                 action.tool_name or "", "tool_output"
             )
             flat_output = _to_text(result.output)
-            cls_result = classify(flat_output, source=source_hint)
+            # Trusted internal tools (our own logs, files, diffs, test output)
+            # live inside the trusted boundary. A bare mention of a credential
+            # word like "api_key" in that content is not a leaked secret and
+            # must not quarantine the agent's own evidence — so the soft
+            # keyword layer is disabled for them. Real credential SHAPES
+            # (regex spans) are still detected and classified SECRET.
+            keyword_secrets = (action.tool_name or "") not in _TRUSTED_INTERNAL_TOOLS
+            cls_result = classify(
+                flat_output, source=source_hint, keyword_secrets=keyword_secrets
+            )
             self.log.log(
                 "data_classified",
                 {
