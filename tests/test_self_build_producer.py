@@ -1292,3 +1292,59 @@ def test_cooldown_selector_noop_without_exclusions(workspace: Path, monkeypatch)
 
     selector = mod._default_grounded_selector(workspace)
     assert selector() is first
+
+
+def test_selector_skips_oversized_split_and_picks_next(workspace: Path, monkeypatch):
+    # C at selection time: an oversized module-split is non-actionable, so the
+    # selector advances to the next actionable candidate WITHIN the same run
+    # instead of ending the run on a doomed split.
+    from core.self_build_producer import _MAX_SPLIT_TARGET_LINES
+    import core.self_build_producer as mod
+    import core.backlog_selector as bl
+
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    big_rel = "core/huge_mod.py"
+    big = "".join(f"x{i} = {i}\n" for i in range(_MAX_SPLIT_TARGET_LINES + 50))
+    (workspace / big_rel).write_text(big, encoding="utf-8")
+
+    split_cand = types.SimpleNamespace(
+        target_path=f"split:{big_rel}",
+        signal_source="oversized_module",
+        evidence_ref=f"oversized_module:{big_rel}",
+        problem_quote="module is oversized",
+        proposed_change="split",
+        proof_of_value="",
+        expected_effect="",
+        confidence=0.4,
+    )
+    nxt = _Candidate("core/redaction.py", "tidy a helper", "TECH_DEBT.md:2")
+    monkeypatch.setattr(bl, "load_backlog", lambda *a, **k: [split_cand, nxt])
+
+    selector = mod._default_grounded_selector(workspace)
+    assert selector() is nxt
+
+
+def test_selector_keeps_small_split_actionable(workspace: Path, monkeypatch):
+    # A normal-sized split stays actionable and is picked first (no false skip).
+    import core.self_build_producer as mod
+    import core.backlog_selector as bl
+
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    small_rel = "core/small_mod.py"
+    (workspace / small_rel).write_text("def a():\n    return 1\n", encoding="utf-8")
+
+    split_cand = types.SimpleNamespace(
+        target_path=f"split:{small_rel}",
+        signal_source="oversized_module",
+        evidence_ref=f"oversized_module:{small_rel}",
+        problem_quote="module is oversized",
+        proposed_change="split",
+        proof_of_value="",
+        expected_effect="",
+        confidence=0.4,
+    )
+    nxt = _Candidate("core/redaction.py", "tidy", "TECH_DEBT.md:2")
+    monkeypatch.setattr(bl, "load_backlog", lambda *a, **k: [split_cand, nxt])
+
+    selector = mod._default_grounded_selector(workspace)
+    assert selector() is split_cand
