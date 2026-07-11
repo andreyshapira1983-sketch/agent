@@ -186,3 +186,65 @@ def test_recent_lessons_swallows_store_errors() -> None:
             raise RuntimeError("disk full")
 
     assert recent_self_build_lessons(_FakeAgent(_Boom()), "core/x.py") == []
+
+
+# ── recently_vetoed_self_build_targets (cooldown after a critic veto) ─────────
+
+
+class _TaggedEpisode:
+    def __init__(self, tags) -> None:
+        self.tags = tuple(tags)
+
+
+class _TagFilterStore:
+    """search_by_tags with the real AND semantics (all required tags present)."""
+
+    def __init__(self, episodes) -> None:
+        self._episodes = list(episodes)
+        self.queried_tags = None
+
+    def search_by_tags(self, tags, *, limit: int = 5):
+        self.queried_tags = list(tags)
+        required = frozenset(tags)
+        return [e for e in self._episodes if required <= set(e.tags)][:limit]
+
+
+def test_recently_vetoed_targets_extracts_path_from_veto_episodes() -> None:
+    from cli.self_build_memory import recently_vetoed_self_build_targets
+
+    store = _TagFilterStore([
+        _TaggedEpisode(("self-build", "critic_veto", "failed", "core/model_router.py")),
+        _TaggedEpisode(("self-build", "proposed", "success", "core/redaction.py")),
+        _TaggedEpisode(("self-build", "critic_veto", "failed", "docs/self_build.md")),
+    ])
+    got = recently_vetoed_self_build_targets(_FakeAgent(store))
+    assert got == frozenset({"core/model_router.py", "docs/self_build.md"})
+    # Scoped to vetoed self-build episodes only.
+    assert "self-build" in store.queried_tags
+    assert "critic_veto" in store.queried_tags
+
+
+def test_recently_vetoed_targets_ignores_non_path_tags() -> None:
+    from cli.self_build_memory import recently_vetoed_self_build_targets
+
+    store = _TagFilterStore([
+        # a veto episode with no path-like tag yields nothing (not a crash).
+        _TaggedEpisode(("self-build", "critic_veto", "failed")),
+    ])
+    assert recently_vetoed_self_build_targets(_FakeAgent(store)) == frozenset()
+
+
+def test_recently_vetoed_targets_is_empty_without_store() -> None:
+    from cli.self_build_memory import recently_vetoed_self_build_targets
+
+    assert recently_vetoed_self_build_targets(_FakeAgent(None)) == frozenset()
+
+
+def test_recently_vetoed_targets_swallows_store_errors() -> None:
+    from cli.self_build_memory import recently_vetoed_self_build_targets
+
+    class _Boom:
+        def search_by_tags(self, tags, *, limit: int = 20):  # noqa: ARG002
+            raise RuntimeError("disk full")
+
+    assert recently_vetoed_self_build_targets(_FakeAgent(_Boom())) == frozenset()

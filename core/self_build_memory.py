@@ -145,6 +145,35 @@ def recent_self_build_lessons(agent: Any, target: str, *, limit: int = 3) -> lis
         return []
 
 
+def recently_vetoed_self_build_targets(agent: Any, *, limit: int = 20) -> frozenset[str]:
+    """Return concrete target paths whose LAST self-build attempt was critic-vetoed.
+
+    Reads the agent's episodic memory for lesson episodes tagged with BOTH
+    ``self-build`` and ``critic_veto`` and extracts the file-path tag each such
+    episode carries (see :func:`build_self_build_episode`). The producer uses this
+    as a short cooldown set so the very next ``:self-build-produce`` run skips a
+    target it just failed on and advances to the next grounded candidate instead
+    of re-picking the same wall. Best-effort: returns an empty set when memory is
+    unavailable or empty, and never raises.
+    """
+    try:
+        store = getattr(agent, "episodic_store", None)
+        if store is None:
+            return frozenset()
+        episodes = store.search_by_tags(["self-build", "critic_veto"], limit=limit)
+        targets: set[str] = set()
+        for episode in episodes:
+            for tag in getattr(episode, "tags", ()) or ():
+                candidate = str(tag).replace("\\", "/").strip()
+                if "/" in candidate and (
+                    candidate.endswith(".py") or candidate.endswith(".md")
+                ):
+                    targets.add(candidate)
+        return frozenset(targets)
+    except Exception:  # noqa: BLE001 — cooldown recall must never break the caller
+        return frozenset()
+
+
 def _recent_self_improvement_events(
     agent: Any,
     workspace: Path,
