@@ -11,6 +11,7 @@ from tools.base import Tool
 
 
 MAX_BYTES = 1_000_000  # 1 MB hard cap for MVP
+_MAX_HINT_ENTRIES = 40  # cap the "did you mean" listing so error stays compact
 
 
 class FileReadTool(Tool):
@@ -30,6 +31,54 @@ class FileReadTool(Tool):
         normalize separators before giving the path to ``pathlib``.
         """
         return Path(raw_path.strip().replace("\\", "/"))
+
+    def _nearest_dir_hint(self, target: Path) -> str:
+        """Best-effort listing of REAL entries near a missing path.
+
+        When a path guess misses, we walk up to the nearest ancestor
+        directory that actually exists (staying inside the sandbox) and
+        list its entries. This text rides along in the FileNotFoundError
+        message, which the loop surfaces to the planner inside the
+        ``<replan_context>`` block as the failed step's ``reason``. The
+        planner can then self-correct to a real path instead of guessing
+        again — i.e. the agent "scans itself" at the moment it guessed wrong.
+        """
+        probe = target.parent
+        while True:
+            try:
+                probe.relative_to(self.workspace_root)
+            except ValueError:
+                return ""  # walked above the sandbox; give no hint
+            if probe.is_dir():
+                break
+            if probe == probe.parent:
+                return ""  # reached filesystem root without a real dir
+            probe = probe.parent
+
+        try:
+            entries = sorted(
+                p.name + ("/" if p.is_dir() else "")
+                for p in probe.iterdir()
+                if not p.name.startswith(".")
+            )
+        except OSError:
+            return ""
+        if not entries:
+            return ""
+
+        shown = entries[:_MAX_HINT_ENTRIES]
+        more = (
+            ""
+            if len(entries) <= _MAX_HINT_ENTRIES
+            else f", … (+{len(entries) - _MAX_HINT_ENTRIES} more)"
+        )
+        rel = probe.relative_to(self.workspace_root)
+        where = "workspace root" if str(rel) == "." else f"'{rel.as_posix()}'"
+        return (
+            f". Nearest existing directory {where} actually contains: "
+            f"{', '.join(shown)}{more}. "
+            f"Use one of these real paths instead of guessing."
+        )
 
     def run(self, path: str) -> str:
         # Read-only file access may target user-supplied local documents
@@ -54,7 +103,9 @@ class FileReadTool(Tool):
             raise PermissionError(f"Path escapes workspace: {target}") from exc
 
         if not target.exists():
-            raise FileNotFoundError(f"File not found: {target}")
+            raise FileNotFoundError(
+                f"File not found: {target}{self._nearest_dir_hint(target)}"
+            )
         if not target.is_file():
             raise IsADirectoryError(f"Not a file: {target}")
 
