@@ -125,3 +125,44 @@ def test_cyrillic_stems_unaffected_by_boundary_fix():
     )
     assert not r.has_mismatch
     assert set(r.matched_tools) == {"list_dir", "file_read"}
+
+
+def test_generic_cyrillic_stems_do_not_trigger_reverse_direction():
+    # Regression for the "reasoning_action_mismatch fires every turn" bug.
+    # Ordinary planner prose uses generic verb/noun stems ("содержимое",
+    # "выполню", "запущу", "загружу", "сегодня") that must NOT be treated
+    # as advocacy for list_dir / shell_exec / current_time in the reverse
+    # direction when those tools were never planned.
+    cases = [
+        # "read the file's content" -> must not imply a missing list_dir
+        ("Прочитаю содержимое файла core/loop.py.", ["file_read"]),
+        # "perform a search / read files" -> must not imply shell_exec
+        ("Выполню поиск по репозиторию и прочитаю файлы.", ["file_read"]),
+        # "run a command / load the result" -> shell_exec IS planned, so
+        # the reverse scan must not additionally flag anything spurious
+        ("Запущу команду и загружу результат.", ["shell_exec"]),
+    ]
+    for reasoning, tools in cases:
+        r = check_reasoning_actions(reasoning, tools)
+        assert r.mentioned_but_not_planned == (), (
+            f"{reasoning!r} spuriously flagged {r.mentioned_but_not_planned}"
+        )
+
+
+def test_today_mention_does_not_imply_missing_current_time():
+    # "Сегодня отвечу..." must not be read as advocacy for current_time.
+    r = check_reasoning_actions(
+        "Сегодня отвечу из общих знаний, ничего искать не нужно.",
+        [],
+    )
+    assert "current_time" not in r.mentioned_but_not_planned
+
+
+def test_strong_single_token_still_triggers_reverse_direction():
+    # High-precision single tokens (product/library names) remain strong
+    # advocacy signals so genuine mismatches are still surfaced.
+    r = check_reasoning_actions(
+        "Just run pytest to confirm the suite is green.",
+        ["file_read"],
+    )
+    assert "run_tests" in r.mentioned_but_not_planned
