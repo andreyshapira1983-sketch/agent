@@ -92,6 +92,46 @@ _PROJECT_MEMORY_TAG_TERMS = (
     "tech_debt.md",
     "tech-debt.md",
 )
+# Signals that a question is introspection about the agent's OWN private repo /
+# self — code, architecture, memory, sub-agents, its own PRs. The public web
+# cannot answer these; a web_search here only returns generic noise (e.g. a CNN
+# homepage) that then pollutes the source registry. See _drop_web_lookup_for_introspection.
+_SELF_REPO_INTROSPECTION_TERMS = (
+    # English
+    "your repository", "your repo", "your codebase", "your code",
+    "your architecture", "your own architecture", "your memory",
+    "your long-term memory", "your subagent", "your sub-agent",
+    "your subagents", "your sub-agents", "your behavior", "your behaviour",
+    "your own behavior", "your own behaviour", "yourself", "self-repair",
+    "self repair", "your weaknesses", "your own weaknesses", "your tests",
+    # Russian (stemmed to survive inflection)
+    "свой репозитор", "своё репозитор", "своем репозитор", "своём репозитор",
+    "твой репозитор", "твоем репозитор", "твоём репозитор",
+    "своей архитектур", "свою архитектур", "своего кода", "твоей архитектур",
+    "своей памяти", "твоей памяти", "долговременной памяти", "долговременную память",
+    "своём поведени", "своем поведени", "твоём поведени", "твоем поведени",
+    "своего поведени", "твоего поведени", "субагент", "суб-агент",
+    "своих слабых мест", "свои слабые места", "своей работе", "своей работы",
+    "в собственной работе", "собственной архитектур",
+)
+# Negative guard: signals the question genuinely wants outside / current / web
+# information or a comparison against a named external system. When present, the
+# web egress is legitimate and must NOT be dropped even if a self-repo term also
+# appears (e.g. "compare your architecture with AutoGen").
+_EXTERNAL_LOOKUP_TERMS = (
+    "http://", "https://", "www.",
+    "compare with", "compared to", "compare against", "versus", " vs ",
+    "latest news", "current news", "on the web", "on the internet",
+    "search the web", "search online", "look it up", "look up online",
+    "autogen", "metagpt", "langchain", "langgraph", "crewai", "autogpt",
+    "arxiv", "research paper", "papers on", "state of the art", "state-of-the-art",
+    # Russian
+    "сравни с", "сравнить с", "сравни со", "в сравнении с",
+    "в интернете", "в сети интернет", "в вебе", "в вэбе",
+    "последние новости", "поиск в интернете", "на рынке", "в открытых источник",
+    "научн", "arxiv", "статью", "статьи про",
+)
+
 _DOCTRINE_CORPORATE_STRONG_TERMS = (
     "corporate model",
     "central agent governance",
@@ -294,6 +334,25 @@ def _should_prefer_memory_over_readme(question: str, history: str) -> bool:
         and not _explicitly_requests_readme(question)
         and not _explicitly_requests_architecture_reference(question)
     )
+
+
+def _wants_external_lookup(question: str) -> bool:
+    """True when the question genuinely needs outside/web/current information or
+    a comparison against a named external system — the one case where web egress
+    on a self-referential question is still legitimate."""
+    lowered = (question or "").casefold()
+    return any(term in lowered for term in _EXTERNAL_LOOKUP_TERMS)
+
+
+def _is_self_repo_introspection_question(question: str) -> bool:
+    """True when the question is purely about the agent's OWN private repo/self
+    and carries no external-lookup intent. Such questions cannot be answered by
+    the public web; a web_search only harvests irrelevant noise that pollutes
+    the source registry."""
+    lowered = (question or "").casefold()
+    if not any(term in lowered for term in _SELF_REPO_INTROSPECTION_TERMS):
+        return False
+    return not _wants_external_lookup(question)
 
 
 def _is_doctrine_corporate_question(question: str) -> bool:
@@ -501,6 +560,33 @@ def _drop_readme_status_sources(
             warnings.append(
                 "file_read README.md dropped for broad project status because "
                 "fresh long_term_memory is available"
+            )
+            continue
+        filtered.append(src)
+    return filtered
+
+
+# Web-egress tools that reach the public internet with an open-ended query.
+# On a pure self-repo introspection question these can only return irrelevant
+# hits that pollute the source registry, so they are dropped at plan time.
+_WEB_EGRESS_TOOLS = frozenset({"web_search", "web_fetch", "rss_fetch"})
+
+
+def _drop_web_lookup_for_introspection(
+    sources: list[dict[str, Any]],
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    """Remove web-egress steps from a plan for a self-repo introspection
+    question. The public web cannot answer "what changed in your own repo / what
+    bug is in your architecture / what's in your memory"; a web_search there only
+    harvests noise (e.g. a CNN homepage) that then gets ingested as a source."""
+    filtered: list[dict[str, Any]] = []
+    for src in sources:
+        if src.get("tool") in _WEB_EGRESS_TOOLS:
+            label = src.get("label") or src.get("tool")
+            warnings.append(
+                f"{src.get('tool')} dropped for self-repo introspection question "
+                f"(public web cannot answer it; would pollute the source registry): {label}"
             )
             continue
         filtered.append(src)
@@ -1112,6 +1198,8 @@ class LLMPlanner:
         )
         if _should_prefer_memory_over_readme(question, history):
             sources = _drop_readme_status_sources(sources, step_warnings)
+        if _is_self_repo_introspection_question(question):
+            sources = _drop_web_lookup_for_introspection(sources, step_warnings)
         if _is_confidence_evidence_diagnostic_question(question):
             if "file_read" in self.hidden_tools:
                 step_warnings.append(
