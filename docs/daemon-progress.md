@@ -231,10 +231,11 @@ Each sub-item reports four independent fields so the status is unambiguous:
 
 ## 2.2 File watcher
 
-- **implementation:** completed | **main_pr:** open (draft) | **hotfix:** none | **acceptance:** pending
+- **implementation:** completed | **main_pr:** #45 open (draft) | **hotfix:** none | **acceptance:** pending
 - **Branch:** `andreyshapira1983-sketch-daemon-2-2-file-watcher` (created via the
   branch-rename tool; the tool prefixed/truncated the stored ref, but the PR
   title and this entry are the source of truth for the sub-item mapping)
+- **Pull Request:** #45 (draft)
 - **Last updated:** 2026-07-11
 - **Implementation:** New `app/file_watcher.py` with `FileWatcher` — the second
   daemon event source (after the 2.1 timer scheduler). It watches a set of files
@@ -304,7 +305,7 @@ Each sub-item reports four independent fields so the status is unambiguous:
 | 1.3 | Single-instance guarantee | merged incl. hotfix (acceptance pending) |
 | 1.4 | Windows service launch | merged (acceptance pending) |
 | 2.1 | Timer events (in-loop scheduler) | merged (acceptance pending) |
-| 2.2 | File watcher | PR open (draft) |
+| 2.2 | File watcher | PR #45 open (draft) |
 | 2.3 | Instant wake on new RuntimeTask | not started |
 | 2.4 | External events | skipped (explicitly deferred) |
 | 3.1 | Priority event queue | not started |
