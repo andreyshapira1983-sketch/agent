@@ -1182,6 +1182,15 @@ def test_subagent_governance_detector_contextual_pair() -> None:
     assert _is_subagent_governance_question("карантин для агента")
 
 
+def test_subagent_governance_detector_pause_route() -> None:
+    # "pause" is documented as a routing action; the positive branch must work
+    # (agent/role context + a pause form), while a bare build pause must not.
+    assert _is_subagent_governance_question("pause this agent")
+    assert _is_subagent_governance_question("поставь роль на паузу")
+    assert not _is_subagent_governance_question("pause the build")
+    assert not _is_subagent_governance_question("пауза в сборке")
+
+
 def test_subagent_governance_detector_does_not_overfire() -> None:
     for q in (
         "explain the corporate model",
