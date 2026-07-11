@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from core.low_evidence_policy import evaluate_low_evidence_policy
+from core.low_evidence_policy import (
+    evaluate_low_evidence_policy,
+    is_evidence_expected,
+)
 
 
 @dataclass
@@ -274,3 +277,106 @@ class TestLowEvidenceTrigger:
         assert payload["unverified_total"] == 10
         assert payload["locale"] == "en"
         assert "verified_ratio" in payload["reason"]
+
+
+class TestIsEvidenceExpected:
+    """The loop derives ``evidence_expected`` from this helper; a generative
+    coding turn (role=programmer) must switch the gate OFF so a docstring/diff
+    the user asked for is not deleted as 'unverified'."""
+
+    def test_programmer_role_never_expects_evidence(self):
+        # Even with a non-empty chain (a file WAS read) and realtime intent,
+        # a programmer turn delivers new code/docstring — no evidence expected.
+        assert is_evidence_expected(
+            role="programmer",
+            chain_was_empty=False,
+            realtime_required=True,
+        ) is False
+
+    def test_factual_role_with_read_file_keeps_gate(self):
+        # A researcher/operator turn that read a file still faces the gate.
+        for role in ("researcher", "technical_report", "operator_chat", ""):
+            assert is_evidence_expected(
+                role=role,
+                chain_was_empty=False,
+                realtime_required=False,
+            ) is True, role
+
+    def test_empty_chain_non_realtime_reasoning_bypasses_gate(self):
+        # Pure design/reasoning answer: empty chain + no realtime intent.
+        assert is_evidence_expected(
+            role="operator_chat",
+            chain_was_empty=True,
+            realtime_required=False,
+        ) is False
+
+    def test_empty_chain_but_realtime_keeps_gate(self):
+        # A realtime factual question with an empty chain still expects evidence.
+        assert is_evidence_expected(
+            role="researcher",
+            chain_was_empty=True,
+            realtime_required=True,
+        ) is True
+
+    def test_defaults_expect_evidence(self):
+        # Unknown role, no signals -> conservative default keeps the gate on.
+        assert is_evidence_expected() is True
+
+
+class TestProgrammerDocstringSurvivesTruncation:
+    """End-to-end: the regression that motivated the fix. A programmer turn
+    proposes a new docstring (14 chunks, 2 verified) that would otherwise be
+    replaced by the 'insufficient data' stub. With evidence_expected derived
+    from the programmer role, the generated answer survives verbatim."""
+
+    def test_generated_docstring_is_not_suppressed(self):
+        report = _Report(
+            total_chunks=14,
+            verified_chunks=2,
+            unverified_chunks=12,
+            chunks=tuple(
+                _Chunk(text=f"docstring line {i}.", verdict="unverified")
+                for i in range(14)
+            ),
+        )
+        # evidence_expected as the loop would now compute it for a programmer
+        # turn that read the source file (non-empty chain).
+        evidence_expected = is_evidence_expected(
+            role="programmer",
+            chain_was_empty=False,
+            realtime_required=True,
+        )
+        result = evaluate_low_evidence_policy(
+            answer=_SAMPLE_LONG_ANSWER,
+            report=report,
+            question="Прочитай core/task_complexity.py и покажи новый docstring",
+            evidence_expected=evidence_expected,
+        )
+        assert result.triggered is False
+        assert result.reason == "no_evidence_expected"
+        assert result.answer == _SAMPLE_LONG_ANSWER
+
+    def test_same_distribution_still_truncates_for_factual_turn(self):
+        # Control: an identical low-evidence distribution from a FACTUAL turn
+        # (evidence expected) is still suppressed — the fix is scoped to code.
+        report = _Report(
+            total_chunks=14,
+            verified_chunks=2,
+            unverified_chunks=12,
+            chunks=tuple(
+                _Chunk(text=f"claim {i}.", verdict="unverified")
+                for i in range(14)
+            ),
+        )
+        evidence_expected = is_evidence_expected(
+            role="researcher",
+            chain_was_empty=False,
+            realtime_required=True,
+        )
+        result = evaluate_low_evidence_policy(
+            answer=_SAMPLE_LONG_ANSWER,
+            report=report,
+            question="what is the current inflation rate?",
+            evidence_expected=evidence_expected,
+        )
+        assert result.triggered is True

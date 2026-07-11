@@ -67,7 +67,10 @@ from core.models import (
     ToolResult,
 )
 from core.output_policy import apply_ranker_output_policy
-from core.low_evidence_policy import evaluate_low_evidence_policy
+from core.low_evidence_policy import (
+    evaluate_low_evidence_policy,
+    is_evidence_expected,
+)
 from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner, PlannerOutput
 from core.policy import PolicyGate
@@ -1858,7 +1861,11 @@ class AgentLoop(AgentLoopExtractedMethods):
                 # Evidence is only "expected" for factual / realtime questions.
                 # A pure reasoning or design question produces an empty evidence
                 # chain and carries no realtime intent; suppressing it would
-                # throw away a legitimate answer (even a costly Opus one).
+                # throw away a legitimate answer (even a costly Opus one). A
+                # generative coding turn (role=programmer, output_style="diff")
+                # is the same class: it delivers NEW code/docstring/diff that the
+                # factual verifier cannot match verbatim against the file it read
+                # as input, so the gate would delete exactly what was requested.
                 # Default to expecting evidence whenever we cannot tell, so the
                 # gate stays fully in force for factual and realtime queries.
                 _chain_empty = bool(
@@ -1869,7 +1876,11 @@ class AgentLoop(AgentLoopExtractedMethods):
                     if _ranking is not None
                     else True
                 )
-                _evidence_expected = not (_chain_empty and not _realtime)
+                _evidence_expected = is_evidence_expected(
+                    role=getattr(self.last_role_context, "role", ""),
+                    chain_was_empty=_chain_empty,
+                    realtime_required=_realtime,
+                )
                 _le = evaluate_low_evidence_policy(
                     answer=answer,
                     report=self.last_verification,
