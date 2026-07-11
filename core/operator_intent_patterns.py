@@ -913,9 +913,39 @@ _APPROVAL_CONTEXT = (
     "runtime",
 )
 
+# A consent-request directed AT the agent ("запроси моё подтверждение",
+# "request my confirmation") tells it to PAUSE for human sign-off before acting
+# on the real task — it is NOT a question about the approval inbox. Without this
+# guard the pairing of "подтвержд" (ambiguous) + "запрос" (context) hijacked
+# ordinary engineering instructions such as "…и запроси моё подтверждение" into
+# `:approval-list all`, so the request never reached the agent at all. Kept
+# narrow: only the "запрос…/request … confirmation" verb family, matched as a
+# contiguous substring so real queries ("запросы подтверждения в инбоксе") stay
+# routed.
+_APPROVAL_CONSENT_REQUEST = (
+    "запроси моё подтвержд",
+    "запроси мое подтвержд",
+    "запросить моё подтвержд",
+    "запросить мое подтвержд",
+    "запрос моего подтвержд",
+    "запроси подтвержд",
+    "запросить подтвержд",
+    "запрашивай подтвержд",
+    "запрашивать подтвержд",
+    "request my confirmation",
+    "request confirmation",
+    "ask for my confirmation",
+    "ask for confirmation",
+)
+
 
 def _matches_approval_status(text: str) -> bool:
     if _has_any(text, ("без одобр", "without approval", "no approval", "без явного")):
+        return False
+    # A consent-request aimed at the agent ("запроси моё подтверждение") must not
+    # be read as an approval-inbox query — otherwise the engineering task it is
+    # attached to is silently swallowed by `:approval-list all`.
+    if _has_any(text, _APPROVAL_CONSENT_REQUEST):
         return False
     if _has_any(text, _APPROVAL_STRONG):
         return True
