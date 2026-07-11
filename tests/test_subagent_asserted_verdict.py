@@ -42,11 +42,15 @@ class TestDerivativeDetection:
         ev = _subagent_evidence(contract="A", external=0)
         assert _is_derivative_subagent_evidence(ev) is True
 
-    def test_marker_with_external_is_not_derivative(self):
+    def test_marker_with_external_is_still_derivative(self):
+        # Corrected trust model: the parent embeds only the child's answer
+        # text, never the child's raw evidences. A self-reported external
+        # count proves the child *looked at* sources, not that its
+        # conclusion is faithful to them — so it stays derivative.
         ev = _subagent_evidence(
             contract="A", external=2, kinds="web_page,file",
         )
-        assert _is_derivative_subagent_evidence(ev) is False
+        assert _is_derivative_subagent_evidence(ev) is True
 
     def test_unrelated_evidence_is_not_derivative(self):
         ev = make_evidence(
@@ -71,7 +75,9 @@ class TestDerivativeDetection:
         )
         assert _is_derivative_subagent_evidence(ev) is True
 
-    def test_legacy_subagent_artefact_with_external_citation_is_not(self):
+    def test_legacy_subagent_artefact_with_embedded_citation_is_still_derivative(self):
+        # A [web:...] token a sub-agent embeds in its own answer is still
+        # the child's unverifiable claim, not evidence the parent holds.
         ev = make_evidence(
             kind="memory",
             source_id="memory:working_turn_1_subagent_Old",
@@ -79,7 +85,7 @@ class TestDerivativeDetection:
             claim="legacy",
             excerpt="see [web:https://example.com] for details",
         )
-        assert _is_derivative_subagent_evidence(ev) is False
+        assert _is_derivative_subagent_evidence(ev) is True
 
 
 class TestSubagentAssertedVerdict:
@@ -117,9 +123,11 @@ class TestSubagentAssertedVerdict:
         ]
         assert len(sub_verdicts) >= 3
 
-    def test_subagent_with_external_evidence_stays_verified(self):
-        # Sub-agent that DID fetch external evidence — its citations
-        # remain admissible as `verified`.
+    def test_subagent_with_external_evidence_is_still_witness(self):
+        # Corrected trust model: even when the sub-agent self-reports
+        # external evidence, the parent holds only the child's prose, so
+        # the claim is a witness statement (subagent_asserted), never
+        # `verified`.
         chain = ProvenanceChain()
         chain.add(_subagent_evidence(
             contract="WebResearcher", external=2,
@@ -136,8 +144,39 @@ class TestSubagentAssertedVerdict:
         )
         report = verify(answer=answer, chain=chain)
 
-        assert report.verified_chunks >= 1
-        assert report.subagent_asserted_chunks == 0
+        assert report.verified_chunks == 0
+        assert report.subagent_asserted_chunks >= 1
+
+    def test_subagent_code_claim_with_files_is_not_verified(self):
+        # Regression for the observed hallucination: a BugHunter sub-agent
+        # read 7 repo files (external_evidence_count=7, kinds=file) and
+        # still asserted a non-existent code bug. The parent must NOT mint
+        # that as `verified` just because the child looked at files — it is
+        # a witness claim (subagent_asserted).
+        chain = ProvenanceChain()
+        chain.add(_subagent_evidence(
+            contract="ConcreteBugScenario", external=7, kinds="file",
+            extra_excerpt=(
+                "EpisodeRecord.to_dict() omits full_answer so it is lost "
+                "on save/load."
+            ),
+        ))
+
+        answer = (
+            "Conclusion: a confirmed real defect exists "
+            "[memory:memory:working_turn_1_subagent_ConcreteBugScenario].\n"
+            "Sources: 1 sub-agent.\n"
+            "Confidence: high\n"
+            "Unverified: nothing\n"
+            "Safety: ok"
+        )
+        report = verify(answer=answer, chain=chain)
+
+        assert report.verified_chunks == 0, (
+            f"subagent code claim must not be verified; "
+            f"verdicts={[c.verdict for c in report.chunks]}"
+        )
+        assert report.subagent_asserted_chunks >= 1
 
     def test_low_evidence_policy_triggers_on_subagent_only(self):
         # End-to-end: 3 sub-agents, 0 external each, 11 claim chunks
