@@ -1327,6 +1327,28 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head == ":memory-consolidate":
         return _handle_memory_consolidate(rest.strip(), agent)
 
+    if head == ":audit":
+        arg = rest.strip().lower()
+        if arg in {"on", "enable", "start"}:
+            agent.set_audit_read_only(True)
+            print(
+                "(audit read-only ON — no durable memory writes this session; "
+                "agent-auto persistent/semantic writes frozen; :remember still works)",
+                file=sys.stderr,
+            )
+        elif arg in {"off", "disable", "stop"}:
+            agent.set_audit_read_only(False)
+            print(
+                "(audit read-only OFF — durable memory writes resumed)",
+                file=sys.stderr,
+            )
+        elif arg in {"", "status"}:
+            state = "ON" if getattr(agent, "audit_read_only", False) else "OFF"
+            print(f"(audit read-only: {state})", file=sys.stderr)
+        else:
+            print("Usage: :audit [on|off|status]", file=sys.stderr)
+        return True
+
     if head in {":clear", ":reset"}:
         if agent.memory is None:
             print("(no working memory to clear)", file=sys.stderr)
@@ -1617,6 +1639,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :mem | :memory                  inspect working + persistent memory\n"
             "  :smart-memory [--json]          inspect episodic/procedural/consolidation memory\n"
             "  :memory-consolidate [--json]    link episodes to reusable procedures now\n"
+            "  :audit [on|off|status]          read-only audit mode: freeze all durable memory writes\n"
             "  :clear                          wipe working memory only\n"
             "  :remember [tags] <text>         save to persistent memory (Write Policy gated)\n"
             "  :forget [id|all]                delete persistent record(s)\n"
@@ -1990,7 +2013,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :smart-memory  :memory-consolidate  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :dry-health-pass  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :budget-kill-switch  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :model-discovery-audit  :provider-catalog-refresh  :approval-list  :approval-triage  :best-next-action  :self-issue-verify  :ack  :ack-list  :ack-clear  :approval-run  :self-apply-run  :self-build-produce  :self-split  :self-task-propose  :self-task-build  :value-review  :value-review-list  :task-add  :schedule-disable  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :self-build-supervisor  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        "Commands: :memory  :smart-memory  :memory-consolidate  :audit  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :dry-health-pass  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :budget-kill-switch  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :model-discovery-audit  :provider-catalog-refresh  :approval-list  :approval-triage  :best-next-action  :self-issue-verify  :ack  :ack-list  :ack-clear  :approval-run  :self-apply-run  :self-build-produce  :self-split  :self-task-propose  :self-task-build  :value-review  :value-review-list  :task-add  :schedule-disable  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :self-build-supervisor  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
         file=sys.stderr,
     )
     while True:

@@ -30,6 +30,7 @@ are also reachable one-shot via `--ask ":command args"`.
 | `:clear \| :reset` | Clear working memory (persistent untouched). |
 | `:smart-memory \| :memory-status` | Show episodic/procedural memory summary. |
 | `:memory-consolidate` | Consolidate episodic memory. |
+| `:audit [on\|off\|status]` | Read-only audit mode: freeze ALL durable memory writes (episodic, procedural, consolidation, user profile, and agent-auto persistent/semantic writes) for the session. Set before investigating memory so the audit cannot contaminate its own object. Operator `:remember` (user-explicit) still works. |
 | `:hygiene [subcmd] [--dry-run]` | Memory hygiene (dedup/expire/summarise). |
 
 ## Sources, ingestion & knowledge
