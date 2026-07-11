@@ -213,6 +213,23 @@ def test_approval_status_still_matches_real_inbox_queries():
         assert intent.command == ":approval-list all", text
 
 
+def test_approval_status_not_triggered_by_consent_request_to_agent():
+    # Regression: an engineering instruction that ends with a consent-request
+    # aimed AT the agent ("запроси моё подтверждение" / "request my confirmation")
+    # pairs "подтвержд" (ambiguous) with "запрос" (context) and used to be
+    # hijacked into `:approval-list all`, swallowing the real coding task before
+    # it ever reached the agent. It must NOT route to approval_status.
+    samples = [
+        "Прочитай core/task_complexity.py и покажи новый docstring, запроси моё подтверждение",
+        "Открой файл и внеси правку, но сначала запроси мое подтверждение",
+        "Подготовь изменение и запроси подтверждение перед записью",
+        "Read the file, prepare the edit and request my confirmation before writing",
+    ]
+    for text in samples:
+        intent = route_operator_intent(text)
+        assert intent is None or intent.kind != "approval_status", text
+
+
 def test_routes_urgent_status_phrases():
     intent = route_operator_intent("Есть ли что-то срочное")
 
