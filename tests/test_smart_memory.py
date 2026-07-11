@@ -207,9 +207,57 @@ def test_procedural_store_upserts_successful_tool_workflow(workspace: Path) -> N
     assert created1 is True
     assert created2 is False
     assert proc2.success_count == 2
-    assert proc2.confidence == 1.0
+    # Beta(1,1)-smoothed: (2+1)/(2+2) = 0.75. Two successes are good evidence
+    # but not a certainty — confidence must not read 1.0.
+    assert proc2.confidence == 0.75
     assert set(proc2.source_episode_ids) == {episode1.id, episode2.id}
     assert store.count() == 1
+
+
+def test_single_success_procedure_is_not_certain(workspace: Path) -> None:
+    """A procedure minted from ONE successful episode must not report
+    confidence 1.0 — one observation is weak evidence. Regression for the
+    trace where a low-relevance turn minted a proc at confidence=1.0.
+    """
+    store = ProceduralMemoryStore(workspace / "procedures.jsonl")
+    episode = episode_from_agent_cycle(
+        goal="read file",
+        question="read doc",
+        answer="done",
+        tools_used=["file_read"],
+        source_labels=["file:doc.txt"],
+        verified_chunks=1,
+    )
+    proc, created = store.upsert_from_episode(episode)
+    assert created is True
+    assert proc is not None
+    assert proc.success_count == 1
+    # Beta(1,1): (1+1)/(1+2) = 0.667 — active but modest, never 1.0.
+    assert proc.confidence == 0.667
+    assert proc.confidence < 1.0
+    assert proc.status == "active"
+
+
+def test_procedure_confidence_grows_but_never_reaches_one(workspace: Path) -> None:
+    """Repeated successes push confidence up asymptotically toward — but never
+    to — 1.0, so a workflow earns trust with evidence instead of by fiat.
+    """
+    store = ProceduralMemoryStore(workspace / "procedures.jsonl")
+    last = 0.0
+    for i in range(6):
+        episode = episode_from_agent_cycle(
+            goal="read file",
+            question=f"read doc {i}",
+            answer="done",
+            tools_used=["file_read"],
+            source_labels=["file:doc.txt"],
+            verified_chunks=1,
+        )
+        proc, _created = store.upsert_from_episode(episode)
+        assert proc is not None
+        assert proc.confidence > last  # monotonically increasing
+        assert proc.confidence < 1.0   # never certain
+        last = proc.confidence
 
 
 def test_consolidation_links_episodes_and_procedures(workspace: Path) -> None:
