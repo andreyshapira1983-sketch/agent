@@ -329,6 +329,38 @@ def _norm_source_path(path: str) -> str:
     return path.strip().casefold().replace("\\", "/")
 
 
+# RFC 2606 / RFC 6761 reserved names. When the planner LLM emits one of these
+# as a fetch target it is almost always echoing a placeholder from
+# documentation rather than a real source: the fetch is guaranteed to fail DNS
+# (or return the static "Example Domain" page) and only pollutes the source
+# registry. Drop such steps at plan time so a hallucinated placeholder never
+# burns a network call.
+_PLACEHOLDER_HOSTS = frozenset({
+    "example.com", "example.org", "example.net", "example.edu",
+    "www.example.com", "www.example.org", "www.example.net", "www.example.edu",
+})
+_PLACEHOLDER_TLDS = (".example", ".invalid", ".test", ".localhost")
+
+
+def _url_host(url_lower: str) -> str:
+    """Extract the bare host from an already http/https, ASCII, lowercased URL."""
+    after_scheme = url_lower.split("://", 1)[-1]
+    host = after_scheme.split("/", 1)[0]
+    host = host.split("@", 1)[-1]   # strip any userinfo
+    host = host.split(":", 1)[0]    # strip port
+    return host.strip(".")
+
+
+def _is_placeholder_url(url_lower: str) -> bool:
+    """True for reserved documentation/example/test hosts (never real targets)."""
+    host = _url_host(url_lower)
+    if not host:
+        return False
+    if host in _PLACEHOLDER_HOSTS:
+        return True
+    return any(host.endswith(tld) for tld in _PLACEHOLDER_TLDS)
+
+
 def _file_read_source_spec(path: str) -> dict[str, Any]:
     return {
         "tool": "file_read",
@@ -1672,6 +1704,11 @@ class LLMPlanner:
                         f"step[{idx}]: web_fetch url targets local network, dropped"
                     )
                     return None
+            if _is_placeholder_url(url_lower):
+                warnings.append(
+                    f"step[{idx}]: web_fetch url is a placeholder/example host, dropped"
+                )
+                return None
             return {
                 "tool": "web_fetch",
                 "arguments": {"url": url},
@@ -1711,6 +1748,11 @@ class LLMPlanner:
                         f"step[{idx}]: rss_fetch url targets local network, dropped"
                     )
                     return None
+            if _is_placeholder_url(url_lower):
+                warnings.append(
+                    f"step[{idx}]: rss_fetch url is a placeholder/example host, dropped"
+                )
+                return None
             requested = args.get("max_entries", 20)
             try:
                 max_entries = int(requested)

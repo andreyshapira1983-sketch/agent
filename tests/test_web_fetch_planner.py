@@ -49,11 +49,28 @@ class TestWebFetchSanitizer:
     def test_well_formed_passes(self, workspace: Path):
         sources, _ = _run(workspace, [{
             "tool": "web_fetch",
-            "arguments": {"url": "https://example.com/page"},
+            "arguments": {"url": "https://realpython.com/page"},
         }])
         assert len(sources) == 1
-        assert sources[0]["arguments"]["url"] == "https://example.com/page"
-        assert sources[0]["label"].startswith("web_fetch:https://example.com")
+        assert sources[0]["arguments"]["url"] == "https://realpython.com/page"
+        assert sources[0]["label"].startswith("web_fetch:https://realpython.com")
+
+    @pytest.mark.parametrize("url", [
+        "https://example.com",
+        "https://example.com/page",
+        "http://www.example.org/",
+        "https://example.net/feed",
+        "https://example.edu/x",
+        "https://something.invalid/x",
+        "https://host.test/x",
+        "https://box.example/x",
+    ])
+    def test_placeholder_hosts_dropped(self, workspace: Path, url: str):
+        sources, warnings = _run(workspace, [{
+            "tool": "web_fetch", "arguments": {"url": url},
+        }])
+        assert sources == []
+        assert any("placeholder" in w for w in warnings)
 
     def test_missing_url_dropped(self, workspace: Path):
         sources, warnings = _run(workspace, [{
@@ -111,7 +128,7 @@ class TestWebFetchSanitizer:
         assert any("local network" in w for w in warnings)
 
     def test_label_truncated(self, workspace: Path):
-        url = "https://example.com/" + "a" * 200
+        url = "https://realpython.com/" + "a" * 200
         sources, _ = _run(workspace, [{
             "tool": "web_fetch", "arguments": {"url": url},
         }])
@@ -123,15 +140,15 @@ class TestRssFetchSanitizer:
     def test_well_formed_passes(self, workspace: Path):
         sources, _ = _run(workspace, [{
             "tool": "rss_fetch",
-            "arguments": {"url": "https://example.com/feed.xml", "max_entries": 7},
+            "arguments": {"url": "https://realpython.com/feed.xml", "max_entries": 7},
         }])
 
         assert len(sources) == 1
         assert sources[0]["arguments"] == {
-            "url": "https://example.com/feed.xml",
+            "url": "https://realpython.com/feed.xml",
             "max_entries": 7,
         }
-        assert sources[0]["label"].startswith("rss_fetch:https://example.com")
+        assert sources[0]["label"].startswith("rss_fetch:https://realpython.com")
 
     def test_missing_url_dropped(self, workspace: Path):
         sources, warnings = _run(workspace, [{
@@ -141,6 +158,14 @@ class TestRssFetchSanitizer:
 
         assert sources == []
         assert any("without url" in warning for warning in warnings)
+
+    def test_placeholder_host_dropped(self, workspace: Path):
+        sources, warnings = _run(workspace, [{
+            "tool": "rss_fetch",
+            "arguments": {"url": "https://example.com/feed.xml"},
+        }])
+        assert sources == []
+        assert any("placeholder" in warning for warning in warnings)
 
     @pytest.mark.parametrize("url", [
         "file:///etc/passwd",
@@ -160,7 +185,7 @@ class TestRssFetchSanitizer:
     def test_max_entries_default_and_cap(self, workspace: Path):
         sources, warnings = _run(workspace, [{
             "tool": "rss_fetch",
-            "arguments": {"url": "https://example.com/feed.xml", "max_entries": "bad"},
+            "arguments": {"url": "https://realpython.com/feed.xml", "max_entries": "bad"},
         }])
 
         assert sources[0]["arguments"]["max_entries"] == 20
@@ -168,6 +193,6 @@ class TestRssFetchSanitizer:
 
         sources, _ = _run(workspace, [{
             "tool": "rss_fetch",
-            "arguments": {"url": "https://example.com/feed.xml", "max_entries": 500},
+            "arguments": {"url": "https://realpython.com/feed.xml", "max_entries": 500},
         }])
         assert sources[0]["arguments"]["max_entries"] == 50
