@@ -539,6 +539,65 @@ def _matches_self_task_propose(text: str) -> bool:
     return debt and propose
 
 
+def _matches_architecture_audit(text: str) -> bool:
+    # Read-only architecture audit (layers / multi-agent gaps). Requires an
+    # architecture term AND an audit/review verb so it never fires on a plain
+    # "проверь проект" (project health) or a mere mention of architecture.
+    # Must be routed BEFORE _matches_project_health, because
+    # "проверь архитектуру проекта" also satisfies that broad project branch.
+    architecture = _has_any(text, ("архитектур", "architecture", "architectural"))
+    audit_verb = _has_any(
+        text,
+        (
+            "аудит",
+            "audit",
+            "обзор",
+            "review",
+            "оцени",
+            "оценить",
+            "оценка",
+            "проверь",
+            "проверить",
+            "проверка",
+            "инспек",
+            "inspect",
+            "проанализируй",
+            "анализ",
+            "analyze",
+            "analyse",
+        ),
+    )
+    return architecture and audit_verb
+
+
+def _matches_subagent_proposal(text: str) -> bool:
+    # Scoped autonomous-subagent proposal (SubagentProposal contract from a
+    # goal). Distinct from capability_request (which treats "subagent" as a
+    # missing capability): this needs an explicit PROPOSE/DESIGN verb next to
+    # the subagent term. Routed BEFORE capability_request so "предложи
+    # ограниченного субагента" wins over any capability overlap.
+    subagent = _has_any(
+        text,
+        ("субагент", "суб-агент", "подагент", "под-агент", "subagent", "sub-agent"),
+    )
+    propose_verb = _has_any(
+        text,
+        (
+            "предлож",
+            "propose",
+            "сформируй",
+            "сформулируй",
+            "подготовь",
+            "составь",
+            "спроектируй",
+            "design",
+            "draft",
+            "инициатив",
+            "initiative",
+        ),
+    )
+    return subagent and propose_verb
+
 def _matches_autonomy_readiness(text: str) -> bool:
     return _has_any(
         text,

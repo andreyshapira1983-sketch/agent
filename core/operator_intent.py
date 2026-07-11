@@ -21,6 +21,7 @@ from .operator_intent_patterns import (
     _looks_like_self_build_request,
     _looks_like_shell_command,
     _matches_approval_status,
+    _matches_architecture_audit,
     _matches_autonomy_readiness,
     _matches_best_next_action,
     _matches_budget_status,
@@ -39,6 +40,7 @@ from .operator_intent_patterns import (
     _matches_self_task_propose,
     _matches_smart_memory_status,
     _matches_source_review,
+    _matches_subagent_proposal,
     _matches_urgent_status,
     _matches_weakness_finder,
 )
@@ -46,6 +48,8 @@ from .operator_intent_patterns import (
 
 OperatorIntentKind = Literal[
     "shell_command_hint",
+    "subagent_proposal",
+    "architecture_audit",
     "capability_request",
     "self_task_proposal",
     "safe_self_check",
@@ -104,6 +108,18 @@ def route_operator_intent(text: str) -> OperatorIntent | None:
             kind="shell_command_hint",
             command="shell-command-hint",
             reason="shell/powershell command wording",
+        )
+    if _matches_subagent_proposal(normalized):
+        return OperatorIntent(
+            kind="subagent_proposal",
+            command=":subagent-proposal",
+            reason="propose/design + subagent wording",
+        )
+    if _matches_architecture_audit(normalized):
+        return OperatorIntent(
+            kind="architecture_audit",
+            command=":architecture-audit",
+            reason="architecture + audit/review wording",
         )
     if _matches_capability_request(normalized):
         return OperatorIntent(
