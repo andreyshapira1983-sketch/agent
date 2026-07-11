@@ -1042,6 +1042,10 @@ def _dispatch_operator_intent(
 ) -> bool:
     if intent.kind == "capability_request":
         return _handle_capability_request(original_text, agent, workspace)
+    if intent.kind == "subagent_proposal":
+        return _handle_subagent_proposal(original_text.strip(), agent, workspace)
+    if intent.kind == "architecture_audit":
+        return _handle_architecture_audit("", agent, workspace)
     if intent.kind == "self_task_proposal":
         return _handle_self_task_propose("", agent, workspace)
     if intent.kind == "safe_self_check":
