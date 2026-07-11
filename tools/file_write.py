@@ -31,6 +31,7 @@ Output shape (consumed by `validate_output` and by the synthesizer):
 """
 from __future__ import annotations
 
+import re
 import shutil
 import time
 from pathlib import Path
@@ -42,6 +43,46 @@ from tools.base import Risk, Tool, require_ascii_identifier
 
 
 MAX_BYTES = 1 * 1024 * 1024  # 1 MiB
+
+
+# A whole-content single angle-bracket token, e.g. "<to be synthesized ...>".
+_SINGLE_TAG_RE = re.compile(r"^<[^<>\n]+>$")
+
+# Keywords that mark an unfilled template even when it has no inner whitespace.
+_PLACEHOLDER_HINTS = (
+    "to be",
+    "tbd",
+    "todo",
+    "placeholder",
+    "synthes",  # synthesize / synthesized
+    "fill in",
+    "fill-in",
+    "your text",
+    "goes here",
+    "insert ",
+)
+
+
+def _looks_like_unfilled_placeholder(content: str) -> bool:
+    """True when `content` is a single unfilled template token.
+
+    The planner sometimes emits a ``file_write`` step *before* the text it
+    means to save has been synthesized, leaving a literal angle-bracket
+    placeholder like ``<to be synthesized from the three files>`` as the
+    ``content`` argument. Executing that stub creates a junk file that looks
+    "done" while holding no real content (observed: a 45-byte
+    ``about_me.txt``). A whole-content single angle-bracket token is never a
+    legitimate document, so we refuse it as a hard rule and let the caller
+    synthesize the real text first.
+    """
+    stripped = content.strip()
+    if not _SINGLE_TAG_RE.match(stripped):
+        return False
+    inner = stripped[1:-1]
+    if any(ch.isspace() for ch in inner):
+        return True
+    lowered = stripped.casefold()
+    return any(hint in lowered for hint in _PLACEHOLDER_HINTS)
 
 
 class FileWriteTool(Tool):
@@ -105,6 +146,13 @@ class FileWriteTool(Tool):
         if not isinstance(content, str):
             raise TypeError(
                 f"content must be a string, got {type(content).__name__}"
+            )
+
+        if _looks_like_unfilled_placeholder(content):
+            raise ValueError(
+                "refusing to write an unfilled placeholder to disk: "
+                f"{content.strip()!r}. Synthesize the real content first, "
+                "then write it."
             )
 
         size = len(content.encode("utf-8"))
