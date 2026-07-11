@@ -56,6 +56,39 @@ def test_missing_file_raises(workspace: Path) -> None:
         tool.run(path="does_not_exist.txt")
 
 
+def test_missing_file_hint_lists_real_neighbors(workspace: Path) -> None:
+    """A wrong guess should surface the real files in the nearest existing
+    directory, so the planner can self-correct on replan instead of guessing
+    another non-existent path (the 'scan itself' behaviour)."""
+    (workspace / "README.md").write_text("hi", encoding="utf-8")
+    (workspace / "docs").mkdir()
+    (workspace / "docs" / "AGENT_ANATOMY.md").write_text("x", encoding="utf-8")
+    (workspace / "docs" / "daemon-progress.md").write_text("y", encoding="utf-8")
+    tool = _tool(workspace)
+
+    with pytest.raises(FileNotFoundError) as exc:
+        tool.run(path="docs/CORPORATE_MODEL.md")
+    msg = str(exc.value)
+    # Names the nearest real directory and lists its actual contents.
+    assert "docs" in msg
+    assert "AGENT_ANATOMY.md" in msg
+    assert "daemon-progress.md" in msg
+    assert "Use one of these real paths" in msg
+
+
+def test_missing_file_hint_walks_up_to_existing_ancestor(workspace: Path) -> None:
+    """If several path segments are hallucinated, the hint comes from the
+    nearest ancestor that really exists."""
+    (workspace / "AGENT_DOCTRINE.md").write_text("d", encoding="utf-8")
+    tool = _tool(workspace)
+
+    with pytest.raises(FileNotFoundError) as exc:
+        tool.run(path="docs/future/deep/CORPORATE_MODEL.md")
+    msg = str(exc.value)
+    assert "AGENT_DOCTRINE.md" in msg
+    assert "workspace root" in msg
+
+
 # ---------- 3. workspace escape ----------
 
 def test_path_traversal_is_rejected(workspace: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
