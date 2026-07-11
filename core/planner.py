@@ -478,6 +478,11 @@ _SUBAGENT_DOC_CONTEXT_TERMS = (
 _SUBAGENT_DOC_ACTION_TERMS = (
     "quarantine",
     "карантин",
+    "pause",
+    "paused",
+    "pausing",
+    "пауз",
+    "приостанов",
     "retire",
     "retirement",
     "requalif",

@@ -210,6 +210,10 @@ _Model discovery, routing, usage accounting._
 
 _Subagent proposals, registry, execution, teams._
 
+> Lifecycle governance (normative spec, not a `core/` module):
+> `docs/SUBAGENT_LIFECYCLE.md` — how sub-agents are proposed, bounded, trusted,
+> evaluated, quarantined and retired.
+
 | Module | Purpose |
 | ------ | ------- |
 | `core/subagent_memory_scope` | MVP-18.1  Autonomous Subagent Proposal Contract. |
