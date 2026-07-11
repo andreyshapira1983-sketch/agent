@@ -367,3 +367,41 @@ def test_governance_denied_rollback_marks_report_failed(tmp_path: Path):
     assert agent.rolled_back_plan_ids == []  # agent.rollback() never called
     rb = [s for s in report.steps if s.name == "rollback"]
     assert rb and rb[0].status == "governance_denied"
+
+
+# --------------------------------------------------------------------------- #
+# write physically applied then failed the controller's own validation gate    #
+# --------------------------------------------------------------------------- #
+
+def test_write_applied_but_invalid_output_is_rolled_back(tmp_path: Path):
+    # The write tool_call SUCCEEDS (file changed on disk, compensation plan
+    # registered inside _call_tool) but the controller's post-call output
+    # validation rejects it → write.ok is False. The physical change must NOT
+    # be left orphaned: the controller has to roll back the registered plan
+    # before returning, not bail out silently.
+    outputs = _success_tool_outputs()
+    # status=success → _call_tool registers the compensation plan; valid=False
+    # → validate_output fails afterwards → the write step reports verify_failed.
+    outputs["file_write"] = {
+        "output": {"path": "core/example.py", "bytes_written": 16},
+        "valid": False,
+    }
+    agent = _FakeAgent(tool_outputs=outputs)
+    controller = SelfRepairController(agent, workspace_root=tmp_path)
+
+    report = controller.run(_proposal())
+
+    # A compensation plan was registered by the (physically applied) write...
+    assert len(agent.compensation_log) == 1
+    registered_plan_id = agent.compensation_log[0].id
+    # ...and the controller rolled it back instead of leaving an orphaned change.
+    assert agent.rolled_back_plan_ids == [registered_plan_id]
+    assert report.compensation_plan_id == registered_plan_id
+    # The failed write is still visible as its own step, and a rollback step
+    # was appended with a clean (error-free) result.
+    write_steps = [s for s in report.steps if s.name == "write"]
+    assert write_steps and write_steps[0].status == "verify_failed"
+    rb = [s for s in report.steps if s.name == "rollback"]
+    assert rb and rb[0].status == "ok"
+    assert report.status == "rolled_back"
+
