@@ -172,10 +172,26 @@ _RU_SELF_DOMAIN_STEMS = tuple(
 
 
 def _ru_pronoun_domain_introspection(tokens: tuple[str, ...]) -> bool:
-    """True when a Russian self-pronoun co-occurs with a self-domain noun stem."""
-    if not any(tok in _RU_SELF_PRONOUNS for tok in tokens):
-        return False
-    return any(tok.startswith(stem) for tok in tokens for stem in _RU_SELF_DOMAIN_STEMS)
+    """True when a self-domain noun stem immediately follows a Russian
+    self-referential pronoun (e.g. "свою архитектуру", "свой репозиторий",
+    "своими тестами").
+
+    Adjacency — not mere co-occurrence — is required on purpose. Co-occurrence
+    anywhere in the sentence is far too broad: "в своей стране архитектура
+    власти" or "в своём городе сдают тесты" would be mis-flagged as self-repo
+    introspection and wrongly denied a legitimate web lookup. The pronoun must
+    directly modify the domain noun, which in Russian means it sits right before
+    it. Stable collocations that place an adjective between the pronoun and the
+    noun (e.g. "твоей долговременной памяти") are handled by the phrase list, so
+    they do not need a wider window here."""
+    for i, tok in enumerate(tokens):
+        if tok not in _RU_SELF_PRONOUNS:
+            continue
+        if i + 1 < len(tokens):
+            nxt = tokens[i + 1]
+            if any(nxt.startswith(stem) for stem in _RU_SELF_DOMAIN_STEMS):
+                return True
+    return False
 
 
 _DOCTRINE_CORPORATE_STRONG_TERMS = (
