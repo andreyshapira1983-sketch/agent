@@ -1892,6 +1892,14 @@ class AgentLoop(AgentLoopExtractedMethods):
 
         verification = self.last_verification
         if durable_learning_writes:
+            weak_chunks = 0
+            if verification:
+                weak_chunks = (
+                    verification.subagent_asserted_chunks
+                    + verification.cited_but_unmatched_chunks
+                    + verification.receipt_missing_chunks
+                    + verification.topic_supported_but_claim_unverified_chunks
+                )
             self._record_experience_memory(
                 goal_description=goal.description,
                 question=user_question,
@@ -1900,6 +1908,7 @@ class AgentLoop(AgentLoopExtractedMethods):
                 source_labels=list(artifacts.keys()) or ["general-knowledge"],
                 verified_chunks=verification.verified_chunks if verification else 0,
                 unverified_chunks=verification.unverified_chunks if verification else 0,
+                weak_chunks=weak_chunks,
                 replan_exhausted=replan_exhausted,
                 skip_consolidation=cheap_path_active,
             )
@@ -2193,6 +2202,7 @@ class AgentLoop(AgentLoopExtractedMethods):
         verified_chunks: int,
         unverified_chunks: int,
         replan_exhausted: bool,
+        weak_chunks: int = 0,
         skip_consolidation: bool = False,
     ) -> None:
         """Write episodic/procedural/consolidation memory after a cycle.
@@ -2221,6 +2231,7 @@ class AgentLoop(AgentLoopExtractedMethods):
                 source_labels=source_labels,
                 verified_chunks=verified_chunks,
                 unverified_chunks=unverified_chunks,
+                weak_chunks=weak_chunks,
                 replan_exhausted=replan_exhausted,
             )
             if self.episodic_store is not None:
@@ -2235,6 +2246,7 @@ class AgentLoop(AgentLoopExtractedMethods):
                         "source_labels": list(episode.source_labels),
                         "verified_chunks": episode.verified_chunks,
                         "unverified_chunks": episode.unverified_chunks,
+                        "weak_chunks": episode.weak_chunks,
                     },
                 )
 
