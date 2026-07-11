@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from core.llm import LLM
+from core.lang_match import any_term_matches, normalize_text, tokenize
 from tools.base import ToolRegistry
 
 
@@ -137,6 +138,45 @@ _EXTERNAL_LOOKUP_TERMS = (
 # the substring "сравни с" matched inside "сравни своё…", so a purely
 # introspective question was mis-flagged as external and web_search was allowed
 # to run, polluting the source registry. See _wants_external_lookup.
+
+# --- Russian morphological rule for self-repo introspection -------------------
+# A hand-written stem list cannot keep up with Russian possessive-pronoun
+# inflection (свой/своя/своё/свои/своего/своей/своих/своим/своём/свою, and the
+# твой-/собственн- families). Instead of enumerating every pronoun+noun phrase,
+# the Russian rule detects a self-referential pronoun (a *closed* inflection
+# set, matched as whole tokens after ё->е normalization) co-occurring with a
+# self-domain noun *stem*. This is boundary-correct and inflection-robust.
+_RU_SELF_PRONOUNS = frozenset(
+    normalize_text(w)
+    for w in (
+        "свой", "своя", "своё", "свое", "свои", "своего", "своей", "своих",
+        "своим", "своими", "своём", "своем", "свою",
+        "твой", "твоя", "твоё", "твое", "твои", "твоего", "твоей", "твоих",
+        "твоим", "твоими", "твоём", "твоем", "твою",
+        "себя", "себе", "собой",
+        "собственный", "собственная", "собственное", "собственные",
+        "собственного", "собственной", "собственных", "собственную",
+        "собственным", "собственными", "собственном",
+    )
+)
+# Self-domain noun stems (prefix-matched on token starts, so all inflections of
+# репозиторий/архитектура/память/поведение/… are covered).
+_RU_SELF_DOMAIN_STEMS = tuple(
+    normalize_text(s)
+    for s in (
+        "репозитор", "архитектур", "памят", "поведени", "субагент",
+        "планировщик", "верификатор", "код", "кодбейз", "модул", "слаб",
+        "тест", "самовосстановл", "реестр", "эпизод", "процедурн", "навык",
+    )
+)
+
+
+def _ru_pronoun_domain_introspection(tokens: tuple[str, ...]) -> bool:
+    """True when a Russian self-pronoun co-occurs with a self-domain noun stem."""
+    if not any(tok in _RU_SELF_PRONOUNS for tok in tokens):
+        return False
+    return any(tok.startswith(stem) for tok in tokens for stem in _RU_SELF_DOMAIN_STEMS)
+
 
 _DOCTRINE_CORPORATE_STRONG_TERMS = (
     "corporate model",
@@ -345,9 +385,12 @@ def _should_prefer_memory_over_readme(question: str, history: str) -> bool:
 def _wants_external_lookup(question: str) -> bool:
     """True when the question genuinely needs outside/web/current information or
     a comparison against a named external system — the one case where web egress
-    on a self-referential question is still legitimate."""
-    lowered = (question or "").casefold()
-    return any(term in lowered for term in _EXTERNAL_LOOKUP_TERMS)
+    on a self-referential question is still legitimate.
+
+    Matching is token-boundary aware (see core.lang_match) so short function
+    words cannot substring-collide with longer inflected words — e.g. the
+    preposition "с" no longer matches inside "своё"."""
+    return any_term_matches(question or "", _EXTERNAL_LOOKUP_TERMS)
 
 
 def _is_self_repo_introspection_question(question: str) -> bool:
@@ -355,8 +398,10 @@ def _is_self_repo_introspection_question(question: str) -> bool:
     and carries no external-lookup intent. Such questions cannot be answered by
     the public web; a web_search only harvests irrelevant noise that pollutes
     the source registry."""
-    lowered = (question or "").casefold()
-    if not any(term in lowered for term in _SELF_REPO_INTROSPECTION_TERMS):
+    if not (
+        any_term_matches(question or "", _SELF_REPO_INTROSPECTION_TERMS)
+        or _ru_pronoun_domain_introspection(tokenize(question or ""))
+    ):
         return False
     return not _wants_external_lookup(question)
 
