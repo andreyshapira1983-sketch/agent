@@ -95,8 +95,6 @@ def route_operator_intent(text: str) -> OperatorIntent | None:
         return None
     if len(normalized) > 600:
         return None
-    if _looks_like_meta_instruction(normalized):
-        return None
     if _looks_like_plain_bug_note(normalized):
         return None
     if _looks_like_explicit_non_routing_command(normalized):
@@ -107,6 +105,8 @@ def route_operator_intent(text: str) -> OperatorIntent | None:
             command=":self-build-produce",
             reason="explicit start self-build wording",
         )
+    if _looks_like_meta_instruction(normalized):
+        return None
     if _looks_like_self_build_request(normalized):
         return None
     if _matches_inbox_task_request(normalized):
