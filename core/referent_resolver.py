@@ -24,6 +24,7 @@ no loop behaviour until a later PR wires it behind the flag.
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -33,6 +34,20 @@ from typing import Any, Literal, Mapping, Sequence
 # Shadow / rollout flag — loop wiring (PR2+) must default this to False.
 FEATURE_FLAG = "referent_resolver_v1"
 FEATURE_FLAG_DEFAULT = False
+_ENV_MODE = "AGENT_REFERENT_RESOLVER"
+
+
+def referent_resolver_mode() -> str:
+    """Return ``off`` (default), ``shadow`` (log only), or ``on``.
+
+    ``on`` currently matches shadow for behaviour; PR2+ will branch on it.
+    """
+    raw = (os.getenv(_ENV_MODE) or "").strip().lower()
+    if raw in ("on", "true", "1", "yes"):
+        return "on"
+    if raw in ("shadow",):
+        return "shadow"
+    return "off"
 
 ReferentStatus = Literal["resolved", "ambiguous", "unresolved", "needs_tool"]
 ReferentKind = Literal[

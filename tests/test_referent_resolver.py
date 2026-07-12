@@ -33,6 +33,22 @@ def test_feature_flag_defaults_off():
     assert FEATURE_FLAG_DEFAULT is False
 
 
+def test_referent_resolver_mode_default_off(monkeypatch):
+    monkeypatch.delenv("AGENT_REFERENT_RESOLVER", raising=False)
+    from core.referent_resolver import referent_resolver_mode
+
+    assert referent_resolver_mode() == "off"
+
+
+def test_referent_resolver_mode_shadow_and_on(monkeypatch):
+    from core.referent_resolver import referent_resolver_mode
+
+    monkeypatch.setenv("AGENT_REFERENT_RESOLVER", "shadow")
+    assert referent_resolver_mode() == "shadow"
+    monkeypatch.setenv("AGENT_REFERENT_RESOLVER", "on")
+    assert referent_resolver_mode() == "on"
+
+
 def test_anaphora_resolves_to_prior_turn():
     prior = PriorTurnRef(
         turn_id="turn_prev",
