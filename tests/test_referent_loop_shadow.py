@@ -70,6 +70,7 @@ def test_referent_shadow_logs_decision(workspace: Path, monkeypatch):
     assert len(events) == 1
     payload = events[0]["payload"]
     assert payload["mode"] == "shadow"
-    assert payload["would_change_answer"] is False
+    assert payload["would_change_answer"] is True
+    assert payload["local_critique_eligible"] is True
     assert payload["status"] in {"resolved", "ambiguous", "unresolved", "needs_tool"}
     assert agent.last_referent_decision is not None

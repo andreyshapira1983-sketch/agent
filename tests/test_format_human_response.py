@@ -152,3 +152,44 @@ class TestEdgeCases:
     def test_no_double_blank_lines(self):
         out = format_human_response(_GPT_ANSWER)
         assert "\n\n\n" not in out
+
+
+def test_strips_empty_blockquote_leftover():
+    answer = """\
+Conclusion:
+Слабые стороны ясны. [user:target]
+Facts:
+- > [user:target]
+- Дублирование тезисов. [user:target]
+Sources:
+1. user:target
+Confidence: medium
+Unverified:
+nothing
+Safety:
+nothing
+"""
+    out = format_human_response(answer)
+    assert "\n>\n" not in out
+    assert not any(line.strip() == ">" for line in out.splitlines())
+    assert "Дублирование тезисов" in out
+
+
+def test_strips_user_target_and_prior_turn_citations():
+    answer = """\
+Conclusion:
+Текст содержит преувеличения. [prior_turn:turn_abc]
+Facts:
+- Нет источников. [user:target]
+Sources:
+1. prior_turn:turn_abc
+Confidence: medium
+Unverified:
+nothing
+Safety:
+nothing
+"""
+    out = format_human_response(answer)
+    assert "[prior_turn:" not in out
+    assert "[user:target]" not in out
+    assert "преувеличения" in out
