@@ -71,6 +71,14 @@ from core.low_evidence_policy import (
     evaluate_low_evidence_policy,
     is_evidence_expected,
 )
+from core.referent_resolver import (
+    FileHintRef,
+    PriorTurnRef,
+    ReferentDecision,
+    ReferentResolver,
+    artifacts_from_working_memory,
+    referent_resolver_mode,
+)
 from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner, PlannerOutput
 from core.policy import PolicyGate
@@ -423,6 +431,7 @@ class AgentLoop(AgentLoopExtractedMethods):
         from core.verifier import VerificationReport as _VR
 
         self.last_verification: _VR | None = None
+        self.last_referent_decision: ReferentDecision | None = None
         # MVP-14.3/14.3x — trust metadata over the Evidence chain.
         # Source ranking is logged/exposed, and Ranker-to-Output Policy uses
         # it to cap confidence for unsuitable realtime sources.
@@ -727,6 +736,9 @@ class AgentLoop(AgentLoopExtractedMethods):
                         "artifacts_cached": len(self.memory.artifacts),
                     },
                 )
+
+        # Referent resolver (critique PR1) — shadow/on observability only until PR2.
+        self._maybe_resolve_referent(user_question, file_hint=file_hint)
 
         # Persistent memory retrieval — pick a few long-term records that
         # share keywords with the question, then format them as a
@@ -2530,6 +2542,66 @@ class AgentLoop(AgentLoopExtractedMethods):
         """Run the Operational Design Domain gate (§7 ODD) — pure, no LLM."""
         from core.operational_domain import DomainResult, check_operational_domain
         return check_operational_domain(user_question)
+
+    def _maybe_resolve_referent(
+        self,
+        user_question: str,
+        *,
+        file_hint: str | None,
+    ) -> None:
+        """Shadow/on referent resolution — logs only; does not change the answer path."""
+        mode = referent_resolver_mode()
+        if mode == "off":
+            self.last_referent_decision = None
+            return
+        try:
+            run_id = str(getattr(self.log, "trace_id", "") or new_id("run"))
+            session_id = (
+                self.memory.session_id if self.memory is not None else run_id
+            )
+            prior_turns: list[PriorTurnRef] = []
+            artifacts = []
+            if self.memory is not None:
+                for turn in self.memory.recent_turns(5):
+                    prior_turns.append(
+                        PriorTurnRef(
+                            turn_id=turn.id,
+                            session_id=session_id,
+                            question=turn.question,
+                            answer=turn.answer,
+                            timestamp=turn.timestamp,
+                        )
+                    )
+                artifacts = artifacts_from_working_memory(
+                    self.memory.artifacts,
+                    session_id=session_id,
+                )
+            hint_ref: FileHintRef | None = None
+            if file_hint and str(file_hint).strip():
+                hint_ref = FileHintRef(
+                    path=str(file_hint).strip(),
+                    turn_id=run_id,
+                    session_id=session_id,
+                )
+            resolver = ReferentResolver(
+                workspace_root=self._file_read_workspace_root(),
+            )
+            decision = resolver.resolve(
+                user_question,
+                current_session_id=session_id,
+                current_turn_id=run_id,
+                file_hint=hint_ref,
+                artifacts=artifacts,
+                prior_turns=tuple(prior_turns),
+            )
+            self.last_referent_decision = decision
+            payload = decision.to_dict()
+            payload["mode"] = mode
+            payload["would_change_answer"] = False
+            self.log.log("referent_decision", payload)
+        except Exception:
+            # Observability must never abort the run.
+            self.last_referent_decision = None
 
     def _build_plan(self, goal: Goal, sources: list[dict[str, Any]]) -> Plan:
         plan = Plan(goal_id=goal.id)
