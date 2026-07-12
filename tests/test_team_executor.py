@@ -58,6 +58,12 @@ class _ErrorResultRunner:
 
 class _AuditedRunner:
     def run_contract(self, contract: CanonicalSubagentContract):
+        receipt = SubagentExecutionReceipt(
+            contract.contract_id,
+            contract.schema_version,
+            used_tools=("file_read",),
+            iterations=1,
+        )
         return SimpleNamespace(
             status="success",
             answer="audited result",
