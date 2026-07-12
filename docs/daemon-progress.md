@@ -331,8 +331,9 @@ Each sub-item reports four independent fields so the status is unambiguous:
 
 ## 3.1 Priority event queue
 
-- **implementation:** completed | **main_pr:** open | **hotfix:** none | **acceptance:** pending
+- **implementation:** completed | **main_pr:** #84 merged | **hotfix:** none | **acceptance:** pending
 - **Branch:** `daemon/3.1-priority-event-queue`
+- **Pull Request:** #84 (merged)
 - **Last updated:** 2026-07-12
 - **Implementation:** New `app/priority_event_queue.py` with typed
   `DaemonEvent`, `EventPriority` (`urgent > scheduled > background`), and
@@ -347,22 +348,38 @@ Each sub-item reports four independent fields so the status is unambiguous:
 - **Tests added:** `tests/test_priority_event_queue.py` — coerce/validation,
   priority + FIFO order, aging vs strict priority, on_put error isolation,
   DaemonLoop wake bridge, async get/close/cancel paths, repeated close.
-- **Checks run:**
-  - `python -m pytest tests/test_priority_event_queue.py -q` → 16 passed
-  - `python -m pytest tests/test_priority_event_queue.py tests/test_daemon_loop.py tests/test_daemon_shutdown.py tests/test_task_queue.py tests/test_file_watcher.py -q` → 87 passed
-  - `python -m pytest tests/test_team_executor.py::test_team_executor_persists_outcome_in_real_registry -q` → 1 passed
-    (minimal CI hotfix: define missing `receipt` in `_AuditedRunner` left broken on main by #83)
-  - `coverage run --branch -m pytest` → 1 failed before hotfix / re-run locally for priority+team_executor green;
-    full suite was 4556 passed + 1 known main failure before the test-double fix
-  - `coverage report --fail-under=85` → TOTAL 93% (on full run)
-  - `coverage report -m --include=app/priority_event_queue.py` → 94%
-  - `python scripts/generate_sbom.py --check` → in sync
-  - `python scripts/audit_release.py` → ok
-  - `pip check` → no broken requirements
-  - pylint / formatter / mypy: not configured in CI; skipped.
+- **Checks run:** See merged PR #84 / GitHub CI.
 - **Known limitations:** In-memory only (no durable priority queue across
   process restart — recovery remains 4.2). Not yet wired as the daemon's sole
   dispatcher; producers still wake via reason strings until composition lands.
+- **Blockers:** none. **Human action:** optional read-only acceptance review;
+  do not reimplement.
+
+## 3.2 Worker pool
+
+- **implementation:** completed | **main_pr:** open | **hotfix:** none | **acceptance:** pending
+- **Branch:** `daemon/3.2-worker-pool`
+- **Last updated:** 2026-07-13
+- **Why this item:** GitHub shows 2.3 (#83) and 3.1 (#84) already merged; no
+  open PR/branch for 3.2; next required sequence item is 3.2.
+- **Implementation:** New `app/worker_pool.py` with `WorkerPool` consuming an
+  existing `PriorityEventQueue` (no second queue). Configurable `max_workers`
+  (default 2). Workers are asyncio tasks; handler exceptions are logged and
+  isolated so one failure does not stop the pool. `shutdown()` closes the
+  queue (stop accepting), drains in-flight handlers for a bounded
+  `drain_timeout`, then cancels stragglers; repeated shutdown is safe.
+  Does not add per-task timeouts (3.3), does not own `DaemonLoop`, does not
+  change `agent_tick.py`.
+- **Reused:** `PriorityEventQueue.get` / `close` / `PriorityEventQueueClosed`
+  from 3.1; shutdown/drain pattern aligned with `DaemonLoop` (1.2).
+- **Tests added:** `tests/test_worker_pool.py` — defaults/validation,
+  concurrency cap, error isolation, shutdown refuse+idempotent, drain of
+  short work, run-cancellation → shutdown. No real long sleeps.
+- **Checks run:**
+  - `python -m pytest tests/test_worker_pool.py tests/test_priority_event_queue.py tests/test_daemon_loop.py tests/test_daemon_shutdown.py -q` → 52 passed
+  - broader checks recorded in the PR description
+- **Known limitations:** Not yet composed into a full daemon entry point;
+  per-event timeout/cancel semantics are 3.3; durable recovery remains 4.x.
 - **Blockers:** none. **Human action:** review and merge the PR.
 
 | Item | Title | Status |
@@ -375,8 +392,8 @@ Each sub-item reports four independent fields so the status is unambiguous:
 | 2.2 | File watcher | merged (acceptance pending) |
 | 2.3 | Instant wake on new RuntimeTask | merged (acceptance pending) |
 | 2.4 | External events | skipped (explicitly deferred) |
-| 3.1 | Priority event queue | open PR (acceptance pending) |
-| 3.2 | Worker pool | not started |
+| 3.1 | Priority event queue | merged (acceptance pending) |
+| 3.2 | Worker pool | open PR (acceptance pending) |
 | 3.3 | Task timeout and cancellation | not started |
 | 3.4 | Event deduplication | not started |
 | 4.1 | In-flight task checkpointing | not started |
