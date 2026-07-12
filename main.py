@@ -55,6 +55,7 @@ from core.subagent_memory_scope import (
     needs_delegation,
     propose_subagent,
 )
+from core.subagent_contract import approval_payload_from_proposal
 from core.loop import AgentLoop, format_human_response
 from core.model_usage import ModelBudgetExceeded
 from core.model_router import ModelRole
@@ -526,7 +527,7 @@ def _handle_subagent_proposal(rest: str, agent: AgentLoop, workspace: Path) -> b
             summary=f"Subagent proposal: {result.proposal.proposed_role} — {goal}",
             risk="reversible",
             reasons=(f"why: {result.proposal.why_needed}",),
-            payload=result.proposal.to_dict(),
+            payload=approval_payload_from_proposal(result.proposal),
         )
         print(f"(subagent-proposal submitted to approval inbox id={item.id})", file=sys.stderr)
 

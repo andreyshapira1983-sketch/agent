@@ -37,6 +37,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from core.subagent_contract import CanonicalSubagentContract
+from core.subagent_contract_audit import ContractAuditReport, SubagentExecutionReceipt
+
 # Persistent ledger location (gitignored ``data/`` tree). One small JSON file
 # keyed by role id; atomic tmp+replace on write.
 REGISTRY_PATH = "data/subagent_registry.json"
@@ -204,6 +207,95 @@ class RoleRecord:
         )
 
 
+@dataclass
+class ContractRunRecord:
+    """Version-separated runtime counters for one canonical contract.
+
+    These counters are deliberately independent from :class:`RoleRecord` so a
+    future caller can reconcile verified value exactly once instead of
+    accidentally double-counting an execution as role reputation.
+    """
+
+    contract_id: str
+    schema_version: int
+    role_id: str
+    source: str
+    invocations: int = 0
+    executed: int = 0
+    errors: int = 0
+    refused: int = 0
+    audit_passes: int = 0
+    audit_failures: int = 0
+    audit_unknown: int = 0
+    last_execution_receipt: dict[str, Any] | None = None
+    last_audit_report: dict[str, Any] | None = None
+    last_outcome: str | None = None
+    last_used_at: str | None = None
+
+    @property
+    def key(self) -> str:
+        return _contract_run_key(self.contract_id, self.schema_version)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "contract_id": self.contract_id,
+            "schema_version": self.schema_version,
+            "role_id": self.role_id,
+            "source": self.source,
+            "invocations": self.invocations,
+            "executed": self.executed,
+            "errors": self.errors,
+            "refused": self.refused,
+            "audit_passes": self.audit_passes,
+            "audit_failures": self.audit_failures,
+            "audit_unknown": self.audit_unknown,
+            "last_execution_receipt": self.last_execution_receipt,
+            "last_audit_report": self.last_audit_report,
+            "last_outcome": self.last_outcome,
+            "last_used_at": self.last_used_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ContractRunRecord | None":
+        contract_id = str(data.get("contract_id") or "").strip()
+        role_id = str(data.get("role_id") or "").strip()
+        schema_version = _as_int(data.get("schema_version"), default=0)
+        if not contract_id or not role_id or schema_version < 1:
+            return None
+        last_outcome = str(data.get("last_outcome") or "") or None
+        if last_outcome not in {None, "executed", "error", "refused"}:
+            last_outcome = None
+        return cls(
+            contract_id=contract_id,
+            schema_version=schema_version,
+            role_id=role_id,
+            source=str(data.get("source") or "unknown"),
+            invocations=_as_int(data.get("invocations")),
+            executed=_as_int(data.get("executed")),
+            errors=_as_int(data.get("errors")),
+            refused=_as_int(data.get("refused")),
+            audit_passes=_as_int(data.get("audit_passes")),
+            audit_failures=_as_int(data.get("audit_failures")),
+            audit_unknown=_as_int(data.get("audit_unknown")),
+            last_execution_receipt=(
+                dict(data["last_execution_receipt"])
+                if isinstance(data.get("last_execution_receipt"), dict)
+                else None
+            ),
+            last_audit_report=(
+                dict(data["last_audit_report"])
+                if isinstance(data.get("last_audit_report"), dict)
+                else None
+            ),
+            last_outcome=last_outcome,
+            last_used_at=(str(data["last_used_at"]) if data.get("last_used_at") else None),
+        )
+
+
+def _contract_run_key(contract_id: str, schema_version: int) -> str:
+    return f"{contract_id}@v{schema_version}"
+
+
 def _trust_score(rec: RoleRecord) -> float:
     """Fraction of *judged* events that went well (0..1).
 
@@ -319,14 +411,22 @@ class SubagentRegistry:
     write helpers persist atomically and never raise on a corrupt/missing file.
     """
 
-    def __init__(self, workspace: str | Path, roles: dict[str, RoleRecord] | None = None,
-                 applied_outcomes: set[str] | None = None):
+    def __init__(
+        self,
+        workspace: str | Path,
+        roles: dict[str, RoleRecord] | None = None,
+        applied_outcomes: set[str] | None = None,
+        contract_runs: dict[str, ContractRunRecord] | None = None,
+    ):
         self.workspace = Path(workspace)
         self.roles: dict[str, RoleRecord] = roles if roles is not None else {}
         # Persistent dedup set for TD-031 lane outcomes. Keyed
         # ``f"{item_id}:{role_id}:{outcome}"`` so re-firing a hook (or a restart)
         # never double-counts, and future multi-role crediting stays safe.
         self.applied_outcomes: set[str] = applied_outcomes if applied_outcomes is not None else set()
+        self.contract_runs: dict[str, ContractRunRecord] = (
+            contract_runs if contract_runs is not None else {}
+        )
         self._ensure_defaults()
 
     # ── persistence ─────────────────────────────────────────────────────────
@@ -348,6 +448,7 @@ class SubagentRegistry:
         path = Path(workspace) / REGISTRY_PATH
         roles: dict[str, RoleRecord] = {}
         applied: set[str] = set()
+        contract_runs: dict[str, ContractRunRecord] = {}
         if path.exists():
             try:
                 raw = json.loads(path.read_text(encoding="utf-8"))
@@ -362,10 +463,21 @@ class SubagentRegistry:
                 raw_applied = raw.get("applied_outcomes", []) if isinstance(raw, dict) else []
                 if isinstance(raw_applied, list):
                     applied = {str(k) for k in raw_applied}
+                raw_contracts = (
+                    raw.get("contract_runs", {}) if isinstance(raw, dict) else {}
+                )
+                if isinstance(raw_contracts, dict):
+                    for data in raw_contracts.values():
+                        if not isinstance(data, dict):
+                            continue
+                        record = ContractRunRecord.from_dict(data)
+                        if record is not None:
+                            contract_runs[record.key] = record
             except (ValueError, OSError):
                 roles = {}  # corrupt -> rebuild defaults
                 applied = set()
-        return cls(workspace, roles, applied)
+                contract_runs = {}
+        return cls(workspace, roles, applied, contract_runs)
 
     def save(self) -> None:
         """Persist atomically (tmp + replace). Best-effort; may raise on IO —
@@ -375,6 +487,9 @@ class SubagentRegistry:
             "updated_at": _now_iso(),
             "roles": {rid: rec.to_dict() for rid, rec in self.roles.items()},
             "applied_outcomes": sorted(self.applied_outcomes),
+            "contract_runs": {
+                key: rec.to_dict() for key, rec in sorted(self.contract_runs.items())
+            },
         }
         tmp = self.path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -388,6 +503,69 @@ class SubagentRegistry:
             rec = RoleRecord(role_id=role_id)
             self.roles[role_id] = rec
         return rec
+
+    def record_contract_run(
+        self,
+        contract: CanonicalSubagentContract,
+        outcome: str,
+        *,
+        execution_receipt: SubagentExecutionReceipt | None = None,
+        audit_report: ContractAuditReport | None = None,
+        save: bool = True,
+    ) -> bool:
+        """Record one canonical runtime outcome without touching role scores.
+
+        ``outcome`` is one of ``executed``, ``error``, or ``refused``. Contract
+        identity is the pair ``(contract_id, schema_version)``; a reused identity
+        with a different role/source is rejected instead of merging histories.
+        """
+        if outcome not in {"executed", "error", "refused"}:
+            return False
+        if audit_report is not None and (
+            audit_report.contract_id != contract.contract_id
+            or audit_report.schema_version != contract.schema_version
+        ):
+            raise ValueError("audit report identity does not match canonical contract")
+        if execution_receipt is not None and (
+            execution_receipt.contract_id != contract.contract_id
+            or execution_receipt.schema_version != contract.schema_version
+        ):
+            raise ValueError("execution receipt identity does not match canonical contract")
+        key = _contract_run_key(contract.contract_id, contract.schema_version)
+        record = self.contract_runs.get(key)
+        if record is None:
+            record = ContractRunRecord(
+                contract_id=contract.contract_id,
+                schema_version=contract.schema_version,
+                role_id=contract.role,
+                source=contract.source,
+            )
+            self.contract_runs[key] = record
+        elif record.role_id != contract.role or record.source != contract.source:
+            raise ValueError(f"canonical contract identity collision: {key}")
+
+        record.invocations += 1
+        if outcome == "executed":
+            record.executed += 1
+        elif outcome == "error":
+            record.errors += 1
+        else:
+            record.refused += 1
+        if audit_report is not None:
+            if audit_report.verdict == "pass":
+                record.audit_passes += 1
+            elif audit_report.verdict == "fail":
+                record.audit_failures += 1
+            else:
+                record.audit_unknown += 1
+            record.last_audit_report = audit_report.to_dict()
+        if execution_receipt is not None:
+            record.last_execution_receipt = execution_receipt.to_dict()
+        record.last_outcome = outcome
+        record.last_used_at = _now_iso()
+        if save:
+            self.save()
+        return True
 
     def record_report(self, report: Any, *, save: bool = True) -> bool:
         """Record one producer run's role outcomes. Returns True if anything was
@@ -543,6 +721,11 @@ class SubagentRegistry:
             "role_count": len(self.roles),
             "recommendation_counts": counts,
             "roles": roles,
+            "contract_count": len(self.contract_runs),
+            "contract_runs": [
+                self.contract_runs[key].to_dict()
+                for key in sorted(self.contract_runs)
+            ],
         }
 
     def summary_line(self) -> str:

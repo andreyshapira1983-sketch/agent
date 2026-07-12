@@ -298,6 +298,41 @@ Each sub-item reports four independent fields so the status is unambiguous:
   sub-item can add a content hash if needed.
 - **Blockers:** none. **Human action:** none -- PR merged; plan acceptance (Definition of Done sign-off) still pending.
 
+## 2.3 Instant wake on new RuntimeTask
+
+- **implementation:** completed | **main_pr:** open | **hotfix:** none | **acceptance:** pending
+- **Branch:** daemon/2.3-runtime-task-wake
+- **Last updated:** 2026-07-12
+- **Implementation:** Extended the existing TaskQueueStore with an optional
+  on_task_added(RuntimeTask) callback. Both normal tasks and paused checkpoint
+  tasks invoke it immediately after the JSONL rewrite succeeds and after the
+  queue file lock is released. A daemon-owned store can pass
+  DaemonLoop.wake_threadsafe (including a task-id reason), so in-process
+  producers wake the persistent loop without polling or a second queue.
+  Callback failures are logged and isolated: the already-durable task remains
+  available for the next wake/recovery pass. Existing constructors, persisted
+  RuntimeTask data, ordering, scheduler behaviour, and agent_tick.py are
+  unchanged.
+- **Tests added:** Four deterministic cases in tests/test_task_queue.py:
+  callback-after-persistence (also proves it runs outside the file lock), paused
+  checkpoint notification, callback-error durability/logging, and a bounded
+  integration test showing a new task wakes DaemonLoop through wake_threadsafe
+  and supplies the exact task-id reason. No real sleeps are used.
+- **Checks run:**
+  - git diff --check -> passed
+  - python -m pytest tests/test_task_queue.py -q -> not run: python is not
+    available in PATH
+  - py -3.11 -m pytest tests/test_task_queue.py -q -> not run: no installed
+    Python was found by the launcher
+- **Known limitations:** The callback is an in-process wake bridge. A task
+  written by another process uses the 2.2 file-watcher path until daemon
+  composition/wiring lands with the dispatcher/worker items. The callback is
+  synchronous by design because DaemonLoop.wake_threadsafe is synchronous.
+  No daemon entry point is introduced here.
+- **Blockers:** none in code. **Human action:** review the Draft PR and rely on
+  GitHub CI for pytest/coverage because this workstation currently has no
+  usable Python runtime.
+
 | Item | Title | Status |
 | --- | --- | --- |
 | 1.1 | Main async event loop | merged (acceptance pending) |
@@ -306,7 +341,7 @@ Each sub-item reports four independent fields so the status is unambiguous:
 | 1.4 | Windows service launch | merged (acceptance pending) |
 | 2.1 | Timer events (in-loop scheduler) | merged (acceptance pending) |
 | 2.2 | File watcher | merged (acceptance pending) |
-| 2.3 | Instant wake on new RuntimeTask | not started |
+| 2.3 | Instant wake on new RuntimeTask | Draft PR open (acceptance pending) |
 | 2.4 | External events | skipped (explicitly deferred) |
 | 3.1 | Priority event queue | not started |
 | 3.2 | Worker pool | not started |

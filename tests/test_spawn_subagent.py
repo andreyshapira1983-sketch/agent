@@ -309,6 +309,26 @@ def test_spawn_tool_validate_output_rejects_non_string(spawn_tool):
     assert ok is False
 
 
+def test_spawn_tool_run_contract_reuses_existing_runner(spawn_tool):
+    from core.subagent_contract import CanonicalSubagentContract
+    from core.subagent_memory_scope import make_default_proposal
+
+    contract = CanonicalSubagentContract.from_proposal(
+        make_default_proposal("audit project")
+    )
+    expected = object()
+    spawn_tool._runner.run_contract = MagicMock(return_value=expected)
+
+    result = spawn_tool.run_contract(contract, approved=True, context="approved")
+
+    assert result is expected
+    spawn_tool._runner.run_contract.assert_called_once_with(
+        contract,
+        approved=True,
+        context="approved",
+    )
+
+
 # ──────────────────────────────────────────────────────────
 # 5. Contract name resolution
 # ──────────────────────────────────────────────────────────
