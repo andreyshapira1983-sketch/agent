@@ -357,29 +357,52 @@ Each sub-item reports four independent fields so the status is unambiguous:
 
 ## 3.2 Worker pool
 
-- **implementation:** completed | **main_pr:** open | **hotfix:** none | **acceptance:** pending
+- **implementation:** completed | **main_pr:** #86 merged | **hotfix:** none | **acceptance:** pending
 - **Branch:** `daemon/3.2-worker-pool`
+- **Pull Request:** #86 (merged)
 - **Last updated:** 2026-07-13
-- **Why this item:** GitHub shows 2.3 (#83) and 3.1 (#84) already merged; no
-  open PR/branch for 3.2; next required sequence item is 3.2.
 - **Implementation:** New `app/worker_pool.py` with `WorkerPool` consuming an
   existing `PriorityEventQueue` (no second queue). Configurable `max_workers`
   (default 2). Workers are asyncio tasks; handler exceptions are logged and
   isolated so one failure does not stop the pool. `shutdown()` closes the
   queue (stop accepting), drains in-flight handlers for a bounded
   `drain_timeout`, then cancels stragglers; repeated shutdown is safe.
-  Does not add per-task timeouts (3.3), does not own `DaemonLoop`, does not
-  change `agent_tick.py`.
+  Does not own `DaemonLoop`, does not change `agent_tick.py`.
 - **Reused:** `PriorityEventQueue.get` / `close` / `PriorityEventQueueClosed`
   from 3.1; shutdown/drain pattern aligned with `DaemonLoop` (1.2).
 - **Tests added:** `tests/test_worker_pool.py` — defaults/validation,
   concurrency cap, error isolation, shutdown refuse+idempotent, drain of
-  short work, run-cancellation → shutdown. No real long sleeps.
+  short work, run-cancellation → shutdown.
+- **Checks run:** See merged PR #86 / GitHub CI.
+- **Known limitations:** Composition into a full daemon entry point still
+  pending; durable recovery remains 4.x. Per-event timeout added in 3.3.
+- **Blockers:** none. **Human action:** optional read-only acceptance review;
+  do not reimplement.
+
+## 3.3 Task timeout and cancellation
+
+- **implementation:** completed | **main_pr:** open | **hotfix:** none | **acceptance:** pending
+- **Branch:** `daemon/3.3-task-timeout`
+- **Last updated:** 2026-07-13
+- **Why this item:** 3.2 (#86) merged on main; no open PR for 3.3; next in
+  sequence.
+- **Implementation:** Extended `WorkerPool` with configurable `task_timeout`
+  (default 60s; `None` disables). Each handler runs under `asyncio.wait_for`;
+  on timeout the awaitable is cancelled, `timeout_count` increments, success
+  counter does **not**, and a warning log includes `reason=task_timeout`.
+  Explicit `CancelledError` still propagates and is never counted as success.
+  Added `metrics()` snapshot for later daemon-status (6.2/6.3).
+- **Reused:** existing `WorkerPool` / `PriorityEventQueue` (no second executor).
+- **Tests added/updated:** `tests/test_worker_pool.py` — timeout then continue,
+  cancel ≠ success, `task_timeout=None` park until shutdown, validation,
+  metrics counters. Bounded waits only (≤0.08s), no long real sleeps.
 - **Checks run:**
-  - `python -m pytest tests/test_worker_pool.py tests/test_priority_event_queue.py tests/test_daemon_loop.py tests/test_daemon_shutdown.py -q` → 52 passed
-  - broader checks recorded in the PR description
-- **Known limitations:** Not yet composed into a full daemon entry point;
-  per-event timeout/cancel semantics are 3.3; durable recovery remains 4.x.
+  - `python -m pytest tests/test_worker_pool.py tests/test_priority_event_queue.py -q` → 25 passed
+- **Also in this branch:** `.cursor/rules/daemon-plan-workflow.mdc` so agents
+  keep the one-item daemon protocol without re-pasting the full checkpoint.
+- **Known limitations:** No separate metrics backend yet (6.3); timeout uses
+  asyncio loop time (tests use short real timeouts, not a fake clock — same
+  pattern as 3.2 cancel tests).
 - **Blockers:** none. **Human action:** review and merge the PR.
 
 | Item | Title | Status |
@@ -393,8 +416,8 @@ Each sub-item reports four independent fields so the status is unambiguous:
 | 2.3 | Instant wake on new RuntimeTask | merged (acceptance pending) |
 | 2.4 | External events | skipped (explicitly deferred) |
 | 3.1 | Priority event queue | merged (acceptance pending) |
-| 3.2 | Worker pool | open PR (acceptance pending) |
-| 3.3 | Task timeout and cancellation | not started |
+| 3.2 | Worker pool | merged (acceptance pending) |
+| 3.3 | Task timeout and cancellation | open PR (acceptance pending) |
 | 3.4 | Event deduplication | not started |
 | 4.1 | In-flight task checkpointing | not started |
 | 4.2 | Recovery on start | not started |
