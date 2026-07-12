@@ -77,6 +77,9 @@ from core.referent_resolver import (
     ReferentDecision,
     ReferentResolver,
     artifacts_from_working_memory,
+    citation_token_for_referent,
+    is_local_critique_eligible,
+    is_show_only_directive,
     referent_resolver_mode,
 )
 from core.persistent_memory import PersistentMemoryStore
@@ -143,6 +146,7 @@ from tools.base import ToolRegistry
 from tools.file_read import MAX_BYTES as FILE_READ_MAX_BYTES
 from core.loop_helpers import (  # noqa: F401 -- re-exported
     DEFAULT_MAX_REPLAN_ATTEMPTS,
+    LOCAL_CRITIQUE_SYSTEM_ADDENDUM,
     SYSTEM_ANSWER,
     _ANSWER_CITATION_RE,
     _VERIF_MARKER_RE,
@@ -737,14 +741,39 @@ class AgentLoop(AgentLoopExtractedMethods):
                     },
                 )
 
-        # Referent resolver (critique PR1) — shadow/on observability only until PR2.
+        # Referent resolver (critique PR1/PR2) — shadow logs; on enables path.
         self._maybe_resolve_referent(user_question, file_hint=file_hint)
+        local_critique_active = (
+            referent_resolver_mode() == "on"
+            and self.last_referent_decision is not None
+            and is_local_critique_eligible(self.last_referent_decision)
+        )
+        if local_critique_active:
+            _rd = self.last_referent_decision
+            assert _rd is not None and _rd.primary is not None
+            self.log.log(
+                "local_critique_path",
+                {
+                    "status": _rd.status,
+                    "kind": _rd.primary.kind,
+                    "show_only": is_show_only_directive(_rd.directive_excerpt),
+                    "target_chars": len(_rd.analysis_target_excerpt),
+                    "citation": citation_token_for_referent(_rd),
+                },
+            )
 
         # Persistent memory retrieval — pick a few long-term records that
         # share keywords with the question, then format them as a
         # <long_term_memory> block injected into planner + synthesizer.
-        persistent_block = self._retrieve_persistent(user_question)
-        experience_block = self._retrieve_experience_memory(user_question)
+        # Local-critique turns suppress default LTM/episodic injection (PR2).
+        if local_critique_active:
+            persistent_block = ""
+            experience_block = ""
+            self._last_best_similar_episode = None
+            self._last_best_similar_score = 0.0
+        else:
+            persistent_block = self._retrieve_persistent(user_question)
+            experience_block = self._retrieve_experience_memory(user_question)
 
         # ── Episodic fast path ───────────────────────────────────────────────────
         # Jaccard ≥ 0.85 AND quality ≥ 0.70 → serve the stored answer directly,
@@ -757,10 +786,12 @@ class AgentLoop(AgentLoopExtractedMethods):
         #     the environment (files, installed packages, command output) which
         #     may have changed since; only purely reasoned answers (no tools)
         #     are safe to replay verbatim.
+        #   - local_critique_active (must critique current referent, not replay)
         _fp_ep = self._last_best_similar_episode
         _fp_score = self._last_best_similar_score
         if (
-            not file_hint
+            not local_critique_active
+            and not file_hint
             and not user_question.strip().startswith(":")
             and _fp_ep is not None
             and _fp_score >= 0.85
@@ -932,6 +963,40 @@ class AgentLoop(AgentLoopExtractedMethods):
                     warnings=forced_warnings,
                 )
             else:
+                # ── Local-critique path (PR2) ─────────────────────────────
+                # Resolved referent + critique/show-only → skip planner tools
+                # and synthesise from analysis_target (not memory/GK).
+                if (
+                    local_critique_active
+                    and attempt == 1
+                    and not failure_context.strip()
+                ):
+                    planner_out = PlannerOutput(
+                        reasoning=(
+                            "Local critique path: referent resolved — answering "
+                            "from analysis_target without tools or memory/GK."
+                        ),
+                        sources=[],
+                        raw_response="",
+                        warnings=["planner_skipped_local_critique"],
+                        diagnostics={
+                            "stage": "skipped",
+                            "reason": "referent_local_critique",
+                            "fallback": "local_critique",
+                        },
+                    )
+                    self.log.log(
+                        "planner_local_critique",
+                        {
+                            "question_chars": len(user_question),
+                            "kind": (
+                                None
+                                if self.last_referent_decision is None
+                                or self.last_referent_decision.primary is None
+                                else self.last_referent_decision.primary.kind
+                            ),
+                        },
+                    )
                 # ── Cheap-path gate ───────────────────────────────────────
                 # Trivial, no-tool input (config-flag echoes, greetings, one
                 # line "what is X") never needs a tool: the planner would only
@@ -939,7 +1004,7 @@ class AgentLoop(AgentLoopExtractedMethods):
                 # and let the normal empty-plan flow synthesise the answer.
                 # Gated to the first attempt with no failure/replan context so
                 # replans always get the real planner.
-                if (
+                elif (
                     self.cheap_path_enabled
                     and attempt == 1
                     and not failure_context.strip()
@@ -1421,6 +1486,11 @@ class AgentLoop(AgentLoopExtractedMethods):
                 # Shrink the prompt/output on the adapted attempt — this is the
                 # recovery for a request the model "could not finish".
                 lean_context=cheap_path_active or _attempt.adapt_context,
+                local_critique=(
+                    self.last_referent_decision
+                    if local_critique_active
+                    else None
+                ),
             )
 
         try:
@@ -2549,7 +2619,7 @@ class AgentLoop(AgentLoopExtractedMethods):
         *,
         file_hint: str | None,
     ) -> None:
-        """Shadow/on referent resolution — logs only; does not change the answer path."""
+        """Shadow/on referent resolution. Shadow logs only; ``on`` enables PR2 path."""
         mode = referent_resolver_mode()
         if mode == "off":
             self.last_referent_decision = None
@@ -2595,9 +2665,12 @@ class AgentLoop(AgentLoopExtractedMethods):
                 prior_turns=tuple(prior_turns),
             )
             self.last_referent_decision = decision
+            eligible = is_local_critique_eligible(decision)
             payload = decision.to_dict()
             payload["mode"] = mode
-            payload["would_change_answer"] = False
+            payload["local_critique_eligible"] = eligible
+            # True when enabling ``on`` would change the answer path (PR2).
+            payload["would_change_answer"] = eligible
             self.log.log("referent_decision", payload)
         except Exception:
             # Observability must never abort the run.
@@ -3741,6 +3814,7 @@ class AgentLoop(AgentLoopExtractedMethods):
         failure_history: list[ReplanTrigger] | None = None,
         llm=None,
         lean_context: bool = False,
+        local_critique: ReferentDecision | None = None,
     ) -> str:
         history_block = (
             f"<conversation_history>\n{history}\n</conversation_history>\n\n"
@@ -3751,11 +3825,21 @@ class AgentLoop(AgentLoopExtractedMethods):
         # (long-term memory, user profile, run assumptions). A trivial
         # greeting / config-flag echo is answered from general knowledge;
         # these blocks only inflate the prompt token count.
-        if lean_context:
+        # Local critique: keep profile (language/verbosity) but drop LTM,
+        # assumptions, role, and conversation_history — target is explicit.
+        if lean_context or local_critique is not None:
             long_term_block = ""
-            profile_block = ""
             assumptions_block = ""
             role_block = ""
+            if local_critique is not None:
+                history_block = ""
+                profile_block = (
+                    profile_to_prompt_block(self.last_user_profile) + "\n\n"
+                    if self.last_user_profile is not None
+                    else ""
+                )
+            else:
+                profile_block = ""
         else:
             long_term_block = (
                 f"{persistent_block}\n\n" if persistent_block.strip() else ""
@@ -3810,7 +3894,53 @@ class AgentLoop(AgentLoopExtractedMethods):
         # or sensitive PII the user pasted in.
         safe_question, _q_findings, _q_pii_findings = redact_dlp_text(question)
 
-        if artifacts:
+        system_prompt = SYSTEM_ANSWER
+        if local_critique is not None and not artifacts:
+            cite = citation_token_for_referent(local_critique)
+            raw_target = (local_critique.analysis_target_excerpt or "").strip()
+            # Cap oversized targets; keep the turn bounded.
+            _max_target = 12_000
+            truncated = False
+            if len(raw_target) > _max_target:
+                raw_target = raw_target[:_max_target]
+                truncated = True
+            safe_target, _, _ = redact_dlp_text(raw_target)
+            safe_target = (
+                safe_target.replace("</analysis_target>", "")
+                .replace("<analysis_target", "&lt;analysis_target")
+            )
+            directive_raw = (local_critique.directive_excerpt or question).strip()
+            safe_directive, _, _ = redact_dlp_text(directive_raw)
+            safe_directive = safe_directive.replace("</directive>", "")
+            show_only = is_show_only_directive(directive_raw)
+            trunc_note = (
+                "\n[note] analysis_target truncated for length.\n"
+                if truncated
+                else ""
+            )
+            show_only_line = (
+                "Show-only: do not offer further actions or help.\n"
+                if show_only
+                else ""
+            )
+            user_prompt = (
+                f"{safety_block}"
+                f"{failure_block}"
+                f"{profile_block}"
+                f"<directive>\n{safe_directive}\n</directive>\n\n"
+                f'<analysis_target untrusted="true">\n'
+                f"{safe_target}{trunc_note}"
+                f"</analysis_target>\n\n"
+                f"<allowed_target_citation>{cite}</allowed_target_citation>\n\n"
+                f"planner_reasoning: {planner_reasoning}\n\n"
+                f"{show_only_line}"
+                "Answer using the Output Contract. Critique only the "
+                "analysis_target. Cite target-descriptive claims with the "
+                "allowed_target_citation token. Do not use [general-knowledge] "
+                "or [memory:*] for this turn. Do not claim the object is missing."
+            )
+            system_prompt = SYSTEM_ANSWER + "\n" + LOCAL_CRITIQUE_SYSTEM_ADDENDUM
+        elif artifacts:
             from core.evidence_budget import apply_total_budget
             raw_blocks: list[tuple[str, str]] = []
             for label, art in artifacts.items():
@@ -3917,25 +4047,29 @@ class AgentLoop(AgentLoopExtractedMethods):
         safe_user_prompt, _secret_findings, _pii_findings = redact_dlp_text(user_prompt)
         _active_llm = llm if llm is not None else self.llm
         from core.planner import _build_host_tools_block  # lazy import — avoids circular
-        host_block = _build_host_tools_block()
-        # Inject host tools as a synthetic evidence block so the model treats
-        # the paths as verified context (the model answers strictly from evidence).
-        if host_block:
-            host_evidence = (
-                "\n\n<evidence source=\"host_tools\">\n"
-                + host_block.strip()
-                + "\nWhen a script was written for one of these tools, state the EXACT "
-                "run command from above in the Facts section so the user knows how to execute it."
-                + "\n</evidence>"
-            )
-            safe_user_prompt = safe_user_prompt + host_evidence
+        # Local critique must not pull host_tools as synthetic "evidence".
+        if local_critique is None:
+            host_block = _build_host_tools_block()
+            # Inject host tools as a synthetic evidence block so the model treats
+            # the paths as verified context (the model answers strictly from evidence).
+            if host_block:
+                host_evidence = (
+                    "\n\n<evidence source=\"host_tools\">\n"
+                    + host_block.strip()
+                    + "\nWhen a script was written for one of these tools, state the EXACT "
+                    "run command from above in the Facts section so the user knows how to execute it."
+                    + "\n</evidence>"
+                )
+                safe_user_prompt = safe_user_prompt + host_evidence
         _on_token = getattr(self, "_stream_on_token", None)
         if _on_token is not None:
             return _active_llm.stream_complete(
-                system=SYSTEM_ANSWER, user=safe_user_prompt,
+                system=system_prompt, user=safe_user_prompt,
                 temperature=0.5, on_token=_on_token,
             )
-        return _active_llm.complete(system=SYSTEM_ANSWER, user=safe_user_prompt, temperature=0.5)
+        return _active_llm.complete(
+            system=system_prompt, user=safe_user_prompt, temperature=0.5
+        )
 
     @staticmethod
     def _citation_for_evidence(ev: Evidence) -> str | None:
