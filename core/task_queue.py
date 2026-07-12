@@ -7,15 +7,18 @@ pending task, run it, and record the result.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 from core.file_lock import exclusive_file_lock
 from core.ids import new_id
 from core.state_integrity import read_state_jsonl_unlocked, rewrite_state_jsonl_unlocked
 
+
+logger = logging.getLogger(__name__)
 
 RuntimeTaskKind = Literal["auto_run", "resume_checkpoint"]
 RuntimeTaskStatus = Literal["pending", "running", "done", "failed", "cancelled", "paused"]
@@ -114,6 +117,9 @@ class RuntimeTask:
         return RuntimeTask.from_dict(data)
 
 
+TaskAddedCallback = Callable[[RuntimeTask], None]
+
+
 class TaskQueueStore:
     """JSONL-backed runtime task queue.
 
@@ -121,9 +127,15 @@ class TaskQueueStore:
     to inspect by hand and avoids event-log compaction for this early slice.
     """
 
-    def __init__(self, path: Path | str):
+    def __init__(
+        self,
+        path: Path | str,
+        *,
+        on_task_added: TaskAddedCallback | None = None,
+    ):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._on_task_added = on_task_added
 
     def add(
         self,
@@ -153,6 +165,7 @@ class TaskQueueStore:
             tasks = self._load_unlocked()
             tasks.append(task)
             self._save_unlocked(tasks)
+        self._notify_task_added(task)
         return task
 
     def add_paused_checkpoint(
@@ -179,7 +192,17 @@ class TaskQueueStore:
             tasks = self._load_unlocked()
             tasks.append(task)
             self._save_unlocked(tasks)
+        self._notify_task_added(task)
         return task
+
+    def _notify_task_added(self, task: RuntimeTask) -> None:
+        """Notify the daemon after a new task is durably visible in the queue."""
+        if self._on_task_added is None:
+            return
+        try:
+            self._on_task_added(task)
+        except Exception:  # noqa: BLE001 - a wake failure must not lose durable work
+            logger.exception("runtime task wake callback failed for %s", task.id)
 
     def load(self) -> list[RuntimeTask]:
         with exclusive_file_lock(self._lock_path):

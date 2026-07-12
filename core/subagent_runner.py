@@ -31,11 +31,18 @@ Typical flow
 """
 from __future__ import annotations
 
+import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from core.subagent_contract import CanonicalSubagentContract
+from core.subagent_contract_audit import (
+    ContractAuditReport,
+    SubagentExecutionReceipt,
+    audit_subagent_execution,
+)
 from tools.base import ToolRegistry
 
 if TYPE_CHECKING:
@@ -61,6 +68,10 @@ _SAFE_SUBAGENT_TOOLS: frozenset[str] = frozenset({
 
 # Hard ceiling on how many tool calls a single sub-agent may make.
 MAX_SUBAGENT_TOOL_CALLS = 3
+
+
+class SubagentContractRefused(ValueError):
+    """Raised before execution when the runner cannot enforce a contract."""
 
 # Evidence kinds that count as EXTERNAL — i.e. verifiable artefacts the
 # sub-agent fetched from outside the LLM. `memory`, `llm_claim`,
@@ -214,6 +225,8 @@ class SubAgentRunResult:
     # such citations as `verified`.
     external_evidence_count: int = 0
     external_evidence_kinds: tuple[str, ...] = ()
+    execution_receipt: SubagentExecutionReceipt | None = None
+    contract_audit: ContractAuditReport | None = None
 
     def to_evidence_text(self) -> str:
         """Format for injection into the parent loop's Evidence chain."""
@@ -290,6 +303,78 @@ class SubAgentRunner:
     # Public API
     # ------------------------------------------------------------------
 
+    def run_contract(
+        self,
+        contract: CanonicalSubagentContract,
+        *,
+        approved: bool = False,
+        context: str = "",
+    ) -> SubAgentRunResult:
+        """Execute a canonical contract after strict capability prechecks.
+
+        This compatibility entry point is intentionally strict.  The current
+        child loop is stateless, read-only, and single-iteration, so policy it
+        cannot honour is refused rather than silently ignored.  The legacy
+        :meth:`run` API remains available while callers migrate in stages.
+
+        Exact child-trace tool/attempt observations are attached as a typed
+        receipt and audited after the run. Per-contract model-call/cost
+        accounting remains unknown until the shared usage ledger carries trace
+        attribution; verifier execution is also a later stage.
+        """
+        if contract.approval_required and not approved:
+            raise SubagentContractRefused(
+                f"contract {contract.contract_id} requires human approval"
+            )
+
+        memory_scope = contract.memory_scope
+        if memory_scope is not None and (
+            memory_scope.read_tags or memory_scope.write_tags
+        ):
+            raise SubagentContractRefused(
+                "persistent memory scope is not supported by SubAgentRunner"
+            )
+
+        if contract.budget_scope.max_iterations != 1:
+            raise SubagentContractRefused(
+                "SubAgentRunner currently supports exactly one iteration"
+            )
+
+        if contract.budget_scope.max_model_calls == 0:
+            raise SubagentContractRefused(
+                "SubAgentRunner requires at least one model call"
+            )
+
+        max_writes = contract.budget_scope.max_file_writes
+        if max_writes not in (None, 0):
+            raise SubagentContractRefused(
+                "SubAgentRunner does not permit file writes"
+            )
+
+        result = self.run(
+            contract_name=contract.name,
+            role=contract.role,
+            objective=contract.objective,
+            context=context,
+            allowed_tools=list(contract.tool_scope.allowed_tools),
+            model_role=contract.model_role or "synthesizer",
+        )
+        # Keep compatibility with test doubles and third-party legacy runners
+        # that return their own result type.  Real SubAgentRunResult instances
+        # receive the typed receipt and deterministic audit report.
+        if not isinstance(result, SubAgentRunResult):
+            return result
+        receipt = self._execution_receipt(
+            contract,
+            result,
+            approved=approved,
+        )
+        return replace(
+            result,
+            execution_receipt=receipt,
+            contract_audit=audit_subagent_execution(contract, receipt),
+        )
+
     def run(
         self,
         contract_name: str,
@@ -297,6 +382,8 @@ class SubAgentRunner:
         objective: str,
         context: str = "",
         allowed_tools: list[str] | None = None,
+        *,
+        model_role: str = "synthesizer",
     ) -> SubAgentRunResult:
         """Execute one sub-agent contract and return its result.
 
@@ -334,7 +421,7 @@ class SubAgentRunner:
             child_loop = AgentLoop(
                 registry=child_registry,
                 policy=self.policy,
-                llm=self.model_router.for_role("synthesizer"),
+                llm=self.model_router.for_role(model_role),
                 logger=child_logger,
                 model_router=self.model_router,
                 # Sub-agents don't carry persistent or episodic memory —
@@ -459,6 +546,73 @@ class SubAgentRunner:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _execution_receipt(
+        self,
+        contract: CanonicalSubagentContract,
+        result: SubAgentRunResult,
+        *,
+        approved: bool,
+    ) -> SubagentExecutionReceipt:
+        """Build only observations the current runner can prove.
+
+        Tool calls and attempts come from the flushed child trace.  Persistent
+        memory is structurally absent from the child loop.  Model usage and
+        cost remain unknown because the current usage ledger is shared and has
+        no trace id, so a process-wide delta cannot safely be attributed here.
+        """
+        used_tools, iterations = self._trace_observations(result.trace_id)
+        return SubagentExecutionReceipt(
+            contract_id=contract.contract_id,
+            schema_version=contract.schema_version,
+            approval_granted=(approved if contract.approval_required else None),
+            used_tools=used_tools,
+            memory_read_tags=(),
+            memory_write_tags=(),
+            model_calls=None,
+            iterations=iterations,
+            cost_units=None,
+            web_fetches=(
+                used_tools.count("web_fetch") if used_tools is not None else None
+            ),
+            file_writes=(
+                used_tools.count("file_write") if used_tools is not None else None
+            ),
+            verifier_status=("not_run" if contract.verifier is not None else None),
+            stop_reason=None,
+        )
+
+    def _trace_observations(
+        self,
+        trace_id: str,
+    ) -> tuple[tuple[str, ...] | None, int | None]:
+        """Read exact tool/attempt observations; malformed traces are unknown."""
+        if not trace_id:
+            return None, None
+        path = self.log_dir / f"{trace_id}.jsonl"
+        try:
+            rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+        except (OSError, ValueError, TypeError):
+            return None, None
+
+        used_tools: list[str] = []
+        iterations: int | None = None
+        for row in rows:
+            if not isinstance(row, dict):
+                return None, None
+            payload = row.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            if row.get("event") == "tool_call":
+                tool_name = payload.get("tool_name")
+                if not isinstance(tool_name, str) or not tool_name:
+                    return None, None
+                used_tools.append(tool_name)
+            elif row.get("event") == "respond":
+                attempts = payload.get("attempts_used")
+                if isinstance(attempts, int) and not isinstance(attempts, bool) and attempts >= 0:
+                    iterations = attempts
+        return tuple(used_tools), iterations
 
     def _judge_answer(self, objective: str, answer: str) -> int:
         """Rate sub-agent answer quality via a single lightweight LLM call.

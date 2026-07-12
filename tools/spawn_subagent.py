@@ -21,7 +21,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from core.subagent_runner import SubAgentRunner, _SAFE_SUBAGENT_TOOLS
+from core.subagent_contract import CanonicalSubagentContract
+from core.subagent_runner import (
+    SubAgentRunResult,
+    SubAgentRunner,
+    _SAFE_SUBAGENT_TOOLS,
+)
 from tools.base import Tool, ToolRegistry
 
 # Hard limits on string field lengths to prevent prompt injection via
@@ -76,6 +81,20 @@ class SpawnSubagentTool(Tool):
     # ------------------------------------------------------------------
     # Tool.run() implementation
     # ------------------------------------------------------------------
+
+    def run_contract(
+        self,
+        contract: CanonicalSubagentContract,
+        *,
+        approved: bool = False,
+        context: str = "",
+    ) -> SubAgentRunResult:
+        """Execute an already validated canonical approval contract."""
+        return self._runner.run_contract(
+            contract,
+            approved=approved,
+            context=context,
+        )
 
     def run(
         self,
