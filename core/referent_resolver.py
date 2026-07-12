@@ -40,7 +40,8 @@ _ENV_MODE = "AGENT_REFERENT_RESOLVER"
 def referent_resolver_mode() -> str:
     """Return ``off`` (default), ``shadow`` (log only), or ``on``.
 
-    ``on`` currently matches shadow for behaviour; PR2+ will branch on it.
+    ``shadow`` logs decisions only. ``on`` enables the local-critique answer
+    path when :func:`is_local_critique_eligible` is true (PR2).
     """
     raw = (os.getenv(_ENV_MODE) or "").strip().lower()
     if raw in ("on", "true", "1", "yes"):
@@ -48,6 +49,12 @@ def referent_resolver_mode() -> str:
     if raw in ("shadow",):
         return "shadow"
     return "off"
+
+
+# Kinds that can be critiqued without a tool read (PR2). file_hint / path → PR4.
+LOCAL_CRITIQUE_KINDS: frozenset[str] = frozenset(
+    {"user_text", "artifact", "prior_turn", "explicit_quote"}
+)
 
 ReferentStatus = Literal["resolved", "ambiguous", "unresolved", "needs_tool"]
 ReferentKind = Literal[
@@ -104,6 +111,44 @@ _QUOTED_RE = re.compile(
     r"[\"«]([^\"»]{8,800})[\"»]"
     r"|'([^']{8,800})'"
 )
+
+
+def is_critique_directive(text: str) -> bool:
+    """True when the user asks to analyse / critique / show weaknesses."""
+    return bool(_CRITIQUE_RE.search(text or "") or _SHOW_ONLY_DIRECTIVE_RE.search(text or ""))
+
+
+def is_show_only_directive(text: str) -> bool:
+    """True for show-only directives (no further action offers)."""
+    return bool(_SHOW_ONLY_DIRECTIVE_RE.search(text or ""))
+
+
+def is_local_critique_eligible(decision: ReferentDecision) -> bool:
+    """Whether PR2 should take the local-critique / show-only path.
+
+    Requires ``resolved`` primary in :data:`LOCAL_CRITIQUE_KINDS`, a non-empty
+    analysis target, and a critique / show-only directive.
+    """
+    if decision.status != "resolved" or decision.primary is None:
+        return False
+    if decision.primary.kind not in LOCAL_CRITIQUE_KINDS:
+        return False
+    if not (decision.analysis_target_excerpt or "").strip():
+        return False
+    return is_critique_directive(decision.directive_excerpt or "")
+
+
+def citation_token_for_referent(decision: ReferentDecision) -> str:
+    """Citation grammar token for claims about the resolved analysis target."""
+    primary = decision.primary
+    if primary is None:
+        return "[user:target]"
+    if primary.kind == "prior_turn":
+        tid = primary.turn_id or primary.id
+        return f"[prior_turn:{tid}]"
+    if primary.kind == "artifact":
+        return f"[artifact:{primary.id}]"
+    return "[user:target]"
 
 
 def _now() -> datetime:

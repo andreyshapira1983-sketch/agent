@@ -331,3 +331,32 @@ def test_to_dict_omits_full_excerpt_body():
     payload = decision.to_dict()
     assert "analysis_target_excerpt_chars" in payload
     assert "analysis_target_excerpt" not in payload
+
+
+def test_is_local_critique_eligible_prior_turn():
+    from core.referent_resolver import is_local_critique_eligible
+
+    prior = PriorTurnRef(
+        turn_id="turn_prev",
+        session_id=SESSION,
+        question="план",
+        answer="Категоричный текст без доказательств о росте рынка.",
+    )
+    decision = _resolver().resolve(
+        "покажи слабые стороны этого",
+        current_session_id=SESSION,
+        current_turn_id=TURN,
+        prior_turns=(prior,),
+    )
+    assert decision.status == "resolved"
+    assert is_local_critique_eligible(decision) is True
+
+
+def test_is_local_critique_eligible_rejects_unresolved():
+    from core.referent_resolver import (
+        ReferentDecision,
+        is_local_critique_eligible,
+    )
+
+    decision = ReferentDecision(status="unresolved")
+    assert is_local_critique_eligible(decision) is False
