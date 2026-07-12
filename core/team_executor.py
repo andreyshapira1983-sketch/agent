@@ -11,10 +11,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from core.subagent_contract import CanonicalSubagentContract
+from core.subagent_runner import SubagentContractRefused
 from core.team_plan import SubagentContract, TeamPlan
 
 if TYPE_CHECKING:
     from core.subagent_runner import SubAgentRunner
+    from core.subagent_registry import SubagentRegistry
 
 
 TeamExecutionStatus = Literal[
@@ -184,10 +187,18 @@ class TeamExecutor:
     runner:
         Optional SubAgentRunner.  Required when ``dry_run=False``.
         When None (default), the executor operates in dry-run-only mode.
+    registry:
+        Optional SubagentRegistry for best-effort canonical outcome recording.
+        Registry failures become warnings and never replace execution results.
     """
 
-    def __init__(self, runner: "SubAgentRunner | None" = None) -> None:
+    def __init__(
+        self,
+        runner: "SubAgentRunner | None" = None,
+        registry: "SubagentRegistry | None" = None,
+    ) -> None:
         self._runner = runner
+        self._registry = registry
 
     def run(
         self,
@@ -256,18 +267,41 @@ class TeamExecutor:
                 summary = "Dry-run planned; no subagent was executed."
                 steps.append(_step_from_contract(order, contract, status=step_status, summary=summary))
             else:
-                # Real execution via SubAgentRunner
+                # Real execution crosses the canonical contract boundary.
                 assert self._runner is not None  # guarded above
+                canonical: CanonicalSubagentContract | None = None
                 try:
-                    result = self._runner.run(
-                        contract_name=contract.name,
-                        role=contract.role,
-                        objective=contract.objective,
-                        allowed_tools=list(contract.allowed_tools),
+                    canonical = CanonicalSubagentContract.from_team_contract(contract)
+                    result = self._runner.run_contract(
+                        canonical,
                     )
-                    step_status = "executed"
-                    answer = result.answer
-                    summary = f"executed: confidence={result.confidence_score:.2f} quality={result.quality_score}"
+                    result_status = str(getattr(result, "status", "success"))
+                    if result_status == "success":
+                        step_status = "executed"
+                        answer = result.answer
+                        summary = f"executed: confidence={result.confidence_score:.2f} quality={result.quality_score}"
+                        self._record_contract_run(
+                            canonical,
+                            "executed",
+                            warnings,
+                            execution_receipt=getattr(result, "execution_receipt", None),
+                            audit_report=getattr(result, "contract_audit", None),
+                        )
+                    else:
+                        step_status = "error"
+                        answer = ""
+                        error = str(getattr(result, "error", "") or result_status)
+                        summary = f"error: subagent returned {result_status}: {error}"
+                        if status == "completed":
+                            status = "blocked"
+                        warnings.append(f"{contract.name} failed: {summary}")
+                        self._record_contract_run(
+                            canonical,
+                            "error",
+                            warnings,
+                            execution_receipt=getattr(result, "execution_receipt", None),
+                            audit_report=getattr(result, "contract_audit", None),
+                        )
                 except Exception as exc:
                     step_status = "error"
                     answer = ""
@@ -275,6 +309,13 @@ class TeamExecutor:
                     if status == "completed":
                         status = "blocked"
                     warnings.append(f"{contract.name} failed: {summary}")
+                    if canonical is not None:
+                        outcome = (
+                            "refused"
+                            if isinstance(exc, SubagentContractRefused)
+                            else "error"
+                        )
+                        self._record_contract_run(canonical, outcome, warnings)
                 steps.append(
                     _step_from_contract(order, contract, status=step_status, summary=summary, answer=answer if step_status == "executed" else "")
                 )
@@ -291,6 +332,34 @@ class TeamExecutor:
             warnings=tuple(_dedupe(warnings)),
             stop_reason=stop_reason,
         )
+
+    def _record_contract_run(
+        self,
+        contract: CanonicalSubagentContract,
+        outcome: str,
+        warnings: list[str],
+        *,
+        execution_receipt: Any | None = None,
+        audit_report: Any | None = None,
+    ) -> None:
+        """Best-effort registry hook; observability must not break execution."""
+        if self._registry is None:
+            return
+        try:
+            if audit_report is None and execution_receipt is None:
+                self._registry.record_contract_run(contract, outcome)
+            else:
+                self._registry.record_contract_run(
+                    contract,
+                    outcome,
+                    execution_receipt=execution_receipt,
+                    audit_report=audit_report,
+                )
+        except Exception as exc:
+            warnings.append(
+                "contract registry write failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
 
 
 def _step_from_contract(

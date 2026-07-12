@@ -19,9 +19,18 @@
 > and a registry that tracks per-role metrics and emits *advisory* recommendations
 > separating technical success from human-confirmed value.
 >
-> **Target lifecycle (planned):** a single canonical lifecycle contract that
-> travels unchanged from proposal → execution → verification → reputation →
-> retirement, driven by a Subagent Lifecycle Manager.
+> **Target lifecycle (in progress):** `core/subagent_contract.py` now provides
+> a versioned, loss-aware canonical v1 shape plus deterministic adapters from
+> `SubagentProposal` and `SubagentContract`. `SubAgentRunner.run_contract()` now
+> accepts that canonical shape and refuses unsafe capability mismatches. Real
+> `TeamExecutor` runs now adapt `SubagentContract` through that boundary.
+> `SubagentRegistry` has an additive, version-separated contract-run ledger, and
+> an optional TeamExecutor registry hook records real executed/error/refused
+> outcomes. Submitted proposals now persist both legacy detail and the canonical
+> contract; approved `launch_subagent` items reuse the registered tool/runner and
+> record outcomes. Verification/reputation are still separate, so it does not travel
+> end-to-end from proposal → execution → verification → reputation → retirement.
+> That migration remains staged work, followed by a Subagent Lifecycle Manager.
 >
 > **Non-implemented capabilities (planned, not in code):** automatic status
 > transitions; the stored statuses `candidate` / `watch` / `quarantined`;
@@ -254,8 +263,16 @@ value, and a fluent answer is not evidence.
 
 **Exists (verified):**
 - `SubagentProposal` — the bounded proposal contract.
+- `launch_subagent` approval boundary — new submissions store a versioned
+  canonical contract alongside legacy proposal detail; the loader still accepts
+  old flat payloads. Approved execution reuses the registered SpawnSubagentTool
+  and leaves refused/error items approved rather than claiming execution.
 - `SubAgentRunner` — bounded, stateless execution (fresh child loop, safe tool
-  subset, no memory, no recursion, one attempt).
+  subset, no memory, no recursion, one attempt). Its canonical `run_contract`
+  entry point requires explicit approval and refuses declared persistent-memory,
+  multi-iteration, zero-model-call, or file-write policy that it cannot honour.
+  Per-contract usage reconciliation, verifier execution and stop-condition audit
+  remain later stages; this entry point does not overclaim them.
 - `team_plan.SubagentContract` / `TeamPlanner` — a second contract model with
   `model_role`, `outputs`, `verifier`, `stop_conditions`, `max_iterations`, and
   budgets.
@@ -266,11 +283,30 @@ value, and a fluent answer is not evidence.
   accounted through the shared `ModelRouter` / usage ledger; **per-sub-agent
   actual-cost reconciliation is not yet part of the lifecycle registry.**
 - `SubagentRegistry` — per-role metrics that separate technical success from
-  confirmed value, emitting advisory recommendations only.
+  confirmed value, emitting advisory recommendations only. It also has a
+  backward-compatible `contract_runs` ledger keyed by contract id and schema
+  version. An optional TeamExecutor hook records only real run outcomes (never
+  dry-run/approval-wait/budget-block), and registry failures surface as warnings
+  without changing task results. The counters do not mutate role reputation.
+- `subagent_contract_audit` — a pure deterministic post-run policy over an
+  explicit typed execution receipt. It checks contract identity, approval,
+  tool and memory scopes, declared budgets, read-only policy, verifier outcome,
+  and stop reason. Missing telemetry and undeclared memory policy produce
+  `unknown`, never a false pass. Canonical runner execution now builds a receipt
+  from exact child-trace tool/attempt observations and structural no-memory
+  guarantees, then attaches the audit report to its result. Shared model-call
+  and cost usage is not trace-attributed yet, so those facts remain `unknown`.
+  TeamExecutor and approved proposal execution persist both the receipt and
+  report in the version-separated contract ledger without changing role
+  reputation.
 
-**Missing:**
-- One **canonical lifecycle contract** unifying `SubagentProposal`,
-  `SubagentContract`, runtime enforcement, verification and reputation.
+**Missing / in progress:**
+- The canonical v1 bridge exists in `core/subagent_contract.py`; the runner has
+  an opt-in strict entry point and real `TeamExecutor` execution uses it.
+  TeamExecutor and approved proposal execution can record version-separated
+  runtime outcomes and audit reports. Exact per-contract model-call/cost
+  attribution, verifier execution, and reputation reconciliation remain
+  separate stages before the legacy split can be removed.
 - A **Subagent Lifecycle Manager** — a controller that actually moves roles
   `candidate → active → watch → paused → quarantined → retired` based on verified
   results. Today those transitions are advisory only.

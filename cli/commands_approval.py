@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any
 
 from core.approval_inbox import ApprovalInbox, DEFAULT_APPROVAL_INBOX_PATH
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
+from core.subagent_contract import canonical_from_approval_payload
+from core.subagent_runner import SubagentContractRefused
 
 if TYPE_CHECKING:
     from core.loop import AgentLoop
@@ -455,6 +457,8 @@ def _handle_approval_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             file=sys.stderr,
         )
         return True
+    if item.operation == "launch_subagent":
+        return _run_approved_subagent(item, agent, workspace, inbox)
     if item.operation != "autonomous_runtime.allow_effects":
         print(
             f"(approval run refused: unsupported operation={item.operation})",
@@ -486,3 +490,106 @@ def _handle_approval_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         agent.log.log("approval_inbox_executed", executed.to_dict())
     print(report.user_summary(), file=sys.stderr)
     return True
+
+
+def _run_approved_subagent(
+    item: Any,
+    agent: AgentLoop,
+    workspace: Path,
+    inbox: ApprovalInbox,
+) -> bool:
+    """Run one approved canonical subagent using the registered tool/runner."""
+    try:
+        contract = canonical_from_approval_payload(item.payload)
+    except (TypeError, ValueError) as exc:
+        print(f"(approval run failed: invalid subagent payload: {exc})", file=sys.stderr)
+        return True
+
+    try:
+        spawn_tool = agent.registry.get("spawn_subagent")
+    except KeyError as exc:
+        print(f"(approval run failed: {exc})", file=sys.stderr)
+        return True
+    run_contract = getattr(spawn_tool, "run_contract", None)
+    if not callable(run_contract):
+        print(
+            "(approval run failed: spawn_subagent lacks canonical runner support)",
+            file=sys.stderr,
+        )
+        return True
+
+    try:
+        result = run_contract(contract, approved=True)
+    except SubagentContractRefused as exc:
+        _record_subagent_contract_outcome(workspace, contract, "refused")
+        agent.log.log(
+            "approval_subagent_refused",
+            {"approval_id": item.id, "contract_id": contract.contract_id, "reason": str(exc)},
+        )
+        print(f"(approval run refused: {exc})", file=sys.stderr)
+        return True
+    except Exception as exc:
+        _record_subagent_contract_outcome(workspace, contract, "error")
+        agent.log.log(
+            "approval_subagent_error",
+            {
+                "approval_id": item.id,
+                "contract_id": contract.contract_id,
+                "error": f"{type(exc).__name__}: {exc}",
+            },
+        )
+        print(
+            f"(approval run failed: {type(exc).__name__}: {exc})",
+            file=sys.stderr,
+        )
+        return True
+
+    if getattr(result, "status", "error") != "success":
+        _record_subagent_contract_outcome(
+            workspace,
+            contract,
+            "error",
+            execution_receipt=getattr(result, "execution_receipt", None),
+            audit_report=getattr(result, "contract_audit", None),
+        )
+        error = str(getattr(result, "error", "") or "subagent returned error")
+        print(f"(approval run failed: {error})", file=sys.stderr)
+        return True
+
+    _record_subagent_contract_outcome(
+        workspace,
+        contract,
+        "executed",
+        execution_receipt=getattr(result, "execution_receipt", None),
+        audit_report=getattr(result, "contract_audit", None),
+    )
+    executed = inbox.mark_executed(item.id)
+    agent.log.log("approval_inbox_executed", executed.to_dict())
+    print(result.to_evidence_text(), file=sys.stderr)
+    return True
+
+
+def _record_subagent_contract_outcome(
+    workspace: Path,
+    contract: Any,
+    outcome: str,
+    *,
+    execution_receipt: Any | None = None,
+    audit_report: Any | None = None,
+) -> None:
+    """Best-effort contract ledger hook; approval flow remains authoritative."""
+    try:
+        from core.subagent_registry import SubagentRegistry
+
+        SubagentRegistry.load(workspace).record_contract_run(
+            contract,
+            outcome,
+            execution_receipt=execution_receipt,
+            audit_report=audit_report,
+        )
+    except Exception as exc:
+        print(
+            "(approval run warning: contract registry write failed: "
+            f"{type(exc).__name__}: {exc})",
+            file=sys.stderr,
+        )
