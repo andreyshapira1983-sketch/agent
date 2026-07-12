@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from app.daemon import DaemonLoop
 from core.state_integrity import read_state_jsonl_unlocked, rewrite_state_jsonl_unlocked
 from core.task_queue import TaskQueueStore
 
@@ -20,6 +23,82 @@ def test_task_queue_persists_added_task(workspace: Path):
     assert reloaded[0].goal == "project health"
     assert not reloaded[0].include_tests
     assert reloaded[0].limit == 2
+
+
+def test_task_added_callback_runs_after_task_is_persisted(workspace: Path):
+    path = workspace / "tasks.jsonl"
+    seen: list[str] = []
+
+    def wake(task) -> None:
+        persisted = TaskQueueStore(path).get(task.id)
+        assert persisted is not None
+        seen.append(task.id)
+
+    queue = TaskQueueStore(path, on_task_added=wake)
+
+    task = queue.add(goal="wake daemon")
+
+    assert seen == [task.id]
+
+
+def test_paused_checkpoint_notifies_task_added_callback(workspace: Path):
+    seen = []
+    queue = TaskQueueStore(
+        workspace / "tasks.jsonl",
+        on_task_added=seen.append,
+    )
+
+    task = queue.add_paused_checkpoint(
+        goal="resume later",
+        report={"stop_reason": "budget_exhausted"},
+    )
+
+    assert seen == [task]
+
+
+def test_task_added_callback_failure_keeps_persisted_task(
+    workspace: Path,
+    caplog,
+):
+    path = workspace / "tasks.jsonl"
+
+    def broken_wake(_task) -> None:
+        raise RuntimeError("loop unavailable")
+
+    queue = TaskQueueStore(path, on_task_added=broken_wake)
+
+    with caplog.at_level(logging.ERROR, logger="core.task_queue"):
+        task = queue.add(goal="still durable")
+
+    assert TaskQueueStore(path).get(task.id) == task
+    assert "runtime task wake callback failed" in caplog.text
+
+
+def test_new_runtime_task_wakes_daemon_immediately(workspace: Path):
+    async def scenario() -> None:
+        reasons_seen: list[str] = []
+        daemon: DaemonLoop
+
+        async def handle_wake(reasons: list[str]) -> None:
+            reasons_seen.extend(reasons)
+            daemon.request_stop()
+
+        daemon = DaemonLoop(handle_wake)
+        queue = TaskQueueStore(
+            workspace / "tasks.jsonl",
+            on_task_added=lambda task: daemon.wake_threadsafe(
+                f"runtime-task:{task.id}"
+            ),
+        )
+        runner = asyncio.create_task(daemon.run())
+        await asyncio.sleep(0)
+
+        task = queue.add(goal="dispatch now")
+        await asyncio.wait_for(runner, timeout=1)
+
+        assert reasons_seen == [f"runtime-task:{task.id}"]
+
+    asyncio.run(scenario())
 
 
 def test_pending_filters_future_tasks(workspace: Path):
