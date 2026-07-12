@@ -296,12 +296,14 @@ Each sub-item reports four independent fields so the status is unambiguous:
   use `(mtime_ns, size)`, so an in-place edit that preserves both would be missed
   — not a concern for append-only JSONL inboxes or config edits, and a future
   sub-item can add a content hash if needed.
-- **Blockers:** none. **Human action:** none -- PR merged; plan acceptance (Definition of Done sign-off) still pending.
+- **Blockers:** none. **Human action:** optional read-only acceptance review;
+  do not reimplement.
 
 ## 2.3 Instant wake on new RuntimeTask
 
-- **implementation:** completed | **main_pr:** open | **hotfix:** none | **acceptance:** pending
-- **Branch:** daemon/2.3-runtime-task-wake
+- **implementation:** completed | **main_pr:** #83 merged | **hotfix:** none | **acceptance:** pending
+- **Branch:** `daemon/2.3-runtime-task-wake`
+- **Pull Request:** #83 (merged)
 - **Last updated:** 2026-07-12
 - **Implementation:** Extended the existing TaskQueueStore with an optional
   on_task_added(RuntimeTask) callback. Both normal tasks and paused checkpoint
@@ -318,20 +320,50 @@ Each sub-item reports four independent fields so the status is unambiguous:
   checkpoint notification, callback-error durability/logging, and a bounded
   integration test showing a new task wakes DaemonLoop through wake_threadsafe
   and supplies the exact task-id reason. No real sleeps are used.
-- **Checks run:**
-  - git diff --check -> passed
-  - python -m pytest tests/test_task_queue.py -q -> not run: python is not
-    available in PATH
-  - py -3.11 -m pytest tests/test_task_queue.py -q -> not run: no installed
-    Python was found by the launcher
+- **Checks run:** See merged PR #83 / GitHub CI (pytest + coverage).
 - **Known limitations:** The callback is an in-process wake bridge. A task
   written by another process uses the 2.2 file-watcher path until daemon
   composition/wiring lands with the dispatcher/worker items. The callback is
   synchronous by design because DaemonLoop.wake_threadsafe is synchronous.
   No daemon entry point is introduced here.
-- **Blockers:** none in code. **Human action:** review the Draft PR and rely on
-  GitHub CI for pytest/coverage because this workstation currently has no
-  usable Python runtime.
+- **Blockers:** none. **Human action:** optional read-only acceptance review;
+  do not reimplement.
+
+## 3.1 Priority event queue
+
+- **implementation:** completed | **main_pr:** open | **hotfix:** none | **acceptance:** pending
+- **Branch:** `daemon/3.1-priority-event-queue`
+- **Last updated:** 2026-07-12
+- **Implementation:** New `app/priority_event_queue.py` with typed
+  `DaemonEvent`, `EventPriority` (`urgent > scheduled > background`), and
+  `PriorityEventQueue`. Same-priority order is stable FIFO via a monotonic
+  sequence. Anti-starvation: after `aging_after` consecutive higher-priority
+  pops (default 8; `0` disables), a waiting background event is served next.
+  Optional `on_put` can call `DaemonLoop.wake` / `wake_threadsafe`. `close()`
+  refuses further puts and unblocks async `get` waiters. Does not run workers
+  (3.2), does not own the daemon loop, does not change `agent_tick.py`.
+- **Reused:** `core.ids.new_id`, `DaemonLoop.wake_threadsafe` in the wake
+  integration test, logging isolation pattern from `TaskQueueStore` callbacks.
+- **Tests added:** `tests/test_priority_event_queue.py` — coerce/validation,
+  priority + FIFO order, aging vs strict priority, on_put error isolation,
+  DaemonLoop wake bridge, async get/close/cancel paths, repeated close.
+- **Checks run:**
+  - `python -m pytest tests/test_priority_event_queue.py -q` → 16 passed
+  - `python -m pytest tests/test_priority_event_queue.py tests/test_daemon_loop.py tests/test_daemon_shutdown.py tests/test_task_queue.py tests/test_file_watcher.py -q` → 87 passed
+  - `python -m pytest tests/test_team_executor.py::test_team_executor_persists_outcome_in_real_registry -q` → 1 passed
+    (minimal CI hotfix: define missing `receipt` in `_AuditedRunner` left broken on main by #83)
+  - `coverage run --branch -m pytest` → 1 failed before hotfix / re-run locally for priority+team_executor green;
+    full suite was 4556 passed + 1 known main failure before the test-double fix
+  - `coverage report --fail-under=85` → TOTAL 93% (on full run)
+  - `coverage report -m --include=app/priority_event_queue.py` → 94%
+  - `python scripts/generate_sbom.py --check` → in sync
+  - `python scripts/audit_release.py` → ok
+  - `pip check` → no broken requirements
+  - pylint / formatter / mypy: not configured in CI; skipped.
+- **Known limitations:** In-memory only (no durable priority queue across
+  process restart — recovery remains 4.2). Not yet wired as the daemon's sole
+  dispatcher; producers still wake via reason strings until composition lands.
+- **Blockers:** none. **Human action:** review and merge the PR.
 
 | Item | Title | Status |
 | --- | --- | --- |
@@ -341,9 +373,9 @@ Each sub-item reports four independent fields so the status is unambiguous:
 | 1.4 | Windows service launch | merged (acceptance pending) |
 | 2.1 | Timer events (in-loop scheduler) | merged (acceptance pending) |
 | 2.2 | File watcher | merged (acceptance pending) |
-| 2.3 | Instant wake on new RuntimeTask | Draft PR open (acceptance pending) |
+| 2.3 | Instant wake on new RuntimeTask | merged (acceptance pending) |
 | 2.4 | External events | skipped (explicitly deferred) |
-| 3.1 | Priority event queue | not started |
+| 3.1 | Priority event queue | open PR (acceptance pending) |
 | 3.2 | Worker pool | not started |
 | 3.3 | Task timeout and cancellation | not started |
 | 3.4 | Event deduplication | not started |
