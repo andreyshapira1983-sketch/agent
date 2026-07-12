@@ -1,8 +1,8 @@
-"""Bounded asyncio worker pool for the daemon dispatcher (plan item 3.2).
+"""Bounded asyncio worker pool for the daemon dispatcher (plan items 3.2–3.3).
 
 Consumes :class:`~app.priority_event_queue.DaemonEvent` values from an existing
 :class:`~app.priority_event_queue.PriorityEventQueue` (3.1) without owning the
-queue store, the :class:`~app.daemon.DaemonLoop`, or per-task timeouts (3.3).
+queue store or the :class:`~app.daemon.DaemonLoop`.
 
 Contract
 --------
@@ -10,6 +10,11 @@ Contract
 * Workers are asyncio tasks — they must ``await`` and must not block the loop
   with long synchronous work.
 * An exception in one handler is logged and isolated; other workers continue.
+* Each handler runs under a configurable ``task_timeout`` (3.3). On timeout the
+  in-flight awaitable is cancelled, the event is **not** counted as success,
+  and a structured log line records the timeout reason.
+* Explicit cancellation (:class:`asyncio.CancelledError`) is also **not**
+  counted as success.
 * :meth:`WorkerPool.shutdown` stops accepting new work (closes the queue),
   waits up to ``drain_timeout`` for in-flight handlers, then cancels stragglers.
 * Repeated :meth:`shutdown` is safe.
@@ -32,6 +37,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_WORKERS = 2
 DEFAULT_DRAIN_TIMEOUT = 10.0
+# Default per-event handler budget (plan 3.3). ``None`` disables the limit.
+DEFAULT_TASK_TIMEOUT = 60.0
 _CANCEL_GRACE_SECONDS = 5.0
 
 EventHandler = Callable[[DaemonEvent], Awaitable[None]]
@@ -56,6 +63,10 @@ class WorkerPool:
     drain_timeout:
         Seconds to wait for in-flight handlers during :meth:`shutdown`
         before cancelling them.
+    task_timeout:
+        Seconds allowed for a single handler. ``None`` disables per-task
+        timeout. Timed-out work is cancelled and recorded in
+        :attr:`timeout_count` (never as a successful :attr:`processed_count`).
     """
 
     def __init__(
@@ -65,15 +76,19 @@ class WorkerPool:
         *,
         max_workers: int = DEFAULT_MAX_WORKERS,
         drain_timeout: float = DEFAULT_DRAIN_TIMEOUT,
+        task_timeout: Optional[float] = DEFAULT_TASK_TIMEOUT,
     ) -> None:
         if max_workers < 1:
             raise ValueError("max_workers must be >= 1")
         if drain_timeout < 0:
             raise ValueError("drain_timeout must be >= 0")
+        if task_timeout is not None and task_timeout <= 0:
+            raise ValueError("task_timeout must be positive or None")
         self._queue = queue
         self._handler = handler
         self._max_workers = max_workers
         self._drain_timeout = drain_timeout
+        self._task_timeout = task_timeout
         self._workers: list[asyncio.Task[None]] = []
         self._in_flight: set[asyncio.Task[None]] = set()
         self._started = False
@@ -82,10 +97,15 @@ class WorkerPool:
         self._processed = 0
         self._errors = 0
         self._cancelled = 0
+        self._timeouts = 0
 
     @property
     def max_workers(self) -> int:
         return self._max_workers
+
+    @property
+    def task_timeout(self) -> Optional[float]:
+        return self._task_timeout
 
     @property
     def active_workers(self) -> int:
@@ -110,6 +130,24 @@ class WorkerPool:
     @property
     def cancelled_count(self) -> int:
         return self._cancelled
+
+    @property
+    def timeout_count(self) -> int:
+        return self._timeouts
+
+    def metrics(self) -> dict[str, int | float | None]:
+        """Snapshot counters for daemon-status / observability hooks."""
+        return {
+            "processed": self._processed,
+            "errors": self._errors,
+            "cancelled": self._cancelled,
+            "timeouts": self._timeouts,
+            "in_flight": len(self._in_flight),
+            "active_workers": self.active_workers,
+            "max_workers": self._max_workers,
+            "task_timeout": self._task_timeout,
+            "queue_size": self._queue.qsize(),
+        }
 
     def start(self) -> None:
         """Spawn worker tasks on the running event loop.
@@ -172,7 +210,7 @@ class WorkerPool:
         # Drain remaining in-flight handler tasks, then cancel stragglers.
         pending_handlers = [t for t in self._in_flight if not t.done()]
         if pending_handlers:
-            done, still = await asyncio.wait(
+            _done, still = await asyncio.wait(
                 pending_handlers,
                 timeout=timeout,
                 return_when=asyncio.ALL_COMPLETED,
@@ -198,9 +236,6 @@ class WorkerPool:
 
     async def _worker_loop(self, worker_id: int) -> None:
         while True:
-            if self._shutting_down and self._queue.qsize() == 0:
-                # Still allow draining events already queued before close.
-                pass
             try:
                 event = await self._queue.get()
             except PriorityEventQueueClosed:
@@ -216,6 +251,13 @@ class WorkerPool:
             try:
                 await handler_task
             except asyncio.CancelledError:
+                # Outer cancel (shutdown / run cancel) — not a successful event.
+                if not handler_task.done():
+                    handler_task.cancel()
+                    try:
+                        await handler_task
+                    except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                        pass
                 self._cancelled += 1
                 raise
             finally:
@@ -223,9 +265,25 @@ class WorkerPool:
 
     async def _run_handler(self, event: DaemonEvent) -> None:
         try:
-            await self._handler(event)
+            if self._task_timeout is None:
+                await self._handler(event)
+            else:
+                await asyncio.wait_for(
+                    self._handler(event),
+                    timeout=self._task_timeout,
+                )
             self._processed += 1
+        except asyncio.TimeoutError:
+            self._timeouts += 1
+            logger.warning(
+                "worker pool task timed out event_id=%s kind=%s "
+                "timeout_s=%s reason=task_timeout",
+                event.event_id,
+                event.kind,
+                self._task_timeout,
+            )
         except asyncio.CancelledError:
+            # Propagate; caller records cancelled_count. Never count as success.
             raise
         except Exception:  # noqa: BLE001 - one bad event must not kill the pool
             self._errors += 1
