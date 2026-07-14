@@ -48,7 +48,14 @@ def _stub_tier_models(monkeypatch, mapping: dict[tuple[str, str], str]) -> None:
 
 
 def _clear_provider_creds(monkeypatch) -> None:
-    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "HF_TOKEN"):
+    for var in (
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "HF_TOKEN",
+        "LOCAL_LLM_BASE_URL",
+        "LOCAL_LLM_MODEL",
+        "LOCAL_LLM_API_KEY",
+    ):
         monkeypatch.delenv(var, raising=False)
     for var in (
         "AGENT_TIER_PROVIDERS_LIGHT",
@@ -154,7 +161,8 @@ def test_env_override_selects_provider(monkeypatch, tmp_path):
     assert llm.route.reason == "complexity:light:openai"
 
 
-def test_unsupported_provider_local_is_skipped_gracefully(monkeypatch, tmp_path):
+def test_uncredentialed_provider_local_is_skipped_gracefully(monkeypatch, tmp_path):
+    """``local`` is supported, but without LOCAL_LLM_* env it is unavailable."""
     _clear_provider_creds(monkeypatch)
     monkeypatch.setenv("OPENAI_API_KEY", "oa-key")
     monkeypatch.setenv("AGENT_TIER_PROVIDERS_LIGHT", "local,openai")
