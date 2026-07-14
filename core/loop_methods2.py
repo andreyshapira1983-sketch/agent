@@ -175,10 +175,6 @@ class AgentLoopExtractedMethods2:
         self._last_best_similar_score = 0.0
         if self.episodic_store is None and self.procedural_store is None:
             return ""
-        # TODO: apply the same retrieval_policy filter here when assembling LLM
-        # experience context (not only in EpisodicMemoryStore.search) so
-        # audit_only closed_unconfirmed lessons cannot influence the planner
-        # (sii_f93697560e4dafda; fail-closed).
         episodes = (
             self.episodic_store.search(question, limit=3)
             if self.episodic_store is not None
