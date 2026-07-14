@@ -336,6 +336,14 @@ class EpisodicMemoryStore:
         return len(self.load())
 
     def search(self, query: str, *, limit: int = 3) -> list[EpisodeRecord]:
+        # TODO: filter episodes by value-review retrieval_policy before returning —
+        # audit_only / closed_unconfirmed / rejected_harmful / superseded must be
+        # excluded from normal retrieval (fail-closed on corrupt/contradictory
+        # reviews); audit paths may still include them. Wire from
+        # data/value_reviews.jsonl via recorded_at_utc + supersedes_review_id
+        # (issue sii_f93697560e4dafda). Add filter_episode_for_retrieval(ep) helper
+        # and unit tests: ep_bd56fdec hidden in search, shown in audit mode,
+        # confirmed still returned, dual-review uses latest neutral_keep, restart-safe.
         q_tokens = _tokens(query)
         if not q_tokens:
             return []
