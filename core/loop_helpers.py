@@ -160,6 +160,30 @@ LOCAL CRITIQUE MODE (overrides the no-evidence general-knowledge rule above):
 - Avoid repeating the same thesis; keep Facts concise and non-duplicative.
 """
 
+# The two mandatory headers that identify the generic prose Output Contract
+# (SYSTEM_ANSWER). A task-specific contract that replaces SYSTEM_ANSWER (e.g. a
+# table-only diagnostic contract) omits these.
+_GENERIC_CONTRACT_MARKERS = ("Conclusion:", "Facts:")
+
+
+def output_contract_requires_headers(system_prompt: str | None) -> bool:
+    """Whether *system_prompt* enforces the generic Conclusion/Facts contract.
+
+    Priority rule for the output contract:
+        task-specific/structured contract present -> generic prose contract OFF
+        no task-specific contract                 -> use Conclusion/Facts
+
+    When a task-specific contract replaces SYSTEM_ANSWER, the synthesised answer
+    legitimately lacks the six generic headers, so the verifier must not treat
+    it as ``malformed_output``. We can never simultaneously demand "table only"
+    and mandatory prose sections. Defaults to ``True`` (generic) for an
+    empty/unknown prompt so existing behaviour is preserved.
+    """
+    if not system_prompt:
+        return True
+    return all(marker in system_prompt for marker in _GENERIC_CONTRACT_MARKERS)
+
+
 _VERIF_MARKER_RE = re.compile(
     r"\s*\["
     r"(?:unverified"

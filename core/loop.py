@@ -148,6 +148,7 @@ from core.loop_helpers import (  # noqa: F401 -- re-exported
     DEFAULT_MAX_REPLAN_ATTEMPTS,
     LOCAL_CRITIQUE_SYSTEM_ADDENDUM,
     SYSTEM_ANSWER,
+    output_contract_requires_headers,
     _ANSWER_CITATION_RE,
     _VERIF_MARKER_RE,
     _strip_verification_markers,
@@ -1502,6 +1503,9 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 answer=draft_answer,
                 chain=chain,
                 user_question=user_question,
+                expects_contract_headers=getattr(
+                    self, "_synthesis_expects_contract_headers", True
+                ),
                 **self._verification_receipt_kwargs(),
             )
             self.log.log("verification", report.to_log_payload())
@@ -1771,6 +1775,9 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 answer=draft_answer,
                 chain=chain,
                 user_question=user_question,
+                expects_contract_headers=getattr(
+                    self, "_synthesis_expects_contract_headers", True
+                ),
                 **self._verification_receipt_kwargs(),
             )
                 self.log.log(
@@ -3489,7 +3496,14 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # or sensitive PII the user pasted in.
         safe_question, _q_findings, _q_pii_findings = redact_dlp_text(question)
 
-        system_prompt = SYSTEM_ANSWER
+        # Read the active synthesis contract from the prompt registry so an
+        # env/registry override (e.g. a task-specific table-only contract)
+        # actually takes effect here instead of being silently ignored.
+        try:
+            from core.prompt_registry import get_prompt as _get_prompt
+            system_prompt = _get_prompt("synthesizer.system")
+        except Exception:
+            system_prompt = SYSTEM_ANSWER
         if local_critique is not None and not artifacts:
             cite = citation_token_for_referent(local_critique)
             raw_target = (local_critique.analysis_target_excerpt or "").strip()
@@ -3534,7 +3548,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 "allowed_target_citation token. Do not use [general-knowledge] "
                 "or [memory:*] for this turn. Do not claim the object is missing."
             )
-            system_prompt = SYSTEM_ANSWER + "\n" + LOCAL_CRITIQUE_SYSTEM_ADDENDUM
+            system_prompt = system_prompt + "\n" + LOCAL_CRITIQUE_SYSTEM_ADDENDUM
         elif artifacts:
             from core.evidence_budget import apply_total_budget
             raw_blocks: list[tuple[str, str]] = []
@@ -3635,6 +3649,14 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 "as the source label. Follow the Output Contract from the system instructions."
                 + (f" {extra_guidance}" if extra_guidance else "")
             )
+
+        # Record whether the active contract is the generic Conclusion/Facts
+        # prose contract. When a task-specific/structured contract replaced it,
+        # the verifier must not flag the answer as malformed for lacking the
+        # generic headers (output-contract priority).
+        self._synthesis_expects_contract_headers = output_contract_requires_headers(
+            system_prompt
+        )
 
         # Defence-in-depth: the prompt is now built from redacted artifacts
         # and a redacted question. One more pass catches anything we missed
