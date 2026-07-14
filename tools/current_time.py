@@ -27,6 +27,8 @@ from typing import Any
 
 from tools.base import Tool
 
+# TODO: add format_duration_seconds(seconds: int|float) -> str as "Xh Ym Zs" / "Ym Zs" / "Zs"; negatives raise ValueError
+
 
 class CurrentTimeTool(Tool):
     name = "current_time"

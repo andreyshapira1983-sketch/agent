@@ -97,11 +97,13 @@ function Get-LocalPort {
 function Invoke-Lms {
     param(
         [string] $Lms,
-        [string[]] $Args,
+        # Do NOT name this $Args — PowerShell overwrites it with the automatic
+        # $args variable and the real argv silently becomes empty.
+        [string[]] $LmsArgs,
         [switch] $IgnoreFailure
     )
-    Write-Log ("Running: {0} {1}" -f $Lms, ($Args -join " "))
-    & $Lms @Args 2>&1 | ForEach-Object {
+    Write-Log ("Running: {0} {1}" -f $Lms, ($LmsArgs -join " "))
+    & $Lms @LmsArgs 2>&1 | ForEach-Object {
         Write-Log ("  {0}" -f $_)
     }
     $code = $LASTEXITCODE
@@ -139,9 +141,18 @@ Import-DotEnv (Join-Path $Workspace ".env")
 
 $model = $env:LOCAL_LLM_MODEL
 if ([string]::IsNullOrWhiteSpace($model)) { $model = "qwen-local" }
+# Disk key for `lms load` (may differ from the OpenAI-compatible identifier).
+$loadKey = $env:LOCAL_LLM_LOAD_KEY
+if ([string]::IsNullOrWhiteSpace($loadKey)) {
+    if ($model -eq "qwen-local") {
+        $loadKey = "qwen/qwen3-4b-2507"
+    } else {
+        $loadKey = $model
+    }
+}
 $port = Get-LocalPort
 
-Write-Log "=== Local LLM startup begin (model=$model port=$port) ==="
+Write-Log "=== Local LLM startup begin (model=$model loadKey=$loadKey port=$port) ==="
 
 $lms = Find-Lms
 if (-not $lms) {
@@ -151,14 +162,15 @@ if (-not $lms) {
 Write-Log "Using lms: $lms"
 
 # daemon up — idempotent; ignore "already running"
-Invoke-Lms -Lms $lms -Args @("daemon", "up") -IgnoreFailure | Out-Null
+Invoke-Lms -Lms $lms -LmsArgs @("daemon", "up") -IgnoreFailure | Out-Null
 
 # server start
 $serverArgs = @("server", "start", "--port", "$port")
-Invoke-Lms -Lms $lms -Args $serverArgs -IgnoreFailure | Out-Null
+Invoke-Lms -Lms $lms -LmsArgs $serverArgs -IgnoreFailure | Out-Null
 
 if (-not $SkipLoad) {
-    Invoke-Lms -Lms $lms -Args @("load", $model) -IgnoreFailure | Out-Null
+    # Prefer explicit identifier so AGENT / LOCAL_LLM_MODEL=qwen-local keeps working.
+    Invoke-Lms -Lms $lms -LmsArgs @("load", $loadKey, "--identifier", $model) -IgnoreFailure | Out-Null
 }
 
 if (-not (Test-LocalHealth -Port $port)) {
