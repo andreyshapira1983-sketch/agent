@@ -51,6 +51,9 @@ def require_ascii_identifier(value: str, *, role: str) -> str:
     return value
 
 
+# TODO: add normalize_slug(text: str) -> str: lowercase ASCII, collapse non-alnum to one hyphen, strip edges; empty -> "untitled"
+
+
 class Tool(ABC):
     name: str
     description: str
