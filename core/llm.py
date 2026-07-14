@@ -5,6 +5,7 @@ AGENT_PROVIDER env var. Supported:
     anthropic   -> Anthropic Messages API (default)
     openai      -> OpenAI Chat Completions
     huggingface -> HuggingFace Inference Router (free with HF_TOKEN)
+    local       -> OpenAI-compatible local server (LM Studio, vLLM, llama.cpp)
     mock        -> Deterministic offline stub (no network; for testing)
 
 MVP-14.5c — Usage tracking. Every successful `complete()` increments
@@ -28,6 +29,9 @@ def _provider() -> str:
 
 
 def _default_model(provider: str) -> str:
+    if provider == "local":
+        return os.getenv("LOCAL_LLM_MODEL", "qwen-local")
+
     override = os.getenv("AGENT_MODEL")
     if override:
         return override
@@ -159,11 +163,28 @@ class LLM:
                 base_url="https://router.huggingface.co/v1",
                 api_key=os.getenv("HF_TOKEN"),
             )
+        if self.provider == "local":
+            from openai import OpenAI
+
+            try:
+                timeout = float(os.getenv("LOCAL_LLM_TIMEOUT", "60"))
+            except (TypeError, ValueError):
+                timeout = 60.0
+            if timeout <= 0:
+                timeout = 60.0
+            return OpenAI(
+                base_url=os.getenv(
+                    "LOCAL_LLM_BASE_URL",
+                    "http://127.0.0.1:1234/v1",
+                ),
+                api_key=os.getenv("LOCAL_LLM_API_KEY", "lm-studio"),
+                timeout=timeout,
+            )
         if self.provider == "mock":
             return None
         raise ValueError(
             f"Unsupported AGENT_PROVIDER: {self.provider!r}. "
-            "Use 'anthropic', 'openai', 'huggingface', or 'mock'."
+            "Use 'anthropic', 'openai', 'huggingface', 'local', or 'mock'."
         )
 
     def complete(
@@ -241,11 +262,7 @@ class LLM:
         """
         if self.provider == "anthropic":
             return self._complete_anthropic(system, user, max_tokens, temperature, prior)
-        if self.provider == "openai":
-            return self._complete_openai_compatible(
-                system, user, max_tokens, temperature, self.model, prior
-            )
-        if self.provider == "huggingface":
+        if self.provider in {"openai", "huggingface", "local"}:
             return self._complete_openai_compatible(
                 system, user, max_tokens, temperature, self.model, prior
             )
@@ -273,8 +290,10 @@ class LLM:
         """
         if self.provider == "anthropic":
             return self._stream_anthropic(system, user, max_tokens, temperature, on_token)
-        if self.provider == "openai":
-            return self._stream_openai_compatible(system, user, max_tokens, temperature, self.model, on_token)
+        if self.provider in {"openai", "local"}:
+            return self._stream_openai_compatible(
+                system, user, max_tokens, temperature, self.model, on_token
+            )
         # HuggingFace and mock do not support true streaming — fall back to complete.
         return self.complete(system, user, max_tokens, temperature)
 

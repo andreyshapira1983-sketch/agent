@@ -69,6 +69,33 @@ class TestProviderRouting:
         llm = LLM()
         assert llm.model == "custom-model-42"
 
+    def test_local_default_model_and_timeout(self, monkeypatch):
+        monkeypatch.delenv("AGENT_MODEL", raising=False)
+        monkeypatch.setenv("LOCAL_LLM_MODEL", "qwen-local")
+        monkeypatch.setenv("LOCAL_LLM_TIMEOUT", "12.5")
+        captured: dict = {}
+
+        class _FakeOpenAI:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        monkeypatch.setattr("openai.OpenAI", _FakeOpenAI)
+        # Import path used inside _build_client: `from openai import OpenAI`
+        import openai as openai_mod
+
+        monkeypatch.setattr(openai_mod, "OpenAI", _FakeOpenAI)
+
+        llm = LLM(provider="local")
+        assert llm.provider == "local"
+        assert llm.model == "qwen-local"
+        assert captured["timeout"] == 12.5
+        assert "1234" in captured["base_url"]
+
+    def test_local_ignores_agent_model_for_default(self, monkeypatch):
+        monkeypatch.setenv("AGENT_MODEL", "gpt-cloud")
+        monkeypatch.delenv("LOCAL_LLM_MODEL", raising=False)
+        assert _default_model("local") == "qwen-local"
+
 
 # ============================================================
 # Mock synthesis mode (non-planner system prompt)
