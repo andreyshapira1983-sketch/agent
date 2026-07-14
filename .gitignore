@@ -30,4 +30,5 @@ env/
 *.log
 
 .vscode/
+.codex/
 config/model_registry.json
