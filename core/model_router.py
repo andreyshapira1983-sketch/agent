@@ -10,7 +10,7 @@ import json
 import errno
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -354,15 +354,76 @@ class UsageTrackedLLM:
     ):
         self._llm = llm
         self.role = role
-        self.route = route
         self.cost_tier = cost_tier
         self.ledger = ledger
         # Factory used to rebuild the client on another provider during
         # failover. When ``None`` (e.g. no ledger / static LLM paths) failover
         # is disabled and behaviour is unchanged.
         self._llm_factory = llm_factory
-        self.provider = getattr(llm, "provider", route.provider)
-        self.model = getattr(llm, "model", route.model)
+        # ── Routing attribution integrity ────────────────────────────────
+        # The factory can silently *heal* an un-credentialed or policy-vetoed
+        # route to a different provider/model (e.g. anthropic/claude-sonnet-4-5
+        # -> openai/gpt-4o-mini). Historically the ModelRoute (and therefore the
+        # usage-ledger route_reason and adaptive_route logs) kept naming the
+        # *requested* model while the client actually called another one. Never
+        # log "reason: forced X" next to "model: Y". Record requested vs actual
+        # separately and stamp an honest downgrade reason when they diverge.
+        self.requested_provider = route.provider
+        self.requested_model = route.model
+        actual_provider = getattr(llm, "provider", route.provider)
+        actual_model = getattr(llm, "model", route.model)
+        self.provider = actual_provider
+        self.model = actual_model
+        self.route = self._reconcile_route(route, actual_provider, actual_model)
+
+    @staticmethod
+    def _reconcile_route(
+        route: ModelRoute,
+        actual_provider: str | None,
+        actual_model: str | None,
+    ) -> ModelRoute:
+        """Annotate ``route.reason`` when the live client diverges from request.
+
+        Only fires when both the requested and actual provider/model are known
+        and differ, so normal role-default routes (provider/model ``None``) and
+        exact matches are untouched. The requested provider/model on the route
+        are preserved; the honest downgrade is recorded in ``reason`` so no log
+        pairs a forced-X reason with an actually-Y model.
+        """
+        req_p = route.provider
+        req_m = route.model
+        provider_diverged = bool(req_p) and bool(actual_provider) and req_p != actual_provider
+        model_diverged = bool(req_m) and bool(actual_model) and req_m != actual_model
+        if not provider_diverged and not model_diverged:
+            return route
+        downgrade = (
+            f"route_downgrade:requested={req_p or '?'}/{req_m or '?'}"
+            f"->actual={actual_provider or '?'}/{actual_model or '?'}"
+        )
+        if downgrade in (route.reason or ""):
+            return route
+        reason = f"{route.reason}|{downgrade}" if route.reason else downgrade
+        return replace(route, reason=reason)
+
+    def attribution(self) -> dict[str, str | None]:
+        """Structured routing attribution for diagnostics/logging.
+
+        Separates what was *requested* from what the client actually resolved
+        to, plus the policy/override reason, so the teaching harness can assert
+        ``requested == actual`` (or a truthful downgrade reason is present).
+        """
+        actual_provider = getattr(self._llm, "provider", self.provider)
+        actual_model = getattr(self._llm, "model", self.model)
+        return {
+            "role": self.role,
+            "requested_provider": self.requested_provider,
+            "requested_model": self.requested_model,
+            "resolved_provider": self.route.provider,
+            "resolved_model": self.route.model,
+            "actual_provider": actual_provider,
+            "actual_model": actual_model,
+            "reason": self.route.reason,
+        }
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._llm, name)
