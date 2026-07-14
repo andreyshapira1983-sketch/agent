@@ -47,6 +47,7 @@ _Planning, verification, clarification, control loop._
 | `core/referent_resolver` | Deterministic referent resolution for local critique and show-only turns. |
 | `core/loop_helpers` | Extracted from `core/loop` by autonomous self-build module split. |
 | `core/loop_methods` | Extracted from `core/loop` by autonomous self-build module split. |
+| `core/loop_methods2` | Extracted from `core/loop` by autonomous self-build module split. |
 | `core/planner` | LLM-driven Planner (§3 Cognitive Core: Planning). |
 | `core/lang_match` | Token-boundary, morphology-aware term matching (RU/EN) for routing heuristics. |
 | `core/verifier` | MVP-14.4 — Verifier. |
