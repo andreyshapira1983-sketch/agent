@@ -27,7 +27,27 @@ from typing import Any
 
 from tools.base import Tool
 
-# TODO: add format_duration_seconds(seconds: int|float) -> str as "Xh Ym Zs" / "Ym Zs" / "Zs"; negatives raise ValueError
+
+def format_duration_seconds(seconds: int | float) -> str:
+    """Format a non-negative duration in seconds.
+
+    Examples:
+        59 -> "59s"
+        61 -> "1m 1s"
+        3661 -> "1h 1m 1s"
+    """
+    if seconds < 0:
+        raise ValueError("seconds must be non-negative")
+
+    total_seconds = int(seconds)
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+
+    if hours:
+        return f"{hours}h {minutes}m {secs}s"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
 
 
 class CurrentTimeTool(Tool):
