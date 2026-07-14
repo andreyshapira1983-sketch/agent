@@ -51,7 +51,15 @@ def require_ascii_identifier(value: str, *, role: str) -> str:
     return value
 
 
-# TODO: add normalize_slug(text: str) -> str: lowercase ASCII, collapse non-alnum to one hyphen, strip edges; empty -> "untitled"
+def normalize_slug(text: str) -> str:
+    """Lowercase ASCII slug: non-alphanumeric runs become one hyphen."""
+    import re
+
+    if not isinstance(text, str):
+        raise TypeError(f"normalize_slug expects str, got {type(text).__name__}")
+    slug = re.sub(r"[^a-z0-9]+", "-", text.strip().lower())
+    slug = slug.strip("-")
+    return slug or "untitled"
 
 
 class Tool(ABC):
