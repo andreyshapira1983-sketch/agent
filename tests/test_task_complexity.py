@@ -333,16 +333,22 @@ def test_model_router_for_task_mock_static():
     assert result is fake_llm
 
 
-def test_model_router_for_task_standard_equals_for_role():
+def test_model_router_for_task_standard_equals_for_role(tmp_path, monkeypatch):
     """STANDARD complexity must return same object as for_role()."""
+    monkeypatch.setenv(
+        "AGENT_MODEL_CATALOG_PATH",
+        str(tmp_path / "missing-model-catalog.json"),
+    )
+    monkeypatch.delenv("AGENT_MODEL_TIER_STANDARD", raising=False)
+
     from core.model_router import ModelRole, ModelRouter
 
     router = ModelRouter(
         default_provider="mock",
         default_model="mock-1",
     )
-    role_llm  = router.for_role(ModelRole.PLANNER)
-    task_llm  = router.for_task(ModelRole.PLANNER, "напиши код для API")
+    role_llm = router.for_role(ModelRole.PLANNER)
+    task_llm = router.for_task(ModelRole.PLANNER, "напиши код для API")
     assert role_llm is task_llm
 
 
@@ -379,9 +385,19 @@ def test_model_router_for_task_light_uses_haiku_model(monkeypatch):
     assert any("haiku" in (m or "") for _, m in calls), f"calls: {calls}"
 
 
-def test_model_router_for_task_deep_task_different_from_standard():
+def test_model_router_for_task_deep_task_different_from_standard(
+    tmp_path,
+    monkeypatch,
+):
     """DEEP tier returns a different LLM than STANDARD only when an operator
     escalation unlocks it; without a reason the deep request downgrades."""
+    monkeypatch.setenv(
+        "AGENT_MODEL_CATALOG_PATH",
+        str(tmp_path / "missing-model-catalog.json"),
+    )
+    monkeypatch.delenv("AGENT_MODEL_TIER_STANDARD", raising=False)
+    monkeypatch.delenv("AGENT_MODEL_TIER_DEEP", raising=False)
+
     from unittest.mock import MagicMock
     from core.model_router import ModelRole, ModelRouter
     from core.deep_escalation import OperatorEscalation

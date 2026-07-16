@@ -7,9 +7,10 @@ and memory summarisation can move independently as better models appear.
 from __future__ import annotations
 
 import json
+import errno
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -112,7 +113,13 @@ class ModelSpec:
         }
 
 
-SUPPORTED_PROVIDERS = frozenset({"anthropic", "openai", "huggingface", "mock"})
+SUPPORTED_PROVIDERS = frozenset({
+    "anthropic",
+    "openai",
+    "huggingface",
+    "local",
+    "mock",
+})
 
 _QUALITY_SCORE = {
     "frontier": 5,
@@ -143,16 +150,17 @@ _DEFAULT_PROVIDER_ENV: dict[str, tuple[str, ...]] = {
     "anthropic": ("ANTHROPIC_API_KEY",),
     "openai": ("OPENAI_API_KEY",),
     "huggingface": ("HF_TOKEN",),
+    "local": ("LOCAL_LLM_BASE_URL", "LOCAL_LLM_MODEL"),
     "mock": (),
 }
 
 
 # ── TD-010: provider-by-complexity preference ─────────────────────────────────
 # Ordered provider preference per complexity tier, chosen only among providers
-# that are already supported. NO local/Ollama backend and NO fake-local alias:
-# a real local backend is a future extension point. Model names are never
-# hardcoded here — the concrete model always comes from
-# ``model_catalog.tier_model_for(tier, provider)``.
+# that are already supported. ``local`` is a real OpenAI-compatible backend
+# (LM Studio / vLLM / llama.cpp); include it via AGENT_TIER_PROVIDERS_* when
+# desired. Model names are never hardcoded here — the concrete model always
+# comes from ``model_catalog.tier_model_for(tier, provider)``.
 #
 # Keyed by ComplexityTier.value so this module needs no task_complexity import.
 _TIER_PROVIDER_PREF: dict[str, tuple[str, ...]] = {
@@ -346,15 +354,76 @@ class UsageTrackedLLM:
     ):
         self._llm = llm
         self.role = role
-        self.route = route
         self.cost_tier = cost_tier
         self.ledger = ledger
         # Factory used to rebuild the client on another provider during
         # failover. When ``None`` (e.g. no ledger / static LLM paths) failover
         # is disabled and behaviour is unchanged.
         self._llm_factory = llm_factory
-        self.provider = getattr(llm, "provider", route.provider)
-        self.model = getattr(llm, "model", route.model)
+        # ── Routing attribution integrity ────────────────────────────────
+        # The factory can silently *heal* an un-credentialed or policy-vetoed
+        # route to a different provider/model (e.g. anthropic/claude-sonnet-4-5
+        # -> openai/gpt-4o-mini). Historically the ModelRoute (and therefore the
+        # usage-ledger route_reason and adaptive_route logs) kept naming the
+        # *requested* model while the client actually called another one. Never
+        # log "reason: forced X" next to "model: Y". Record requested vs actual
+        # separately and stamp an honest downgrade reason when they diverge.
+        self.requested_provider = route.provider
+        self.requested_model = route.model
+        actual_provider = getattr(llm, "provider", route.provider)
+        actual_model = getattr(llm, "model", route.model)
+        self.provider = actual_provider
+        self.model = actual_model
+        self.route = self._reconcile_route(route, actual_provider, actual_model)
+
+    @staticmethod
+    def _reconcile_route(
+        route: ModelRoute,
+        actual_provider: str | None,
+        actual_model: str | None,
+    ) -> ModelRoute:
+        """Annotate ``route.reason`` when the live client diverges from request.
+
+        Only fires when both the requested and actual provider/model are known
+        and differ, so normal role-default routes (provider/model ``None``) and
+        exact matches are untouched. The requested provider/model on the route
+        are preserved; the honest downgrade is recorded in ``reason`` so no log
+        pairs a forced-X reason with an actually-Y model.
+        """
+        req_p = route.provider
+        req_m = route.model
+        provider_diverged = bool(req_p) and bool(actual_provider) and req_p != actual_provider
+        model_diverged = bool(req_m) and bool(actual_model) and req_m != actual_model
+        if not provider_diverged and not model_diverged:
+            return route
+        downgrade = (
+            f"route_downgrade:requested={req_p or '?'}/{req_m or '?'}"
+            f"->actual={actual_provider or '?'}/{actual_model or '?'}"
+        )
+        if downgrade in (route.reason or ""):
+            return route
+        reason = f"{route.reason}|{downgrade}" if route.reason else downgrade
+        return replace(route, reason=reason)
+
+    def attribution(self) -> dict[str, str | None]:
+        """Structured routing attribution for diagnostics/logging.
+
+        Separates what was *requested* from what the client actually resolved
+        to, plus the policy/override reason, so the teaching harness can assert
+        ``requested == actual`` (or a truthful downgrade reason is present).
+        """
+        actual_provider = getattr(self._llm, "provider", self.provider)
+        actual_model = getattr(self._llm, "model", self.model)
+        return {
+            "role": self.role,
+            "requested_provider": self.requested_provider,
+            "requested_model": self.requested_model,
+            "resolved_provider": self.route.provider,
+            "resolved_model": self.route.model,
+            "actual_provider": actual_provider,
+            "actual_model": actual_model,
+            "reason": self.route.reason,
+        }
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._llm, name)
@@ -362,13 +431,19 @@ class UsageTrackedLLM:
     def _failover_llm(self, exc: BaseException, tried: Sequence[str]) -> Any | None:
         """Return a replacement LLM on another credentialed provider, or None.
 
-        Only fires when failover is enabled, a factory is available, the error
-        looks like a key/quota/auth problem, and another credentialed provider
-        exists that hasn't been tried yet.
+        Fires when failover is enabled, a factory is available, and either:
+        - the error looks like a key/quota/auth problem (any provider), or
+        - the current provider is ``local`` and the error looks like downtime
+          (connection refused, timeout, hung server),
+        and another credentialed provider exists that hasn't been tried yet.
         """
         if self._llm_factory is None or not _provider_failover_enabled():
             return None
-        if not _is_switch_key_error(exc):
+        provider = str(getattr(self._llm, "provider", self.route.provider) or "").lower()
+        switchable = _is_switch_key_error(exc) or (
+            provider == "local" and _is_local_unavailable_error(exc)
+        )
+        if not switchable:
             return None
         nxt = _next_failover_provider(tried)
         if nxt is None:
@@ -563,7 +638,7 @@ def _is_switch_key_error(exc: BaseException) -> bool:
 
     Deliberately conservative: content-policy, validation and generic
     network/timeout errors do NOT match, so failover only fires for genuine
-    key/quota/auth problems.
+    key/quota/auth problems. Local downtime uses ``_is_local_unavailable_error``.
     """
     status = getattr(exc, "status_code", None)
     if status is None:
@@ -578,6 +653,58 @@ def _is_switch_key_error(exc: BaseException) -> bool:
         return True
     text = str(exc).lower()
     return any(marker in text for marker in _SWITCH_KEY_TEXT_MARKERS)
+
+
+# Exception *class name* fragments for local server downtime / hang.
+_LOCAL_UNAVAILABLE_NAME_MARKERS: tuple[str, ...] = (
+    "apiconnectionerror",
+    "apitimeouterror",
+    "connecterror",
+    "connecttimeout",
+    "readtimeout",
+    "timeoutexception",
+)
+
+# Error *message* fragments for local downtime (connection refused, hang, etc.).
+_LOCAL_UNAVAILABLE_TEXT_MARKERS: tuple[str, ...] = (
+    "connection refused",
+    "connection reset",
+    "connect error",
+    "connecterror",
+    "failed to connect",
+    "timed out",
+    "timeout",
+    "actively refused",
+    "name or service not known",
+    "nodename nor servname",
+    "server disconnected",
+    "remote end closed",
+)
+
+
+def _is_local_unavailable_error(exc: BaseException) -> bool:
+    """True when *exc* looks like the local OpenAI-compatible server is down,
+    unreachable, or timed out — so falling over to a cloud provider may help.
+
+    Used only when the current provider is ``local``. Cloud providers still use
+    ``_is_switch_key_error`` alone so a flaky network does not hop providers.
+    """
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    errno_val = getattr(exc, "errno", None)
+    if isinstance(exc, OSError) and errno_val in {
+        errno.ECONNREFUSED,
+        errno.ECONNRESET,
+        errno.ETIMEDOUT,
+        errno.ENETUNREACH,
+        errno.EHOSTUNREACH,
+    }:
+        return True
+    name = type(exc).__name__.lower()
+    if any(marker in name for marker in _LOCAL_UNAVAILABLE_NAME_MARKERS):
+        return True
+    text = str(exc).lower()
+    return any(marker in text for marker in _LOCAL_UNAVAILABLE_TEXT_MARKERS)
 
 
 def _next_failover_provider(tried: Sequence[str]) -> str | None:

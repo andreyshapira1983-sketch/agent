@@ -1,8 +1,16 @@
 {
-  "updated_at": "2026-06-01T15:29:13.468365+00:00",
+  "updated_at": "2026-07-16T15:09:17.998735+00:00",
   "providers": {
     "anthropic": {
       "models": [
+        {
+          "id": "claude-sonnet-5",
+          "tier": "standard"
+        },
+        {
+          "id": "claude-fable-5",
+          "tier": "standard"
+        },
         {
           "id": "claude-opus-4-8",
           "tier": "deep"
@@ -34,19 +42,11 @@
         {
           "id": "claude-opus-4-1-20250805",
           "tier": "deep"
-        },
-        {
-          "id": "claude-opus-4-20250514",
-          "tier": "deep"
-        },
-        {
-          "id": "claude-sonnet-4-20250514",
-          "tier": "standard"
         }
       ],
       "tier_best": {
         "light": "claude-haiku-4-5-20251001",
-        "standard": "claude-sonnet-4-6",
+        "standard": "claude-sonnet-5",
         "deep": "claude-opus-4-8"
       }
     },
@@ -323,11 +323,23 @@
         {
           "id": "gpt-5.5-pro-2026-04-23",
           "tier": "standard"
+        },
+        {
+          "id": "gpt-5.6-sol",
+          "tier": "standard"
+        },
+        {
+          "id": "gpt-5.6-terra",
+          "tier": "standard"
+        },
+        {
+          "id": "gpt-5.6-luna",
+          "tier": "standard"
         }
       ],
       "tier_best": {
         "light": "gpt-5.4-nano-2026-03-17",
-        "standard": "gpt-5.5-pro-2026-04-23",
+        "standard": "gpt-5.6-terra",
         "deep": "o4-mini-2025-04-16"
       }
     }
