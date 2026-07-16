@@ -249,6 +249,23 @@ def test_balanced_policy_uses_builtin_low_cost_routes_when_available(monkeypatch
     monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
     monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
 
+    # Keep builtin balanced routing isolated from role overrides in .env.
+    for key in (
+        "AGENT_PROVIDER",
+        "AGENT_MODEL",
+        "AGENT_PLANNER_PROVIDER",
+        "AGENT_PLANNER_MODEL",
+        "AGENT_SYNTHESIZER_PROVIDER",
+        "AGENT_SYNTHESIZER_MODEL",
+        "AGENT_REPAIR_PROVIDER",
+        "AGENT_REPAIR_MODEL",
+        "AGENT_MEMORY_PROVIDER",
+        "AGENT_MEMORY_MODEL",
+        "AGENT_VERIFIER_PROVIDER",
+        "AGENT_VERIFIER_MODEL",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
     def factory(provider: str | None, model: str | None) -> FakeLLM:
         llm = FakeLLM()
         llm.provider = provider or "unset"
@@ -338,7 +355,15 @@ def test_cost_policy_respects_max_cost_and_model_availability(monkeypatch):
     monkeypatch.setenv("AGENT_MODEL_POLICY", "cost")
     monkeypatch.setenv("AGENT_MODEL_MAX_COST", "low")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("AGENT_PROVIDER", raising=False)
+
+    # This test verifies policy fallback, not explicit role routes from .env.
+    for key in (
+        "AGENT_PROVIDER",
+        "AGENT_MODEL",
+        "AGENT_MEMORY_PROVIDER",
+        "AGENT_MEMORY_MODEL",
+    ):
+        monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv(
         "AGENT_MODEL_REGISTRY_JSON",
         json.dumps([

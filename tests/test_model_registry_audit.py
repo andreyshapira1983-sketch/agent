@@ -10,6 +10,23 @@ def test_model_registry_audit_explains_routes_are_smaller_than_registry(monkeypa
     monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
     monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
 
+    # Keep this test independent from role-specific routes loaded from .env.
+    for key in (
+        "AGENT_PROVIDER",
+        "AGENT_MODEL",
+        "AGENT_PLANNER_PROVIDER",
+        "AGENT_PLANNER_MODEL",
+        "AGENT_SYNTHESIZER_PROVIDER",
+        "AGENT_SYNTHESIZER_MODEL",
+        "AGENT_REPAIR_PROVIDER",
+        "AGENT_REPAIR_MODEL",
+        "AGENT_MEMORY_PROVIDER",
+        "AGENT_MEMORY_MODEL",
+        "AGENT_VERIFIER_PROVIDER",
+        "AGENT_VERIFIER_MODEL",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
     def factory(provider: str | None, model: str | None) -> FakeLLM:
         llm = FakeLLM()
         llm.provider = provider or "unset"
