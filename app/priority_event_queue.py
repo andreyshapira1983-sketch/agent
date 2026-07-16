@@ -20,6 +20,13 @@ the next :meth:`PriorityEventQueue.pop` / :meth:`get_nowait` serves the oldest
 background event instead and resets the aging counter. Set ``aging_after`` to
 ``0`` to disable aging (pure strict priority — starvation possible; documented).
 
+Deduplication
+-------------
+An optional non-empty ``dedup_key`` suppresses another event with the same key
+only while the first event is waiting in this queue. The first event is returned
+unchanged; its key is released as soon as it is popped. Unkeyed events are never
+deduplicated. This state is intentionally in-memory and has no TTL or recovery.
+
 ``agent_tick.py`` is untouched; nothing here replaces the single-shot path.
 """
 from __future__ import annotations
@@ -77,6 +84,15 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _normalize_dedup_key(value: str | None) -> str | None:
+    if value is None:
+        return None
+    key = str(value).strip()
+    if not key:
+        raise ValueError("dedup_key must be a non-empty string when provided")
+    return key
+
+
 @dataclass(frozen=True, order=True)
 class DaemonEvent:
     """One typed dispatcher event.
@@ -92,9 +108,13 @@ class DaemonEvent:
     event_id: str = field(compare=False, default_factory=lambda: new_id("devent"))
     payload: Mapping[str, Any] = field(compare=False, default_factory=dict)
     created_at: str = field(compare=False, default_factory=_now_iso)
+    dedup_key: str | None = field(compare=False, default=None)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "dedup_key", _normalize_dedup_key(self.dedup_key))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "event_id": self.event_id,
             "kind": self.kind,
             "priority": self.priority.name.lower(),
@@ -103,6 +123,9 @@ class DaemonEvent:
             "payload": dict(self.payload),
             "created_at": self.created_at,
         }
+        if self.dedup_key is not None:
+            result["dedup_key"] = self.dedup_key
+        return result
 
 
 class PriorityEventQueueEmpty(LookupError):
@@ -140,6 +163,7 @@ class PriorityEventQueue:
         self._aging_after = aging_after
         self._on_put = on_put
         self._heap: list[DaemonEvent] = []
+        self._pending_by_dedup_key: dict[str, DaemonEvent] = {}
         self._sequence = 0
         self._high_priority_streak = 0
         self._closed = False
@@ -167,13 +191,23 @@ class PriorityEventQueue:
         payload: Mapping[str, Any] | None = None,
         *,
         event_id: str | None = None,
+        dedup_key: str | None = None,
     ) -> DaemonEvent:
-        """Enqueue one event. Raises :class:`PriorityEventQueueClosed` if closed."""
+        """Enqueue or return the pending event with the same ``dedup_key``.
+
+        Raises :class:`PriorityEventQueueClosed` if closed. A duplicate does
+        not mutate the queue, sequence, original event, or ``on_put`` callback.
+        """
         if self._closed:
             raise PriorityEventQueueClosed("priority event queue is closed")
         kind_s = str(kind or "").strip()
         if not kind_s:
             raise ValueError("event kind must be a non-empty string")
+        key = _normalize_dedup_key(dedup_key)
+        if key is not None:
+            pending = self._pending_by_dedup_key.get(key)
+            if pending is not None:
+                return pending
         band = coerce_priority(priority)
         self._sequence += 1
         event = DaemonEvent(
@@ -182,8 +216,11 @@ class PriorityEventQueue:
             kind=kind_s,
             event_id=event_id or new_id("devent"),
             payload=dict(payload or {}),
+            dedup_key=key,
         )
         heapq.heappush(self._heap, event)
+        if key is not None:
+            self._pending_by_dedup_key[key] = event
         self._not_empty.set()
         if self._on_put is not None:
             try:
@@ -247,11 +284,13 @@ class PriorityEventQueue:
         ):
             event = self._pop_background()
             self._high_priority_streak = 0
+            self._release_dedup_key(event)
             if not self._heap:
                 self._not_empty.clear()
             return event
 
         event = heapq.heappop(self._heap)
+        self._release_dedup_key(event)
         if event.priority == EventPriority.BACKGROUND:
             self._high_priority_streak = 0
         else:
@@ -269,3 +308,8 @@ class PriorityEventQueue:
         self._heap = [e for e in self._heap if e.event_id != chosen.event_id]
         heapq.heapify(self._heap)
         return chosen
+
+    def _release_dedup_key(self, event: DaemonEvent) -> None:
+        key = event.dedup_key
+        if key is not None and self._pending_by_dedup_key.get(key) is event:
+            del self._pending_by_dedup_key[key]
