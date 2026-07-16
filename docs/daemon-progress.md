@@ -442,6 +442,48 @@ Each sub-item reports four independent fields so the status is unambiguous:
 - **Blockers:** none. **Human action:** none -- PR #89 merged; plan
   acceptance remains pending.
 
+## 4.1 In-flight task checkpointing
+
+- **implementation:** completed | **main_pr:** open | **hotfix:** none | **acceptance:** pending
+- **Branch:** `daemon/4.1-in-flight-checkpointing`
+- **Last updated:** 2026-07-16
+- **Implementation:** Extended the existing `WorkerPool` with an optional
+  `InFlightCheckpointStore`. Before handler code is awaited, the worker writes
+  a JSON-safe snapshot of the complete `DaemonEvent` plus worker id and an
+  injectable UTC timestamp. The store uses the shared state-integrity envelope,
+  atomic JSONL rewrite, and cross-process file lock in one locked
+  read-modify-write, so concurrent workers preserve one another's records.
+  Success, handler error, timeout, explicit handler cancellation, and shutdown
+  cancellation all remove only their own checkpoint; removal is idempotent.
+  A checkpoint write failure prevents the handler from starting. A process
+  crash bypasses terminal cleanup and leaves the last atomic snapshot for 4.2.
+  Existing WorkerPool callers remain compatible because the store is injected;
+  queue priority, FIFO order, deduplication, metrics, timeout/error isolation,
+  and shutdown behavior are otherwise unchanged. `agent_tick.py` is untouched.
+- **Tests added/updated:** `tests/test_worker_pool.py` now covers checkpoint
+  visibility before handler entry, success cleanup, error cleanup, timeout
+  cleanup, explicit cancellation, shutdown cancellation, two concurrent
+  handlers, atomic replace failure preserving the prior file, idempotent
+  cleanup that preserves other work, persistence failure blocking handler
+  execution, JSON-safe crash residue/reload, and injected time. All async waits
+  are bounded; no long real sleeps were added.
+- **Checks run:**
+  - `python -m pytest tests/test_worker_pool.py tests/test_priority_event_queue.py tests/test_task_queue.py -q` -> 60 passed
+  - `python -m pytest -q` -> 4646 passed
+  - `uv pip check` -> all installed packages are compatible
+  - `python scripts/generate_sbom.py --check` -> in sync
+  - `python scripts/audit_release.py` -> release/supply-chain checks passed;
+    local forbidden artefacts exist but are excluded from release packaging
+  - `python -m coverage run --branch -m pytest` -> 4646 passed
+  - `python -m coverage report --fail-under=85` -> TOTAL 93%
+  - `git diff --check` -> passed
+- **Known limitations:** This item only records and cleans in-flight work. It
+  deliberately does not scan, requeue, or execute leftover checkpoints on
+  startup; that is item 4.2. The standalone WorkerPool still has no daemon
+  composition entry point, so its owner must inject the checkpoint path.
+- **Blockers:** none. **Human action:** review and merge the open PR; do not
+  implement startup recovery in this item.
+
 | Item | Title | Status |
 | --- | --- | --- |
 | 1.1 | Main async event loop | merged (acceptance pending) |
@@ -456,7 +498,7 @@ Each sub-item reports four independent fields so the status is unambiguous:
 | 3.2 | Worker pool | merged (acceptance pending) |
 | 3.3 | Task timeout and cancellation | merged (acceptance pending) |
 | 3.4 | Event deduplication | merged (acceptance pending) |
-| 4.1 | In-flight task checkpointing | not started |
+| 4.1 | In-flight task checkpointing | open (acceptance pending) |
 | 4.2 | Recovery on start | not started |
 | 4.3 | Circuit breaker | not started |
 | 4.4 | Heartbeat and watchdog | not started |
