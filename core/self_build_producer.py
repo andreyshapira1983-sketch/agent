@@ -1508,29 +1508,13 @@ def produce_self_apply_proposal(
         manager = _manager_from_grounded(selector, targets, workspace=workspace)
     roles.append(manager)
     if manager.decision != "selected":
-        # An oversized-module split that the one-shot mapper refused (e.g.
-        # core/loop.py at 4010 lines > the single-pass ceiling) is not a
-        # dead-end: hand it to the deterministic incremental splitter, which is
-        # built for exactly these modules and publishes one provably-safe
-        # extraction step for human approval. Only if the splitter is
-        # unavailable/can't plan do we fall through to the honest refusal.
-        rejected = ""
-        if manager.data:
-            rejected = str(manager.data.get("rejected_target", "") or "")
-        concrete = _concrete_split_target(rejected)
-        if concrete is not None:
-            det = _deterministic_split_report(
-                workspace=workspace,
-                concrete_target=concrete,
-                inbox=inbox,
-                reader=reader,
-                gates=gates,
-                roles=roles,
-            )
-            if det is not None:
-                return _record(det)
+        # A rejected grounded candidate is not evidence of a defect. In
+        # particular, an abstract ``split:*`` signal may describe only an
+        # architectural refactor. Do not turn that refusal into a deterministic
+        # split proposal: publication requires a concrete grounded target that
+        # the Manager actually selected.
         return _record(ProducerReport(
-            status="no_patch",
+            status="no_patch" if legacy_llm_manager else "no_grounded_target",
             reason=manager.detail or "no low-risk candidate selected",
             checked_gates=gates,
             role_outputs=roles,

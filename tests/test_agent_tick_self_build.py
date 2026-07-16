@@ -263,7 +263,7 @@ def test_real_producer_creates_at_most_one_item_and_no_git(tmp_path: Path):
         vcs=vcs, kill_switch=SimpleNamespace(active=False, reason=""),
         budget_snapshot={"windows": []},
     )
-    assert out["self_build_status"] == "no_patch"
+    assert out["self_build_status"] == "no_grounded_target"
     assert inbox.list() == []
     assert vcs.mutations == []
 

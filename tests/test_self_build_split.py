@@ -299,7 +299,7 @@ def test_split_critical_target_is_refused(workspace: Path):
         file_reader=lambda p: "x = 1\n",
         grounded_selector=lambda: _candidate("split:core/loop.py"),
     )
-    assert report.status == "no_patch"
+    assert report.status == "no_grounded_target"
     assert llm.calls == []  # refused before any builder work
     assert inbox.list() == []
 
