@@ -408,8 +408,8 @@ Each sub-item reports four independent fields so the status is unambiguous:
 
 ## 3.4 Event deduplication
 
-- **implementation:** completed | **main_pr:** none (local work) | **hotfix:** none | **acceptance:** pending
-- **Branch:** `daemon/3.4-event-deduplication` (local only)
+- **implementation:** completed | **main_pr:** #89 open | **hotfix:** none | **acceptance:** pending
+- **Branch:** `daemon/3.4-event-deduplication`
 - **Last updated:** 2026-07-16
 - **Implementation:** Extended the existing in-memory `PriorityEventQueue` and
   `DaemonEvent` with an optional normalized `dedup_key`. While a keyed event is
@@ -430,7 +430,7 @@ Each sub-item reports four independent fields so the status is unambiguous:
 - **Checks run:**
   - `python -m pytest tests/test_priority_event_queue.py tests/test_worker_pool.py -q` -> 35 passed
   - `python -m pytest -q` -> 4636 passed
-  - `python -m pip check` -> no broken requirements
+  - `uv pip check` -> all installed packages are compatible
   - `python scripts/generate_sbom.py --check` -> in sync
   - `python scripts/audit_release.py` -> release/supply-chain checks passed;
     local forbidden artefacts exist but are excluded from release packaging
@@ -439,8 +439,8 @@ Each sub-item reports four independent fields so the status is unambiguous:
 - **Known limitations:** Deduplication is process-local and only covers events
   currently waiting in this queue. It has no persistence, TTL, restart
   recovery, database, or in-flight-handler suppression; recovery remains 4.x.
-- **Blockers:** none in local implementation. **Human action:** review local
-  work separately; no PR exists and acceptance remains pending.
+- **Blockers:** none. **Human action:** review and merge PR #89; acceptance
+  remains pending.
 
 | Item | Title | Status |
 | --- | --- | --- |
@@ -455,7 +455,7 @@ Each sub-item reports four independent fields so the status is unambiguous:
 | 3.1 | Priority event queue | merged (acceptance pending) |
 | 3.2 | Worker pool | merged (acceptance pending) |
 | 3.3 | Task timeout and cancellation | merged (acceptance pending) |
-| 3.4 | Event deduplication | completed locally; no PR (acceptance pending) |
+| 3.4 | Event deduplication | open PR #89 (acceptance pending) |
 | 4.1 | In-flight task checkpointing | not started |
 | 4.2 | Recovery on start | not started |
 | 4.3 | Circuit breaker | not started |
