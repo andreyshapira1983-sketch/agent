@@ -15,6 +15,7 @@ import pytest
 from core.model_router import (
     ModelRoute,
     UsageTrackedLLM,
+    _is_local_unavailable_error,
     _is_switch_key_error,
     _next_failover_provider,
 )
@@ -100,6 +101,28 @@ def test_is_switch_key_error_text_auth():
 def test_non_switch_key_error_not_matched():
     assert not _is_switch_key_error(ValueError("content policy violation"))
     assert not _is_switch_key_error(TimeoutError("connection reset"))
+
+
+def test_is_local_unavailable_error_timeout_and_connection():
+    assert _is_local_unavailable_error(TimeoutError("timed out"))
+    assert _is_local_unavailable_error(ConnectionError("connection refused"))
+    assert _is_local_unavailable_error(ConnectionRefusedError("refused"))
+
+
+def test_is_local_unavailable_error_sdk_class_names():
+    class APIConnectionError(Exception):
+        pass
+
+    class APITimeoutError(Exception):
+        pass
+
+    assert _is_local_unavailable_error(APIConnectionError("failed to connect"))
+    assert _is_local_unavailable_error(APITimeoutError("request timed out"))
+
+
+def test_is_local_unavailable_error_rejects_content_errors():
+    assert not _is_local_unavailable_error(ValueError("content policy violation"))
+    assert not _is_local_unavailable_error(RuntimeError("invalid json in model output"))
 
 
 # --- next provider selection -------------------------------------------------
@@ -241,3 +264,101 @@ def test_successful_call_unchanged(monkeypatch):
     assert tracked.complete(system="s", user="u") == "hello"
     assert [r["status"] for r in ledger.records] == ["success"]
     assert ledger.records[0]["route_reason"] == "test"
+
+
+# --- local downtime failover -------------------------------------------------
+
+def _tracked_local(primary, factory, ledger):
+    return UsageTrackedLLM(
+        primary,
+        role="memory_summary",
+        route=ModelRoute(
+            role="memory_summary",
+            provider="local",
+            model="qwen-local",
+            reason="env:AGENT_MEMORY",
+        ),
+        cost_tier="free",
+        ledger=ledger,
+        llm_factory=factory,
+    )
+
+
+def test_local_connection_error_failovers_to_openai(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-oa")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+
+    primary = _FakeLLM("local", raises=ConnectionError("connection refused"))
+    backup = _FakeLLM("openai", output="cloud-ok")
+
+    def factory(provider, model):
+        assert provider == "openai"
+        assert model is None
+        return backup
+
+    ledger = _FakeLedger()
+    tracked = _tracked_local(primary, factory, ledger)
+
+    out = tracked.complete(system="s", user="u")
+
+    assert out == "cloud-ok"
+    assert primary.calls == 1 and backup.calls == 1
+    assert [r["status"] for r in ledger.records] == ["error", "success"]
+    assert ledger.records[0]["provider"] == "local"
+    assert ledger.records[1]["provider"] == "openai"
+    assert ledger.records[1]["route_reason"] == "provider_failover:local->openai"
+    assert tracked.provider == "openai"
+
+
+def test_local_timeout_failovers_to_openai(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-oa")
+
+    primary = _FakeLLM("local", raises=TimeoutError("request timed out"))
+    backup = _FakeLLM("openai", output="after-timeout")
+
+    def factory(provider, model):
+        assert provider == "openai"
+        return backup
+
+    ledger = _FakeLedger()
+    tracked = _tracked_local(primary, factory, ledger)
+
+    assert tracked.complete(system="s", user="u") == "after-timeout"
+    assert ledger.records[1]["route_reason"] == "provider_failover:local->openai"
+
+
+def test_openai_timeout_does_not_failover(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-oa")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+
+    primary = _FakeLLM("openai", raises=TimeoutError("request timed out"))
+    called = {"n": 0}
+
+    def factory(provider, model):
+        called["n"] += 1
+        return _FakeLLM(provider, output="should-not-be-used")
+
+    ledger = _FakeLedger()
+    tracked = _tracked(primary, factory, ledger)
+
+    with pytest.raises(TimeoutError):
+        tracked.complete(system="s", user="u")
+    assert called["n"] == 0
+    assert [r["status"] for r in ledger.records] == ["error"]
+
+
+def test_local_failover_disabled_by_env(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-oa")
+    monkeypatch.setenv("AGENT_PROVIDER_FAILOVER", "0")
+
+    primary = _FakeLLM("local", raises=ConnectionError("connection refused"))
+
+    def factory(provider, model):  # pragma: no cover
+        raise AssertionError("factory should not be called when failover disabled")
+
+    ledger = _FakeLedger()
+    tracked = _tracked_local(primary, factory, ledger)
+
+    with pytest.raises(ConnectionError):
+        tracked.complete(system="s", user="u")
+    assert [r["status"] for r in ledger.records] == ["error"]

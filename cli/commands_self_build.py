@@ -88,7 +88,7 @@ def _handle_self_build_produce(rest: str, agent: "AgentLoop", workspace: Path) -
     # NOT necessarily an empty backlog — a candidate may have been found and then
     # rejected as off-allowlist/critical; manager_detail carries the exact reason.
     no_grounded_target = (
-        result.get("status") == "no_patch"
+        result.get("status") in {"no_patch", "no_grounded_target"}
         and manager is not None
         and manager.get("decision") == "no_target"
         and not grounded

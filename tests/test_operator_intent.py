@@ -96,6 +96,15 @@ def test_routes_model_status_phrases():
     assert intent.command == ":models"
 
 
+def test_routes_model_status_genitive_roles_phrase():
+    """Russian genitive 'моделей' must still hit :models, not web_search."""
+    intent = route_operator_intent("какие роли моделей сейчас активны? Ответь коротко.")
+
+    assert intent is not None
+    assert intent.kind == "model_status"
+    assert intent.command == ":models"
+
+
 def test_routes_smart_memory_status_phrases():
     intent = route_operator_intent("Какая память у меня существует")
 

@@ -634,7 +634,7 @@ def test_default_uses_grounded_selector_not_llm(workspace: Path):
         budget_snapshot=_headroom_budget(),
         kill_switch=FakeKillSwitch(active=False),
     )
-    assert report.status == "no_patch"
+    assert report.status == "no_grounded_target"
     assert [r.role for r in report.role_outputs] == ["manager"]
     assert report.role_outputs[0].decision == "no_target"
     assert llm.calls == []  # no LLM invention, no builder work
@@ -664,7 +664,7 @@ def test_default_grounded_selector_is_read_only(workspace: Path, monkeypatch):
         budget_snapshot=_headroom_budget(),
         kill_switch=FakeKillSwitch(active=False),
     )
-    assert report.status == "no_patch"
+    assert report.status == "no_grounded_target"
     assert report.role_outputs[0].decision == "no_target"
     assert llm.calls == []
 
@@ -833,7 +833,7 @@ def test_default_grounded_selector_does_not_repeat_docs_pilot_after_doc_exists(
         file_reader=_reader({_SELF_BUILD_DOC_TARGET: "# Self-build\n"}),
     )
 
-    assert report.status == "no_patch"
+    assert report.status == "no_grounded_target"
     assert report.role_outputs[0].decision == "no_target"
     assert report.reason == "no grounded backlog candidate"
     assert llm.calls == []
@@ -856,7 +856,7 @@ def test_default_grounded_selector_keeps_anatomy_candidates_blocked(
         kill_switch=FakeKillSwitch(active=False),
     )
 
-    assert report.status == "no_patch"
+    assert report.status == "no_grounded_target"
     manager = report.role_outputs[0]
     assert manager.decision == "no_target"
     assert manager.data["mapping_decision"] == "no_target"
@@ -874,7 +874,7 @@ def test_grounded_selector_none_returns_no_target_not_invented(workspace: Path):
         inbox=inbox,
         grounded_selector=lambda: None,
     )
-    assert report.status == "no_patch"
+    assert report.status == "no_grounded_target"
     assert [r.role for r in report.role_outputs] == ["manager"]
     assert report.role_outputs[0].decision == "no_target"
     assert llm.calls == []  # no LLM invention, no builder work
@@ -892,7 +892,7 @@ def test_grounded_off_allowlist_target_is_no_target(workspace: Path):
         candidate_targets=(_TARGET,),
         grounded_selector=lambda: candidate,
     )
-    assert report.status == "no_patch"
+    assert report.status == "no_grounded_target"
     assert report.role_outputs[0].decision == "no_target"
     assert inbox.list() == []
 
@@ -908,7 +908,7 @@ def test_grounded_critical_target_is_no_target(workspace: Path):
         grounded_selector=lambda: candidate,
         file_reader=_reader({"core/loop.py": "x = 1\n"}),
     )
-    assert report.status == "no_patch"
+    assert report.status == "no_grounded_target"
     assert report.role_outputs[0].decision == "no_target"
 
 
@@ -924,7 +924,7 @@ def test_grounded_ambiguous_mapping_refuses_without_legacy_or_approval(workspace
         grounded_selector=lambda: candidate,
     )
 
-    assert report.status == "no_patch"
+    assert report.status == "no_grounded_target"
     assert report.role_outputs[0].decision == "no_target"
     assert report.role_outputs[0].data["mapping_decision"] == "no_target"
     assert llm.calls == []
@@ -951,7 +951,7 @@ def test_grounded_mapping_missing_evidence_refuses_without_approval(workspace: P
         grounded_selector=lambda: candidate,
     )
 
-    assert report.status == "no_patch"
+    assert report.status == "no_grounded_target"
     assert report.role_outputs[0].decision == "no_target"
     assert report.role_outputs[0].data["mapping_decision"] == "unknown"
     assert "missing_evidence" in report.reason
@@ -969,7 +969,7 @@ def test_broken_selector_does_not_break_producer(workspace: Path):
         grounded_selector=_boom,
     )
     # A raising selector is treated as "no grounded candidate", never a crash.
-    assert report.status == "no_patch"
+    assert report.status == "no_grounded_target"
     assert report.role_outputs[0].decision == "no_target"
 
 
@@ -1211,11 +1211,9 @@ def _oversized_split_cand(target_rel):
     )
 
 
-def test_oversized_split_manager_refusal_routes_to_deterministic(workspace, monkeypatch):
-    # Site 1 (the real core/loop.py case): the one-shot mapper refuses an
-    # oversized split, but instead of dead-ending the run is handed to the
-    # deterministic incremental splitter, which publishes ONE provably-safe step.
-    # The LLM Builder is never consulted.
+def test_oversized_split_manager_refusal_does_not_publish_refactor(workspace, monkeypatch):
+    # Regression: a mapper-refused split (the real core/loop.py failure mode) is
+    # not a proven defect and must not become a deterministic refactor proposal.
     import core.incremental_splitter as isp
     import core.backlog_target_mapper as btm
 
@@ -1224,7 +1222,10 @@ def test_oversized_split_manager_refusal_routes_to_deterministic(workspace, monk
     (workspace / target_rel).write_text("A = 1\nB = 2\nC = 3\nD = 4\n", encoding="utf-8")
     # Force the mapper to treat this small file as "too large for one pass".
     monkeypatch.setattr(btm, "SPLIT_ONE_SHOT_MAX_LINES", 2)
-    monkeypatch.setattr(isp, "plan_incremental_split", lambda ws, tgt, **k: _fake_split_plan(tgt))
+    def _must_not_plan(*args, **kwargs):
+        raise AssertionError("incremental splitter must not run for no_target")
+
+    monkeypatch.setattr(isp, "plan_incremental_split", _must_not_plan)
 
     inbox = ApprovalInbox(path=None)
     llm = FakeLLM(["{}"])  # the Builder must never be consulted
@@ -1238,13 +1239,11 @@ def test_oversized_split_manager_refusal_routes_to_deterministic(workspace, monk
         file_reader=lambda p: (workspace / p).read_text() if (workspace / p).exists() else None,
         grounded_selector=lambda: _oversized_split_cand(target_rel),
     )
-    assert report.status == "proposed", report.reason
-    assert report.target_path == target_rel
-    assert report.approval_id
+    assert report.status == "no_grounded_target", report.reason
+    assert report.target_path is None
+    assert report.approval_id is None
     assert not any("Builder" in c["system"] for c in llm.calls)
-    items = inbox.list()
-    assert len(items) == 1
-    assert "incremental split step" in items[0].summary
+    assert inbox.list() == []
 
 
 def test_oversized_split_scale_gate_routes_to_deterministic(workspace, monkeypatch):
@@ -1282,12 +1281,12 @@ def test_oversized_split_no_patch_when_planner_cannot(workspace, monkeypatch):
     # If even the deterministic planner cannot prove a safe step, we honestly
     # refuse (no_patch) with the planner's reason — still no Builder, no apply.
     import core.incremental_splitter as isp
-    import core.backlog_target_mapper as btm
+    import core.self_build_producer as mod
 
     (workspace / "core").mkdir(parents=True, exist_ok=True)
     target_rel = "core/huge_mod.py"
     (workspace / target_rel).write_text("A = 1\nB = 2\nC = 3\nD = 4\n", encoding="utf-8")
-    monkeypatch.setattr(btm, "SPLIT_ONE_SHOT_MAX_LINES", 2)
+    monkeypatch.setattr(mod, "_MAX_SPLIT_TARGET_LINES", 2)
     monkeypatch.setattr(
         isp,
         "plan_incremental_split",
@@ -1320,12 +1319,12 @@ def test_oversized_split_planner_crash_is_surfaced_not_disguised(workspace, monk
     # no_patch carrying the exception type + an incremental_splitter_error veto,
     # so an operator can tell a crash from a clean "no safe step" decline.
     import core.incremental_splitter as isp
-    import core.backlog_target_mapper as btm
+    import core.self_build_producer as mod
 
     (workspace / "core").mkdir(parents=True, exist_ok=True)
     target_rel = "core/huge_mod.py"
     (workspace / target_rel).write_text("A = 1\nB = 2\nC = 3\nD = 4\n", encoding="utf-8")
-    monkeypatch.setattr(btm, "SPLIT_ONE_SHOT_MAX_LINES", 2)
+    monkeypatch.setattr(mod, "_MAX_SPLIT_TARGET_LINES", 2)
 
     def _boom(ws, tgt, **k):
         raise RuntimeError("planner exploded")

@@ -523,7 +523,21 @@ def _matches_project_health(text: str) -> bool:
 
 
 def _matches_model_status(text: str) -> bool:
-    return _has_any(text, ("модель", "модели", "model", "models")) and _has_any(
+    # Include Russian case forms (моделей / моделями / моделях) so phrases like
+    # "какие роли моделей сейчас активны" route to :models instead of web_search.
+    return _has_any(
+        text,
+        (
+            "модель",
+            "модели",
+            "моделей",
+            "моделям",
+            "моделями",
+            "моделях",
+            "model",
+            "models",
+        ),
+    ) and _has_any(
         text,
         (
             "покажи",
@@ -531,12 +545,15 @@ def _matches_model_status(text: str) -> bool:
             "использ",
             "маршрут",
             "роут",
+            "активн",
             "status",
             "route",
             "routing",
             "usage",
             "show",
             "which",
+            "roles",
+            "рол",
         ),
     )
 

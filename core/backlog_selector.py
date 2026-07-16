@@ -226,7 +226,7 @@ def _load_architecture_audit(root: Path) -> tuple[list[SignalRecord], str]:
 # Kept intentionally to the low-risk Python homes; critical-organ and config
 # files are filtered downstream by the producer's own gates, so scanning here is
 # safe even if a marker happens to live in a file it may never actually change.
-_CODE_TODO_SCAN_DIRS: tuple[str, ...] = ("core", "cli", "tools", "tests")
+_CODE_TODO_SCAN_DIRS: tuple[str, ...] = ("core", "cli", "tools", "tests", "app")
 
 
 def _scan_code_todos(root: Path) -> tuple[list[SignalRecord], str]:

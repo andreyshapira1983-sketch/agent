@@ -132,13 +132,15 @@ def _task_builder_generate(
         "write a NEW pytest acceptance test that FAILS today and will PASS once "
         "the task is implemented. Do NOT write the implementation itself. The "
         "test must import from the given implementation module and assert real, "
-        "specific behaviour (never a trivial `assert True`). Reply with strict "
-        "JSON only: {"
+        "specific behaviour (never a trivial `assert True`). "
+        "Reply with ONE JSON object only (no markdown fences, no commentary). "
+        "Put the test body as an array of lines so newlines stay valid JSON: "
+        "{"
         '"task_title": "<short title>", '
         '"task_summary": "<what to implement, 1-3 sentences>", '
         '"impl_path": "<repo-relative .py file to change>", '
         '"test_path": "tests/test_<name>.py", '
-        '"test_content": "<full pytest file content>", '
+        '"test_lines": ["import ...", "def test_...():", "    assert ..."], '
         '"confidence": <0..1>}.'
     )
     user = (
@@ -149,19 +151,37 @@ def _task_builder_generate(
     )
     parsed = _llm_json(llm, system=system, user=user, max_tokens=4000)
     if not parsed:
+        # One recovery attempt: models often wrap JSON or embed raw newlines
+        # inside a single "test_content" string. Re-ask for strict JSON lines.
+        parsed = _llm_json(
+            llm,
+            system=system + " IMPORTANT: previous reply was not valid JSON.",
+            user=user + "\n\nReturn ONLY the JSON object. Use test_lines (array of strings).",
+            max_tokens=4000,
+        )
+    if not parsed:
         return RoleOutput("task_builder", "failed", "task author returned no parseable JSON")
+    test_content = parsed.get("test_content") or ""
+    if not isinstance(test_content, str) or not test_content.strip():
+        lines = parsed.get("test_lines")
+        if isinstance(lines, list) and lines:
+            test_content = "\n".join(str(line) for line in lines)
+            if test_content and not test_content.endswith("\n"):
+                test_content += "\n"
     data = {
         "task_title": str(parsed.get("task_title") or "").strip(),
         "task_summary": str(parsed.get("task_summary") or "").strip(),
         "impl_path": str(parsed.get("impl_path") or "").replace("\\", "/").strip(),
         "test_path": str(parsed.get("test_path") or "").replace("\\", "/").strip(),
-        "test_content": parsed.get("test_content") or "",
+        "test_content": test_content if isinstance(test_content, str) else "",
     }
     try:
         data["confidence"] = float(parsed.get("confidence", 0.0))
     except (TypeError, ValueError):
         data["confidence"] = 0.0
     if not data["task_title"] or not isinstance(data["test_content"], str):
+        return RoleOutput("task_builder", "failed", "task author reply missing fields", data)
+    if not data["test_content"].strip():
         return RoleOutput("task_builder", "failed", "task author reply missing fields", data)
     return RoleOutput(
         "task_builder",

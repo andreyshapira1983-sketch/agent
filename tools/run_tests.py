@@ -10,7 +10,8 @@ Safety model:
     paths/pattern. No metacharacters get to the OS shell because there
     IS no shell in the pipeline.
   - cwd is the workspace root; pytest cannot escape it.
-  - timeout (default 90 s) — pytest can be long; capped via subprocess.
+  - timeout (default 300 s) — full suite needs ~3 min on this repo; capped via
+    subprocess. Override with AGENT_TEST_TIMEOUT_SECONDS.
   - output capped at 1 MiB stdout / 1 MiB stderr to keep audit logs
     bounded; oversized output is truncated with a marker.
   - stdout/stderr pass through `redact_text` before being returned, so
@@ -41,12 +42,19 @@ from tools.base import Risk, Tool, require_ascii_identifier
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_TIMEOUT_SECONDS = 90.0
+DEFAULT_TIMEOUT_SECONDS = 300.0
 MAX_STDOUT_BYTES = 1 * 1024 * 1024  # 1 MiB
 MAX_STDERR_BYTES = 1 * 1024 * 1024
 MAX_PATHS = 16                       # planner shouldn't submit huge path lists
 MAX_PATTERN_LEN = 200                # pytest -k filter
 MAX_FAILED_NAMES = 50                # cap on the captured failed test list
+
+_TIMEOUT_NOTE = (
+    "NOTE: run_tests TIMED OUT before pytest finished. "
+    "Progress characters (including F) from a partial run are NOT a final "
+    "failure list. Treat timed_out=True as inconclusive; re-run a narrower "
+    "paths/pattern subset or raise AGENT_TEST_TIMEOUT_SECONDS."
+)
 
 
 # pytest's terminal summary lines like:
@@ -167,11 +175,24 @@ class RunTestsTool(Tool):
 
         counts = self._parse_counts(stdout_safe + "\n" + stderr_safe)
         failed_tests = self._parse_failed_names(stdout_safe)
+        # On timeout, pytest usually never prints the short-test summary, so
+        # progress-bar "F" glyphs are unreliable. Prefer empty failed_tests
+        # over a partial/misleading list unless we already have named fails.
+        if timed_out and not failed_tests:
+            counts = {
+                "passed": counts["passed"],
+                "failed": 0,
+                "errors": 0,
+                "skipped": counts["skipped"],
+                "total": counts["passed"] + counts["skipped"],
+            }
 
         # Bound the audit-log size: only keep the last few KB of stdout
         # (mostly pytest's "short test summary" + traceback tails).
         tail_chars = 4000
         stdout_tail = stdout_safe[-tail_chars:] if len(stdout_safe) > tail_chars else stdout_safe
+        if timed_out:
+            stdout_tail = _TIMEOUT_NOTE + "\n" + stdout_tail
 
         coverage_summary = self._parse_coverage(stdout_safe) if coverage else None
 

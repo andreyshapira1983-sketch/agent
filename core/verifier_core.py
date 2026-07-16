@@ -28,7 +28,7 @@ from .verifier_utils import (
 )
 
 
-def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_question: str | None = None, receipt_ledger: Any = None, trace_id: str | None = None) -> VerificationReport:
+def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_question: str | None = None, receipt_ledger: Any = None, trace_id: str | None = None, expects_contract_headers: bool = True) -> VerificationReport:
     chain_empty = len(chain) == 0
     if user_question and user_question.strip():
         user_ev = make_evidence(kind="user_explicit", source_id="user:current_turn", obtained_via="user_input", claim="Operator-provided text for the current turn", excerpt=user_question.strip())
@@ -188,7 +188,10 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
         examined_chunks = rebuilt_chunks
     annotated_answer = "\n".join(annotated_chunks)
     headers_found = any(_output_contract_header_name((t or "").strip()) is not None for t in all_chunks_text)
-    malformed_output = bool(all_chunks_text) and not headers_found
+    # A task-specific/structured output contract (e.g. table-only) legitimately
+    # omits the generic Conclusion/Facts headers. Only flag malformed output
+    # when the generic prose contract is actually in force.
+    malformed_output = bool(all_chunks_text) and not headers_found and expects_contract_headers
     fully_unverified = (verified == 0 and self_declared == 0)
     disclaimer: str | None = None
     if fully_unverified:

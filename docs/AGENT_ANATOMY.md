@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 133 modules across 12 groups._
+_Total: 134 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -44,8 +44,10 @@ _Planning, verification, clarification, control loop._
 | Module | Purpose |
 | ------ | ------- |
 | `core/loop` | Control Loop — Observe -> Interpret -> Plan -> Act -> Verify -> Respond. |
+| `core/referent_resolver` | Deterministic referent resolution for local critique and show-only turns. |
 | `core/loop_helpers` | Extracted from `core/loop` by autonomous self-build module split. |
 | `core/loop_methods` | Extracted from `core/loop` by autonomous self-build module split. |
+| `core/loop_methods2` | Extracted from `core/loop` by autonomous self-build module split. |
 | `core/planner` | LLM-driven Planner (§3 Cognitive Core: Planning). |
 | `core/lang_match` | Token-boundary, morphology-aware term matching (RU/EN) for routing heuristics. |
 | `core/verifier` | MVP-14.4 — Verifier. |

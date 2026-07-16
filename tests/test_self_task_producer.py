@@ -301,3 +301,20 @@ def test_veto_test_does_not_parse(workspace: Path):
 def test_builder_no_json_vetoes(workspace: Path):
     _, report = _run(workspace, llm=FakeLLM(["not json at all"]))
     assert report.status == "task_veto"
+
+
+def test_builder_accepts_test_lines_array(workspace: Path):
+    """Multiline test bodies as JSON arrays stay parseable (Stage A JSON fix)."""
+    payload = {
+        "task_title": "Add redact() helper",
+        "task_summary": "Implement redact() to mask secret values.",
+        "impl_path": _IMPL,
+        "test_path": "tests/test_redaction_stagea.py",
+        "test_lines": _GOOD_TEST.splitlines(),
+        "confidence": 0.9,
+    }
+    inbox, report = _run(workspace, llm=FakeLLM([json.dumps(payload)]))
+    assert report.status == "proposed"
+    item = next(i for i in inbox.list() if i.id == report.approval_id)
+    assert "def test_" in item.payload["test_content"]
+    assert "redact" in item.payload["test_content"]

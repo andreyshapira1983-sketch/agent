@@ -14,7 +14,13 @@ from typing import Any
 from core.approval import AutoApprover
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
-from core.model_router import ModelRole, ModelRoute, ModelRouter
+from core.model_router import (
+    ModelRole,
+    ModelRoute,
+    ModelRouter,
+    UsageTrackedLLM,
+)
+from core.model_usage import ModelUsageLedger
 from core.policy import PolicyGate
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
@@ -243,6 +249,23 @@ def test_balanced_policy_uses_builtin_low_cost_routes_when_available(monkeypatch
     monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
     monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
 
+    # Keep builtin balanced routing isolated from role overrides in .env.
+    for key in (
+        "AGENT_PROVIDER",
+        "AGENT_MODEL",
+        "AGENT_PLANNER_PROVIDER",
+        "AGENT_PLANNER_MODEL",
+        "AGENT_SYNTHESIZER_PROVIDER",
+        "AGENT_SYNTHESIZER_MODEL",
+        "AGENT_REPAIR_PROVIDER",
+        "AGENT_REPAIR_MODEL",
+        "AGENT_MEMORY_PROVIDER",
+        "AGENT_MEMORY_MODEL",
+        "AGENT_VERIFIER_PROVIDER",
+        "AGENT_VERIFIER_MODEL",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
     def factory(provider: str | None, model: str | None) -> FakeLLM:
         llm = FakeLLM()
         llm.provider = provider or "unset"
@@ -332,7 +355,15 @@ def test_cost_policy_respects_max_cost_and_model_availability(monkeypatch):
     monkeypatch.setenv("AGENT_MODEL_POLICY", "cost")
     monkeypatch.setenv("AGENT_MODEL_MAX_COST", "low")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("AGENT_PROVIDER", raising=False)
+
+    # This test verifies policy fallback, not explicit role routes from .env.
+    for key in (
+        "AGENT_PROVIDER",
+        "AGENT_MODEL",
+        "AGENT_MEMORY_PROVIDER",
+        "AGENT_MEMORY_MODEL",
+    ):
+        monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv(
         "AGENT_MODEL_REGISTRY_JSON",
         json.dumps([
@@ -447,3 +478,97 @@ def test_agent_loop_uses_repair_proposal_route(tmp_path: Path, monkeypatch):
     assert len(repair_llm.calls) == 1
     assert synth_llm.calls == []
     assert planner_llm.calls == []
+
+
+# ── Routing attribution integrity (teaching-harness repair) ──────────────────
+#
+# The factory may silently heal a forbidden/uncredentialed route to another
+# provider/model. The route metadata + usage ledger must never claim a model the
+# client did not actually call: either requested == actual, or a truthful
+# downgrade reason is stamped.
+
+
+def _tracked(route: ModelRoute, *, provider: str, model: str) -> UsageTrackedLLM:
+    llm = FakeLLM(responses=["ok"])
+    llm.provider = provider
+    llm.model = model
+    return UsageTrackedLLM(
+        llm,
+        role=route.role,
+        route=route,
+        cost_tier="medium",
+        ledger=ModelUsageLedger(),
+    )
+
+
+def test_tracked_llm_stamps_downgrade_when_client_diverges_from_request():
+    route = ModelRoute(
+        role=ModelRole.PLANNER.value,
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        reason="diagnostic:forced-sonnet-4-5",
+    )
+    tracked = _tracked(route, provider="openai", model="gpt-4o-mini")
+
+    # Attribution must reflect the *actual* client, not the requested model.
+    assert tracked.provider == "openai"
+    assert tracked.model == "gpt-4o-mini"
+    downgrade = (
+        "route_downgrade:requested=anthropic/claude-sonnet-4-5"
+        "->actual=openai/gpt-4o-mini"
+    )
+    assert downgrade in tracked.route.reason
+    assert "diagnostic:forced-sonnet-4-5" in tracked.route.reason
+
+    attribution = tracked.attribution()
+    assert attribution["requested_provider"] == "anthropic"
+    assert attribution["requested_model"] == "claude-sonnet-4-5"
+    assert attribution["actual_provider"] == "openai"
+    assert attribution["actual_model"] == "gpt-4o-mini"
+
+
+def test_tracked_llm_ledger_never_pairs_forced_reason_with_other_model():
+    route = ModelRoute(
+        role=ModelRole.PLANNER.value,
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        reason="diagnostic:forced-sonnet-4-5",
+    )
+    tracked = _tracked(route, provider="openai", model="gpt-4o-mini")
+    tracked.complete(system="s", user="u", max_tokens=8)
+
+    records = tracked.ledger.records
+    assert records, "usage ledger recorded nothing"
+    last = records[-1]
+    # The logged model and its route_reason must agree: model gpt-4o-mini must
+    # carry the honest downgrade, never a bare 'forced-sonnet-4-5'.
+    assert last.model == "gpt-4o-mini"
+    assert last.provider == "openai"
+    assert "route_downgrade:" in last.route_reason
+
+
+def test_tracked_llm_preserves_reason_when_client_matches_request():
+    route = ModelRoute(
+        role=ModelRole.PLANNER.value,
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        reason="diagnostic:forced-sonnet-4-5",
+    )
+    tracked = _tracked(route, provider="anthropic", model="claude-sonnet-4-5")
+
+    assert tracked.route.reason == "diagnostic:forced-sonnet-4-5"
+    assert "route_downgrade" not in tracked.route.reason
+    attribution = tracked.attribution()
+    assert attribution["requested_model"] == attribution["actual_model"]
+
+
+def test_tracked_llm_leaves_role_default_route_untouched():
+    # Role-default routes leave provider/model as None; there is no explicit
+    # request to contradict, so no downgrade annotation should be added.
+    route = ModelRoute(role=ModelRole.PLANNER.value, reason="default")
+    tracked = _tracked(route, provider="openai", model="gpt-4o-mini")
+
+    assert tracked.route.reason == "default"
+    attribution = tracked.attribution()
+    assert attribution["requested_provider"] is None
+    assert attribution["actual_provider"] == "openai"
