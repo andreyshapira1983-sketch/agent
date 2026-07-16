@@ -408,7 +408,7 @@ Each sub-item reports four independent fields so the status is unambiguous:
 
 ## 3.4 Event deduplication
 
-- **implementation:** completed | **main_pr:** #89 open | **hotfix:** none | **acceptance:** pending
+- **implementation:** completed | **main_pr:** #89 merged | **hotfix:** none | **acceptance:** pending
 - **Branch:** `daemon/3.4-event-deduplication`
 - **Last updated:** 2026-07-16
 - **Implementation:** Extended the existing in-memory `PriorityEventQueue` and
@@ -439,8 +439,8 @@ Each sub-item reports four independent fields so the status is unambiguous:
 - **Known limitations:** Deduplication is process-local and only covers events
   currently waiting in this queue. It has no persistence, TTL, restart
   recovery, database, or in-flight-handler suppression; recovery remains 4.x.
-- **Blockers:** none. **Human action:** review and merge PR #89; acceptance
-  remains pending.
+- **Blockers:** none. **Human action:** none -- PR #89 merged; plan
+  acceptance remains pending.
 
 | Item | Title | Status |
 | --- | --- | --- |
@@ -455,7 +455,7 @@ Each sub-item reports four independent fields so the status is unambiguous:
 | 3.1 | Priority event queue | merged (acceptance pending) |
 | 3.2 | Worker pool | merged (acceptance pending) |
 | 3.3 | Task timeout and cancellation | merged (acceptance pending) |
-| 3.4 | Event deduplication | open PR #89 (acceptance pending) |
+| 3.4 | Event deduplication | merged (acceptance pending) |
 | 4.1 | In-flight task checkpointing | not started |
 | 4.2 | Recovery on start | not started |
 | 4.3 | Circuit breaker | not started |
