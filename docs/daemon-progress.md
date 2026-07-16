@@ -381,11 +381,11 @@ Each sub-item reports four independent fields so the status is unambiguous:
 
 ## 3.3 Task timeout and cancellation
 
-- **implementation:** completed | **main_pr:** open | **hotfix:** none | **acceptance:** pending
+- **implementation:** completed | **main_pr:** #87 merged | **hotfix:** none | **acceptance:** pending
 - **Branch:** `daemon/3.3-task-timeout`
+- **Pull Request:** #87 (merged)
 - **Last updated:** 2026-07-13
-- **Why this item:** 3.2 (#86) merged on main; no open PR for 3.3; next in
-  sequence.
+- **Why this item:** Implemented after 3.2 (#86) as the next item in sequence.
 - **Implementation:** Extended `WorkerPool` with configurable `task_timeout`
   (default 60s; `None` disables). Each handler runs under `asyncio.wait_for`;
   on timeout the awaitable is cancelled, `timeout_count` increments, success
@@ -403,7 +403,44 @@ Each sub-item reports four independent fields so the status is unambiguous:
 - **Known limitations:** No separate metrics backend yet (6.3); timeout uses
   asyncio loop time (tests use short real timeouts, not a fake clock — same
   pattern as 3.2 cancel tests).
-- **Blockers:** none. **Human action:** review and merge the PR.
+- **Blockers:** none. **Human action:** none -- PR #87 merged; plan acceptance
+  (Definition of Done sign-off) remains pending.
+
+## 3.4 Event deduplication
+
+- **implementation:** completed | **main_pr:** none (local work) | **hotfix:** none | **acceptance:** pending
+- **Branch:** `daemon/3.4-event-deduplication` (local only)
+- **Last updated:** 2026-07-16
+- **Implementation:** Extended the existing in-memory `PriorityEventQueue` and
+  `DaemonEvent` with an optional normalized `dedup_key`. While a keyed event is
+  waiting, a repeated `put()` with the same key returns that original event and
+  does not change queue size, sequence, callback count, priority, payload,
+  event id, or FIFO position. Unkeyed events retain the original behaviour and
+  may repeat. The key is released in the shared pop path, covering
+  `get_nowait()`, `pop_batch()`, async `get()`, and the background-aging branch;
+  it can then be enqueued again. Empty/whitespace keys raise `ValueError`, and
+  a closed queue continues to reject every `put()`.
+- **Reused:** Existing `PriorityEventQueue` heap, sequence, aging, close/wake
+  semantics, and `WorkerPool.get()` consumption path; no second queue or store.
+- **Tests added/updated:** `tests/test_priority_event_queue.py` covers same and
+  different keys, absent keys, sequence preservation, first-event
+  priority/payload/id/FIFO preservation, key reuse after sync/async get,
+  `pop_batch`, background aging, one-shot `on_put`, invalid empty keys, and a
+  closed queue. Existing worker-pool tests provide consumer compatibility.
+- **Checks run:**
+  - `python -m pytest tests/test_priority_event_queue.py tests/test_worker_pool.py -q` -> 35 passed
+  - `python -m pytest -q` -> 4636 passed
+  - `python -m pip check` -> no broken requirements
+  - `python scripts/generate_sbom.py --check` -> in sync
+  - `python scripts/audit_release.py` -> release/supply-chain checks passed;
+    local forbidden artefacts exist but are excluded from release packaging
+  - `python -m coverage run --branch -m pytest` -> 4636 passed
+  - `python -m coverage report --fail-under=85` -> TOTAL 93%
+- **Known limitations:** Deduplication is process-local and only covers events
+  currently waiting in this queue. It has no persistence, TTL, restart
+  recovery, database, or in-flight-handler suppression; recovery remains 4.x.
+- **Blockers:** none in local implementation. **Human action:** review local
+  work separately; no PR exists and acceptance remains pending.
 
 | Item | Title | Status |
 | --- | --- | --- |
@@ -417,8 +454,8 @@ Each sub-item reports four independent fields so the status is unambiguous:
 | 2.4 | External events | skipped (explicitly deferred) |
 | 3.1 | Priority event queue | merged (acceptance pending) |
 | 3.2 | Worker pool | merged (acceptance pending) |
-| 3.3 | Task timeout and cancellation | open PR (acceptance pending) |
-| 3.4 | Event deduplication | not started |
+| 3.3 | Task timeout and cancellation | merged (acceptance pending) |
+| 3.4 | Event deduplication | completed locally; no PR (acceptance pending) |
 | 4.1 | In-flight task checkpointing | not started |
 | 4.2 | Recovery on start | not started |
 | 4.3 | Circuit breaker | not started |
