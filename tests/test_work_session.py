@@ -321,5 +321,7 @@ class TestRunWorkSession:
         # but the _log helper itself should not raise an AttributeError.
         try:
             run_work_session(config, agent=agent, workspace=workspace)
+        except AttributeError as exc:
+            pytest.fail(f"_log helper is not safe against a .log-less agent: {exc}")
         except Exception:
-            pass  # AutonomousRuntime may fail; the test is only about _log safety
+            pass  # AutonomousRuntime may fail for unrelated reasons; only _log safety is under test
