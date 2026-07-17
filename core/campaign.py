@@ -28,9 +28,12 @@ The loop is::
 Hard guarantees (the whole point of this layer):
 
 * An IDLE cycle never calls the LLM. When there is no high-priority action the
-  agent records ``reason_if_idle`` and advances ``next_check_at`` instead of
-  asking a model "what should I do" (which would cost money to be told
-  "nothing").
+  agent records ``reason_if_idle`` and stamps an advisory ``next_check_at`` on
+  the ledger record instead of asking a model "what should I do" (which would
+  cost money to be told "nothing"). ``next_check_at`` is informational only —
+  actual cycle pacing (including idle cycles) is driven by
+  ``cycle_pause_seconds``; nothing re-reads ``next_check_at`` to skip or delay
+  a cycle.
 * ``max_idle_streak`` consecutive idle cycles stops the campaign with a report
   ("3 empty cycles -> stop and ask the operator").
 * The campaign opens NO new effect path. A useful cycle runs through the
@@ -202,6 +205,9 @@ def run_campaign(
             if action.priority <= 0:
                 idle_streak += 1
                 idle_cycles += 1
+                # Advisory only, for the ledger/operator view — this timestamp is
+                # never read back to throttle or skip a cycle. Real pacing is
+                # config.cycle_pause_seconds (see the module docstring).
                 next_check = (
                     (now + __import__("datetime").timedelta(seconds=config.idle_recheck_seconds)).isoformat()
                     if config.idle_recheck_seconds

@@ -19,7 +19,6 @@ GatewayOutcome = Literal["allow", "deny", "escalate", "simulate", "passthrough",
 
 # Effectful tools routed through gateway (see gateway-proposal.md).
 EFFECTFUL_TOOL_NAMES: frozenset[str] = frozenset({"file_write", "shell_exec"})
-G1_EFFECTFUL_TOOL_NAMES = EFFECTFUL_TOOL_NAMES  # backward-compatible alias
 
 
 def gateway_path_from_receipt(receipt_path: str) -> GatewayPath:
