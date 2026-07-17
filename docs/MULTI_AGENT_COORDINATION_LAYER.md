@@ -114,6 +114,11 @@ Code comments and planning documents may refer to decision identifiers, but the 
 
 The Shared Backlog is the common operational state for the central agent and all bounded subagents.
 
+> Failure classes that a backlog/queue must defend against (queue without a
+> consumer, `approved` mistaken for `executed`, no backlog alarm) are catalogued
+> in [`docs/OPERATIONAL_FAILURE_MODES.md`](OPERATIONAL_FAILURE_MODES.md)
+> (OFM-006, OFM-008).
+
 Each task should include:
 
 - task identifier;
@@ -234,6 +239,11 @@ The operator should be able to:
 - inspect exactly why another agent received a particular context package.
 
 The Workbench must not hide failed runs or silently rewrite history. Corrections should create new records that supersede old ones.
+
+> The specific failure modes the Workbench must surface (dead runner, stalled
+> draft/queue, false external success, no path to delivery) are catalogued in
+> [`docs/OPERATIONAL_FAILURE_MODES.md`](OPERATIONAL_FAILURE_MODES.md)
+> (OFM-004, OFM-007, OFM-009, OFM-018).
 
 ## 11. Safety and governance requirements
 
