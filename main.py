@@ -1535,7 +1535,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
         return _handle_subagent_proposal(rest.strip(), agent, workspace)
 
     if head in {":team-run", ":team-execute", ":subagents-run"}:
-        return _handle_team_run(rest.strip(), agent)
+        return _handle_team_run(rest.strip(), agent, workspace)
 
     if head == ":approval-list":
         return _handle_approval_list(rest.strip(), agent, workspace)
