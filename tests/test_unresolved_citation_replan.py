@@ -72,6 +72,7 @@ class ScriptedPlanner:
                 "history": history,
                 "failure_context": failure_context,
                 "forbidden_actions": forbidden_actions,
+                "llm": llm,
                 "call_index": len(self.calls),
             }
         )
@@ -311,6 +312,13 @@ class TestUnresolvedCitationHappyPath:
         # The 2nd planner call carries the URL in its failure_context.
         assert url in planner.calls[1]["failure_context"]
         assert "unresolved_citation" in planner.calls[1]["failure_context"]
+
+        # Regression: the verify-driven re-plan must reuse the SAME
+        # complexity-routed planner LLM as the initial plan, not silently
+        # drop to the default tier. The loop resolves one adaptive planner
+        # LLM per run() and both plan() calls must receive that same object.
+        assert planner.calls[0]["llm"] is not None
+        assert planner.calls[1]["llm"] is planner.calls[0]["llm"]
 
 
 # ===========================================================================
