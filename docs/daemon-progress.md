@@ -398,8 +398,6 @@ Each sub-item reports four independent fields so the status is unambiguous:
   metrics counters. Bounded waits only (≤0.08s), no long real sleeps.
 - **Checks run:**
   - `python -m pytest tests/test_worker_pool.py tests/test_priority_event_queue.py -q` → 25 passed
-- **Also in this branch:** `.cursor/rules/daemon-plan-workflow.mdc` so agents
-  keep the one-item daemon protocol without re-pasting the full checkpoint.
 - **Known limitations:** No separate metrics backend yet (6.3); timeout uses
   asyncio loop time (tests use short real timeouts, not a fake clock — same
   pattern as 3.2 cancel tests).
