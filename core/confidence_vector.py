@@ -35,6 +35,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Sequence
 
+from core.confidence_gate import compute_confidence
+
 
 # Severity weight applied to disagreement events when computing
 # coherence. High-severity events (planner_vs_verifier_full) hurt much
@@ -118,20 +120,11 @@ def _tokenise(text: str) -> set[str]:
 def evidence_score(report: Any) -> float:
     """Verification coverage as a 0..1 score.
 
-    Mirrors the formula in :func:`core.confidence_gate.compute_confidence`
-    but lives here so callers can read this axis without taking the
-    full scalar dependency.
+    Delegates to :func:`core.confidence_gate.compute_confidence` so the two
+    axes can never drift apart; exposed separately so callers can read this
+    axis without depending on the full scalar gate's semantics.
     """
-    if report is None:
-        return 0.0
-    total = int(getattr(report, "total_chunks", 0) or 0)
-    if total <= 0:
-        return 0.0
-    verified = int(getattr(report, "verified_chunks", 0) or 0)
-    cited = int(getattr(report, "cited_but_unmatched_chunks", 0) or 0)
-    unverified = int(getattr(report, "unverified_chunks", 0) or 0)
-    raw = verified * 1.0 + cited * 0.5 + unverified * -0.25
-    return max(0.0, min(1.0, raw / total))
+    return compute_confidence(report)
 
 
 def coherence_score(disagreements: Sequence[dict] | None) -> float:

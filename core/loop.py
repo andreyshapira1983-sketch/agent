@@ -1697,6 +1697,11 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                         history=planner_history,
                         failure_context=failure_context,
                         forbidden_actions=decision.forbidden_actions,
+                        # Keep the complexity-escalated planner model on verify
+                        # re-plans; without this the re-plan silently dropped to
+                        # the default tier a "deep" question was escalated away
+                        # from.
+                        llm=_task_planner_llm,
                     )
                 except ModelBudgetExceeded as exc:
                     self._save_budget_pause_checkpoint(

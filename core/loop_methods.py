@@ -386,6 +386,39 @@ class AgentLoopExtractedMethods:
         self.log.log("persistent_memory_dedupe", report.summary())
         return report
 
+    def prune_episodic(
+        self,
+        *,
+        max_age_days: int = 30,
+        min_quality: float = 0.4,
+        staleness_threshold: float = 1.5,
+        dry_run: bool = False,
+    ) -> list[str]:
+        """Evict old, low-quality, non-protected episodes from episodic memory.
+
+        Complements the persistent-memory hygiene chain: FIFO eviction alone
+        keeps recent ``replan_exhausted`` failures around as retrieval
+        distractors. Returns the IDs pruned (or, in dry-run, that would be).
+        No-op when no episodic store is configured.
+        """
+        if self.episodic_store is None:
+            self.log.log(
+                "episodic_memory_prune",
+                {"pruned": 0, "dry_run": dry_run, "skipped_reason": "no store"},
+            )
+            return []
+        pruned_ids = self.episodic_store.prune_stale(
+            max_age_days=max_age_days,
+            min_quality=min_quality,
+            staleness_threshold=staleness_threshold,
+            dry_run=dry_run,
+        )
+        self.log.log(
+            "episodic_memory_prune",
+            {"pruned": len(pruned_ids), "dry_run": dry_run, "ids": pruned_ids},
+        )
+        return pruned_ids
+
     def summarise_persistent(
         self,
         tag: str,

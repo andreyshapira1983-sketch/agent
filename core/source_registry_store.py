@@ -24,20 +24,6 @@ class SourceRegistryStore:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    def save_source(self, source: SourceRecord) -> bool:
-        with state_file_lock(self.path):
-            if any(existing.id == source.id for existing in self._load_sources_unlocked()):
-                return False
-            self._append_unlocked("source", source.to_dict())
-            return True
-
-    def save_claim(self, claim: ClaimRecord) -> bool:
-        with state_file_lock(self.path):
-            if self._has_claim_key_unlocked(_claim_key(claim)):
-                return False
-            self._append_unlocked("claim", claim.to_dict())
-            return True
-
     def save_registry(self, registry: SourceRegistry) -> dict[str, int]:
         """Persist a whole registry with a SINGLE file scan and one append.
 
@@ -177,9 +163,6 @@ class SourceRegistryStore:
                 self.path.unlink()
         return counts
 
-    def _append_unlocked(self, kind: str, payload: dict) -> None:
-        append_state_jsonl_unlocked(self.path, [{"kind": kind, "payload": payload}])
-
     def _iter_records_unlocked(self) -> Iterable[tuple[str, dict]]:
         if not self.path.exists():
             return
@@ -188,18 +171,6 @@ class SourceRegistryStore:
             payload = row.get("payload")
             if isinstance(kind, str) and isinstance(payload, dict):
                 yield kind, payload
-
-    def _has_claim_key(self, key: str) -> bool:
-        for claim in self.load_claims():
-            if _claim_key(claim) == key:
-                return True
-        return False
-
-    def _has_claim_key_unlocked(self, key: str) -> bool:
-        for claim in self._load_claims_unlocked():
-            if _claim_key(claim) == key:
-                return True
-        return False
 
 
 def _claim_key(claim: ClaimRecord) -> str:

@@ -18,6 +18,8 @@ from typing import Any, Iterable
 from core.evidence import ProvenanceChain, evidence_from_tool_result, make_evidence
 from core.ingestion_reports import IngestReport, RssIngestReport, WebIngestReport
 from core.ingestion_utils import (
+    SKIP_DIR_NAMES,
+    TEXT_EXTENSIONS,
     _candidate_urls,
     _chunk_text,
     _ensure_inside_workspace,
@@ -32,35 +34,6 @@ from core.source_library import resolve_source_library
 from core.source_ranker import rank_chain
 from core.source_registry import SourceRegistry
 
-
-TEXT_EXTENSIONS = frozenset({
-    ".cfg",
-    ".ini",
-    ".json",
-    ".md",
-    ".py",
-    ".ps1",
-    ".sh",
-    ".toml",
-    ".txt",
-    ".yaml",
-    ".yml",
-})
-
-SKIP_DIR_NAMES = frozenset({
-    ".git",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".venv",
-    "__pycache__",
-    "build",
-    "data",
-    "dist",
-    "logs",
-    "node_modules",
-    "procedural_chroma",
-    "venv",
-})
 
 MAX_FILE_BYTES = 1_000_000
 DEFAULT_PROJECT_LIMIT = 80
@@ -428,6 +401,14 @@ def _ingest_paths(
     if auto_write_memory is not None:
         write_memory = bool(auto_write_memory)
     if dry_run:
+        write_memory = False
+    # Self-ingest of the workspace's own tree (``:ingest-project``) is
+    # evidence-only: it builds the source registry to answer the CURRENT
+    # question. It must NEVER mass-persist code/docstring fragments as long-term
+    # "facts" — that floods memory with thousands of mid-sentence source chunks
+    # (retrieval distractors) that are re-derivable from the code itself. A
+    # caller wanting to learn one specific document uses ``:ingest-source``.
+    if mode == "project":
         write_memory = False
 
     report = IngestReport(

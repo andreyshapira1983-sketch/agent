@@ -1536,7 +1536,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
         return _handle_subagent_proposal(rest.strip(), agent, workspace)
 
     if head in {":team-run", ":team-execute", ":subagents-run"}:
-        return _handle_team_run(rest.strip(), agent)
+        return _handle_team_run(rest.strip(), agent, workspace)
 
     if head == ":approval-list":
         return _handle_approval_list(rest.strip(), agent, workspace)
@@ -1750,9 +1750,10 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "      backups    delete old .bak.<ts> files (keep last 3, >14d old)\n"
             "      expire     drop persistent records past their TTL\n"
             "      dedupe     collapse near-duplicate persistent records\n"
+            "      episodic   prune old low-quality episodes (retrieval distractors)\n"
             "      summarise <tag>  merge records sharing <tag> via LLM\n"
             "      archive [--threshold=N] [--min-age=N]  move low-value records to archive\n"
-            "      (no subcmd)      run expire, then dedupe, then backups\n"
+            "      (no subcmd)      run expire, dedupe, episodic, then backups\n"
             "  :rollback [plan_id]             apply latest compensation plan (or by id);\n"
             "                                  no arg = LIFO pop; 'list' = show registered plans\n"
             "  :repair <target> <proposal> [tests...] [--pattern PAT]\n"

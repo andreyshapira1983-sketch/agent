@@ -43,6 +43,11 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
     examined_chunks: list[ClaimChunk] = []
     verified = unverified = cited_unmatched = topic_supported = memory_only_unmatched = self_declared = structural = 0
     annotated_chunks: list[str] = []
+    # Index into ``annotated_chunks`` for each examined (non-structural) chunk,
+    # so the downgrade pass below can patch the exact rendered line instead of
+    # fuzzy string-matching (which silently failed when a claim began with its
+    # own citation).
+    examined_annotated_idx: list[int] = []
     current_section: str | None = None
     for chunk_text in all_chunks_text:
         header = _output_contract_header_name(chunk_text)
@@ -150,12 +155,13 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                         memory_only_unmatched += 1
         examined_chunks.append(ClaimChunk(text=chunk_text, citations=tuple(cits), matched_evidence_ids=tuple(matched_ids), verdict=verdict))
         annotated_chunks.append(annotated)
+        examined_annotated_idx.append(len(annotated_chunks) - 1)
     subagent_asserted = receipt_missing = 0
     if examined_chunks:
         from core.receipt_consumer import matched_evidence_lacks_receipt
         ev_by_id: dict[str, Evidence] = {ev.id: ev for ev in chain.evidences}
         rebuilt_chunks: list[ClaimChunk] = []
-        for ch in examined_chunks:
+        for ch, ann_idx in zip(examined_chunks, examined_annotated_idx):
             if ch.verdict != "verified" or not ch.matched_evidence_ids:
                 rebuilt_chunks.append(ch)
                 continue
@@ -168,21 +174,17 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                 verified -= 1
                 subagent_asserted += 1
                 rebuilt_chunks.append(ClaimChunk(text=ch.text, citations=ch.citations, matched_evidence_ids=ch.matched_evidence_ids, verdict="subagent_asserted"))
-                for i, line in enumerate(annotated_chunks):
-                    if line.startswith(ch.text[:30]) and ("[verified:" in line or "[subagent-asserted]" not in line):
-                        if "[subagent-asserted]" not in line:
-                            annotated_chunks[i] = line.rstrip() + " [subagent-asserted]"
-                        break
+                line = annotated_chunks[ann_idx]
+                if "[subagent-asserted]" not in line:
+                    annotated_chunks[ann_idx] = line.rstrip() + " [subagent-asserted]"
                 continue
             if matched_evidence_lacks_receipt(evs, ledger=receipt_ledger, trace_id=trace_id):
                 verified -= 1
                 receipt_missing += 1
                 rebuilt_chunks.append(ClaimChunk(text=ch.text, citations=ch.citations, matched_evidence_ids=ch.matched_evidence_ids, verdict="receipt_missing"))
-                claim_prefix = ch.text.split("[", 1)[0].strip()
-                for i, line in enumerate(annotated_chunks):
-                    if claim_prefix and claim_prefix in line and "[no-receipt]" not in line:
-                        annotated_chunks[i] = line.replace("[verified:", "[unverified:").rstrip() + " [no-receipt]"
-                        break
+                line = annotated_chunks[ann_idx]
+                if "[no-receipt]" not in line:
+                    annotated_chunks[ann_idx] = line.replace("[verified:", "[unverified:").rstrip() + " [no-receipt]"
                 continue
             rebuilt_chunks.append(ch)
         examined_chunks = rebuilt_chunks

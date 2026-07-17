@@ -34,11 +34,3 @@ def _force_utf8_io() -> None:
             # than crash the REPL. The audit log will still capture the
             # raw bytes for forensics.
             pass
-
-
-if sys.platform == "win32":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
-    except Exception:
-        pass

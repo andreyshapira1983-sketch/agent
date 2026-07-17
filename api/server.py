@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -85,11 +86,26 @@ def _build_server_agent():
 
 _agent = None  # initialised on first request (lazy startup)
 
+# Guards lazy construction so a first burst of concurrent requests can't build
+# two agents and leak one.
+_agent_lock = threading.Lock()
+
+# Serializes agent.run() across requests. FastAPI runs sync endpoints in a
+# thread pool, so without this two concurrent /ask calls would drive the SAME
+# AgentLoop at once — interleaving its single TraceLogger (one trace_id),
+# WorkingMemory turns, and ModelUsageLedger writes. The agent is intentionally
+# one shared instance with cross-request session memory (see /ask docstring),
+# so the correct fix is to serialize access rather than shard per request.
+_run_lock = threading.Lock()
+
 
 def _get_agent():
     global _agent
     if _agent is None:
-        _agent = _build_server_agent()
+        with _agent_lock:
+            # Double-checked: another thread may have built it while we waited.
+            if _agent is None:
+                _agent = _build_server_agent()
     return _agent
 
 
@@ -183,22 +199,25 @@ def ask(body: AskRequest) -> AskResponse:
     planner to a specific workspace file.
     """
     agent = _get_agent()
-    try:
-        answer = agent.run(
-            user_question=body.question,
-            file_hint=body.file_hint,
-        )
-    except Exception as exc:  # noqa: BLE001
-        # Surface unexpected errors as 500 with a safe message (no stack trace
-        # in the response body — full trace is in the JSONL log).
-        agent.log.log("api_error", {"error": type(exc).__name__, "message": str(exc)})
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Agent error: {type(exc).__name__}",
-        ) from exc
+    # Serialize the whole run + response read: concurrent /ask calls must not
+    # interleave the shared agent's TraceLogger / WorkingMemory / usage ledger.
+    with _run_lock:
+        try:
+            answer = agent.run(
+                user_question=body.question,
+                file_hint=body.file_hint,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Surface unexpected errors as 500 with a safe message (no stack
+            # trace in the response body — full trace is in the JSONL log).
+            agent.log.log("api_error", {"error": type(exc).__name__, "message": str(exc)})
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Agent error: {type(exc).__name__}",
+            ) from exc
 
-    return AskResponse(
-        answer=answer,
-        trace_id=agent.log.trace_id,
-        token_usage=agent.llm.usage_summary(),
-    )
+        return AskResponse(
+            answer=answer,
+            trace_id=agent.log.trace_id,
+            token_usage=agent.llm.usage_summary(),
+        )

@@ -180,6 +180,10 @@ class ClaimExtractor:
             return False
         if not re.search(r"[A-Za-zА-Яа-я]", text):
             return False
+        if _is_broken_encoding(text) or _looks_like_code_fragment(text):
+            # Mojibake and raw source-code / CLI / mid-sentence fragments are not
+            # facts — they are file chunks that flooded memory as distractors.
+            return False
         words = re.findall(r"[\w]+", text, flags=re.UNICODE)
         return len(words) >= 4
 
@@ -419,6 +423,61 @@ def _sentences(text: str) -> list[str]:
         parts = re.split(r"(?<=[.!?])\s+|[•;]\s+", line)
         pieces.extend(part.strip(" -\t") for part in parts if part.strip(" -\t"))
     return pieces
+
+
+def _is_broken_encoding(text: str) -> bool:
+    """True when the text carries mojibake / decode-failure markers.
+
+    The Unicode replacement char (``�``) is the unambiguous signal that
+    bytes were decoded with the wrong codec upstream; such content is garbage,
+    never a fact.
+    """
+    if "�" in text:
+        return True
+    # A high density of replacement chars or lone control bytes also indicates
+    # corruption even if a few survived.
+    bad = sum(1 for ch in text if ch == "�" or (ord(ch) < 0x20 and ch not in "\t\n\r"))
+    return bad > 0
+
+
+# Prefixes that mark a line as source code, a shell/REPL transcript, or a
+# doc/CLI example rather than a natural-language fact.
+_CODE_LINE_PREFIXES = (
+    "import ", "from ", "def ", "class ", "return ", "raise ", "yield ",
+    "async def ", "await ", "@", "#", "//", "/*", "*", '"""', "'''",
+    ">>>", ">>> ", "> ", "$ ", "python ", "pip ", "uvicorn ", "pytest ",
+    "git ", "cd ", "curl ", "npm ", "--", "```",
+)
+
+# Dangling trailing tokens that reveal a mid-sentence chunk cut, not a whole fact.
+_DANGLING_TAIL = {
+    "and", "or", "but", "the", "a", "an", "of", "to", "for", "with", "in",
+    "on", "at", "as", "by", "from", "that", "which", "и", "или", "в", "на",
+    "с", "по", "что", "для",
+}
+
+
+def _looks_like_code_fragment(text: str) -> bool:
+    """True when the line is source code / CLI / a mid-sentence file chunk.
+
+    Deterministic, high-precision heuristics — the goal is to keep raw file
+    fragments out of long-term memory without rejecting genuine prose facts.
+    """
+    stripped = text.strip()
+    low = stripped.casefold()
+    if any(low.startswith(p.casefold()) for p in _CODE_LINE_PREFIXES):
+        return True
+    # Assignment / call-heavy code without sentence structure.
+    if ("=" in stripped or "()" in stripped) and stripped.endswith((":", ")", "}", ";")):
+        return True
+    if stripped.count("(") + stripped.count(")") >= 4:
+        return True
+    # A chunk cut mid-sentence: ends on a conjunction/preposition/article and
+    # has no terminal punctuation.
+    last = re.findall(r"[\w']+", low)
+    if last and last[-1] in _DANGLING_TAIL and not stripped.endswith((".", "!", "?")):
+        return True
+    return False
 
 
 def _is_meaningful_claim(text: str) -> bool:

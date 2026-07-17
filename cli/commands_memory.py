@@ -2,8 +2,9 @@
 
 Split out of ``main.py``. Every function here drives the agent only through its
 public methods (``rollback``, ``expire_persistent``, ``dedupe_persistent``,
-``cleanup_backups``, ``summarise_persistent``, ``archive_persistent``,
-``list_persistent``, ``smart_memory_summary`` and the smart-memory stores) plus
+``prune_episodic``, ``cleanup_backups``, ``summarise_persistent``,
+``archive_persistent``, ``list_persistent``, ``smart_memory_summary`` and the
+smart-memory stores) plus
 ``core`` helpers — never back into ``main`` — so there is no import cycle.
 ``main.py`` re-exports every name below for the REPL dispatch and the tests.
 """
@@ -77,12 +78,14 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         # from the bulk run because it needs an explicit tag.
         exp = agent.expire_persistent(dry_run=dry_run)
         dup = agent.dedupe_persistent(dry_run=dry_run)
+        epi = agent.prune_episodic(dry_run=dry_run)
         bak = agent.cleanup_backups(workspace, dry_run=dry_run)
         print(
             f"hygiene (dry_run={dry_run}):\n"
             f"  expire   : {len(exp.expired)} record(s) past TTL\n"
             f"  dedupe   : {len(dup.deleted)} near-duplicate(s) collapsed "
             f"({len(dup.groups)} group(s))\n"
+            f"  episodic : {len(epi)} stale episode(s) pruned\n"
             f"  backups  : {len(bak.deleted)} old .bak.<ts> file(s) removed "
             f"(scanned {bak.scanned})",
             file=sys.stderr,
@@ -118,6 +121,15 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             f"backups (dry_run={dry_run}): scanned {rep.scanned} backup(s), "
             f"deleted {len(rep.deleted)}, kept {len(rep.kept)}; "
             f"keep_last={rep.keep_last}, max_age_days={rep.max_age_days}",
+            file=sys.stderr,
+        )
+        return True
+
+    if sub == "episodic":
+        pruned = agent.prune_episodic(dry_run=dry_run)
+        print(
+            f"episodic (dry_run={dry_run}): {len(pruned)} stale episode(s) "
+            f"pruned. ids={pruned}",
             file=sys.stderr,
         )
         return True
