@@ -511,6 +511,44 @@ class TestHandleMetaCommand:
         assert handle_meta_command(cmd, agent, workspace) is True
         assert called == {"goal": "project health", "dry_run": True, "max_cost_units": 0}
 
+    def test_team_run_allow_effects_uses_configured_workspace(
+        self, workspace: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        # Regression: `:team-run --allow-effects` must sandbox its subagents to
+        # the operator-configured --workspace, not a hardcoded Path(".") that
+        # resolves against the process CWD.
+        captured: dict = {}
+
+        class _FakeRunner:
+            def __init__(self, *, workspace_root, **kwargs):
+                captured["workspace_root"] = workspace_root
+
+        class _FakeReport:
+            def to_dict(self) -> dict:
+                return {"status": "completed"}
+
+            def user_summary(self) -> str:
+                return "status=completed"
+
+        class _FakeExecutor:
+            def __init__(self, *, runner=None):
+                captured["runner"] = runner
+
+            def run(self, plan, **kwargs):
+                return _FakeReport()
+
+        monkeypatch.setattr("core.subagent_runner.SubAgentRunner", _FakeRunner)
+        monkeypatch.setattr("cli.commands_misc.TeamExecutor", _FakeExecutor)
+
+        agent = _build_agent(workspace)
+        assert handle_meta_command(
+            ":team-run improve docs --allow-effects", agent, workspace
+        ) is True
+
+        # The runner must have been sandboxed to the configured workspace.
+        assert captured["runner"] is not None
+        assert captured["workspace_root"] == workspace
+
     def test_self_apply_run_command_registered(self, workspace: Path, capsys):
         # Dispatcher recognizes :self-apply-run. An unknown id is refused by the
         # bridge (needs_validated_proposal) without touching git or tests.
