@@ -590,6 +590,14 @@ _TAG_WEIGHTS: dict[str, float] = {
     "user-approved": 0.6,
 }
 
+# Curated categories that must NEVER be archived, regardless of age or access
+# (they are hand-authored lessons/bugs/reflections/decisions, not auto-ingested
+# facts). Mirrors EpisodicMemoryStore.PROTECTED_TAGS for persistent memory.
+_ARCHIVE_PROTECTED_TAGS: frozenset[str] = frozenset({
+    "lesson", "bug", "bug-fix", "regression-guard", "reflection", "repair",
+    "preference", "decision", "insight", "code-audit", "curriculum",
+})
+
 # Archive if importance score is below this threshold
 DEFAULT_ARCHIVE_THRESHOLD = 0.25
 
@@ -627,6 +635,9 @@ def _importance_score(record: MemoryRecord, now: datetime) -> float:
     """
     tags_lower = {t.strip().lower() for t in (record.tags or [])}
     base = max((_TAG_WEIGHTS.get(t, 0.0) for t in tags_lower), default=0.3)
+    # Honour an explicitly-stored importance as a floor — a record hand-marked
+    # important must not be scored down to the archive by tag/access heuristics.
+    base = max(base, float(record.importance or 0.0))
 
     # Access boost — each use bumps importance
     access_boost = min(0.3, record.access_count * 0.05)
@@ -672,6 +683,9 @@ def archive_low_value_memory(
                            scanned=len(records), dry_run=dry_run)
 
     for rec in records:
+        if _ARCHIVE_PROTECTED_TAGS & {t.strip().lower() for t in (rec.tags or [])}:
+            continue  # curated (lesson/bug/decision/…) — never archived
+
         age_days = (now - rec.created_at).total_seconds() / 86400
         if age_days < min_age_days:
             continue  # too young — give it time
