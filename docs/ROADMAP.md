@@ -65,6 +65,9 @@ Observe → Interpret → Plan → Act → Verify → Respond, driven by an LLM 
   `core/scheduler`, `core/task_queue`, `core/campaign*`, `core/work_session`.
 - **Async daemon** (`app/daemon.py`): incremental, tracked per sub-item in
   `docs/daemon-progress.md`. `agent_tick.py` remains the single-shot fallback.
+- Durability/queue/retry failure classes to verify (queue-without-consumer,
+  dead runner, no retry backoff) are catalogued in
+  `docs/OPERATIONAL_FAILURE_MODES.md` (OFM-008/009/010).
 
 ## Track E — Learning & self-improvement (self-build)
 
@@ -114,6 +117,9 @@ budget, and self-directed multi-agent coordination. See
 - Structured JSONL logging: `core/logger`; trace ids: `core/ids`.
 - Read-only audits: `core/architecture_audit` (`:architecture-audit`),
   `core/model_registry_audit`, `core/release_hygiene`, `core/supply_chain`.
+- Observability failure classes the operator surface must catch (dead runner,
+  silent failure, stale heartbeat) are catalogued in
+  `docs/OPERATIONAL_FAILURE_MODES.md` (OFM-009).
 
 ---
 
