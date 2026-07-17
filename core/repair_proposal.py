@@ -28,6 +28,7 @@ from core.llm import LLM
 from core.redaction import redact_payload, redact_text
 from core.secret_scanner import contains_secret
 from core.self_repair import RepairProposal
+from core.self_repair_utils import _diff_summary, _test_summary, _tests_passed
 from tools.diff_file import DiffFileTool
 from tools.file_read import FileReadTool
 from tools.read_logs import ReadLogsTool
@@ -460,17 +461,6 @@ def _parse_json_object(raw: str) -> dict[str, Any]:
     return {"ok": True, "data": data}
 
 
-def _tests_passed(output: dict[str, Any] | None) -> bool:
-    if not isinstance(output, dict):
-        return False
-    return (
-        output.get("timed_out") is False
-        and output.get("exit_code") == 0
-        and int(output.get("failed") or 0) == 0
-        and int(output.get("errors") or 0) == 0
-    )
-
-
 def _coerce_confidence(value: Any) -> float | None:
     try:
         out = float(value)
@@ -504,21 +494,6 @@ def _truncate(text: str, limit: int) -> str:
     return text[:limit] + "\n...[truncated]\n"
 
 
-def _test_summary(output: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not isinstance(output, dict):
-        return None
-    return {
-        "exit_code": output.get("exit_code"),
-        "timed_out": output.get("timed_out"),
-        "passed": output.get("passed"),
-        "failed": output.get("failed"),
-        "errors": output.get("errors"),
-        "skipped": output.get("skipped"),
-        "total": output.get("total"),
-        "failed_tests": output.get("failed_tests") or [],
-    }
-
-
 def _log_summary(output: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(output, dict):
         return None
@@ -530,13 +505,3 @@ def _log_summary(output: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
-def _diff_summary(output: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not isinstance(output, dict):
-        return None
-    return {
-        "path": output.get("path"),
-        "file_exists": output.get("file_exists"),
-        "additions": output.get("additions"),
-        "deletions": output.get("deletions"),
-        "diff_truncated": output.get("diff_truncated"),
-    }

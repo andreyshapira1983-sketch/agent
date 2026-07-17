@@ -34,6 +34,7 @@ from core.self_build_supervisor import (
     hour_budget_headroom,
     is_budget_near_exhaustion,
 )
+from core.self_repair_utils import _tests_passed as _tests_ok
 
 # Directories whose ``*.py`` files may be auto-applied in this lane.
 _ALLOWED_CODE_DIRS = ("core", "cli", "tools", "tests")
@@ -206,17 +207,6 @@ def classify_patch_risk(
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
-
-
-def _tests_ok(result: Any) -> bool:
-    if not isinstance(result, dict):
-        return False
-    return (
-        result.get("timed_out") is False
-        and result.get("exit_code") == 0
-        and int(result.get("failed") or 0) == 0
-        and int(result.get("errors") or 0) == 0
-    )
 
 
 # Matches pytest's error-prefixed traceback tail lines, e.g.
