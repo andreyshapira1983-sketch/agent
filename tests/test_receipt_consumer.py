@@ -152,3 +152,30 @@ def test_verify_memory_only_claim_unaffected_without_receipt(workspace: Path) ->
     )
 
     assert report.receipt_missing_chunks == 0
+
+
+def test_verify_demotes_claim_that_starts_with_its_citation(workspace: Path) -> None:
+    """Regression: a claim whose text begins with the citation must still get the
+    ``[no-receipt]`` marker in the rendered answer. The old string-matching
+    downgrade computed an empty prefix here and silently left ``[verified:...]``
+    visible on an internally-distrusted claim."""
+    ev = _test_ev(target="tests/bug_lab")
+    chain = ProvenanceChain()
+    chain.add(ev)
+    # The claim chunk starts with the citation, not with prose.
+    answer = "Conclusion:\n[test:run_tests:bug_lab] confirms the suite is green."
+    ledger = ToolReceiptLedger(default_receipts_path(workspace))
+
+    report = verify(
+        answer=answer,
+        chain=chain,
+        receipt_ledger=ledger,
+        trace_id="trace_no_receipt_prefix",
+    )
+
+    assert report.verified_chunks == 0
+    assert report.receipt_missing_chunks == 1
+    assert report.chunks[0].verdict == "receipt_missing"
+    # The rendered answer must not still claim the demoted chunk is verified.
+    assert "[verified:test:run_tests:bug_lab]" not in report.annotated_answer
+    assert "[no-receipt]" in report.annotated_answer

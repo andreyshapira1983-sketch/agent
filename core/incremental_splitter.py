@@ -442,9 +442,10 @@ def _movable_methods(
         refs = _free_refs(node)
         if refs - _BUILTIN_NAMES - imports:
             continue  # touches module-level names staying behind
-        span = (node.end_lineno or node.lineno) - node.lineno + 1
+        start = node.lineno
         for deco in node.decorator_list:
-            span += 0 if deco.lineno >= node.lineno else 0
+            start = min(start, deco.lineno)
+        span = (node.end_lineno or node.lineno) - start + 1
         if used + span > max_lines:
             continue
         picked.append(node)

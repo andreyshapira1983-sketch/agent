@@ -231,6 +231,58 @@ class TestForTaskFallback:
         assert result is not None
 
 
+class TestForTaskCostTier:
+    def test_for_task_records_registry_cost_tier_not_complexity_name(self, tmp_path: Path):
+        """Regression: for_task() must price a complexity-routed call by the
+        resolved model's registry cost_tier, not the ComplexityTier name.
+
+        Passing "light"/"standard"/"deep" to the usage ledger silently priced
+        every for_task() call as "unknown" (5 units/1k) because the ledger's
+        cost table only knows "free/low/medium/high/unknown"."""
+        from core.model_router import ModelRegistry, ModelSpec, ModelSelectionPolicy
+        from core.model_usage import ModelUsageLedger
+
+        registry = ModelRegistry([
+            ModelSpec(
+                id="mock/light-1",
+                provider="mock",
+                model="light-1",
+                cost_tier="low",
+            ),
+        ])
+        ledger = ModelUsageLedger(path=tmp_path / "usage.jsonl")
+
+        def factory(provider: str | None, model: str | None) -> FakeLLM:
+            llm = FakeLLM()
+            llm.provider = provider or "mock"
+            llm.model = model or "light-1"
+            return llm
+
+        router = ModelRouter(
+            default_provider="mock",
+            default_model="light-1",
+            llm_factory=factory,
+            registry=registry,
+            selection_policy=ModelSelectionPolicy(name="offline", allow_mock=True),
+            usage_ledger=ledger,
+        )
+
+        # A LIGHT question routes through the complexity path (LIGHT is never
+        # escalation-gated). Pin the provider to our registered one (env/policy
+        # provider preference is not what's under test) and force the catalog to
+        # resolve our registered model.
+        with patch.object(router, "_resolve_tier_provider", return_value=(None, "", [])), \
+             patch("core.model_catalog.tier_model_for", return_value="light-1"):
+            tracked = router.for_task(ModelRole.PLANNER, "привет")
+
+        # The route must resolve to our registered model so the cost tier lookup
+        # is meaningful.
+        assert tracked.provider == "mock"
+        assert tracked.model == "light-1"
+        # The ledger must see the registry cost tier, not "light" or "unknown".
+        assert getattr(tracked, "cost_tier", None) == "low"
+
+
 # ── 5. assess_complexity() LIGHT / STANDARD / DEEP ───────────────────────────
 
 class TestComplexityClassification:

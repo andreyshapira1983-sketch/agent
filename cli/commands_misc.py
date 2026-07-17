@@ -357,7 +357,7 @@ def _handle_team_plan(rest: str, agent: AgentLoop) -> bool:
     return True
 
 
-def _handle_team_run(rest: str, agent: AgentLoop) -> bool:
+def _handle_team_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     tokens = _split_meta_args(rest)
     as_json = False
     dry_run = True
@@ -426,7 +426,7 @@ def _handle_team_run(rest: str, agent: AgentLoop) -> bool:
     try:
         from core.subagent_runner import SubAgentRunner  # noqa: PLC0415
         runner = None if dry_run else SubAgentRunner(
-            workspace_root=Path("."),
+            workspace_root=workspace,
             policy=agent.policy,
             model_router=agent.model_router,
             parent_registry=agent.registry,

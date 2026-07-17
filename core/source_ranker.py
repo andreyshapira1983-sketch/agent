@@ -91,10 +91,10 @@ _REPUTABLE_DOMAINS = frozenset({
     "pubmed.ncbi.nlm.nih.gov",
     "ncbi.nlm.nih.gov",
     "plato.stanford.edu",
-    "developer.mozilla.org",
-    "learn.microsoft.com",
-    "rfc-editor.org",
-    "docs.python.org",
+    # Note: docs.python.org / developer.mozilla.org / learn.microsoft.com /
+    # rfc-editor.org are deliberately NOT listed here — _is_official_domain()
+    # below always classifies them as "authoritative" (score 1.00) first, so
+    # a "reputable" (0.82) entry for them here would be unreachable dead data.
 })
 
 _BLOG_OR_FORUM_DOMAINS = frozenset({
