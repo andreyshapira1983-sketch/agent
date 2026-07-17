@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from core.budget_governor import budget_limit_label as _budget_limit_label
 from core.state_integrity import append_state_jsonl, read_state_jsonl
 
 
@@ -35,10 +36,6 @@ def _utc_now() -> datetime:
 
 def _utc_now_iso() -> str:
     return _utc_now().isoformat()
-
-
-def _budget_limit_label(limit: int) -> str:
-    return str(limit) if int(limit) > 0 else "unlimited"
 
 
 def _parse_ts(value: str) -> datetime | None:
