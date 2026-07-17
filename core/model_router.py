@@ -1196,7 +1196,11 @@ class ModelRouter:
             llm,
             role=role_key,
             route=tier_route,
-            cost_tier=tier.value,
+            # Price by the resolved model's real registry cost tier, not the
+            # complexity tier name — the usage ledger's cost table is keyed on
+            # "free/low/medium/high/unknown", so passing "light/standard/deep"
+            # here silently priced every complexity-routed call as "unknown".
+            cost_tier=self._cost_tier_for_route(tier_route),
             ledger=self.usage_ledger,
             llm_factory=self._llm_factory,
         )
