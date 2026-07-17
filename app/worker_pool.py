@@ -1,4 +1,4 @@
-"""Bounded asyncio worker pool for the daemon dispatcher (plan items 3.2–3.3).
+"""Bounded asyncio worker pool for the daemon dispatcher (plan items 3.2–4.1).
 
 Consumes :class:`~app.priority_event_queue.DaemonEvent` values from an existing
 :class:`~app.priority_event_queue.PriorityEventQueue` (3.1) without owning the
@@ -15,6 +15,8 @@ Contract
   and a structured log line records the timeout reason.
 * Explicit cancellation (:class:`asyncio.CancelledError`) is also **not**
   counted as success.
+* With an :class:`InFlightCheckpointStore`, each event becomes durable before
+  handler code starts and is removed on every non-crash terminal path (4.1).
 * :meth:`WorkerPool.shutdown` stops accepting new work (closes the queue),
   waits up to ``drain_timeout`` for in-flight handlers, then cancels stragglers.
 * Repeated :meth:`shutdown` is safe.
@@ -24,7 +26,10 @@ Contract
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 from app.priority_event_queue import (
@@ -32,6 +37,8 @@ from app.priority_event_queue import (
     PriorityEventQueue,
     PriorityEventQueueClosed,
 )
+from core.file_lock import exclusive_file_lock
+from core.state_integrity import read_state_jsonl_unlocked, rewrite_state_jsonl_unlocked
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +49,73 @@ DEFAULT_TASK_TIMEOUT = 60.0
 _CANCEL_GRACE_SECONDS = 5.0
 
 EventHandler = Callable[[DaemonEvent], Awaitable[None]]
+Now = Callable[[], datetime]
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _json_safe_event(event: DaemonEvent) -> dict:
+    """Return a detached JSON-safe event snapshot for future recovery."""
+    return json.loads(
+        json.dumps(event.to_dict(), ensure_ascii=False, sort_keys=True, default=str)
+    )
+
+
+class InFlightCheckpointStore:
+    """Atomic JSONL snapshot of events whose handlers are currently running.
+
+    Each update is a locked read-modify-write so concurrent workers and
+    processes cannot replace one another's checkpoints.  A process crash
+    leaves the last atomic file intact for roadmap item 4.2 to inspect.
+    """
+
+    FORMAT = "daemon-in-flight-v1"
+
+    def __init__(self, path: Path | str, *, now: Now = _now) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._now = now
+
+    def checkpoint(self, event: DaemonEvent, *, worker_id: int) -> dict:
+        """Durably upsert ``event`` before its handler starts."""
+        timestamp = self._now().astimezone(timezone.utc).isoformat()
+        record = {
+            "format": self.FORMAT,
+            "event_id": event.event_id,
+            "worker_id": worker_id,
+            "checkpointed_at": timestamp,
+            "event": _json_safe_event(event),
+        }
+        with exclusive_file_lock(self._lock_path):
+            records = self._load_unlocked()
+            retained = [row for row in records if row.get("event_id") != event.event_id]
+            retained.append(record)
+            rewrite_state_jsonl_unlocked(self.path, retained)
+        return record
+
+    def remove(self, event_id: str) -> bool:
+        """Atomically remove one checkpoint; repeated cleanup is harmless."""
+        with exclusive_file_lock(self._lock_path):
+            records = self._load_unlocked()
+            retained = [row for row in records if row.get("event_id") != event_id]
+            if len(retained) == len(records):
+                return False
+            rewrite_state_jsonl_unlocked(self.path, retained)
+            return True
+
+    def load(self) -> list[dict]:
+        """Load valid checkpoints without performing startup recovery."""
+        with exclusive_file_lock(self._lock_path):
+            return self._load_unlocked()
+
+    def _load_unlocked(self) -> list[dict]:
+        return read_state_jsonl_unlocked(self.path)
+
+    @property
+    def _lock_path(self) -> Path:
+        return self.path.with_suffix(self.path.suffix + ".lock")
 
 
 class WorkerPoolError(RuntimeError):
@@ -67,6 +141,10 @@ class WorkerPool:
         Seconds allowed for a single handler. ``None`` disables per-task
         timeout. Timed-out work is cancelled and recorded in
         :attr:`timeout_count` (never as a successful :attr:`processed_count`).
+    checkpoint_store:
+        Optional durable in-flight store. When provided, an event checkpoint
+        is atomically persisted before its handler begins and removed after
+        success, error, timeout, or cancellation. Existing callers may omit it.
     """
 
     def __init__(
@@ -77,6 +155,7 @@ class WorkerPool:
         max_workers: int = DEFAULT_MAX_WORKERS,
         drain_timeout: float = DEFAULT_DRAIN_TIMEOUT,
         task_timeout: Optional[float] = DEFAULT_TASK_TIMEOUT,
+        checkpoint_store: InFlightCheckpointStore | None = None,
     ) -> None:
         if max_workers < 1:
             raise ValueError("max_workers must be >= 1")
@@ -89,6 +168,7 @@ class WorkerPool:
         self._max_workers = max_workers
         self._drain_timeout = drain_timeout
         self._task_timeout = task_timeout
+        self._checkpoint_store = checkpoint_store
         self._workers: list[asyncio.Task[None]] = []
         self._in_flight: set[asyncio.Task[None]] = set()
         self._started = False
@@ -244,7 +324,7 @@ class WorkerPool:
                 raise
 
             handler_task = asyncio.create_task(
-                self._run_handler(event),
+                self._run_handler(event, worker_id=worker_id),
                 name=f"daemon-handler-{worker_id}-{event.event_id}",
             )
             self._in_flight.add(handler_task)
@@ -263,7 +343,21 @@ class WorkerPool:
             finally:
                 self._in_flight.discard(handler_task)
 
-    async def _run_handler(self, event: DaemonEvent) -> None:
+    async def _run_handler(self, event: DaemonEvent, *, worker_id: int) -> None:
+        checkpointed = False
+        if self._checkpoint_store is not None:
+            try:
+                self._checkpoint_store.checkpoint(event, worker_id=worker_id)
+                checkpointed = True
+            except Exception:  # noqa: BLE001 - never run work without durability
+                self._errors += 1
+                logger.exception(
+                    "worker pool checkpoint failed for event %s kind=%s; "
+                    "handler not started",
+                    event.event_id,
+                    event.kind,
+                )
+                return
         try:
             if self._task_timeout is None:
                 await self._handler(event)
@@ -292,3 +386,13 @@ class WorkerPool:
                 event.event_id,
                 event.kind,
             )
+        finally:
+            if checkpointed and self._checkpoint_store is not None:
+                try:
+                    self._checkpoint_store.remove(event.event_id)
+                except Exception:  # noqa: BLE001 - preserve crash evidence
+                    logger.exception(
+                        "worker pool checkpoint cleanup failed for event %s kind=%s",
+                        event.event_id,
+                        event.kind,
+                    )
