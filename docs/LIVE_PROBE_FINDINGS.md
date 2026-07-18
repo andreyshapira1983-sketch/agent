@@ -25,7 +25,7 @@ This is an *observation log from live runs*, distinct from
 
 ---
 
-## LPF-001 — `host_tools` injected as fake `<evidence>` defeats the general-knowledge path *(confirmed-defect)*
+## LPF-001 — `host_tools` injected as fake `<evidence>` defeats the general-knowledge path *(confirmed-defect — FIXED 2026-07-18)*
 
 **Symptom.** "What can you do?" → the agent answers with **Blender / OpenSCAD /
 ADB / Python** (paths from `.env`), not its real tools
@@ -64,6 +64,18 @@ silently disabled.
 `[general-knowledge]`, and a capability question lists the agent's registered
 tools, not `.env` host paths. (Negative control: a real host-tool task still gets
 the run command.)
+
+**Fixed (2026-07-18).** Two iterations on branch `fix/host-tools-not-evidence`
+(PR #96): (1) `fd802e2` — `host_tools` is wrapped as a non-citable
+`<host_environment>` reference block instead of `<evidence source="host_tools">`,
+plus one line in `SYSTEM_ANSWER` (`core/loop_helpers.py`) stating a
+`<host_environment>` block is reference-only, must not be cited, and does not
+count as evidence — so the general-knowledge path stays enabled; (2) `25e030b` —
+the block is injected **only** on host-tool-relevant turns
+(`host_tools_relevant()` in `core/planner.py`), not on every synthesizer prompt.
+Verified live: "17 × 23" → 391, no host noise; "What can you do?" → real tools,
+`cited_but_unmatched=0` (was 6); a real "Write a Blender script…" task still gets
+the exact run command. Regression: `tests/test_host_tools_context.py`.
 
 ---
 
