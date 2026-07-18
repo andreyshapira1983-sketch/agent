@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
+
 from core.confidence_vector import (
     ConfidenceVector,
     coherence_score,
@@ -34,12 +36,14 @@ class TestEvidenceScore:
         assert evidence_score(_Report(total_chunks=0)) == 0.0
         assert evidence_score(None) == 0.0
 
-    def test_partial_credit_for_cited_unmatched(self):
-        # 2 verified + 2 cited_but_unmatched out of 4: (2*1 + 2*0.5)/4 = 0.75.
+    def test_cited_unmatched_is_penalised_not_credited(self):
+        # CORE-04: a cited_but_unmatched (fabricated attribution) is penalised
+        # like unverified, never half-credited.
+        # 2 verified + 2 cited_but_unmatched out of 4: (2*1 + 2*-0.25)/4 = 0.375.
         score = evidence_score(_Report(
             total_chunks=4, verified_chunks=2, cited_but_unmatched_chunks=2,
         ))
-        assert score == 0.75
+        assert score == pytest.approx(0.375)
 
     def test_unverified_penalty(self):
         # 4 verified + 4 unverified: (4 - 1)/8 = 0.375.
