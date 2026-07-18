@@ -216,6 +216,7 @@ def evaluate_low_evidence_policy(
     max_verified_ratio: float = _DEFAULT_MAX_VERIFIED_RATIO,
     unverified_floor: int = _DEFAULT_UNVERIFIED_FLOOR,
     evidence_expected: bool = True,
+    local_critique_active: bool = False,
 ) -> LowEvidencePolicyResult:
     """Decide whether to truncate the answer because evidence is too thin.
 
@@ -226,6 +227,10 @@ def evaluate_low_evidence_policy(
     Locale (EN / RU) is detected from the user's question first, then
     falls back to the answer text. RU users get RU notices; everyone
     else gets EN.
+
+    When ``local_critique_active`` is true (resolved referent critique
+    path), empty rewrite is forbidden even if the bulk trigger would
+    fire — the analysis target is known (critique plan PR3 invariant).
     """
     if report is None:
         return LowEvidencePolicyResult(
@@ -253,6 +258,15 @@ def evaluate_low_evidence_policy(
         unverified + cited_unmatched + topic_supported + subagent_asserted
     )
     verified_ratio = (verified / total) if total > 0 else 0.0
+
+    if local_critique_active:
+        return LowEvidencePolicyResult(
+            triggered=False, answer=answer,
+            verified_chunks=verified, total_chunks=total,
+            verified_ratio=verified_ratio,
+            unverified_total=unverified_total,
+            reason="local_critique_skip_empty_rewrite",
+        )
 
     if not evidence_expected:
         # The task never needed external evidence (pure reasoning / design
