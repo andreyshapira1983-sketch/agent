@@ -54,6 +54,39 @@ def _looks_like_explicit_non_routing_command(text: str) -> bool:
     )
 
 
+def _looks_like_conversational_turn(text: str) -> bool:
+    """A social / greeting-laden chat turn — must fall through to the normal
+    conversational path rather than being hijacked into a deterministic operator
+    command. Otherwise "Привет. Как дела? Что ты умеешь делать?" is swallowed by
+    the capability-check matcher and answered with a rigid operator dump instead
+    of a natural reply (the router is intentionally narrow — when a message reads
+    as chat, let the LLM handle it). Markers are distinctive enough not to appear
+    inside real terse operator commands."""
+    return _has_any(
+        text,
+        (
+            "привет",
+            "здравствуй",
+            "добрый день",
+            "добрый вечер",
+            "доброе утро",
+            "как дела",
+            "как ты",
+            "как поживаешь",
+            "как настроение",
+            "о чём ты думаешь",
+            "о чем ты думаешь",
+            "о чём думаешь",
+            "о чем думаешь",
+            "hello",
+            "how are you",
+            "how's it going",
+            "how are things",
+            "what are you thinking",
+        ),
+    )
+
+
 def _looks_like_self_build_request(text: str) -> bool:
     return _has_any(
         text,
