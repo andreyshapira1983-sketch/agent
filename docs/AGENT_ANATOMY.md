@@ -66,6 +66,7 @@ _Planning, verification, clarification, control loop._
 | `core/best_next_action` | Priority intelligence: choose the single most important next action. |
 | `core/task_complexity` | Task Complexity Assessment — automatic model tier selection. |
 | `core/low_evidence_policy` | Low-evidence answer policy. |
+| `core/unsupported_claims` | Claim-level answer enforcement (critique plan PR3): separates insufficient-evidence, verifier-failure soft-fail, and unsupported world-claim outcomes; flag `AGENT_ENFORCE_UNSUPPORTED_CLAIMS`. |
 | `core/subsystem_disagreement` | Detect disagreements between cognitive subsystems on the same turn. |
 | `core/strategy_router` | Strategy Router: deliberation kernel layer BEFORE the LLM planner. |
 | `core/role_router` | Role / mode routing for the agent core. |
