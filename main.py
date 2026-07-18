@@ -692,6 +692,25 @@ def _handle_operator_capability_check(agent: AgentLoop, workspace: Path) -> bool
     return True
 
 
+def _runtime_capability_facts(agent: AgentLoop) -> dict:
+    """Live runtime introspection: what THIS running agent actually has wired.
+
+    Reads the agent's own tool registry and memory handles (the same source
+    session_start logs), so a "what can you do now" question is answered from
+    the running process, not from README/web guesses (#2 introspection gap).
+    """
+    try:
+        tools = sorted(tool.name for tool in agent.registry.list())
+    except Exception:  # noqa: BLE001 — introspection must never crash the command
+        tools = []
+    return {
+        "registered_tools": tools,
+        "tool_count": len(tools),
+        "memory": "on" if getattr(agent, "memory", None) is not None else "off",
+        "persistent_memory": "on" if getattr(agent, "persistent_store", None) is not None else "off",
+    }
+
+
 def _operator_capability_payload(agent: AgentLoop, workspace: Path) -> dict:
     digest = _operator_digest_payload(agent, workspace)
     architecture = digest.get("architecture", {})
@@ -701,6 +720,7 @@ def _operator_capability_payload(agent: AgentLoop, workspace: Path) -> dict:
     queue = digest.get("task_queue", {})
     scheduler = digest.get("scheduler", {})
     return {
+        "runtime": _runtime_capability_facts(agent),
         "wired": [
             "local operator digest/status commands",
             f"source registry visible: sources={source_registry.get('sources', 0)} claims={source_registry.get('claims', 0)}",
@@ -729,6 +749,17 @@ def _operator_capability_payload(agent: AgentLoop, workspace: Path) -> dict:
 
 def _format_operator_capability_check(payload: dict) -> str:
     lines = ["=== operator capabilities ==="]
+    runtime = payload.get("runtime") or {}
+    if runtime:
+        lines.append("live runtime:")
+        lines.append(
+            f"  - registered tools ({runtime.get('tool_count', 0)}): "
+            + (", ".join(runtime.get("registered_tools", [])) or "none")
+        )
+        lines.append(
+            f"  - memory={runtime.get('memory', 'off')} "
+            f"persistent_memory={runtime.get('persistent_memory', 'off')}"
+        )
     sections = (
         ("wired", "wired now"),
         ("dry_run_only", "dry-run / supervised only"),
