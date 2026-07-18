@@ -175,8 +175,18 @@ class AgentLoopExtractedMethods2:
         self._last_best_similar_score = 0.0
         if self.episodic_store is None and self.procedural_store is None:
             return ""
+        # Only SUCCESSFUL episodes are fed back as reusable experience; a
+        # `partial`/`failed` episode must not be surfaced as "what worked
+        # before" (CORE-05/LPF-012 — the self-reinforcing loop). Curated
+        # `lesson` episodes are kept regardless: they are learn-from-failure by
+        # design. Over-fetch, then filter, then cap so up to 3 GOOD episodes
+        # still surface even when some top matches were non-success.
         episodes = (
-            self.episodic_store.search(question, limit=3)
+            [
+                ep
+                for ep in self.episodic_store.search(question, limit=6)
+                if ep.outcome == "success" or "lesson" in ep.tags
+            ][:3]
             if self.episodic_store is not None
             else []
         )
