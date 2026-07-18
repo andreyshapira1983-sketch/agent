@@ -538,7 +538,14 @@ def episode_from_agent_cycle(
     outcome: EpisodeOutcome
     if replan_exhausted:
         outcome = "failed"
-    elif unverified > verified and verified == 0:
+    elif unverified > verified:
+        # The answer's UNVERIFIED support outnumbers its verified support — a
+        # relative-majority test (mirrors the `weak >= verified` guard below),
+        # not a magic threshold. The old `and verified == 0` let a single lucky
+        # verified chunk immunise an answer with many more unverified chunks, so
+        # verified=1/unverified=10 banked as a clean `success` (CORE-01/MGA-02).
+        # (verified=0/unverified=0 is untouched — a pure general-knowledge answer
+        # stays `success`; that relevance question is a separate concern.)
         outcome = "partial"
     elif weak > 0 and weak >= verified:
         # The answer leans at least as much on support the verifier could not
