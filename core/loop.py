@@ -3702,21 +3702,34 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # (e.g. a secret or PII hiding in planner_reasoning).
         safe_user_prompt, _secret_findings, _pii_findings = redact_dlp_text(user_prompt)
         _active_llm = llm if llm is not None else self.llm
-        from core.planner import _build_host_tools_block  # lazy import — avoids circular
-        # Local critique must not pull host_tools as synthetic "evidence".
-        if local_critique is None:
+        from core.planner import _build_host_tools_block, host_tools_relevant  # lazy — avoids circular
+        # Local critique must not pull host_tools context. Otherwise inject only
+        # when the turn is actually about host tools (name / task word / an
+        # effect tool was used) — so .env paths don't ride along on unrelated
+        # questions (LPF-001 iteration 1b).
+        _tools_used = [a.get("tool") for a in artifacts.values() if isinstance(a, dict)]
+        if local_critique is None and host_tools_relevant(
+            f"{question}\n{planner_reasoning}", _tools_used
+        ):
             host_block = _build_host_tools_block()
-            # Inject host tools as a synthetic evidence block so the model treats
-            # the paths as verified context (the model answers strictly from evidence).
+            # Reference context ONLY — NOT evidence. Wrapping host tools as an
+            # <evidence> block used to flip the synthesizer into "answer STRICTLY
+            # from evidence" mode (disabling the general-knowledge path) and
+            # produced fabricated [tool:host_tools] citations the verifier could
+            # never match (LPF-001). A <host_environment> block is reference-only,
+            # must not be cited, and never switches off general-knowledge answering.
             if host_block:
-                host_evidence = (
-                    "\n\n<evidence source=\"host_tools\">\n"
+                host_context = (
+                    "\n\n<host_environment>\n"
                     + host_block.strip()
-                    + "\nWhen a script was written for one of these tools, state the EXACT "
-                    "run command from above in the Facts section so the user knows how to execute it."
-                    + "\n</evidence>"
+                    + "\nThis lists programs installed on the machine. It is reference "
+                    "context, NOT a source: never cite it (no [tool:...] or [source] "
+                    "label), and its presence does not make an answer 'grounded'. "
+                    "When you actually write a script for one of these tools, state the "
+                    "EXACT run command from above in the Facts section."
+                    + "\n</host_environment>"
                 )
-                safe_user_prompt = safe_user_prompt + host_evidence
+                safe_user_prompt = safe_user_prompt + host_context
         _on_token = getattr(self, "_stream_on_token", None)
         if _on_token is not None:
             return _active_llm.stream_complete(
