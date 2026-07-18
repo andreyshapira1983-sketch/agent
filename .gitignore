@@ -8,6 +8,20 @@ config/budget_limits.json
 config/*.secret.json
 !config/*.example.json
 
+# Private keys, certificates & OAuth client secrets — never commit these.
+# (release_hygiene.py rejects them at packaging time; this stops the accidental
+#  commit one step earlier.)
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+client_secret*.json
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+
 data/
 logs/
 

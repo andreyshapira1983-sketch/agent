@@ -16,6 +16,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so gitleaks scans past commits, not just the latest diff
+
+      - name: Secret scan (gitleaks)
+        # Scans git history + diffs for leaked credentials (OpenAI, Anthropic,
+        # AWS, GitHub PATs, PEM/private keys, …). Orthogonal to the other gates:
+        # audit_release checks the release manifest/deps and core/secret_scanner
+        # scans runtime content — neither inspects commit history. Fails the
+        # build on any finding. Placed first so a leak fails fast.
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
