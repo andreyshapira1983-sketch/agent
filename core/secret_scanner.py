@@ -37,8 +37,11 @@ from typing import Final
 # Regex rules: (kind, compiled pattern). `kind` ends up in the redaction
 # token, e.g. `[REDACTED:openai-key]`, so keep it short, lowercase, kebab.
 REGEX_RULES: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
-    ("anthropic-key",      re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}")),
-    ("openai-key",         re.compile(r"sk-[A-Za-z0-9_\-]{20,}")),
+    # Left boundary `(?<![A-Za-z0-9_-])` so "sk-" must START a token: without it
+    # the hyphen-in-class + unanchored pattern matched INSIDE ordinary words
+    # ("ta|sk-...", "ri|sk-...", "di|sk-...") + a hyphenated slug (CORE-13).
+    ("anthropic-key",      re.compile(r"(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9_\-]{20,}")),
+    ("openai-key",         re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_\-]{20,}")),
     ("github-pat",         re.compile(r"ghp_[A-Za-z0-9]{20,}")),
     ("huggingface-token",  re.compile(r"hf_[A-Za-z0-9]{20,}")),
     ("aws-access-key",     re.compile(r"AKIA[0-9A-Z]{16}")),
