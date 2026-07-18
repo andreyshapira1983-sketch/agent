@@ -726,6 +726,55 @@ def test_auto_runtime_queue_can_run_specific_task_ids(workspace: Path):
     assert queue.get(old.id).status == "pending"
 
 
+def _backdate_task_updated_at(path: Path, task_id: str, *, minutes_ago: int) -> None:
+    """Rewrite a task's ``updated_at`` into the past so ``recover_stuck`` treats
+    it as stale (mirrors the helper in ``tests/test_task_queue.py``)."""
+    from datetime import datetime, timedelta, timezone
+
+    from core.state_integrity import (
+        read_state_jsonl_unlocked,
+        rewrite_state_jsonl_unlocked,
+    )
+
+    backdated = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).isoformat()
+    rows = read_state_jsonl_unlocked(path)
+    for row in rows:
+        if row.get("id") == task_id:
+            row["updated_at"] = backdated
+    rewrite_state_jsonl_unlocked(path, rows)
+
+
+def test_run_task_queue_recovers_stuck_running_task(workspace: Path):
+    """A task left ``running`` by a crashed prior run (older than the stuck
+    timeout) must be recovered by the AutonomousRuntime queue consumer, not
+    stranded forever.
+
+    Regression for MIR-040: ``TaskQueueStore.recover_stuck`` existed and was
+    unit-tested but had no production caller, so ``run_task_queue`` never
+    reclaimed a task that a previous process had marked ``running`` and then
+    crashed on. Such a task is not ``pending``, so the consumer skipped it
+    permanently. This asserts the consumer now recovers it before draining.
+    """
+    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
+    agent = _agent(workspace, with_tests=False)
+    path = workspace / "tasks.jsonl"
+    queue = TaskQueueStore(path)
+    task = queue.add(goal="project health", include_tests=False, limit=2)
+    queue.mark_running(task.id)  # claimed by a prior run…
+    _backdate_task_updated_at(path, task.id, minutes_ago=45)  # …that then crashed
+
+    report = AutonomousRuntime(agent, workspace=workspace).run_task_queue(
+        queue,
+        max_tasks=1,
+    )
+
+    # Before the fix: the stuck task stayed ``running`` (never in ``pending()``),
+    # the consumer processed nothing (report ``empty``), and it was stranded.
+    # After the fix: it is recovered to ``pending``, drained, and run to ``done``.
+    assert queue.get(task.id).status == "done"
+    assert report.processed and report.processed[0].task_id == task.id
+
+
 def test_dry_run_goal_uses_gateway_simulate_and_restores(workspace: Path):
     """A dry-run goal task must set gateway_dry_run on the parent loop (not
     policy.blocked_tools for effect tools), then restore afterwards."""
