@@ -247,11 +247,34 @@ findings below are amplifiers of this loop.
   "hacking", which then route as `general_question`. Correct framing: coverage
   gap, not a missing/never-called classifier.
 
+## Re-classified after live confirmation
+
+> **Correction (2026-07-18).** The item below was previously listed under
+> "Not confirmed / excluded" as a *rejected* injection false-positive. A live
+> reproduction (operator tracking id **#9**) showed the earlier probe tested the
+> wrong input. It is now a **confirmed, fixed** defect.
+
+- **Injection false-positive on `where` output — CONFIRMED & FIXED.** The
+  original probe ran `scan_for_injection` directly on the raw `where` stderr
+  ("Could not find files…", a Python path) and got **clean** every time — that
+  result is correct, but it is the *wrong input*. In production the loop scans
+  the **entire serialized `tool_result` envelope** (`_to_text(result.output)`,
+  `core/loop.py`), which for `shell_exec` also carries the framework's OWN
+  metadata — `compensation_plan.description` = "read-only command 'where';
+  nothing to undo". The word "command " trips the override pattern
+  (`core/injection_guard.py:70`, `…|rule|command|task)[:\s]+`) →
+  `injection_suspicious`, `category=override`. Confirmed live (isolated-workspace
+  trace `run_24b4895…`: both findings, offsets 341/481, land in the
+  compensation-plan text, not the stderr; the stderr alone scans clean). The
+  localized / mojibake Cyrillic "не найдены" is a red herring — it decodes to
+  U+FFFD and scans clean. **Fixed** by scanning only the untrusted payload
+  (`untrusted_scan_view`, `core/loop_helpers.py`; `shell_exec` → `stdout+stderr`
+  only) — branch `fix/injection-scan-scope` (PR #95), regression
+  `tests/test_injection_scan_scope.py`. **Lesson:** reproduce a scanner finding
+  on the EXACT input production feeds it (the whole serialized envelope), not a
+  hand-picked substring.
+
 ## Not confirmed / excluded
 
-- **(rejected) injection false-positive on `where` output.** Running
-  `scan_for_injection` on realistic benign `where` outputs ("Could not find
-  files…", a Python path) returned **clean** every time. Could not reproduce as
-  stated — NOT recorded as a defect.
 - **(needs log) provenance-id mismatch (memory vs shell_exec).** Plausible but the
   code root was not pinned down; needs the specific run log to trace.
