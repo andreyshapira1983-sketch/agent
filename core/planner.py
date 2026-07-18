@@ -314,21 +314,60 @@ _CONFIDENCE_LOW_SIGNAL_DEFAULT_PATHS = (
 )
 
 
+# Single source of truth for host-tool names (env var, tool name, description).
+# Reused by `_build_host_tools_block` and `host_tools_relevant` so the two never
+# drift apart.
+_HOST_ENV_TOOLS = [
+    ("BLENDER_PATH",   "blender",   "3D rendering / animation (Blender)"),
+    ("OPENSCAD_PATH",  "openscad",  "parametric 3D modelling (OpenSCAD)"),
+    ("ADB_PATH",       "adb",       "Android device bridge (ADB)"),
+    ("FFMPEG_PATH",    "ffmpeg",    "video / audio processing (FFmpeg)"),
+    ("MAGICK_PATH",    "magick",    "image processing (ImageMagick)"),
+    ("PANDOC_PATH",    "pandoc",    "document conversion (Pandoc)"),
+    ("SOFFICE_PATH",   "soffice",   "office documents (LibreOffice)"),
+    ("PYTHON_PATH",    "python",    "Python interpreter (custom path)"),
+]
+
+# Whole-word task cues that mean "this turn is about producing a document / media
+# / device artifact" even when no tool is named explicitly.
+_HOST_TASK_WORDS = (
+    "document", "word", "excel", "spreadsheet", "pdf", "slides", "presentation",
+    "docx", "xlsx", "pptx", "3d", "render", "modelling", "modeling",
+    "video", "audio", "image", "convert", "android", "office", "libreoffice",
+)
+
+# Effect tools whose use means a host-tool run command may be worth stating.
+_HOST_EFFECT_TOOLS = frozenset({"shell_exec", "file_write"})
+
+_HOST_RELEVANCE_RE = re.compile(
+    r"\b(" + "|".join(
+        re.escape(name) for _env, name, _desc in _HOST_ENV_TOOLS
+    ) + "|" + "|".join(re.escape(w) for w in _HOST_TASK_WORDS) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def host_tools_relevant(text: str, tools_used: "Iterable[str]" = ()) -> bool:
+    """Deterministic gate: is this turn actually about host tools?
+
+    True when the text (question + planner reasoning) mentions a host-tool name
+    or a document/media/device task word (whole-word, so "word" inside "keyword"
+    does NOT fire), OR the plan actually used an effect tool (``shell_exec`` /
+    ``file_write``). No LLM. Used to avoid injecting ``.env`` host paths into
+    every synthesizer prompt (LPF-001 iteration 1b).
+    """
+    if _HOST_RELEVANCE_RE.search(text or ""):
+        return True
+    used = {str(t).strip().lower() for t in (tools_used or ()) if t}
+    return bool(used & _HOST_EFFECT_TOOLS)
+
+
 def _build_host_tools_block() -> str:
     """Read tool paths from env vars (loaded from .env) and return a planner
     context block listing what is actually installed on this host.
     Only includes vars that are set and non-empty.
     """
-    _ENV_TOOLS = [
-        ("BLENDER_PATH",   "blender",   "3D rendering / animation (Blender)"),
-        ("OPENSCAD_PATH",  "openscad",  "parametric 3D modelling (OpenSCAD)"),
-        ("ADB_PATH",       "adb",       "Android device bridge (ADB)"),
-        ("FFMPEG_PATH",    "ffmpeg",    "video / audio processing (FFmpeg)"),
-        ("MAGICK_PATH",    "magick",    "image processing (ImageMagick)"),
-        ("PANDOC_PATH",    "pandoc",    "document conversion (Pandoc)"),
-        ("SOFFICE_PATH",   "soffice",   "office documents (LibreOffice)"),
-        ("PYTHON_PATH",    "python",    "Python interpreter (custom path)"),
-    ]
+    _ENV_TOOLS = _HOST_ENV_TOOLS
     # Also detect Python from common Windows locations if PYTHON_PATH not set
     found: list[str] = []
     for env_var, tool_name, description in _ENV_TOOLS:

@@ -3668,9 +3668,15 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # (e.g. a secret or PII hiding in planner_reasoning).
         safe_user_prompt, _secret_findings, _pii_findings = redact_dlp_text(user_prompt)
         _active_llm = llm if llm is not None else self.llm
-        from core.planner import _build_host_tools_block  # lazy import — avoids circular
-        # Local critique must not pull host_tools as synthetic "evidence".
-        if local_critique is None:
+        from core.planner import _build_host_tools_block, host_tools_relevant  # lazy — avoids circular
+        # Local critique must not pull host_tools context. Otherwise inject only
+        # when the turn is actually about host tools (name / task word / an
+        # effect tool was used) — so .env paths don't ride along on unrelated
+        # questions (LPF-001 iteration 1b).
+        _tools_used = [a.get("tool") for a in artifacts.values() if isinstance(a, dict)]
+        if local_critique is None and host_tools_relevant(
+            f"{question}\n{planner_reasoning}", _tools_used
+        ):
             host_block = _build_host_tools_block()
             # Reference context ONLY — NOT evidence. Wrapping host tools as an
             # <evidence> block used to flip the synthesizer into "answer STRICTLY
