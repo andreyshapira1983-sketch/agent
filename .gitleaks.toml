@@ -1,0 +1,29 @@
+# Gitleaks configuration for the agent repo.
+# Auto-detected by gitleaks-action at the repo root (see .github/workflows/ci.yml).
+#
+# Rationale: this project ships its OWN secret scanner (core/secret_scanner.py)
+# plus a large test suite that deliberately contains SYNTHETIC secret-shaped
+# strings (e.g. AKIAIOSFODNN7EXAMPLE, fake ghp_… / sk-ant-… tokens, dummy PEM
+# blocks) as fixtures. Those are not real credentials — without an allowlist
+# gitleaks would fail every build on them.
+#
+# Trade-off (documented on purpose): the two allowlisted paths below are where
+# fake secrets legitimately live. Everything else — config/, core/ (except the
+# scanner), scripts/, and the full git history of .env* — stays fully scanned,
+# so a real credential committed outside these fixtures still fails CI.
+
+title = "agent gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic secret fixtures: the repo's own scanner definitions and its test suite."
+paths = [
+  '''core/secret_scanner\.py''',
+  '''tests/.*\.py''',
+]
+# Canonical AWS documentation key, in case it appears outside the paths above.
+regexes = [
+  '''AKIAIOSFODNN7EXAMPLE''',
+]
