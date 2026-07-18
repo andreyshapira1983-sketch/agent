@@ -38,10 +38,16 @@ class IntentDecision:
     action: str | None
     confidence: float
     reasoning: str
+    # "model": a genuine, parseable verdict from the model.
+    # "fallback": we could not get a clear verdict (error / unparseable /
+    # ungrounded / low confidence) and defaulted to conversation. Callers that
+    # must not override deterministic behaviour on uncertainty check this.
+    source: Literal["model", "fallback"] = "model"
 
     @classmethod
     def conversation(cls, reasoning: str = "") -> "IntentDecision":
-        return cls(kind="conversation", action=None, confidence=1.0, reasoning=reasoning)
+        return cls(kind="conversation", action=None, confidence=1.0,
+                   reasoning=reasoning, source="fallback")
 
 
 _SYSTEM_TEMPLATE = """You are the intent router for a LOCAL autonomous agent.
@@ -120,12 +126,20 @@ def understand_intent(
         confidence = 0.0
     reasoning = str(obj.get("reasoning") or "")[:300]
 
-    # Grounding + safety gates → fall back to conversation on any failure.
+    # Only an EXPLICIT verdict is a genuine model signal (source="model") —
+    # callers may act on it. A missing/unknown kind, an ungrounded action, or a
+    # low-confidence guess is uncertainty (source="fallback"): callers must NOT
+    # override deterministic behaviour on those (an empty "{}" is not a
+    # "conversation" verdict).
+    if kind == "conversation":
+        return IntentDecision(kind="conversation", action=None, confidence=confidence,
+                              reasoning=reasoning or "model chose conversation", source="model")
     if kind != "action":
-        return IntentDecision.conversation(reasoning or "model chose conversation")
+        return IntentDecision.conversation(f"no/unknown kind in model output: {kind!r}")
     if action is None or action not in actions:
         return IntentDecision.conversation(f"ungrounded/invented action: {action!r}")
     if confidence < _MIN_ACTION_CONFIDENCE:
         return IntentDecision(kind="conversation", action=None, confidence=confidence,
-                              reasoning=f"low confidence ({confidence:.2f})")
-    return IntentDecision(kind="action", action=action, confidence=confidence, reasoning=reasoning)
+                              reasoning=f"low confidence ({confidence:.2f})", source="fallback")
+    return IntentDecision(kind="action", action=action, confidence=confidence,
+                          reasoning=reasoning, source="model")

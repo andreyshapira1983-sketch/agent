@@ -1875,7 +1875,12 @@ Produce a patch proposal for the routing bug.
         assert "current gaps" in out.err
         assert "live weakness digest" in out.err
         assert "next safe test" in out.err
-        assert agent.llm.calls == []
+        # Bridge: the 4 "soft" verified intents (capability_check,
+        # current_gaps_check, weakness_finder, next_safe_test) each make ONE
+        # lightweight model verification call before dispatch; safe_self_check
+        # is not gated (0 calls). Crucially, the full planner/tool loop still
+        # never runs — no tool_call, no file_read.
+        assert len(agent.llm.calls) == 4
         log_text = agent.log.path.read_text(encoding="utf-8")
         assert '"event": "tool_call"' not in log_text
         assert '"tool_name": "file_read"' not in log_text

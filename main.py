@@ -59,6 +59,7 @@ from core.subagent_contract import approval_payload_from_proposal
 from core.loop import AgentLoop, format_human_response
 from core.model_usage import ModelBudgetExceeded
 from core.model_router import ModelRole
+from core.intent_understanding import understand_intent
 from core.operator_intent import OperatorIntent, route_operator_intent
 from core.strategy_router import classify_operator_strategy
 from core.self_build_supervisor import evaluate_self_build_supervisor
@@ -1041,6 +1042,34 @@ def _format_next_safe_test(payload: dict) -> str:
     return "\n".join(lines)
 
 
+# "Soft" status/capability intents that conversational phrasing can trip. For
+# these, the keyword match is VERIFIED by the model (it understands "прошу" vs
+# "упомянул") before dispatch. Explicit imperative intents are not gated.
+_VERIFY_INTENTS: frozenset[str] = frozenset({
+    "capability_check", "project_health", "smart_memory_status",
+    "current_gaps_check", "weakness_finder", "next_safe_test",
+    "best_next_action", "next_actions", "autonomy_readiness",
+    "model_status", "budget_status", "approval_status", "urgent_status",
+})
+
+
+def _model_says_conversation(text: str, intent: OperatorIntent, agent: AgentLoop) -> bool:
+    """True only when the model gives a CLEAR, parseable "this is conversation"
+    verdict for a soft keyword match.
+
+    On a confirmed action, or any uncertainty (model error / unparseable /
+    ungrounded / low confidence / no model), returns False — so deterministic
+    routing is preserved and the model only ever *vetoes* an obvious
+    conversational false-positive (model advises, kernel decides).
+    """
+    try:
+        llm = agent.model_router.for_role(ModelRole.PLANNER)
+    except Exception:  # noqa: BLE001 — no model to consult -> keep routing
+        return False
+    decision = understand_intent(text, available_actions=(intent.kind,), llm=llm)
+    return decision.kind == "conversation" and decision.source == "model"
+
+
 def handle_conversational_operator_input(text: str, agent: AgentLoop, workspace: Path) -> bool:
     strategy = classify_operator_strategy(text)
     agent.log.log(
@@ -1049,6 +1078,15 @@ def handle_conversational_operator_input(text: str, agent: AgentLoop, workspace:
     )
     intent = route_operator_intent(text)
     if intent is None:
+        return False
+    # Bridge: for a soft match, let the model VETO an obvious conversational
+    # false-positive. It only suppresses on a clear "this is conversation"
+    # verdict; on uncertainty the deterministic route is preserved.
+    if intent.kind in _VERIFY_INTENTS and _model_says_conversation(text, intent, agent):
+        agent.log.log(
+            "operator_intent_suppressed",
+            {"kind": intent.kind, "reason": "model judged conversation, not a request"},
+        )
         return False
     agent.log.log("operator_intent", intent.to_dict())
     if intent.kind == "shell_command_hint":
