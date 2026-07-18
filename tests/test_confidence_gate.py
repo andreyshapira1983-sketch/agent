@@ -34,9 +34,17 @@ def test_compute_confidence_all_verified_returns_one():
     assert compute_confidence(r) == 1.0
 
 
-def test_compute_confidence_half_credit_for_cited():
+def test_compute_confidence_penalises_fabricated_citations():
+    # CORE-04: a cited_but_unmatched chunk is a citation that resolved to
+    # NOTHING in the provenance chain — a fabricated attribution. It must be a
+    # penalty (like unverified), never +0.5 half-credit.
+    # Pure fabricated: (4 * -0.25) / 4 = -0.25 -> clamped to 0.0 (was 0.5).
     r = _FakeReport(total_chunks=4, cited_but_unmatched_chunks=4)
-    assert compute_confidence(r) == 0.5
+    assert compute_confidence(r) == 0.0
+    # Mixed: one verified + one fabricated must not out-score verified alone.
+    mixed = _FakeReport(total_chunks=2, verified_chunks=1, cited_but_unmatched_chunks=1)
+    # (1 * 1.0 + 1 * -0.25) / 2 = 0.375  (old buggy value was 0.75)
+    assert compute_confidence(mixed) == pytest.approx(0.375)
 
 
 def test_compute_confidence_penalises_unverified():

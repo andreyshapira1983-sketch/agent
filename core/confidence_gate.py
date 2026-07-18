@@ -12,8 +12,9 @@ This module provides:
 
 * :func:`compute_confidence` — a single pure scalar in ``[0.0, 1.0]``
   derived from a ``VerificationReport``. Verified chunks count fully;
-  ``cited_but_unmatched`` count as half-credit; ``self_declared`` as zero
-  factual support; ``unverified`` as a penalty.
+  ``cited_but_unmatched`` (a citation that resolved to nothing — a fabricated
+  attribution) count as a penalty, same as ``unverified``; ``self_declared``
+  as zero factual support.
 * :class:`ConfidenceGate` with :meth:`evaluate` returning a
   ``ConfidenceGateResult`` so the loop can choose to log a warning or to
   feed a synthetic ``ReplanTrigger`` back into the policy in a future
@@ -49,7 +50,11 @@ def compute_confidence(report: Any) -> float:
     cited = int(getattr(report, "cited_but_unmatched_chunks", 0) or 0)
     unverified = int(getattr(report, "unverified_chunks", 0) or 0)
     # self_declared chunks count as neither support nor penalty.
-    raw = (verified * 1.0) + (cited * 0.5) + (unverified * -0.25)
+    # cited_but_unmatched = a citation that resolved to NOTHING in the chain
+    # (a fabricated attribution). It is unverified support with a false source,
+    # so it carries the same penalty as `unverified` — never positive credit
+    # (CORE-04; it used to earn +0.5, inflating confidence on fabricated cites).
+    raw = (verified * 1.0) + (cited * -0.25) + (unverified * -0.25)
     return max(0.0, min(1.0, raw / total))
 
 
