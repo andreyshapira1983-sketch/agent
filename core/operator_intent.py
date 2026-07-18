@@ -14,6 +14,7 @@ from .operator_intent_patterns import (
     _explicit_documentation_requested,
     _has_any,
     _is_explicit_budget_status_command,
+    _looks_like_conversational_turn,
     _looks_like_engineering_change_request,
     _looks_like_explicit_non_routing_command,
     _looks_like_meta_instruction,
@@ -98,6 +99,11 @@ def route_operator_intent(text: str) -> OperatorIntent | None:
     if _looks_like_plain_bug_note(normalized):
         return None
     if _looks_like_explicit_non_routing_command(normalized):
+        return None
+    # A social / greeting-laden chat turn is not an operator command — let the
+    # LLM answer it naturally (guards against the capability-check matcher
+    # hijacking "Привет, как дела, что ты умеешь?" into a rigid operator dump).
+    if _looks_like_conversational_turn(normalized):
         return None
     if _matches_self_build_request(normalized):
         return OperatorIntent(
