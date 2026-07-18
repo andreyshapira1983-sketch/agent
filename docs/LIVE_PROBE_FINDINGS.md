@@ -166,3 +166,92 @@ the refusal to do arithmetic, the misrepresented capabilities, and the guarantee
 loop_helpers.py), which answers the operator's question directly: the root of a
 given error is not "one place for everything" — it must be traced per error, and
 some roots span several files while others (LPF-002) live in one.
+
+---
+
+# Batch 2 — operator-collected findings (each verified against code)
+
+The operator collected a further set of issues from run logs. Each was
+**re-verified against the code before recording**; unverifiable or
+non-reproducing items are marked as such and are NOT claimed as defects.
+
+## The one primary root (verified)
+
+`mandatory citation of every claim` → `sources are not collected` → `synthesizer
+uses memory / host_tools context` → `fabricated citations appear` → `verifier
+flags them` → `the output gate only logs, does not block` → `the bad answer is
+saved as a success episode` → `the bad episode is fed back as experience`. The
+findings below are amplifiers of this loop.
+
+## Confirmed by code
+
+- **LPF-007 — universal, self-contradicting success criterion.** Every goal is
+  built with `success_criteria="A grounded answer citing every claim back to a
+  provided source."` (`core/loop_methods2.py:436`), even when the planner decides
+  no sources/tools are needed → the synthesizer must cite sources that were never
+  collected. Root of the "provided materials" phrasing (LPF-020).
+- **LPF-008 — fabricated citations get positive evidence credit.**
+  `compute_confidence` (`core/confidence_gate.py`) = `(verified*1.0 + cited*0.5 +
+  unverified*-0.25)/total`. `cited_but_unmatched` chunks (i.e. citations that
+  matched NOTHING in the chain) each add **+0.5**, so `[tool:host_tools]` on an
+  empty chain yields `evidence_score = 0.5`. Unmatched (fabricated) citations
+  should be a red flag, not half credit.
+- **LPF-009 — the confidence/verification gate does not block output.** A
+  `fully_unverified=True` / `low_confidence_gate triggered` turn is still emitted
+  (`[OUT] respond`). The gate only logs. Ties to MGA-01 / the audit's
+  "confidence gate is observational".
+- **LPF-010 — command failure recorded as step success.** `shell_exec` sets
+  `tool_result.status="success"` when the *tool ran*; the command's `exit_code`
+  (1 = `where soffice/pandoc/python` not found) lives inside `output` and is
+  never checked as a post-condition. The loop treats `status=="success"` as the
+  step succeeding (`core/loop.py:2950,3301`). Transport execution ≠ command
+  success (this is OFM-004).
+- **LPF-011 — ungrounded answer scored as top-quality success.**
+  `_compute_quality_score(verified, unverified, weak)` returns **1.0 when
+  `total==0`** (`core/smart_memory.py`), i.e. a purely self-declared /
+  general-knowledge answer with zero evidence gets `answer_quality_score=1.0` and
+  `outcome=success`, directly contradicting a `fully_unverified` verifier report.
+- **LPF-012 — low-quality/partial episodes are re-fed as experience.**
+  `_retrieve_experience_memory` injects `episodic_store.search(question, limit=3)`
+  with **no outcome/quality filter** — a `partial` / `quality=0` episode can be
+  retrieved and injected (only a text "quality LOW" note is added). Feeds the
+  self-reinforcing loop.
+- **LPF-013 — a single dubious success activates a procedure.**
+  `procedure_from_episode` gates only on `outcome=="success" and tools_used` (no
+  `answer_quality_score` check); one success smooths to `confidence=0.667 ≥ 0.6`
+  → `status=active` (= MGA-03).
+- **LPF-014 — shallow re-ask detection.** Re-ask/repeat uses `Jaccard ≥ 0.4` on
+  tokens (`core/loop_methods2.py:167`); "Я хочу научиться программировать" and
+  "Я хочу построить ракету" share the "Я хочу … что мне сделать" frame → >0.4,
+  so semantically-different questions are treated as repeats.
+- **LPF-015 — user profile is sticky toward `expert`.** `UserProfileStore`
+  re-derives expertise from the cumulative `expert_signals`/`novice_signals`
+  ratio; with hundreds of accumulated expert signals, current beginner-level
+  questions barely move it (`core/user_profile.py`).
+- **LPF-016 — no goal/plan finalizer.** Goals stay `pending` and plans stay
+  `in_progress` after `[OUT] respond` — no transition to `completed`/`failed`
+  exists for the per-run Goal/Plan objects (`core/loop.py`). **Low severity:**
+  these are ephemeral in-run log objects; the *durable* `RuntimeTaskStore`
+  lifecycle (`mark_done`/`mark_failed`) is closed correctly.
+
+## Partial / needs more context
+
+- **LPF-017 — assumptions may accumulate across unrelated goals.** Restore is
+  `assumption_store.load_by_run(run_id)` (`core/loop.py:512`). In one-shot mode
+  each turn has a fresh `trace_id` (no accumulation); the growth the operator saw
+  needs a REPL session where `run_id` is shared across turns — mechanism exists,
+  scope needs confirming.
+- **LPF-018 — safety coverage gap (not an absent classifier).** An ODD gate
+  **does** run before planning (`core/loop.py:653` `_check_operational_domain`,
+  pure no-LLM); the issue is that its heuristic may under-detect "rocket" /
+  "hacking", which then route as `general_question`. Correct framing: coverage
+  gap, not a missing/never-called classifier.
+
+## Not confirmed / excluded
+
+- **(rejected) injection false-positive on `where` output.** Running
+  `scan_for_injection` on realistic benign `where` outputs ("Could not find
+  files…", a Python path) returned **clean** every time. Could not reproduce as
+  stated — NOT recorded as a defect.
+- **(needs log) provenance-id mismatch (memory vs shell_exec).** Plausible but the
+  code root was not pinned down; needs the specific run log to trace.
