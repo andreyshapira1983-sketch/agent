@@ -88,7 +88,11 @@ def _tokens(text: str) -> set[str]:
     return {
         token.casefold()
         for token in normalized.split()
-        if len(token.strip()) > 2
+        # Keep tokens over 2 chars, OR any token bearing a digit — short numeric
+        # / alphanumeric tokens ("17", "23", "v2", "3d") are real match signal
+        # that the length floor alone silently dropped (CORE-10). Purely
+        # short alphabetic (stopword-like) tokens still fall through.
+        if len(token.strip()) > 2 or any(ch.isdigit() for ch in token)
     }
 
 
