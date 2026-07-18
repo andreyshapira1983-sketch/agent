@@ -166,6 +166,10 @@ from core.loop_methods2 import AgentLoopExtractedMethods2
 _TOOL_SOURCE_HINTS: dict[str, SourceHint] = {
     "file_read": "file",
     "web_search": "web",
+    # web_fetch returns a fetched public page body; without this entry the
+    # lookup fell back to "tool_output" -> PRIVATE (MGA-06 / CORE-09), so a
+    # public page fetched via web_fetch lost its `public` classification.
+    "web_fetch": "web",
 }
 
 
