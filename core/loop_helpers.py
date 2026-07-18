@@ -22,6 +22,37 @@ def _to_text(output: Any) -> str:
     except Exception:
         return str(output)
 
+
+# Structured tool outputs carry framework-generated envelope metadata
+# (argv we chose, our own compensation-plan descriptions, timing counters)
+# alongside the genuinely untrusted payload. The injection guard must scan
+# ONLY the untrusted payload — scanning the whole envelope makes our own
+# metadata (e.g. a compensation description "read-only command 'where'; …")
+# trip instruction-override patterns, producing false-positive
+# injection_suspicious flags and drowning real detections in alert-fatigue.
+#
+# Maps tool_name -> the output-dict keys whose values are untrusted (i.e.
+# originate outside our trust boundary). Tools not listed here have no
+# envelope: their entire output IS the untrusted payload and is scanned whole.
+_UNTRUSTED_OUTPUT_FIELDS: dict[str, tuple[str, ...]] = {
+    "shell_exec": ("stdout", "stderr"),
+}
+
+
+def untrusted_scan_view(tool_name: str | None, output: Any) -> str:
+    """Return the untrusted portion of *output* for injection scanning.
+
+    For tools with a structured envelope (see ``_UNTRUSTED_OUTPUT_FIELDS``)
+    only the untrusted payload fields are returned; framework metadata is
+    excluded. For every other shape the flat text view is scanned whole,
+    preserving the prior (fail-safe) behaviour.
+    """
+    fields = _UNTRUSTED_OUTPUT_FIELDS.get(tool_name or "")
+    if fields and isinstance(output, dict):
+        return "\n".join(_to_text(output.get(f, "")) for f in fields)
+    return _to_text(output)
+
+
 DEFAULT_MAX_REPLAN_ATTEMPTS = 3
 
 SYSTEM_ANSWER = """You are a careful research analyst.

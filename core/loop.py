@@ -153,6 +153,7 @@ from core.loop_helpers import (  # noqa: F401 -- re-exported
     _VERIF_MARKER_RE,
     _strip_verification_markers,
     _to_text,
+    untrusted_scan_view,
     format_human_response,
     new_trace_id,
 )
@@ -3107,7 +3108,15 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             if action.tool_name in _TRUSTED_INTERNAL_TOOLS:
                 inj = None
             else:
-                inj = scan_for_injection(flat_output)
+                # Scan ONLY the untrusted payload, not framework-generated
+                # envelope metadata (argv, compensation-plan descriptions,
+                # timing). Scanning the whole envelope tripped override
+                # patterns on our own text (e.g. shell_exec's
+                # "read-only command 'where'; …") -> false-positive
+                # injection_suspicious. See untrusted_scan_view().
+                inj = scan_for_injection(
+                    untrusted_scan_view(action.tool_name, result.output)
+                )
             if inj is not None and inj.verdict != "clean":
                 self.log.log(
                     "injection_" + inj.verdict,
