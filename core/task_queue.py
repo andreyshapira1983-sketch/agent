@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
 
@@ -24,6 +24,13 @@ RuntimeTaskKind = Literal["auto_run", "resume_checkpoint"]
 RuntimeTaskStatus = Literal["pending", "running", "done", "failed", "cancelled", "paused"]
 _VALID_KINDS = {"auto_run", "resume_checkpoint"}
 _VALID_STATUSES = {"pending", "running", "done", "failed", "cancelled", "paused"}
+
+# Exponential backoff for re-queued failed tasks (OFM-010 / CORE-07): a
+# deterministic failure must not be immediately eligible again on the next tick.
+# attempts is already bumped in mark_running, so the first failure (attempts=1)
+# waits BASE seconds, then doubles, capped at MAX.
+_RETRY_BACKOFF_BASE_SECONDS = 30
+_RETRY_BACKOFF_MAX_SECONDS = 3600
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _FALSE_VALUES = {"0", "false", "no", "off"}
 
@@ -284,14 +291,36 @@ class TaskQueueStore:
             ),
         )
 
-    def mark_failed(self, task_id: str, *, error: str, report: dict | None = None) -> RuntimeTask:
+    def mark_failed(
+        self,
+        task_id: str,
+        *,
+        error: str,
+        report: dict | None = None,
+        now: datetime | None = None,
+    ) -> RuntimeTask:
+        retry_from = (now or _now()).astimezone(timezone.utc)
+
         def update(task: RuntimeTask) -> RuntimeTask:
-            status: RuntimeTaskStatus = "failed" if task.attempts >= task.max_attempts else "pending"
+            if task.attempts >= task.max_attempts:
+                return task.with_updates(
+                    status="failed",
+                    last_error=error,
+                    last_report=report or task.last_report,
+                )
+            # Re-queue with exponential backoff so a deterministic failure does
+            # not hot-retry every tick (OFM-010 / CORE-07).
+            delay = min(
+                _RETRY_BACKOFF_MAX_SECONDS,
+                _RETRY_BACKOFF_BASE_SECONDS * (2 ** max(0, task.attempts - 1)),
+            )
             return task.with_updates(
-                status=status,
+                status="pending",
                 last_error=error,
                 last_report=report or task.last_report,
+                run_after=_iso(retry_from + timedelta(seconds=delay)),
             )
+
         return self._update_one(task_id, update)
 
     def cancel(self, task_id: str) -> RuntimeTask:
