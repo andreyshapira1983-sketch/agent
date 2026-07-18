@@ -68,9 +68,9 @@ from core.models import (
 )
 from core.output_policy import apply_ranker_output_policy
 from core.low_evidence_policy import (
-    evaluate_low_evidence_policy,
     is_evidence_expected,
 )
+from core.unsupported_claims import apply_answer_enforcement
 from core.referent_resolver import (
     FileHintRef,
     PriorTurnRef,
@@ -1493,21 +1493,50 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # exactly which URLs to fetch; once web_fetch runs, the original
         # draft is re-verified on the enriched chain — no second LLM
         # synthesis is needed because the draft already cites the URLs.
+        verifier_failure = False
         if self.verifier_enabled:
             from core.verifier import (
                 extract_unresolved_web_urls,
                 verify as _verify,
             )
+            from core.verifier_models import VerificationReport as _VRSoft
 
-            report = _verify(
-                answer=draft_answer,
-                chain=chain,
-                user_question=user_question,
-                expects_contract_headers=getattr(
-                    self, "_synthesis_expects_contract_headers", True
-                ),
-                **self._verification_receipt_kwargs(),
-            )
+            try:
+                report = _verify(
+                    answer=draft_answer,
+                    chain=chain,
+                    user_question=user_question,
+                    expects_contract_headers=getattr(
+                        self, "_synthesis_expects_contract_headers", True
+                    ),
+                    **self._verification_receipt_kwargs(),
+                )
+            except Exception as _ver_exc:
+                # Soft-fail: keep draft; do not pretend "insufficient evidence".
+                verifier_failure = True
+                self.log.log(
+                    "verifier_failure",
+                    {
+                        "error_type": type(_ver_exc).__name__,
+                        "error": str(_ver_exc)[:300],
+                        "draft_chars": len(draft_answer),
+                        "phase": "initial",
+                    },
+                )
+                report = _VRSoft(
+                    total_chunks=0,
+                    verified_chunks=0,
+                    unverified_chunks=0,
+                    cited_but_unmatched_chunks=0,
+                    self_declared_chunks=0,
+                    structural_chunks=0,
+                    chunks=(),
+                    annotated_answer=draft_answer,
+                    fully_unverified=False,
+                    chain_was_empty=True,
+                    disclaimer=None,
+                    malformed_output=False,
+                )
             self.log.log("verification", report.to_log_payload())
 
             # P1 — observational cross-subsystem audit. Compare planner
@@ -1776,15 +1805,29 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 # The draft already cites these URLs (that's why they
                 # were unresolved); now the chain has the web_page
                 # evidence so `match_citation` will resolve them.
-                report = _verify(
-                answer=draft_answer,
-                chain=chain,
-                user_question=user_question,
-                expects_contract_headers=getattr(
-                    self, "_synthesis_expects_contract_headers", True
-                ),
-                **self._verification_receipt_kwargs(),
-            )
+                try:
+                    report = _verify(
+                        answer=draft_answer,
+                        chain=chain,
+                        user_question=user_question,
+                        expects_contract_headers=getattr(
+                            self, "_synthesis_expects_contract_headers", True
+                        ),
+                        **self._verification_receipt_kwargs(),
+                    )
+                except Exception as _ver_exc:
+                    verifier_failure = True
+                    self.log.log(
+                        "verifier_failure",
+                        {
+                            "error_type": type(_ver_exc).__name__,
+                            "error": str(_ver_exc)[:300],
+                            "draft_chars": len(draft_answer),
+                            "phase": "verify_replan",
+                            "iteration": verify_replan_attempt,
+                        },
+                    )
+                    break
                 self.log.log(
                     "verification",
                     {
@@ -1902,55 +1945,46 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             except Exception:
                 pass
 
-        # Low-evidence enforcement: if the verifier's verdict
-        # distribution is severely below threshold (few verified, many
-        # unverified, long enough draft), replace the long polished
-        # answer with a deterministic short reply that lists ONLY the
-        # verified claims and explicitly states "insufficient data".
-        # The informational ConfidenceGate already logs the warning;
-        # this is the structural enforcement paired with it.
-        if self.last_verification is not None:
-            try:
-                _ranking = self.last_source_ranking
-                # Evidence is only "expected" for factual / realtime questions.
-                # A pure reasoning or design question produces an empty evidence
-                # chain and carries no realtime intent; suppressing it would
-                # throw away a legitimate answer (even a costly Opus one). A
-                # generative coding turn (role=programmer, output_style="diff")
-                # is the same class: it delivers NEW code/docstring/diff that the
-                # factual verifier cannot match verbatim against the file it read
-                # as input, so the gate would delete exactly what was requested.
-                # Default to expecting evidence whenever we cannot tell, so the
-                # gate stays fully in force for factual and realtime queries.
-                _chain_empty = bool(
-                    getattr(self.last_verification, "chain_was_empty", False)
+        # Answer enforcement (PR3): low-evidence truncation, local-critique
+        # empty-rewrite skip, verifier soft-fail, claim-level short path.
+        # ConfidenceGate stays observational; this is the structural layer.
+        try:
+            _ranking = self.last_source_ranking
+            _report = self.last_verification
+            _chain_empty = bool(
+                getattr(_report, "chain_was_empty", False)
+            ) if _report is not None else True
+            _realtime = (
+                bool(getattr(_ranking, "realtime_required", True))
+                if _ranking is not None
+                else True
+            )
+            _evidence_expected = is_evidence_expected(
+                role=getattr(self.last_role_context, "role", ""),
+                chain_was_empty=_chain_empty,
+                realtime_required=_realtime,
+            )
+            _enf = apply_answer_enforcement(
+                answer=answer,
+                report=_report,
+                question=user_question,
+                evidence_expected=_evidence_expected,
+                local_critique_active=local_critique_active,
+                verifier_failure=verifier_failure,
+            )
+            self.log.log("answer_enforcement", _enf.to_log_payload())
+            if _enf.outcome == "insufficient_evidence" and _enf.applied:
+                self.log.log(
+                    "low_evidence_truncation",
+                    _enf.low_evidence_payload or _enf.to_log_payload(),
                 )
-                _realtime = (
-                    bool(getattr(_ranking, "realtime_required", True))
-                    if _ranking is not None
-                    else True
-                )
-                _evidence_expected = is_evidence_expected(
-                    role=getattr(self.last_role_context, "role", ""),
-                    chain_was_empty=_chain_empty,
-                    realtime_required=_realtime,
-                )
-                _le = evaluate_low_evidence_policy(
-                    answer=answer,
-                    report=self.last_verification,
-                    question=user_question,
-                    evidence_expected=_evidence_expected,
-                )
-                if _le.triggered:
-                    self.log.log(
-                        "low_evidence_truncation", _le.to_log_payload()
-                    )
-                    answer = _le.answer
-            except Exception:
-                # Defence-in-depth: truncation must NEVER take down
-                # the loop. A failed evaluation falls back to the
-                # original answer the user would otherwise have got.
-                pass
+            if _enf.applied:
+                answer = _enf.answer
+        except Exception:
+            # Defence-in-depth: truncation must NEVER take down
+            # the loop. A failed evaluation falls back to the
+            # original answer the user would otherwise have got.
+            pass
 
         # Strip internal verification markers before user-facing output.
         # Must happen AFTER output_policy which needs [verified:...] markers.
