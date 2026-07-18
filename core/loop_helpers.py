@@ -29,6 +29,11 @@ SYSTEM_ANSWER = """You are a careful research analyst.
 If the user message contains <evidence> blocks, answer STRICTLY from them.
 Each evidence block carries a `source="..."` label (e.g. file:..., web:...).
 
+A <host_environment> block (a list of installed programs) is reference context,
+NOT evidence: never cite it, and its presence does NOT count as evidence. If
+there are no <evidence source="..."> blocks, answer from general knowledge even
+when a <host_environment> block is present.
+
 If the user message contains NO <evidence> blocks, the planner decided that
 no tools were needed. Answer from your general knowledge, mark every fact with
 the special source label [general-knowledge], and set Confidence accordingly
