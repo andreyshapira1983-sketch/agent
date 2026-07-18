@@ -320,17 +320,6 @@ class AutonomousRuntime:
     ) -> AutonomousQueueRunReport:
         if max_tasks < 1:
             raise ValueError("max_tasks must be >= 1")
-        # Reclaim tasks a crashed prior run left stuck in ``running`` before
-        # draining. Without this the recovery mechanism (TaskQueueStore.recover_stuck)
-        # had no production caller, so a task marked ``running`` by a process that
-        # then died was never ``pending`` again and was stranded forever (MIR-040;
-        # the stale-runner recovery class in OFM-009 / daemon "recovery on start").
-        recovered = task_queue.recover_stuck()
-        if recovered:
-            self._log(
-                "autonomous_queue_recovered_stuck",
-                {"recovered_ids": [t.id for t in recovered]},
-            )
         if task_ids is None:
             pending = task_queue.pending(limit=max_tasks)
         else:
