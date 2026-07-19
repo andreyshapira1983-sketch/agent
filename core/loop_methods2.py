@@ -53,12 +53,17 @@ class AgentLoopExtractedMethods2:
            zero-delta guarantee.
         2. ``suppress_durable_learning_writes`` (dry-run) — ABSOLUTE deny, for
            the same reason: a dry run must leave no trace.
-        3. ``durable_writes is None`` — allow. This is the interactive default
-           and preserves the historical "write everything" behaviour.
-        4. ``sink in durable_writes`` — allow.
-        5. Anything else — DENY. Default-deny covers an unknown sink name, a
-           sink not on the allowlist, and a caller that named no sink at all;
-           none of them may slip through an allowlist.
+        3. Unnamed or unrecognised ``sink`` — ALWAYS deny, and log it. Sink
+           *validity* is a separate question from sink *permission*, and it is
+           answered first: otherwise a typo would be refused only while an
+           allowlist happened to be active, and waved through on the
+           interactive profile. Reaching this branch means a caller passed a
+           name that is not in `KNOWN_DURABLE_SINKS` — a code defect, hence
+           the log line.
+        4. ``durable_writes is None`` — allow (the sink is known by now). This
+           is the interactive default and preserves the historical
+           "write everything" behaviour.
+        5. Otherwise the allowlist decides: on it → allow, off it → deny.
 
         `durable_writes` is instance-scoped: it is fixed at construction for
         the life of the agent, and there is deliberately no per-run API.
@@ -66,6 +71,12 @@ class AgentLoopExtractedMethods2:
         if bool(getattr(self, "audit_read_only", False)):
             return True
         if bool(getattr(self, "suppress_durable_learning_writes", False)):
+            return True
+        if sink is None or sink not in KNOWN_DURABLE_SINKS:
+            self.log.log(
+                "durable_write_unknown_sink",
+                {"sink": sink, "known_sinks": sorted(KNOWN_DURABLE_SINKS)},
+            )
             return True
         allowlist = getattr(self, "durable_writes", None)
         if allowlist is None:
