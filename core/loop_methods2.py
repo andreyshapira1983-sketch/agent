@@ -365,6 +365,44 @@ class AgentLoopExtractedMethods2:
 
         return block
 
+    def _quarantine_conflicted_memory(self, knowledge_result: Any) -> None:
+        """Withdraw memory records whose claim just turned out contradicted.
+
+        Runs at write time, where the conflict is detected, so the window in
+        which a contradicted claim still reads as ordinary evidence is as
+        short as the cycle itself. Marking is by provenance tag only — a
+        record with no claim link is left alone rather than matched by
+        content, which would be the guess MIR-049/050 forbid.
+
+        Best-effort: quarantine failing must not abort a user-facing answer.
+        """
+        conflicts = getattr(knowledge_result, "conflicts", None)
+        conflicted_ids = {
+            cid
+            for conflict in (getattr(conflicts, "conflicts", None) or [])
+            for cid in getattr(conflict, "claim_ids", ())
+        }
+        if not conflicted_ids or self.persistent_store is None:
+            return
+        if self._durable_learning_suppressed("knowledge"):
+            return
+        try:
+            from core.knowledge_pipeline import quarantine_conflicted_records
+
+            records = self.persistent_store.load()
+            updated, report = quarantine_conflicted_records(
+                records, conflicted_claim_ids=conflicted_ids
+            )
+            if report["quarantined"]:
+                for record in updated:
+                    if "conflicted" in (record.tags or []):
+                        self.persistent_store.update(record)
+            self.log.log("conflict_quarantine", {"claims": len(conflicted_ids), **report})
+        except Exception as exc:  # noqa: BLE001
+            self.log.log(
+                "conflict_quarantine_error", {"error": type(exc).__name__}
+            )
+
     def _record_aborted_episode(self, question: str, *, reason: str) -> None:
         """Bank a `failed` episode for a run that did not complete.
 
