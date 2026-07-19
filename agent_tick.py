@@ -77,6 +77,29 @@ EXPECTED_TICK_INTERVAL_SECONDS = int(
 )
 STALENESS_FACTOR = 2
 
+# Memory profile for the unattended (daemon/cron) agent. Defined once here
+# because all three build sites below must stay identical.
+#
+# Phase 1 — connect experience memory to the core WITHOUT granting it a voice
+# in durable state:
+#   with_experience=True     the unattended agent finally holds episodic and
+#                            procedural stores (before this it held none, so it
+#                            could neither record nor recall experience)
+#   episodic_replay=False    it may read that experience, but must never serve
+#                            a stored answer in place of running a real cycle
+#   no_durable_learning=True hard brake: every durable write is skipped, so
+#                            connecting the stores cannot grow memory
+#   with_memory=False        unchanged — no cross-run session memory
+#
+# Autonomous write-back is a SEPARATE, later step and is deliberately not
+# enabled here.
+UNATTENDED_MEMORY_PROFILE = {
+    "with_memory": False,
+    "with_experience": True,
+    "episodic_replay": False,
+    "no_durable_learning": True,
+}
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -643,7 +666,7 @@ def _maybe_produce_self_build(
 
         builder = build_agent_fn or (
             lambda ws: __import__("main", fromlist=["build_agent"]).build_agent(
-                ws, with_memory=False, approval_provider=None
+                ws, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
             )
         )
         agent = builder(workspace)
@@ -803,7 +826,9 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
             _log_tick(workspace, {"event": "no_pending_tasks"})
             # Still check approval inbox below
         else:
-            agent = build_agent(workspace, with_memory=False, approval_provider=None)
+            agent = build_agent(
+                workspace, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
+            )
             inbox = ApprovalInbox(path=workspace / APPROVAL_INBOX_PATH)
             incident_log = IncidentLog(path=workspace / INCIDENT_LOG_PATH)
             runtime = AutonomousRuntime(
@@ -1118,7 +1143,9 @@ def run_paced_campaign(
         from dotenv import load_dotenv
         load_dotenv(workspace / ".env")
         from main import build_agent
-        agent = build_agent(workspace, with_memory=False, approval_provider=None)
+        agent = build_agent(
+            workspace, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
+        )
 
     from core.approval_inbox import ApprovalInbox
     inbox = ApprovalInbox(path=workspace / APPROVAL_INBOX_PATH)

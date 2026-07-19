@@ -31,12 +31,22 @@ class AgentLoopExtractedMethods2:
     def _durable_learning_suppressed(self) -> bool:
         """True when durable learning writes must be skipped this cycle.
 
-        Combines the dry-run brake (`suppress_durable_learning_writes`) with
-        the deterministic audit/read-only brake so both are honoured at every
-        durable-write site with one check.
+        Combines three independent brakes so every durable-write site honours
+        all of them with one check:
+
+        - `suppress_durable_learning_writes` — the dry-run brake (save/restored
+          around an autonomous cycle);
+        - `audit_read_only` — the deterministic operator `:audit` brake;
+        - `no_durable_learning` — an instance-scoped profile brake fixed at
+          construction, used by paths that may hold and read experience memory
+          but must never write durable state.
+
+        Any one of them engaged means: skip the write.
         """
-        return bool(getattr(self, "suppress_durable_learning_writes", False)) or bool(
-            getattr(self, "audit_read_only", False)
+        return (
+            bool(getattr(self, "suppress_durable_learning_writes", False))
+            or bool(getattr(self, "audit_read_only", False))
+            or bool(getattr(self, "no_durable_learning", False))
         )
 
     def set_audit_read_only(self, enabled: bool) -> bool:
@@ -173,6 +183,11 @@ class AgentLoopExtractedMethods2:
         self._last_procedure_records = []
         self._last_best_similar_episode = None
         self._last_best_similar_score = 0.0
+        # Holding the stores and being allowed to read them are separate
+        # permissions. Returning early also leaves `_last_best_similar_episode`
+        # unset, which structurally keeps the fast path from firing.
+        if not getattr(self, "experience_retrieval", True):
+            return ""
         if self.episodic_store is None and self.procedural_store is None:
             return ""
         # Only SUCCESSFUL episodes are fed back as reusable experience; a
