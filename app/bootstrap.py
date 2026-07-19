@@ -61,7 +61,7 @@ def build_agent(
     with_experience: bool | None = None,
     experience_retrieval: bool = True,
     episodic_replay: bool = True,
-    no_durable_learning: bool = False,
+    durable_writes: frozenset[str] | None = None,
 ) -> AgentLoop:
     """Assemble the production agent for one entry point.
 
@@ -76,12 +76,15 @@ def build_agent(
                              to ``with_memory`` so every existing caller keeps
                              its current profile; pass it explicitly to give a
                              path experience memory without working memory.
-    - ``experience_retrieval`` / ``episodic_replay`` / ``no_durable_learning``
+    - ``experience_retrieval`` / ``episodic_replay`` / ``durable_writes``
                            — read, replay and write permissions, forwarded to
                              the loop (see ``AgentLoop.__init__``).
 
-    ``no_durable_learning`` is **instance-scoped**: it holds for the whole life
-    of the returned agent, not for a single run. There is deliberately no
+    ``durable_writes`` is an ALLOWLIST of durable sinks: ``None`` means "all"
+    (the interactive default), a frozenset permits exactly those sinks and
+    denies everything else, and ``frozenset()`` denies all durable writes. The
+    audit and dry-run brakes outrank it absolutely. It is **instance-scoped**:
+    fixed for the whole life of the returned agent, with deliberately no
     per-run API yet.
     """
     if with_experience is None:
@@ -286,5 +289,5 @@ def build_agent(
         assumption_store=assumption_store,  # Layer 5
         experience_retrieval=experience_retrieval,
         episodic_replay=episodic_replay,
-        no_durable_learning=no_durable_learning,
+        durable_writes=durable_writes,
     )

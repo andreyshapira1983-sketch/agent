@@ -27,27 +27,50 @@ from core.smart_memory import (
     format_experience_context,
 )
 
+# Every durable sink the loop can write. A write site names its sink; a name
+# outside this set is refused rather than waved through, so a typo or a new
+# unregistered sink fails closed.
+KNOWN_DURABLE_SINKS: frozenset[str] = frozenset({
+    "episode",          # episodic_store.save
+    "procedure",        # procedural_store.upsert_from_episode
+    "consolidation",    # consolidate_memory -> consolidation_store
+    "knowledge",        # knowledge pipeline auto-write / remember batch
+    "source_registry",  # source_registry_store
+    "profile",          # user_profile_store
+    "assumptions",      # assumption_store
+    "access_stats",     # persistent record access_count / last_accessed_at
+})
+
+
 class AgentLoopExtractedMethods2:
-    def _durable_learning_suppressed(self) -> bool:
-        """True when durable learning writes must be skipped this cycle.
+    def _durable_learning_suppressed(self, sink: str | None = None) -> bool:
+        """True when a durable learning write must be skipped.
 
-        Combines three independent brakes so every durable-write site honours
-        all of them with one check:
+        Resolution order — the first rule that applies wins:
 
-        - `suppress_durable_learning_writes` — the dry-run brake (save/restored
-          around an autonomous cycle);
-        - `audit_read_only` — the deterministic operator `:audit` brake;
-        - `no_durable_learning` — an instance-scoped profile brake fixed at
-          construction, used by paths that may hold and read experience memory
-          but must never write durable state.
+        1. ``audit_read_only`` — ABSOLUTE deny. The operator is auditing memory;
+           no per-sink permission may pierce this, so `:audit` keeps its
+           zero-delta guarantee.
+        2. ``suppress_durable_learning_writes`` (dry-run) — ABSOLUTE deny, for
+           the same reason: a dry run must leave no trace.
+        3. ``durable_writes is None`` — allow. This is the interactive default
+           and preserves the historical "write everything" behaviour.
+        4. ``sink in durable_writes`` — allow.
+        5. Anything else — DENY. Default-deny covers an unknown sink name, a
+           sink not on the allowlist, and a caller that named no sink at all;
+           none of them may slip through an allowlist.
 
-        Any one of them engaged means: skip the write.
+        `durable_writes` is instance-scoped: it is fixed at construction for
+        the life of the agent, and there is deliberately no per-run API.
         """
-        return (
-            bool(getattr(self, "suppress_durable_learning_writes", False))
-            or bool(getattr(self, "audit_read_only", False))
-            or bool(getattr(self, "no_durable_learning", False))
-        )
+        if bool(getattr(self, "audit_read_only", False)):
+            return True
+        if bool(getattr(self, "suppress_durable_learning_writes", False)):
+            return True
+        allowlist = getattr(self, "durable_writes", None)
+        if allowlist is None:
+            return False
+        return sink not in allowlist
 
     def set_audit_read_only(self, enabled: bool) -> bool:
         """Enable/disable audit read-only mode. Returns the resulting state.
@@ -151,7 +174,7 @@ class AgentLoopExtractedMethods2:
         # knows which records are actively useful (≠ junk that was saved but
         # never used again).
         if (
-            not self._durable_learning_suppressed()
+            not self._durable_learning_suppressed("access_stats")
             and self.persistent_store is not None
             and selected
         ):
@@ -329,13 +352,21 @@ class AgentLoopExtractedMethods2:
         Experience memory is best-effort. A malformed local state file should
         be quarantined by the state layer, not crash the user-facing answer.
         """
-        if self._durable_learning_suppressed():
+        # Episode, procedure and consolidation are three separate sinks: a path
+        # may be allowed to bank an episode while procedural promotion and
+        # consolidation stay off.
+        may_episode = not self._durable_learning_suppressed("episode")
+        may_procedure = not self._durable_learning_suppressed("procedure")
+        may_consolidation = not self._durable_learning_suppressed("consolidation")
+        if not (may_episode or may_procedure or may_consolidation):
             self.log.log(
                 "durable_learning_writes_skipped",
                 {
                     "reason": "audit_read_only"
                     if getattr(self, "audit_read_only", False)
-                    else "dry_run",
+                    else "dry_run"
+                    if getattr(self, "suppress_durable_learning_writes", False)
+                    else "not_allowlisted",
                     "sink": "experience_memory",
                 },
             )
@@ -358,7 +389,7 @@ class AgentLoopExtractedMethods2:
                 weak_chunks=weak_chunks,
                 replan_exhausted=replan_exhausted,
             )
-            if self.episodic_store is not None:
+            if self.episodic_store is not None and may_episode:
                 self.episodic_store.save(episode)
                 self.log.log(
                     "episodic_memory_write",
@@ -375,7 +406,7 @@ class AgentLoopExtractedMethods2:
                 )
 
             procedure = None
-            if self.procedural_store is not None:
+            if self.procedural_store is not None and may_procedure:
                 procedure, created = self.procedural_store.upsert_from_episode(episode)
                 self.log.log(
                     "procedural_memory_update",
@@ -389,7 +420,8 @@ class AgentLoopExtractedMethods2:
                 )
 
             if (
-                self.consolidation_store is not None
+                may_consolidation
+                and self.consolidation_store is not None
                 and self.episodic_store is not None
                 and self.procedural_store is not None
                 and not skip_consolidation
