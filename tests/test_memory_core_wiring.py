@@ -116,11 +116,13 @@ def _durable_snapshot(workspace: Path) -> dict[str, str]:
     return snap
 
 
-def _drive_one_cycle(agent: AgentLoop, question: str) -> str:
+def _drive_one_cycle(
+    agent: AgentLoop, question: str, *, task_id: str | None = None
+) -> str:
     """Run a full, deterministic no-tool cycle (planner and synthesizer faked)."""
     agent.planner = FakePlanner(sources=[])
     agent.llm = FakeLLM(responses=[SYNTH_GENERAL] * 4)
-    return agent.run(user_question=question, file_hint=None)
+    return agent.run(user_question=question, file_hint=None, task_id=task_id)
 
 
 def _replayable_episode(question: str) -> EpisodeRecord:

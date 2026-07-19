@@ -18,6 +18,7 @@ from core.models import (
     ToolCall,
     ToolResult,
 )
+from core.run_context import current_run
 from core.smart_memory import (
     EpisodicMemoryStore,
     MemoryConsolidationStore,
@@ -388,6 +389,7 @@ class AgentLoopExtractedMethods2:
             and self.consolidation_store is None
         ):
             return
+        run = current_run()
         try:
             episode = episode_from_agent_cycle(
                 goal=goal_description,
@@ -399,12 +401,28 @@ class AgentLoopExtractedMethods2:
                 unverified_chunks=unverified_chunks,
                 weak_chunks=weak_chunks,
                 replan_exhausted=replan_exhausted,
+                run_id=run.run_id if run else "",
+                task_id=(run.task_id or "") if run else "",
             )
             if self.episodic_store is not None and may_episode:
-                self.episodic_store.save(episode)
+                # save_once, not save: a run that reaches this site twice must
+                # bank one episode, not two. Bounded by the store's FIFO window.
+                written = self.episodic_store.save_once(episode)
+                if not written:
+                    self.log.log(
+                        "episodic_memory_write_skipped",
+                        {
+                            "reason": "already_banked_for_run",
+                            "episode_id": episode.id,
+                            "run_id": episode.run_id,
+                        },
+                    )
                 self.log.log(
                     "episodic_memory_write",
                     {
+                        "written": written,
+                        "run_id": episode.run_id,
+                        "task_id": episode.task_id,
                         "episode_id": episode.id,
                         "outcome": episode.outcome,
                         "answer_quality_score": episode.answer_quality_score,

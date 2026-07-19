@@ -41,6 +41,7 @@ from core.evidence import (
     make_evidence,
 )
 from core.ids import new_id
+from core.run_context import run_scope
 from core.llm import LLM
 from core.logger import TraceLogger
 from core.memory import WorkingMemory
@@ -482,6 +483,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         file_hint: str | None = None,
         on_token: Any = None,
         deep_escalation: Any = None,
+        task_id: str | None = None,
     ) -> str:
         """Run one observe→plan→act→verify→respond cycle.
 
@@ -497,7 +499,29 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                       explicit, valid operator reason lets planner/synthesizer
                       escalate to the deep (Opus) tier; the default ``None``
                       keeps every autonomous run on the standard tier.
+            task_id: Optional id of the *logical task* this run serves. It
+                      survives a retry; the run id minted below does not.
+
+        This is a thin wrapper: it owns run identity and nothing else, so the
+        identity is bound before any cycle work and released even if the cycle
+        raises. The body lives in `_run_inner`.
         """
+        with run_scope(new_id("run"), task_id):
+            return self._run_inner(
+                user_question=user_question,
+                file_hint=file_hint,
+                on_token=on_token,
+                deep_escalation=deep_escalation,
+            )
+
+    def _run_inner(
+        self,
+        user_question: str,
+        file_hint: str | None = None,
+        on_token: Any = None,
+        deep_escalation: Any = None,
+    ) -> str:
+        """The cycle body. Always entered through `run`, which owns run identity."""
         # Store streaming callback so _synthesize() can pick it up without
         # changing its signature (which is called from multiple paths).
         self._stream_on_token = on_token
