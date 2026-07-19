@@ -40,6 +40,11 @@ _DEFAULT_STALENESS_THRESHOLD = 1.5  # tuned with score_staleness's weights
 # can override without code change.
 _W_AGE = 1.0 / 30.0          # +1.0 per 30 days
 _W_LOW_QUALITY = 1.5         # full weight when quality == 0
+# Where an unmeasured answer sits on the quality axis. Mid-scale is a
+# statement about this consumer's treatment of missing data, not a guess at
+# the episode's worth: it neither rewards nor punishes an answer that carried
+# no evidence to measure.
+_QUALITY_WHEN_UNMEASURED = 0.5
 _W_FAILED = 0.75
 _W_PARTIAL = 0.25
 _W_REPLAN_EXHAUSTED = 0.50
@@ -74,7 +79,16 @@ def score_staleness(ep: EpisodeRecord, now: datetime | None = None) -> float:
     created = _parse_iso(ep.created_at)
     age_days = max(0.0, (now - created).total_seconds() / 86400.0) if created else 0.0
 
-    quality = max(0.0, min(1.0, float(ep.answer_quality_score)))
+    # An unmeasured answer (no evidence chunks at all) earns neither the bonus
+    # of a perfect score nor the penalty of a bad one — mid-scale is the honest
+    # placement for "we do not know". Reading None as 1.0 is what let groundless
+    # episodes outlive well-evidenced ones (MIR-002).
+    raw_quality = ep.answer_quality_score
+    quality = (
+        _QUALITY_WHEN_UNMEASURED
+        if raw_quality is None
+        else max(0.0, min(1.0, float(raw_quality)))
+    )
     score = age_days * _W_AGE
     score += (1.0 - quality) * _W_LOW_QUALITY
     if ep.outcome == "failed":
@@ -122,9 +136,22 @@ def select_for_pruning(
         created = _parse_iso(ep.created_at)
         if created is None or created > cutoff:
             continue
-        low_quality = ep.answer_quality_score < min_quality
+        # Two distinct reasons an episode carries no reusable value, kept
+        # apart because they are different facts:
+        #   low_quality — measured, and most of its support did not hold up
+        #   unmeasured  — carried no evidence at all, so there is nothing to
+        #                 reuse: no sources, no verified findings
+        # Both are candidates. Treating `unmeasured` as pristine is what let a
+        # groundless episode outlive one with 8/10 chunks verified (MIR-002).
+        # Neither is deleted on this basis alone — age, staleness and the
+        # protected-tag guard still apply.
+        low_quality = (
+            ep.answer_quality_score is not None
+            and ep.answer_quality_score < min_quality
+        )
+        unmeasured = ep.answer_quality_score is None
         is_failure = ep.outcome == "failed" or ep.replan_exhausted
-        if not (low_quality or is_failure):
+        if not (low_quality or unmeasured or is_failure):
             continue
         if score_staleness(ep, now) < staleness_threshold:
             continue
