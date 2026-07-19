@@ -273,11 +273,26 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         assumption_store: AssumptionStore | None = None,  # Layer 5
         gateway_dry_run: bool = False,
         gateway_path: GatewayPath = "repl",
+        experience_retrieval: bool = True,
+        episodic_replay: bool = True,
+        no_durable_learning: bool = False,
     ):
         self.registry = registry
         self.policy = policy
         self.gateway_dry_run = gateway_dry_run
         self.gateway_path = gateway_path
+        # ── Memory permissions (INSTANCE-scoped, fixed for this agent's life) ──
+        # Holding stores is not the same permission as reading them, replaying
+        # an answer from them, or writing durable state. These three keep those
+        # apart; they are set once at construction and there is deliberately no
+        # per-run API yet.
+        #   experience_retrieval — inject episodic/procedural memory into planning
+        #   episodic_replay      — allow the fast path to serve a stored answer
+        #   no_durable_learning  — hard brake on every durable write (see
+        #                          `_durable_learning_suppressed`)
+        self.experience_retrieval = experience_retrieval
+        self.episodic_replay = episodic_replay
+        self.no_durable_learning = no_durable_learning
         self.suppress_durable_learning_writes = False
         # Audit / read-only execution brake. When True, the loop performs NO
         # durable learning writes (episodic, procedural, consolidation, user
@@ -745,6 +760,9 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # Jaccard ≥ 0.85 AND quality ≥ 0.70 → serve the stored answer directly,
         # skipping both the planner LLM call and the synthesizer LLM call.
         # Conditions that disable the fast path:
+        #   - episodic_replay is False (this agent may read experience memory
+        #     but may not serve a stored answer in place of a fresh cycle —
+        #     the unattended profile runs this way)
         #   - file_hint is set (the answer is tied to a specific file)
         #   - question starts with ':' (operator command)
         #   - full_answer is empty (episode from before this feature)
@@ -756,7 +774,8 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         _fp_ep = self._last_best_similar_episode
         _fp_score = self._last_best_similar_score
         if (
-            not local_critique_active
+            self.episodic_replay
+            and not local_critique_active
             and not file_hint
             and not user_question.strip().startswith(":")
             and _fp_ep is not None
