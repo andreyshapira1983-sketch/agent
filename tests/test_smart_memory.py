@@ -546,6 +546,9 @@ def test_fast_path_used_when_cached_episode_had_no_tools(workspace: Path) -> Non
             verified_chunks=2,
             unverified_chunks=0,
             full_answer="Paris is the capital of France.",
+            # This test covers the fast-path MECHANISM; eligibility (2c)
+            # fail-closes on unclassified episodes and has its own suite.
+            usage_eligible=True,
         )
     )
 

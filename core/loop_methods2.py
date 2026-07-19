@@ -4,6 +4,7 @@ public surface are unchanged."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 from core.models import (
     Action,
@@ -18,26 +19,75 @@ from core.models import (
     ToolCall,
     ToolResult,
 )
+from core.run_context import current_run
 from core.smart_memory import (
     EpisodicMemoryStore,
     MemoryConsolidationStore,
     ProceduralMemoryStore,
     consolidate_memory,
+    decide_usage_eligibility,
+    resolve_used_procedures,
     episode_from_agent_cycle,
     format_experience_context,
+    is_usage_eligible,
 )
 
-class AgentLoopExtractedMethods2:
-    def _durable_learning_suppressed(self) -> bool:
-        """True when durable learning writes must be skipped this cycle.
+# Every durable sink the loop can write. A write site names its sink; a name
+# outside this set is refused rather than waved through, so a typo or a new
+# unregistered sink fails closed.
+KNOWN_DURABLE_SINKS: frozenset[str] = frozenset({
+    "episode",          # episodic_store.save
+    "procedure",        # procedural_store.upsert_from_episode
+    "consolidation",    # consolidate_memory -> consolidation_store
+    "knowledge",        # knowledge pipeline auto-write / remember batch
+    "source_registry",  # source_registry_store
+    "profile",          # user_profile_store
+    "assumptions",      # assumption_store
+    "access_stats",     # persistent record access_count / last_accessed_at
+    "hygiene",          # expire / dedup / prune / archive — a DESTRUCTIVE write
+})
 
-        Combines the dry-run brake (`suppress_durable_learning_writes`) with
-        the deterministic audit/read-only brake so both are honoured at every
-        durable-write site with one check.
+
+class AgentLoopExtractedMethods2:
+    def _durable_learning_suppressed(self, sink: str | None = None) -> bool:
+        """True when a durable learning write must be skipped.
+
+        Resolution order — the first rule that applies wins:
+
+        1. ``audit_read_only`` — ABSOLUTE deny. The operator is auditing memory;
+           no per-sink permission may pierce this, so `:audit` keeps its
+           zero-delta guarantee.
+        2. ``suppress_durable_learning_writes`` (dry-run) — ABSOLUTE deny, for
+           the same reason: a dry run must leave no trace.
+        3. Unnamed or unrecognised ``sink`` — ALWAYS deny, and log it. Sink
+           *validity* is a separate question from sink *permission*, and it is
+           answered first: otherwise a typo would be refused only while an
+           allowlist happened to be active, and waved through on the
+           interactive profile. Reaching this branch means a caller passed a
+           name that is not in `KNOWN_DURABLE_SINKS` — a code defect, hence
+           the log line.
+        4. ``durable_writes is None`` — allow (the sink is known by now). This
+           is the interactive default and preserves the historical
+           "write everything" behaviour.
+        5. Otherwise the allowlist decides: on it → allow, off it → deny.
+
+        `durable_writes` is instance-scoped: it is fixed at construction for
+        the life of the agent, and there is deliberately no per-run API.
         """
-        return bool(getattr(self, "suppress_durable_learning_writes", False)) or bool(
-            getattr(self, "audit_read_only", False)
-        )
+        if bool(getattr(self, "audit_read_only", False)):
+            return True
+        if bool(getattr(self, "suppress_durable_learning_writes", False)):
+            return True
+        if sink is None or sink not in KNOWN_DURABLE_SINKS:
+            self.log.log(
+                "durable_write_unknown_sink",
+                {"sink": sink, "known_sinks": sorted(KNOWN_DURABLE_SINKS)},
+            )
+            return True
+        allowlist = getattr(self, "durable_writes", None)
+        if allowlist is None:
+            return False
+        return sink not in allowlist
 
     def set_audit_read_only(self, enabled: bool) -> bool:
         """Enable/disable audit read-only mode. Returns the resulting state.
@@ -141,7 +191,7 @@ class AgentLoopExtractedMethods2:
         # knows which records are actively useful (≠ junk that was saved but
         # never used again).
         if (
-            not self._durable_learning_suppressed()
+            not self._durable_learning_suppressed("access_stats")
             and self.persistent_store is not None
             and selected
         ):
@@ -173,6 +223,11 @@ class AgentLoopExtractedMethods2:
         self._last_procedure_records = []
         self._last_best_similar_episode = None
         self._last_best_similar_score = 0.0
+        # Holding the stores and being allowed to read them are separate
+        # permissions. Returning early also leaves `_last_best_similar_episode`
+        # unset, which structurally keeps the fast path from firing.
+        if not getattr(self, "experience_retrieval", True):
+            return ""
         if self.episodic_store is None and self.procedural_store is None:
             return ""
         # Only SUCCESSFUL episodes are fed back as reusable experience; a
@@ -181,11 +236,16 @@ class AgentLoopExtractedMethods2:
         # `lesson` episodes are kept regardless: they are learn-from-failure by
         # design. Over-fetch, then filter, then cap so up to 3 GOOD episodes
         # still surface even when some top matches were non-success.
+        # `is_usage_eligible` is the second, independent filter: outcome asks
+        # "did this go well", eligibility asks "is this episode allowed to
+        # steer anything at all". Legacy and quarantined episodes stay stored
+        # and auditable but never reach the planner.
         episodes = (
             [
                 ep
                 for ep in self.episodic_store.search(question, limit=6)
-                if ep.outcome == "success" or "lesson" in ep.tags
+                if (ep.outcome == "success" or "lesson" in ep.tags)
+                and is_usage_eligible(ep)
             ][:3]
             if self.episodic_store is not None
             else []
@@ -206,8 +266,11 @@ class AgentLoopExtractedMethods2:
                 if "/" in w or w.endswith(".py")
             ]
             for lesson in lessons:
-                if lesson not in episodes and path_tokens and any(
-                    tok in lesson.summary.lower() for tok in path_tokens
+                if (
+                    is_usage_eligible(lesson)          # second door — same gate
+                    and lesson not in episodes
+                    and path_tokens
+                    and any(tok in lesson.summary.lower() for tok in path_tokens)
                 ):
                     episodes.append(lesson)
         procedures = (
@@ -239,6 +302,13 @@ class AgentLoopExtractedMethods2:
                 repeat_ep, repeat_score = self.episodic_store.find_most_similar(
                     question, threshold=_REPEAT_THRESHOLD
                 )
+                # Third door, and the most dangerous one: this feeds the fast
+                # path, which returns a stored answer verbatim in place of a
+                # real cycle. An ineligible match is dropped here rather than
+                # at the fast-path gate, so re-ask hints cannot lean on it
+                # either.
+                if repeat_ep is not None and not is_usage_eligible(repeat_ep):
+                    repeat_ep, repeat_score = None, 0.0
                 # Store for fast-path and planner-cache checks in run().
                 self._last_best_similar_episode = repeat_ep
                 self._last_best_similar_score = repeat_score
@@ -295,6 +365,87 @@ class AgentLoopExtractedMethods2:
 
         return block
 
+    def _quarantine_conflicted_memory(self, knowledge_result: Any) -> None:
+        """Withdraw memory records whose claim just turned out contradicted.
+
+        Runs at write time, where the conflict is detected, so the window in
+        which a contradicted claim still reads as ordinary evidence is as
+        short as the cycle itself. Marking is by provenance tag only — a
+        record with no claim link is left alone rather than matched by
+        content, which would be the guess MIR-049/050 forbid.
+
+        Best-effort: quarantine failing must not abort a user-facing answer.
+        """
+        conflicts = getattr(knowledge_result, "conflicts", None)
+        conflicted_ids = {
+            cid
+            for conflict in (getattr(conflicts, "conflicts", None) or [])
+            for cid in getattr(conflict, "claim_ids", ())
+        }
+        if not conflicted_ids or self.persistent_store is None:
+            return
+        if self._durable_learning_suppressed("knowledge"):
+            return
+        try:
+            from core.knowledge_pipeline import quarantine_conflicted_records
+
+            records = self.persistent_store.load()
+            updated, report = quarantine_conflicted_records(
+                records, conflicted_claim_ids=conflicted_ids
+            )
+            if report["quarantined"]:
+                for record in updated:
+                    if "conflicted" in (record.tags or []):
+                        self.persistent_store.update(record)
+            self.log.log("conflict_quarantine", {"claims": len(conflicted_ids), **report})
+        except Exception as exc:  # noqa: BLE001
+            self.log.log(
+                "conflict_quarantine_error", {"error": type(exc).__name__}
+            )
+
+    def _record_aborted_episode(self, question: str, *, reason: str) -> None:
+        """Bank a `failed` episode for a run that did not complete.
+
+        Called from `run`'s exception paths. Without it an interrupted run
+        leaves either nothing (invisible) or, worse, a success banked earlier
+        in the cycle. Best-effort by construction: this runs while an exception
+        is propagating, so it must never replace that exception with its own.
+        """
+        if self.episodic_store is None:
+            return
+        if self._durable_learning_suppressed("episode"):
+            return
+        try:
+            run = current_run()
+            episode = episode_from_agent_cycle(
+                goal="(run aborted before completion)",
+                question=question,
+                answer="",
+                tools_used=[],
+                source_labels=[],
+                run_id=run.run_id if run else "",
+                task_id=(run.task_id or "") if run else "",
+                aborted_reason=reason,
+                # Same quarantine as any other episode written today.
+                usage_eligible=False,
+            )
+            written = self.episodic_store.save_once(episode)
+            self.log.log(
+                "episodic_memory_write_aborted",
+                {
+                    "written": written,
+                    "reason": reason,
+                    "episode_id": episode.id,
+                    "run_id": episode.run_id,
+                    "outcome": episode.outcome,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.log.log(
+                "smart_memory_error",
+                {"error": type(exc).__name__, "where": "_record_aborted_episode"},
+            )
+
     def _record_experience_memory(
         self,
         *,
@@ -314,13 +465,21 @@ class AgentLoopExtractedMethods2:
         Experience memory is best-effort. A malformed local state file should
         be quarantined by the state layer, not crash the user-facing answer.
         """
-        if self._durable_learning_suppressed():
+        # Episode, procedure and consolidation are three separate sinks: a path
+        # may be allowed to bank an episode while procedural promotion and
+        # consolidation stay off.
+        may_episode = not self._durable_learning_suppressed("episode")
+        may_procedure = not self._durable_learning_suppressed("procedure")
+        may_consolidation = not self._durable_learning_suppressed("consolidation")
+        if not (may_episode or may_procedure or may_consolidation):
             self.log.log(
                 "durable_learning_writes_skipped",
                 {
                     "reason": "audit_read_only"
                     if getattr(self, "audit_read_only", False)
-                    else "dry_run",
+                    else "dry_run"
+                    if getattr(self, "suppress_durable_learning_writes", False)
+                    else "not_allowlisted",
                     "sink": "experience_memory",
                 },
             )
@@ -331,6 +490,7 @@ class AgentLoopExtractedMethods2:
             and self.consolidation_store is None
         ):
             return
+        run = current_run()
         try:
             episode = episode_from_agent_cycle(
                 goal=goal_description,
@@ -342,12 +502,46 @@ class AgentLoopExtractedMethods2:
                 unverified_chunks=unverified_chunks,
                 weak_chunks=weak_chunks,
                 replan_exhausted=replan_exhausted,
+                run_id=run.run_id if run else "",
+                task_id=(run.task_id or "") if run else "",
+                # Admission is decided per episode, not by a global switch:
+                # MIR-002/041/046 are fixed, so the blanket quarantine is
+                # lifted — but only evidenced, completed, non-replay episodes
+                # (or curated lessons) become reusable experience. Everything
+                # else stays fail-closed, and `None` remains reserved for rows
+                # that predate the field. See `decide_usage_eligibility`.
+                usage_eligible=None,   # replaced below, once the record exists
+                # Attribution comes from what actually executed, over the
+                # procedures this run selected -- never matched by workflow_key,
+                # which MIR-050 measured to pool unrelated goals. () is a real
+                # answer here ("nothing applied"), distinct from a legacy None.
+                used_procedure_ids=resolve_used_procedures(
+                    selected=list(getattr(self, "_last_procedure_records", []) or []),
+                    executed_tools=list(getattr(self, "_executed_tools", []) or []),
+                ),
             )
-            if self.episodic_store is not None:
-                self.episodic_store.save(episode)
+            episode = replace(
+                episode, usage_eligible=decide_usage_eligibility(episode)
+            )
+            if self.episodic_store is not None and may_episode:
+                # save_once, not save: a run that reaches this site twice must
+                # bank one episode, not two. Bounded by the store's FIFO window.
+                written = self.episodic_store.save_once(episode)
+                if not written:
+                    self.log.log(
+                        "episodic_memory_write_skipped",
+                        {
+                            "reason": "already_banked_for_run",
+                            "episode_id": episode.id,
+                            "run_id": episode.run_id,
+                        },
+                    )
                 self.log.log(
                     "episodic_memory_write",
                     {
+                        "written": written,
+                        "run_id": episode.run_id,
+                        "task_id": episode.task_id,
                         "episode_id": episode.id,
                         "outcome": episode.outcome,
                         "answer_quality_score": episode.answer_quality_score,
@@ -360,8 +554,16 @@ class AgentLoopExtractedMethods2:
                 )
 
             procedure = None
-            if self.procedural_store is not None:
+            if self.procedural_store is not None and may_procedure:
                 procedure, created = self.procedural_store.upsert_from_episode(episode)
+                # Outcome feedback (MIR-048), driven only by the attribution
+                # MIR-049 recorded. Runs AFTER upsert on purpose: a fresh
+                # success already journalled this episode id, so idempotence
+                # makes this a no-op there and it only adds what upsert cannot
+                # express -- a `partial`/`failed` debit against the procedures
+                # the run actually used.
+                feedback = self.procedural_store.apply_episode_feedback(episode)
+                self.log.log("procedure_feedback", {"episode_id": episode.id, **feedback})
                 self.log.log(
                     "procedural_memory_update",
                     {
@@ -374,7 +576,8 @@ class AgentLoopExtractedMethods2:
                 )
 
             if (
-                self.consolidation_store is not None
+                may_consolidation
+                and self.consolidation_store is not None
                 and self.episodic_store is not None
                 and self.procedural_store is not None
                 and not skip_consolidation

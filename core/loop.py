@@ -40,7 +40,10 @@ from core.evidence import (
     evidence_from_tool_result,
     make_evidence,
 )
+from asyncio import CancelledError
+
 from core.ids import new_id
+from core.run_context import run_scope
 from core.llm import LLM
 from core.logger import TraceLogger
 from core.memory import WorkingMemory
@@ -273,11 +276,30 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         assumption_store: AssumptionStore | None = None,  # Layer 5
         gateway_dry_run: bool = False,
         gateway_path: GatewayPath = "repl",
+        experience_retrieval: bool = True,
+        episodic_replay: bool = True,
+        durable_writes: frozenset[str] | None = None,
     ):
         self.registry = registry
         self.policy = policy
         self.gateway_dry_run = gateway_dry_run
         self.gateway_path = gateway_path
+        # ── Memory permissions (INSTANCE-scoped, fixed for this agent's life) ──
+        # Holding stores is not the same permission as reading them, replaying
+        # an answer from them, or writing durable state. These three keep those
+        # apart; they are set once at construction and there is deliberately no
+        # per-run API yet.
+        #   experience_retrieval — inject episodic/procedural memory into planning
+        #   episodic_replay      — allow the fast path to serve a stored answer
+        #   durable_writes       — which durable sinks this agent may write.
+        #                          None = all (interactive default); a frozenset
+        #                          is an ALLOWLIST and everything outside it is
+        #                          denied, including unknown sink names. The
+        #                          audit and dry-run brakes outrank it entirely
+        #                          (see `_durable_learning_suppressed`).
+        self.experience_retrieval = experience_retrieval
+        self.episodic_replay = episodic_replay
+        self.durable_writes = durable_writes
         self.suppress_durable_learning_writes = False
         # Audit / read-only execution brake. When True, the loop performs NO
         # durable learning writes (episodic, procedural, consolidation, user
@@ -463,6 +485,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         file_hint: str | None = None,
         on_token: Any = None,
         deep_escalation: Any = None,
+        task_id: str | None = None,
     ) -> str:
         """Run one observe→plan→act→verify→respond cycle.
 
@@ -478,16 +501,82 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                       explicit, valid operator reason lets planner/synthesizer
                       escalate to the deep (Opus) tier; the default ``None``
                       keeps every autonomous run on the standard tier.
+            task_id: Optional id of the *logical task* this run serves. It
+                      survives a retry; the run id minted below does not.
+
+        This is a thin wrapper: it owns run identity and nothing else, so the
+        identity is bound before any cycle work and released even if the cycle
+        raises. The body lives in `_run_inner`.
         """
+        with run_scope(new_id("run"), task_id):
+            try:
+                return self._run_inner(
+                    user_question=user_question,
+                    file_hint=file_hint,
+                    on_token=on_token,
+                    deep_escalation=deep_escalation,
+                )
+            except (KeyboardInterrupt, CancelledError):
+                # Cancellation is a control signal, not a failure to absorb.
+                # Record the outcome honestly, then let it keep propagating —
+                # swallowing it would strand the caller that asked to stop.
+                # Caught explicitly rather than via `except BaseException` so
+                # unrelated exits (SystemExit, MemoryError) are not reinterpreted.
+                self._record_aborted_episode(user_question, reason="cancelled")
+                raise
+            except Exception as exc:  # noqa: BLE001
+                self._record_aborted_episode(
+                    user_question, reason=type(exc).__name__
+                )
+                raise
+
+    # Minimum measured quality an episode needs before its answer may be
+    # served verbatim instead of running a real cycle.
+    _REPLAY_MIN_QUALITY = 0.70
+
+    @staticmethod
+    def _quality_allows_replay(episode: Any) -> bool:
+        """May this episode's answer be replayed, on quality grounds alone?
+
+        An unmeasured score (None — the episode carried no evidence chunks)
+        is refused. Absence of measurement is not evidence of quality, and
+        the previous encoding of "unmeasured" as 1.0 cleared this gate by the
+        widest possible margin (MIR-002).
+        """
+        score = getattr(episode, "answer_quality_score", None)
+        if score is None:
+            return False
+        return score >= AgentLoop._REPLAY_MIN_QUALITY
+
+    def _run_inner(
+        self,
+        user_question: str,
+        file_hint: str | None = None,
+        on_token: Any = None,
+        deep_escalation: Any = None,
+    ) -> str:
+        """The cycle body. Always entered through `run`, which owns run identity."""
         # Store streaming callback so _synthesize() can pick it up without
         # changing its signature (which is called from multiple paths).
         self._stream_on_token = on_token
         self._cycle_findings = []
+        # Tools that ACTUALLY executed this run, in order. Procedure
+        # attribution (MIR-049) is judged from this rather than from the plan,
+        # so a run cancelled before reaching a procedure's steps never debits
+        # it. Accumulated as execution happens so an exception cannot discard
+        # attribution already earned.
+        self._executed_tools = []
         self.last_replan_exhausted = False
         self.last_source_ranking = None
         self.last_source_registry = SourceRegistry()
         self.last_knowledge_pipeline = None
-        durable_learning_writes = not self._durable_learning_suppressed()
+        # Per-sink permissions for this cycle. Experience-memory sinks
+        # (episode/procedure/consolidation) are resolved inside
+        # `_record_experience_memory`, which owns those three writes.
+        may_knowledge = not self._durable_learning_suppressed("knowledge")
+        may_source_registry = not self._durable_learning_suppressed("source_registry")
+        may_profile = not self._durable_learning_suppressed("profile")
+        may_assumptions = not self._durable_learning_suppressed("assumptions")
 
         # Layer 4 — load the user profile for this cycle.
         if self.user_profile_store is not None:
@@ -745,6 +834,9 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # Jaccard ≥ 0.85 AND quality ≥ 0.70 → serve the stored answer directly,
         # skipping both the planner LLM call and the synthesizer LLM call.
         # Conditions that disable the fast path:
+        #   - episodic_replay is False (this agent may read experience memory
+        #     but may not serve a stored answer in place of a fresh cycle —
+        #     the unattended profile runs this way)
         #   - file_hint is set (the answer is tied to a specific file)
         #   - question starts with ':' (operator command)
         #   - full_answer is empty (episode from before this feature)
@@ -756,12 +848,13 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         _fp_ep = self._last_best_similar_episode
         _fp_score = self._last_best_similar_score
         if (
-            not local_critique_active
+            self.episodic_replay
+            and not local_critique_active
             and not file_hint
             and not user_question.strip().startswith(":")
             and _fp_ep is not None
             and _fp_score >= 0.85
-            and _fp_ep.answer_quality_score >= 0.70
+            and self._quality_allows_replay(_fp_ep)
             and _fp_ep.full_answer
             and not _fp_ep.tools_used
         ):
@@ -774,14 +867,24 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     "answer_chars": len(_fp_ep.full_answer),
                 },
             )
+            # A replay produces NO new evidence: nothing was fetched, nothing
+            # was verified this cycle. Banking it as verified_chunks=1 minted
+            # verification out of "it matched something in memory", and the
+            # replay then looked as trustworthy as the answer it copied — a
+            # self-reinforcing chain (MIR-041).
+            #
+            # unverified=1 rather than 0/0 on purpose: an empty chain scores
+            # quality 1.0 (MIR-002), which would hand the replay top marks for
+            # having no evidence at all. The source episode is named in
+            # source_labels so the copy stays traceable to its origin.
             self._record_experience_memory(
                 goal_description=goal.description,
                 question=user_question,
                 answer=_fp_ep.full_answer,
                 tools_used=[],
                 source_labels=[f"memory:{_fp_ep.id}"],
-                verified_chunks=1,
-                unverified_chunks=0,
+                verified_chunks=0,
+                unverified_chunks=1,
                 replan_exhausted=False,
             )
             if self.memory is not None:
@@ -1173,6 +1276,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     if trigger is not None:
                         attempt_failures.append(trigger)
                     continue
+                self._executed_tools.append(outcome["tool"])
                 attempt_artifacts[outcome["label"]] = {
                     "tool": outcome["tool"],
                     "output": outcome["output"],
@@ -1394,10 +1498,10 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             knowledge_result = self.knowledge_pipeline.run(
                 chain,
                 ranking=source_ranking,
-                source_store=self.source_registry_store if durable_learning_writes else None,
-                remember=self._knowledge_remember_batch() if durable_learning_writes else None,
+                source_store=self.source_registry_store if may_source_registry else None,
+                remember=self._knowledge_remember_batch() if may_knowledge else None,
                 auto_write_memory=(
-                    self.knowledge_auto_write if durable_learning_writes else False
+                    self.knowledge_auto_write if may_knowledge else False
                 ),
             )
             source_registry = knowledge_result.registry
@@ -1790,6 +1894,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                         if trigger is not None:
                             failure_history.append(trigger)
                         continue
+                    self._executed_tools.append(outcome["tool"])
                     artifacts[outcome["label"]] = {
                         "tool": outcome["tool"],
                         "output": outcome["output"],
@@ -1870,18 +1975,19 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     chain,
                     ranking=source_ranking,
                     source_store=(
-                        self.source_registry_store if durable_learning_writes else None
+                        self.source_registry_store if may_source_registry else None
                     ),
                     remember=(
                         self._knowledge_remember_batch()
-                        if durable_learning_writes
+                        if may_knowledge
                         else None
                     ),
                     auto_write_memory=(
-                        self.knowledge_auto_write if durable_learning_writes else False
+                        self.knowledge_auto_write if may_knowledge else False
                     ),
                 )
                 source_registry = knowledge_result.registry
+                self._quarantine_conflicted_memory(knowledge_result)
                 self.last_source_registry = source_registry
                 self.log.log(
                     "source_registry",
@@ -2079,35 +2185,16 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 pass
 
         verification = self.last_verification
-        if durable_learning_writes:
-            weak_chunks = 0
-            if verification:
-                weak_chunks = (
-                    verification.subagent_asserted_chunks
-                    + verification.cited_but_unmatched_chunks
-                    + verification.receipt_missing_chunks
-                    + verification.topic_supported_but_claim_unverified_chunks
-                )
-            self._record_experience_memory(
-                goal_description=goal.description,
-                question=user_question,
-                answer=answer,
-                tools_used=[s["tool"] for s in planner_out.sources],
-                source_labels=list(artifacts.keys()) or ["general-knowledge"],
-                verified_chunks=verification.verified_chunks if verification else 0,
-                unverified_chunks=verification.unverified_chunks if verification else 0,
-                weak_chunks=weak_chunks,
-                replan_exhausted=replan_exhausted,
-                skip_consolidation=cheap_path_active,
+        weak_chunks = 0
+        if verification:
+            weak_chunks = (
+                verification.subagent_asserted_chunks
+                + verification.cited_but_unmatched_chunks
+                + verification.receipt_missing_chunks
+                + verification.topic_supported_but_claim_unverified_chunks
             )
-        else:
-            self.log.log(
-                "durable_learning_writes_skipped",
-                {"reason": "dry_run"},
-            )
-
         # Layer 4 — update user profile from this interaction.
-        if durable_learning_writes and self.user_profile_store is not None:
+        if may_profile and self.user_profile_store is not None:
             try:
                 updated = self.user_profile_store.update_from_interaction(
                     question=user_question,
@@ -2133,7 +2220,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # Layer 5 — persist assumptions and expose via last_assumptions.
         self.last_assumptions = _run_assumptions
         if (
-            durable_learning_writes
+            may_assumptions
             and self.assumption_store is not None
             and _run_assumptions.new_assumptions
         ):
@@ -2141,6 +2228,29 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 self.assumption_store.save_many(_run_assumptions.new_assumptions)
             except Exception:
                 pass  # Store failure must never abort the run.
+
+        # ── Bank the episode LAST ────────────────────────────────────────────
+        # A `success` outcome may only be recorded once the run has actually
+        # finished. Writing it earlier leaves a window where a later failure
+        # would abort the run with a success already banked — and idempotency
+        # (keyed on run_id) would then refuse to correct it.
+        #
+        # No outer permission gate here: episode, procedure and consolidation
+        # are three separate sinks, and `_record_experience_memory` resolves
+        # each one. Gating the whole call would make "bank an episode but
+        # promote no procedure" unreachable.
+        self._record_experience_memory(
+            goal_description=goal.description,
+            question=user_question,
+            answer=answer,
+            tools_used=[s["tool"] for s in planner_out.sources],
+            source_labels=list(artifacts.keys()) or ["general-knowledge"],
+            verified_chunks=verification.verified_chunks if verification else 0,
+            unverified_chunks=verification.unverified_chunks if verification else 0,
+            weak_chunks=weak_chunks,
+            replan_exhausted=replan_exhausted,
+            skip_consolidation=cheap_path_active,
+        )
 
         # Clear streaming callback so it cannot leak into the next turn.
         self._stream_on_token = None
