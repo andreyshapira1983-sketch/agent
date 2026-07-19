@@ -87,18 +87,22 @@ STALENESS_FACTOR = 2
 #                            could neither record nor recall experience)
 #   episodic_replay=False    it may read that experience, but must never serve
 #                            a stored answer in place of running a real cycle
-#   durable_writes=frozenset()
-#                            an EMPTY allowlist: every durable sink is denied,
-#                            so connecting the stores cannot grow memory
+#   durable_writes={"episode"}
+#                            a ONE-SINK allowlist: the unattended agent banks
+#                            episodes so its work leaves a trace, while
+#                            procedural promotion, consolidation, knowledge,
+#                            source registry, profile and assumptions all stay
+#                            denied by default-deny
 #   with_memory=False        unchanged — no cross-run session memory
 #
-# Autonomous episode write-back means adding "episode" to the allowlist. That
-# is a SEPARATE, later sub-step and is deliberately not enabled here.
+# Episodes are written `usage_eligible=False` (quarantined), so the loop closes
+# mechanically but stays inert until the quality defects (MIR-002/041/046) are
+# fixed: wiring operational, usage quarantined.
 UNATTENDED_MEMORY_PROFILE = {
     "with_memory": False,
     "with_experience": True,
     "episodic_replay": False,
-    "durable_writes": frozenset(),
+    "durable_writes": frozenset({"episode"}),
 }
 
 

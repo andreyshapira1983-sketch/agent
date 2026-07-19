@@ -361,6 +361,49 @@ class AgentLoopExtractedMethods2:
 
         return block
 
+    def _record_aborted_episode(self, question: str, *, reason: str) -> None:
+        """Bank a `failed` episode for a run that did not complete.
+
+        Called from `run`'s exception paths. Without it an interrupted run
+        leaves either nothing (invisible) or, worse, a success banked earlier
+        in the cycle. Best-effort by construction: this runs while an exception
+        is propagating, so it must never replace that exception with its own.
+        """
+        if self.episodic_store is None:
+            return
+        if self._durable_learning_suppressed("episode"):
+            return
+        try:
+            run = current_run()
+            episode = episode_from_agent_cycle(
+                goal="(run aborted before completion)",
+                question=question,
+                answer="",
+                tools_used=[],
+                source_labels=[],
+                run_id=run.run_id if run else "",
+                task_id=(run.task_id or "") if run else "",
+                aborted_reason=reason,
+                # Same quarantine as any other episode written today.
+                usage_eligible=False,
+            )
+            written = self.episodic_store.save_once(episode)
+            self.log.log(
+                "episodic_memory_write_aborted",
+                {
+                    "written": written,
+                    "reason": reason,
+                    "episode_id": episode.id,
+                    "run_id": episode.run_id,
+                    "outcome": episode.outcome,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.log.log(
+                "smart_memory_error",
+                {"error": type(exc).__name__, "where": "_record_aborted_episode"},
+            )
+
     def _record_experience_memory(
         self,
         *,
@@ -419,6 +462,13 @@ class AgentLoopExtractedMethods2:
                 replan_exhausted=replan_exhausted,
                 run_id=run.run_id if run else "",
                 task_id=(run.task_id or "") if run else "",
+                # Quarantined, not unclassified: `answer_quality_score` and the
+                # verified-chunk counts these episodes carry are still computed
+                # by the semantics MIR-002/041/046 describe as broken. Writing
+                # them is deliberate (the loop must close); admitting them to
+                # retrieval is not. `None` stays reserved for rows that predate
+                # the field. Flips to True when those defects are fixed.
+                usage_eligible=False,
             )
             if self.episodic_store is not None and may_episode:
                 # save_once, not save: a run that reaches this site twice must

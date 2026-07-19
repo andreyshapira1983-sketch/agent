@@ -297,10 +297,18 @@ def test_autonomous_profile_reads_but_never_replays(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------
-# 7. SAFETY — connecting the stores must not let the unattended agent write.
+# 7. SAFETY — holding the stores must not by itself permit writing.
 #    Zero delta across every durable sink (MIR-038 / MGA-09 shape).
+#
+#    Originally this asserted that the *unattended profile* writes nothing.
+#    Sub-step 2d deliberately gave that profile a one-sink allowlist, so the
+#    assertion is now made against an EMPTY allowlist directly: the property
+#    worth pinning is "stores present + nothing permitted => nothing written",
+#    which must hold no matter what the shipped profile currently allows.
+#    Per-sink behaviour of the real profile is covered by
+#    tests/test_autonomous_episode_writeback.py.
 # --------------------------------------------------------------------------
-def test_autonomous_cycle_leaves_durable_state_unchanged(tmp_path: Path) -> None:
+def test_stores_without_permission_write_nothing(tmp_path: Path) -> None:
     question = "how much is two plus two"
 
     # CONTROL: the same cycle on the interactive profile DOES write durable
@@ -314,10 +322,14 @@ def test_autonomous_cycle_leaves_durable_state_unchanged(tmp_path: Path) -> None
         "precondition failed: this cycle does not write durable state at all"
     )
 
-    # The unattended profile runs the same cycle and must change nothing.
+    # Same stores, no permissions: the cycle must change nothing.
     auto_ws = tmp_path / "unattended"
     auto_ws.mkdir()
-    agent = _autonomous(auto_ws)
+    agent = build_agent(
+        auto_ws,
+        approval_provider=None,
+        **{**UNATTENDED_MEMORY_PROFILE, "durable_writes": frozenset()},
+    )
     before = _durable_snapshot(auto_ws)
     answer = _drive_one_cycle(agent, question)
     after = _durable_snapshot(auto_ws)
