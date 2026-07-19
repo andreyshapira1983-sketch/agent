@@ -144,6 +144,12 @@ class EpisodeRecord:
     # from a deliberate quarantine. Retrieval admits only True — see
     # `is_usage_eligible`.
     usage_eligible: bool | None = None
+    # Procedures that actually influenced THIS run — judged from execution, not
+    # from the plan. THREE states: None = legacy row, attribution unknown and
+    # nothing may be inferred from it; () = this version ran and is certain no
+    # procedure was applied; (ids…) = application observed. MIR-048 debits
+    # these ids, so a looser meaning would turn feedback into misattribution.
+    used_procedure_ids: tuple[str, ...] | None = None
     id: str = field(default_factory=lambda: new_id("ep"))
     created_at: str = field(default_factory=_now_iso)
 
@@ -153,6 +159,10 @@ class EpisodeRecord:
             "task_id": self.task_id,
             "run_id": self.run_id,
             "usage_eligible": self.usage_eligible,
+            "used_procedure_ids": (
+                None if self.used_procedure_ids is None
+                else list(self.used_procedure_ids)
+            ),
             "goal": self.goal,
             "question": self.question,
             "outcome": self.outcome,
@@ -180,6 +190,11 @@ class EpisodeRecord:
                 None
                 if data.get("usage_eligible") is None
                 else bool(data["usage_eligible"])
+            ),
+            used_procedure_ids=(
+                None
+                if data.get("used_procedure_ids") is None
+                else tuple(str(x) for x in data["used_procedure_ids"])
             ),
             goal=str(data.get("goal") or ""),
             question=str(data.get("question") or ""),
@@ -682,6 +697,45 @@ class MemoryConsolidationStore:
         return len(self.load())
 
 
+def resolve_used_procedures(
+    *, selected: "list[ProcedureRecord]", executed_tools: "list[str]"
+) -> tuple[str, ...]:
+    """Which of the SELECTED procedures this run actually applied.
+
+    Two gates, both required. A procedure must have been selected into the run
+    (retrieval alone is not use), and every tool in its workflow must have
+    actually executed — the plan is not evidence, so a run cancelled before
+    reaching a procedure's steps does not debit it.
+
+    Attribution follows the selected records, never `workflow_key`: MIR-050
+    measured that keys pool unrelated goals, so matching on shape would debit
+    whichever procedure happened to share it.
+
+    Order is first actual completion and the result is a tuple, so the stored
+    record is deterministic and reproducible — a serialised set would not be.
+    """
+    ran: list[str] = []
+    seen: set[str] = set()
+    executed = list(executed_tools)
+    for proc in selected:
+        if proc.id in seen:
+            continue
+        workflow = [t for t in proc.workflow_key.removeprefix("tools:").split("->") if t]
+        if not workflow:
+            continue
+        if all(tool in executed for tool in workflow):
+            ran.append(proc.id)
+            seen.add(proc.id)
+    # Order by the point each workflow completed, so the record reflects the
+    # sequence of actual use rather than the order retrieval happened to return.
+    def _completion_index(pid: str) -> int:
+        proc = next(p for p in selected if p.id == pid)
+        wf = [t for t in proc.workflow_key.removeprefix("tools:").split("->") if t]
+        return max(len(executed) - 1 - executed[::-1].index(t) for t in wf)
+
+    return tuple(sorted(ran, key=_completion_index))
+
+
 def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
     """Decide whether a freshly banked episode may steer later answers.
 
@@ -755,6 +809,7 @@ def episode_from_agent_cycle(
     task_id: str = "",
     usage_eligible: bool | None = None,
     aborted_reason: str = "",
+    used_procedure_ids: tuple[str, ...] | None = None,
 ) -> EpisodeRecord:
     """Build an episode from one finished cycle.
 
@@ -818,6 +873,7 @@ def episode_from_agent_cycle(
         # Defaults to None (legacy_unclassified): banking an episode is not by
         # itself a verdict that it may steer later answers. The caller decides.
         usage_eligible=usage_eligible,
+        used_procedure_ids=used_procedure_ids,
         id=episode_id,
     )
 
