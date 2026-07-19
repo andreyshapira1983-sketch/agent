@@ -96,13 +96,32 @@ def test_unnamed_sink_is_denied_under_an_allowlist(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------
 # The three policy shapes.
 # --------------------------------------------------------------------------
-def test_none_policy_allows_every_sink(tmp_path: Path) -> None:
-    """The interactive default: unchanged from before this sub-step."""
+def test_none_policy_allows_every_KNOWN_sink(tmp_path: Path) -> None:
+    """The interactive default: every *known* sink is permitted."""
     agent = _agent(tmp_path, None)
 
     for sink in KNOWN_DURABLE_SINKS:
         assert agent._durable_learning_suppressed(sink) is False
-    assert agent._durable_learning_suppressed() is False
+
+
+def test_unknown_sink_is_denied_without_an_allowlist(tmp_path: Path) -> None:
+    """`durable_writes=None` must not become an escape hatch for a bad name.
+
+    Sink validity and sink permission are different questions. Answering
+    "permitted" before "is this even a real sink" let a typo through on the
+    interactive profile — the one with the most stores attached.
+    """
+    agent = _agent(tmp_path, None)
+
+    assert agent._durable_learning_suppressed("not_a_real_sink") is True
+    assert agent._durable_learning_suppressed("episodes") is True
+
+
+def test_unnamed_sink_is_denied_without_an_allowlist(tmp_path: Path) -> None:
+    agent = _agent(tmp_path, None)
+
+    assert agent._durable_learning_suppressed() is True
+    assert agent._durable_learning_suppressed(None) is True
 
 
 def test_empty_allowlist_denies_every_sink(tmp_path: Path) -> None:
