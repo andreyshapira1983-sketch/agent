@@ -38,18 +38,28 @@ def _clean_text(text: str, *, max_chars: int = 800) -> str:
     return redacted
 
 
-def _compute_quality_score(verified: int, unverified: int, weak: int = 0) -> float:
+def _compute_quality_score(
+    verified: int, unverified: int, weak: int = 0
+) -> float | None:
     """Fraction of evidence chunks that stood up as verified support.
 
     ``weak`` counts claims the verifier could NOT confirm as faithful support —
     sub-agent-asserted, cited-but-unmatched, receipt-missing and topic-only
     chunks. They belong in the denominator, never in the numerator: an answer
     resting on unconfirmed support must not score as if it were verified.
-    Returns 1.0 only when NO evidence chunks of any kind exist (a pure
-    general-knowledge answer — neutral, not penalised)."""
+
+    Returns **None** when there are no chunks at all (a pure general-knowledge
+    answer): with an empty denominator the fraction is undefined, not perfect.
+    This used to return 1.0 "so general knowledge is not penalised", but the
+    top of the scale is not a neutral value — every consumer read it as
+    "fully verified" and inverted (MIR-002): groundless episodes outlived
+    well-evidenced ones in hygiene, were shielded from pruning, and were less
+    likely to trigger a re-ask hint. Consumers must now decide explicitly what
+    an unmeasured answer means for them.
+    """
     total = verified + unverified + weak
     if total == 0:
-        return 1.0
+        return None
     return round(verified / total, 3)
 
 
@@ -115,9 +125,9 @@ class EpisodeRecord:
     weak_chunks: int = 0
     replan_exhausted: bool = False
     # Quality score: verified / (verified + unverified + weak), clamped to [0, 1].
-    # 1.0 when no evidence chunks were seen (general-knowledge answer — neutral).
-    # Computed from the chunk counts; not stored separately in the JSONL.
-    answer_quality_score: float = 1.0
+    # None when no evidence chunks were seen at all — the fraction is undefined,
+    # NOT perfect. Computed from the chunk counts; not stored in the JSONL.
+    answer_quality_score: float | None = None
     tags: tuple[str, ...] = ()
     # Full answer text — stored verbatim for the episodic fast path.
     # Empty string for episodes created before this field was added.
@@ -448,9 +458,16 @@ class EpisodicMemoryStore:
                 best_ep = ep
         if best_ep is None:
             return None, 0.0
-        # Lower the threshold when the best candidate was a low-quality answer.
+        # Lower the threshold when the best candidate was a low-quality answer
+        # — or an unmeasured one. A re-ask hint is an offer to go deeper, not a
+        # verdict on the episode, and an answer that carried no evidence is a
+        # plausible reason someone is asking again. Treating None as 1.0 made
+        # the hint LESS likely exactly where it was most useful (MIR-002).
         effective_threshold = threshold
-        if best_ep.answer_quality_score < 0.5:
+        if (
+            best_ep.answer_quality_score is None
+            or best_ep.answer_quality_score < 0.5
+        ):
             effective_threshold = max(0.20, threshold - 0.10)
         if best_score >= effective_threshold:
             return best_ep, best_score

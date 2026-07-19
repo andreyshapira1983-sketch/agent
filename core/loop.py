@@ -530,6 +530,24 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 )
                 raise
 
+    # Minimum measured quality an episode needs before its answer may be
+    # served verbatim instead of running a real cycle.
+    _REPLAY_MIN_QUALITY = 0.70
+
+    @staticmethod
+    def _quality_allows_replay(episode: Any) -> bool:
+        """May this episode's answer be replayed, on quality grounds alone?
+
+        An unmeasured score (None — the episode carried no evidence chunks)
+        is refused. Absence of measurement is not evidence of quality, and
+        the previous encoding of "unmeasured" as 1.0 cleared this gate by the
+        widest possible margin (MIR-002).
+        """
+        score = getattr(episode, "answer_quality_score", None)
+        if score is None:
+            return False
+        return score >= AgentLoop._REPLAY_MIN_QUALITY
+
     def _run_inner(
         self,
         user_question: str,
@@ -830,7 +848,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             and not user_question.strip().startswith(":")
             and _fp_ep is not None
             and _fp_score >= 0.85
-            and _fp_ep.answer_quality_score >= 0.70
+            and self._quality_allows_replay(_fp_ep)
             and _fp_ep.full_answer
             and not _fp_ep.tools_used
         ):
