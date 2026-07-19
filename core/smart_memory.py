@@ -7,7 +7,7 @@ to procedures and surface stale knowledge risks.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Literal
@@ -265,6 +265,29 @@ class ProcedureRecord:
             status=_procedure_status(str(data.get("status") or "active")),
             created_at=str(data.get("created_at") or _now_iso()),
             updated_at=str(data.get("updated_at") or _now_iso()),
+        )
+
+    def with_outcome(self, episode: EpisodeRecord, verdict: str) -> "ProcedureRecord":
+        """Apply one observation, recomputing every derived value together.
+
+        Counter, confidence and status move in a single new record, so no
+        reader can observe a bumped counter beside a stale confidence.
+        `source_episode_ids` doubles as the applied-feedback journal, which is
+        what makes re-processing a queue a no-op (see `apply_episode_feedback`).
+        """
+        success_count = self.success_count + (1 if verdict == "success" else 0)
+        failure_count = self.failure_count + (1 if verdict == "failure" else 0)
+        confidence = _smoothed_confidence(success_count, failure_count)
+        return replace(
+            self,
+            source_episode_ids=tuple(
+                dict.fromkeys([*self.source_episode_ids, episode.id])
+            ),
+            success_count=success_count,
+            failure_count=failure_count,
+            confidence=confidence,
+            status="active" if confidence >= 0.6 else "needs_review",
+            updated_at=_now_iso(),
         )
 
     def with_episode(self, episode: EpisodeRecord) -> "ProcedureRecord":
@@ -537,6 +560,64 @@ class ProceduralMemoryStore:
     def count(self) -> int:
         return len(self.load())
 
+    def apply_episode_feedback(self, episode: EpisodeRecord) -> dict:
+        """Feed one run's outcome back to the procedures it actually used.
+
+        Driven **only** by `episode.used_procedure_ids`. There is deliberately
+        no fallback to workflow_key, tool set, name similarity, a fresh
+        retrieval or inference from content: MIR-050 measured that keys pool
+        unrelated goals, so any of those would debit a procedure that had
+        nothing to do with this run. An id that no longer resolves is reported
+        as `orphaned` — never substituted with something that merely looks
+        similar.
+
+        `None` (legacy, attribution unknown) and `()` (known to have applied
+        none) are both no-ops, and stay distinguishable in the report.
+
+        Idempotent per episode: a procedure whose journal already lists this
+        episode id is skipped, so re-processing a queue cannot turn the ratchet
+        twice. The check is an explicit journal lookup, not a guess from the
+        counters' shape.
+        """
+        used = episode.used_procedure_ids
+        report = {
+            "applied": 0, "already_applied": 0, "orphaned": 0, "skipped": 0,
+            "verdict": feedback_for_episode(episode),
+            "attribution": "unknown" if used is None else "recorded",
+        }
+        if not used:
+            return report
+        if report["verdict"] == "none":
+            report["skipped"] = len(dict.fromkeys(used))
+            return report
+
+        with state_file_lock(self.path):
+            rows = read_state_jsonl_unlocked(self.path)
+            procs = []
+            for row in rows:
+                try:
+                    procs.append(ProcedureRecord.from_dict(row))
+                except (TypeError, ValueError):
+                    continue
+            by_id = {p.id: p for p in procs}
+            changed = False
+            for pid in dict.fromkeys(used):        # collapse duplicates first
+                target = by_id.get(pid)
+                if target is None:
+                    report["orphaned"] += 1
+                    continue
+                if episode.id in target.source_episode_ids:
+                    report["already_applied"] += 1
+                    continue
+                by_id[pid] = target.with_outcome(episode, report["verdict"])
+                report["applied"] += 1
+                changed = True
+            if changed:
+                rewrite_state_jsonl_unlocked(
+                    self.path, [by_id.get(p.id, p).to_dict() for p in procs]
+                )
+        return report
+
     def recompute_legacy_confidence(
         self, *, dry_run: bool = True, limit: int | None = None
     ) -> dict:
@@ -695,6 +776,26 @@ class MemoryConsolidationStore:
 
     def count(self) -> int:
         return len(self.load())
+
+
+def feedback_for_episode(episode: EpisodeRecord) -> str:
+    """What this run's outcome says about a procedure it used.
+
+    Returns "success", "failure" or "none".
+
+    A cancelled run yields "none": cancellation is a control signal, not
+    evidence that the procedure is bad. Punishing a procedure because an
+    operator pressed stop would make the counters describe scheduling, not
+    quality. `partial` DOES count as a failure — unverified support
+    outnumbered verified support, which is a real quality signal.
+    """
+    if any(t.startswith("aborted:cancelled") for t in episode.tags):
+        return "none"
+    if episode.outcome == "success":
+        return "success"
+    if episode.outcome in ("partial", "failed"):
+        return "failure"
+    return "none"
 
 
 def resolve_used_procedures(

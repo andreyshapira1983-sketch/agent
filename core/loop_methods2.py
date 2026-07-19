@@ -518,6 +518,14 @@ class AgentLoopExtractedMethods2:
             procedure = None
             if self.procedural_store is not None and may_procedure:
                 procedure, created = self.procedural_store.upsert_from_episode(episode)
+                # Outcome feedback (MIR-048), driven only by the attribution
+                # MIR-049 recorded. Runs AFTER upsert on purpose: a fresh
+                # success already journalled this episode id, so idempotence
+                # makes this a no-op there and it only adds what upsert cannot
+                # express -- a `partial`/`failed` debit against the procedures
+                # the run actually used.
+                feedback = self.procedural_store.apply_episode_feedback(episode)
+                self.log.log("procedure_feedback", {"episode_id": episode.id, **feedback})
                 self.log.log(
                     "procedural_memory_update",
                     {
