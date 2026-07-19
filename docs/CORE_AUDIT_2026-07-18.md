@@ -204,6 +204,24 @@ Recorded so this audit cannot be accused of only listing suspicions.
 
 ## 7. Relationship to existing audits & next step
 
+> **⚠️ STATUS LEDGER SUPERSEDED (2026-07-20).** This document's own claim below
+> — "None is yet fixed in code" — was true when written and is false now. Do
+> **not** read any open/closed judgement from this file: statuses live only in
+> [`audit/MASTER_ISSUE_REGISTRY.md`](audit/MASTER_ISSUE_REGISTRY.md), where each
+> of these findings carries its canonical `MIR-` id, its resolution and the
+> commit that made it.
+>
+> Rough mapping for orientation (the registry is authoritative): CORE-01 →
+> MIR-001, CORE-02 → MIR-003, CORE-03 → MIR-002, CORE-04 → MIR-004, CORE-05 →
+> MIR-005, CORE-06 → MIR-010, CORE-07 → MIR-017, CORE-08 → MIR-011, CORE-09 →
+> MIR-012, CORE-10 → MIR-007, CORE-11 → MIR-008, CORE-12 → MIR-009.
+>
+> **What remains valuable here, and why the file is kept:** the reproduction
+> method, the execution-verified evidence for each defect, the "one
+> self-reinforcing loop" framing of CORE-01…05, and Section 4's honest
+> negatives. That reasoning is why several fixes took the shape they did, and
+> it exists nowhere else.
+
 Most CORE-01…09 correspond to findings the repo's own audits already recorded
 (`MEMORY_SYSTEM_AUDIT.md` MGA-*, `LIVE_PROBE_FINDINGS.md` LPF-*,
 `OPERATIONAL_FAILURE_MODES.md` OFM-010). This pass **independently re-verified

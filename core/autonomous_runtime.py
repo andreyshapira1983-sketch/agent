@@ -831,6 +831,11 @@ class AutonomousRuntime:
             },
         )
         try:
+            # NOTE: no task_id yet. By this point the RuntimeTask (which has
+            # the id, see run_task_queue) has been reduced to an AutonomousTask
+            # carrying only kind+description. Threading the queue's task id
+            # across that boundary belongs to the autonomous write-back step,
+            # where it is actually consumed.
             answer = self.agent.run(user_question=task.description)
         finally:
             self.agent.gateway_dry_run = previous_gateway_dry_run
