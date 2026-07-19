@@ -116,6 +116,12 @@ class Evidence:
     confidence: float        # in [0, 1]
     claim: str               # short human-readable claim this evidence supports
     excerpt: str             # first MAX_EXCERPT_CHARS chars of the source
+    # Provenance of the underlying record, when it has one. For memory
+    # evidence this is the persistent record's `source` — "user-explicit",
+    # "agent-auto", an ingested source type. It was previously only readable
+    # as prose inside `claim`, which meant the verifier could not consult it
+    # without parsing English. None for evidence that has no such notion.
+    origin: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -128,6 +134,7 @@ class Evidence:
             "confidence": self.confidence,
             "claim": self.claim,
             "excerpt": self.excerpt,
+            "origin": self.origin,
         }
 
     @classmethod
@@ -142,6 +149,7 @@ class Evidence:
             confidence=float(data["confidence"]),
             claim=data["claim"],
             excerpt=data["excerpt"],
+            origin=data.get("origin"),
         )
 
 
@@ -224,6 +232,7 @@ def make_evidence(
     excerpt: str,
     confidence: float | None = None,
     fetched_at: str | None = None,
+    origin: str | None = None,
 ) -> Evidence:
     """Constructor that fills in id / hash / timestamp / baseline confidence.
 
@@ -246,6 +255,7 @@ def make_evidence(
         confidence=conf,
         claim=claim,
         excerpt=excerpt_trimmed,
+        origin=origin,
     )
 
 
@@ -604,6 +614,9 @@ def evidence_from_memory_record(
         claim=f"Memory record {record_id}" + (f" (source={source})" if source else ""),
         excerpt=content,
         confidence=conf,
+        # Structured copy of the same fact the claim states in prose, so the
+        # verifier can weigh provenance without parsing the sentence.
+        origin=source,
         fetched_at=created_at,
     )
 

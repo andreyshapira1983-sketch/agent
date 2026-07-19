@@ -28,6 +28,33 @@ from .verifier_utils import (
 )
 
 
+# Memory records whose provenance makes a citation to them independent
+# evidence. Only an explicit human write qualifies: the operator asserting a
+# fact is a source, whereas the agent's own auto-written record is a copy of
+# something it already said.
+_INDEPENDENT_MEMORY_ORIGINS: frozenset[str] = frozenset({"user-explicit"})
+
+
+def _memory_citation_is_independent(ev: Evidence) -> bool:
+    """May a citation resolving to this evidence count as `verified`?
+
+    Only memory evidence is questioned here; every other kind keeps its
+    existing treatment. Two memory shapes are deliberately distinguished:
+
+    - a **persistent record** (`obtained_via="memory"`) is judged on its
+      `origin`: a `user-explicit` record is a human assertion, while an
+      `agent-auto` or ingested one is not independent of the agent;
+    - a **working-memory artifact** (`obtained_via="working_memory"`) is a
+      cached tool observation — real output that was actually fetched — so it
+      keeps counting as evidence.
+    """
+    if ev.kind != "memory":
+        return True
+    if ev.obtained_via != "memory":
+        return True
+    return ev.origin in _INDEPENDENT_MEMORY_ORIGINS
+
+
 def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_question: str | None = None, receipt_ledger: Any = None, trace_id: str | None = None, expects_contract_headers: bool = True) -> VerificationReport:
     chain_empty = len(chain) == 0
     if user_question and user_question.strip():
@@ -94,6 +121,14 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                 if ev is None:
                     continue
                 strict_ok = True
+                if not _memory_citation_is_independent(ev):
+                    # The citation resolves — the record exists and matches the
+                    # id — but resolution is not verification. An agent-auto
+                    # record is the agent's own earlier output; counting it as
+                    # `verified` lets the agent confirm itself by having
+                    # remembered something (MIR-046). Demoted to topic-only, so
+                    # it still shows as supporting context but never as proof.
+                    strict_ok = False
                 if stat_claim and c.prefix not in {"user", "memory", "general-knowledge"}:
                     excerpt = ev.excerpt or ""
                     if stat_figures:
