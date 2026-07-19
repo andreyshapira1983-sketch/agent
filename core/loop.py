@@ -843,14 +843,24 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     "answer_chars": len(_fp_ep.full_answer),
                 },
             )
+            # A replay produces NO new evidence: nothing was fetched, nothing
+            # was verified this cycle. Banking it as verified_chunks=1 minted
+            # verification out of "it matched something in memory", and the
+            # replay then looked as trustworthy as the answer it copied — a
+            # self-reinforcing chain (MIR-041).
+            #
+            # unverified=1 rather than 0/0 on purpose: an empty chain scores
+            # quality 1.0 (MIR-002), which would hand the replay top marks for
+            # having no evidence at all. The source episode is named in
+            # source_labels so the copy stays traceable to its origin.
             self._record_experience_memory(
                 goal_description=goal.description,
                 question=user_question,
                 answer=_fp_ep.full_answer,
                 tools_used=[],
                 source_labels=[f"memory:{_fp_ep.id}"],
-                verified_chunks=1,
-                unverified_chunks=0,
+                verified_chunks=0,
+                unverified_chunks=1,
                 replan_exhausted=False,
             )
             if self.memory is not None:
