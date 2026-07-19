@@ -127,6 +127,13 @@ class EpisodeRecord:
     # on legacy records and on runs that carry no task.
     task_id: str = ""
     run_id: str = ""
+    # May this episode steer later answers? THREE states, deliberately not a
+    # bool: None = legacy_unclassified (written before this field existed),
+    # False = quarantined (an explicit decision to withhold), True = eligible.
+    # Collapsing None into False would make a legacy row indistinguishable
+    # from a deliberate quarantine. Retrieval admits only True — see
+    # `is_usage_eligible`.
+    usage_eligible: bool | None = None
     id: str = field(default_factory=lambda: new_id("ep"))
     created_at: str = field(default_factory=_now_iso)
 
@@ -135,6 +142,7 @@ class EpisodeRecord:
             "id": self.id,
             "task_id": self.task_id,
             "run_id": self.run_id,
+            "usage_eligible": self.usage_eligible,
             "goal": self.goal,
             "question": self.question,
             "outcome": self.outcome,
@@ -156,6 +164,13 @@ class EpisodeRecord:
             id=str(data.get("id") or new_id("ep")),
             task_id=str(data.get("task_id") or ""),
             run_id=str(data.get("run_id") or ""),
+            # `.get` WITHOUT a default: an absent key must stay None
+            # (legacy_unclassified), never collapse into False (quarantined).
+            usage_eligible=(
+                None
+                if data.get("usage_eligible") is None
+                else bool(data["usage_eligible"])
+            ),
             goal=str(data.get("goal") or ""),
             question=str(data.get("question") or ""),
             outcome=_episode_outcome(str(data.get("outcome") or "partial")),
@@ -549,6 +564,16 @@ class MemoryConsolidationStore:
         return len(self.load())
 
 
+def is_usage_eligible(episode: EpisodeRecord) -> bool:
+    """May this episode steer a later answer?
+
+    Only an EXPLICIT `True` admits it. Both `None` (legacy_unclassified) and
+    `False` (quarantined) are refused — fail-closed, because an episode whose
+    provenance was never established is not evidence that it is trustworthy.
+    """
+    return episode.usage_eligible is True
+
+
 def episode_id_for_run(run_id: str) -> str:
     """Deterministic episode id for one attempt.
 
@@ -571,6 +596,7 @@ def episode_from_agent_cycle(
     replan_exhausted: bool = False,
     run_id: str = "",
     task_id: str = "",
+    usage_eligible: bool | None = None,
 ) -> EpisodeRecord:
     verified = max(0, int(verified_chunks))
     unverified = max(0, int(unverified_chunks))
@@ -618,6 +644,9 @@ def episode_from_agent_cycle(
         tags=tags,
         task_id=str(task_id or ""),
         run_id=str(run_id or ""),
+        # Defaults to None (legacy_unclassified): banking an episode is not by
+        # itself a verdict that it may steer later answers. The caller decides.
+        usage_eligible=usage_eligible,
         id=episode_id,
     )
 

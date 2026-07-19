@@ -35,6 +35,9 @@ def _ep(outcome, summary):
         outcome=outcome,
         summary=summary,
         tools_used=("shell_exec",),
+        # This suite covers the OUTCOME filter; usage eligibility (2c) is a
+        # second, independent gate with its own suite, so seed past it.
+        usage_eligible=True,
     )
 
 
@@ -60,6 +63,7 @@ def test_lesson_episode_kept_even_if_not_success(tmp_path):
         summary="lesson: never deploy on a stale checkout",
         tools_used=("shell_exec",),
         tags=("episode", "partial", "lesson"),
+        usage_eligible=True,
     )
     store.save(lesson)
 
