@@ -188,6 +188,57 @@ class ClaimExtractor:
         return len(words) >= 4
 
 
+def claim_provenance_tag(claim_id: str) -> str:
+    """Tag linking a memory record back to the claim it came from.
+
+    Without it a record cannot be found again when its claim later turns out
+    to be contradicted — quarantine has no addressee, which is why conflict
+    detection stayed advisory (MIR-047). Carried as a tag rather than a new
+    field because tags are already persisted, already filtered by
+    `KnowledgeUsePolicy`, and need no schema change.
+    """
+    return f"claim:{claim_id}"
+
+
+def quarantine_conflicted_records(
+    records: "list[MemoryRecord]", *, conflicted_claim_ids: "set[str]"
+) -> "tuple[list[MemoryRecord], dict]":
+    """Tag records whose originating claim is now contradicted.
+
+    Marks strictly by provenance tag. A record with no claim link is reported
+    as `unlinked` and left alone: matching it by content would be the guess
+    MIR-049/050 exist to forbid, and mis-quarantining a correct record is
+    worse than leaving a conflicted one in place until an operator looks.
+
+    Idempotent — a record already carrying the tag is counted, not re-tagged.
+    Resolution is operator-only: removing the tag restores the record.
+    """
+    report = {"quarantined": 0, "already_quarantined": 0, "unlinked": 0, "unaffected": 0}
+    if not conflicted_claim_ids:
+        report["unaffected"] = len(records)
+        return list(records), report
+
+    wanted = {claim_provenance_tag(cid) for cid in conflicted_claim_ids}
+    out: list[MemoryRecord] = []
+    for record in records:
+        tags = list(record.tags or [])
+        if not any(t.startswith("claim:") for t in tags):
+            report["unlinked"] += 1
+            out.append(record)
+            continue
+        if not (set(tags) & wanted):
+            report["unaffected"] += 1
+            out.append(record)
+            continue
+        if "conflicted" in tags:
+            report["already_quarantined"] += 1
+            out.append(record)
+            continue
+        report["quarantined"] += 1
+        out.append(record.model_copy(update={"tags": [*tags, "conflicted"]}))
+    return out, report
+
+
 class ConflictResolver:
     """Detect obvious contradictory claims over the same subject."""
 
@@ -332,7 +383,12 @@ class KnowledgeWritePolicy:
         )
 
     def memory_tags(self, claim: ClaimRecord, source: SourceRecord) -> list[str]:
-        return ["fact", "knowledge", "source-backed", source.type]
+        # `claim:<id>` is provenance, not description: it is what lets a
+        # record be found again if its claim is later contradicted (MIR-047).
+        return [
+            "fact", "knowledge", "source-backed", source.type,
+            claim_provenance_tag(claim.id),
+        ]
 
 
 class KnowledgePipeline:

@@ -22,6 +22,10 @@ QUARANTINE_TAGS = frozenset({
     "wrong",
     "obsolete",
     "superseded",
+    # A claim contradicted by another source stops being ordinary evidence
+    # until an operator resolves it (MIR-047). Listing it here means every
+    # retrieval site inherits the filter with no extra code.
+    "conflicted",
     "temporary",
     "transient",
 })

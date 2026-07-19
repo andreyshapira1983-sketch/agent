@@ -1987,6 +1987,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     ),
                 )
                 source_registry = knowledge_result.registry
+                self._quarantine_conflicted_memory(knowledge_result)
                 self.last_source_registry = source_registry
                 self.log.log(
                     "source_registry",
