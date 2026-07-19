@@ -9,3 +9,4 @@ python-dotenv
 ddgs
 pytest
 coverage
+pytest-asyncio
