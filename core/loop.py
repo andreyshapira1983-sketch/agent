@@ -560,6 +560,12 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # changing its signature (which is called from multiple paths).
         self._stream_on_token = on_token
         self._cycle_findings = []
+        # Tools that ACTUALLY executed this run, in order. Procedure
+        # attribution (MIR-049) is judged from this rather than from the plan,
+        # so a run cancelled before reaching a procedure's steps never debits
+        # it. Accumulated as execution happens so an exception cannot discard
+        # attribution already earned.
+        self._executed_tools = []
         self.last_replan_exhausted = False
         self.last_source_ranking = None
         self.last_source_registry = SourceRegistry()
@@ -1270,6 +1276,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     if trigger is not None:
                         attempt_failures.append(trigger)
                     continue
+                self._executed_tools.append(outcome["tool"])
                 attempt_artifacts[outcome["label"]] = {
                     "tool": outcome["tool"],
                     "output": outcome["output"],
@@ -1887,6 +1894,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                         if trigger is not None:
                             failure_history.append(trigger)
                         continue
+                    self._executed_tools.append(outcome["tool"])
                     artifacts[outcome["label"]] = {
                         "tool": outcome["tool"],
                         "output": outcome["output"],

@@ -26,6 +26,7 @@ from core.smart_memory import (
     ProceduralMemoryStore,
     consolidate_memory,
     decide_usage_eligibility,
+    resolve_used_procedures,
     episode_from_agent_cycle,
     format_experience_context,
     is_usage_eligible,
@@ -472,6 +473,14 @@ class AgentLoopExtractedMethods2:
                 # else stays fail-closed, and `None` remains reserved for rows
                 # that predate the field. See `decide_usage_eligibility`.
                 usage_eligible=None,   # replaced below, once the record exists
+                # Attribution comes from what actually executed, over the
+                # procedures this run selected -- never matched by workflow_key,
+                # which MIR-050 measured to pool unrelated goals. () is a real
+                # answer here ("nothing applied"), distinct from a legacy None.
+                used_procedure_ids=resolve_used_procedures(
+                    selected=list(getattr(self, "_last_procedure_records", []) or []),
+                    executed_tools=list(getattr(self, "_executed_tools", []) or []),
+                ),
             )
             episode = replace(
                 episode, usage_eligible=decide_usage_eligibility(episode)

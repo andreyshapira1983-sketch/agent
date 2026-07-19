@@ -42,9 +42,9 @@ re-grounded against **current code on `main` @ `f317c4c`**.
 
 | Status | Count | IDs |
 |---|---|---|
-| fixed | 9 | MIR-017 (runtime-reproduced), MIR-001, MIR-004, MIR-005 (Stage-3.3 reproduced), **MIR-002, MIR-041, MIR-043, MIR-046** (2026-07-20, branch `fix/mir-043-autonomous-experience-wiring`), **MIR-051** (legacy confidence migrated on live data) |
+| fixed | 10 | MIR-017 (runtime-reproduced), MIR-001, MIR-004, MIR-005 (Stage-3.3 reproduced), **MIR-002, MIR-041, MIR-043, MIR-046** (2026-07-20, branch `fix/mir-043-autonomous-experience-wiring`), **MIR-051** (legacy confidence migrated on live data), **MIR-049** (procedure attribution) |
 | code_fixed_needs_runtime_verification | 3 | MIR-012, 013, 014 |
-| open | 19 | MIR-006, 008, 010, 011, 015, 016, 020, 021, 023, 024, 026, 039, 040, 044, 045, 047, 048, 049, **050** (harm measured, fix deferred) |
+| open | 18 | MIR-006, 008, 010, 011, 015, 016, 020, 021, 023, 024, 026, 039, 040, 044, 045, 047, 048, **050** (harm measured, fix deferred) |
 | partially_fixed | 3 | MIR-003, MIR-007, **MIR-042** (counting face closed by MIR-046; injection face open) |
 | planned_gap | 8 | MIR-009, 018(partial), 022, 029, 030, 031, 034, 038 |
 | needs_investigation | 6 | MIR-019, 025, 027, 028, 032, 033 |
@@ -224,7 +224,11 @@ covered the registered items in isolation — NOT full end-to-end coverage of th
 - **Aliases:** none. **Related:** MIR-048 (feedback), MIR-050 (identity) — separate roots, kept apart. **Provenance:** newly_discovered (M1 review).
 - **Files/functions:** `core/loop.py:392`, `core/loop_methods2.py:229-230` — procedures injected into planning are recorded in `_last_procedure_records`, which is **read nowhere**; banked episodes carry no `used_procedure_ids`.
 - **Symptom:** a cycle that consumed a procedure and then failed/produced an unverified answer never updates that procedure; the only update channel is coincidental (a later success sharing the same tool sequence). Reputation without attribution.
-- **Status:** `open` (newly_discovered; code-verified). **Prerequisite for MIR-048 — sequenced ahead of it (operator decision, 2026-07-20).**
+- **Status:** **`fixed` (2026-07-20)** ⬆ from `open`. Observation only — counters deliberately untouched, so "is the attribution correct" stays provable separately from "is the feedback policy correct" (MIR-048).
+- **Resolution:** `EpisodeRecord.used_procedure_ids: tuple[str, ...] | None` with **three** distinguishable states — `None` = legacy row, attribution unknown and nothing may be inferred; `()` = this version ran and is certain no procedure applied; `(ids…)` = application observed. `resolve_used_procedures(selected, executed_tools)` requires **two** gates: the procedure was selected into the run (retrieval alone is not use) **and** every tool in its workflow actually executed. Judged from execution rather than the plan, so a run cancelled before reaching a procedure's steps never debits it. `AgentLoop._executed_tools` accumulates as steps complete, so an exception cannot discard attribution already earned. Order is first actual completion; the result is a tuple, never a set, so the stored record is reproducible.
+- **Central invariant (executable):** two procedures sharing one `workflow_key`, only one selected → the episode names only that one. This is the direct proof that MIR-049 removes the risk MIR-050 measured: attribution follows the selection, never the shared shape.
+- **Tests:** `tests/test_used_procedure_attribution.py` — 12 passing, all fail-before. Matrix: retrieved-but-not-selected, selected-but-not-reached, partial execution, full execution, repeat use recorded once, two procedures in deterministic order, attribution surviving `partial`/`failed`, cancellation after application, replay attributing nothing, legacy reading as `None` not `()`, and a dangling id never re-pointed via `workflow_key`.
+- **Prerequisite satisfied for MIR-048:** a trustworthy causal link now exists to consume.
 - **Why it must precede MIR-048:** MIR-048 needs to know which procedure a failed cycle should debit. The only alternative to a recorded `used_procedure_ids` is re-deriving the link from `workflow_key`, which MIR-050 has now measured to pool unrelated goals. Closing the feedback loop on top of an approximate link would replace an inert one-way ratchet with active misattribution — the system would honestly count failures and charge them to the wrong procedure.
 - **Acceptance:** an episode records the procedures that were actually injected into its planning; a procedure's counters change only through that recorded link (or the repaired workflow-match channel), never through a re-derived guess.
 
