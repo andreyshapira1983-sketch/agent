@@ -126,7 +126,12 @@ def _drive_one_cycle(
 
 
 def _replayable_episode(question: str) -> EpisodeRecord:
-    """An episode that satisfies every fast-path precondition."""
+    """An episode that satisfies every fast-path precondition.
+
+    `usage_eligible=True` is explicit: these tests exercise the retrieval and
+    replay MECHANISM, not the eligibility policy (2c), which fail-closes on
+    unclassified episodes and is covered by its own suite.
+    """
     return EpisodeRecord(
         goal="answer a general-knowledge question",
         question=question,
@@ -138,6 +143,7 @@ def _replayable_episode(question: str) -> EpisodeRecord:
         answer_quality_score=1.0,
         tools_used=[],
         full_answer="CACHED-ANSWER-FROM-EPISODIC-MEMORY",
+        usage_eligible=True,
         id="ep-replay-1",
         created_at=datetime.now(timezone.utc).isoformat(),
     )
@@ -154,6 +160,7 @@ def _episode(question: str) -> EpisodeRecord:
         replan_exhausted=False,
         answer_quality_score=0.9,
         tools_used=["file_read"],
+        usage_eligible=True,   # see _replayable_episode: mechanism, not policy
         id="ep-wiring-1",
         created_at=datetime.now(timezone.utc).isoformat(),
     )

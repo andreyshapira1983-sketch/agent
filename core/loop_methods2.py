@@ -26,6 +26,7 @@ from core.smart_memory import (
     consolidate_memory,
     episode_from_agent_cycle,
     format_experience_context,
+    is_usage_eligible,
 )
 
 # Every durable sink the loop can write. A write site names its sink; a name
@@ -231,11 +232,16 @@ class AgentLoopExtractedMethods2:
         # `lesson` episodes are kept regardless: they are learn-from-failure by
         # design. Over-fetch, then filter, then cap so up to 3 GOOD episodes
         # still surface even when some top matches were non-success.
+        # `is_usage_eligible` is the second, independent filter: outcome asks
+        # "did this go well", eligibility asks "is this episode allowed to
+        # steer anything at all". Legacy and quarantined episodes stay stored
+        # and auditable but never reach the planner.
         episodes = (
             [
                 ep
                 for ep in self.episodic_store.search(question, limit=6)
-                if ep.outcome == "success" or "lesson" in ep.tags
+                if (ep.outcome == "success" or "lesson" in ep.tags)
+                and is_usage_eligible(ep)
             ][:3]
             if self.episodic_store is not None
             else []
@@ -256,8 +262,11 @@ class AgentLoopExtractedMethods2:
                 if "/" in w or w.endswith(".py")
             ]
             for lesson in lessons:
-                if lesson not in episodes and path_tokens and any(
-                    tok in lesson.summary.lower() for tok in path_tokens
+                if (
+                    is_usage_eligible(lesson)          # second door — same gate
+                    and lesson not in episodes
+                    and path_tokens
+                    and any(tok in lesson.summary.lower() for tok in path_tokens)
                 ):
                     episodes.append(lesson)
         procedures = (
@@ -289,6 +298,13 @@ class AgentLoopExtractedMethods2:
                 repeat_ep, repeat_score = self.episodic_store.find_most_similar(
                     question, threshold=_REPEAT_THRESHOLD
                 )
+                # Third door, and the most dangerous one: this feeds the fast
+                # path, which returns a stored answer verbatim in place of a
+                # real cycle. An ineligible match is dropped here rather than
+                # at the fast-path gate, so re-ask hints cannot lean on it
+                # either.
+                if repeat_ep is not None and not is_usage_eligible(repeat_ep):
+                    repeat_ep, repeat_score = None, 0.0
                 # Store for fast-path and planner-cache checks in run().
                 self._last_best_similar_episode = repeat_ep
                 self._last_best_similar_score = repeat_score
