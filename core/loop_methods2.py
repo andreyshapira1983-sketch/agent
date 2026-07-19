@@ -4,6 +4,7 @@ public surface are unchanged."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 from core.models import (
     Action,
@@ -24,6 +25,7 @@ from core.smart_memory import (
     MemoryConsolidationStore,
     ProceduralMemoryStore,
     consolidate_memory,
+    decide_usage_eligibility,
     episode_from_agent_cycle,
     format_experience_context,
     is_usage_eligible,
@@ -462,13 +464,16 @@ class AgentLoopExtractedMethods2:
                 replan_exhausted=replan_exhausted,
                 run_id=run.run_id if run else "",
                 task_id=(run.task_id or "") if run else "",
-                # Quarantined, not unclassified: `answer_quality_score` and the
-                # verified-chunk counts these episodes carry are still computed
-                # by the semantics MIR-002/041/046 describe as broken. Writing
-                # them is deliberate (the loop must close); admitting them to
-                # retrieval is not. `None` stays reserved for rows that predate
-                # the field. Flips to True when those defects are fixed.
-                usage_eligible=False,
+                # Admission is decided per episode, not by a global switch:
+                # MIR-002/041/046 are fixed, so the blanket quarantine is
+                # lifted — but only evidenced, completed, non-replay episodes
+                # (or curated lessons) become reusable experience. Everything
+                # else stays fail-closed, and `None` remains reserved for rows
+                # that predate the field. See `decide_usage_eligibility`.
+                usage_eligible=None,   # replaced below, once the record exists
+            )
+            episode = replace(
+                episode, usage_eligible=decide_usage_eligibility(episode)
             )
             if self.episodic_store is not None and may_episode:
                 # save_once, not save: a run that reaches this site twice must

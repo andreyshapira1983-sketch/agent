@@ -581,6 +581,45 @@ class MemoryConsolidationStore:
         return len(self.load())
 
 
+def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
+    """Decide whether a freshly banked episode may steer later answers.
+
+    This is the admission policy, kept as a function rather than a literal
+    because admission is a judgement about a specific episode, not a global
+    switch. It always returns a bool: `None` means "never classified" and is
+    reserved for rows written before the field existed — a policy that just
+    examined an episode must not manufacture that state.
+
+    Admitted when every one of these holds:
+
+    - ``outcome == "success"`` — the cycle completed and was scored. A
+      ``partial`` means unverified support outnumbered verified support,
+      which is the self-reinforcement MIR-001 closed; ``failed`` speaks for
+      itself.
+    - ``verified_chunks > 0`` — something was independently confirmed. This
+      is what excludes a pure general-knowledge answer: it may be perfectly
+      correct and still carries nothing reusable — no sources, no findings.
+    - not a replay — a copy of an earlier answer is not new experience.
+      After MIR-041 a replay banks ``verified_chunks=0`` and so is already
+      refused by the rule above; the source-label check is defence in depth
+      for records written before that fix.
+
+    One deliberate exception: a curated ``lesson`` is admitted whatever its
+    outcome. Learning from a failure is the entire purpose of that tag, and
+    lessons are already protected from eviction for the same reason.
+
+    No threshold constant appears here on purpose — every rule reads a fact
+    the verifier measured, so there is no number to tune or to justify.
+    """
+    if "lesson" in episode.tags:
+        return True
+    if episode.outcome != "success":
+        return False
+    if any(str(label).startswith("memory:") for label in episode.source_labels):
+        return False
+    return episode.verified_chunks > 0
+
+
 def is_usage_eligible(episode: EpisodeRecord) -> bool:
     """May this episode steer a later answer?
 
