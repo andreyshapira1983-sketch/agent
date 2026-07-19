@@ -356,6 +356,17 @@ Verified against code on the audited `main` (source of truth):
 
 ## 11. Confirmed current gaps
 
+> **⚠️ SUPERSEDED (2026-07-20).** The single `confirmed-gap` recorded below —
+> OFM-010, retry without backoff — **is fixed**: it is MIR-017 in
+> [`audit/MASTER_ISSUE_REGISTRY.md`](audit/MASTER_ISSUE_REGISTRY.md), closed
+> with a runtime-reproduced regression test. Read no open/closed status from
+> this section; the registry owns them.
+>
+> The rest of this document is **not** affected, because it never claimed to
+> describe this repository: sections 3–9 are failure modes observed in someone
+> else's system, kept as a verification checklist. That checklist is still
+> useful and still largely unexercised — see §12.
+
 Only gaps verified against our code appear here.
 
 - **OFM-010 — no retry backoff.** `core/task_queue.py` `mark_failed()` sets a

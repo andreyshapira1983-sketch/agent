@@ -180,6 +180,25 @@ message falls through to the normal model-backed agent loop unchanged.
 | "budget / token / spend status" | `:operator-budget` | `budget_status` |
 | "what's in the approval inbox" | `:approval-list all` | `approval_status` |
 
+### Model-assisted veto (`core/intent_understanding`)
+
+A second, later layer sits **after** a positive match from the table above, at
+`main.py:1069`. The keyword matcher works on substrings, so it cannot
+distinguish "please run the architecture audit" from a sentence that merely
+mentions one — and the latter would be hijacked into a command.
+
+`understand_intent` asks the model whether the message is really a request or
+just conversation, and its answer is **only ever able to cancel** the routing:
+
+- it may not choose an action — the candidate is passed in from the kernel;
+- it may only pick from the agent's real capability list, so an invented action
+  is rejected;
+- model error, unparseable output, low confidence, or no model configured all
+  leave the deterministic routing untouched.
+
+Kernel decides, model advises. This is why it appears here rather than in the
+table: it removes routes, never adds them.
+
 **Safety guarantees (verified in code):** the router is intentionally narrow.
 Before any positive match it returns `None` (falls through to the model) for:
 empty/very long input, plain bug notes (`_looks_like_plain_bug_note`),
