@@ -44,16 +44,18 @@ re-grounded against **current code on `main` @ `f317c4c`**.
 |---|---|---|
 | fixed | 8 | MIR-017 (runtime-reproduced), MIR-001, MIR-004, MIR-005 (Stage-3.3 reproduced), **MIR-002, MIR-041, MIR-043, MIR-046** (2026-07-20, branch `fix/mir-043-autonomous-experience-wiring`) |
 | code_fixed_needs_runtime_verification | 3 | MIR-012, 013, 014 |
-| open | 18 | MIR-006, 008, 010, 011, 015, 016, 020, 021, 023, 024, 026, 039, 040, 044, 045, 047, 048, 049 |
+| open | 20 | MIR-006, 008, 010, 011, 015, 016, 020, 021, 023, 024, 026, 039, 040, 044, 045, 047, 048, 049, **050** (harm measured, fix deferred), **051** (legacy confidence migration) |
 | partially_fixed | 3 | MIR-003, MIR-007, **MIR-042** (counting face closed by MIR-046; injection face open) |
 | planned_gap | 8 | MIR-009, 018(partial), 022, 029, 030, 031, 034, 038 |
-| needs_investigation | 7 | MIR-019, 025, 027, 028, 032, 033, 050 |
+| needs_investigation | 6 | MIR-019, 025, 027, 028, 032, 033 |
 | stale_finding (doc) | 2 | MIR-036, 037 |
 | open (process) | 1 | MIR-035 |
 
-**Tally last reconciled: 2026-07-20** (after branch `fix/mir-043-autonomous-experience-wiring`:
-MIR-002/041/043/046 → `fixed`, MIR-042 → `partially_fixed`). The total is unchanged at 50 —
-no issue was added or removed, only re-graded.
+**Tally last reconciled: 2026-07-20** (second pass). First pass: MIR-002/041/043/046 → `fixed`,
+MIR-042 → `partially_fixed` (re-grades only, total unchanged). Second pass, after the D-1
+measurement: **MIR-051 added** (legacy confidence migration), MIR-050 `needs_investigation` →
+`open` with harm measured and fix deliberately deferred, MIR-049 sequenced **ahead of** MIR-048.
+**Total is now 51.**
 
 (**50 issues total — this tally is the authoritative count**; older "47" mentions in
 chronological log entries are historical, not current-state. Some IDs carry a secondary qualifier; the row text is authoritative.
@@ -213,22 +215,45 @@ covered the registered items in isolation — NOT full end-to-end coverage of th
 - **Aliases:** none. **Related:** MIR-003 (birth gate — different root: birth vs demotion), MIR-044. **Provenance:** newly_discovered (M1 review, operator-challenge follow-up).
 - **Files/functions:** sole production path `core/loop_methods2.py:364` → `upsert_from_episode` (`core/smart_memory.py:464-467`) → `procedure_from_episode` (`:578-580`) returns `None` for any `outcome != "success"` — so `with_episode` (`:221-240`) never receives a non-success episode. The `failure_count` increment (`:224`) is **dead code in production**; no other writer exists.
 - **Symptom:** procedure confidence `(s+1)/(s+2)` rises monotonically from 0.667; `needs_review` (`<0.6`) is unreachable via outcomes; **a procedure can fail forever and never demote**. Consolidation's `needs_review` list is structurally near-empty (compounds MIR-044's emptiness).
-- **Status:** `open` (newly_discovered; code-verified).
+- **Status:** `open` (newly_discovered; code-verified). **Blocked on MIR-049 — fix that first.**
+- **Sequencing (operator decision, 2026-07-20):** attribution must land **before** feedback. Without `used_procedure_ids`, the only way to decide *which* procedure a failed cycle should debit is to re-derive it from `workflow_key` or a similar heuristic — and MIR-050 has now measured that those keys pool unrelated goals (8/48 keys span multiple goal classes). The result would be: failed episode → approximately-matched procedure → `failure_count` incremented on the **wrong** procedure. That is worse than the current ratchet, because a one-way ratchet is inert while misattributed punishment is actively wrong. Exact causal link first, counter updates second.
+- **Measured scale (live store, read-only, 2026-07-20):** `failure_count == 0` on **all 65** procedures — the ratchet is not theoretical, it has never once turned. 64/65 are `active`; 53/65 rest on a single success. Non-success episodes do exist (e.g. `partial×2 + success×1` under `tools:shell_exec`), they simply never reach a procedure.
 - **Root formula impact:** any lifecycle driver built on these counts (incl. §6.4 of the draft M1) inherits a positive-only signal — this is why "B-enhanced" alone is not a root fix.
 
 ### MIR-049 — no usage→outcome attribution for procedures (write-only `_last_procedure_records`)
 - **Aliases:** none. **Related:** MIR-048 (feedback), MIR-050 (identity) — separate roots, kept apart. **Provenance:** newly_discovered (M1 review).
 - **Files/functions:** `core/loop.py:392`, `core/loop_methods2.py:229-230` — procedures injected into planning are recorded in `_last_procedure_records`, which is **read nowhere**; banked episodes carry no `used_procedure_ids`.
 - **Symptom:** a cycle that consumed a procedure and then failed/produced an unverified answer never updates that procedure; the only update channel is coincidental (a later success sharing the same tool sequence). Reputation without attribution.
-- **Status:** `open` (newly_discovered; code-verified).
+- **Status:** `open` (newly_discovered; code-verified). **Prerequisite for MIR-048 — sequenced ahead of it (operator decision, 2026-07-20).**
+- **Why it must precede MIR-048:** MIR-048 needs to know which procedure a failed cycle should debit. The only alternative to a recorded `used_procedure_ids` is re-deriving the link from `workflow_key`, which MIR-050 has now measured to pool unrelated goals. Closing the feedback loop on top of an approximate link would replace an inert one-way ratchet with active misattribution — the system would honestly count failures and charge them to the wrong procedure.
+- **Acceptance:** an episode records the procedures that were actually injected into its planning; a procedure's counters change only through that recorded link (or the repaired workflow-match channel), never through a re-derived guess.
 
 ### MIR-050 — procedure identity is tool-sequence-only; evidence aggregates across unrelated goals
 - **Aliases:** none. **Related:** MIR-048/049 (they interact: attribution onto a meaningless aggregate is still meaningless). **Provenance:** newly_discovered (M1 review).
 - **Files/functions:** `core/smart_memory.py:581` `workflow_key = "tools:" + "->".join(tools)`.
 - **Symptom:** episodes with the same tool sequence but unrelated goals upsert into one procedure ("Workflow using file_read"); its success counts and confidence describe a semantically meaningless aggregate, so any lifecycle judgment over it is unfounded.
-- **Status:** `needs_investigation`. ⬇ corrected from `open` (operator review, 2026-07-19): the **mechanism** is code-verified (`workflow_key` = tool sequence), but **concrete harm was not demonstrated** — no measured case of aggregation producing a wrong judgment. Same discipline as MIR-008 (CORE-11), which was deliberately kept a consistency-concern for the identical reason.
-- **Defined investigation (resolves this status):** read-only measurement over the live procedural store — how many distinct goals/questions share one `workflow_key`, and whether identity options (a)/(b) would have judged them differently. This is also the decision input for contract §16 D-1.
-- **Note:** fix is a design decision (key = tools + goal-class/token signature, or per-goal sub-buckets) — isolated as Open Decision D-1 in `MEMORY_LIFECYCLE_CONTRACT.md` §16, not prejudged.
+- **Status:** `open` — **harm confirmed, fix deliberately DEFERRED** (2026-07-20). ⬆ from `needs_investigation`: the defined measurement ran, so this is no longer a mechanism without evidence. It is deferred on the merits, not forgotten — see the return condition below.
+- **Measurement (live stores, read-only, 2026-07-20; nothing mutated):**
+  - 65 procedures / 65 distinct `workflow_key`s; 200 episodes, 68 carrying tools, across 48 distinct tool-sequences.
+  - **Keys spanning more than one goal-signature class: 8 of 48 (17%).**
+  - **Episodes whose evidence is pooled across goal classes: 27 of 68 (40%).**
+  - **Worst collision:** `tools:file_read->list_dir` — 10 distinct goal classes over 10 episodes, i.e. every episode under that key is a different goal.
+  - **Outcome mixing under one key (the concrete wrong judgment):** `tools:shell_exec` holds `partial×2 + success×1` from three different goals — one procedure's counters aggregate the success of one task with the failures of others.
+- **Why the fix is deferred rather than applied:** mean density is **1.4 episodes per key**. Option (a) (composite key = tools + goal signature) would fragment already-sparse evidence into singleton procedures — the worst key's 10 episodes would become 10 procedures of one episode each, none able to accumulate anything. Changing identity at this data volume degrades the store instead of repairing it. The harm is real but bounded (17% of keys); the cure at current density is worse.
+- **Return condition (explicit, so "deferred" cannot become indefinite):** revisit once the store holds enough episodes to run an **offline** comparison of current vs candidate identity **without migrating production data**. That comparison must report: collision rate, share of singleton procedures, episodes-per-key density, outcome divergence within one key, and the effect on retrieval/planning quality. Only then is D-1 decidable.
+- **Note:** fix remains a design decision (key = tools + goal-class/token signature, or per-goal sub-buckets) — Open Decision D-1 in `MEMORY_LIFECYCLE_CONTRACT.md` §16, still not prejudged.
+
+### MIR-051 — stored procedure `confidence` violates the Beta-smoothing invariant (legacy data)
+- **Aliases:** none. **Related:** MIR-048 (same field, different root — this is data, that is a missing code path), MIR-003. **Provenance:** newly_discovered (D-1 measurement, 2026-07-20).
+- **Files/functions:** data defect in `data/procedural_memory.jsonl`. The code is **correct**: both writers — `procedure_from_episode` (`core/smart_memory.py:735`, births at `0.5`) and `ProcedureRecord.with_episode` (`:261`) — go through `_smoothed_confidence`. No writer produces `1.0`.
+- **Symptom:** **45 of 65 procedures (69%) carry `confidence=1.0`**, unreachable from `(s+1)/(s+2)` for any counter pair. Breakdown: `success=1 → stored 1.0` (39 records, Beta expects 0.667), `success=2 → 1.0` (5, expects 0.75), `success=3 → 1.0` (1, expects 0.8). The remaining 20 match the formula exactly.
+- **Root cause:** smoothing was introduced on **2026-07-11** — the split is sharp: every record last updated before that date is unsmoothed, every record after it is correct. Existing rows were never migrated.
+- **Why this is NOT part of MIR-048:** distinct cause (unmigrated data vs. an unreachable code path), distinct blast radius (69% of stored procedures vs. all future updates), distinct fix (a one-off recomputation vs. new feedback plumbing), distinct completion criteria, and a migration risk that MIR-048 does not carry. Folding it in would hide a data-integrity defect inside a logic defect.
+- **Impact:** those 45 procedures are `active` and injected into planning as proven workflows at maximum confidence — a certainty no measurement ever earned. This directly contradicts `docs/ROADMAP.md` Track B ("procedure confidence is Beta(1,1)-smoothed — a single success is **not** treated as certainty"): on live data, 39 single-success procedures are at exactly 1.0.
+- **Status:** `open` (newly_discovered; measured on the live store, read-only).
+- **Invariant to restore:** `stored_confidence == _smoothed_confidence(success_count, failure_count)` for every procedure whose counters are valid.
+- **Migration requirements (all mandatory):** deterministic; idempotent (a second run is a no-op); available as `dry_run` first; bounded in volume or safely resumable; emits a before/after report; **does not alter `success_count` / `failure_count`**; **does not touch `updated_at`, `last_used_at` or any other freshness field** — a migration must not make stale procedures look recently used and thereby extend their life past hygiene. Recompute every field that is a pure derivative of the same counters (e.g. `status`, which is `confidence >= 0.6`), but **do not reconstruct missing failure history** — that is MIR-048's job, not a migration's.
+- **Missing tests:** invariant holds for all records post-migration; dry-run changes nothing; second run is a no-op; freshness fields byte-identical before/after; counters unchanged.
 
 ### MIR-041 — episodic fast-path replays verbatim, skips verification, and re-banks as `verified_chunks=1`
 - **Aliases:** none. **Related:** MIR-002 (the score that makes ungrounded answers eligible), MIR-016 (verify gate observational), MIR-024 (Jaccard similarity), MIR-005. **Provenance:** newly_discovered (Stage-3.3 deep dive).
