@@ -87,17 +87,18 @@ STALENESS_FACTOR = 2
 #                            could neither record nor recall experience)
 #   episodic_replay=False    it may read that experience, but must never serve
 #                            a stored answer in place of running a real cycle
-#   no_durable_learning=True hard brake: every durable write is skipped, so
-#                            connecting the stores cannot grow memory
+#   durable_writes=frozenset()
+#                            an EMPTY allowlist: every durable sink is denied,
+#                            so connecting the stores cannot grow memory
 #   with_memory=False        unchanged — no cross-run session memory
 #
-# Autonomous write-back is a SEPARATE, later step and is deliberately not
-# enabled here.
+# Autonomous episode write-back means adding "episode" to the allowlist. That
+# is a SEPARATE, later sub-step and is deliberately not enabled here.
 UNATTENDED_MEMORY_PROFILE = {
     "with_memory": False,
     "with_experience": True,
     "episodic_replay": False,
-    "no_durable_learning": True,
+    "durable_writes": frozenset(),
 }
 
 

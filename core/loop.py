@@ -275,7 +275,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         gateway_path: GatewayPath = "repl",
         experience_retrieval: bool = True,
         episodic_replay: bool = True,
-        no_durable_learning: bool = False,
+        durable_writes: frozenset[str] | None = None,
     ):
         self.registry = registry
         self.policy = policy
@@ -288,11 +288,15 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # per-run API yet.
         #   experience_retrieval — inject episodic/procedural memory into planning
         #   episodic_replay      — allow the fast path to serve a stored answer
-        #   no_durable_learning  — hard brake on every durable write (see
-        #                          `_durable_learning_suppressed`)
+        #   durable_writes       — which durable sinks this agent may write.
+        #                          None = all (interactive default); a frozenset
+        #                          is an ALLOWLIST and everything outside it is
+        #                          denied, including unknown sink names. The
+        #                          audit and dry-run brakes outrank it entirely
+        #                          (see `_durable_learning_suppressed`).
         self.experience_retrieval = experience_retrieval
         self.episodic_replay = episodic_replay
-        self.no_durable_learning = no_durable_learning
+        self.durable_writes = durable_writes
         self.suppress_durable_learning_writes = False
         # Audit / read-only execution brake. When True, the loop performs NO
         # durable learning writes (episodic, procedural, consolidation, user
@@ -502,7 +506,13 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         self.last_source_ranking = None
         self.last_source_registry = SourceRegistry()
         self.last_knowledge_pipeline = None
-        durable_learning_writes = not self._durable_learning_suppressed()
+        # Per-sink permissions for this cycle. Experience-memory sinks
+        # (episode/procedure/consolidation) are resolved inside
+        # `_record_experience_memory`, which owns those three writes.
+        may_knowledge = not self._durable_learning_suppressed("knowledge")
+        may_source_registry = not self._durable_learning_suppressed("source_registry")
+        may_profile = not self._durable_learning_suppressed("profile")
+        may_assumptions = not self._durable_learning_suppressed("assumptions")
 
         # Layer 4 — load the user profile for this cycle.
         if self.user_profile_store is not None:
@@ -1413,10 +1423,10 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             knowledge_result = self.knowledge_pipeline.run(
                 chain,
                 ranking=source_ranking,
-                source_store=self.source_registry_store if durable_learning_writes else None,
-                remember=self._knowledge_remember_batch() if durable_learning_writes else None,
+                source_store=self.source_registry_store if may_source_registry else None,
+                remember=self._knowledge_remember_batch() if may_knowledge else None,
                 auto_write_memory=(
-                    self.knowledge_auto_write if durable_learning_writes else False
+                    self.knowledge_auto_write if may_knowledge else False
                 ),
             )
             source_registry = knowledge_result.registry
@@ -1889,15 +1899,15 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     chain,
                     ranking=source_ranking,
                     source_store=(
-                        self.source_registry_store if durable_learning_writes else None
+                        self.source_registry_store if may_source_registry else None
                     ),
                     remember=(
                         self._knowledge_remember_batch()
-                        if durable_learning_writes
+                        if may_knowledge
                         else None
                     ),
                     auto_write_memory=(
-                        self.knowledge_auto_write if durable_learning_writes else False
+                        self.knowledge_auto_write if may_knowledge else False
                     ),
                 )
                 source_registry = knowledge_result.registry
@@ -2098,35 +2108,33 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 pass
 
         verification = self.last_verification
-        if durable_learning_writes:
-            weak_chunks = 0
-            if verification:
-                weak_chunks = (
-                    verification.subagent_asserted_chunks
-                    + verification.cited_but_unmatched_chunks
-                    + verification.receipt_missing_chunks
-                    + verification.topic_supported_but_claim_unverified_chunks
-                )
-            self._record_experience_memory(
-                goal_description=goal.description,
-                question=user_question,
-                answer=answer,
-                tools_used=[s["tool"] for s in planner_out.sources],
-                source_labels=list(artifacts.keys()) or ["general-knowledge"],
-                verified_chunks=verification.verified_chunks if verification else 0,
-                unverified_chunks=verification.unverified_chunks if verification else 0,
-                weak_chunks=weak_chunks,
-                replan_exhausted=replan_exhausted,
-                skip_consolidation=cheap_path_active,
+        weak_chunks = 0
+        if verification:
+            weak_chunks = (
+                verification.subagent_asserted_chunks
+                + verification.cited_but_unmatched_chunks
+                + verification.receipt_missing_chunks
+                + verification.topic_supported_but_claim_unverified_chunks
             )
-        else:
-            self.log.log(
-                "durable_learning_writes_skipped",
-                {"reason": "dry_run"},
-            )
+        # No outer gate here: episode, procedure and consolidation are three
+        # separate sinks, and `_record_experience_memory` resolves each one.
+        # Gating the whole call would make "bank an episode but promote no
+        # procedure" unreachable.
+        self._record_experience_memory(
+            goal_description=goal.description,
+            question=user_question,
+            answer=answer,
+            tools_used=[s["tool"] for s in planner_out.sources],
+            source_labels=list(artifacts.keys()) or ["general-knowledge"],
+            verified_chunks=verification.verified_chunks if verification else 0,
+            unverified_chunks=verification.unverified_chunks if verification else 0,
+            weak_chunks=weak_chunks,
+            replan_exhausted=replan_exhausted,
+            skip_consolidation=cheap_path_active,
+        )
 
         # Layer 4 — update user profile from this interaction.
-        if durable_learning_writes and self.user_profile_store is not None:
+        if may_profile and self.user_profile_store is not None:
             try:
                 updated = self.user_profile_store.update_from_interaction(
                     question=user_question,
@@ -2152,7 +2160,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # Layer 5 — persist assumptions and expose via last_assumptions.
         self.last_assumptions = _run_assumptions
         if (
-            durable_learning_writes
+            may_assumptions
             and self.assumption_store is not None
             and _run_assumptions.new_assumptions
         ):

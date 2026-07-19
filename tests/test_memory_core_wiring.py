@@ -90,8 +90,8 @@ Unverified: nothing
 
 Safety: nothing"""
 
-# Every durable sink the loop can write, per `durable_learning_writes`
-# (core/loop.py:490 and its guarded call sites).
+# Every durable sink the loop can write. Mirrors `KNOWN_DURABLE_SINKS`
+# (core/loop_methods2.py) as on-disk paths.
 _DURABLE_SINKS = (
     DEFAULT_EPISODIC_MEMORY_PATH,
     DEFAULT_PROCEDURAL_MEMORY_PATH,
@@ -316,5 +316,5 @@ def test_autonomous_cycle_leaves_durable_state_unchanged(tmp_path: Path) -> None
     assert answer, "the cycle must actually produce an answer"
     changed = [k for k in before if before[k] != after[k]]
     assert not changed, (
-        f"no_durable_learning=True still wrote durable state: {changed}"
+        f"an empty durable_writes allowlist still wrote durable state: {changed}"
     )
