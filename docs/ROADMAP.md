@@ -32,9 +32,21 @@ Observe → Interpret → Plan → Act → Verify → Respond, driven by an LLM 
 **Status: IMPLEMENTED (working + persistent + episodic/procedural).**
 
 - Working memory: `core/memory`; persistent records: `core/persistent_memory`.
-- Episodic / procedural / consolidation: `core/smart_memory`
-  (procedure confidence is Beta(1,1)-smoothed — a single success is **not**
-  treated as certainty).
+- Episodic / procedural / consolidation: `core/smart_memory`.
+  Procedure confidence is Beta(1,1)-smoothed, so one success reaches 0.667 —
+  active, but explicitly not certainty. **Two corrections to how this used to
+  be stated here** (both now fixed, see the registry): smoothing landed on
+  2026-07-11 and the rows written before it were never migrated, so 45 of 65
+  live procedures sat at a raw `1.0` until MIR-051 recomputed them; and until
+  MIR-048 no non-success episode could reach a procedure at all, leaving
+  `failure_count` at 0 across the whole store — the formula was sound while
+  demotion was unreachable. Feedback is now attributed (`used_procedure_ids`,
+  MIR-049) and bidirectional.
+- Experience memory reaches the **unattended** agent too (MIR-043): the
+  autonomous path holds episodic/procedural stores, banks episodes, and runs
+  bounded hygiene automatically. What an episode may influence is a separate
+  permission from whether it is stored (`usage_eligible`), and durable writes
+  are governed per sink with default-deny.
 - Write / retrieval policy + hygiene: `core/memory_policy`, `core/hygiene`,
   `core/episodic_hygiene`, `core/memory_echo_antibody`.
 - Controlled ingestion: `core/ingestion*`, `core/knowledge_pipeline`.
@@ -114,6 +126,13 @@ budget, and self-directed multi-agent coordination. See
   are mapped to their `:command` equivalents by the deterministic no-LLM router
   in `core/operator_intent.py` / `core/operator_intent_patterns.py`. See the
   "Natural-language routing (intent parity)" section in `docs/COMMANDS_MAP.md`.
+- Model-assisted intent **veto**: `core/intent_understanding` (wired at
+  `main.py:1069`). The keyword router cannot tell "please do X" from a sentence
+  that merely mentions X, so a conversational turn could be hijacked into a
+  command. The model is consulted only to *cancel* such a false positive — it
+  may never choose an action. Any uncertainty (model error, unparseable output,
+  an action outside the kernel's real capability list, low confidence, or no
+  model at all) keeps the deterministic routing. Kernel decides, model advises.
 - Structured JSONL logging: `core/logger`; trace ids: `core/ids`.
 - Read-only audits: `core/architecture_audit` (`:architecture-audit`),
   `core/model_registry_audit`, `core/release_hygiene`, `core/supply_chain`.
