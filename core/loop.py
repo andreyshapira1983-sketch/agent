@@ -40,6 +40,8 @@ from core.evidence import (
     evidence_from_tool_result,
     make_evidence,
 )
+from asyncio import CancelledError
+
 from core.ids import new_id
 from core.run_context import run_scope
 from core.llm import LLM
@@ -507,12 +509,26 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         raises. The body lives in `_run_inner`.
         """
         with run_scope(new_id("run"), task_id):
-            return self._run_inner(
-                user_question=user_question,
-                file_hint=file_hint,
-                on_token=on_token,
-                deep_escalation=deep_escalation,
-            )
+            try:
+                return self._run_inner(
+                    user_question=user_question,
+                    file_hint=file_hint,
+                    on_token=on_token,
+                    deep_escalation=deep_escalation,
+                )
+            except (KeyboardInterrupt, CancelledError):
+                # Cancellation is a control signal, not a failure to absorb.
+                # Record the outcome honestly, then let it keep propagating —
+                # swallowing it would strand the caller that asked to stop.
+                # Caught explicitly rather than via `except BaseException` so
+                # unrelated exits (SystemExit, MemoryError) are not reinterpreted.
+                self._record_aborted_episode(user_question, reason="cancelled")
+                raise
+            except Exception as exc:  # noqa: BLE001
+                self._record_aborted_episode(
+                    user_question, reason=type(exc).__name__
+                )
+                raise
 
     def _run_inner(
         self,
@@ -2140,23 +2156,6 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 + verification.receipt_missing_chunks
                 + verification.topic_supported_but_claim_unverified_chunks
             )
-        # No outer gate here: episode, procedure and consolidation are three
-        # separate sinks, and `_record_experience_memory` resolves each one.
-        # Gating the whole call would make "bank an episode but promote no
-        # procedure" unreachable.
-        self._record_experience_memory(
-            goal_description=goal.description,
-            question=user_question,
-            answer=answer,
-            tools_used=[s["tool"] for s in planner_out.sources],
-            source_labels=list(artifacts.keys()) or ["general-knowledge"],
-            verified_chunks=verification.verified_chunks if verification else 0,
-            unverified_chunks=verification.unverified_chunks if verification else 0,
-            weak_chunks=weak_chunks,
-            replan_exhausted=replan_exhausted,
-            skip_consolidation=cheap_path_active,
-        )
-
         # Layer 4 — update user profile from this interaction.
         if may_profile and self.user_profile_store is not None:
             try:
@@ -2192,6 +2191,29 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 self.assumption_store.save_many(_run_assumptions.new_assumptions)
             except Exception:
                 pass  # Store failure must never abort the run.
+
+        # ── Bank the episode LAST ────────────────────────────────────────────
+        # A `success` outcome may only be recorded once the run has actually
+        # finished. Writing it earlier leaves a window where a later failure
+        # would abort the run with a success already banked — and idempotency
+        # (keyed on run_id) would then refuse to correct it.
+        #
+        # No outer permission gate here: episode, procedure and consolidation
+        # are three separate sinks, and `_record_experience_memory` resolves
+        # each one. Gating the whole call would make "bank an episode but
+        # promote no procedure" unreachable.
+        self._record_experience_memory(
+            goal_description=goal.description,
+            question=user_question,
+            answer=answer,
+            tools_used=[s["tool"] for s in planner_out.sources],
+            source_labels=list(artifacts.keys()) or ["general-knowledge"],
+            verified_chunks=verification.verified_chunks if verification else 0,
+            unverified_chunks=verification.unverified_chunks if verification else 0,
+            weak_chunks=weak_chunks,
+            replan_exhausted=replan_exhausted,
+            skip_consolidation=cheap_path_active,
+        )
 
         # Clear streaming callback so it cannot leak into the next turn.
         self._stream_on_token = None

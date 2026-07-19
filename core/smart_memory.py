@@ -597,12 +597,24 @@ def episode_from_agent_cycle(
     run_id: str = "",
     task_id: str = "",
     usage_eligible: bool | None = None,
+    aborted_reason: str = "",
 ) -> EpisodeRecord:
+    """Build an episode from one finished cycle.
+
+    `aborted_reason` marks a run that never completed (an exception, a
+    cancellation, a timeout). Outcome is otherwise derived from chunk counts
+    alone, which cannot see any of those — so without this an interrupted run
+    would bank as `success`.
+    """
     verified = max(0, int(verified_chunks))
     unverified = max(0, int(unverified_chunks))
     weak = max(0, int(weak_chunks))
     outcome: EpisodeOutcome
-    if replan_exhausted:
+    if aborted_reason:
+        # The run did not finish. No chunk count can express that, so it is
+        # decided before them and cannot be overridden into a success.
+        outcome = "failed"
+    elif replan_exhausted:
         outcome = "failed"
     elif unverified > verified:
         # The answer's UNVERIFIED support outnumbers its verified support — a
@@ -624,6 +636,8 @@ def episode_from_agent_cycle(
     tools = tuple(str(t) for t in tools_used if str(t).strip())
     labels = tuple(str(label) for label in source_labels if str(label).strip())
     tags = _episode_tags(tools=tools, outcome=outcome, labels=labels)
+    if aborted_reason:
+        tags = tags + ("aborted", f"aborted:{aborted_reason}")
     # A run-derived id is what makes duplicate detection possible at all: the
     # store can recognise "this attempt was already banked" without keeping a
     # ledger. Runs without an id keep the random default.
