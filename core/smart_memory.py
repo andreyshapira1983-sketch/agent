@@ -122,12 +122,19 @@ class EpisodeRecord:
     # Full answer text — stored verbatim for the episodic fast path.
     # Empty string for episodes created before this field was added.
     full_answer: str = ""
+    # Which logical task this episode served, and which attempt produced it.
+    # `task_id` survives a retry; `run_id` is fresh per attempt. Empty string
+    # on legacy records and on runs that carry no task.
+    task_id: str = ""
+    run_id: str = ""
     id: str = field(default_factory=lambda: new_id("ep"))
     created_at: str = field(default_factory=_now_iso)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
+            "task_id": self.task_id,
+            "run_id": self.run_id,
             "goal": self.goal,
             "question": self.question,
             "outcome": self.outcome,
@@ -147,6 +154,8 @@ class EpisodeRecord:
     def from_dict(cls, data: dict[str, Any]) -> "EpisodeRecord":
         return cls(
             id=str(data.get("id") or new_id("ep")),
+            task_id=str(data.get("task_id") or ""),
+            run_id=str(data.get("run_id") or ""),
             goal=str(data.get("goal") or ""),
             question=str(data.get("question") or ""),
             outcome=_episode_outcome(str(data.get("outcome") or "partial")),
@@ -295,6 +304,26 @@ class EpisodicMemoryStore:
         with state_file_lock(self.path):
             append_state_jsonl_unlocked(self.path, [episode.to_dict()])
             self._maybe_prune_unlocked()
+
+    def save_once(self, episode: EpisodeRecord) -> bool:
+        """Append the episode unless its id is already stored.
+
+        Returns True if written, False if it was a duplicate. The lookup and
+        the append happen inside ONE `state_file_lock`, so two processes
+        racing on the same run cannot both write.
+
+        **Bounded idempotency.** The guarantee lasts only while the episode is
+        inside the FIFO window (`max_episodes`): once evicted, its id becomes
+        writable again. No separate ledger is kept, so this is deduplication
+        for a run and its immediate retries — not a permanent claim.
+        """
+        with state_file_lock(self.path):
+            for row in read_state_jsonl_unlocked(self.path):
+                if row.get("id") == episode.id:
+                    return False
+            append_state_jsonl_unlocked(self.path, [episode.to_dict()])
+            self._maybe_prune_unlocked()
+            return True
 
     def _maybe_prune_unlocked(self) -> int:
         """Evict oldest non-protected episodes when over *max_episodes*.
@@ -520,6 +549,15 @@ class MemoryConsolidationStore:
         return len(self.load())
 
 
+def episode_id_for_run(run_id: str) -> str:
+    """Deterministic episode id for one attempt.
+
+    Derived rather than random so `EpisodicMemoryStore.save_once` can detect a
+    duplicate of the same run without a side ledger.
+    """
+    return f"ep-run-{run_id}"
+
+
 def episode_from_agent_cycle(
     *,
     goal: str,
@@ -531,6 +569,8 @@ def episode_from_agent_cycle(
     unverified_chunks: int = 0,
     weak_chunks: int = 0,
     replan_exhausted: bool = False,
+    run_id: str = "",
+    task_id: str = "",
 ) -> EpisodeRecord:
     verified = max(0, int(verified_chunks))
     unverified = max(0, int(unverified_chunks))
@@ -558,6 +598,10 @@ def episode_from_agent_cycle(
     tools = tuple(str(t) for t in tools_used if str(t).strip())
     labels = tuple(str(label) for label in source_labels if str(label).strip())
     tags = _episode_tags(tools=tools, outcome=outcome, labels=labels)
+    # A run-derived id is what makes duplicate detection possible at all: the
+    # store can recognise "this attempt was already banked" without keeping a
+    # ledger. Runs without an id keep the random default.
+    episode_id = episode_id_for_run(run_id) if run_id else new_id("ep")
     return EpisodeRecord(
         goal=_clean_text(goal, max_chars=300),
         question=_clean_text(question, max_chars=400),
@@ -572,6 +616,9 @@ def episode_from_agent_cycle(
         replan_exhausted=bool(replan_exhausted),
         answer_quality_score=_compute_quality_score(verified, unverified, weak),
         tags=tags,
+        task_id=str(task_id or ""),
+        run_id=str(run_id or ""),
+        id=episode_id,
     )
 
 
