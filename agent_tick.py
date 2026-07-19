@@ -102,7 +102,7 @@ UNATTENDED_MEMORY_PROFILE = {
     "with_memory": False,
     "with_experience": True,
     "episodic_replay": False,
-    "durable_writes": frozenset({"episode"}),
+    "durable_writes": frozenset({"episode", "hygiene"}),
 }
 
 
@@ -971,6 +971,31 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         did_work=summary["tasks_processed"] > 0,
     )
     summary.update(visibility)
+
+    # ── Memory maintenance ───────────────────────────────────────────────────
+    # Runs here because this is the path with no human on it: interactively an
+    # operator can type `:hygiene`, unattended nobody will, and memory grows
+    # until someone notices (MIR-045).
+    #
+    # Placed AFTER the work summary so a maintenance problem can never change
+    # the tick's verdict, and gated by AGENT_AUTO_HYGIENE:
+    #   shadow (default) — count and report, remove nothing
+    #   on               — actually remove
+    #   off              — skip entirely
+    # Shadow is the default deliberately: these thresholds have only ever been
+    # exercised against synthetic data, and the pass deletes.
+    _hygiene_mode = os.environ.get("AGENT_AUTO_HYGIENE", "shadow").strip().lower()
+    if _hygiene_mode in {"shadow", "on"}:
+        try:
+            _hyg_agent = build_agent(
+                workspace, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
+            )
+            _hyg = _hyg_agent.run_maintenance_pass(dry_run=_hygiene_mode == "shadow")
+            _log_tick(workspace, {"event": "maintenance_pass", **_hyg})
+        except Exception as exc:  # noqa: BLE001
+            _log_tick(workspace, {"event": "maintenance_error",
+                                  "error": type(exc).__name__})
+
     _log_tick(workspace, {"event": "tick_complete", **summary})
 
     # Heartbeat #2: record successful completion with the honest health verdict.

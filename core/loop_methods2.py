@@ -43,6 +43,7 @@ KNOWN_DURABLE_SINKS: frozenset[str] = frozenset({
     "profile",          # user_profile_store
     "assumptions",      # assumption_store
     "access_stats",     # persistent record access_count / last_accessed_at
+    "hygiene",          # expire / dedup / prune / archive — a DESTRUCTIVE write
 })
 
 
