@@ -42,9 +42,9 @@ re-grounded against **current code on `main` @ `f317c4c`**.
 
 | Status | Count | IDs |
 |---|---|---|
-| fixed | 10 | MIR-017 (runtime-reproduced), MIR-001, MIR-004, MIR-005 (Stage-3.3 reproduced), **MIR-002, MIR-041, MIR-043, MIR-046** (2026-07-20, branch `fix/mir-043-autonomous-experience-wiring`), **MIR-051** (legacy confidence migrated on live data), **MIR-049** (procedure attribution) |
+| fixed | 11 | MIR-017 (runtime-reproduced), MIR-001, MIR-004, MIR-005 (Stage-3.3 reproduced), **MIR-002, MIR-041, MIR-043, MIR-046** (2026-07-20, branch `fix/mir-043-autonomous-experience-wiring`), **MIR-051** (legacy confidence migrated on live data), **MIR-049** (procedure attribution), **MIR-048** (procedural feedback loop closed) |
 | code_fixed_needs_runtime_verification | 3 | MIR-012, 013, 014 |
-| open | 18 | MIR-006, 008, 010, 011, 015, 016, 020, 021, 023, 024, 026, 039, 040, 044, 045, 047, 048, **050** (harm measured, fix deferred) |
+| open | 19 | MIR-006, 052, 053, 008, 010, 011, 015, 016, 020, 021, 023, 024, 026, 039, 040, 044, 045, 047, **050** (harm measured, fix deferred) |
 | partially_fixed | 3 | MIR-003, MIR-007, **MIR-042** (counting face closed by MIR-046; injection face open) |
 | planned_gap | 8 | MIR-009, 018(partial), 022, 029, 030, 031, 034, 038 |
 | needs_investigation | 6 | MIR-019, 025, 027, 028, 032, 033 |
@@ -55,7 +55,7 @@ re-grounded against **current code on `main` @ `f317c4c`**.
 MIR-042 → `partially_fixed` (re-grades only, total unchanged). Second pass, after the D-1
 measurement: **MIR-051 added** (legacy confidence migration), MIR-050 `needs_investigation` →
 `open` with harm measured and fix deliberately deferred, MIR-049 sequenced **ahead of** MIR-048.
-**Total is now 51.**
+**Total is now 53** (MIR-052/053 added 2026-07-20 from the MIR-049 implementation pass).
 
 (**50 issues total — this tally is the authoritative count**; older "47" mentions in
 chronological log entries are historical, not current-state. Some IDs carry a secondary qualifier; the row text is authoritative.
@@ -215,7 +215,11 @@ covered the registered items in isolation — NOT full end-to-end coverage of th
 - **Aliases:** none. **Related:** MIR-003 (birth gate — different root: birth vs demotion), MIR-044. **Provenance:** newly_discovered (M1 review, operator-challenge follow-up).
 - **Files/functions:** sole production path `core/loop_methods2.py:364` → `upsert_from_episode` (`core/smart_memory.py:464-467`) → `procedure_from_episode` (`:578-580`) returns `None` for any `outcome != "success"` — so `with_episode` (`:221-240`) never receives a non-success episode. The `failure_count` increment (`:224`) is **dead code in production**; no other writer exists.
 - **Symptom:** procedure confidence `(s+1)/(s+2)` rises monotonically from 0.667; `needs_review` (`<0.6`) is unreachable via outcomes; **a procedure can fail forever and never demote**. Consolidation's `needs_review` list is structurally near-empty (compounds MIR-044's emptiness).
-- **Status:** `open` (newly_discovered; code-verified). **Blocked on MIR-049 — fix that first.**
+- **Status:** **`fixed` (2026-07-20)** ⬆ from `open`. Demotion is now reachable through outcomes.
+- **Resolution:** `ProceduralMemoryStore.apply_episode_feedback(episode)` consumes **only** `used_procedure_ids` (MIR-049). No fallback exists — not workflow_key, tool set, name similarity, a fresh retrieval, or inference from content — because MIR-050 measured that keys pool unrelated goals, so any of those would debit an uninvolved procedure. An unresolvable id is reported `orphaned`, never substituted. Outcome matrix: `success` → `success_count+1`; `partial` and `failed` → `failure_count+1`; **cancelled → nothing** (a control signal is not evidence a procedure is bad); `used_procedure_ids` `None` (legacy) and `()` (known-none) are both no-ops and stay distinguishable in the report.
+- **Atomicity:** `ProcedureRecord.with_outcome` recomputes counter, confidence and status into one new record, so no reader can see a bumped counter beside a stale confidence.
+- **Idempotence:** keyed on the episode id already present in the procedure's own `source_episode_ids` journal — an explicit lookup, not a guess from the counters' shape. Re-processing a queue cannot turn the ratchet twice. Wired after `upsert_from_episode`, which journals the same id on a fresh success, so the two paths compose without double-counting.
+- **Tests:** `tests/test_procedure_outcome_feedback.py` — 15 passing, all fail-before. Central case continues the MIR-049 scenario to its conclusion: two procedures sharing a workflow_key, only one attributed, run failed → the attributed one is debited and the other comes out **byte-identical**. Plus the outcome matrix, cancellation as a no-op, no-attribution no-ops, orphaned ids, re-application, multi-procedure (one discrete observation each, not a split share), duplicate collapsing, partial-orphan resilience, and `demotion_is_now_reachable` — four attributed failures move a procedure to `needs_review`.
 - **Sequencing (operator decision, 2026-07-20):** attribution must land **before** feedback. Without `used_procedure_ids`, the only way to decide *which* procedure a failed cycle should debit is to re-derive it from `workflow_key` or a similar heuristic — and MIR-050 has now measured that those keys pool unrelated goals (8/48 keys span multiple goal classes). The result would be: failed episode → approximately-matched procedure → `failure_count` incremented on the **wrong** procedure. That is worse than the current ratchet, because a one-way ratchet is inert while misattributed punishment is actively wrong. Exact causal link first, counter updates second.
 - **Measured scale (live store, read-only, 2026-07-20):** `failure_count == 0` on **all 65** procedures — the ratchet is not theoretical, it has never once turned. 64/65 are `active`; 53/65 rest on a single success. Non-success episodes do exist (e.g. `partial×2 + success×1` under `tools:shell_exec`), they simply never reach a procedure.
 - **Root formula impact:** any lifecycle driver built on these counts (incl. §6.4 of the draft M1) inherits a positive-only signal — this is why "B-enhanced" alone is not a root fix.
@@ -246,6 +250,23 @@ covered the registered items in isolation — NOT full end-to-end coverage of th
 - **Why the fix is deferred rather than applied:** mean density is **1.4 episodes per key**. Option (a) (composite key = tools + goal signature) would fragment already-sparse evidence into singleton procedures — the worst key's 10 episodes would become 10 procedures of one episode each, none able to accumulate anything. Changing identity at this data volume degrades the store instead of repairing it. The harm is real but bounded (17% of keys); the cure at current density is worse.
 - **Return condition (explicit, so "deferred" cannot become indefinite):** revisit once the store holds enough episodes to run an **offline** comparison of current vs candidate identity **without migrating production data**. That comparison must report: collision rate, share of singleton procedures, episodes-per-key density, outcome divergence within one key, and the effect on retrieval/planning quality. Only then is D-1 decidable.
 - **Note:** fix remains a design decision (key = tools + goal-class/token signature, or per-goal sub-buckets) — Open Decision D-1 in `MEMORY_LIFECYCLE_CONTRACT.md` §16, still not prejudged.
+
+### MIR-052 — a programming error in episode construction is masked as a memory outage
+- **Aliases:** none. **Related:** MIR-043 (found during its follow-up work). **Provenance:** newly_discovered (2026-07-20, during MIR-049 implementation).
+- **Files/functions:** `core/loop_methods2.py` `_record_experience_memory` — the whole build-and-write block sits under one `except Exception`, logged as `smart_memory_error`.
+- **Symptom:** a `TypeError` from `episode_from_agent_cycle` (a caller passing an argument the signature does not accept) was swallowed and surfaced only as "no episode was written". Observed live: the delta was zero and every test reported nothing changed, with no failure anywhere pointing at the real cause. A signature or invariant violation is indistinguishable from a corrupt state file.
+- **Why it matters:** this is the boundary that hid the previous defect. A future feedback bug will present the same way — "delta is zero" — and cost the same detour.
+- **Status:** `open` (newly_discovered).
+- **Fix direction:** keep isolating genuine storage failures (corrupt file, lock contention, disk error) — those legitimately must not abort a user-facing answer. But `TypeError` / `AttributeError` / invariant violations should propagate under test and development, so a programming error fails loudly instead of looking like memory being unavailable.
+- **Missing tests:** a caller passing a bad argument to the episode factory raises rather than logging `smart_memory_error`; a simulated storage failure still degrades quietly.
+
+### MIR-053 — the test environment is not network-deny by default
+- **Aliases:** none. **Provenance:** newly_discovered (2026-07-20, during MIR-049 implementation).
+- **Symptom:** a diagnostic script run outside pytest called the real provider (`gpt-5.6-terra`, one billed request) because `load_dotenv` picked up live keys. Nothing refused it. Test fixtures do delete API keys and set `AGENT_ALLOW_MOCK_ROUTING`, but that is a per-file convention each author must remember, not an enforced boundary.
+- **Why it matters:** correctness of the test suite currently depends on every future script being written correctly. The failure is silent and costs real money; it also means a "test" run can mutate external state.
+- **Status:** `open` (newly_discovered).
+- **Fix direction:** make the default deny rather than the convention: session-level fixture stripping credentials, a stubbed external client, an unmocked network call failing loudly, and diagnostic scripts requiring explicit opt-in for network access.
+- **Missing tests:** an unmocked provider call inside the suite fails rather than dialing out.
 
 ### MIR-051 — stored procedure `confidence` violates the Beta-smoothing invariant (legacy data)
 - **Aliases:** none. **Related:** MIR-048 (same field, different root — this is data, that is a missing code path), MIR-003. **Provenance:** newly_discovered (D-1 measurement, 2026-07-20).
