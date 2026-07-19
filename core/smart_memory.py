@@ -522,6 +522,107 @@ class ProceduralMemoryStore:
     def count(self) -> int:
         return len(self.load())
 
+    def recompute_legacy_confidence(
+        self, *, dry_run: bool = True, limit: int | None = None
+    ) -> dict:
+        """Restore `confidence == _smoothed_confidence(success, failure)` (MIR-051).
+
+        Smoothing landed on 2026-07-11; rows written before it kept a raw
+        `confidence` the formula cannot produce — 45 of 65 in the live store
+        sat at 1.0, 39 of those on a single success. The writers are correct,
+        so this repairs data, not logic, and is deliberately a separate
+        explicit pass rather than something hidden inside read or upsert.
+
+        Touches **only** derived values: `confidence`, and `status` with it,
+        since status is exactly `confidence >= 0.6`. Leaving status stale would
+        just trade one broken invariant for another.
+
+        Never touched: `success_count` / `failure_count` (reconstructing missing
+        failure history is MIR-048's problem, not a migration's), `created_at` /
+        `updated_at` (refreshing freshness would make stale procedures look
+        recently used and outlive hygiene), identity, provenance and content.
+
+        Operates on raw payloads so unknown fields survive untouched and the
+        real stored counters are visible — `ProcedureRecord.from_dict` clamps
+        negatives to 0, which would silently launder a corrupt row into a
+        valid-looking one. Writes through the store's own writer, so the
+        integrity envelope is recomputed normally.
+
+        Records already consistent are not rewritten at all, so their bytes,
+        checksums and audit trail stay exactly as they were.
+        """
+        with state_file_lock(self.path):
+            rows = read_state_jsonl_unlocked(self.path)
+
+        def _dist(values: list) -> dict:
+            out: dict = {}
+            for v in values:
+                key = str(round(float(v), 3)) if isinstance(v, (int, float)) else "invalid"
+                out[key] = out.get(key, 0) + 1
+            return out
+
+        report = {
+            "scanned": len(rows),
+            "eligible": 0,
+            "corrected": 0,
+            "already_consistent": 0,
+            "invalid": 0,
+            "skipped": 0,
+            "before_distribution": _dist([r.get("confidence") for r in rows]),
+            "after_distribution": {},
+            "dry_run": bool(dry_run),
+            "limit_reached": False,
+        }
+
+        changed = False
+        for row in rows:
+            success = row.get("success_count")
+            failure = row.get("failure_count")
+            if (
+                not isinstance(success, int) or isinstance(success, bool)
+                or not isinstance(failure, int) or isinstance(failure, bool)
+                or success < 0 or failure < 0
+            ):
+                # Counters that cannot be trusted are reported, never guessed:
+                # a repaired confidence over invented history is not a repair.
+                report["invalid"] += 1
+                continue
+
+            expected = _smoothed_confidence(success, failure)
+            stored = row.get("confidence")
+            if isinstance(stored, (int, float)) and round(float(stored), 3) == expected:
+                report["already_consistent"] += 1
+                continue
+
+            report["eligible"] += 1
+            if limit is not None and report["corrected"] >= limit:
+                # Bounded and resumable: the remainder is picked up next run.
+                report["limit_reached"] = True
+                report["skipped"] += 1
+                continue
+
+            report["corrected"] += 1
+            if not dry_run:
+                row["confidence"] = expected
+                row["status"] = "active" if expected >= 0.6 else "needs_review"
+                changed = True
+
+        report["after_distribution"] = _dist(
+            [
+                _smoothed_confidence(r["success_count"], r["failure_count"])
+                if isinstance(r.get("success_count"), int)
+                and isinstance(r.get("failure_count"), int)
+                and r["success_count"] >= 0 and r["failure_count"] >= 0
+                else r.get("confidence")
+                for r in rows
+            ]
+        )
+
+        if changed and not dry_run:
+            with state_file_lock(self.path):
+                rewrite_state_jsonl_unlocked(self.path, rows)
+        return report
+
     def upsert_from_episode(self, episode: EpisodeRecord) -> tuple[ProcedureRecord | None, bool]:
         candidate = procedure_from_episode(episode)
         if candidate is None:
