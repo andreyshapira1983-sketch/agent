@@ -55,6 +55,9 @@ def _bank(agent: AgentLoop, *, verifier_failure: bool, verified: int = 0,
         unverified_chunks=unverified,
         replan_exhausted=replan_exhausted,
         verifier_failure=verifier_failure,
+        # Credit needs the completion axis too since MIR-057; this suite is
+        # about verifier-crash suppression, so it declares the cycle done.
+        declared_completion="achieved",
     )
 
 
@@ -202,6 +205,27 @@ def _crashing_verify(*_args, **_kwargs):
     raise RuntimeError("verifier exploded")
 
 
+def _spy_on_banking(monkeypatch) -> dict:
+    """Record the `verifier_failure` each banking call actually receives.
+
+    These two tests exist to prove the flag PROPAGATES from each soft-fail
+    site to banking, and asserting propagation directly is the honest way to
+    do it. Watching a downstream side effect no longer works: a mocked cycle
+    runs no tools, so credit is never on the table, the verdict is already
+    `none`, and `credit_suppressed` — which marks a DOWNGRADE — stays False.
+    The suppression itself is covered by the direct tests above.
+    """
+    seen: dict = {}
+    original = AgentLoop._record_experience_memory
+
+    def _spy(self, **kwargs):
+        seen["verifier_failure"] = kwargs.get("verifier_failure")
+        return original(self, **kwargs)
+
+    monkeypatch.setattr("core.loop.AgentLoop._record_experience_memory", _spy)
+    return seen
+
+
 def _feedback_payload(agent: AgentLoop) -> dict:
     import json
     events = [
@@ -217,17 +241,18 @@ def _feedback_payload(agent: AgentLoop) -> dict:
 def test_the_initial_verify_crash_reaches_banking(tmp_path: Path, monkeypatch) -> None:
     """`core/loop.py:1625` — the flag has to survive the whole cycle.
 
-    Asserting on the suppression flag rather than on a counter: in a mocked
-    cycle nothing is attributed anyway, so an unchanged `success_count` would
-    hold with or without the fix and would prove nothing.
+    Asserting propagation rather than a counter: in a mocked cycle nothing is
+    attributed anyway, so an unchanged `success_count` would hold with or
+    without the fix and would prove nothing.
     """
     agent = _agent(tmp_path)
     _seed_procedure(agent)
+    seen = _spy_on_banking(monkeypatch)
     monkeypatch.setattr("core.verifier.verify", _crashing_verify)
 
     agent.run("сколько строк в файле core/loop_methods2.py")
 
-    assert _feedback_payload(agent)["credit_suppressed"] is True
+    assert seen["verifier_failure"] is True, "the initial soft-fail flag never arrived"
     assert agent.procedural_store.load()[0].success_count == 2
 
 
@@ -236,6 +261,7 @@ def test_the_replan_verify_crash_reaches_banking(tmp_path: Path, monkeypatch) ->
     unresolved-URL branch, must set the same flag the first one does."""
     agent = _agent(tmp_path)
     _seed_procedure(agent)
+    seen = _spy_on_banking(monkeypatch)
 
     calls = {"verify": 0, "urls": 0}
 
@@ -275,8 +301,8 @@ def test_the_replan_verify_crash_reaches_banking(tmp_path: Path, monkeypatch) ->
     assert "verify_replan" in phases, (
         f"the crash must come from the replan site, not the initial one; saw {phases}"
     )
-    assert _feedback_payload(agent)["credit_suppressed"] is True, (
-        "a crash on re-verify must suppress credit exactly as the first site does"
+    assert seen["verifier_failure"] is True, (
+        "a crash on re-verify must reach banking exactly as the first site does"
     )
     assert agent.procedural_store.load()[0].success_count == 2
 

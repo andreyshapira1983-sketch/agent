@@ -352,9 +352,12 @@ class ProcedureRecord:
         )
 
     def with_episode(self, episode: EpisodeRecord) -> "ProcedureRecord":
+        # The counter asks the same question as creation and the verdict. It
+        # is gated here as well as at the entry, because this is where the
+        # number actually moves and it has to answer for itself (MIR-057).
         episode_ids = tuple(dict.fromkeys([*self.source_episode_ids, episode.id]))
-        success_count = self.success_count + (1 if episode.outcome == "success" else 0)
-        failure_count = self.failure_count + (1 if episode.outcome == "failed" else 0)
+        success_count = self.success_count + (1 if procedure_credit_allowed(episode) else 0)
+        failure_count = self.failure_count + (1 if procedure_debit_allowed(episode) else 0)
         confidence = _smoothed_confidence(success_count, failure_count)
         status: ProcedureStatus = "active" if confidence >= 0.6 else "needs_review"
         return ProcedureRecord(
@@ -892,22 +895,86 @@ class MemoryConsolidationStore:
         return len(self.load())
 
 
+def procedure_credit_allowed(episode: EpisodeRecord) -> bool:
+    """May this run raise a procedure's standing?
+
+    Both axes must agree, because they answer different questions and neither
+    substitutes for the other: `completion_state` says the task was done,
+    `outcome` says the claims that were made held up. A blocked non-answer
+    satisfies the second perfectly — that is how the live store's only
+    admitted episode credited `tools:file_read` to 0.857 (MIR-057).
+
+    `completion_state` is read FROZEN, through the shared accessor. It is
+    never recomputed and never taken from `declared_completion`.
+
+    One predicate, three callers — creation, the counter, and the feedback
+    verdict — so those cannot drift into crediting on different grounds.
+    """
+    return bool(
+        effective_completion(episode) == "achieved"
+        and episode.outcome == "success"
+        and episode.tools_used
+    )
+
+
+def procedure_debit_allowed(episode: EpisodeRecord) -> bool:
+    """May this run lower a procedure's standing?
+
+    Deliberately narrow: only a failure the RUN ITSELF demonstrates. An
+    exhausted replan is the loop giving up after trying — a fact about
+    execution that the procedure took part in.
+
+    Everything else is neutral, and each for its own reason:
+
+    * a DECLARED `failed` is the answer's own claim, and a model reporting it
+      did not succeed says nothing about whether the workflow it used is bad —
+      the cause is usually upstream of the procedure;
+    * `cancelled` is a control signal; debiting for it would make the counters
+      describe scheduling rather than quality;
+    * `blocked` / `refused` / `partially_achieved` are non-completions the
+      procedure may have executed perfectly through;
+    * `unknown` and legacy `None` carry no verdict to act on.
+
+    An ABORTED run is neutral for a structural reason rather than a policy
+    one: `_record_aborted_episode` carries no `used_procedure_ids`, so there
+    is no causal link to debit through at all. Supporting abort feedback needs
+    attribution plus a normalised failure code, designed together — tracked
+    separately.
+
+    The frozen state is authoritative and comes first: `replan_exhausted`
+    NARROWS an existing `failed`, it can never create one. A record claiming
+    `achieved` while carrying an exhausted replan is not debited.
+
+    Derived `aborted:*` tags are never consulted. A value computed from
+    another value must not be what authorises a debit.
+    """
+    return bool(
+        effective_completion(episode) == "failed"
+        and episode.replan_exhausted is True
+    )
+
+
 def feedback_for_episode(episode: EpisodeRecord) -> str:
     """What this run's outcome says about a procedure it used.
 
-    Returns "success", "failure" or "none".
+    Returns "success", "failure" or "none", and is now a thin reading of the
+    two predicates so the verdict cannot disagree with the gates that create
+    and count.
 
-    A cancelled run yields "none": cancellation is a control signal, not
-    evidence that the procedure is bad. Punishing a procedure because an
-    operator pressed stop would make the counters describe scheduling, not
-    quality. `partial` DOES count as a failure — unverified support
-    outnumbered verified support, which is a real quality signal.
+    **Policy change (MIR-057).** An evidence-`partial` used to count as a
+    failure. It no longer does: `partial` means unverified support
+    outnumbered verified support, which is a fact about how well the ANSWER
+    was grounded, not proof that the workflow failed. A procedure that
+    executed exactly as designed was being debited for the synthesizer's weak
+    citations. Debits now come only from `procedure_debit_allowed`.
+
+    The old cancellation carve-out is gone as a special case and survives as
+    a consequence: a cancelled run freezes as `cancelled`, which is neither
+    credit nor debit.
     """
-    if any(t.startswith("aborted:cancelled") for t in episode.tags):
-        return "none"
-    if episode.outcome == "success":
+    if procedure_credit_allowed(episode):
         return "success"
-    if episode.outcome in ("partial", "failed"):
+    if procedure_debit_allowed(episode):
         return "failure"
     return "none"
 
@@ -1208,7 +1275,9 @@ def episode_from_agent_cycle(
 
 
 def procedure_from_episode(episode: EpisodeRecord) -> ProcedureRecord | None:
-    if episode.outcome != "success" or not episode.tools_used:
+    # Same predicate as the counter and the verdict: a workflow is only worth
+    # minting from a run that finished the job (MIR-057).
+    if not procedure_credit_allowed(episode):
         return None
     workflow_key = "tools:" + "->".join(episode.tools_used)
     readable_tools = ", ".join(episode.tools_used)
