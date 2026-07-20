@@ -351,6 +351,65 @@ class AgentLoopExtractedMethods:
         self.log.log("backup_cleanup", report.summary())
         return report
 
+    def run_maintenance_pass(self, *, dry_run: bool = True) -> dict:
+        """One bounded hygiene pass: expire → dedup → prune episodes → archive.
+
+        Exists so the unattended agent keeps its own memory: every operation
+        below already existed, but the sole caller was the `:hygiene` command,
+        and nobody types that on the daemon path (MIR-045).
+
+        Governed as a **durable write** under the `hygiene` sink rather than by
+        a bespoke permission check. That is what makes `:audit` and the dry-run
+        brake stop it absolutely, and what stops a profile that was never
+        granted the sink from running it — the same policy as every other
+        write, with nothing extra to keep in sync.
+
+        `dry_run=True` (the default) counts and reports without removing.
+        Thresholds tuned on synthetic data should be seen against a real store
+        before they are allowed to delete from it.
+
+        `summarise_persistent` is deliberately absent: it needs an LLM call, so
+        it is neither free nor deterministic, and it stays an operator action.
+
+        Returns a delta report — the only way an operator learns what ran while
+        nobody was watching.
+        """
+        if self._durable_learning_suppressed("hygiene"):
+            reason = (
+                "audit_read_only"
+                if getattr(self, "audit_read_only", False)
+                else "dry_run_brake"
+                if getattr(self, "suppress_durable_learning_writes", False)
+                else "not_allowlisted"
+            )
+            self.log.log("maintenance_pass_skipped", {"reason": reason})
+            return {"skipped": reason, "dry_run": dry_run}
+
+        report: dict = {"skipped": None, "dry_run": dry_run}
+        try:
+            expiry = self.expire_persistent(dry_run=dry_run)
+            report["expired"] = len(getattr(expiry, "expired", []) or [])
+
+            dedup = self.dedupe_persistent(dry_run=dry_run)
+            report["deduped"] = len(getattr(dedup, "deleted", []) or [])
+
+            pruned = self.prune_episodic(dry_run=dry_run)
+            report["episodes_pruned"] = len(pruned or [])
+
+            archive = self.archive_persistent(dry_run=dry_run)
+            report["archived"] = len(getattr(archive, "archived", []) or [])
+        except Exception as exc:  # noqa: BLE001
+            # Maintenance must never take the tick down with it: a corrupt
+            # state file is a reason to skip cleanup, not to stop working.
+            self.log.log(
+                "maintenance_pass_error",
+                {"error": type(exc).__name__, "detail": str(exc)[:200]},
+            )
+            report["error"] = type(exc).__name__
+
+        self.log.log("maintenance_pass", report)
+        return report
+
     def expire_persistent(self, *, dry_run: bool = False):
         """Remove persistent records whose TTL has elapsed."""
         from core.hygiene import expire_memory

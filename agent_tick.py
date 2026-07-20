@@ -77,6 +77,34 @@ EXPECTED_TICK_INTERVAL_SECONDS = int(
 )
 STALENESS_FACTOR = 2
 
+# Memory profile for the unattended (daemon/cron) agent. Defined once here
+# because all three build sites below must stay identical.
+#
+# Phase 1 — connect experience memory to the core WITHOUT granting it a voice
+# in durable state:
+#   with_experience=True     the unattended agent finally holds episodic and
+#                            procedural stores (before this it held none, so it
+#                            could neither record nor recall experience)
+#   episodic_replay=False    it may read that experience, but must never serve
+#                            a stored answer in place of running a real cycle
+#   durable_writes={"episode"}
+#                            a ONE-SINK allowlist: the unattended agent banks
+#                            episodes so its work leaves a trace, while
+#                            procedural promotion, consolidation, knowledge,
+#                            source registry, profile and assumptions all stay
+#                            denied by default-deny
+#   with_memory=False        unchanged — no cross-run session memory
+#
+# Episodes are written `usage_eligible=False` (quarantined), so the loop closes
+# mechanically but stays inert until the quality defects (MIR-002/041/046) are
+# fixed: wiring operational, usage quarantined.
+UNATTENDED_MEMORY_PROFILE = {
+    "with_memory": False,
+    "with_experience": True,
+    "episodic_replay": False,
+    "durable_writes": frozenset({"episode", "hygiene"}),
+}
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -643,7 +671,7 @@ def _maybe_produce_self_build(
 
         builder = build_agent_fn or (
             lambda ws: __import__("main", fromlist=["build_agent"]).build_agent(
-                ws, with_memory=False, approval_provider=None
+                ws, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
             )
         )
         agent = builder(workspace)
@@ -803,7 +831,9 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
             _log_tick(workspace, {"event": "no_pending_tasks"})
             # Still check approval inbox below
         else:
-            agent = build_agent(workspace, with_memory=False, approval_provider=None)
+            agent = build_agent(
+                workspace, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
+            )
             inbox = ApprovalInbox(path=workspace / APPROVAL_INBOX_PATH)
             incident_log = IncidentLog(path=workspace / INCIDENT_LOG_PATH)
             runtime = AutonomousRuntime(
@@ -941,6 +971,31 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         did_work=summary["tasks_processed"] > 0,
     )
     summary.update(visibility)
+
+    # ── Memory maintenance ───────────────────────────────────────────────────
+    # Runs here because this is the path with no human on it: interactively an
+    # operator can type `:hygiene`, unattended nobody will, and memory grows
+    # until someone notices (MIR-045).
+    #
+    # Placed AFTER the work summary so a maintenance problem can never change
+    # the tick's verdict, and gated by AGENT_AUTO_HYGIENE:
+    #   shadow (default) — count and report, remove nothing
+    #   on               — actually remove
+    #   off              — skip entirely
+    # Shadow is the default deliberately: these thresholds have only ever been
+    # exercised against synthetic data, and the pass deletes.
+    _hygiene_mode = os.environ.get("AGENT_AUTO_HYGIENE", "shadow").strip().lower()
+    if _hygiene_mode in {"shadow", "on"}:
+        try:
+            _hyg_agent = build_agent(
+                workspace, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
+            )
+            _hyg = _hyg_agent.run_maintenance_pass(dry_run=_hygiene_mode == "shadow")
+            _log_tick(workspace, {"event": "maintenance_pass", **_hyg})
+        except Exception as exc:  # noqa: BLE001
+            _log_tick(workspace, {"event": "maintenance_error",
+                                  "error": type(exc).__name__})
+
     _log_tick(workspace, {"event": "tick_complete", **summary})
 
     # Heartbeat #2: record successful completion with the honest health verdict.
@@ -1118,7 +1173,9 @@ def run_paced_campaign(
         from dotenv import load_dotenv
         load_dotenv(workspace / ".env")
         from main import build_agent
-        agent = build_agent(workspace, with_memory=False, approval_provider=None)
+        agent = build_agent(
+            workspace, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
+        )
 
     from core.approval_inbox import ApprovalInbox
     inbox = ApprovalInbox(path=workspace / APPROVAL_INBOX_PATH)

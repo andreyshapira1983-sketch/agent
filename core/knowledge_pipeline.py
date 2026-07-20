@@ -188,12 +188,119 @@ class ClaimExtractor:
         return len(words) >= 4
 
 
+def claim_provenance_tag(claim_id: str) -> str:
+    """Tag linking a memory record back to the claim it came from.
+
+    Without it a record cannot be found again when its claim later turns out
+    to be contradicted — quarantine has no addressee, which is why conflict
+    detection stayed advisory (MIR-047). Carried as a tag rather than a new
+    field because tags are already persisted, already filtered by
+    `KnowledgeUsePolicy`, and need no schema change.
+    """
+    return f"claim:{claim_id}"
+
+
+def quarantine_conflicted_records(
+    records: "list[MemoryRecord]", *, conflicted_claim_ids: "set[str]"
+) -> "tuple[list[MemoryRecord], dict]":
+    """Tag records whose originating claim is now contradicted.
+
+    Marks strictly by provenance tag. A record with no claim link is reported
+    as `unlinked` and left alone: matching it by content would be the guess
+    MIR-049/050 exist to forbid, and mis-quarantining a correct record is
+    worse than leaving a conflicted one in place until an operator looks.
+
+    Idempotent — a record already carrying the tag is counted, not re-tagged.
+    Resolution is operator-only: removing the tag restores the record.
+    """
+    report = {"quarantined": 0, "already_quarantined": 0, "unlinked": 0, "unaffected": 0}
+    if not conflicted_claim_ids:
+        report["unaffected"] = len(records)
+        return list(records), report
+
+    wanted = {claim_provenance_tag(cid) for cid in conflicted_claim_ids}
+    out: list[MemoryRecord] = []
+    for record in records:
+        tags = list(record.tags or [])
+        if not any(t.startswith("claim:") for t in tags):
+            report["unlinked"] += 1
+            out.append(record)
+            continue
+        if not (set(tags) & wanted):
+            report["unaffected"] += 1
+            out.append(record)
+            continue
+        if "conflicted" in tags:
+            report["already_quarantined"] += 1
+            out.append(record)
+            continue
+        report["quarantined"] += 1
+        out.append(record.model_copy(update={"tags": [*tags, "conflicted"]}))
+    return out, report
+
+
+# Source types where "X is Y" is genuinely a proposition about the world, and
+# two of them disagreeing is a real contradiction worth raising.
+#
+# Everything else is excluded on purpose (MIR-054). `file` is source code and
+# project documents: `path = ...` is an assignment, not an assertion, and every
+# module docstring opens "This module is ...". `memory` is the agent's own
+# prior output: two goals recorded by two runs are two tasks, and citing
+# yourself is not a second source. `log`, `tool_output`, `test_result` are
+# observations of one moment, not standing claims.
+#
+# Measured on the live registry before this rule: 16 conflicts, all false,
+# across 52 claims sourced entirely from `file` (36) and `memory` (16) --
+# not one from a prose source.
+# Source types that do not ASSERT anything, so "X is Y" read out of them is not
+# a proposition and two of them differing is not a contradiction (MIR-054).
+#
+#   memory       the agent's own prior output -- two goals recorded by two runs
+#                are two tasks, and citing yourself is not a second source
+#   log/tool_output/test_result
+#                observations of one moment, not standing claims
+#   code_repository
+#                programs, same reason as code files below
+#
+# Everything else stays in scope, including low-trust sources like `forum`:
+# a forum post does assert things, it just asserts them unreliably, and that
+# is what `trust_level` is for. Excluding it would silently drop a real
+# disagreement instead of resolving it.
+_NON_ASSERTING_SOURCE_TYPES = frozenset({
+    "memory", "log", "tool_output", "test_result", "code_repository",
+})
+
+# Extensions whose contents are programs, not assertions. `x = y` there is an
+# assignment, and every module docstring opens "This module is ...". A prose
+# file (.md, .txt) is left in scope -- it really does state things.
+_CODE_SUFFIXES = frozenset({
+    ".py", ".pyi", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".rb",
+    ".c", ".h", ".cpp", ".hpp", ".cs", ".sh", ".ps1", ".bat", ".sql", ".toml",
+    ".ini", ".cfg", ".yaml", ".yml", ".json",
+})
+
+
+def _is_code_locator(locator: str) -> bool:
+    text = (locator or "").strip().casefold()
+    return any(text.endswith(suffix) for suffix in _CODE_SUFFIXES)
+
+
 class ConflictResolver:
     """Detect obvious contradictory claims over the same subject."""
 
     def resolve(self, registry: SourceRegistry) -> tuple[SourceRegistry, ConflictReport]:
         grouped: dict[str, list[tuple[ClaimRecord, str]]] = {}
+        sources_by_id = {source.id: source for source in registry.sources}
         for claim in registry.claims:
+            # Contradiction is only meaningful between sources that assert
+            # things. Code, the agent's own memory, logs and tool output do
+            # not, and reading them as propositions produced only false
+            # positives (MIR-054).
+            source = sources_by_id.get(claim.source_id)
+            if source is None or source.type in _NON_ASSERTING_SOURCE_TYPES:
+                continue
+            if _is_code_locator(source.locator):
+                continue
             parsed = _subject_value(claim.text)
             if parsed is None:
                 continue
@@ -332,7 +439,12 @@ class KnowledgeWritePolicy:
         )
 
     def memory_tags(self, claim: ClaimRecord, source: SourceRecord) -> list[str]:
-        return ["fact", "knowledge", "source-backed", source.type]
+        # `claim:<id>` is provenance, not description: it is what lets a
+        # record be found again if its claim is later contradicted (MIR-047).
+        return [
+            "fact", "knowledge", "source-backed", source.type,
+            claim_provenance_tag(claim.id),
+        ]
 
 
 class KnowledgePipeline:
