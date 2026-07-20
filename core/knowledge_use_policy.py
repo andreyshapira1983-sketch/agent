@@ -22,6 +22,10 @@ QUARANTINE_TAGS = frozenset({
     "wrong",
     "obsolete",
     "superseded",
+    # A claim contradicted by another source stops being ordinary evidence
+    # until an operator resolves it (MIR-047). Listing it here means every
+    # retrieval site inherits the filter with no extra code.
+    "conflicted",
     "temporary",
     "transient",
 })
@@ -39,6 +43,10 @@ class KnowledgeUseDecision:
     decision: str
     reasons: tuple[str, ...]
     tags: tuple[str, ...] = ()
+    # Machine-readable companion to `reasons`. The prose is for a human
+    # reading one decision; aggregating a trace off it would mean parsing
+    # sentences, which is inferring a cause instead of being told it.
+    code: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -46,6 +54,7 @@ class KnowledgeUseDecision:
             "decision": self.decision,
             "reasons": list(self.reasons),
             "tags": list(self.tags),
+            "code": self.code,
         }
 
 
@@ -59,6 +68,24 @@ class KnowledgeUseReport:
     @property
     def rejected_count(self) -> int:
         return len([d for d in self.decisions if d.decision == "reject"])
+
+    @property
+    def rejected_by(self) -> dict[str, int]:
+        """Rejections aggregated by cause, for the retrieval trace.
+
+        The three reject branches are distinct diagnoses — a type outside the
+        role's scope, a record marked unusable, and a record that simply has
+        nothing to do with the question. Collapsing them into one number (as
+        `len(records) - len(allowed)` did) tells the reader to look in the
+        wrong place two times out of three.
+        """
+        counts: dict[str, int] = {}
+        for decision in self.decisions:
+            if decision.decision != "reject":
+                continue
+            code = decision.code or "unclassified"
+            counts[code] = counts.get(code, 0) + 1
+        return counts
 
     def to_log_payload(self) -> dict[str, Any]:
         return {
@@ -98,6 +125,7 @@ class KnowledgeUsePolicy:
                     decision="reject",
                     reasons=(f"type {record.type} not allowed for role {role_context.role}",),
                     tags=tags,
+                    code="role_scope",
                 ))
                 continue
 
@@ -108,6 +136,7 @@ class KnowledgeUsePolicy:
                     decision="reject",
                     reasons=(f"blocked tag(s): {sorted(blocked)}",),
                     tags=tags,
+                    code="quarantined",
                 ))
                 continue
 
@@ -148,6 +177,7 @@ class KnowledgeUsePolicy:
                 decision="reject",
                 reasons=(f"not applicable to role {role_context.role}",),
                 tags=tags,
+                code="not_applicable",
             ))
 
         return report

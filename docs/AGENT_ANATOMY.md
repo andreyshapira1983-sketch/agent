@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 134 modules across 12 groups._
+_Total: 138 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -49,6 +49,7 @@ _Planning, verification, clarification, control loop._
 | `core/loop_helpers` | Extracted from `core/loop` by autonomous self-build module split. |
 | `core/loop_methods` | Extracted from `core/loop` by autonomous self-build module split. |
 | `core/loop_methods2` | Extracted from `core/loop` by autonomous self-build module split. |
+| `core/run_context` | Run-scoped identity for one agent cycle (run_id per attempt, task_id per logical task). |
 | `core/planner` | LLM-driven Planner (§3 Cognitive Core: Planning). |
 | `core/lang_match` | Token-boundary, morphology-aware term matching (RU/EN) for routing heuristics. |
 | `core/verifier` | MVP-14.4 — Verifier. |
@@ -95,6 +96,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/structured_facts` | Structured fact extraction for tool outputs. |
 | `core/evidence` | MVP-14.1 — Evidence + Provenance model. |
 | `core/evidence_budget` | Evidence Budget — caps context sent to the synthesizer LLM. |
+| `core/completion_marker` | Nonce-bearing channel for the synthesizer's task-completion declaration (MIR-057). |
 | `core/conflict_review` | Operator-facing conflict review for the Source Registry. |
 | `core/source_registry` | Source Registry and extracted claims. |
 | `core/source_registry_store` | Persistent store for SourceRegistry. |

@@ -58,7 +58,37 @@ def build_agent(
     with_persistent: bool = True,
     persistent_path: Path | None = None,
     approval_provider: ApprovalProvider | None = None,
+    with_experience: bool | None = None,
+    experience_retrieval: bool = True,
+    episodic_replay: bool = True,
+    durable_writes: frozenset[str] | None = None,
 ) -> AgentLoop:
+    """Assemble the production agent for one entry point.
+
+    Memory is controlled along four INDEPENDENT axes, because "has stores",
+    "may read them", "may replay an answer from them" and "may write durable
+    state" are genuinely different permissions:
+
+    - ``with_memory``      — session/working memory.
+    - ``with_persistent``  — persistent/semantic memory (+ source registry,
+                             user profile, assumptions).
+    - ``with_experience``  — episodic/procedural/consolidation stores. Defaults
+                             to ``with_memory`` so every existing caller keeps
+                             its current profile; pass it explicitly to give a
+                             path experience memory without working memory.
+    - ``experience_retrieval`` / ``episodic_replay`` / ``durable_writes``
+                           — read, replay and write permissions, forwarded to
+                             the loop (see ``AgentLoop.__init__``).
+
+    ``durable_writes`` is an ALLOWLIST of durable sinks: ``None`` means "all"
+    (the interactive default), a frozenset permits exactly those sinks and
+    denies everything else, and ``frozenset()`` denies all durable writes. The
+    audit and dry-run brakes outrank it absolutely. It is **instance-scoped**:
+    fixed for the whole life of the returned agent, with deliberately no
+    per-run API yet.
+    """
+    if with_experience is None:
+        with_experience = with_memory
     registry = ToolRegistry()
     registry.register(FileReadTool(workspace_root=workspace))
     registry.register(ListDirTool(workspace_root=workspace))
@@ -148,14 +178,20 @@ def build_agent(
         )
         user_profile_store = UserProfileStore(workspace / DEFAULT_USER_PROFILE_PATH)
         assumption_store = AssumptionStore(workspace / DEFAULT_ASSUMPTIONS_PATH)  # Layer 5
-        if with_memory:
-            episodic_store = EpisodicMemoryStore(workspace / DEFAULT_EPISODIC_MEMORY_PATH)
-            procedural_store = ProceduralMemoryStore(
-                workspace / DEFAULT_PROCEDURAL_MEMORY_PATH
-            )
-            consolidation_store = MemoryConsolidationStore(
-                workspace / DEFAULT_MEMORY_CONSOLIDATION_PATH
-            )
+
+    # Experience memory is a SEPARATE axis, deliberately outside the
+    # `with_persistent` block above. It used to be nested under both
+    # `with_persistent` and `with_memory`, which tied episodic/procedural
+    # learning to working memory and left the unattended agent unable to
+    # record or recall experience at all.
+    if with_experience:
+        episodic_store = EpisodicMemoryStore(workspace / DEFAULT_EPISODIC_MEMORY_PATH)
+        procedural_store = ProceduralMemoryStore(
+            workspace / DEFAULT_PROCEDURAL_MEMORY_PATH
+        )
+        consolidation_store = MemoryConsolidationStore(
+            workspace / DEFAULT_MEMORY_CONSOLIDATION_PATH
+        )
 
     logger.log(
         "session_start",
@@ -251,4 +287,7 @@ def build_agent(
         approval_provider=approval_provider,
         user_profile_store=user_profile_store,
         assumption_store=assumption_store,  # Layer 5
+        experience_retrieval=experience_retrieval,
+        episodic_replay=episodic_replay,
+        durable_writes=durable_writes,
     )
