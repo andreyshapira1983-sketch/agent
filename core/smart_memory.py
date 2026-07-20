@@ -23,6 +23,31 @@ from core.state_integrity import (
 
 
 EpisodeOutcome = Literal["success", "partial", "failed"]
+
+# Task completion, kept deliberately apart from `EpisodeOutcome` (MIR-057).
+# `outcome` answers "were the claims supported"; this answers "was the goal
+# reached". A cycle blocked by a truncated evidence budget can be impeccably
+# supported and still have answered nothing, which is how a non-answer became
+# the first episode the system ever admitted as reusable experience.
+CompletionState = Literal[
+    "achieved",
+    "partially_achieved",
+    "blocked",
+    "refused",
+    "failed",
+    "cancelled",
+    "unknown",
+]
+
+# What the synthesizer may declare about its own run. `cancelled` and
+# `unknown` are absent on purpose: they are facts about the run's termination
+# that the loop observes, never something the answer gets to claim.
+CompletionDeclaration = Literal[
+    "achieved", "partially_achieved", "blocked", "refused", "failed"
+]
+
+_COMPLETION_STATES: frozenset[str] = frozenset(CompletionState.__args__)
+_COMPLETION_DECLARATIONS: frozenset[str] = frozenset(CompletionDeclaration.__args__)
 ProcedureStatus = Literal["active", "needs_review", "obsolete"]
 
 
@@ -150,6 +175,19 @@ class EpisodeRecord:
     # procedure was applied; (ids…) = application observed. MIR-048 debits
     # these ids, so a looser meaning would turn feedback into misattribution.
     used_procedure_ids: tuple[str, ...] | None = None
+    # What the synthesizer declared about reaching the goal, verbatim. Stored
+    # because it cannot be recovered: the marker is stripped before the answer
+    # is verified or shown, so it never reaches `full_answer`. None means no
+    # declaration was produced — legacy row, no marker, or no synthesis at all.
+    declared_completion: CompletionDeclaration | None = None
+    # The verdict, ASSEMBLED AT BANKING and frozen. Deliberately stored rather
+    # than derived on read: procedural feedback is applied once, under the rule
+    # in force at the time, and a state recomputed on every read would silently
+    # reclassify episodes whose credit or debit has already been spent.
+    # None = never classified (a row written before this field), and stays
+    # distinguishable from an explicit verdict exactly as `usage_eligible` does.
+    # Readers go through `effective_completion`, which maps None → "unknown".
+    completion_state: CompletionState | None = None
     id: str = field(default_factory=lambda: new_id("ep"))
     created_at: str = field(default_factory=_now_iso)
 
@@ -176,6 +214,13 @@ class EpisodeRecord:
             "replan_exhausted": self.replan_exhausted,
             "tags": list(self.tags),
             "created_at": self.created_at,
+            # Omit-when-None rather than an explicit null: an absent key is the
+            # honest encoding of "this row predates the axis", and it keeps a
+            # legacy row byte-identical to what it was.
+            **({} if self.declared_completion is None
+               else {"declared_completion": self.declared_completion}),
+            **({} if self.completion_state is None
+               else {"completion_state": self.completion_state}),
         }
 
     @classmethod
@@ -195,6 +240,21 @@ class EpisodeRecord:
                 None
                 if data.get("used_procedure_ids") is None
                 else tuple(str(x) for x in data["used_procedure_ids"])
+            ),
+            # Read back as stored, never re-assembled. A legacy row carries no
+            # key and stays None even when it holds an abort tag or
+            # `replan_exhausted`: reconstructing a verdict here would hand one
+            # to episodes whose feedback was already applied without it.
+            # An unrecognised token is refused rather than trusted.
+            declared_completion=(
+                data.get("declared_completion")
+                if data.get("declared_completion") in _COMPLETION_DECLARATIONS
+                else None
+            ),
+            completion_state=(
+                data.get("completion_state")
+                if data.get("completion_state") in _COMPLETION_STATES
+                else None
             ),
             goal=str(data.get("goal") or ""),
             question=str(data.get("question") or ""),
@@ -874,6 +934,69 @@ def resolve_used_procedures(
     return tuple(sorted(ran, key=_completion_index))
 
 
+def assemble_completion_state(
+    *,
+    aborted_reason: str,
+    replan_exhausted: bool,
+    declared: str | None,
+) -> CompletionState:
+    """Decide whether the goal was reached. Called ONCE, at banking.
+
+    A closed table, ordered so that any combination of signals resolves the
+    same way every time — the priority is the contract, not the order the
+    branches happen to be written in:
+
+    ==  ==========================================  =============
+    #   predicate                                   state
+    ==  ==========================================  =============
+    1   aborted_reason == "cancelled"               cancelled
+    2   aborted_reason (anything else)              failed
+    3   replan_exhausted                            failed
+    4   declared is a known token                   that token
+    5   otherwise                                   unknown
+    ==  ==========================================  =============
+
+    Structural facts outrank the declaration absolutely. An answer claiming it
+    achieved the goal is a claim about the answer; a run that was cancelled or
+    exhausted its replans is a fact about the run, and the fact wins. The
+    declaration is still stored, so a model that says "achieved" over a failed
+    run stays auditable.
+
+    The predicates read the CALLER'S arguments, not the tags derived from
+    them: tags are this function's downstream, and reading them back would be
+    parsing our own output.
+
+    The fast-path replay needs no rule of its own. It carries no abort, no
+    exhaustion and no declaration — the synthesizer never ran — so it lands on
+    `unknown` through branch 5. Giving it a `source_labels` predicate would
+    tie the verdict to a naming convention nothing enforces, to reach a result
+    branch 5 already produces.
+    """
+    if aborted_reason == "cancelled":
+        return "cancelled"
+    if aborted_reason:
+        return "failed"
+    if replan_exhausted:
+        return "failed"
+    if declared in _COMPLETION_DECLARATIONS:
+        return declared  # type: ignore[return-value]
+    return "unknown"
+
+
+def effective_completion(episode: EpisodeRecord) -> CompletionState:
+    """The completion verdict a reader should act on.
+
+    `None` on the record means the episode was never classified — it was
+    written before the axis existed. Readers get `unknown` for it, which is
+    fail-closed everywhere the gates land: an unclassified episode steers
+    nothing, credits nothing and is not replayed. The stored `None` is kept
+    distinct from a stored `"unknown"` so a legacy row remains recognisable as
+    legacy rather than as a run we examined and could not classify.
+    """
+    state = episode.completion_state
+    return state if state in _COMPLETION_STATES else "unknown"  # type: ignore[return-value]
+
+
 def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
     """Decide whether a freshly banked episode may steer later answers.
 
@@ -948,6 +1071,7 @@ def episode_from_agent_cycle(
     usage_eligible: bool | None = None,
     aborted_reason: str = "",
     used_procedure_ids: tuple[str, ...] | None = None,
+    declared_completion: str | None = None,
 ) -> EpisodeRecord:
     """Build an episode from one finished cycle.
 
@@ -1012,6 +1136,20 @@ def episode_from_agent_cycle(
         # itself a verdict that it may steer later answers. The caller decides.
         usage_eligible=usage_eligible,
         used_procedure_ids=used_procedure_ids,
+        # Both completion fields are settled here, at the moment of banking,
+        # and never recomputed afterwards (MIR-057). An unrecognised token is
+        # dropped rather than stored, so the declaration column can only ever
+        # hold something the parser is allowed to produce.
+        declared_completion=(
+            declared_completion
+            if declared_completion in _COMPLETION_DECLARATIONS
+            else None
+        ),
+        completion_state=assemble_completion_state(
+            aborted_reason=str(aborted_reason or ""),
+            replan_exhausted=bool(replan_exhausted),
+            declared=declared_completion,
+        ),
         id=episode_id,
     )
 
