@@ -35,9 +35,11 @@ def _ep(outcome, summary):
         outcome=outcome,
         summary=summary,
         tools_used=("shell_exec",),
-        # This suite covers the OUTCOME filter; usage eligibility (2c) is a
-        # second, independent gate with its own suite, so seed past it.
+        # This suite covers the OUTCOME filter; usage eligibility (2c) and
+        # task completion (MIR-057) are second and third independent gates
+        # with their own suites, so seed past both.
         usage_eligible=True,
+        completion_state="achieved",
     )
 
 

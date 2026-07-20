@@ -46,11 +46,15 @@ def _agent(workspace: Path) -> AgentLoop:
 
 
 def _episode(eid: str, *, outcome: str = "success", eligible: bool | None = True,
-             tags: tuple[str, ...] = ()) -> EpisodeRecord:
+             tags: tuple[str, ...] = (),
+             completion: str | None = "achieved") -> EpisodeRecord:
+    # This suite is about the REASONS retrieval reports, so every episode
+    # clears the completion gate (MIR-057) unless a case is about that gate.
     return EpisodeRecord(
         goal="deploy", question=QUESTION, outcome=outcome,  # type: ignore[arg-type]
         summary="deployed the service", tools_used=("shell_exec",),
         verified_chunks=2, unverified_chunks=0, usage_eligible=eligible,
+        completion_state=completion,  # type: ignore[arg-type]
         tags=tags, id=eid, created_at=datetime.now(timezone.utc).isoformat(),
     )
 

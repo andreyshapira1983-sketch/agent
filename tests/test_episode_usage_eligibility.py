@@ -52,6 +52,9 @@ def _episode(*, usage_eligible: bool | None, eid: str = "ep-1") -> EpisodeRecord
         question=QUESTION,
         outcome="success",  # type: ignore[arg-type]
         summary="Answered from general knowledge.",
+        # This suite covers the eligibility BIT; completion (MIR-057) is the
+        # second axis with its own suite, so seed past it.
+        completion_state="achieved",
         verified_chunks=3,
         unverified_chunks=0,
         replan_exhausted=False,
