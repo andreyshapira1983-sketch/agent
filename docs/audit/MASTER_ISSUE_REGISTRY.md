@@ -42,8 +42,8 @@ re-grounded against **current code on `main` @ `f317c4c`**.
 
 | Status | Count | IDs |
 |---|---|---|
-| open | 21 | MIR-006, MIR-008, MIR-010, MIR-011, MIR-015, MIR-016, MIR-020, MIR-021, MIR-023, MIR-024, MIR-026, MIR-035, MIR-039, MIR-040, MIR-044, MIR-045, MIR-050, MIR-052, MIR-053, MIR-057, MIR-058 |
-| fixed | 17 | MIR-001, MIR-002, MIR-004, MIR-005, MIR-017, MIR-036, MIR-037, MIR-041, MIR-043, MIR-046, MIR-047, MIR-048, MIR-049, MIR-051, MIR-054, MIR-055, MIR-056 |
+| open | 20 | MIR-006, MIR-008, MIR-011, MIR-015, MIR-016, MIR-020, MIR-021, MIR-023, MIR-024, MIR-026, MIR-035, MIR-039, MIR-040, MIR-044, MIR-045, MIR-050, MIR-052, MIR-053, MIR-057, MIR-058 |
+| fixed | 18 | MIR-001, MIR-002, MIR-004, MIR-005, MIR-010, MIR-017, MIR-036, MIR-037, MIR-041, MIR-043, MIR-046, MIR-047, MIR-048, MIR-049, MIR-051, MIR-054, MIR-055, MIR-056 |
 | planned_gap | 8 | MIR-009, MIR-018, MIR-022, MIR-029, MIR-030, MIR-031, MIR-034, MIR-038 |
 | needs_investigation | 6 | MIR-019, MIR-025, MIR-027, MIR-028, MIR-032, MIR-033 |
 | code_fixed_needs_runtime_verification | 3 | MIR-012, MIR-013, MIR-014 |
@@ -519,9 +519,15 @@ for MIR-002 and MIR-041 (approved next step) · then the minimal file set for th
 - **Production path:** AgentLoop act → `shell_exec` → step success gate → episode outcome.
 - **Existing tests:** `tests/test_shell_exec*` (existing behaviour).
 - **Missing tests:** per-command exit-code semantics (`exit!=0` → failure for run-commands; `1` still "not found" for `where`/`grep`/`test`).
-- **Status:** `open`.
-- **Evidence:** `validate_output` unchanged; no exit-code→failure mapping.
-- **Alternatives (undecided):** CORE_AUDIT explicitly warns a blanket `exit!=0→failure` breaks `where`/`grep`/`test`. Correct fix is **per-command exit-code semantics**, not a global rule. **Design decision required.**
+- **Status:** **`fixed` (2026-07-20)** ⬆ from `open`. The design decision the entry demanded was taken on measured data.
+- **Live confirmation before the fix:** a real cycle ran `grep -c ^ core/loop.py`, got `exit_code=1` with `stderr="FINDSTR: Cannot open loop.py"`, and the log carried `tool_result status=success` beside `verify ok=True`. The command could not open the file and every layer above it said otherwise.
+- **Why the blanket rule stayed rejected — measured, not argued:** `grep` found → 0/empty stderr; no match → **1/empty stderr** (a legitimate ANSWER); missing file → 2/non-empty. But `where` not-found → **1 with NON-empty stderr** (`ИНФОРМАЦИЯ: не удается найти файлы`), and `which` not-found → 1 with `which: no zzz in (...)`. So both a blanket `exit!=0→failure` AND a family-blind "stderr means trouble" heuristic would recast an ordinary negative result as an error.
+- **Resolution:** `classify_shell_result` in `tools/shell_exec.py` returns **two separate facts** — `execution_status` (success/failure: did the command run correctly) and `answer_result` (positive/negative/not_applicable: what it answered). "grep found nothing" is a successful execution with a negative answer; conflating that with "grep could not open the file" is what produced the defect. Per-family contracts: `grep`/`egrep`/`fgrep` and `findstr` read stderr at exit 1; `rg`, `diff`/`cmp`, `test`/`[`, `where`, `which` key on the exit code alone; anything else takes the conservative unknown contract (0 → success, non-zero → failure); `exit_code is None` (timeout) → failure.
+- **Classified on the binary that ACTUALLY RAN.** `_platform_alias` swaps `grep`→`findstr` on Windows, so reading the requested name would check one tool's exit code against another tool's contract. `git` deliberately takes the unknown contract: it is a multiplexer whose semantics differ per subcommand, and guessing a family from `argv[1]` is the inference this design refuses.
+- **The three layers stay separate.** `run()` returns the raw `exit_code`/`stdout`/`stderr` untouched plus the two normalised fields; `validate_output` still answers only "does this match the schema", because a failed command produces a perfectly well-formed report OF that failure and rejecting it would conflate malformed output with a correct failure message; a new overridable `Tool.execution_status` hook lifts the verdict into the top-level `ToolResult.status`.
+- **`answer_result` is telemetry about one command** and is explicitly NOT a completion signal — it says nothing about task completion, episodic eligibility or procedural feedback (MIR-057 owns those).
+- **Tests:** `tests/test_shell_exit_code_semantics.py` — 47 passing. Every row of the contract table, plus an integration pair through `Tool.invoke`: a real failure (`git rev-parse --verify zzznosuchref` → exit 128) that was `status=success`/`ok=True` before and is `execution_status=failure`/`status=error` after, and a real negative answer that must stay `success`. Reproduced on the old code by stashing `tools/`.
+- **Not fixed here (separate root):** on Windows the alias translates the NAME but not the ARGUMENTS — FINDSTR reads `/` as a switch prefix, so `core/loop.py` becomes `core` plus `/l /o /o /p`, and POSIX flags like `-c` do not exist. That is why the live `grep` failed at all. Registered separately; a path/flag adapter must not ride out on an exit-code fix.
 
 ### MIR-011 — `suspicious` injection content still enters the evidence chain
 - **Aliases:** CORE-08, MGA-04, A8. **Provenance:** previously_documented + independently_reconfirmed.
