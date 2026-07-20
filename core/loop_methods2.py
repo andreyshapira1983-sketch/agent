@@ -528,6 +528,7 @@ class AgentLoopExtractedMethods2:
         replan_exhausted: bool,
         weak_chunks: int = 0,
         skip_consolidation: bool = False,
+        verifier_failure: bool = False,
     ) -> None:
         """Write episodic/procedural/consolidation memory after a cycle.
 
@@ -623,15 +624,27 @@ class AgentLoopExtractedMethods2:
                 )
 
             procedure = None
+            created = False
             if self.procedural_store is not None and may_procedure:
-                procedure, created = self.procedural_store.upsert_from_episode(episode)
+                # A verifier that threw measured nothing. Its soft-fail records
+                # `verified=0, unverified=0`, which falls through the outcome
+                # derivation to `success` — so without this the crash would
+                # mint a procedure and raise its confidence on evidence that
+                # was never taken. `usage_eligible` cannot help: the procedural
+                # path does not read it.
+                if not verifier_failure:
+                    procedure, created = self.procedural_store.upsert_from_episode(episode)
                 # Outcome feedback (MIR-048), driven only by the attribution
                 # MIR-049 recorded. Runs AFTER upsert on purpose: a fresh
                 # success already journalled this episode id, so idempotence
                 # makes this a no-op there and it only adds what upsert cannot
                 # express -- a `partial`/`failed` debit against the procedures
                 # the run actually used.
-                feedback = self.procedural_store.apply_episode_feedback(episode)
+                # Only the positive direction is withheld on a crash: a debit
+                # comes from a structural failure the verifier had no part in.
+                feedback = self.procedural_store.apply_episode_feedback(
+                    episode, allow_credit=not verifier_failure
+                )
                 # `offered` closes the counterfactual: applied=0 alone cannot
                 # distinguish "no procedure was suggested" from "two were
                 # suggested and neither was actually applied" — the second is

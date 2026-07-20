@@ -657,8 +657,19 @@ class ProceduralMemoryStore:
     def count(self) -> int:
         return len(self.load())
 
-    def apply_episode_feedback(self, episode: EpisodeRecord) -> dict:
+    def apply_episode_feedback(
+        self, episode: EpisodeRecord, *, allow_credit: bool = True
+    ) -> dict:
         """Feed one run's outcome back to the procedures it actually used.
+
+        `allow_credit=False` withholds the POSITIVE direction only, for a cycle
+        whose verifier threw: `verified=0, unverified=0` falls through the
+        outcome derivation to `success`, so an unmeasured run would otherwise
+        credit a procedure exactly like a verified one. The negative direction
+        is untouched — a debit comes from a structural failure the verifier had
+        no part in, and suppressing it would let a crash shield a procedure
+        that genuinely failed. The suppression is reported rather than made to
+        look like an absent verdict.
 
         Driven **only** by `episode.used_procedure_ids`. There is deliberately
         no fallback to workflow_key, tool set, name similarity, a fresh
@@ -677,9 +688,14 @@ class ProceduralMemoryStore:
         counters' shape.
         """
         used = episode.used_procedure_ids
+        verdict = feedback_for_episode(episode)
+        credit_suppressed = bool(verdict == "success" and not allow_credit)
+        if credit_suppressed:
+            verdict = "none"
         report = {
             "applied": 0, "already_applied": 0, "orphaned": 0, "skipped": 0,
-            "verdict": feedback_for_episode(episode),
+            "verdict": verdict,
+            "credit_suppressed": credit_suppressed,
             "attribution": "unknown" if used is None else "recorded",
         }
         if not used:
