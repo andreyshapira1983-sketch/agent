@@ -10,8 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Literal
+from typing import Any, Callable, Iterable, Literal
 
+from core.completion_marker import sanitize_token
 from core.ids import new_id
 from core.redaction import redact_dlp_text
 from core.state_integrity import (
@@ -950,6 +951,32 @@ def resolve_used_procedures(
     return tuple(sorted(ran, key=_completion_index))
 
 
+def _checked_declaration(
+    raw: str | None,
+    on_audit: "Callable[[str, dict[str, Any]], None] | None" = None,
+) -> "CompletionDeclaration | None":
+    """Last line of defence for a token that bypassed the marker parser.
+
+    Deliberately coerces rather than raises. Banking runs inside a broad
+    `except Exception` that reports `smart_memory_error` (MIR-052), so an
+    exception here would surface as "memory is unavailable" and hide a
+    programming error behind an infrastructure symptom. Instead the value is
+    dropped — fail-closed, `unknown` rather than a verdict — and reported, so
+    the mistake is loud somewhere it cannot be mistaken for a storage fault.
+    """
+    if raw is None or raw in _COMPLETION_DECLARATIONS:
+        return raw  # type: ignore[return-value]
+    if on_audit is not None:
+        try:
+            on_audit(
+                "completion_declaration_coerced",
+                {"token": sanitize_token(raw), "coerced_to": None},
+            )
+        except Exception:  # noqa: BLE001 — an audit channel must not break banking
+            pass
+    return None
+
+
 def assemble_completion_state(
     *,
     aborted_reason: str,
@@ -1088,6 +1115,7 @@ def episode_from_agent_cycle(
     aborted_reason: str = "",
     used_procedure_ids: tuple[str, ...] | None = None,
     declared_completion: str | None = None,
+    on_audit: "Callable[[str, dict[str, Any]], None] | None" = None,
 ) -> EpisodeRecord:
     """Build an episode from one finished cycle.
 
@@ -1156,11 +1184,7 @@ def episode_from_agent_cycle(
         # and never recomputed afterwards (MIR-057). An unrecognised token is
         # dropped rather than stored, so the declaration column can only ever
         # hold something the parser is allowed to produce.
-        declared_completion=(
-            declared_completion
-            if declared_completion in _COMPLETION_DECLARATIONS
-            else None
-        ),
+        declared_completion=_checked_declaration(declared_completion, on_audit),
         completion_state=assemble_completion_state(
             aborted_reason=str(aborted_reason or ""),
             replan_exhausted=bool(replan_exhausted),

@@ -137,9 +137,15 @@ from core.smart_memory import (
     EpisodicMemoryStore,
     MemoryConsolidationStore,
     ProceduralMemoryStore,
+    _COMPLETION_DECLARATIONS,
     consolidate_memory,
     episode_from_agent_cycle,
     format_experience_context,
+)
+from core.completion_marker import (
+    marker_instruction as completion_marker_instruction,
+    new_nonce as new_completion_nonce,
+    parse_completion_marker,
 )
 from core.source_ranker import SourceRankingReport, rank_chain
 from core.source_registry import SourceRegistry
@@ -1544,13 +1550,28 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 _synth_llm = _task_synth_llm
         _saved_on_token = getattr(self, "_stream_on_token", None)
 
+        # Run-local, deliberately NOT an instance attribute. A `self._last_*`
+        # field survives the run that set it, and the early-return paths
+        # (replay, refusal) bank without ever entering this block — so a
+        # declaration from one run would be attributed to the next run's
+        # episode. Nothing here outlives the closure.
+        _declared: dict[str, str | None] = {"value": None}
+
         def _do_synthesize(_attempt: "SynthAttempt") -> str:
             # Retries must not double-stream tokens: only the first attempt may
             # stream to the console; adapted/retry attempts render silently and
             # the final answer is returned normally.
             if _attempt.index > 0:
                 self._stream_on_token = None
-            return self._synthesize(
+            # Cleared BEFORE the call that can raise: an attempt that dies
+            # part-way must not leave the previous attempt's verdict standing.
+            _declared["value"] = None
+            # One nonce per ATTEMPT, not per run: a marker copied out of an
+            # attempt that was thrown away must not validate against the one
+            # that is actually banked (MIR-057).
+            _nonce = new_completion_nonce()
+            _raw = self._synthesize(
+                completion_nonce=_nonce,
                 goal=goal,
                 artifacts=artifacts,
                 question=user_question,
@@ -1569,6 +1590,27 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     else None
                 ),
             )
+            # Strip here, once. Everything downstream — the verifier, the
+            # user's answer and the stored `full_answer` — is derived from
+            # this return value, so one removal keeps all three identical and
+            # the nonce reaches none of them.
+            _parsed = parse_completion_marker(
+                _raw, nonce=_nonce, valid_tokens=_COMPLETION_DECLARATIONS
+            )
+            _declared["value"] = _parsed.declared
+            self.log.log(
+                "completion_declaration",
+                {
+                    # The nonce is a secret of the attempt and is never logged:
+                    # a log that carries it would hand forgery back to anyone
+                    # who can read logs.
+                    "attempt": _attempt.index,
+                    "parse": _parsed.status,
+                    "declared": _parsed.declared,
+                    **({"detail": _parsed.detail} if _parsed.detail else {}),
+                },
+            )
+            return _parsed.text
 
         try:
             _ladder = run_synthesizer_ladder(
@@ -1579,6 +1621,11 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             )
             draft_answer = _ladder.answer
             self._last_synth_degraded = _ladder.degraded
+            if _ladder.degraded:
+                # The answer the user gets was assembled by the fallback, not
+                # by the attempt that declared. Keeping that declaration would
+                # attribute a verdict to text its author never wrote.
+                _declared["value"] = None
         except ModelBudgetExceeded as exc:
             self._save_budget_pause_checkpoint(
                 _cp,
@@ -2260,6 +2307,9 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             # Set by either soft-fail site (`:1625` initial, `:1929` replan).
             # Both write this same local, which is why one flag covers them.
             verifier_failure=verifier_failure,
+            # Run-local: the verdict of the synthesis attempt that produced
+            # THIS answer, or None when the ladder degraded.
+            declared_completion=_declared["value"],
         )
 
         # Clear streaming callback so it cannot leak into the next turn.
@@ -3589,6 +3639,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         llm=None,
         lean_context: bool = False,
         local_critique: ReferentDecision | None = None,
+        completion_nonce: str = "",
     ) -> str:
         history_block = (
             f"<conversation_history>\n{history}\n</conversation_history>\n\n"
@@ -3676,6 +3727,12 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             system_prompt = _get_prompt("synthesizer.system")
         except Exception:
             system_prompt = SYSTEM_ANSWER
+        if completion_nonce:
+            # Appended to the system prompt rather than to one of the three
+            # user-prompt branches, so every synthesis shape carries it.
+            system_prompt = system_prompt + completion_marker_instruction(
+                completion_nonce, _COMPLETION_DECLARATIONS
+            )
         if local_critique is not None and not artifacts:
             cite = citation_token_for_referent(local_critique)
             raw_target = (local_critique.analysis_target_excerpt or "").strip()
