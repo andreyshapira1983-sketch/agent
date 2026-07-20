@@ -128,15 +128,17 @@ def _drive_one_cycle(
 def _replayable_episode(question: str) -> EpisodeRecord:
     """An episode that satisfies every fast-path precondition.
 
-    `usage_eligible=True` is explicit: these tests exercise the retrieval and
-    replay MECHANISM, not the eligibility policy (2c), which fail-closes on
-    unclassified episodes and is covered by its own suite.
+    `usage_eligible=True` and `completion_state="achieved"` are explicit:
+    these tests exercise the retrieval and replay MECHANISM, not the
+    eligibility policy (2c) or the completion axis (MIR-057), both of which
+    fail-close on unclassified episodes and have their own suites.
     """
     return EpisodeRecord(
         goal="answer a general-knowledge question",
         question=question,
         outcome="success",  # type: ignore[arg-type]
         summary="Answered from general knowledge.",
+        completion_state="achieved",
         verified_chunks=1,
         unverified_chunks=0,
         replan_exhausted=False,
@@ -155,6 +157,9 @@ def _episode(question: str) -> EpisodeRecord:
         question=question,
         outcome="success",  # type: ignore[arg-type]
         summary="Checked the changelog with file_read and summarised it.",
+        # Wiring suite: seed past the completion gate (MIR-057), which has
+        # its own suite, so this stays a test about which stores are held.
+        completion_state="achieved",
         verified_chunks=3,
         unverified_chunks=0,
         replan_exhausted=False,

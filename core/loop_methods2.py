@@ -26,6 +26,7 @@ from core.smart_memory import (
     ProceduralMemoryStore,
     consolidate_memory,
     decide_usage_eligibility,
+    effective_completion,
     resolve_used_procedures,
     episode_from_agent_cycle,
     format_experience_context,
@@ -301,6 +302,16 @@ class AgentLoopExtractedMethods2:
             for ep in found.episodes:
                 if not (ep.outcome == "success" or "lesson" in ep.tags):
                     rejected_by["outcome"] = rejected_by.get("outcome", 0) + 1
+                    continue
+                # Checked here as well as at admission, not instead of it: the
+                # stored `usage_eligible` bit was decided by whatever rule was
+                # in force when the episode was banked, and this reader must
+                # answer for its own use case. A `lesson` keeps its context
+                # arm — surfacing a failure as a warning is the whole point of
+                # the tag — but an ordinary episode has to have finished the
+                # job before it may steer a later one.
+                if "lesson" not in ep.tags and effective_completion(ep) != "achieved":
+                    rejected_by["not_achieved"] = rejected_by.get("not_achieved", 0) + 1
                     continue
                 if not is_usage_eligible(ep):
                     rejected_by["not_eligible"] = rejected_by.get("not_eligible", 0) + 1

@@ -163,10 +163,12 @@ def test_mir041_4_replay_must_not_be_recorded_verified(workspace: Path):
         goal="answer", question=_Q, answer="Canberra.",
         tools_used=[], source_labels=["file:atlas.txt"],
         verified_chunks=3, unverified_chunks=0,  # a genuinely-evidenced answer
-        # Eligibility (2c) fail-closes on unclassified episodes, so the seed
-        # must be explicitly admitted for the fast path to fire at all —
-        # otherwise this test never reaches the assertion it exists for.
+        # Eligibility (2c) and completion (MIR-057) both fail-close on
+        # unclassified episodes, so the seed must be explicitly admitted for
+        # the fast path to fire at all — otherwise this test never reaches
+        # the assertion it exists for.
         usage_eligible=True,
+        declared_completion="achieved",
     )
     store.save(source)
 
@@ -241,9 +243,10 @@ def test_mir_protective_7_genuinely_verified_episode_may_fast_path(workspace: Pa
         tools_used=[], source_labels=["file:atlas.txt"],
         verified_chunks=3, unverified_chunks=0,
         # Seeding updated exactly as this docstring instructs. The eligibility
-        # field (2c) has landed and fail-closes on unclassified episodes, so a
-        # genuinely-verified seed must now say so explicitly.
+        # field (2c) and the completion axis (MIR-057) both fail-close on
+        # unclassified episodes, so a genuinely-verified seed must say so.
         usage_eligible=True,
+        declared_completion="achieved",
     )
     store.save(verified)
 

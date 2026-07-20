@@ -63,10 +63,13 @@ def _ep(
     unverified: int = 0,
     tags: tuple[str, ...] = (),
     labels: tuple[str, ...] = ("file:atlas.txt",),
+    completion: str | None = "achieved",
 ) -> EpisodeRecord:
+    # Admission now needs BOTH axes (MIR-057): these cases vary the evidence
+    # axis, so completion is held at `achieved` unless a case says otherwise.
     return EpisodeRecord(
         goal="g", question=QUESTION, outcome=outcome,  # type: ignore[arg-type]
-        summary="s",
+        summary="s", completion_state=completion,  # type: ignore[arg-type]
         verified_chunks=verified, unverified_chunks=unverified,
         answer_quality_score=(
             None if (verified + unverified) == 0 else verified / (verified + unverified)

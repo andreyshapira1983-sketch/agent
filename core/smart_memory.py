@@ -1051,6 +1051,10 @@ def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
 
     Admitted when every one of these holds:
 
+    - ``completion_state == "achieved"`` — the task was actually done. Read
+      frozen, never re-derived, and never taken from the declaration. This is
+      the axis `outcome` cannot express: a cycle blocked by a truncated
+      evidence budget cites everything it says and answers nothing (MIR-057).
     - ``outcome == "success"`` — the cycle completed and was scored. A
       ``partial`` means unverified support outnumbered verified support,
       which is the self-reinforcement MIR-001 closed; ``failed`` speaks for
@@ -1073,6 +1077,15 @@ def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
     if "lesson" in episode.tags:
         return True
     if episode.outcome != "success":
+        return False
+    # The second axis, and the reason this function exists at all in its
+    # current form: `outcome` reports that the claims held up, which a blocked
+    # non-answer can satisfy perfectly. Both must agree — neither is a
+    # substitute for the other, and this one only ever subtracts permission.
+    # Read from the FROZEN state through the shared accessor, never from
+    # `declared_completion`: what the model claimed is auditable history, and
+    # the structural facts already outranked it when the episode was banked.
+    if effective_completion(episode) != "achieved":
         return False
     if any(str(label).startswith("memory:") for label in episode.source_labels):
         return False

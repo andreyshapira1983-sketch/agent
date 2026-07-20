@@ -139,6 +139,7 @@ from core.smart_memory import (
     ProceduralMemoryStore,
     _COMPLETION_DECLARATIONS,
     consolidate_memory,
+    effective_completion,
     episode_from_agent_cycle,
     format_experience_context,
 )
@@ -539,6 +540,28 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
     # Minimum measured quality an episode needs before its answer may be
     # served verbatim instead of running a real cycle.
     _REPLAY_MIN_QUALITY = 0.70
+    # Jaccard overlap with the stored question below which a replay is not
+    # even considered the same ask.
+    _REPLAY_MIN_SIMILARITY = 0.85
+
+    @staticmethod
+    def _fast_path_allows_replay(episode: Any, similarity: float) -> bool:
+        """The episode-shaped half of the fast-path gate.
+
+        Named so the three episodic readers agree on how the completion axis
+        is read: through the frozen state and the shared accessor, never the
+        declaration and never a re-derivation. Replay serves a stored answer
+        INSTEAD of running a cycle, so a `lesson` gets no exception here —
+        being retrievable as a warning is not being reusable as an answer.
+        """
+        return bool(
+            episode is not None
+            and similarity >= AgentLoop._REPLAY_MIN_SIMILARITY
+            and effective_completion(episode) == "achieved"
+            and AgentLoop._quality_allows_replay(episode)
+            and getattr(episode, "full_answer", "")
+            and not getattr(episode, "tools_used", ())
+        )
 
     @staticmethod
     def _quality_allows_replay(episode: Any) -> bool:
@@ -858,11 +881,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             and not local_critique_active
             and not file_hint
             and not user_question.strip().startswith(":")
-            and _fp_ep is not None
-            and _fp_score >= 0.85
-            and self._quality_allows_replay(_fp_ep)
-            and _fp_ep.full_answer
-            and not _fp_ep.tools_used
+            and self._fast_path_allows_replay(_fp_ep, _fp_score)
         ):
             self.log.log(
                 "episodic_fast_path",
