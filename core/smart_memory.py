@@ -354,6 +354,19 @@ class ConsolidationReport:
         )
 
 
+@dataclass(frozen=True)
+class EpisodeSearchResult:
+    """What a search returned, and why the rest of the store did not.
+
+    Same contract as `RetrievalSelection` on the persistent side: reasons are
+    reported by the component that decided, counted by reason and never per
+    record, and an absent reason means zero.
+    """
+
+    episodes: list[EpisodeRecord]
+    rejected_by: dict[str, int]
+
+
 class EpisodicMemoryStore:
     # Tags that mark episodes as too valuable to evict (e.g. repair lessons).
     PROTECTED_TAGS: frozenset[str] = frozenset({"lesson", "bug-fix", "regression-guard"})
@@ -432,11 +445,26 @@ class EpisodicMemoryStore:
         return len(self.load())
 
     def search(self, query: str, *, limit: int = 3) -> list[EpisodeRecord]:
+        """The matching episodes. Delegates so there is one decision, not two."""
+        return self.search_with_report(query, limit=limit).episodes
+
+    def search_with_report(self, query: str, *, limit: int = 3) -> EpisodeSearchResult:
+        """`search`, plus why the rest of the store did not come back.
+
+        A caller that only sees the survivors cannot report on the drops that
+        happened in here — which is how `episodes_selected=0, rejected_by={}`
+        stayed reachable on a store of 200 episodes.
+        """
+        episodes = self.load()
         q_tokens = _tokens(query)
         if not q_tokens:
-            return []
+            return EpisodeSearchResult(
+                episodes=[],
+                rejected_by={"no_query_tokens": len(episodes)} if episodes else {},
+            )
         scored: list[tuple[int, EpisodeRecord]] = []
-        for ep in self.load():
+        no_overlap = 0
+        for ep in episodes:
             haystack = " ".join([ep.goal, ep.question, ep.summary, " ".join(ep.tags)])
             score = len(q_tokens & _tokens(haystack))
             if score:
@@ -445,8 +473,17 @@ class EpisodicMemoryStore:
                 if self.PROTECTED_TAGS & set(ep.tags):
                     score += 50
                 scored.append((score, ep))
+            else:
+                no_overlap += 1
         scored.sort(key=lambda item: (item[0], item[1].created_at), reverse=True)
-        return [ep for _score, ep in scored[:limit]]
+        selected = [ep for _score, ep in scored[:limit]]
+        rejected_by = {
+            k: v for k, v in (
+                ("no_overlap", no_overlap),
+                ("over_limit", len(scored) - len(selected)),
+            ) if v > 0
+        }
+        return EpisodeSearchResult(episodes=selected, rejected_by=rejected_by)
 
     def search_by_tags(
         self, tags: Iterable[str], *, limit: int = 5

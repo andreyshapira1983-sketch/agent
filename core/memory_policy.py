@@ -457,6 +457,26 @@ def _record_prompt_note(record: MemoryRecord) -> str:
     return "[README architecture/reference] "
 
 
+@dataclass(frozen=True)
+class RetrievalSelection:
+    """What `select` kept, and why each of the rest did not make it.
+
+    The reasons are produced where the decision is taken. An observer that
+    re-derives them by subtracting list lengths cannot separate causes it
+    never saw: `len(candidates) - len(selected)` reads a `max_records`
+    cut-off and a score below the floor as one number, and reports whichever
+    label the caller happened to write down. Measured on the live store, that
+    inference was wrong for 4 of 6 realistic questions.
+
+    Counts are aggregated **by reason, never per record** — a per-record
+    trace would grow with the store and cost more than the retrieval it
+    observes. A reason that did not fire is absent, not zero.
+    """
+
+    selected: list[MemoryRecord]
+    rejected_by: dict[str, int]
+
+
 class MemoryRetrievalPolicy:
     """Picks the few persistent records most relevant to the current question.
 
@@ -480,12 +500,26 @@ class MemoryRetrievalPolicy:
         records: list[MemoryRecord],
         question: str,
     ) -> list[MemoryRecord]:
-        if not records or not question:
-            return []
-        q_tokens = _query_tokens(question)
-        if not q_tokens:
-            return []
+        """The records to inject. Delegates so there is one decision, not two."""
+        return self.select_with_report(records, question).selected
 
+    def select_with_report(
+        self,
+        records: list[MemoryRecord],
+        question: str,
+    ) -> RetrievalSelection:
+        if not records:
+            return RetrievalSelection(selected=[], rejected_by={})
+        q_tokens = _query_tokens(question) if question else set()
+        if not q_tokens:
+            # Nothing was judged about the records at all. Calling this
+            # "below threshold" points the reader at the store when the
+            # question is what produced no searchable tokens.
+            return RetrievalSelection(
+                selected=[], rejected_by={"no_query_tokens": len(records)}
+            )
+
+        below_threshold = 0
         scored: list[tuple[int, MemoryRecord]] = []
         for r in records:
             text = r.content if isinstance(r.content, str) else str(r.content)
@@ -508,10 +542,24 @@ class MemoryRetrievalPolicy:
                 score += _broad_project_score_adjustment(r, score)
             if score >= self.min_score:
                 scored.append((score, r))
+            else:
+                below_threshold += 1
 
         # Higher score first, then newer first.
         scored.sort(key=lambda pair: (pair[0], pair[1].created_at), reverse=True)
-        return [r for _score, r in scored[: self.max_records]]
+        selected = [r for _score, r in scored[: self.max_records]]
+
+        # A cap is not a relevance judgment: these records DID clear the
+        # floor and were cut by max_records. Reported separately because the
+        # two call for opposite responses — raise the cap vs. write better
+        # records.
+        rejected_by = {
+            k: v for k, v in (
+                ("below_threshold", below_threshold),
+                ("over_limit", len(scored) - len(selected)),
+            ) if v > 0
+        }
+        return RetrievalSelection(selected=selected, rejected_by=rejected_by)
 
     def format_for_prompt(self, records: list[MemoryRecord]) -> str:
         if not records:
