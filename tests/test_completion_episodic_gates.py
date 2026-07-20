@@ -37,6 +37,7 @@ from core.smart_memory import (
     _compute_quality_score,
     decide_usage_eligibility,
     effective_completion,
+    is_usage_eligible,
 )
 
 QUESTION = "how do I deploy the service"
@@ -229,15 +230,39 @@ def test_a_legacy_row_is_withheld_without_reconstruction(tmp_path: Path) -> None
     assert _fast_path_pure(episode) is False
 
 
-def test_the_live_store_stays_fully_withheld(tmp_path: Path) -> None:
-    """Every episode written before this axis existed: 0 admitted."""
+def test_no_legacy_episode_in_the_live_store_is_ever_admitted(tmp_path: Path) -> None:
+    """Legacy stays withheld — the invariant, not a snapshot.
+
+    This first asserted that EVERY live episode read `unknown`, which was true
+    the day it was written and false the moment the agent ran: new cycles bank
+    real completion states, as they should. A test that pins a snapshot of
+    mutable production data reports its own staleness as a regression.
+
+    What must hold forever is narrower: an episode carrying no verdict — a row
+    written before the axis existed — is never replayed, whatever else lands
+    in the store around it.
+    """
     store = EpisodicMemoryStore(Path("data/episodic_memory.jsonl"))
     episodes = store.load()
     if not episodes:
         pytest.skip("no live store in this environment")
 
-    assert all(effective_completion(ep) == "unknown" for ep in episodes)
-    assert not [ep for ep in episodes if _fast_path_pure(ep)]
+    legacy = [ep for ep in episodes if ep.completion_state is None]
+    assert all(effective_completion(ep) == "unknown" for ep in legacy)
+    assert not [ep for ep in legacy if _fast_path_pure(ep)]
+    # Modelled on what RETRIEVAL does, not on `decide_usage_eligibility`.
+    # The banking-time policy admits a lesson whatever its stored bit says;
+    # retrieval reads that bit, and a legacy row carries none. Asserting the
+    # policy here would fail on the 108 legacy lessons while the live agent
+    # admits none of them — the same conflation this suite exists to prevent.
+    def _retrieval_admits(ep) -> bool:
+        if "lesson" in ep.tags:
+            return is_usage_eligible(ep)
+        return effective_completion(ep) == "achieved" and is_usage_eligible(ep)
+
+    assert not [ep for ep in legacy if _retrieval_admits(ep)], (
+        "an unclassified episode must not reach a prompt as the store fills"
+    )
 
 
 # ==========================================================================
