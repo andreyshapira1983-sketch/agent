@@ -462,14 +462,16 @@ class ShellExecTool(Tool):
         # error, not a confusing FileNotFoundError from subprocess.
         # `where` is Windows-only; map it to `which` on POSIX (and vice
         # versa) so tests are portable.
-        real_cmd = self._platform_alias(cmd)
+        real_cmd, substituted = self._resolve_binary(cmd)
         exe = shutil.which(real_cmd)
         if exe is None:
             raise FileNotFoundError(
                 f"shell_exec cannot find executable '{real_cmd}' on PATH"
             )
 
-        run_argv = [exe, *argv[1:]]
+        # Arguments are adapted only when the PROGRAM changed underneath the
+        # caller; the requested binary already understands its own dialect.
+        run_argv = [exe, *self._normalise_argv_for(list(argv), substituted=substituted)[1:]]
         env = self._safe_env()
         started = time.monotonic()
         timed_out = False
@@ -518,6 +520,11 @@ class ShellExecTool(Tool):
                 ("execution_status", "answer_result"),
                 classify_shell_result(real_cmd, exit_code=exit_code, stderr=stderr_safe),
             )),
+            # The live log showed `argv: ['grep', ...]` beside `FINDSTR:` in
+            # stderr with nothing connecting them. A substitution that cannot
+            # be seen is one nobody can debug.
+            "executed_command": real_cmd,
+            "binary_substituted": substituted,
             "compensation_plan": plan.to_dict(),
         }
 
@@ -577,9 +584,61 @@ class ShellExecTool(Tool):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    def _resolve_binary(self, cmd: str) -> tuple[str, bool]:
+        """Pick the binary to run: `(name, substituted)`.
+
+        The requested command WINS when it is installed. The platform
+        equivalent is a fallback for when it is absent, not a rewrite applied
+        regardless — which is what it used to be, and what made a live cycle
+        fail. Measured on the machine where that happened:
+
+            shutil.which("grep")     -> C:\\Program Files\\Git\\usr\\bin\\grep.EXE
+            grep -c ^ core/loop.py   -> exit 0, "4093"  (either slash style)
+            findstr /C:x core/loop.py-> exit 1, "FINDSTR: Cannot open loop.py"
+
+        Real grep was installed, worked, and was swapped away for a tool that
+        could not read the path it was handed.
+        """
+        if shutil.which(cmd) is not None:
+            return cmd, False
+        alias = self._platform_alias(cmd)
+        if alias != cmd and shutil.which(alias) is not None:
+            return alias, True
+        return cmd, False
+
+    @staticmethod
+    def _normalise_argv_for(argv: list[str], *, substituted: bool) -> list[str]:
+        """Make the arguments readable by the program that will actually run.
+
+        Only when a SUBSTITUTION happened: if the requested binary is the one
+        executing, its own dialect is already correct and rewriting would be
+        damage. On Windows `findstr` reads `/` as a switch prefix, so
+        `core/loop.py` parses as `core` plus `/l /o /o /p` — the exact live
+        failure.
+
+        Separators only. Flags are NOT translated: `grep -c` has no findstr
+        equivalent worth guessing at, and a half-built dialect mapper turns
+        every unmapped flag into a new silent failure. After MIR-010 a
+        fallback that cannot read its arguments fails visibly, which is the
+        honest outcome and leaves the planner able to see it.
+        """
+        if not substituted or sys.platform != "win32":
+            return argv
+        out = [argv[0]]
+        for elem in argv[1:]:
+            # A switch is not a path. `/C:x` and `-c` pass through untouched.
+            if elem.startswith(("/", "-")) or "/" not in elem:
+                out.append(elem)
+            else:
+                out.append(elem.replace("/", "\\"))
+        return out
+
     def _platform_alias(self, cmd: str) -> str:
         """Map `where`<->`which` and `findstr`<->`grep` to the binary the
-        current OS actually ships."""
+        current OS actually ships.
+
+        Consulted by `_resolve_binary` as a FALLBACK only — see there.
+        """
         if cmd == "where" and sys.platform != "win32":
             return "which"
         if cmd == "which" and sys.platform == "win32":
