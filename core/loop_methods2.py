@@ -529,6 +529,7 @@ class AgentLoopExtractedMethods2:
         weak_chunks: int = 0,
         skip_consolidation: bool = False,
         verifier_failure: bool = False,
+        declared_completion: str | None = None,
     ) -> None:
         """Write episodic/procedural/consolidation memory after a cycle.
 
@@ -589,6 +590,12 @@ class AgentLoopExtractedMethods2:
                     selected=list(getattr(self, "_last_procedure_records", []) or []),
                     executed_tools=list(getattr(self, "_executed_tools", []) or []),
                 ),
+                # Passed in by the caller that owns the synthesis, never read
+                # off `self`: instance state outlives its run, and the paths
+                # that bank without synthesising would inherit the previous
+                # run's verdict. A replay or a refusal declares nothing.
+                declared_completion=declared_completion,
+                on_audit=self.log.log,
             )
             episode = replace(
                 episode, usage_eligible=decide_usage_eligibility(episode)
