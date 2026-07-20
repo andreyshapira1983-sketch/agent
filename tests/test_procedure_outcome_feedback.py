@@ -14,7 +14,8 @@ is reported as `orphaned`, never substituted.
 Outcome matrix:
 
     success                     success_count += 1
-    partial                     failure_count += 1
+    partial                     neutral (MIR-057: evidence weakness
+                                is not procedural failure)
     failed / exception          failure_count += 1
     cancelled                   nothing — a control signal is not evidence
                                 that the procedure is bad
@@ -52,13 +53,24 @@ def _proc(pid: str, *, success: int = 1, failure: int = 0, tools: str = "file_re
     )
 
 
+_COMPLETION_FOR = {"success": "achieved", "partial": "partially_achieved",
+                   "failed": "failed"}
+
+
 def _episode(
     *, outcome: str = "success", used: tuple[str, ...] | None = ("p",),
     eid: str = "ep-1", tags: tuple[str, ...] = (),
+    completion: str | None = None, replan: bool = False,
 ) -> EpisodeRecord:
+    # Feedback reads BOTH axes since MIR-057. The default mirrors `outcome`
+    # onto the completion axis so each case still says one thing; a debit
+    # additionally needs `replan_exhausted`, which is what makes the failure
+    # something the RUN demonstrated rather than something the answer claimed.
     return EpisodeRecord(
         goal="g", question="q", outcome=outcome,  # type: ignore[arg-type]
         summary="s", tools_used=("file_read",), id=eid,
+        completion_state=(completion or _COMPLETION_FOR.get(outcome)),  # type: ignore[arg-type]
+        replan_exhausted=replan,
         used_procedure_ids=used, tags=tags,
     )
 
@@ -87,7 +99,7 @@ def test_failure_debits_only_the_attributed_procedure(tmp_path: Path) -> None:
     before_other = _by_id(store)["proc-other"]
 
     report = store.apply_episode_feedback(
-        _episode(outcome="failed", used=("proc-selected",))
+        _episode(outcome="failed", replan=True, used=("proc-selected",))
     )
 
     after = _by_id(store)
@@ -103,13 +115,28 @@ def test_failure_debits_only_the_attributed_procedure(tmp_path: Path) -> None:
 # Outcome matrix.
 # ==========================================================================
 @pytest.mark.parametrize(
-    "outcome,d_success,d_failure",
-    [("success", 1, 0), ("partial", 0, 1), ("failed", 0, 1)],
+    "outcome,replan,d_success,d_failure",
+    [
+        ("success", False, 1, 0),
+        # POLICY CHANGE (MIR-057): an evidence-`partial` no longer debits.
+        # `partial` says unverified support outnumbered verified support —
+        # a fact about how well the ANSWER was grounded, not proof that the
+        # workflow failed. It used to cost the procedure a failure.
+        ("partial", False, 0, 0),
+        # A `failed` the answer merely declared is likewise neutral: the
+        # cause is usually upstream of the procedure.
+        ("failed", False, 0, 0),
+        # A failure the RUN demonstrated still debits, exactly as MIR-048
+        # intended.
+        ("failed", True, 0, 1),
+    ],
 )
-def test_outcome_matrix(tmp_path: Path, outcome: str, d_success: int, d_failure: int) -> None:
+def test_outcome_matrix(
+    tmp_path: Path, outcome: str, replan: bool, d_success: int, d_failure: int
+) -> None:
     store = _store(tmp_path, [_proc("p", success=2, failure=1)])
 
-    store.apply_episode_feedback(_episode(outcome=outcome, used=("p",)))
+    store.apply_episode_feedback(_episode(outcome=outcome, used=("p",), replan=replan))
 
     got = _by_id(store)["p"]
     assert (got.success_count, got.failure_count) == (2 + d_success, 1 + d_failure)
@@ -121,7 +148,8 @@ def test_cancellation_is_not_negative_evidence(tmp_path: Path) -> None:
     before = _by_id(store)["p"]
 
     report = store.apply_episode_feedback(
-        _episode(outcome="failed", used=("p",), tags=("aborted", "aborted:cancelled"))
+        _episode(outcome="failed", completion="cancelled", used=("p",),
+                 tags=("aborted", "aborted:cancelled"))
     )
 
     assert report["skipped"] == 1
@@ -134,7 +162,7 @@ def test_no_attribution_means_no_feedback(tmp_path: Path, used) -> None:
     store = _store(tmp_path, [_proc("p")])
     before = _by_id(store)["p"]
 
-    report = store.apply_episode_feedback(_episode(outcome="failed", used=used))
+    report = store.apply_episode_feedback(_episode(outcome="failed", replan=True, used=used))
 
     assert report["applied"] == 0
     assert _by_id(store)["p"] == before
@@ -149,7 +177,7 @@ def test_unknown_id_is_orphaned_not_substituted(tmp_path: Path) -> None:
     before = _by_id(store)["p"]
 
     report = store.apply_episode_feedback(
-        _episode(outcome="failed", used=("proc-deleted",))
+        _episode(outcome="failed", replan=True, used=("proc-deleted",))
     )
 
     assert report["orphaned"] == 1
@@ -165,9 +193,9 @@ def test_unknown_id_is_orphaned_not_substituted(tmp_path: Path) -> None:
 def test_reapplying_the_same_episode_is_a_no_op(tmp_path: Path) -> None:
     store = _store(tmp_path, [_proc("p")])
 
-    first = store.apply_episode_feedback(_episode(outcome="failed", used=("p",), eid="ep-42"))
+    first = store.apply_episode_feedback(_episode(outcome="failed", replan=True, used=("p",), eid="ep-42"))
     after_first = _by_id(store)["p"]
-    second = store.apply_episode_feedback(_episode(outcome="failed", used=("p",), eid="ep-42"))
+    second = store.apply_episode_feedback(_episode(outcome="failed", replan=True, used=("p",), eid="ep-42"))
 
     assert first["applied"] == 1
     assert second["already_applied"] == 1
@@ -178,8 +206,8 @@ def test_reapplying_the_same_episode_is_a_no_op(tmp_path: Path) -> None:
 def test_a_different_episode_still_counts(tmp_path: Path) -> None:
     store = _store(tmp_path, [_proc("p")])
 
-    store.apply_episode_feedback(_episode(outcome="failed", used=("p",), eid="ep-1"))
-    store.apply_episode_feedback(_episode(outcome="failed", used=("p",), eid="ep-2"))
+    store.apply_episode_feedback(_episode(outcome="failed", replan=True, used=("p",), eid="ep-1"))
+    store.apply_episode_feedback(_episode(outcome="failed", replan=True, used=("p",), eid="ep-2"))
 
     assert _by_id(store)["p"].failure_count == 2
 
@@ -191,7 +219,7 @@ def test_counters_confidence_and_status_move_together(tmp_path: Path) -> None:
     """No intermediate state where a counter moved but confidence did not."""
     store = _store(tmp_path, [_proc("p", success=1, failure=0)])
 
-    store.apply_episode_feedback(_episode(outcome="failed", used=("p",)))
+    store.apply_episode_feedback(_episode(outcome="failed", replan=True, used=("p",)))
 
     got = _by_id(store)["p"]
     assert got.confidence == _smoothed_confidence(got.success_count, got.failure_count)
@@ -204,7 +232,7 @@ def test_demotion_is_now_reachable(tmp_path: Path) -> None:
     assert _by_id(store)["p"].status == "active"
 
     for i in range(4):
-        store.apply_episode_feedback(_episode(outcome="failed", used=("p",), eid=f"ep-{i}"))
+        store.apply_episode_feedback(_episode(outcome="failed", replan=True, used=("p",), eid=f"ep-{i}"))
 
     got = _by_id(store)["p"]
     assert got.failure_count == 4
@@ -216,7 +244,7 @@ def test_demotion_is_now_reachable(tmp_path: Path) -> None:
 def test_two_used_procedures_each_get_one_observation(tmp_path: Path) -> None:
     store = _store(tmp_path, [_proc("a"), _proc("b")])
 
-    store.apply_episode_feedback(_episode(outcome="failed", used=("a", "b")))
+    store.apply_episode_feedback(_episode(outcome="failed", replan=True, used=("a", "b")))
 
     got = _by_id(store)
     assert (got["a"].failure_count, got["b"].failure_count) == (1, 1), (
@@ -227,7 +255,7 @@ def test_two_used_procedures_each_get_one_observation(tmp_path: Path) -> None:
 def test_duplicate_ids_are_collapsed_before_updating(tmp_path: Path) -> None:
     store = _store(tmp_path, [_proc("p")])
 
-    store.apply_episode_feedback(_episode(outcome="failed", used=("p", "p", "p")))
+    store.apply_episode_feedback(_episode(outcome="failed", replan=True, used=("p", "p", "p")))
 
     assert _by_id(store)["p"].failure_count == 1
 
@@ -237,7 +265,7 @@ def test_one_orphan_does_not_silence_the_rest(tmp_path: Path) -> None:
     store = _store(tmp_path, [_proc("real")])
 
     report = store.apply_episode_feedback(
-        _episode(outcome="failed", used=("real", "ghost"))
+        _episode(outcome="failed", replan=True, used=("real", "ghost"))
     )
 
     assert report["applied"] == 1

@@ -25,6 +25,36 @@ from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
 
 
+def _declare_completion(monkeypatch, token: str = "achieved") -> None:
+    """Append a valid completion marker to whatever synthesis produces.
+
+    An end-to-end cycle here is driven by a canned `FakeLLM` answer, which
+    cannot carry the per-attempt nonce. Without a declaration the cycle freezes
+    as `unknown` and distils no procedure — true, and not what these tests are
+    measuring.
+    """
+    original = AgentLoop._synthesize
+
+    def _synth(self, *args, completion_nonce: str = "", **kwargs) -> str:
+        text = original(self, *args, **kwargs)
+        return f"{text}\n[[agent.completion:{completion_nonce}:{token}]]"
+
+    monkeypatch.setattr("core.loop.AgentLoop._synthesize", _synth)
+
+
+def _make_achieved_episode(**kwargs):
+    """An episode whose cycle DECLARED the task done, for cases that need it.
+
+    Named rather than shadowing the factory, so the premise is visible at the
+    call site: credit needs both axes since MIR-057, and an undeclared cycle
+    freezes as `unknown`. Cases that are about non-completion — a failed run,
+    a weak-evidence run, or the factory itself — call the real factory
+    directly and say so by doing it.
+    """
+    kwargs.setdefault("declared_completion", "achieved")
+    return episode_from_agent_cycle(**kwargs)
+
+
 PLAN_FILE_READ = json.dumps(
     {
         "reasoning": "Read the hinted file.",
@@ -146,7 +176,7 @@ def test_weak_verdicts_block_success_and_procedure() -> None:
 def test_weak_verdicts_dent_quality_but_keep_success_when_dominated() -> None:
     """A single stray unmatched citation among mostly verified evidence lowers
     quality without flipping a clean turn to partial."""
-    episode = episode_from_agent_cycle(
+    episode = _make_achieved_episode(
         goal="read a file",
         question="what is in the file?",
         answer="the file lists the modules",
@@ -182,7 +212,7 @@ def test_weak_chunks_survive_serialization_round_trip() -> None:
 
 def test_procedural_store_upserts_successful_tool_workflow(workspace: Path) -> None:
     store = ProceduralMemoryStore(workspace / "procedures.jsonl")
-    episode1 = episode_from_agent_cycle(
+    episode1 = _make_achieved_episode(
         goal="read file",
         question="read doc",
         answer="done",
@@ -190,7 +220,7 @@ def test_procedural_store_upserts_successful_tool_workflow(workspace: Path) -> N
         source_labels=["file:doc.txt"],
         verified_chunks=1,
     )
-    episode2 = episode_from_agent_cycle(
+    episode2 = _make_achieved_episode(
         goal="read file again",
         question="read doc again",
         answer="done",
@@ -220,7 +250,7 @@ def test_single_success_procedure_is_not_certain(workspace: Path) -> None:
     trace where a low-relevance turn minted a proc at confidence=1.0.
     """
     store = ProceduralMemoryStore(workspace / "procedures.jsonl")
-    episode = episode_from_agent_cycle(
+    episode = _make_achieved_episode(
         goal="read file",
         question="read doc",
         answer="done",
@@ -245,7 +275,7 @@ def test_procedure_confidence_grows_but_never_reaches_one(workspace: Path) -> No
     store = ProceduralMemoryStore(workspace / "procedures.jsonl")
     last = 0.0
     for i in range(6):
-        episode = episode_from_agent_cycle(
+        episode = _make_achieved_episode(
             goal="read file",
             question=f"read doc {i}",
             answer="done",
@@ -264,7 +294,7 @@ def test_consolidation_links_episodes_and_procedures(workspace: Path) -> None:
     episodic = EpisodicMemoryStore(workspace / "episodes.jsonl")
     procedural = ProceduralMemoryStore(workspace / "procedures.jsonl")
     consolidation = MemoryConsolidationStore(workspace / "consolidation.jsonl")
-    episode = episode_from_agent_cycle(
+    episode = _make_achieved_episode(
         goal="read file",
         question="read doc",
         answer="done",
@@ -287,7 +317,7 @@ def test_consolidation_links_episodes_and_procedures(workspace: Path) -> None:
 
 
 def test_format_experience_context_contains_procedures_and_episodes() -> None:
-    episode = episode_from_agent_cycle(
+    episode = _make_achieved_episode(
         goal="read file",
         question="read doc",
         answer="done",
@@ -304,9 +334,10 @@ def test_format_experience_context_contains_procedures_and_episodes() -> None:
     assert f"[{episode.id}]" in text
 
 
-def test_agent_loop_records_smart_memory_after_successful_cycle(workspace: Path) -> None:
+def test_agent_loop_records_smart_memory_after_successful_cycle(workspace: Path, monkeypatch) -> None:
     (workspace / "doc.txt").write_text("alpha\n", encoding="utf-8")
     agent, log_path = _build_agent(workspace, FakeLLM([PLAN_FILE_READ, SYNTH_FILE]))
+    _declare_completion(monkeypatch)
 
     answer = agent.run("Read doc.txt", file_hint="doc.txt")
 
@@ -352,10 +383,11 @@ def test_cheap_path_skips_consolidation_but_still_records_episode(
     assert agent.smart_memory_summary()["consolidation"]["reports"] == 0
 
 
-def test_experience_memory_is_injected_into_next_planner_call(workspace: Path) -> None:
+def test_experience_memory_is_injected_into_next_planner_call(workspace: Path, monkeypatch) -> None:
     (workspace / "doc.txt").write_text("alpha\n", encoding="utf-8")
     llm = FakeLLM([PLAN_FILE_READ, SYNTH_FILE, PLAN_FILE_READ, SYNTH_FILE])
     agent, log_path = _build_agent(workspace, llm)
+    _declare_completion(monkeypatch)
 
     agent.run("Read doc.txt", file_hint="doc.txt")
     agent.run("Read doc.txt again", file_hint="doc.txt")
@@ -370,7 +402,7 @@ def test_experience_memory_is_injected_into_next_planner_call(workspace: Path) -
 
 def test_smart_memory_cli_commands(workspace: Path, capsys) -> None:
     agent, _log_path = _build_agent(workspace, FakeLLM([]))
-    episode = episode_from_agent_cycle(
+    episode = _make_achieved_episode(
         goal="read file",
         question="read doc",
         answer="done",
@@ -394,7 +426,7 @@ def test_smart_memory_cli_commands(workspace: Path, capsys) -> None:
 def test_episodic_store_evicts_oldest_when_over_limit(tmp_path: Path) -> None:
     store = EpisodicMemoryStore(tmp_path / "ep.jsonl", max_episodes=3)
     for i in range(5):
-        ep = episode_from_agent_cycle(
+        ep = _make_achieved_episode(
             goal="g", question=f"q{i}", answer="a",
             tools_used=[], source_labels=[], verified_chunks=1,
         )
@@ -413,7 +445,7 @@ def test_episodic_store_protects_lesson_tags(tmp_path: Path) -> None:
     store = EpisodicMemoryStore(tmp_path / "ep.jsonl", max_episodes=2)
     # Save 2 normal episodes first
     for i in range(2):
-        ep = episode_from_agent_cycle(
+        ep = _make_achieved_episode(
             goal="g", question=f"normal{i}", answer="a",
             tools_used=[], source_labels=[], verified_chunks=1,
         )
@@ -434,7 +466,7 @@ def test_episodic_store_protects_lesson_tags(tmp_path: Path) -> None:
 def test_episodic_store_no_eviction_under_limit(tmp_path: Path) -> None:
     store = EpisodicMemoryStore(tmp_path / "ep.jsonl", max_episodes=10)
     for i in range(5):
-        ep = episode_from_agent_cycle(
+        ep = _make_achieved_episode(
             goal="g", question=f"q{i}", answer="a",
             tools_used=[], source_labels=[], verified_chunks=1,
         )
@@ -445,7 +477,7 @@ def test_episodic_store_no_eviction_under_limit(tmp_path: Path) -> None:
 def test_search_boosts_lesson_episodes(tmp_path: Path) -> None:
     """Lesson episodes should appear above ordinary ones on same token overlap."""
     store = EpisodicMemoryStore(tmp_path / "ep.jsonl", max_episodes=100)
-    ordinary = episode_from_agent_cycle(
+    ordinary = _make_achieved_episode(
         goal="repair", question="fix bug in core", answer="patched",
         tools_used=[], source_labels=[], verified_chunks=1,
     )
@@ -470,7 +502,7 @@ def test_search_by_tags_returns_matching_episodes(tmp_path: Path) -> None:
         goal="repair", question="q", outcome="success",
         summary="fixed core/foo.py", tags=("lesson", "bug-fix"),
     )
-    other = episode_from_agent_cycle(
+    other = _make_achieved_episode(
         goal="g", question="q2", answer="a",
         tools_used=[], source_labels=[], verified_chunks=1,
     )
