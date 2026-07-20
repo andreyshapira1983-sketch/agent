@@ -886,6 +886,10 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 verified_chunks=0,
                 unverified_chunks=1,
                 replan_exhausted=False,
+                # No verifier ran on a replay, so none of it crashed. The
+                # distinction matters: this flag means "the verifier threw",
+                # not "no verification happened".
+                verifier_failure=False,
             )
             if self.memory is not None:
                 self.memory.record_turn(
@@ -947,6 +951,9 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 verified_chunks=0,
                 unverified_chunks=1,
                 replan_exhausted=False,
+                # The refusal returns before planning, so verification never
+                # started — again not a crash.
+                verifier_failure=False,
             )
             self._stream_on_token = None
             return answer
@@ -2250,6 +2257,9 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             weak_chunks=weak_chunks,
             replan_exhausted=replan_exhausted,
             skip_consolidation=cheap_path_active,
+            # Set by either soft-fail site (`:1625` initial, `:1929` replan).
+            # Both write this same local, which is why one flag covers them.
+            verifier_failure=verifier_failure,
         )
 
         # Clear streaming callback so it cannot leak into the next turn.
