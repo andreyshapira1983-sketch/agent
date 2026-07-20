@@ -73,10 +73,18 @@ def _passes_positive_reuse(episode: EpisodeRecord) -> bool:
 def _passes_lesson_context(episode: EpisodeRecord) -> bool:
     """Admission through the curated-lesson arm, which ignores completion.
 
-    Deliberate and agreed: surfacing a past failure as a warning is the whole
-    purpose of the tag. Counted here so it is visible, never as an anomaly.
+    Surfacing a past failure as a warning is the whole purpose of the tag, so
+    this is a deliberate exception and is counted on its own line, never as an
+    anomaly.
+
+    Reads `is_usage_eligible` — the STORED bit — because that is what
+    retrieval reads. `decide_usage_eligibility` is the banking-time policy and
+    answers a different question: for a lesson it returns True whatever the
+    stored bit says. Using it here reported 108 legacy lessons as admitted
+    when the live agent admits none of them, and a diagnostic that overstates
+    what memory is reachable is worse than no diagnostic.
     """
-    return _is_lesson(episode) and decide_usage_eligibility(episode)
+    return _is_lesson(episode) and is_usage_eligible(episode)
 
 
 def _passes_fast_path(episode: EpisodeRecord) -> bool:
@@ -155,6 +163,13 @@ def build_report(episodes: list[EpisodeRecord], procedures: list[ProcedureRecord
             ("<none>" if e.declared_completion is None else e.declared_completion)
             for e in episodes
         ),
+        # Reported because on a legacy store this — not completion — is what
+        # actually withholds everything: retrieval admits only an explicit
+        # True, and a row written before the field carries no bit at all.
+        "usage_eligible": _distribution(
+            ("<missing>" if e.usage_eligible is None else str(e.usage_eligible))
+            for e in episodes
+        ),
         "gates": {name: len(eps) for name, eps in gates.items()},
         "anomalies": {k: v for k, v in anomalies.items() if v},
         "backfill_candidates": [e.id for e in episodes if _backfill_candidate(e)],
@@ -178,6 +193,9 @@ def render(report: dict) -> str:
         add(f"    {key:<22} {count:>5}")
     add("DECLARED completion as stored (auditable history, read by no gate)")
     for key, count in report["declared_completion"].items():
+        add(f"    {key:<22} {count:>5}")
+    add("STORED eligibility bit — what retrieval reads; only an explicit True admits")
+    for key, count in report["usage_eligible"].items():
         add(f"    {key:<22} {count:>5}")
 
     add("\nGATES — what each would admit today")
