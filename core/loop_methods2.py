@@ -157,6 +157,7 @@ class AgentLoopExtractedMethods2:
                     "records_selected": 0,
                     "reason": "no records applicable to current role",
                     "role": self.last_role_context.role,
+                    "rejected_by": {"role_scope": len(records)},
                 },
             )
             return ""
@@ -170,6 +171,10 @@ class AgentLoopExtractedMethods2:
                     "reason": "no keyword overlap above threshold",
                     "role": self.last_role_context.role,
                     "records_applicable": len(use_report.allowed),
+                    "rejected_by": {
+                        "role_scope": len(records) - len(use_report.allowed),
+                        "below_threshold": len(use_report.allowed),
+                    },
                 },
             )
             return ""
@@ -183,6 +188,13 @@ class AgentLoopExtractedMethods2:
                 "ids": [r.id for r in selected],
                 "chars": len(formatted),
                 "role": self.last_role_context.role,
+                # Same vocabulary as experience retrieval: reasons, not records.
+                "rejected_by": {
+                    k: v for k, v in (
+                        ("role_scope", len(records) - len(use_report.allowed)),
+                        ("below_threshold", len(use_report.allowed) - len(selected)),
+                    ) if v > 0
+                },
             },
         )
         self._last_persistent_records = list(selected)
@@ -226,7 +238,24 @@ class AgentLoopExtractedMethods2:
         # Holding the stores and being allowed to read them are separate
         # permissions. Returning early also leaves `_last_best_similar_episode`
         # unset, which structurally keeps the fast path from firing.
+        # Counterfactual trace: WHY a record did not come back is where the
+        # information is. `selected=0` alone cannot distinguish "nothing
+        # matched" from "everything matched but was withheld", and those call
+        # for opposite responses. Counted BY REASON, never per record — a
+        # per-record trace would cost more than the retrieval it observes.
+        rejected_by: dict[str, int] = {}
         if not getattr(self, "experience_retrieval", True):
+            self.log.log(
+                "experience_memory_inject",
+                {
+                    "episodes_selected": 0,
+                    "procedures_selected": 0,
+                    "episode_ids": [],
+                    "procedure_ids": [],
+                    "chars": 0,
+                    "rejected_by": {"retrieval_disabled": 1},
+                },
+            )
             return ""
         if self.episodic_store is None and self.procedural_store is None:
             return ""
@@ -240,16 +269,19 @@ class AgentLoopExtractedMethods2:
         # "did this go well", eligibility asks "is this episode allowed to
         # steer anything at all". Legacy and quarantined episodes stay stored
         # and auditable but never reach the planner.
-        episodes = (
-            [
-                ep
-                for ep in self.episodic_store.search(question, limit=6)
-                if (ep.outcome == "success" or "lesson" in ep.tags)
-                and is_usage_eligible(ep)
-            ][:3]
-            if self.episodic_store is not None
-            else []
-        )
+        episodes = []
+        if self.episodic_store is not None:
+            for ep in self.episodic_store.search(question, limit=6):
+                if not (ep.outcome == "success" or "lesson" in ep.tags):
+                    rejected_by["outcome"] = rejected_by.get("outcome", 0) + 1
+                    continue
+                if not is_usage_eligible(ep):
+                    rejected_by["not_eligible"] = rejected_by.get("not_eligible", 0) + 1
+                    continue
+                if len(episodes) >= 3:
+                    rejected_by["over_limit"] = rejected_by.get("over_limit", 0) + 1
+                    continue
+                episodes.append(ep)
         # ── Surface repair lessons for files mentioned in the question ────
         # search() gives a +50 boost to protected-tag episodes so they usually
         # appear in the top-3, but when the question contains a file path that
@@ -287,6 +319,7 @@ class AgentLoopExtractedMethods2:
                 "episode_ids": [ep.id for ep in episodes],
                 "procedure_ids": [proc.id for proc in procedures],
                 "chars": len(block),
+                "rejected_by": rejected_by,
             },
         )
         self._last_episode_records = list(episodes)
@@ -563,7 +596,15 @@ class AgentLoopExtractedMethods2:
                 # express -- a `partial`/`failed` debit against the procedures
                 # the run actually used.
                 feedback = self.procedural_store.apply_episode_feedback(episode)
-                self.log.log("procedure_feedback", {"episode_id": episode.id, **feedback})
+                # `offered` closes the counterfactual: applied=0 alone cannot
+                # distinguish "no procedure was suggested" from "two were
+                # suggested and neither was actually applied" — the second is
+                # a signal about retrieval quality, the first is not.
+                offered = len(getattr(self, "_last_procedure_records", []) or [])
+                self.log.log(
+                    "procedure_feedback",
+                    {"episode_id": episode.id, "offered": offered, **feedback},
+                )
                 self.log.log(
                     "procedural_memory_update",
                     {
