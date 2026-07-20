@@ -48,6 +48,29 @@ KNOWN_DURABLE_SINKS: frozenset[str] = frozenset({
 })
 
 
+def _merge_rejection_reasons(*reports: dict[str, int]) -> dict[str, int]:
+    """Combine `rejected_by` maps from the components that did the rejecting.
+
+    Retrieval is a chain of deciders — a use policy, then a scoring policy,
+    then the loop's own filters — and each one knows the cause of its own
+    drops. Merging what they report is the alternative to the observer
+    inferring causes from `len(before) - len(after)`, which cannot separate a
+    cap from a floor and, measured on the live store, mislabelled 4 of 6
+    realistic questions.
+
+    Reasons repeated across stages are summed: an episode ranked out by the
+    store's cap and one ranked out by the loop's cap were both ranked out by
+    a cap, and a reader looking for "how much did the caps cost me" wants one
+    number. Absent reasons stay absent rather than becoming zeros.
+    """
+    merged: dict[str, int] = {}
+    for report in reports:
+        for reason, count in (report or {}).items():
+            if count:
+                merged[reason] = merged.get(reason, 0) + count
+    return merged
+
+
 class AgentLoopExtractedMethods2:
     def _durable_learning_suppressed(self, sink: str | None = None) -> bool:
         """True when a durable learning write must be skipped.
@@ -157,11 +180,16 @@ class AgentLoopExtractedMethods2:
                     "records_selected": 0,
                     "reason": "no records applicable to current role",
                     "role": self.last_role_context.role,
-                    "rejected_by": {"role_scope": len(records)},
+                    # The policy classified every rejection as it made it;
+                    # `role_scope`, `quarantined` and `not_applicable` are
+                    # three different diagnoses and used to be one number.
+                    "rejected_by": use_report.rejected_by,
                 },
             )
             return ""
-        selected = self.retrieval_policy.select(use_report.allowed, question)
+        selection = self.retrieval_policy.select_with_report(use_report.allowed, question)
+        selected = selection.selected
+        rejected_by = _merge_rejection_reasons(use_report.rejected_by, selection.rejected_by)
         if not selected:
             self.log.log(
                 "persistent_memory_inject",
@@ -171,10 +199,7 @@ class AgentLoopExtractedMethods2:
                     "reason": "no keyword overlap above threshold",
                     "role": self.last_role_context.role,
                     "records_applicable": len(use_report.allowed),
-                    "rejected_by": {
-                        "role_scope": len(records) - len(use_report.allowed),
-                        "below_threshold": len(use_report.allowed),
-                    },
+                    "rejected_by": rejected_by,
                 },
             )
             return ""
@@ -189,12 +214,7 @@ class AgentLoopExtractedMethods2:
                 "chars": len(formatted),
                 "role": self.last_role_context.role,
                 # Same vocabulary as experience retrieval: reasons, not records.
-                "rejected_by": {
-                    k: v for k, v in (
-                        ("role_scope", len(records) - len(use_report.allowed)),
-                        ("below_threshold", len(use_report.allowed) - len(selected)),
-                    ) if v > 0
-                },
+                "rejected_by": rejected_by,
             },
         )
         self._last_persistent_records = list(selected)
@@ -270,8 +290,15 @@ class AgentLoopExtractedMethods2:
         # steer anything at all". Legacy and quarantined episodes stay stored
         # and auditable but never reach the planner.
         episodes = []
+        readmitted = 0
         if self.episodic_store is not None:
-            for ep in self.episodic_store.search(question, limit=6):
+            # `search_with_report` rather than `search`: the store drops
+            # episodes for reasons only it can see (no token overlap, its own
+            # cap), and counting only what it handed back is how
+            # `selected=0, rejected_by={}` stayed reachable on 200 episodes.
+            found = self.episodic_store.search_with_report(question, limit=6)
+            rejected_by = _merge_rejection_reasons(rejected_by, found.rejected_by)
+            for ep in found.episodes:
                 if not (ep.outcome == "success" or "lesson" in ep.tags):
                     rejected_by["outcome"] = rejected_by.get("outcome", 0) + 1
                     continue
@@ -305,6 +332,13 @@ class AgentLoopExtractedMethods2:
                     and any(tok in lesson.summary.lower() for tok in path_tokens)
                 ):
                     episodes.append(lesson)
+                    # This lesson was already charged to some rejection reason
+                    # by the first pass, and which one is not knowable here
+                    # without a per-record trace. Reported as its own number
+                    # rather than guessed at and subtracted: with it, the
+                    # reader reconciles as
+                    # `selected - readmitted + sum(rejected_by) == candidates`.
+                    readmitted += 1
         procedures = (
             self.procedural_store.search(question, limit=3)
             if self.procedural_store is not None
@@ -320,6 +354,8 @@ class AgentLoopExtractedMethods2:
                 "procedure_ids": [proc.id for proc in procedures],
                 "chars": len(block),
                 "rejected_by": rejected_by,
+                # Absent means zero, like every reason key.
+                **({"readmitted": readmitted} if readmitted else {}),
             },
         )
         self._last_episode_records = list(episodes)
