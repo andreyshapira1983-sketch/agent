@@ -104,8 +104,11 @@ do not change when the architectural framing changes.
 - **The adapter cannot express structured outputs at all** — zero occurrences of
   `response_format` / `json_schema` / `strict`; `core/llm.py` is the only
   provider call site; surface is Chat Completions, not Responses. → audit §1.
-- **Live routes**: standard → `openai / gpt-5.6-terra`; light →
-  `openai / gpt-5.4-nano-2026-03-17` (by fallback); deep → Anthropic. → audit §3.
+- **Live routes — three models, not two** (corrected 2026-07-21 against a real
+  session start). Per question: standard → `openai / gpt-5.6-terra`, light →
+  `openai / gpt-5.4-nano-2026-03-17`. **Role default → `openai / gpt-5.4-mini`**
+  from the custom registry — this is what the session banner prints, and by the
+  registry it is also the `verifier` model. → audit §3 correction.
 - **Model capability for strict JSON Schema is UNDETERMINED** and may not be
   inferred, recalled or guessed. Only a live probe answers it. → audit §4.
 - **Declaration vocabulary is five tokens, not seven** — `cancelled` / `unknown`
