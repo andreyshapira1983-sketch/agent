@@ -1255,3 +1255,148 @@ def test_non_subagent_doctrine_question_omits_lifecycle_doc(workspace: Path) -> 
         if src["tool"] == "file_read"
     ]
     assert "docs/SUBAGENT_LIFECYCLE.md" not in paths
+
+
+# ---------- thematic memory governance doc routing (conditional) ----------
+
+
+def test_memory_question_injects_memory_governance_docs(workspace: Path) -> None:
+    """A memory-governance question must lead with the memory docs.
+
+    Fail-before: nothing injects them today, so the planner's source list is
+    whatever the model asked for (`core/smart_memory.py` here).
+    """
+    canned = json.dumps(
+        {
+            "reasoning": "answer directly",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "core/smart_memory.py"},
+                    "rationale": "mechanics",
+                }
+            ],
+        }
+    )
+    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
+    out = planner.plan(
+        question="How does episodic memory get consolidated, and what is forgotten?",
+        file_hint=None,
+    )
+    paths = [
+        src["arguments"]["path"]
+        for src in out.sources
+        if src["tool"] == "file_read"
+    ]
+    assert "docs/audit/MEMORY_MAP.md" in paths
+    assert "docs/MEMORY_SYSTEM_AUDIT.md" in paths
+    assert "docs/self-audit-lessons.md" in paths
+    # a pure memory question (not a broad doctrine question) → the thematic
+    # docs lead the source list.
+    assert paths[0] == "docs/audit/MEMORY_MAP.md"
+
+
+def test_non_memory_doctrine_question_omits_memory_docs(workspace: Path) -> None:
+    canned = json.dumps(
+        {
+            "reasoning": "doctrine",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "docs/ROADMAP.md"},
+                    "rationale": "roadmap",
+                }
+            ],
+        }
+    )
+    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
+    out = planner.plan(
+        question="Explain the corporate model and what is on the roadmap.",
+        file_hint=None,
+    )
+    paths = [
+        src["arguments"]["path"]
+        for src in out.sources
+        if src["tool"] == "file_read"
+    ]
+    assert "docs/audit/MEMORY_MAP.md" not in paths
+    assert "docs/MEMORY_SYSTEM_AUDIT.md" not in paths
+
+
+from core.planner import _is_memory_governance_question
+
+
+def test_memory_governance_detector_strong_terms() -> None:
+    for q in (
+        "how is episodic memory consolidated?",
+        "what does procedural memory store",
+        "объясни консолидацию памяти",
+        "почему забывание не работает автоматически",
+        "what is memory hygiene",
+        "bug in core/smart_memory.py",
+    ):
+        assert _is_memory_governance_question(q), q
+
+
+def test_memory_governance_detector_contextual_pair() -> None:
+    # a weak action term only counts together with a memory context word
+    assert _is_memory_governance_question("how does memory retrieval work?")
+    assert _is_memory_governance_question("какое хранилище у памяти")
+    assert _is_memory_governance_question("что агент помнит и чему обучается из памяти")
+
+
+def test_memory_governance_detector_does_not_overfire() -> None:
+    for q in (
+        "explain the corporate model",
+        "what is on the roadmap",
+        "how do subagents get retired?",
+        "fix the bug in core/loop.py",
+        "run the tests and show coverage",
+        "какая погода сегодня",
+        "this is a memorable result",
+    ):
+        assert not _is_memory_governance_question(q), q
+
+
+def test_memory_and_subagent_groups_are_independent() -> None:
+    """The two thematic groups must not collapse into one another."""
+    assert _is_memory_governance_question("how is episodic memory consolidated?")
+    assert not _is_subagent_governance_question(
+        "how is episodic memory consolidated?"
+    )
+    assert _is_subagent_governance_question("how do subagents get retired?")
+    assert not _is_memory_governance_question("how do subagents get retired?")
+
+
+def test_question_touching_both_themes_keeps_stable_order(workspace: Path) -> None:
+    """Both thematic groups may fire at once; the order must be deterministic.
+
+    Sub-agent contract first, then the memory docs — the two injectors must not
+    compete for the same slot.
+    """
+    canned = json.dumps(
+        {
+            "reasoning": "answer directly",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "core/subagent_runner.py"},
+                    "rationale": "mechanics",
+                }
+            ],
+        }
+    )
+    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
+    out = planner.plan(
+        question="How does a subagent use episodic memory when it is delegated a task?",
+        file_hint=None,
+    )
+    paths = [
+        src["arguments"]["path"]
+        for src in out.sources
+        if src["tool"] == "file_read"
+    ]
+    assert paths[0] == "docs/SUBAGENT_LIFECYCLE.md"
+    assert paths[1] == "docs/audit/MEMORY_MAP.md"
+    # no duplicates from the two injectors touching the same list
+    assert len(paths) == len(set(paths)), paths
