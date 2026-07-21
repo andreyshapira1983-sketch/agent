@@ -104,6 +104,20 @@ class Tool(ABC):
             return False, ["empty output"]
         return True, []
 
+    def execution_status(self, output: Any) -> str:
+        """Did the work this tool was asked to do actually succeed?
+
+        Defaults to `success` for any tool whose `run` returned without
+        raising — for most tools, returning IS succeeding. A tool that can
+        complete its own call while the work fails overrides this: shell
+        commands are the case that forced it, where the subprocess starting
+        and the command working are different facts (MIR-010).
+
+        Distinct from `validate_output`, which asks whether the returned
+        object is well-formed. A correct report of a failure is valid.
+        """
+        return "success"
+
     def invoke(self, call: ToolCall) -> ToolResult:
         """Wrap `run` with timing and error capture, returning a ToolResult."""
         started = time.perf_counter()
@@ -112,7 +126,7 @@ class Tool(ABC):
             latency_ms = int((time.perf_counter() - started) * 1000)
             result = ToolResult(
                 tool_call_id=call.id,
-                status="success",
+                status="success" if self.execution_status(output) == "success" else "error",
                 output=output,
                 latency_ms=latency_ms,
             )
