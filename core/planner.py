@@ -255,6 +255,28 @@ _DOCTRINE_CORPORATE_DOC_PATHS = (
 _SUBAGENT_GOVERNANCE_DOC_PATHS = (
     "docs/SUBAGENT_LIFECYCLE.md",
 )
+# Thematic (conditional) doc group for memory / durable-learning questions,
+# same discipline as the sub-agent group above: never in the universal
+# manifest, so unrelated architecture turns do not pay for it.
+#
+# Until this existed the agent could not read its own memory problem history
+# (MEMORY_FIX_PLAN B.3), which is failure mode OFM-015 — a record written and
+# never read changes nothing.
+#
+# Membership is deliberately small, and three obvious candidates are left OUT:
+#   * docs/audit/MEMORY_LIFECYCLE_CONTRACT.md — v2-draft, never approved, no
+#     code implements it. Injecting it as doctrine would teach the agent that
+#     unimplemented rules are current behaviour.
+#   * docs/MEMORY_FIX_PLAN.md — partly superseded; its A3 prescription was
+#     never applied as written, so it would teach a rule that does not hold.
+#   * docs/audit/MASTER_ISSUE_REGISTRY.md — the authoritative status owner, but
+#     far too large to inject per turn. Reach it by name when a status is
+#     actually needed.
+_MEMORY_GOVERNANCE_DOC_PATHS = (
+    "docs/audit/MEMORY_MAP.md",
+    "docs/MEMORY_SYSTEM_AUDIT.md",
+    "docs/self-audit-lessons.md",
+)
 _DOCTRINE_LOW_SIGNAL_DEFAULT_PATHS = (
     "README.md",
     "core/planner.py",
@@ -542,6 +564,75 @@ def _is_subagent_governance_question(question: str) -> bool:
     return has_context and has_action
 
 
+# Two-tier, same shape as the sub-agent detector above and for the same reason:
+# plain substring matching on "memory" would fire on "not enough memory",
+# "memorable", and every turn that merely mentions remembering something.
+# Broadening one of these lists has regressed the planner before, so each
+# carries paired negative tests.
+_MEMORY_DOC_STRONG_TERMS = (
+    "episodic",
+    "эпизодическ",
+    "procedural memory",
+    "процедурная память",
+    "процедурной памяти",
+    "semantic memory",
+    "семантическая память",
+    "working memory",
+    "рабочая память",
+    "persistent memory",
+    "долговременная память",
+    "smart_memory",
+    "persistent_memory",
+    "episodic_memory",
+    "procedural_memory",
+    "memory governance",
+    "memory policy",
+    "политика памяти",
+    "memory hygiene",
+    "гигиена памяти",
+    "consolidation",
+    "консолидац",
+    "forgetting",
+    "забывани",
+)
+_MEMORY_DOC_CONTEXT_TERMS = (
+    "memory",
+    "память",
+    "памяти",
+    "памятью",
+)
+_MEMORY_DOC_ACTION_TERMS = (
+    "retrieval",
+    "retrieve",
+    "извлечен",
+    "store",
+    "хранилищ",
+    "prune",
+    "pruning",
+    "очист",
+    "provenance",
+    "провенанс",
+    "trust",
+    "довери",
+    "learn",
+    # both stems: "обучение/обученный" and "обучается/обучаться". Only ever
+    # consulted together with a memory context word, so the wider stem cannot
+    # fire on an unrelated training question.
+    "обучен",
+    "обуча",
+    "governance",
+)
+
+
+def _is_memory_governance_question(question: str) -> bool:
+    lowered = (question or "").casefold()
+    if any(term in lowered for term in _MEMORY_DOC_STRONG_TERMS):
+        return True
+    has_context = any(term in lowered for term in _MEMORY_DOC_CONTEXT_TERMS)
+    has_action = any(term in lowered for term in _MEMORY_DOC_ACTION_TERMS)
+    return has_context and has_action
+
+
 def _is_confidence_evidence_diagnostic_question(question: str) -> bool:
     lowered = (question or "").casefold()
     return any(term in lowered for term in _CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS)
@@ -763,6 +854,65 @@ def _ensure_subagent_governance_docs_first(
     if injected:
         warnings.append(
             "subagent governance docs injected for a sub-agent question: "
+            + ", ".join(injected)
+        )
+    return rest[:insert_at] + ordered_target + rest[insert_at:]
+
+
+def _ensure_memory_governance_docs_first(
+    sources: list[dict[str, Any]],
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    """Ensure the thematic memory docs lead a memory/durable-learning question.
+
+    Placed after any leading doctrine/corporate docs AND after the sub-agent
+    contract, so a question touching several themes keeps a stable order
+    (corporate → sub-agent → memory) instead of the two thematic groups
+    competing for the same slot.
+    """
+    target_norms = {
+        _norm_source_path(path): path for path in _MEMORY_GOVERNANCE_DOC_PATHS
+    }
+    lead_norms = {
+        _norm_source_path(path)
+        for path in _DOCTRINE_CORPORATE_DOC_PATHS + _SUBAGENT_GOVERNANCE_DOC_PATHS
+    }
+
+    found: dict[str, dict[str, Any]] = {}
+    rest: list[dict[str, Any]] = []
+    for src in sources:
+        args = src.get("arguments") or {}
+        path = args.get("path") if isinstance(args, dict) else None
+        norm = _norm_source_path(path) if isinstance(path, str) else ""
+        if src.get("tool") == "file_read" and norm in target_norms and norm not in found:
+            found[norm] = src
+            continue
+        rest.append(src)
+
+    insert_at = 0
+    for src in rest:
+        args = src.get("arguments") or {}
+        path = args.get("path") if isinstance(args, dict) else None
+        norm = _norm_source_path(path) if isinstance(path, str) else ""
+        if src.get("tool") == "file_read" and norm in lead_norms:
+            insert_at += 1
+        else:
+            break
+
+    ordered_target: list[dict[str, Any]] = []
+    injected: list[str] = []
+    for path in _MEMORY_GOVERNANCE_DOC_PATHS:
+        norm = _norm_source_path(path)
+        existing = found.get(norm)
+        if existing is not None:
+            ordered_target.append(existing)
+        else:
+            ordered_target.append(_file_read_source_spec(path))
+            injected.append(path)
+
+    if injected:
+        warnings.append(
+            "memory governance docs injected for a memory question: "
             + ", ".join(injected)
         )
     return rest[:insert_at] + ordered_target + rest[insert_at:]
@@ -1483,6 +1633,17 @@ class LLMPlanner:
                         sources,
                         step_warnings,
                     )
+        if _is_memory_governance_question(question):
+            if "file_read" not in self.hidden_tools:
+                try:
+                    self.registry.get("file_read")
+                except KeyError:
+                    pass
+                else:
+                    sources = _ensure_memory_governance_docs_first(
+                        sources,
+                        step_warnings,
+                    )
         # Coverage enforcement: if the question is about test adequacy /
         # coverage and the planner produced a run_tests step without
         # coverage=True, inject it automatically so the synthesizer always
@@ -1581,6 +1742,17 @@ class LLMPlanner:
                 "normative sub-agent lifecycle contract) before core/*.py "
                 "mechanics.]\n"
             )
+        memory_docs_block = ""
+        if _is_memory_governance_question(question):
+            memory_docs_block = (
+                "[MEMORY_DOCS=required — this question is about memory / "
+                "episodic / procedural / consolidation / forgetting / retrieval "
+                "/ durable learning. Read docs/audit/MEMORY_MAP.md (how memory "
+                "actually flows today), docs/MEMORY_SYSTEM_AUDIT.md and "
+                "docs/self-audit-lessons.md first, before core/*.py mechanics. "
+                "These record known defects and their causes — do not "
+                "re-derive them from the code.]\n"
+            )
         confidence_evidence_block = ""
         if _is_confidence_evidence_diagnostic_question(question):
             confidence_evidence_block = (
@@ -1613,6 +1785,7 @@ class LLMPlanner:
             f"{confidence_evidence_block}"
             f"{doctrine_docs_block}"
             f"{subagent_docs_block}"
+            f"{memory_docs_block}"
             f"question: {question}\n"
             f"\n"
             f"Return your JSON plan now."

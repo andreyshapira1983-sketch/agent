@@ -17,6 +17,7 @@ from core.learning_planner import (
     _DOCTRINE_CORPORATE_DOC_PATHS as LEARNING_MANIFEST,
 )
 from core.planner import _DOCTRINE_CORPORATE_DOC_PATHS as PLANNER_MANIFEST
+from core.planner import _MEMORY_GOVERNANCE_DOC_PATHS as MEMORY_MANIFEST
 from core.planner import _SUBAGENT_GOVERNANCE_DOC_PATHS as SUBAGENT_MANIFEST
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -84,3 +85,42 @@ def test_subagent_doc_separates_implemented_from_planned() -> None:
     flat = " ".join(text.lower().replace(">", " ").split())
     assert "`auto-pause` and `auto-retire` do not exist today" in flat
     assert "no auto-promote, auto-pause, auto-retire, or auto-quarantine" in flat
+
+
+def test_memory_governance_docs_all_exist() -> None:
+    missing = [p for p in MEMORY_MANIFEST if not (REPO_ROOT / p).is_file()]
+    assert not missing, (
+        "memory governance manifest references files that do not exist: "
+        f"{missing}. Create the doc or remove it from "
+        "core.planner._MEMORY_GOVERNANCE_DOC_PATHS."
+    )
+
+
+def test_memory_docs_are_thematic_not_in_corporate_manifest() -> None:
+    """Conditionally routed, never universal — same rule as the sub-agent doc.
+
+    If a memory doc leaks into the corporate manifest it is read on every
+    architecture question and the conditional routing is silently defeated.
+    """
+    for path in MEMORY_MANIFEST:
+        assert path not in PLANNER_MANIFEST, path
+        assert path not in LEARNING_MANIFEST, path
+        assert path not in SUBAGENT_MANIFEST, path
+
+
+def test_memory_manifest_excludes_unapproved_and_superseded_docs() -> None:
+    """The two documents deliberately kept out must stay out.
+
+    `MEMORY_LIFECYCLE_CONTRACT.md` is an unapproved v2-draft that no code
+    implements; `MEMORY_FIX_PLAN.md` is partly superseded (its A3 prescription
+    was never applied as written). Injecting either as doctrine would teach the
+    agent a rule that does not hold in the code it is reading.
+    """
+    for path in (
+        "docs/audit/MEMORY_LIFECYCLE_CONTRACT.md",
+        "docs/MEMORY_FIX_PLAN.md",
+    ):
+        assert path not in MEMORY_MANIFEST, (
+            f"{path} was added to the memory manifest. It is unapproved or "
+            "partly superseded; if that changed, update this test and say why."
+        )

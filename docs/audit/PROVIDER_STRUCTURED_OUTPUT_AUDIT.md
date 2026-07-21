@@ -90,6 +90,30 @@ Resolved by executing the router's own resolution functions (no network):
 | standard | `openai` | **`openai / gpt-5.6-terra`** |
 | deep | `anthropic` | `anthropic / claude-opus-4-8` |
 
+> **⚠ CORRECTION (2026-07-21, measured against a real session start).** The
+> table above is the **per-question** routing (`ModelRouter.for_task`) and is
+> confirmed correct. It was incomplete in a way that matters: **three models sit
+> on live paths, not two.**
+>
+> The operator's session banner prints `llm_model=gpt-5.4-mini` with
+> `reason=policy:balanced:…` — that is the **role default** (`for_role`),
+> resolved from the custom entries in `config/model_registry.json`
+> (`my-current-planner`, `my-cheap-summary`), not from the tier catalog.
+> Reproduced by building the router exactly as `app/bootstrap.py:143` does
+> (`ModelRouter.from_env()`), which returns `gpt-5.4-mini` for the planner role
+> while `for_task` returns nano for a trivial question and terra for an ordinary
+> one.
+>
+> **Consequence for §7:** the capability probe must cover **`gpt-5.4-mini`** as
+> well. By the registry it serves `verifier` and `memory_summary` — so the
+> verifier, the component MIR-060 is about, runs on a model this audit did not
+> list. Paths calling `for_role` rather than `for_task`
+> (`core/loop_methods.py:247`, `:499`, `main.py:1066`, and the bootstrap
+> defaults) all land on it.
+>
+> Nothing else in this section is revised; the tier resolution stands as
+> measured.
+
 Three things worth recording:
 
 - **`huggingface` is preferred for the light tier but never wins.**
@@ -253,8 +277,10 @@ own evidence — not inherited from a schema draft.
 
 ## 7. What the capability probe must establish
 
-Six requests per model (`gpt-5.6-terra`, `gpt-5.4-nano-2026-03-17`), against
-the schema in §6, on Chat Completions, recording the raw response envelope:
+Six requests per model — **`gpt-5.6-terra`, `gpt-5.4-nano-2026-03-17`, and
+`gpt-5.4-mini`** (the third added 2026-07-21, see the correction in §3; it is
+the role default and the registry's `verifier` model) — against the schema in
+§6, on Chat Completions, recording the raw response envelope:
 
 1. **strict accepted at all** — does the request return 200 or a 400 naming
    `response_format` / `json_schema`?
