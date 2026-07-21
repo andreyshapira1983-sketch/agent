@@ -128,6 +128,42 @@ def test_a_legacy_lesson_is_an_expected_admission_not_an_anomaly() -> None:
     )
 
 
+def test_the_lesson_arm_reports_what_retrieval_admits_not_what_the_policy_says() -> None:
+    """The report models RETRIEVAL, and retrieval reads the STORED bit.
+
+    `decide_usage_eligibility` is the banking-time policy: for a lesson it
+    returns True regardless of the stored `usage_eligible`. Retrieval calls
+    `is_usage_eligible`, which admits only an explicit True — so a legacy
+    lesson, whose bit was never set, is refused. Reporting the policy's answer
+    said 108 legacy lessons were admitted when the live agent admits none, and
+    a diagnostic that overstates what memory is reachable is worse than no
+    diagnostic.
+    """
+    unclassified = _episode("legacy-lesson", tags=("lesson",), outcome="failed",
+                            eligible=None)
+    admitted = _episode("live-lesson", tags=("lesson",), outcome="failed",
+                        eligible=True)
+
+    report = build_report([unclassified, admitted], [])
+
+    assert report["gates"]["lesson context eligibility"] == 1, (
+        "a legacy lesson carries no eligibility bit and retrieval refuses it"
+    )
+    assert report["anomalies"] == {}
+
+
+def test_the_stored_eligibility_bit_is_reported() -> None:
+    """It is what actually withholds legacy memory, so it has to be visible."""
+    report = build_report(
+        [_episode("a", eligible=None), _episode("b", eligible=False),
+         _episode("c", eligible=True)],
+        [],
+    )
+
+    assert report["usage_eligible"] == {"<missing>": 1, "False": 1, "True": 1}
+    assert "STORED eligibility bit" in render(report)
+
+
 def test_an_achieved_episode_reaches_the_positive_gates() -> None:
     report = build_report([_episode("ok", completion="achieved")], [])
 

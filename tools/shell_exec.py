@@ -77,6 +77,97 @@ from tools.base import Risk, Tool, require_ascii_identifier
 
 # Commands whose output is informational only. Calling them does not
 # mutate filesystem or environment.
+# Exit-code semantics, per command FAMILY (MIR-010).
+#
+# A command that ran and answered "no" is not a command that failed, and the
+# live defect came from having only one word for both: `shell_exec` reported
+# `status=success` whenever the subprocess started, so `grep` failing to open
+# a file read exactly like `grep` finding nothing.
+#
+# A blanket `exit != 0 -> failure` is the obvious fix and it is wrong. Measured
+# on Windows + git-bash while designing this:
+#
+#     grep found         exit 0   stderr empty
+#     grep no match      exit 1   stderr empty       <- a legitimate ANSWER
+#     grep missing file  exit 2   stderr non-empty
+#     where not found    exit 1   stderr NON-empty   <- also a legitimate answer
+#     which bad option   exit 255
+#
+# So `where`/`which` write diagnostics on a perfectly ordinary negative
+# result. Sharing grep's "stderr means trouble" rule would turn every "not
+# found" into a failure. Each family therefore carries its own contract, and
+# only the ones that were measured or documented are listed. Anything absent
+# gets the conservative unknown contract.
+_FAMILY_GREP = frozenset({"grep", "egrep", "fgrep"})
+_FAMILY_FINDSTR = frozenset({"findstr"})
+_FAMILY_RIPGREP = frozenset({"rg"})
+_FAMILY_DIFF = frozenset({"diff", "cmp"})
+_FAMILY_TEST = frozenset({"test", "["})
+_FAMILY_WHERE = frozenset({"where"})
+_FAMILY_WHICH = frozenset({"which"})
+
+
+def classify_shell_result(
+    command: str, *, exit_code: int | None, stderr: str
+) -> tuple[str, str]:
+    """Return `(execution_status, answer_result)` for one finished command.
+
+    `execution_status` is `success` or `failure`: did the command run
+    correctly. `answer_result` is `positive`, `negative` or `not_applicable`:
+    what it answered. They are separate facts on purpose — "grep found
+    nothing" is a successful execution with a negative answer, and calling
+    that a failure is as wrong as calling a crash a success.
+
+    `answer_result` is telemetry about ONE command. It is deliberately not a
+    completion signal: it says nothing about whether the task was done,
+    whether an episode may be reused, or what a procedure deserves.
+
+    `command` must be the binary that ACTUALLY RAN. `_platform_alias` swaps
+    `grep`→`findstr` on Windows, and reading one tool's exit code against
+    another tool's contract is the same class of error this function exists
+    to remove.
+
+    A family is applied only when the executable is unambiguous. `git` is a
+    multiplexer whose exit semantics differ per subcommand, so it takes the
+    unknown contract rather than a guess from `argv[1]`.
+    """
+    if exit_code is None:
+        # A timeout killed the process. Absence of an exit code is not a pass.
+        return "failure", "not_applicable"
+    if exit_code == 0:
+        if command in (
+            _FAMILY_GREP | _FAMILY_FINDSTR | _FAMILY_RIPGREP
+            | _FAMILY_DIFF | _FAMILY_TEST | _FAMILY_WHERE | _FAMILY_WHICH
+        ):
+            return "success", "positive"
+        return "success", "not_applicable"
+
+    has_stderr = bool((stderr or "").strip())
+
+    if command in _FAMILY_GREP or command in _FAMILY_FINDSTR:
+        # 1 means "no match" — but only when nothing was written to stderr.
+        # The live case arrived as exit 1 + "FINDSTR: Cannot open loop.py".
+        if exit_code == 1 and not has_stderr:
+            return "success", "negative"
+        return "failure", "not_applicable"
+
+    if command in _FAMILY_RIPGREP:
+        # ripgrep documents 2 as its error code, so the exit code alone
+        # decides; no stderr heuristic is invented for it without a measurement.
+        return ("success", "negative") if exit_code == 1 else ("failure", "not_applicable")
+
+    if command in _FAMILY_DIFF or command in _FAMILY_TEST:
+        # 1 is the answer "they differ" / "the predicate is false".
+        return ("success", "negative") if exit_code == 1 else ("failure", "not_applicable")
+
+    if command in _FAMILY_WHERE or command in _FAMILY_WHICH:
+        # Measured: both write diagnostics to stderr on a normal "not found",
+        # so stderr is deliberately ignored here.
+        return ("success", "negative") if exit_code == 1 else ("failure", "not_applicable")
+
+    return "failure", "not_applicable"
+
+
 READ_ONLY_COMMANDS: frozenset[str] = frozenset(
     {
         "whoami",
@@ -371,14 +462,16 @@ class ShellExecTool(Tool):
         # error, not a confusing FileNotFoundError from subprocess.
         # `where` is Windows-only; map it to `which` on POSIX (and vice
         # versa) so tests are portable.
-        real_cmd = self._platform_alias(cmd)
+        real_cmd, substituted = self._resolve_binary(cmd)
         exe = shutil.which(real_cmd)
         if exe is None:
             raise FileNotFoundError(
                 f"shell_exec cannot find executable '{real_cmd}' on PATH"
             )
 
-        run_argv = [exe, *argv[1:]]
+        # Arguments are adapted only when the PROGRAM changed underneath the
+        # caller; the requested binary already understands its own dialect.
+        run_argv = [exe, *self._normalise_argv_for(list(argv), substituted=substituted)[1:]]
         env = self._safe_env()
         started = time.monotonic()
         timed_out = False
@@ -420,6 +513,18 @@ class ShellExecTool(Tool):
             "stderr_truncated": stderr_trunc,
             "duration_ms": duration_ms,
             "timed_out": timed_out,
+            # Normalised beside the raw facts, never instead of them: the exit
+            # code, stdout and stderr above stay exactly as observed (MIR-010).
+            # Classified on `real_cmd` — the binary that actually ran.
+            **dict(zip(
+                ("execution_status", "answer_result"),
+                classify_shell_result(real_cmd, exit_code=exit_code, stderr=stderr_safe),
+            )),
+            # The live log showed `argv: ['grep', ...]` beside `FINDSTR:` in
+            # stderr with nothing connecting them. A substitution that cannot
+            # be seen is one nobody can debug.
+            "executed_command": real_cmd,
+            "binary_substituted": substituted,
             "compensation_plan": plan.to_dict(),
         }
 
@@ -467,15 +572,73 @@ class ShellExecTool(Tool):
             "stderr_truncated": False,
             "duration_ms": duration_ms,
             "timed_out": False,
+            # `mkdir`/`touch` are dispatched directly — no platform alias is
+            # involved, so the requested command IS the one that ran.
+            **dict(zip(
+                ("execution_status", "answer_result"),
+                classify_shell_result(cmd, exit_code=exit_code, stderr=stderr_safe),
+            )),
             "compensation_plan": plan.to_dict(),
         }
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    def _resolve_binary(self, cmd: str) -> tuple[str, bool]:
+        """Pick the binary to run: `(name, substituted)`.
+
+        The requested command WINS when it is installed. The platform
+        equivalent is a fallback for when it is absent, not a rewrite applied
+        regardless — which is what it used to be, and what made a live cycle
+        fail. Measured on the machine where that happened:
+
+            shutil.which("grep")     -> C:\\Program Files\\Git\\usr\\bin\\grep.EXE
+            grep -c ^ core/loop.py   -> exit 0, "4093"  (either slash style)
+            findstr /C:x core/loop.py-> exit 1, "FINDSTR: Cannot open loop.py"
+
+        Real grep was installed, worked, and was swapped away for a tool that
+        could not read the path it was handed.
+        """
+        if shutil.which(cmd) is not None:
+            return cmd, False
+        alias = self._platform_alias(cmd)
+        if alias != cmd and shutil.which(alias) is not None:
+            return alias, True
+        return cmd, False
+
+    @staticmethod
+    def _normalise_argv_for(argv: list[str], *, substituted: bool) -> list[str]:
+        """Make the arguments readable by the program that will actually run.
+
+        Only when a SUBSTITUTION happened: if the requested binary is the one
+        executing, its own dialect is already correct and rewriting would be
+        damage. On Windows `findstr` reads `/` as a switch prefix, so
+        `core/loop.py` parses as `core` plus `/l /o /o /p` — the exact live
+        failure.
+
+        Separators only. Flags are NOT translated: `grep -c` has no findstr
+        equivalent worth guessing at, and a half-built dialect mapper turns
+        every unmapped flag into a new silent failure. After MIR-010 a
+        fallback that cannot read its arguments fails visibly, which is the
+        honest outcome and leaves the planner able to see it.
+        """
+        if not substituted or sys.platform != "win32":
+            return argv
+        out = [argv[0]]
+        for elem in argv[1:]:
+            # A switch is not a path. `/C:x` and `-c` pass through untouched.
+            if elem.startswith(("/", "-")) or "/" not in elem:
+                out.append(elem)
+            else:
+                out.append(elem.replace("/", "\\"))
+        return out
+
     def _platform_alias(self, cmd: str) -> str:
         """Map `where`<->`which` and `findstr`<->`grep` to the binary the
-        current OS actually ships."""
+        current OS actually ships.
+
+        Consulted by `_resolve_binary` as a FALLBACK only — see there.
+        """
         if cmd == "where" and sys.platform != "win32":
             return "which"
         if cmd == "which" and sys.platform == "win32":
@@ -511,7 +674,28 @@ class ShellExecTool(Tool):
     # ------------------------------------------------------------------
     # Output validation (Tool contract)
     # ------------------------------------------------------------------
+    def execution_status(self, output: Any) -> str:
+        """The command's own verdict, not the subprocess's.
+
+        `run()` returning means the process started and was captured. Whether
+        the COMMAND worked is a separate fact, and reporting only the first
+        is what let `exit_code: 1` with `FINDSTR: Cannot open` reach the log
+        as `status=success` (MIR-010).
+        """
+        if isinstance(output, dict):
+            return str(output.get("execution_status") or "success")
+        return "success"
+
     def validate_output(self, output: Any) -> tuple[bool, list[str]]:
+        """Answers ONE question: does this object match the tool's schema?
+
+        A command that failed produces a perfectly well-formed report OF that
+        failure, so it validates. Rejecting it here would conflate "the tool
+        returned a correct message saying the command failed" with "the tool
+        returned something malformed", and only the second is a validation
+        problem. The failure travels in `execution_status` and surfaces as the
+        tool-result status (MIR-010).
+        """
         warnings: list[str] = []
         if not isinstance(output, dict):
             return False, ["shell_exec output must be a dict"]
