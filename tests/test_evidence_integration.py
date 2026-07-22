@@ -403,3 +403,127 @@ class TestFactoryRobustness:
         # Factory's fallback turned it into a tool_output evidence.
         kinds = {ev.kind for ev in agent.last_provenance.evidences}
         assert "tool_output" in kinds
+
+
+# ============================================================
+# MIR-061 — one malformed record must not drop the rest
+# ============================================================
+
+class TestMalformedMemoryRecordDoesNotTruncateChain:
+    """`core/loop.py` persistent-record injection wraps the whole `for` loop.
+
+    One record that fails to convert therefore abandons the loop and every
+    record after it silently never reaches the provenance chain — while the
+    code comment claims "A malformed record stays out of the chain but the
+    loop completes normally". The adjacent working-artifact site does it
+    correctly (try inside the loop).
+    """
+
+    def test_one_bad_record_only_skips_itself(
+        self, workspace: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        agent, log_path = _build_agent(
+            workspace,
+            canned_sources=[{
+                "tool": "file_read",
+                "arguments": {"path": "a.txt"},
+                "label": "file:a.txt",
+            }],
+            persistent=True,
+        )
+        assert agent.persistent_store is not None
+        recs = [
+            MemoryRecord(
+                type="working",
+                content=f"The capital of France is Paris, note {n}.",
+                source="user",
+                tags=["user-approved"],
+                ttl_seconds=None,
+            )
+            for n in range(4)
+        ]
+        agent.persistent_store.save_many(recs)
+        (workspace / "a.txt").write_text("dummy", encoding="utf-8")
+
+        # Fail the SECOND record the injection loop hands over, whatever it
+        # is. Scoped deliberately to what the loop actually receives
+        # (`_last_persistent_records`): retrieval selects a subset by
+        # relevance, and a record that was never selected is not evidence of
+        # truncation. The defect is only about records that reached the loop.
+        import core.loop as loop_mod
+
+        real = loop_mod.evidence_from_memory_record
+        seen: list[str] = []
+        bad: dict[str, str] = {}
+
+        def flaky(*, record_id: str, content: str, source, created_at):
+            seen.append(record_id)
+            if len(seen) == 2:
+                bad["id"] = record_id
+                raise ValueError("malformed record")
+            return real(
+                record_id=record_id,
+                content=content,
+                source=source,
+                created_at=created_at,
+            )
+
+        monkeypatch.setattr(loop_mod, "evidence_from_memory_record", flaky)
+        agent.run("What is the capital of France?", file_hint="a.txt")
+
+        handed = [r.id for r in agent._last_persistent_records]
+        assert len(handed) >= 3, (
+            "test precondition: retrieval must hand the loop at least three "
+            f"records for truncation to be observable, got {len(handed)}"
+        )
+        assert bad.get("id"), "the flaky factory never raised"
+
+        mem_ids = {
+            ev.source_id
+            for ev in agent.last_provenance.by_kind("memory")
+            if ev.obtained_via == "memory"
+        }
+        skipped = [rid for rid in handed if f"memory:{rid}" not in mem_ids]
+
+        assert skipped == [bad["id"]], (
+            "only the malformed record may be dropped, but "
+            f"{len(skipped)} of {len(handed)} records handed to the injection "
+            "loop never reached the chain — the loop was abandoned"
+        )
+
+    def test_skipped_record_is_reported(
+        self, workspace: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """A dropped record must leave a trace; a bare `pass` leaves none."""
+        agent, log_path = _build_agent(
+            workspace,
+            canned_sources=[{
+                "tool": "file_read",
+                "arguments": {"path": "a.txt"},
+                "label": "file:a.txt",
+            }],
+            persistent=True,
+        )
+        assert agent.persistent_store is not None
+        rec = MemoryRecord(
+            type="working",
+            content="The capital of France is Paris.",
+            source="user",
+            tags=["user-approved"],
+            ttl_seconds=None,
+        )
+        agent.persistent_store.save_many([rec])
+        (workspace / "a.txt").write_text("dummy", encoding="utf-8")
+
+        import core.loop as loop_mod
+
+        def always_bad(*, record_id: str, content: str, source, created_at):
+            raise ValueError("malformed record")
+
+        monkeypatch.setattr(loop_mod, "evidence_from_memory_record", always_bad)
+        agent.run("What is the capital of France?", file_hint="a.txt")
+
+        events = _events(log_path)
+        assert any(
+            e.get("event") == "memory_evidence_skipped" for e in events
+        ), "a record dropped from the chain must be logged, not swallowed"
