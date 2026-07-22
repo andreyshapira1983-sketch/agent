@@ -25,6 +25,13 @@ id_ed25519
 data/
 logs/
 
+# Throwaway agent workspaces used for live probes (e.g. runtime/mir003-live).
+# Each holds its own data/ and logs/ — already covered by the rules above — but
+# also probe fixtures and answers, which are local experiment artefacts, not
+# repository content. Ignoring the whole tree keeps a stray `git add -A` from
+# committing a live run's inputs and outputs.
+runtime/
+
 __pycache__/
 *.py[cod]
 .pytest_cache/
