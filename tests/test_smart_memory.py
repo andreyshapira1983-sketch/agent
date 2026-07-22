@@ -10,6 +10,8 @@ from core.memory import WorkingMemory
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
 from core.smart_memory import (
+    PROCEDURE_STATUSES,
+    ConsolidationReport,
     EpisodeRecord,
     EpisodicMemoryStore,
     MemoryConsolidationStore,
@@ -796,3 +798,70 @@ def test_fast_path_used_when_cached_episode_had_no_tools(workspace: Path) -> Non
     assert [e for e in events if e["event"] == "episodic_fast_path"]
     assert answer == "Paris is the capital of France."
     assert not [c for c in llm.calls if "PLANNER_MODE" in c["system"]]
+
+
+# ---------- MIR-003 follow-up: `candidate` must be visible to the operator ----------
+
+
+def test_smart_memory_summary_counts_candidate_procedures(workspace: Path) -> None:
+    """A one-success procedure is a `candidate`; the operator summary must say so.
+
+    Live run (2026-07-22) surfaced this: `:smart-memory` reported
+    `procedures=1 statuses={'active': 0, 'needs_review': 0, 'obsolete': 0}` —
+    one procedure that appears in no status at all, which reads as a fault.
+    """
+    agent, _log = _build_agent(workspace, FakeLLM([]))
+    agent.procedural_store.upsert_from_episode(
+        _make_achieved_episode(
+            goal="read a file",
+            question="read doc",
+            answer="done",
+            tools_used=["file_read"],
+            source_labels=["file:doc.txt"],
+            verified_chunks=3,
+        )
+    )
+    summary = agent.smart_memory_summary()
+    statuses = summary["procedural"]["statuses"]
+
+    assert summary["procedural"]["procedures"] == 1
+    assert statuses.get("candidate") == 1
+    # every procedure is accounted for in exactly one bucket
+    assert sum(statuses.values()) == summary["procedural"]["procedures"]
+
+
+def test_smart_memory_summary_covers_every_procedure_status(workspace: Path) -> None:
+    """Drift guard: the summary must enumerate the real status vocabulary.
+
+    The tally used to hardcode three statuses, so adding `candidate` silently
+    made a procedure invisible. Deriving the keys from `PROCEDURE_STATUSES`
+    means a future status can never go missing the same way.
+    """
+    agent, _log = _build_agent(workspace, FakeLLM([]))
+    statuses = agent.smart_memory_summary()["procedural"]["statuses"]
+    assert set(statuses) == set(PROCEDURE_STATUSES)
+
+
+def test_consolidation_report_lists_candidate_procedures(workspace: Path) -> None:
+    """A candidate belongs in its own bucket, not silently in none of them."""
+    procedural = ProceduralMemoryStore(workspace / "procedures.jsonl")
+    procedure, _created = procedural.upsert_from_episode(
+        _make_achieved_episode(
+            goal="read a file",
+            question="read doc",
+            answer="done",
+            tools_used=["file_read"],
+            source_labels=["file:doc.txt"],
+            verified_chunks=3,
+        )
+    )
+    assert procedure.status == "candidate"
+
+    report = consolidate_memory(episodes=[], procedures=procedural.load())
+
+    assert procedure.id in report.candidate_procedure_ids
+    assert procedure.id not in report.active_procedure_ids
+    # survives the round trip the store performs
+    assert procedure.id in ConsolidationReport.from_dict(
+        report.to_dict()
+    ).candidate_procedure_ids

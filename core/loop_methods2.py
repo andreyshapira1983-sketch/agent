@@ -21,6 +21,7 @@ from core.models import (
 )
 from core.run_context import current_run
 from core.smart_memory import (
+    PROCEDURE_STATUSES,
     EpisodicMemoryStore,
     MemoryConsolidationStore,
     ProceduralMemoryStore,
@@ -740,7 +741,7 @@ class AgentLoopExtractedMethods2:
                 "procedures": len(procedures),
                 "statuses": {
                     status: sum(1 for proc in procedures if proc.status == status)
-                    for status in ("active", "needs_review", "obsolete")
+                    for status in PROCEDURE_STATUSES
                 },
             },
             "consolidation": {
