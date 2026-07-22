@@ -14,6 +14,7 @@ from core.smart_memory import (
     EpisodicMemoryStore,
     MemoryConsolidationStore,
     ProceduralMemoryStore,
+    ProcedureRecord,
     consolidate_memory,
     effective_completion,
     episode_from_agent_cycle,
@@ -328,10 +329,121 @@ def test_single_success_procedure_is_not_certain(workspace: Path) -> None:
     assert created is True
     assert proc is not None
     assert proc.success_count == 1
-    # Beta(1,1): (1+1)/(1+2) = 0.667 — active but modest, never 1.0.
+    # Beta(1,1): (1+1)/(1+2) = 0.667 — modest, never 1.0.
     assert proc.confidence == 0.667
     assert proc.confidence < 1.0
-    assert proc.status == "active"
+    # One success is unproven: born `candidate`, not `active` (MIR-003 A4
+    # maturity gate, owner decision 2026-07-22). Confidence is high enough
+    # (0.667 ≥ 0.6) that the OLD rule would have said active; the maturity
+    # gate holds it at candidate until a second independent success.
+    assert proc.status == "candidate"
+
+
+def test_new_procedure_is_born_candidate_not_active(workspace: Path) -> None:
+    """MIR-003 A4 maturity gate (owner decision 2026-07-22).
+
+    A procedure distilled from ONE genuine completed+verified success is
+    unproven. It must be born `candidate`, never `active` — a single success
+    is not enough standing to be treated as a reusable workflow.
+    """
+    store = ProceduralMemoryStore(workspace / "procedures.jsonl")
+    proc, created = store.upsert_from_episode(
+        _make_achieved_episode(
+            goal="read a file",
+            question="read doc",
+            answer="done",
+            tools_used=["file_read"],
+            source_labels=["file:doc.txt"],
+            verified_chunks=3,
+        )
+    )
+    assert created is True
+    assert proc is not None
+    assert proc.success_count == 1
+    assert proc.status == "candidate"
+
+
+def test_candidate_procedure_is_not_offered_to_planning(workspace: Path) -> None:
+    """A `candidate` must not participate in ordinary planning retrieval.
+
+    ``ProceduralMemoryStore.search`` is the only path that injects procedures
+    into the planner (`core/loop_methods2.py:354`). An unproven candidate must
+    not surface there, or a one-off success would steer later plans before it
+    earned the right to.
+    """
+    store = ProceduralMemoryStore(workspace / "procedures.jsonl")
+    store.upsert_from_episode(
+        _make_achieved_episode(
+            goal="read a file",
+            question="read the doc",
+            answer="done",
+            tools_used=["file_read"],
+            source_labels=["file:doc.txt"],
+            verified_chunks=3,
+        )
+    )
+    # It IS stored (auditable) ...
+    assert store.count() == 1
+    # ... but it is NOT offered to planning while it is a candidate.
+    assert store.search("read the doc file_read") == []
+
+
+def test_second_independent_success_promotes_candidate_to_active(
+    workspace: Path,
+) -> None:
+    """Promotion requires a SECOND, independent, completed+verified success.
+
+    One success → `candidate` (not planned with). A second distinct success on
+    the same workflow → `active`, and only then does it surface to planning.
+    """
+    store = ProceduralMemoryStore(workspace / "procedures.jsonl")
+    first = _make_achieved_episode(
+        goal="read a file",
+        question="read the doc",
+        answer="done",
+        tools_used=["file_read"],
+        source_labels=["file:doc.txt"],
+        verified_chunks=3,
+        run_id="run-first",
+    )
+    second = _make_achieved_episode(
+        goal="read a file again",
+        question="read the doc again",
+        answer="done",
+        tools_used=["file_read"],
+        source_labels=["file:doc.txt"],
+        verified_chunks=3,
+        run_id="run-second",
+    )
+
+    p1, created1 = store.upsert_from_episode(first)
+    assert created1 is True
+    assert p1.success_count == 1
+    assert p1.status == "candidate"
+    assert store.search("read the doc file_read") == []  # not yet planned with
+
+    p2, created2 = store.upsert_from_episode(second)
+    assert created2 is False  # same workflow, updated not re-created
+    assert p2.success_count == 2  # two independent episodes credited
+    assert p2.status == "active"  # promoted
+    assert len(store.search("read the doc file_read")) == 1  # now planned with
+
+
+def test_candidate_status_survives_serialization_round_trip(workspace: Path) -> None:
+    store = ProceduralMemoryStore(workspace / "procedures.jsonl")
+    proc, _ = store.upsert_from_episode(
+        _make_achieved_episode(
+            goal="read a file",
+            question="read doc",
+            answer="done",
+            tools_used=["file_read"],
+            source_labels=["file:doc.txt"],
+            verified_chunks=3,
+        )
+    )
+    assert proc.status == "candidate"
+    restored = ProcedureRecord.from_dict(proc.to_dict())
+    assert restored.status == "candidate"
 
 
 def test_procedure_confidence_grows_but_never_reaches_one(workspace: Path) -> None:
@@ -368,14 +480,29 @@ def test_consolidation_links_episodes_and_procedures(workspace: Path) -> None:
         source_labels=["file:doc.txt"],
         verified_chunks=1,
     )
+    # Two independent successes so the procedure is promoted past the A4
+    # maturity gate to `active` — a single success now yields a `candidate`,
+    # which the consolidation `active` bucket (correctly) does not list.
+    second = _make_achieved_episode(
+        goal="read file again",
+        question="read doc again",
+        answer="done",
+        tools_used=["file_read"],
+        source_labels=["file:doc.txt"],
+        verified_chunks=1,
+        run_id="run-consolidation-2",
+    )
     episodic.save(episode)
-    procedure, _created = procedural.upsert_from_episode(episode)
+    episodic.save(second)
+    procedural.upsert_from_episode(episode)
+    procedure, _created = procedural.upsert_from_episode(second)
 
     report = consolidate_memory(episodes=episodic.load(), procedures=procedural.load())
     consolidation.save(report)
 
     assert procedure is not None
-    assert report.episode_count == 1
+    assert procedure.status == "active"
+    assert report.episode_count == 2
     assert report.procedure_count == 1
     assert episode.id in report.linked_episode_ids
     assert procedure.id in report.active_procedure_ids
@@ -451,19 +578,30 @@ def test_cheap_path_skips_consolidation_but_still_records_episode(
 
 def test_experience_memory_is_injected_into_next_planner_call(workspace: Path, monkeypatch) -> None:
     (workspace / "doc.txt").write_text("alpha\n", encoding="utf-8")
-    llm = FakeLLM([PLAN_FILE_READ, SYNTH_FILE, PLAN_FILE_READ, SYNTH_FILE])
+    # Three cycles: the MIR-003 A4 maturity gate makes a procedure reusable only
+    # after a SECOND independent success promotes it. Retrieval happens at the
+    # START of a cycle and promotion at its END, so the timeline is:
+    #   cycle 1 → banks a `candidate` (1 success);
+    #   cycle 2 → retrieval still sees a candidate (withheld); banking promotes
+    #             it to `active` (2 successes);
+    #   cycle 3 → retrieval now sees an `active` procedure and injects it.
+    llm = FakeLLM([PLAN_FILE_READ, SYNTH_FILE] * 3)
     agent, log_path = _build_agent(workspace, llm)
     _declare_completion(monkeypatch)
 
     agent.run("Read doc.txt", file_hint="doc.txt")
     agent.run("Read doc.txt again", file_hint="doc.txt")
+    agent.run("Read doc.txt once more", file_hint="doc.txt")
 
     planner_calls = [call for call in llm.calls if "PLANNER_MODE" in call["system"]]
-    assert len(planner_calls) == 2
+    assert len(planner_calls) == 3
+    # Episodes are injected throughout — the experience block appears regardless.
     assert "<agent_experience_memory>" in planner_calls[1]["user"]
     events = _events(log_path)
-    inject_events = [e for e in events if e["event"] == "experience_memory_inject"]
-    assert inject_events[-1]["payload"]["procedures_selected"] == 1
+    inject = [e for e in events if e["event"] == "experience_memory_inject"]
+    # Maturity gate, both boundaries:
+    assert inject[1]["payload"]["procedures_selected"] == 0   # still a candidate
+    assert inject[2]["payload"]["procedures_selected"] == 1   # promoted → planned with
 
 
 def test_smart_memory_cli_commands(workspace: Path, capsys) -> None:
