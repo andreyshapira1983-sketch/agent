@@ -42,8 +42,8 @@ re-grounded against **current code on `main` @ `f317c4c`**.
 
 | Status | Count | IDs |
 |---|---|---|
-| fixed | 22 | MIR-001, MIR-002, MIR-004, MIR-005, MIR-010, MIR-012, MIR-013, MIR-014, MIR-017, MIR-036, MIR-037, MIR-041, MIR-043, MIR-046, MIR-047, MIR-048, MIR-049, MIR-051, MIR-054, MIR-055, MIR-056, MIR-059 |
-| open | 22 | MIR-006, MIR-008, MIR-011, MIR-015, MIR-016, MIR-020, MIR-021, MIR-023, MIR-024, MIR-026, MIR-035, MIR-039, MIR-040, MIR-044, MIR-045, MIR-050, MIR-052, MIR-053, MIR-057, MIR-058, MIR-060, MIR-061 |
+| fixed | 23 | MIR-001, MIR-002, MIR-004, MIR-005, MIR-010, MIR-012, MIR-013, MIR-014, MIR-017, MIR-036, MIR-037, MIR-041, MIR-043, MIR-046, MIR-047, MIR-048, MIR-049, MIR-051, MIR-054, MIR-055, MIR-056, MIR-059, MIR-061 |
+| open | 21 | MIR-006, MIR-008, MIR-011, MIR-015, MIR-016, MIR-020, MIR-021, MIR-023, MIR-024, MIR-026, MIR-035, MIR-039, MIR-040, MIR-044, MIR-045, MIR-050, MIR-052, MIR-053, MIR-057, MIR-058, MIR-060 |
 | planned_gap | 8 | MIR-009, MIR-018, MIR-022, MIR-029, MIR-030, MIR-031, MIR-034, MIR-038 |
 | needs_investigation | 6 | MIR-019, MIR-025, MIR-027, MIR-028, MIR-032, MIR-033 |
 | partially_fixed | 3 | MIR-003, MIR-007, MIR-042 |
@@ -471,9 +471,21 @@ the table records the status, the section records the nuance.
 - **Root cause:** exception scope. Not the presence of the guard (chain assembly genuinely must not abort a run) and not the trust model (that is MIR-042) — simply a `try` placed around the loop instead of around the iteration.
 - **Consequence, and why it is not cosmetic:** the verifier's verdict is computed against whatever reached the chain. Citations that *should* resolve then come back `cited_but_unmatched`, so the answer is marked unverified — or its disclaimer fires — for a reason that has nothing to do with the answer or its sources. Because the handler is a bare `pass`, nothing anywhere records that the chain was truncated; the resulting verdict looks like an ordinary evidence shortfall.
 - **Why this is NOT part of MIR-042 (no-merge basis).** Same two lines, orthogonal roots. MIR-042 asks *which records may enter* the chain and is fixed by a trust filter on `Evidence.origin`; this entry asks *whether the records that may enter actually arrive* and is fixed by moving the `try` inside the loop. Distinct blast radius (a trust-model gap vs. silent data loss), distinct closure criteria, and distinct urgency — this one is a two-line fix. Folding it in would let a data-loss bug ride out on a trust-model fix, which the registry's merge discipline forbids.
-- **Status:** `open` (newly_discovered). Measured only — no code changed, no store touched.
-- **Fix direction:** move the `try` inside the `for`, matching `:1469`; log the skipped record id rather than passing silently, so a truncated chain is visible instead of presenting as an evidence shortfall. Whether a malformed record should *also* be reported upward is a separate question and is not prejudged here.
-- **Missing tests:** with N records of which one is malformed, the chain contains N−1 and the skip is logged; the two injection sites are asserted to have the same granularity so they cannot drift apart again.
+- **Status:** `fixed` (integration-verified on commit `667dd6b`, 2026-07-22).
+- **Resolution:** persistent-record evidence conversion now handles exceptions
+  per record rather than around the entire injection loop. A malformed record is
+  skipped without abandoning conversion of later records, and the skipped
+  record is reported through the `memory_evidence_skipped` trace event.
+- **Verification evidence:** `tests/test_evidence_integration.py` includes
+  `test_one_bad_record_only_skips_itself`, which forces the second record
+  conversion to fail and verifies that only that malformed record is absent
+  from the provenance chain. `test_skipped_record_is_reported` verifies that
+  the failure is logged rather than silently swallowed.
+- **Tests:** `python -m pytest -q tests/test_evidence_integration.py`
+  completed with `15 passed`.
+- **Verification scope:** this is a deterministic in-process integration path;
+  no live LLM or network run is required to verify the exception-scope and
+  provenance-chain behaviour.
 
 ### MIR-051 — stored procedure `confidence` violates the Beta-smoothing invariant (legacy data)
 - **Aliases:** none. **Related:** MIR-048 (same field, different root — this is data, that is a missing code path), MIR-003. **Provenance:** newly_discovered (D-1 measurement, 2026-07-20).
