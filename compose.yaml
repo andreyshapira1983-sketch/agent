@@ -1,0 +1,42 @@
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: autonomous-agent
+    init: true
+    restart: unless-stopped
+    working_dir: /workspace
+    command:
+      - python
+      - /workspace/docker/daemon_loop.py
+      - --workspace
+      - /workspace
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AGENT_WORKSPACE: /workspace
+      AGENT_TICK_INTERVAL_SECONDS: ${AGENT_TICK_INTERVAL_SECONDS:-1800}
+      AGENT_TICK_DRY_RUN: ${AGENT_TICK_DRY_RUN:-1}
+      AGENT_DOCKER_TICK_TIMEOUT_SECONDS: ${AGENT_DOCKER_TICK_TIMEOUT_SECONDS:-1500}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      # The repository is the durable workspace. Code changes, data, logs,
+      # approvals and memory survive image rebuilds and container replacement.
+      - .:/workspace
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - /workspace/docker/daemon_loop.py
+        - --workspace
+        - /workspace
+        - --healthcheck
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
