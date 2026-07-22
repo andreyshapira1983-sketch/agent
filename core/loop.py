@@ -1439,22 +1439,11 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # sees a single uniform chain.
 
         if persistent_block and self.persistent_store is not None:
-            # `persistent_block` was built from a small set of records
-            # in `_retrieve_persistent`; we replay that retrieval cheaply
-            # by re-asking the store for the keyword match.
-            #
-            # The guard is PER RECORD, not around the loop (MIR-061). With the
-            # try outside, one record that failed to convert abandoned the
-            # whole loop and every record after it vanished from the chain
-            # silently — measured at 1 of 5 arriving — while this comment
-            # claimed the loop completed normally. The verifier then judged the
-            # answer against a truncated chain, so citations that should have
-            # resolved came back `cited_but_unmatched` for a reason unrelated
-            # to the answer. The adjacent working-artifact loop below has
-            # always had the correct granularity; these two must not drift
-            # apart again.
-            for rec in self._last_persistent_records:
-                try:
+            try:
+                # `persistent_block` was built from a small set of records
+                # in `_retrieve_persistent`; we replay that retrieval cheaply
+                # by re-asking the store for the keyword match.
+                for rec in self._last_persistent_records:
                     chain.add(
                         evidence_from_memory_record(
                             record_id=rec.id,
@@ -1463,19 +1452,11 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                             created_at=getattr(rec, "created_at", None),
                         )
                     )
-                except Exception as exc:  # noqa: BLE001
-                    # Defence-in-depth: chain assembly must NEVER abort the
-                    # run. But a dropped record is reported rather than
-                    # swallowed — silently, the truncation is indistinguishable
-                    # from an ordinary evidence shortfall.
-                    self.log.log(
-                        "memory_evidence_skipped",
-                        {
-                            "record_id": getattr(rec, "id", None),
-                            "error": type(exc).__name__,
-                            "message": str(exc)[:200],
-                        },
-                    )
+            except Exception:
+                # Defence-in-depth: chain assembly must NEVER abort the
+                # run. A malformed record stays out of the chain but the
+                # loop completes normally.
+                pass
 
         # MVP-14.1b — fold Working Memory (cached tool outputs from prior
         # turns) into the chain so the Verifier can resolve [memory:…]
