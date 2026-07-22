@@ -49,7 +49,24 @@ CompletionDeclaration = Literal[
 
 _COMPLETION_STATES: frozenset[str] = frozenset(CompletionState.__args__)
 _COMPLETION_DECLARATIONS: frozenset[str] = frozenset(CompletionDeclaration.__args__)
-ProcedureStatus = Literal["active", "needs_review", "obsolete"]
+ProcedureStatus = Literal["candidate", "active", "needs_review", "obsolete"]
+
+# A newly distilled procedure is unproven: born `candidate`, and it stays a
+# candidate — kept out of ordinary planning retrieval (`search`) — until a
+# SECOND, independent, completed+verified success promotes it to `active`
+# (MIR-003 A4 maturity gate; owner decision 2026-07-22). One lucky success can
+# no longer steer later plans before it has earned the right to. Demotion is
+# unchanged: sustained low confidence still reads `needs_review`, and that
+# check comes first so a doubted procedure is never re-labelled candidate.
+_PROMOTION_MIN_SUCCESSES = 2
+
+
+def _procedure_status_for(success_count: int, confidence: float) -> ProcedureStatus:
+    if confidence < 0.6:
+        return "needs_review"
+    if success_count < _PROMOTION_MIN_SUCCESSES:
+        return "candidate"
+    return "active"
 
 
 def _now_iso() -> str:
@@ -347,7 +364,7 @@ class ProcedureRecord:
             success_count=success_count,
             failure_count=failure_count,
             confidence=confidence,
-            status="active" if confidence >= 0.6 else "needs_review",
+            status=_procedure_status_for(success_count, confidence),
             updated_at=_now_iso(),
         )
 
@@ -359,7 +376,7 @@ class ProcedureRecord:
         success_count = self.success_count + (1 if procedure_credit_allowed(episode) else 0)
         failure_count = self.failure_count + (1 if procedure_debit_allowed(episode) else 0)
         confidence = _smoothed_confidence(success_count, failure_count)
-        status: ProcedureStatus = "active" if confidence >= 0.6 else "needs_review"
+        status: ProcedureStatus = _procedure_status_for(success_count, confidence)
         return ProcedureRecord(
             id=self.id,
             name=self.name,
@@ -863,6 +880,12 @@ class ProceduralMemoryStore:
             return []
         scored: list[tuple[int, ProcedureRecord]] = []
         for proc in self.load():
+            # A `candidate` is unproven and must not steer planning until a
+            # second independent success promotes it (MIR-003 A4 maturity gate).
+            # This is the sole path that injects procedures into the planner
+            # (`core/loop_methods2.py`), so the exclusion belongs here.
+            if proc.status == "candidate":
+                continue
             haystack = " ".join([proc.name, " ".join(proc.trigger_tags), " ".join(proc.steps)])
             score = len(q_tokens & _tokens(haystack))
             if score:
@@ -1296,7 +1319,11 @@ def procedure_from_episode(episode: EpisodeRecord) -> ProcedureRecord | None:
         success_count=0,
         failure_count=0,
         confidence=0.5,
-        status="active",
+        # Born unproven. `upsert_from_episode` immediately folds in the first
+        # episode via `with_episode`, which recomputes the status through
+        # `_procedure_status_for` — one credited success lands on `candidate`,
+        # never `active` (MIR-003 A4 maturity gate).
+        status="candidate",
     )
 
 
@@ -1368,7 +1395,7 @@ def _episode_outcome(value: str) -> EpisodeOutcome:
 
 
 def _procedure_status(value: str) -> ProcedureStatus:
-    return value if value in {"active", "needs_review", "obsolete"} else "needs_review"  # type: ignore[return-value]
+    return value if value in {"candidate", "active", "needs_review", "obsolete"} else "needs_review"  # type: ignore[return-value]
 
 
 def _episode_tags(
