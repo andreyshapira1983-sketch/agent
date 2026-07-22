@@ -60,6 +60,12 @@ ProcedureStatus = Literal["candidate", "active", "needs_review", "obsolete"]
 # check comes first so a doubted procedure is never re-labelled candidate.
 _PROMOTION_MIN_SUCCESSES = 2
 
+# The real status vocabulary, derived from the type rather than restated.
+# Operator-facing tallies enumerate THIS — a hardcoded list is how adding
+# `candidate` made a procedure show up as "1 procedure, 0 in every status"
+# in `:smart-memory` on a live run (2026-07-22).
+PROCEDURE_STATUSES: tuple[str, ...] = ProcedureStatus.__args__
+
 
 def _procedure_status_for(success_count: int, confidence: float) -> ProcedureStatus:
     if confidence < 0.6:
@@ -404,6 +410,9 @@ class ConsolidationReport:
     needs_review_procedure_ids: tuple[str, ...]
     obsolete_procedure_ids: tuple[str, ...]
     notes: tuple[str, ...]
+    # Added 2026-07-22 with the `candidate` status. Defaulted, so reports
+    # written before it round-trip unchanged instead of failing to load.
+    candidate_procedure_ids: tuple[str, ...] = ()
     id: str = field(default_factory=lambda: new_id("consol"))
     created_at: str = field(default_factory=_now_iso)
 
@@ -416,6 +425,7 @@ class ConsolidationReport:
             "active_procedure_ids": list(self.active_procedure_ids),
             "needs_review_procedure_ids": list(self.needs_review_procedure_ids),
             "obsolete_procedure_ids": list(self.obsolete_procedure_ids),
+            "candidate_procedure_ids": list(self.candidate_procedure_ids),
             "notes": list(self.notes),
             "created_at": self.created_at,
         }
@@ -430,6 +440,7 @@ class ConsolidationReport:
             active_procedure_ids=tuple(str(x) for x in data.get("active_procedure_ids") or ()),
             needs_review_procedure_ids=tuple(str(x) for x in data.get("needs_review_procedure_ids") or ()),
             obsolete_procedure_ids=tuple(str(x) for x in data.get("obsolete_procedure_ids") or ()),
+            candidate_procedure_ids=tuple(str(x) for x in data.get("candidate_procedure_ids") or ()),
             notes=tuple(str(x) for x in data.get("notes") or ()),
             created_at=str(data.get("created_at") or _now_iso()),
         )
@@ -1335,6 +1346,7 @@ def consolidate_memory(
     active = tuple(proc.id for proc in procedures if proc.status == "active")
     needs_review = tuple(proc.id for proc in procedures if proc.status == "needs_review")
     obsolete = tuple(proc.id for proc in procedures if proc.status == "obsolete")
+    candidates = tuple(proc.id for proc in procedures if proc.status == "candidate")
     linked_episode_ids = tuple(
         dict.fromkeys(ep_id for proc in procedures for ep_id in proc.source_episode_ids)
     )
@@ -1356,6 +1368,7 @@ def consolidate_memory(
         active_procedure_ids=active,
         needs_review_procedure_ids=needs_review,
         obsolete_procedure_ids=obsolete,
+        candidate_procedure_ids=candidates,
         notes=tuple(notes),
     )
 
