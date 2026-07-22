@@ -15,8 +15,10 @@ from core.smart_memory import (
     MemoryConsolidationStore,
     ProceduralMemoryStore,
     consolidate_memory,
+    effective_completion,
     episode_from_agent_cycle,
     format_experience_context,
+    procedure_credit_allowed,
     procedure_from_episode,
 )
 from main import handle_meta_command
@@ -145,6 +147,70 @@ def test_failed_or_partial_episode_does_not_become_procedure() -> None:
     assert partial.outcome == "partial"
     assert procedure_from_episode(failed) is None
     assert procedure_from_episode(partial) is None
+
+
+def test_grounded_but_incomplete_success_mints_no_procedure() -> None:
+    """MIR-003 / MIR-057 — the completion axis on procedure birth.
+
+    The two axes answer different questions: ``outcome`` says *were the claims
+    supported*, ``completion_state`` says *was the goal reached*. A blocked or
+    refused answer can be impeccably supported (``outcome == "success"``) and
+    still not have finished the task — the exact live case that motivated the
+    completion axis: a blocked answer that cited every claim it made and
+    credited ``tools:file_read`` to 0.857 anyway (MIR-057).
+
+    Such an episode must mint no procedure. The evidence axis alone would call
+    it a success; the completion gate (`procedure_credit_allowed`) is what
+    refuses it. This guarantee was reproduced but never regression-locked.
+    """
+    for token in ("blocked", "refused"):
+        episode = episode_from_agent_cycle(
+            goal="count the lines of a large file",
+            question="how many lines?",
+            answer="Cannot determine: the provided content was truncated. [file:big.txt]",
+            tools_used=["file_read"],
+            source_labels=["file:big.txt"],
+            verified_chunks=3,      # well-grounded — every claim held up ...
+            unverified_chunks=0,
+            weak_chunks=0,
+            declared_completion=token,   # ... but the goal was NOT reached
+        )
+        # The evidence axis on its own would admit this as a success.
+        assert episode.outcome == "success", token
+        assert effective_completion(episode) == token
+        # Both axes must agree before a procedure may be credited (MIR-057).
+        assert procedure_credit_allowed(episode) is False, token
+        assert procedure_from_episode(episode) is None, token
+
+
+def test_incomplete_success_mints_no_procedure_through_the_store(
+    workspace: Path,
+) -> None:
+    """The same guarantee at the real production entry point.
+
+    ``_record_experience_memory`` reaches procedures only through
+    ``ProceduralMemoryStore.upsert_from_episode``; a grounded-but-blocked
+    episode must yield no procedure, report ``created == False``, and leave the
+    store empty — nothing is written that a later planner could reuse.
+    """
+    store = ProceduralMemoryStore(workspace / "procedures.jsonl")
+    blocked = episode_from_agent_cycle(
+        goal="count the lines of a large file",
+        question="how many lines?",
+        answer="Cannot determine: content truncated. [file:big.txt]",
+        tools_used=["file_read"],
+        source_labels=["file:big.txt"],
+        verified_chunks=3,
+        unverified_chunks=0,
+        weak_chunks=0,
+        declared_completion="blocked",
+    )
+
+    proc, created = store.upsert_from_episode(blocked)
+
+    assert proc is None
+    assert created is False
+    assert store.load() == []
 
 
 def test_weak_verdicts_block_success_and_procedure() -> None:
