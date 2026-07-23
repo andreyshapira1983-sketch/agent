@@ -811,7 +811,8 @@ for MIR-002 and MIR-041 (approved next step) · then the minimal file set for th
 - **Root cause:** zero evidence factor collapses a weighted geometric mean.
 - **Production path:** post-verify signal; **observational only** — not a gate (confirmed in CORE_AUDIT §4: `overall_confidence` not consumed by any gate; its two non-definition uses are keyword strings).
 - **Existing tests:** `tests/test_confidence_vector.py`.
-- **Status:** `open` (observational, low). Also carries a **stale in-code comment** describing `cited_but_unmatched=0.5` (see MIR-004).
+- **Status:** `open` (observational, low).
+- **Documentation note (2026-07-23):** the stale in-code comment describing `cited_but_unmatched=0.5` was corrected to `-0.25`; MIR-023 itself remains open because the geometric-mean behaviour is unchanged.
 - **Alternatives (undecided):** evidence floor for self-evident answers, or exclude the evidence axis on legitimately evidence-free turns. Ties to MIR-002.
 
 ### MIR-024 — shallow re-ask detection (Jaccard ≥ 0.40)
