@@ -15,7 +15,7 @@ Axes:
 
 * ``evidence_score`` — verification coverage. Reuses the same chunk
   accounting as :func:`compute_confidence` (verified=1.0,
-  cited_but_unmatched=0.5, unverified=-0.25, self_declared=0) but is
+  cited_but_unmatched=-0.25, unverified=-0.25, self_declared=0) but is
   reported separately so it can be read independently.
 * ``coherence_score`` — internal consistency. Drops when subsystem
   outcomes contradict each other (planner says done / verifier says
