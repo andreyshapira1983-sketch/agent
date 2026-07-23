@@ -108,19 +108,20 @@ Two more traps that are *by design*, not drift:
 
 ## 5. Housekeeping
 
-- **`docs/audit/` — tracking status, corrected 2026-07-21.** Five files **are**
-  tracked in git: registry, progress tracker, inventory, memory map, contract.
-  Two added 2026-07-21 are **untracked** — `PROVIDER_STRUCTURED_OUTPUT_AUDIT.md`
-  and `PROVIDER_AUDIT_CHECKPOINT.md`; `.gitignore` does not exclude them, they
-  were simply never added. This entry previously read "`docs/audit/` is
-  untracked (5 files)", which was false for all five; the error was carried
-  forward once before being caught.
+- **`docs/audit/` — tracking status, corrected 2026-07-23.**
+  `PROVIDER_STRUCTURED_OUTPUT_AUDIT.md` and
+  `PROVIDER_AUDIT_CHECKPOINT.md` are now tracked in git. The earlier statement
+  that these files were untracked is historical and no longer describes the
+  current `main` branch.
+
 - The canonical target-architecture text (`архитектура автономного Агента.txt`,
   repo root) is source-of-truth entry #2 per the README. **Read in full on
   2026-07-21** (previously recorded here as unread). Its §5 names *Capability
   Discovery & Negotiation* and *Tool Schema Drift Detection*; its §7 names
   *Capability Awareness* / *Limitation Awareness* / ODD — foreseen, per that
   document's own rule, is not implemented.
+
 - Precedence everywhere: **current code → wired execution paths → reproducible
   tests → canonical docs.** When a document and the code disagree, the code wins
   and the document must be corrected.
+
