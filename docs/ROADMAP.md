@@ -75,8 +75,12 @@ Observe → Interpret → Plan → Act → Verify → Respond, driven by an LLM 
   `core/file_lock`, `core/circuit_breaker`, `core/termination_guard`.
 - Autonomous runtime / scheduling / campaigns: `core/autonomous_runtime`,
   `core/scheduler`, `core/task_queue`, `core/campaign*`, `core/work_session`.
-- **Async daemon** (`app/daemon.py`): incremental, tracked per sub-item in
-  `docs/daemon-progress.md`. `agent_tick.py` remains the single-shot fallback.
+- **Production unattended path:** `agent_tick.py` (optionally supervised by
+  `docker/daemon_loop.py` under Compose). That supervisor is **not**
+  `app.daemon.DaemonLoop`.
+- **Async daemon plan** (`app/daemon.py` and related building blocks):
+  incremental, tracked per sub-item in `docs/daemon-progress.md`. Modules may
+  exist and be tested without being composed into a production entry point.
 - Durability/queue/retry failure classes to verify (queue-without-consumer,
   dead runner, no retry backoff) are catalogued in
   `docs/OPERATIONAL_FAILURE_MODES.md` (OFM-008/009/010).
@@ -140,6 +144,18 @@ budget, and self-directed multi-agent coordination. See
   silent failure, stale heartbeat) are catalogued in
   `docs/OPERATIONAL_FAILURE_MODES.md` (OFM-009).
 
+## Track H — Project Intelligence (local read-only graph store)
+
+**Status: STANDALONE on `main` — not wired into the agent.**
+
+- Package: `project_intelligence/` (SQLite schema, migrations, DB access layer,
+  schema/idempotency tests).
+- **Present:** migration runner, connection layer, normalized idempotency helpers.
+- **Absent:** document/Git scanners, extractors, claim resolver materialization,
+  FastAPI surface, React/React Flow UI, integration with `main.py` /
+  `agent_tick.py` / Docker.
+- Do **not** treat this package as a production capability of the agent loop.
+
 ---
 
 ## What is deliberately NOT here yet
@@ -149,6 +165,7 @@ budget, and self-directed multi-agent coordination. See
 - A real installed Windows service (only the shell contract exists —
   `app/windows_service.py`, every `*_implemented` flag is `False`).
 - The corporate/organisational model — future only, see `docs/future/`.
+- Project Intelligence scanners, graph UI, or agent integration (Track H).
 
 _Source of facts: repository code as of the referencing commit + module index
 in `docs/AGENT_ANATOMY.md`. When this file and code disagree, code wins and this
