@@ -15,6 +15,23 @@ approval, budget, kill-switch, memory, or dry-run controls.
 `docs/daemon-progress.md` and is not the production supervisor until that plan
 is explicitly composed and documented as such.
 
+### Timeout and stop semantics (production supervisor)
+
+These controls apply to **`docker/daemon_loop.py`**, not to `app.daemon.DaemonLoop`:
+
+- **Per-tick timeout:** each `agent_tick.py` subprocess is run with
+  `AGENT_DOCKER_TICK_TIMEOUT_SECONDS` (default roughly `interval - 60`). On
+  timeout the supervisor records exit code 124; it does **not** implement the
+  async pool drain/cancel path from the daemon plan.
+- **Supervisor stop:** `SIGTERM` / `SIGINT` set an interruptible stop flag; the
+  loop exits after the current sleep/tick cycle. Compose `stop_grace_period`
+  is 30s for the container.
+- **Healthcheck:** reads `data/daemon_heartbeat.json` freshness
+  (`interval * 2 + 120`), separate from any async-daemon heartbeat item.
+
+Graceful task-drain shutdown described under daemon plan item 1.2 lives in
+`app/daemon.py` and is **not** the Compose production path.
+
 The repository is bind-mounted at `/workspace`, so these remain durable on the
 host and survive image rebuilds or container replacement:
 
