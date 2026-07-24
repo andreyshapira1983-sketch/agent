@@ -1,6 +1,16 @@
 # Memory Lifecycle Contract — M1 (canonical design, **v2-draft**)
 
-> **Status: v2-draft — awaiting operator approval. No code implements this document.**
+> **Status: v2-draft — target design only. Not a runtime specification.**
+>
+> **Do not read this document as current behavior.** Owners of *what the code
+> does today*:
+> - **shipped capability status** — `docs/ROADMAP.md` Track B;
+> - **dated M0 store/path census (not current runtime map)** —
+>   `docs/audit/MEMORY_MAP.md`;
+> - **current defect status** — `docs/audit/MASTER_ISSUE_REGISTRY.md`.
+>
+> No production code is required to implement this draft until an operator
+> explicitly approves a phase plan checked against the registry.
 >
 > **Version log (amendments happen HERE — no parallel design docs):**
 > - **v1-draft — REJECTED (operator, 2026-07-19).** Recorded faults: (1) the header
