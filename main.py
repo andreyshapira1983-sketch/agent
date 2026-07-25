@@ -11,10 +11,10 @@ Usage examples:
 
     # Interactive — multi-turn dialogue with both memories
     python main.py
-    > Что такое DuckDuckGo?
-    > А кто его основатель?            # follow-up; planner reuses turn 1
+    > What is DuckDuckGo?
+    > And who founded it?                 # follow-up; planner reuses turn 1
     > :remember preference,fact I prefer concise answers in Russian
-    > :ingest-source "архитектура автономного Агента.txt"
+    > :ingest-source "docs/архитектура автономного Агента.txt"
     > :ingest-project . --limit 40 --dry-run
     > :source-library books
     > :ingest-web "autonomous agent" --sources wikis,science --limit 3 --dry-run
@@ -28,9 +28,9 @@ Usage examples:
     > :quit
 
     # Interactive with a file hint
-    python main.py --file "архитектура автономного Агента.txt"
-    > Сколько доменов в файле?            # file_read runs
-    > А что в 12.4?                       # planner can reuse cached file artifact
+    python main.py --file "docs/архитектура автономного Агента.txt"
+    > How many domains are in the file?   # file_read runs
+    > And what is in section 12.4?        # planner can reuse cached file artifact
 """
 from __future__ import annotations
 
@@ -166,11 +166,11 @@ from cli.commands_self_build import _handle_self_build_produce
 from cli.commands_self_split import _handle_self_split
 # :self-task-propose runs the Stage-A coding-task producer that turns a real code
 # TODO/FIXME into a task + failing acceptance test approval item
-# (cli/commands_self_task.py, roadmap Ступень 1).
+# (cli/commands_self_task.py, roadmap Stage 1).
 from cli.commands_self_task import _handle_self_task_propose
 # :self-task-build implements one APPROVED coding task (Stage B): it writes code
 # to make the frozen acceptance test pass and proposes it to the self-apply lane
-# (cli/commands_self_task.py, roadmap Ступень 1).
+# (cli/commands_self_task.py, roadmap Stage 1).
 from cli.commands_self_task import _handle_self_task_build
 # :value-review / :value-review-list capture a human value verdict for an applied
 # self-build proposal (cli/commands_value_review.py, TD-032, capture-only).
@@ -877,8 +877,9 @@ def _format_next_safe_test(payload: dict) -> str:
 
 
 # "Soft" status/capability intents that conversational phrasing can trip. For
-# these, the keyword match is VERIFIED by the model (it understands "прошу" vs
-# "упомянул") before dispatch. Explicit imperative intents are not gated.
+# these, the keyword match is VERIFIED by the model (it tells a request apart
+# from a passing mention) before dispatch. Explicit imperative intents are not
+# gated.
 _VERIFY_INTENTS: frozenset[str] = frozenset({
     "capability_check", "project_health", "smart_memory_status",
     "current_gaps_check", "weakness_finder", "next_safe_test",
@@ -1672,12 +1673,12 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
         )
         print(
             "\nConversational shortcuts:\n"
-            "  Проверь проект и скажи что требует внимания\n"
-            "  Покажи какие модели используются\n"
-            "  Сколько потрачено токенов и какой бюджет\n"
-            "  Есть ли что-то срочное\n"
-            "  Что делать дальше\n"
-            "  Можно ли запускать автономность",
+            "  Check the project and tell me what needs attention\n"
+            "  Show which models are in use\n"
+            "  How many tokens were spent and what is the budget\n"
+            "  Is there anything urgent\n"
+            "  What should we do next\n"
+            "  Is autonomy ready to run",
             file=sys.stderr,
         )
         return True
@@ -1964,7 +1965,7 @@ def main() -> int:
                 if stripped == ">>>":
                     break
                 # Tolerate the terminator glued to the end of a paste:
-                # "...вакансии.>>>" should also end the block, otherwise
+                # "...last sentence.>>>" should also end the block, otherwise
                 # users get stuck in `... ` prompt forever after a single
                 # Ctrl+V whose buffer ended with ">>>" without a newline.
                 if stripped.endswith(">>>"):

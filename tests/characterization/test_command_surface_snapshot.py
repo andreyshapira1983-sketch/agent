@@ -231,6 +231,9 @@ def test_help_page_carries_non_command_prose(tmp_path, capsys):
     assert "Conversational shortcuts:" in text
     assert "empty line" in text
     assert "flags:" in text
-    # The Russian conversational shortcuts are prose, not tokens.
-    assert "Проверь проект" in text
-    assert not _STANDALONE_TOKEN.findall("Проверь проект и скажи что требует внимания")
+    # The conversational shortcuts are prose, not tokens. (They were Russian at
+    # 9daa9bf and were translated to English; each phrase is verified to route to
+    # the same intent as the Russian original it replaced.)
+    shortcut = "Check the project and tell me what needs attention"
+    assert shortcut in text
+    assert not _STANDALONE_TOKEN.findall(shortcut)
