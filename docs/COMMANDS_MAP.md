@@ -1,9 +1,13 @@
 # Commands Map — operator (REPL) commands
 
 > **Status of this document:** authoritative map of the **real** operator
-> command surface. It is built from the actual REPL dispatch in `main.py`
-> (the `if head == ":…"` chain) and the CLI flags in `main.py --help`. Only
-> commands that exist in code are listed. If a command is not here, it does not
+> command surface. It is built from the actual REPL dispatch in
+> `cli/command_dispatch.py` (the `if head == ":…"` chain, moved there from
+> `main.py` in the Phase 3 extraction) and the CLI flags in `main.py --help`.
+> Parity is enforced mechanically: `scripts/commands_map_check.py` compares this
+> table against `cli/command_registry.py` in both directions, and
+> `tests/test_command_registry.py` ties that registry back to the live dispatch
+> chain. Only commands that exist in code are listed. If a command is not here, it does not
 > exist. Aliases are grouped on one row (`a | b`).
 >
 > **Verification (2026-07-24 reconciliation):** spot-checked against current
@@ -194,7 +198,7 @@ message falls through to the normal model-backed agent loop unchanged.
 ### Model-assisted veto (`core/intent_understanding`)
 
 A second, later layer sits **after** a positive match from the table above, in
-`handle_conversational_operator_input` (`main.py:903`, via
+`handle_conversational_operator_input` (`cli/intent_bridge.py`, via
 `_model_says_conversation`). The keyword matcher works on substrings, so it cannot
 distinguish "please run the architecture audit" from a sentence that merely
 mentions one — and the latter would be hijacked into a command.
@@ -231,6 +235,7 @@ planner before, so every matcher carries paired negative tests in
 | `:help \| ?` | Show command help. |
 | `:quit \| :exit` | Exit the REPL. |
 
-_Source of facts: the REPL dispatch in `main.py` and `cli/commands_*.py`
-handlers. When a command is added/renamed in `main.py`, update this table.
-When this file and `main.py` disagree, `main.py` wins._
+_Source of facts: the REPL dispatch in `cli/command_dispatch.py` and the
+`cli/commands_*.py` / `app/*_cli.py` handlers. When a command is added or renamed,
+update `cli/command_registry.py` and this table together — the parity guard fails
+otherwise. When this file and the code disagree, the code wins._
