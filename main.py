@@ -48,7 +48,6 @@ from dotenv import load_dotenv
 
 from app.io import _force_utf8_io
 from core.approval import ApprovalProvider, AutoApprover, CLIApprovalProvider
-from core.autonomous_runtime import AutonomousRuntime
 from core.subagent_memory_scope import (
     needs_delegation,
     propose_subagent,
@@ -125,6 +124,7 @@ from cli.commands_models import (
 # cli/commands_misc.py (no main back-references, so no cycle).
 from cli.commands_misc import (
     _handle_architecture_audit,
+    _handle_assumptions,
     _handle_conflicts,
     _handle_connector_plan,
     _handle_connectors,
@@ -217,6 +217,7 @@ from app.operator_status import (
 from app.operator_task import _handle_operator_task
 from app.runtime_cli import (
     _handle_auto_run,
+    _handle_auto_status,
     _handle_campaign_start,
     _handle_campaign_status,
     _handle_work_session,
@@ -286,20 +287,6 @@ def _handle_local_operator_reply(text: str, agent: AgentLoop) -> bool:
     if answer is None:
         return False
     print("\n" + format_human_response(answer) + "\n")
-    return True
-
-
-def _handle_auto_status(agent: AgentLoop, workspace: Path) -> bool:
-    status = AutonomousRuntime(
-        agent,
-        workspace=workspace,
-        approval_inbox=_approval_inbox_for(agent, workspace),
-    ).status()
-    status["task_queue"] = _task_queue_for(agent, workspace).summary()
-    status["scheduler"] = _scheduler_for(agent, workspace).summary()
-    status["model_usage"] = agent.model_router.usage_snapshot()
-    status["persistent_budget_windows"] = _budget_ledger_snapshot(agent)
-    print(json.dumps(status, ensure_ascii=False, indent=2), file=sys.stderr)
     return True
 
 
@@ -618,36 +605,6 @@ def _resume_question_from_checkpoint(ctx) -> str:
             "Do not repeat completed discovery unless it must be refreshed.",
         ]
     )
-
-
-def _handle_assumptions(rest: str, agent: AgentLoop) -> bool:  # Layer 5
-    """Show the most-recent assumptions logged by the Assumption Registry."""
-    use_json = "--json" in rest
-    store = getattr(agent, "assumption_store", None)
-    if store is None:
-        print("(assumption store not enabled in this session)", file=sys.stderr)
-        return True
-    try:
-        recent = store.load_recent(20)
-    except Exception as exc:
-        print(f"(assumption store error: {exc})", file=sys.stderr)
-        return True
-    if not recent:
-        print("(no assumptions recorded yet)", file=sys.stderr)
-        return True
-    if use_json:
-        print(json.dumps([a.to_dict() for a in recent], ensure_ascii=False, indent=2))
-        return True
-    current_run = getattr(getattr(agent, "log", None), "trace_id", None)
-    for a in recent:
-        run_tag = " [current]" if a.run_id == current_run else f" [run …{a.run_id[-8:]}]"
-        verified_tag = " ✓" if a.verified is True else (" ✗" if a.verified is False else "")
-        conf = int(a.confidence * 100)
-        print(
-            f"  [{a.category}] {a.text} ({conf}%){verified_tag}{run_tag}",
-            file=sys.stderr,
-        )
-    return True
 
 
 def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:

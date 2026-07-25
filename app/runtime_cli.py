@@ -8,10 +8,13 @@ approval-inbox logic (those stay in ``cli/commands_approval.py`` and ``main``).
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 from cli.commands_approval import _approval_inbox_for
+from cli.commands_budget import _budget_ledger_snapshot
+from app.task_scheduler_cli import _scheduler_for, _task_queue_for
 from cli.parsers import _split_meta_args
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
 from core.campaign import (
@@ -400,4 +403,23 @@ def _handle_campaign_status(rest: str, agent: AgentLoop, workspace: Path) -> boo
 
     rows = load_ledger_rows(workspace / "data" / "campaign_ledger.jsonl")
     print(summarise_ledger(rows, recent=recent), file=sys.stderr)
+    return True
+
+
+# -- :auto-status -------------------------------------------------------------
+# Read-only digest of the autonomous runtime inbox, extracted verbatim from
+# main.py. It reports; it never starts a pass.
+
+
+def _handle_auto_status(agent: AgentLoop, workspace: Path) -> bool:
+    status = AutonomousRuntime(
+        agent,
+        workspace=workspace,
+        approval_inbox=_approval_inbox_for(agent, workspace),
+    ).status()
+    status["task_queue"] = _task_queue_for(agent, workspace).summary()
+    status["scheduler"] = _scheduler_for(agent, workspace).summary()
+    status["model_usage"] = agent.model_router.usage_snapshot()
+    status["persistent_budget_windows"] = _budget_ledger_snapshot(agent)
+    print(json.dumps(status, ensure_ascii=False, indent=2), file=sys.stderr)
     return True
