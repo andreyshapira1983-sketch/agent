@@ -178,10 +178,10 @@ def main() -> int:
         return 2
 
     # One-shot mode. Provider selection, the memory-free agent build, command
-    # precedence and deep escalation all live in cli/one_shot.py. The five
-    # collaborators are passed in rather than imported there, so that
-    # `monkeypatch.setattr(main, "build_agent", …)` and friends keep being
-    # observed — see docs/refactor/CLI_BASELINE.md §2.5 and cli/one_shot.py.
+    # precedence and deep escalation all live in cli/one_shot.py, which reaches
+    # its collaborators through their own modules. Only `build_agent` is still
+    # handed over from here: it is startup wiring, patched on `main` in 22
+    # places — see docs/refactor/MAIN_SURFACE_AUDIT.md.
     if args.ask:
         return run_one_shot(
             args.ask,
@@ -191,10 +191,6 @@ def main() -> int:
             reason=args.reason,
             expect=args.expect,
             build_agent=build_agent,
-            handle_meta_command=handle_meta_command,
-            handle_local_operator_reply=_handle_local_operator_reply,
-            handle_conversational=handle_conversational_operator_input,
-            run_agent_with_budget_guard=_run_agent_with_budget_guard,
         )
 
     # ── Paste-safe interactive input ─────────────────────────────────────────
@@ -238,20 +234,14 @@ def main() -> int:
         + render_startup_commands(),
         file=sys.stderr,
     )
-    # The dialogue loop itself lives in cli/repl.py. Same seam as one-shot: the
-    # five collaborators are passed in so patches on `main` stay observable
-    # (docs/refactor/CLI_BASELINE.md §2.5).
+    # The dialogue loop itself lives in cli/repl.py and reaches its
+    # collaborators through their own modules; nothing is handed over from here.
     return run_repl(
         agent,
         reader=_reader,
         rate_limiter=_rate_limiter,
         workspace=workspace,
         file_hint=args.file,
-        handle_meta_command=handle_meta_command,
-        handle_local_operator_reply=_handle_local_operator_reply,
-        handle_conversational=handle_conversational_operator_input,
-        run_agent_with_budget_guard=_run_agent_with_budget_guard,
-        handle_operator_task=_handle_operator_task,
     )
 
 

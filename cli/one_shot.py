@@ -31,29 +31,26 @@ non-behavioural fixes: the ``approval_provider`` annotation now admits ``None``
 "the docstring at line 9" now names ``main.py``'s module docstring instead of a
 line number that drifts. Every message string and every call is untouched.
 
-**Why the five collaborators are parameters.** ``main`` is a load-bearing
-import *and monkeypatch* surface (``docs/refactor/CLI_BASELINE.md`` section 2.5):
-suites do ``monkeypatch.setattr(main, "build_agent", ...)``, and such a patch is
-only observed where the *call site* resolves the name in ``main``'s namespace.
-Moving these call sites out of ``main.py`` would have turned 25 characterization
-tests red and -- worse -- let 2 of them keep passing while quietly building a
-real agent and dispatching a real command. So ``main()`` passes its own
-module-level bindings in, and this module's imports are only the defaults for
-direct callers. The parameters can be dropped in Phase 7, together with the
-``main.py`` re-export block they exist to preserve.
+**How the collaborators are reached, and why it matters for tests.** A
+``monkeypatch.setattr`` is observed only where the *call site* resolves the name
+(``docs/refactor/CLI_BASELINE.md`` section 2.5). The three collaborator modules
+below are therefore imported as **modules** and called through the attribute --
+``command_dispatch.handle_meta_command(...)`` -- so one patch on the module that
+*defines* the function is seen from here and from ``cli/repl.py`` alike. Binding
+the names at import time instead would silently ignore such a patch.
+
+``build_agent`` is the exception still passed in by ``main()``: it is wiring, it
+is patched on ``main`` in 22 places, and it moves in the next Phase 7 step
+together with the rest of the startup sequence.
 """
 from __future__ import annotations
 
 import sys
 from typing import TYPE_CHECKING
 
+from app import budget_guard
 from app.bootstrap import build_agent as _build_agent
-from app.budget_guard import _run_agent_with_budget_guard
-from cli.command_dispatch import handle_meta_command as _handle_meta_command
-from cli.intent_bridge import (
-    _handle_local_operator_reply,
-    handle_conversational_operator_input as _handle_conversational_operator_input,
-)
+from cli import command_dispatch, intent_bridge
 from core.approval import ApprovalProvider, AutoApprover
 from core.loop import format_human_response
 
@@ -70,13 +67,9 @@ def run_one_shot(
     auto_approve: str = "off",
     reason: str | None = None,
     expect: str | None = None,
-    # Patch seam — see the module docstring. Defaults are the real functions;
-    # main() passes its own bindings so patches on `main` stay observable.
+    # Wiring seam — main() passes its own binding so patches on `main` stay
+    # observable until the startup sequence moves (Phase 7, next step).
     build_agent: Callable[..., object] = _build_agent,
-    handle_meta_command: Callable[..., bool] = _handle_meta_command,
-    handle_local_operator_reply: Callable[..., bool] = _handle_local_operator_reply,
-    handle_conversational: Callable[..., bool] = _handle_conversational_operator_input,
-    run_agent_with_budget_guard: Callable[..., str] = _run_agent_with_budget_guard,
 ) -> int:
     """Run a single question end-to-end and return the process exit code."""
     # Approval provider selection. One-shot can't realistically prompt a
@@ -105,13 +98,13 @@ def run_one_shot(
     # --max-cost-units 0' is misread as a budget query by the classifier.
     ask_head = ask.lstrip()
     if ask_head.startswith(":") or ask_head == "?":
-        if handle_meta_command(ask_head, agent, workspace):
+        if command_dispatch.handle_meta_command(ask_head, agent, workspace):
             return 0
         print(f"(unknown command: {ask_head})", file=sys.stderr)
         return 0
-    if handle_local_operator_reply(ask, agent):
+    if intent_bridge._handle_local_operator_reply(ask, agent):
         return 0
-    if handle_conversational(ask, agent, workspace):
+    if intent_bridge.handle_conversational_operator_input(ask, agent, workspace):
         return 0
     # Deep/Opus escalation is opt-in and operator-driven: only an explicit
     # --reason (with --expect) lets planner/synthesizer reach the deep tier.
@@ -127,7 +120,7 @@ def run_one_shot(
     # stream=False: the formatted print below is the sole output.
     # With stream=True the raw Output-Contract tokens arrive first, then
     # format_human_response reprints the same content — double output.
-    answer = run_agent_with_budget_guard(
+    answer = budget_guard._run_agent_with_budget_guard(
         agent,
         user_question=ask,
         file_hint=file_hint,

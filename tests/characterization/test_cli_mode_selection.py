@@ -16,6 +16,8 @@ from types import SimpleNamespace
 
 import pytest
 
+import app.budget_guard as budget_guard_module
+import cli.intent_bridge as bridge_module
 import main as main_module
 
 REPO_ROOT = Path(main_module.__file__).resolve().parent
@@ -60,15 +62,15 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, build_calls: list[dict]) -> N
 def test_ask_selects_one_shot_and_returns_zero(tmp_path, monkeypatch, capsys):
     build_calls: list[dict] = []
     _patch_common(monkeypatch, build_calls)
-    monkeypatch.setattr(main_module, "_handle_local_operator_reply", lambda *a, **k: False)
-    monkeypatch.setattr(main_module, "handle_conversational_operator_input", lambda *a, **k: False)
+    monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda *a, **k: False)
+    monkeypatch.setattr(bridge_module, "handle_conversational_operator_input", lambda *a, **k: False)
     run_calls: list[dict] = []
 
     def fake_run(agent, **kwargs):
         run_calls.append(kwargs)
         return "characterized answer"
 
-    monkeypatch.setattr(main_module, "_run_agent_with_budget_guard", fake_run)
+    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", fake_run)
     monkeypatch.setattr(
         sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", "baseline question"]
     )
@@ -226,9 +228,9 @@ def test_one_shot_run_writes_only_inside_the_tmp_workspace(tmp_path, monkeypatch
 
     build_calls: list[dict] = []
     _patch_common(monkeypatch, build_calls)
-    monkeypatch.setattr(main_module, "_handle_local_operator_reply", lambda *a, **k: False)
-    monkeypatch.setattr(main_module, "handle_conversational_operator_input", lambda *a, **k: False)
-    monkeypatch.setattr(main_module, "_run_agent_with_budget_guard", lambda *a, **k: "ok")
+    monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda *a, **k: False)
+    monkeypatch.setattr(bridge_module, "handle_conversational_operator_input", lambda *a, **k: False)
+    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", lambda *a, **k: "ok")
     monkeypatch.setattr(main_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
     monkeypatch.setattr(
         sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", "baseline question"]
