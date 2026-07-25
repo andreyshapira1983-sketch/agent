@@ -260,6 +260,33 @@ prose and the banner subset as *separate* concerns.
 > and the updated counts in
 > `tests/characterization/test_command_surface_snapshot.py`.
 
+> **ADDENDUM — budget guard extracted (2026-07-25).** `_run_agent_with_budget_guard`
+> and its four helpers (`_workspace_from_agent`, `_budget_block_payload`,
+> `_existing_paused_checkpoint`, `_persist_resumable_budget_stop`) moved verbatim
+> from `main.py` to **`app/budget_guard.py`** — 173 lines, byte-identical, with
+> `main.py` re-exporting all five so `from main import …` keeps working. They live
+> under `app/` rather than `cli/` because they are about *running the agent*, not
+> about the command-line surface. The group was fully self-contained (zero calls
+> into anything left in `main.py`), which is why it could move ahead of the
+> numbered phases.
+>
+> **All `main.py:NNN` anchors in this document are as of `9daa9bf` and have since
+> drifted** — this extraction alone shifted everything below line 220 by about
+> −166 (`main.py` went 2250 → 2084 lines). Locate the code by the **symbol names**
+> given beside each anchor, not by the line number. Later phases will shift them
+> further; the anchors are kept as provenance for the `9daa9bf` reading, not as a
+> current index.
+>
+> Still blocked, and why: the intent bridge (`handle_conversational_operator_input`,
+> `_dispatch_operator_intent`, `_model_says_conversation`, `_local_operator_reply`,
+> `_handle_local_operator_reply` — 141 lines) is destined for `cli/intent_bridge.py`
+> but **cannot move yet**: `_dispatch_operator_intent` calls seven handlers that
+> still live in `main.py` (`_handle_capability_request`, `_handle_subagent_proposal`,
+> `_handle_operator_capability_check`, `_handle_programming_readiness`,
+> `_handle_operator_gaps_check`, `_handle_operator_weakness_finder`,
+> `_handle_next_safe_test`), so extracting it now would create a circular import.
+> Those seven must reach `cli/commands_*.py` first.
+
 ### 3.2 Natural-language intents partially duplicate handler selection
 
 `_dispatch_operator_intent` (`main.py:1106-1159`) selects handlers itself across
