@@ -7,9 +7,9 @@ can pick it up later (see ``docs/refactor/CLI_BASELINE.md`` §1.5).
 
 Extracted verbatim from ``main.py`` as part of the incremental CLI decomposition.
 It lives under ``app/`` rather than ``cli/`` because it is about *running the
-agent*, not about the command-line surface — the CLI merely calls it. ``main.py``
-re-exports every name below, so existing imports
-(``from main import _run_agent_with_budget_guard``, …) keep working unchanged.
+agent*, not about the command-line surface — the CLI merely calls it. Import the
+helpers from here; the ``main.py`` re-exports that used to mirror them were
+removed with the rest of the compatibility block in Phase 7.
 """
 from __future__ import annotations
 

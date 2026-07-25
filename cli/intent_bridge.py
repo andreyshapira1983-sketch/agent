@@ -7,9 +7,9 @@ message is really a request, and it may only **cancel** the routing -- kernel
 decides, model advises. Anything unmatched falls through to the normal agent loop
 untouched.
 
-Extracted verbatim from ``main.py``; it re-exports these names, so
-``from main import handle_conversational_operator_input`` (and the three others
-listed in ``tests/characterization/test_main_public_surface.py``) keep working.
+Extracted verbatim from ``main.py``. Import these names from here: the
+``main.py`` re-exports that used to mirror them were removed in Phase 7, and a
+fake for any of them belongs on this module, where the call sites resolve it.
 
 Note for anyone stubbing these in a test: the functions resolve each other in
 **this** module's namespace, so a stand-in has to replace the name here, not on

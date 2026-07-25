@@ -30,10 +30,8 @@ import main as main_module
 REPO_ROOT = Path(main_module.__file__).resolve().parent
 TESTS_ROOT = REPO_ROOT / "tests"
 
-# tests/characterization/test_main_public_surface.py patches names purely to
-# assert that `main` *is* patchable (it is the re-export inventory Phase 7 will
-# audit against), so its sites are about the surface, not about interception.
-SURFACE_INVENTORY_MODULE = "characterization/test_main_public_surface.py"
+# Phase 7 removed the re-export block, so `main` carries nothing to fake any
+# more and no module is exempt from the rule below.
 
 
 def _names_main_resolves() -> set[str]:
@@ -118,9 +116,9 @@ def test_the_scanner_itself_finds_the_known_sites():
     app_names = {name for _, _, name in app_sites}
     for expected in ("build_agent", "load_dotenv", "_StdinLineReader"):
         assert expected in app_names, f"scan lost the cli.app {expected} sites"
-    # The runtime no longer binds anything through `main`, so the only fake left
-    # on it is the surface module's own `_dispatch_operator_intent` rebind.
-    assert {name for _, _, name in _patch_sites("main")} == {"_dispatch_operator_intent"}
+    # `main` carries nothing to fake: the re-export block is gone and the
+    # launcher only calls run_cli().
+    assert {name for _, _, name in _patch_sites("main")} == set()
 
 
 def test_every_patch_on_cli_app_is_still_observed():
@@ -144,7 +142,7 @@ def test_every_patch_on_main_is_still_observed():
     inert = [
         (rel, line, name)
         for rel, line, name in _patch_sites("main")
-        if name not in resolved and rel != SURFACE_INVENTORY_MODULE
+        if name not in resolved
     ]
     assert not inert, "\n".join(
         [

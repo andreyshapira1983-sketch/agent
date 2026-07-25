@@ -16,19 +16,18 @@ extraction step. It performs, in this exact order (the order is a contract --
 8. the interactive session: stdin reader, approval provider, agent, rate
    limiter, daemon notice, banner, then the loop in ``cli/repl.py``.
 
-``main.py`` is now a launcher over this module and a compatibility surface for
-``from main import ...``; ``docs/refactor/MAIN_SURFACE_AUDIT.md`` tracks what is
-left of that surface and who still needs it.
+``main.py`` is now nothing but a launcher over this module -- 47 lines, with no
+re-export block left (``docs/refactor/MAIN_SURFACE_AUDIT.md`` records how that
+surface was retired).
 
 **Where to patch in tests.** Steps 1-8 are performed *here*, so a fake for
 ``build_agent``, ``load_dotenv``, ``_StdinLineReader``, ``CLIApprovalProvider``,
 ``_print_daemon_inbox_notice``, ``_schedule_disable_message`` or
 ``_handle_self_build_propose`` belongs on ``cli.app`` -- patching ``main``
-no longer intercepts, and ``tests/characterization/test_main_patch_seams.py``
-fails loudly if one is left there. The exception is ``build_agent`` reached
-through ``from main import build_agent``: ``agent_tick.py`` and ``api/server.py``
-do that lazily at call time, so for *their* paths a patch on ``main`` is still
-the right one.
+intercepts nothing, and ``tests/characterization/test_main_patch_seams.py``
+fails loudly if a fake is left there. ``agent_tick.py`` and ``api/server.py``
+build their own agents through ``app.bootstrap``, so *their* fakes go on that
+module.
 """
 from __future__ import annotations
 

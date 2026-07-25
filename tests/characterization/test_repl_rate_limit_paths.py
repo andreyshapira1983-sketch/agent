@@ -20,6 +20,7 @@ from types import SimpleNamespace
 import pytest
 
 import core.rate_limiter as rate_limiter_module
+import cli.repl as repl_module
 import cli.app as app_module
 import app.budget_guard as budget_guard_module
 import cli.command_dispatch as dispatch_module
@@ -27,7 +28,7 @@ import cli.intent_bridge as bridge_module
 import main as main_module
 
 
-_REAL_STDIN_READER = main_module._StdinLineReader
+_REAL_STDIN_READER = repl_module._StdinLineReader
 
 
 def _fake_agent() -> SimpleNamespace:

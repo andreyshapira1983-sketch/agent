@@ -2,9 +2,9 @@
 
 ``handle_meta_command`` is the single ordered ``if head == …`` chain that turns a
 typed ``:command`` into a call on one of the handler modules. It was extracted
-verbatim from ``main.py``; ``main.py`` re-exports it, so
-``from main import handle_meta_command`` keeps working for the six test modules
-that use it and for the REPL/one-shot call sites.
+verbatim from ``main.py``. Import it from here -- ``main.py`` re-exported it
+until Phase 7 removed the whole compatibility block; the REPL, one-shot and the
+suites all reach it through this module now.
 
 It owns *routing only*. Every command's behaviour lives in the module the branch
 calls -- ``cli/commands_*.py``, ``app/*_cli.py``, ``app/operator_status.py``,

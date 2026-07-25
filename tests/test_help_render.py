@@ -22,6 +22,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 
+import cli.command_dispatch as dispatch_module
 import main as main_module
 from cli import command_registry as reg
 from cli import help as help_module
@@ -36,7 +37,7 @@ def _live_help() -> str:
     """Exactly what ``:help`` writes to stderr."""
     buf = io.StringIO()
     with redirect_stderr(buf), redirect_stdout(io.StringIO()):
-        assert main_module.handle_meta_command(":help", SimpleNamespace(), REPO_ROOT) is True
+        assert dispatch_module.handle_meta_command(":help", SimpleNamespace(), REPO_ROOT) is True
     return buf.getvalue()
 
 
