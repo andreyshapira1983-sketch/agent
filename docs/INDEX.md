@@ -43,7 +43,7 @@ question, which single file is authoritative.
 | Failure classes seen in *someone else's* system, as a checklist | [OPERATIONAL_FAILURE_MODES.md](OPERATIONAL_FAILURE_MODES.md) | the external OFM taxonomy — **no number in it measures this repo** | our defect status (see §4) |
 | Long-horizon multi-agent org model | [future/CORPORATE_MODEL.md](future/CORPORATE_MODEL.md) | explicitly future/aspirational target | anything present-tense |
 | The coordination-layer proposal (Agent Mail, Decision Log, …) | [MULTI_AGENT_COORDINATION_LAYER.md](MULTI_AGENT_COORDINATION_LAYER.md) | a self-declared **proposal**, not implemented | current behaviour |
-| Behavioural doctrine / repo working rules | [../AGENT_DOCTRINE.md](../AGENT_DOCTRINE.md), [../AGENTS.md](../AGENTS.md) | correctness-first priority order; change discipline | technical facts |
+| Behavioural doctrine / repo working rules | [AGENT_DOCTRINE.md](AGENT_DOCTRINE.md), [AGENTS.md](AGENTS.md) | correctness-first priority order; change discipline | technical facts |
 | Entry point + source-of-truth hierarchy | [../README.md](../README.md) | navigation only | everything else |
 
 ### Historical audit sources (read for *method and context*, not for status)
