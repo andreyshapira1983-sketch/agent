@@ -130,8 +130,8 @@ budget, and self-directed multi-agent coordination. See
   are mapped to their `:command` equivalents by the deterministic no-LLM router
   in `core/operator_intent.py` / `core/operator_intent_patterns.py`. See the
   "Natural-language routing (intent parity)" section in `docs/COMMANDS_MAP.md`.
-- Model-assisted intent **veto**: `core/intent_understanding` (wired at
-  `main.py:1069`). The keyword router cannot tell "please do X" from a sentence
+- Model-assisted intent **veto**: `core/intent_understanding` (wired in
+  `cli/intent_bridge.py`). The keyword router cannot tell "please do X" from a sentence
   that merely mentions X, so a conversational turn could be hijacked into a
   command. The model is consulted only to *cancel* such a false positive — it
   may never choose an action. Any uncertainty (model error, unparseable output,

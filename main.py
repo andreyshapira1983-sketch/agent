@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import queue
 import re
 import sys
@@ -48,10 +47,6 @@ from dotenv import load_dotenv
 
 from app.io import _force_utf8_io
 from core.approval import ApprovalProvider, AutoApprover, CLIApprovalProvider
-from core.subagent_memory_scope import (
-    needs_delegation,
-    propose_subagent,
-)
 from core.loop import format_human_response
 
 
@@ -73,114 +68,26 @@ from cli.parsers import (
 from cli.commands_budget import (
     _autonomy_readiness_payload,
     _budget_enforcement_status,
-    _budget_ledger_snapshot,
     _format_operator_budget_digest,
-    _handle_budget_config,
-    _handle_budget_kill_switch,
-    _handle_budget_status,
-    _handle_budget_window_status,
-    _next_action_prerequisites,
-    _persistent_budget_limits_configured,
-)
-# Approval-inbox / alert-ack / best-next-action commands live in
-# cli/commands_approval.py (no main back-references, so no import cycle).
-from cli.commands_approval import (
-    _approval_inbox_for,
-    _handle_alert_ack,
-    _handle_alert_ack_clear,
-    _handle_alert_ack_list,
-    _handle_approval_abort,
-    _handle_approval_decision,
-    _handle_approval_list,
-    _handle_approval_run,
-    _handle_approval_triage,
-    _handle_best_next_action,
-    _handle_self_issue_verify,
 )
 # Memory / hygiene / rollback commands live in cli/commands_memory.py
 # (agent-method driven, no main back-references, so no cycle).
 from cli.commands_memory import (
     _handle_hygiene,
-    _handle_memory_consolidate,
     _handle_rollback,
-    _handle_smart_memory,
     _print_persistent,
-)
-# Model routing / registry / catalog / usage commands live in
-# cli/commands_models.py (model_router-driven, no main back-references).
-from cli.commands_models import (
-    _handle_model_discovery_audit,
-    _handle_model_registry_audit,
-    _handle_model_usage,
-    _handle_models,
-    _handle_provider_catalog_refresh,
-    _handle_refresh_models,
-)
-# Misc operator commands (audit / learn / team / connectors) live in
-# cli/commands_misc.py (no main back-references, so no cycle).
-from cli.commands_misc import (
-    _handle_architecture_audit,
-    _handle_assumptions,
-    _handle_conflicts,
-    _handle_connector_plan,
-    _handle_connectors,
-    _handle_learn,
-    _handle_release_audit,
-    _handle_state_store_drill,
-    _handle_supply_chain_audit,
-    _handle_team_plan,
-    _handle_team_run,
 )
 # Source ingestion / source-registry / planning commands live in
 # cli/commands_ingest.py (no main back-references, so no cycle).
-from cli.commands_ingest import (
-    _handle_implementation_plan,
-    _handle_ingest_project,
-    _handle_ingest_rss,
-    _handle_ingest_source,
-    _handle_ingest_web,
-    _handle_patch_proposal_plan,
-    _handle_self_build_propose,
-    _handle_source_library,
-    _handle_source_registry,
-    _handle_source_review_plan,
-    _self_build_propose_payload,
-)
-# Self-repair commands live in cli/commands_repair.py (no main back-references).
-from cli.commands_repair import _handle_propose_repair, _handle_repair
-# :self-apply-run bridges an approved inbox item into the trusted self-apply
-# lane (cli/commands_self_apply.py, no main back-references).
-from cli.commands_self_apply import _handle_self_apply_run
-# :self-build-produce runs the subagent producer that generates one low-risk
-# self-apply proposal into the approval inbox (cli/commands_self_build.py).
-# :self-split plans one deterministic (no-LLM) incremental extraction step for
-# an oversized module and publishes it as a self-apply approval item.
-from cli.commands_self_split import _handle_self_split
-# :self-task-propose runs the Stage-A coding-task producer that turns a real code
-# TODO/FIXME into a task + failing acceptance test approval item
-# (cli/commands_self_task.py, roadmap Stage 1).
-# :self-task-build implements one APPROVED coding task (Stage B): it writes code
-# to make the frozen acceptance test pass and proposes it to the self-apply lane
-# (cli/commands_self_task.py, roadmap Stage 1).
-from cli.commands_self_task import _handle_self_task_build
-# :value-review / :value-review-list capture a human value verdict for an applied
-# self-build proposal (cli/commands_value_review.py, TD-032, capture-only).
-from cli.commands_value_review import (
-    _handle_value_review,
-    _handle_value_review_list,
-)
-# Local read-only health panel command.
-from cli.commands_health import _handle_dry_health_pass
-# :capability-request / :subagent-proposal — both file a human-approved
-# proposal and nothing else (cli/commands_proposals.py).
-from cli.commands_proposals import (
-    _handle_capability_request,
-    _handle_subagent_proposal,
-)
+from cli.commands_ingest import _handle_self_build_propose
 # The :help page and the REPL startup command summary are rendered from the
 # command registry in cli/help.py (Phase 2 of the main.py extraction).
 # Explicit ':command' dispatch lives in cli/command_dispatch.py; re-exported
 # here so `from main import handle_meta_command` keeps working unchanged.
+# Re-exported for tests that reach these through `main` (attribute access or
+# monkeypatch by name); the REPL itself now goes through cli/command_dispatch.py.
+from cli.commands_proposals import _handle_subagent_proposal
+from cli.commands_self_apply import _handle_self_apply_run
 from cli.command_dispatch import handle_meta_command
 # Plain-language -> command routing lives in cli/intent_bridge.py; re-exported
 # here because tests and the REPL reach these through `main`.
@@ -190,58 +97,21 @@ from cli.intent_bridge import (
     _local_operator_reply,
     handle_conversational_operator_input,
 )
-from cli.help import render_help, render_startup_commands
+from cli.help import render_startup_commands
 from app.bootstrap import build_agent
 # The budget guard (wrap agent.run so an exhausted model budget becomes a
 # resumable paused checkpoint) lives in app/budget_guard.py; re-exported here so
 # existing imports (`from main import _run_agent_with_budget_guard`, …) keep
 # working exactly as before.
-from app.budget_guard import (
-    _budget_block_payload,
-    _existing_paused_checkpoint,
-    _persist_resumable_budget_stop,
-    _run_agent_with_budget_guard,
-    _workspace_from_agent,
-)
+from app.budget_guard import _run_agent_with_budget_guard
 from app.daemon_notice import _print_daemon_inbox_notice
 from app.operator_status import (
     _format_next_actions,
-    _handle_autonomy_readiness,
-    _handle_next_safe_test,
-    _handle_operator_capability_check,
-    _handle_operator_gaps_check,
-    _handle_operator_weakness_finder,
-    _handle_programming_readiness,
     _runtime_capability_facts,
-    _handle_next_actions,
-    _handle_operator_budget,
-    _handle_operator_check,
-    _handle_urgent_status,
-    _operator_digest_payload,
 )
 from app.operator_task import _handle_operator_task
-from app.runtime_cli import (
-    _handle_auto_run,
-    _handle_auto_status,
-    _handle_campaign_start,
-    _handle_campaign_status,
-    _handle_work_session,
-)
-from app.task_scheduler_cli import (
-    _handle_queue_status,
-    _handle_schedule_add,
-    _handle_schedule_disable,
-    _handle_schedule_list,
-    _handle_schedule_tick,
-    _handle_scheduler_status,
-    _handle_task_add,
-    _handle_task_cancel,
-    _handle_task_list,
-    _handle_task_run,
-    _schedule_disable_message,
-    _scheduler_for,
-    _task_queue_for,
-)
+from app.runtime_cli import _handle_auto_run
+from app.task_scheduler_cli import _schedule_disable_message
 
 
 def _collect_instruction_buffer(
