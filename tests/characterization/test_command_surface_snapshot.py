@@ -29,6 +29,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import cli.app as app_module
 import main as main_module
 
 REPO_ROOT = Path(main_module.__file__).resolve().parent
@@ -75,9 +76,12 @@ def _dispatched() -> set[str]:
 
 def _pre_dotenv_fast_paths() -> set[str]:
     """Commands matched with `head.lower() == …` before `load_dotenv()` runs."""
+    # The startup sequence moved to cli/app.py with the rest of `main()`;
+    # scanning main.py here would silently freeze an empty set.
+    app_source = (REPO_ROOT / "cli" / "app.py").read_text(encoding="utf-8")
     marker = "\n    load_dotenv()"
-    assert marker in MAIN_SOURCE, "load_dotenv() call site moved"
-    prefix = MAIN_SOURCE.split(marker, 1)[0]
+    assert marker in app_source, "load_dotenv() call site moved"
+    prefix = app_source.split(marker, 1)[0]
     return set(re.findall(r'head\.lower\(\)\s*==\s*"(:[a-z0-9-]+)"', prefix))
 
 
@@ -114,16 +118,12 @@ def _startup_tokens(tmp_path: Path, monkeypatch, capsys) -> set[str]:
     def readline() -> str:
         return ""  # immediate EOF
 
-    monkeypatch.setattr(main_module, "load_dotenv", lambda *a, **k: None)
-    monkeypatch.setattr(
-        main_module,
-        "build_agent",
+    monkeypatch.setattr(app_module, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(app_module, "build_agent",
         lambda *a, **k: SimpleNamespace(log=SimpleNamespace(log=lambda *x, **y: None)),
     )
-    monkeypatch.setattr(main_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
-    monkeypatch.setattr(
-        main_module,
-        "_StdinLineReader",
+    monkeypatch.setattr(app_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
+    monkeypatch.setattr(app_module, "_StdinLineReader",
         lambda **k: _REAL_STDIN_READER(interactive=False, readline=readline),
     )
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])

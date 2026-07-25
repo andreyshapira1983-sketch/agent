@@ -341,12 +341,13 @@ issue."* Phase gates are local-only until that is resolved.
 > | the `--resume` branch of `main()` + `_resume_question_from_checkpoint` | `cli/resume.py` (`resolve_resume` -> `ResumeDecision`) |
 > | the one-shot `--ask` run (provider choice, memory-free build, `:command` precedence, deep escalation) | `cli/one_shot.py` (`run_one_shot`) |
 > | the seven-flag argparse surface of section 1.1 | `cli/args.py` (`build_parser`) |
+> | `main()` itself: startup ordering, the two pre-dotenv fast paths, mode selection, the session wiring, `_preflight_file_hint` | `cli/app.py` (`run_cli`) |
 >
-> Still in `main.py`: `main()` itself — the two pre-dotenv fast paths, startup
-> ordering, mode selection, and the one-time REPL *wiring* (stdin reader,
-> approval provider, agent build, rate limiter, daemon notice, banner) — plus
-> `_preflight_file_hint` and the re-export block that keeps `from main import …`
-> working for 25 test modules, `agent_tick.py` and `api/server.py`.
+> Still in `main.py` (**134 lines**): the module docstring, `def main(): return
+> run_cli()`, the `raise SystemExit(main())` tail, and the re-export block that
+> keeps `from main import …` working for 25 test modules, `agent_tick.py` and
+> `api/server.py`. Nothing else — `test_main_patch_seams.py` asserts the launcher
+> calls nothing but `run_cli()`.
 >
 > **The section 2.5 patch surface constrains how far a call site can move.** The
 > one-shot extraction proved it: importing `build_agent`, `handle_meta_command`,

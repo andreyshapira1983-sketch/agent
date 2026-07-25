@@ -20,6 +20,7 @@ from types import SimpleNamespace
 import pytest
 
 import core.rate_limiter as rate_limiter_module
+import cli.app as app_module
 import app.budget_guard as budget_guard_module
 import cli.command_dispatch as dispatch_module
 import cli.intent_bridge as bridge_module
@@ -71,16 +72,16 @@ def _run_repl(
     meta: bool = True,
 ) -> list[dict]:
     runs: list[dict] = []
-    monkeypatch.setattr(main_module, "load_dotenv", lambda *a, **k: None)
-    monkeypatch.setattr(main_module, "build_agent", lambda *a, **k: _fake_agent())
-    monkeypatch.setattr(main_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
+    monkeypatch.setattr(app_module, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(app_module, "build_agent", lambda *a, **k: _fake_agent())
+    monkeypatch.setattr(app_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
     monkeypatch.setattr(dispatch_module, "handle_meta_command", lambda *a, **k: meta)
     monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda *a, **k: local_reply)
     monkeypatch.setattr(bridge_module, "handle_conversational_operator_input", lambda *a, **k: conversational
     )
     monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", lambda agent, **kw: runs.append(kw) or "A"
     )
-    monkeypatch.setattr(main_module, "_StdinLineReader", lambda **k: _scripted_reader(lines))
+    monkeypatch.setattr(app_module, "_StdinLineReader", lambda **k: _scripted_reader(lines))
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
     assert main_module.main() == 0
     return runs
@@ -165,8 +166,8 @@ def test_blocked_limiter_keeps_the_repl_alive(tmp_path, monkeypatch):
 def test_one_shot_mode_has_no_rate_limiter(tmp_path, monkeypatch):
     """The limiter is a REPL-session control; one-shot never constructs it."""
     state = _install_limiter(monkeypatch)
-    monkeypatch.setattr(main_module, "load_dotenv", lambda *a, **k: None)
-    monkeypatch.setattr(main_module, "build_agent", lambda *a, **k: _fake_agent())
+    monkeypatch.setattr(app_module, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(app_module, "build_agent", lambda *a, **k: _fake_agent())
     monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda *a, **k: False)
     monkeypatch.setattr(bridge_module, "handle_conversational_operator_input", lambda *a, **k: False)
     monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", lambda *a, **k: "A")
