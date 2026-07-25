@@ -40,6 +40,7 @@ question, which single file is authoritative.
 | What process Docker/Compose actually runs | [DOCKER.md](DOCKER.md) | production supervisor process | async `app/daemon.py` composition (→ daemon-progress) |
 | How to run, operate, drive the HTTP API, and diagnose failures | [OPERATIONS.md](OPERATIONS.md) | run modes, API operator guide, troubleshooting, recovery | container mechanics (→ DOCKER.md); config values (→ CONFIGURATION.md) |
 | How the agent is configured, and where it keeps state | [CONFIGURATION.md](CONFIGURATION.md) | env vars, `config/` files, `data/` state layout | issue status; runtime behaviour |
+| What the CLI did before the `main.py` extraction began | [refactor/CLI_BASELINE.md](refactor/CLI_BASELINE.md) | the dated pre-extraction behaviour record + which parts are contract vs. frozen-for-refactor | how the CLI behaves now (→ code + `tests/characterization/`) |
 | Problem *classes* already fixed, and how to run the next audit | [self-audit-lessons.md](self-audit-lessons.md) | the 6 recurring anti-patterns + audit procedure. **History of regressions — never delete** | current defect status |
 | How each document was classified, and where docs drifted from code | [audit/DOCUMENT_INVENTORY.md](audit/DOCUMENT_INVENTORY.md) | per-document classification as of Stage 1 | current code facts |
 | Failure classes seen in *someone else's* system, as a checklist | [OPERATIONAL_FAILURE_MODES.md](OPERATIONAL_FAILURE_MODES.md) | the external OFM taxonomy — **no number in it measures this repo** | our defect status (see §4) |
