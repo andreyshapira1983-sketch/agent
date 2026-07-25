@@ -19,6 +19,7 @@ import pytest
 
 import main as main_module
 # the intent bridge resolves handler names in its own module (cli/intent_bridge.py)
+import cli.command_dispatch as dispatch_module
 import cli.intent_bridge as bridge_module
 from core.approval import AutoApprover
 from core.budget_ledger import BudgetLedger, BudgetWindow
@@ -1811,7 +1812,11 @@ Produce a patch proposal for the routing bug.
             raise AssertionError("_handle_self_apply_run must not run — no code may be applied")
 
         monkeypatch.setattr(bridge_module, "_handle_self_build_produce", _spy_produce)
-        monkeypatch.setattr(main_module, "_handle_self_apply_run", _apply_must_not_be_called)
+        # Patch the module that owns the *call site* (cli/command_dispatch.py:406).
+        # Patching `main` here armed nothing: the dispatcher resolves the name in
+        # its own namespace, so the real apply lane would have run — proven by
+        # driving `:self-apply-run` with each target in turn.
+        monkeypatch.setattr(dispatch_module, "_handle_self_apply_run", _apply_must_not_be_called)
         monkeypatch.setattr(agent, "run", _run_must_not_be_called)
 
         assert handle_conversational_operator_input(
