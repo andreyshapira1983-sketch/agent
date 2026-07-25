@@ -103,10 +103,11 @@ from cli.intent_bridge import (
     _local_operator_reply,
     handle_conversational_operator_input,
 )
-from cli.args import build_parser
-from cli.help import render_startup_commands
-# The one-shot `--ask` run (memory-free agent, command precedence, deep
-# escalation) lives in cli/one_shot.py; main() only decides which mode to enter.
+# The CLI itself — argument parsing, mode selection, session wiring — lives in
+# cli/app.py. main() is a launcher over it; everything else imported below is
+# re-exported for `from main import …` callers (see
+# docs/refactor/MAIN_SURFACE_AUDIT.md), not used by this file.
+from cli.app import _preflight_file_hint, run_cli
 from cli.one_shot import run_one_shot
 from app.bootstrap import build_agent
 # The budget guard (wrap agent.run so an exhausted model budget becomes a
@@ -124,125 +125,9 @@ from app.runtime_cli import _handle_auto_run
 from app.task_scheduler_cli import _schedule_disable_message
 
 
-def _preflight_file_hint(file_hint: str | None, workspace: Path) -> tuple[bool, str | None]:
-    if not file_hint:
-        return True, None
-    path = Path(file_hint.strip().replace("\\", "/"))
-    if not path.is_absolute():
-        path = workspace / path
-    path = path.resolve()
-    if path.exists():
-        return True, None
-    return (
-        False,
-        "ERROR: file hint does not exist:\n"
-        f"{path}\n\n"
-        "No model calls were made.",
-    )
-
-
 def main() -> int:
-    args = build_parser().parse_args()
-
-    # Must run BEFORE any non-ASCII input flows through stdin / out.
-    _force_utf8_io()
-    workspace = Path(args.workspace).resolve()
-    ask_head = args.ask.lstrip() if args.ask else ""
-    head, _, rest = ask_head.partition(" ")
-    if head.lower() == ":self-build-propose":
-        _handle_self_build_propose(rest.strip(), None, workspace)  # type: ignore[arg-type]
-        return 0
-    if head.lower() == ":schedule-disable":
-        print(_schedule_disable_message(rest.strip(), workspace), file=sys.stderr)
-        return 0
-
-    load_dotenv()
-
-    # §3.5 Resume: if --resume is given, look up the checkpoint file and
-    # short-circuit before building the full agent stack when possible.
-    if args.resume:
-        decision = resolve_resume(
-            args.resume,
-            workspace=workspace,
-            ask=args.ask,
-            file_hint=args.file,
-        )
-        if decision.exit_code is not None:
-            return decision.exit_code
-        args.ask = decision.ask
-        args.file = decision.file_hint
-
-    file_hint_ok, file_hint_error = _preflight_file_hint(args.file, workspace)
-    if not file_hint_ok:
-        print(file_hint_error, file=sys.stderr)
-        return 2
-
-    # One-shot mode. Provider selection, the memory-free agent build, command
-    # precedence and deep escalation all live in cli/one_shot.py, which reaches
-    # its collaborators through their own modules. Only `build_agent` is still
-    # handed over from here: it is startup wiring, patched on `main` in 22
-    # places — see docs/refactor/MAIN_SURFACE_AUDIT.md.
-    if args.ask:
-        return run_one_shot(
-            args.ask,
-            workspace=workspace,
-            file_hint=args.file,
-            auto_approve=args.auto_approve,
-            reason=args.reason,
-            expect=args.expect,
-            build_agent=build_agent,
-        )
-
-    # ── Paste-safe interactive input ─────────────────────────────────────────
-    # One background reader owns stdin so the top-level prompt, block modes,
-    # and the approval prompt all pull from the same queue. This is what lets
-    # a pasted multi-line block be coalesced into ONE message instead of being
-    # chopped into many separate questions.
-    _reader = _StdinLineReader(interactive=_stdin_is_interactive())
-
-    if args.auto_approve == "approve":
-        approval_provider: ApprovalProvider = AutoApprover(default="approve")
-    elif args.auto_approve == "deny":
-        approval_provider = AutoApprover(default="deny")
-    else:
-        def _approval_input(prompt: str) -> str:
-            sys.stderr.write(prompt)
-            sys.stderr.flush()
-            return _reader.read_line()
-
-        approval_provider = CLIApprovalProvider(input_fn=_approval_input)
-
-    # Interactive — single agent with working + persistent memory + approval UX
-    agent = build_agent(workspace, with_memory=True, approval_provider=approval_provider)
-
-    # ── Session rate limiter (T8 / §6) ────────────────────────────────────────
-    # Prevents runaway or accidental rapid-fire requests from burning budget or
-    # triggering external API rate limits.  30 requests per 60 s is generous
-    # for human-paced interaction but catches programmatic loops.
-    from core.rate_limiter import CLIRateLimiter
-    _rate_limiter = CLIRateLimiter(max_requests=30, window_seconds=60.0)
-
-    # ── Daemon wake-up notice ─────────────────────────────────────────────────
-    # If the background daemon ran while the user was away and found problems
-    # (failed tests, repair proposals), surface them immediately so the user
-    # sees them before the first prompt.
-    _print_daemon_inbox_notice(workspace)
-
-    print(
-        f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
-        f"approval={type(approval_provider).__name__}. "
-        + render_startup_commands(),
-        file=sys.stderr,
-    )
-    # The dialogue loop itself lives in cli/repl.py and reaches its
-    # collaborators through their own modules; nothing is handed over from here.
-    return run_repl(
-        agent,
-        reader=_reader,
-        rate_limiter=_rate_limiter,
-        workspace=workspace,
-        file_hint=args.file,
-    )
+    """Launch the CLI. Everything it does lives in cli/app.py."""
+    return run_cli()
 
 
 if __name__ == "__main__":

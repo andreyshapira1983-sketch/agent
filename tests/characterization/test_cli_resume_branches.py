@@ -21,6 +21,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import cli.app as app_module
 import app.budget_guard as budget_guard_module
 import cli.intent_bridge as bridge_module
 import main as main_module
@@ -37,7 +38,7 @@ def _fake_agent() -> SimpleNamespace:
 def _patch(monkeypatch: pytest.MonkeyPatch) -> dict:
     """Patch the collaborators a resume run would otherwise reach."""
     state: dict = {"build": [], "run": []}
-    monkeypatch.setattr(main_module, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(app_module, "load_dotenv", lambda *a, **k: None)
 
     def fake_build_agent(workspace, **kwargs):
         state["build"].append({"workspace": workspace, **kwargs})
@@ -47,7 +48,7 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> dict:
         state["run"].append(kwargs)
         return "fresh answer"
 
-    monkeypatch.setattr(main_module, "build_agent", fake_build_agent)
+    monkeypatch.setattr(app_module, "build_agent", fake_build_agent)
     monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", fake_run)
     monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda *a, **k: False)
     monkeypatch.setattr(bridge_module, "handle_conversational_operator_input", lambda *a, **k: False)

@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import cli.app as app_module
 import main as main_module
 # the intent bridge resolves handler names in its own module (cli/intent_bridge.py)
 import cli.command_dispatch as dispatch_module
@@ -1263,8 +1264,8 @@ class TestHandleMetaCommand:
             return original_open(path, *args, **kwargs)
 
         monkeypatch.setattr(Path, "open", guarded_open)
-        monkeypatch.setattr(main_module, "build_agent", fail_if_called)
-        monkeypatch.setattr(main_module, "load_dotenv", fail_if_called)
+        monkeypatch.setattr(app_module, "build_agent", fail_if_called)
+        monkeypatch.setattr(app_module, "load_dotenv", fail_if_called)
         monkeypatch.setattr(
             sys,
             "argv",
@@ -1309,8 +1310,8 @@ class TestHandleMetaCommand:
         def fail_if_called(*args, **kwargs):
             raise AssertionError("self-build propose must not build agent or load dotenv")
 
-        monkeypatch.setattr(main_module, "build_agent", fail_if_called)
-        monkeypatch.setattr(main_module, "load_dotenv", fail_if_called)
+        monkeypatch.setattr(app_module, "build_agent", fail_if_called)
+        monkeypatch.setattr(app_module, "load_dotenv", fail_if_called)
         monkeypatch.setattr(
             sys,
             "argv",
@@ -2262,8 +2263,8 @@ Produce a patch proposal for the routing bug.
         def fail_if_called(*args, **kwargs):
             raise AssertionError("schedule-disable must not build agent or load dotenv")
 
-        monkeypatch.setattr(main_module, "build_agent", fail_if_called)
-        monkeypatch.setattr(main_module, "load_dotenv", fail_if_called)
+        monkeypatch.setattr(app_module, "build_agent", fail_if_called)
+        monkeypatch.setattr(app_module, "load_dotenv", fail_if_called)
         monkeypatch.setattr(
             sys,
             "argv",

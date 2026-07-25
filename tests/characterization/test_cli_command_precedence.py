@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import cli.app as app_module
 import app.budget_guard as budget_guard_module
 import cli.command_dispatch as dispatch_module
 import cli.intent_bridge as bridge_module
@@ -42,9 +43,9 @@ def _scripted_reader(lines: list[str]):
 def _patch(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Record which router the CLI reaches, in order."""
     calls: list[str] = []
-    monkeypatch.setattr(main_module, "load_dotenv", lambda *a, **k: None)
-    monkeypatch.setattr(main_module, "build_agent", lambda *a, **k: _fake_agent())
-    monkeypatch.setattr(main_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
+    monkeypatch.setattr(app_module, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(app_module, "build_agent", lambda *a, **k: _fake_agent())
+    monkeypatch.setattr(app_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
 
     def fake_meta(cmd, agent, workspace):
         calls.append(f"meta:{cmd}")
@@ -119,7 +120,7 @@ def test_one_shot_local_reply_short_circuits_before_the_intent_router(tmp_path, 
 @pytest.mark.parametrize("line", [":models", "?", "  :models  "])
 def test_repl_explicit_command_beats_intent_routing(line, tmp_path, monkeypatch):
     calls = _patch(monkeypatch)
-    monkeypatch.setattr(main_module, "_StdinLineReader", lambda **k: _scripted_reader([line]))
+    monkeypatch.setattr(app_module, "_StdinLineReader", lambda **k: _scripted_reader([line]))
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
 
     assert main_module.main() == 0
@@ -129,8 +130,7 @@ def test_repl_explicit_command_beats_intent_routing(line, tmp_path, monkeypatch)
 
 def test_repl_plain_text_reaches_the_intent_router(tmp_path, monkeypatch):
     calls = _patch(monkeypatch)
-    monkeypatch.setattr(
-        main_module, "_StdinLineReader", lambda **k: _scripted_reader(["what models are used"])
+    monkeypatch.setattr(app_module, "_StdinLineReader", lambda **k: _scripted_reader(["what models are used"])
     )
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
 
@@ -145,8 +145,7 @@ def test_repl_plain_text_reaches_the_intent_router(tmp_path, monkeypatch):
 def test_repl_unknown_command_reports_and_keeps_the_loop_alive(tmp_path, monkeypatch, capsys):
     calls = _patch(monkeypatch)
     monkeypatch.setattr(dispatch_module, "handle_meta_command", lambda *a, **k: False)
-    monkeypatch.setattr(
-        main_module, "_StdinLineReader", lambda **k: _scripted_reader([":nope", ":also-nope"])
+    monkeypatch.setattr(app_module, "_StdinLineReader", lambda **k: _scripted_reader([":nope", ":also-nope"])
     )
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
 
@@ -168,7 +167,7 @@ def test_repl_quit_propagates_system_exit_zero(tmp_path, monkeypatch):
         raise SystemExit(0)
 
     monkeypatch.setattr(dispatch_module, "handle_meta_command", quitting_meta)
-    monkeypatch.setattr(main_module, "_StdinLineReader", lambda **k: _scripted_reader([":quit"]))
+    monkeypatch.setattr(app_module, "_StdinLineReader", lambda **k: _scripted_reader([":quit"]))
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
 
     with pytest.raises(SystemExit) as excinfo:
