@@ -35,7 +35,6 @@ Usage examples:
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -106,6 +105,9 @@ from cli.intent_bridge import (
     handle_conversational_operator_input,
 )
 from cli.help import render_startup_commands
+# The one-shot `--ask` run (memory-free agent, command precedence, deep
+# escalation) lives in cli/one_shot.py; main() only decides which mode to enter.
+from cli.one_shot import run_one_shot
 from app.bootstrap import build_agent
 # The budget guard (wrap agent.run so an exhausted model budget becomes a
 # resumable paused checkpoint) lives in app/budget_guard.py; re-exported here so
@@ -236,65 +238,25 @@ def main() -> int:
         print(file_hint_error, file=sys.stderr)
         return 2
 
-    # Approval provider selection. One-shot can't realistically prompt a
-    # human, so it falls back to AutoApprover unless the user opted in via
-    # --auto-approve. Interactive uses the live CLI prompt by default.
+    # One-shot mode. Provider selection, the memory-free agent build, command
+    # precedence and deep escalation all live in cli/one_shot.py. The five
+    # collaborators are passed in rather than imported there, so that
+    # `monkeypatch.setattr(main, "build_agent", …)` and friends keep being
+    # observed — see docs/refactor/CLI_BASELINE.md §2.5 and cli/one_shot.py.
     if args.ask:
-        if args.auto_approve == "approve":
-            approval_provider: ApprovalProvider = AutoApprover(default="approve")
-        elif args.auto_approve == "deny":
-            approval_provider = AutoApprover(default="deny")
-        else:
-            # 'off' in one-shot = no provider wired = escalated tools blocked.
-            approval_provider = None
-
-        # with_persistent=False: one-shot must NOT read or mutate
-        # data/persistent_memory.jsonl — the docstring at line 9 promises
-        # "no memory, fresh session", so persistent memory must be excluded
-        # too, not just working (session) memory.
-        agent = build_agent(
-            workspace,
-            with_memory=False,
-            with_persistent=False,
-            approval_provider=approval_provider,
-        )
-        # Explicit ':' meta-commands take precedence over fuzzy intent routing,
-        # mirroring the interactive REPL — otherwise e.g. ':campaign-start
-        # --max-cost-units 0' is misread as a budget query by the classifier.
-        ask_head = args.ask.lstrip()
-        if ask_head.startswith(":") or ask_head == "?":
-            if handle_meta_command(ask_head, agent, workspace):
-                return 0
-            print(f"(unknown command: {ask_head})", file=sys.stderr)
-            return 0
-        if _handle_local_operator_reply(args.ask, agent):
-            return 0
-        if handle_conversational_operator_input(args.ask, agent, workspace):
-            return 0
-        # Deep/Opus escalation is opt-in and operator-driven: only an explicit
-        # --reason (with --expect) lets planner/synthesizer reach the deep tier.
-        # Without it, deep_escalation stays None and every deep request
-        # downgrades to the standard model.
-        deep_escalation = None
-        if args.reason or args.expect:
-            from core.deep_escalation import OperatorEscalation
-            deep_escalation = OperatorEscalation(
-                reason=args.reason,
-                expected_output=args.expect,
-            )
-        # stream=False: the formatted print below is the sole output.
-        # With stream=True the raw Output-Contract tokens arrive first, then
-        # format_human_response reprints the same content — double output.
-        answer = _run_agent_with_budget_guard(
-            agent,
-            user_question=args.ask,
-            file_hint=args.file,
+        return run_one_shot(
+            args.ask,
             workspace=workspace,
-            stream=False,
-            deep_escalation=deep_escalation,
+            file_hint=args.file,
+            auto_approve=args.auto_approve,
+            reason=args.reason,
+            expect=args.expect,
+            build_agent=build_agent,
+            handle_meta_command=handle_meta_command,
+            handle_local_operator_reply=_handle_local_operator_reply,
+            handle_conversational=handle_conversational_operator_input,
+            run_agent_with_budget_guard=_run_agent_with_budget_guard,
         )
-        print("\n" + format_human_response(answer) + "\n")
-        return 0
 
     # ── Paste-safe interactive input ─────────────────────────────────────────
     # One background reader owns stdin so the top-level prompt, block modes,
@@ -304,7 +266,7 @@ def main() -> int:
     _reader = _StdinLineReader(interactive=_stdin_is_interactive())
 
     if args.auto_approve == "approve":
-        approval_provider = AutoApprover(default="approve")
+        approval_provider: ApprovalProvider = AutoApprover(default="approve")
     elif args.auto_approve == "deny":
         approval_provider = AutoApprover(default="deny")
     else:
