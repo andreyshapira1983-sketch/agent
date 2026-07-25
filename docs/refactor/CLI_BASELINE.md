@@ -318,9 +318,10 @@ issue."* Phase gates are local-only until that is resolved.
 
 ---
 
-> **ADDENDUM — where the code lives now (2026-07-25, after Phase 3).** Sections 1-3
+> **ADDENDUM — where the code lives now (2026-07-25, after Phase 3; table extended
+> 2026-07-25 with the stdin-reader, `--resume` and one-shot moves).** Sections 1-3
 > above remain the true record of `9daa9bf`, but most of the code they anchor has
-> since left `main.py`, which went **2250 -> 706 lines**. Every `main.py:NNN` anchor
+> since left `main.py`, which went **2250 -> 450 lines**. Every `main.py:NNN` anchor
 > in this document is provenance for the `9daa9bf` reading only; locate code by the
 > symbol name and this table:
 >
@@ -335,13 +336,25 @@ issue."* Phase gates are local-only until that is resolved.
 > | `:self-build-supervisor` + `_tech_debt_summary`, `_recent_error_lines` | `cli/commands_self_build.py` |
 > | `:auto-status` | `app/runtime_cli.py` |
 > | `:assumptions` | `cli/commands_misc.py` |
+> | `_StdinLineReader`, `_coalesce_burst`, `_collect_instruction_buffer`, `_stdin_is_interactive`, `PASTE_COALESCE_GAP_SECONDS` | `cli/repl.py` |
+> | the `--resume` branch of `main()` + `_resume_question_from_checkpoint` | `cli/resume.py` (`resolve_resume` -> `ResumeDecision`) |
+> | the one-shot `--ask` run (provider choice, memory-free build, `:command` precedence, deep escalation) | `cli/one_shot.py` (`run_one_shot`) |
 >
-> Still in `main.py`: `main()` itself (argparse, startup ordering, resume, one-shot,
-> the REPL loop), the stdin reader (`_StdinLineReader`, `_coalesce_burst`,
-> `_collect_instruction_buffer`, `_stdin_is_interactive`), `_preflight_file_hint`
-> and `_resume_question_from_checkpoint` — plus the re-export block that keeps
+> Still in `main.py`: `main()` itself (argparse, startup ordering, mode selection,
+> the REPL loop) and `_preflight_file_hint` — plus the re-export block that keeps
 > `from main import …` working for 25 test modules, `agent_tick.py` and
 > `api/server.py`.
+>
+> **The section 2.5 patch surface constrains how far a call site can move.** The
+> one-shot extraction proved it: importing `build_agent`, `handle_meta_command`,
+> `_handle_local_operator_reply`, `handle_conversational_operator_input` and
+> `_run_agent_with_budget_guard` inside `cli/one_shot.py` turned **25**
+> characterization tests red and left **2** more green while they silently built a
+> real agent and dispatched a real `:models` (run time 2s -> 84s). `run_one_shot`
+> therefore takes those five as keyword parameters and `main()` passes its own
+> module-level bindings, so a patch on `main` is still observed. The parameters are
+> a compatibility seam, not a design preference: they come out in Phase 7 with the
+> re-export block.
 >
 > **Every behaviour recorded in sections 1 and 2 was verified unchanged after the
 > move**: 36 of the 38 functions that existed at `9daa9bf` are byte-identical
