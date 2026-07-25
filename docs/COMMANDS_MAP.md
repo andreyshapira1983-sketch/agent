@@ -193,8 +193,9 @@ message falls through to the normal model-backed agent loop unchanged.
 
 ### Model-assisted veto (`core/intent_understanding`)
 
-A second, later layer sits **after** a positive match from the table above, at
-`main.py:1069`. The keyword matcher works on substrings, so it cannot
+A second, later layer sits **after** a positive match from the table above, in
+`handle_conversational_operator_input` (`main.py:903`, via
+`_model_says_conversation`). The keyword matcher works on substrings, so it cannot
 distinguish "please run the architecture audit" from a sentence that merely
 mentions one — and the latter would be hijacked into a command.
 
