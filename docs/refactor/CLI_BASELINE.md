@@ -318,6 +318,38 @@ issue."* Phase gates are local-only until that is resolved.
 
 ---
 
+> **ADDENDUM — where the code lives now (2026-07-25, after Phase 3).** Sections 1-3
+> above remain the true record of `9daa9bf`, but most of the code they anchor has
+> since left `main.py`, which went **2250 -> 706 lines**. Every `main.py:NNN` anchor
+> in this document is provenance for the `9daa9bf` reading only; locate code by the
+> symbol name and this table:
+>
+> | What section 1-3 describes | Where it lives now |
+> |---|---|
+> | `handle_meta_command`, the whole `:command` head chain | `cli/command_dispatch.py` |
+> | `:help` page text and the startup banner list | `cli/help.py` (rendered from `cli/command_registry.py`) |
+> | `handle_conversational_operator_input`, `_dispatch_operator_intent`, `_model_says_conversation`, `_local_operator_reply`, `_handle_local_operator_reply` | `cli/intent_bridge.py` |
+> | `_run_agent_with_budget_guard` + its 4 helpers | `app/budget_guard.py` |
+> | `:coding-readiness`, "what can you do", gaps, weaknesses, next-safe-test (13 functions) | `app/operator_status.py` |
+> | `:capability-request`, `:subagent-proposal` | `cli/commands_proposals.py` |
+> | `:self-build-supervisor` + `_tech_debt_summary`, `_recent_error_lines` | `cli/commands_self_build.py` |
+> | `:auto-status` | `app/runtime_cli.py` |
+> | `:assumptions` | `cli/commands_misc.py` |
+>
+> Still in `main.py`: `main()` itself (argparse, startup ordering, resume, one-shot,
+> the REPL loop), the stdin reader (`_StdinLineReader`, `_coalesce_burst`,
+> `_collect_instruction_buffer`, `_stdin_is_interactive`), `_preflight_file_hint`
+> and `_resume_question_from_checkpoint` — plus the re-export block that keeps
+> `from main import …` working for 25 test modules, `agent_tick.py` and
+> `api/server.py`.
+>
+> **Every behaviour recorded in sections 1 and 2 was verified unchanged after the
+> move**: 36 of the 38 functions that existed at `9daa9bf` are byte-identical
+> wherever they now live; the only two that differ are `handle_meta_command` (one
+> line added, 130 lines of help text removed) and `main()` (banner literal replaced
+> by a call, one comment translated). The `:help` page is byte-compared against
+> `tests/fixtures/help_page_expected.txt` on every run.
+
 ## 4. Behavior not yet verified
 
 - **Paste-burst coalescing under real terminal timing.** The characterization
