@@ -37,6 +37,8 @@ MAIN_SOURCE = (REPO_ROOT / "main.py").read_text(encoding="utf-8")
 # pre-load_dotenv() fast paths, the REPL block tokens and the intent bridge are
 # still in main.py, so both sources are read here.
 DISPATCH_SOURCE = (REPO_ROOT / "cli" / "command_dispatch.py").read_text(encoding="utf-8")
+# the operator-intent bridge moved to cli/intent_bridge.py (Phase 3 step 6)
+BRIDGE_SOURCE = (REPO_ROOT / "cli" / "intent_bridge.py").read_text(encoding="utf-8")
 
 # Captured before any monkeypatch replaces the attribute (see the reader factory
 # in _startup_tokens, which must build the real class, not its own stand-in).
@@ -89,9 +91,9 @@ def _repl_control_tokens() -> set[str]:
 
 def _nl_intent_kinds() -> set[str]:
     """`intent.kind` branches inside `_dispatch_operator_intent` only."""
-    start = MAIN_SOURCE.index("def _dispatch_operator_intent(")
-    end = MAIN_SOURCE.index("def _collect_instruction_buffer(")
-    return set(re.findall(r'intent\.kind == "([a-z_]+)"', MAIN_SOURCE[start:end]))
+    start = BRIDGE_SOURCE.index("def _dispatch_operator_intent(")
+    end = len(BRIDGE_SOURCE)
+    return set(re.findall(r'intent\.kind == "([a-z_]+)"', BRIDGE_SOURCE[start:end]))
 
 
 def _help_tokens(tmp_path: Path, capsys) -> set[str]:
@@ -169,7 +171,7 @@ def test_nl_intent_kind_count_is_frozen():
 def test_shell_command_hint_is_handled_before_dispatch_and_is_not_a_command():
     """`shell_command_hint` short-circuits in `handle_conversational_operator_input`."""
     assert "shell_command_hint" not in _nl_intent_kinds()
-    assert 'intent.kind == "shell_command_hint"' in MAIN_SOURCE
+    assert 'intent.kind == "shell_command_hint"' in BRIDGE_SOURCE
 
 
 # ── exact divergences ─────────────────────────────────────────────────────────
