@@ -180,6 +180,9 @@ from cli.commands_value_review import (
 )
 # Local read-only health panel command.
 from cli.commands_health import _handle_dry_health_pass
+# The :help page and the REPL startup command summary are rendered from the
+# command registry in cli/help.py (Phase 2 of the main.py extraction).
+from cli.help import render_help, render_startup_commands
 from app.bootstrap import build_agent
 # The budget guard (wrap agent.run so an exhausted model budget becomes a
 # resumable paused checkpoint) lives in app/budget_guard.py; re-exported here so
@@ -1549,138 +1552,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
         return _handle_propose_repair(rest.strip(), agent, workspace)
 
     if head in {":help", "?"}:
-        print(
-            "Commands:\n"
-            "  :mem | :memory                  inspect working + persistent memory\n"
-            "  :smart-memory [--json]          inspect episodic/procedural/consolidation memory\n"
-            "  :memory-consolidate [--json]    link episodes to reusable procedures now\n"
-            "  :audit [on|off|status]          read-only audit mode: freeze all durable memory writes\n"
-            "  :clear                          wipe working memory only\n"
-            "  :remember [tags] <text>         save to persistent memory (Write Policy gated)\n"
-            "  :forget [id|all]                delete persistent record(s)\n"
-            "  :ingest-source <path> [flags]   ingest one UTF-8 text/code file into Source Registry\n"
-            "  :ingest-project [path] [flags]  ingest project text/code files (default limit 80)\n"
-            "  :source-library [group|all]     list curated online source families\n"
-            "  :source-registry [flags]        list ingested sources and claim counts\n"
-            "      flags: --claims  --limit N  --json\n"
-            "  :source-review-plan <goal>      compare requested files/sources against Source Registry\n"
-            "      flags: --limit N  --json\n"
-            "  :implementation-plan <goal>     local source-backed implementation plan\n"
-            "      flags: --limit N  --json\n"
-            "  :patch-proposal-plan <goal>     local read-only patch proposal plan\n"
-            "      flags: --limit N  --json\n"
-            "  :self-build-propose             propose a self-build patch or NO_PATCH\n"
-            "  :self-build-supervisor          read-only supervisor: wait/stop/propose one candidate\n"
-            "  :ingest-web <topic> [flags]     search/fetch curated web library sources\n"
-            "      flags: --sources wikis|books|science|docs|all|id,id  --limit N  --per-source N\n"
-            "  :ingest-rss <url> [flags]       fetch RSS/Atom feed entries into Source Registry\n"
-            "      flags: --limit N  --dry-run  --write-memory  --no-memory\n"
-            "  :connectors [status] [--json]   list source connectors and rough costs\n"
-            "  :connector-plan <goal> [flags]  recommend source connectors for a task\n"
-            "      flags: --limit N  --json\n"
-            "  :models [--json]                inspect model routes and registry\n"
-            "  :refresh-models                 query providers, persist model catalog\n"
-            "  :model-registry-audit [--json] inspect selected vs available model candidates\n"
-            "  :model-discovery-audit [--json] local (no-network) provider discovery readiness\n"
-            "  :provider-catalog-refresh --dry-run [--anthropic] [--openai] [--json]\n"
-            "                                 dry-run live model discovery + catalog diff (no write)\n"
-            "  :architecture-audit [--json]   inspect layers and multi-agent gaps\n"
-            "  :operator-check [--json]       conversational project/status digest\n"
-            "  :operator-budget [--json]      concise budget + model usage digest\n"
-            "  :budget-config [--json]        inspect budget limit config and env overrides\n"
-            "  :urgent-status [--json]        approvals + queue + scheduler urgency digest\n"
-            "  :next-actions [--json]         architecture priorities + recommendations\n"
-            "  :autonomy-readiness [--json]   whether autonomy is safe to run now\n"
-            "  :dry-health-pass [--json]      local read-only autonomous health panel\n"
-            "  :coding-readiness [--json]     safe programming task readiness report\n"
-            "  :operator-task ... :end        one safe multi-line operator task report\n"
-            "  :task-begin ... :task-end       buffer a complex instruction (bypasses keyword router; :task-abort discards)\n"
-            "  :model-usage [--json]           inspect model calls/tokens/cost units\n"
-            "  :team-plan <goal> [--json]      dry-run bounded subagent contracts\n"
-            "  :team-run <goal> [--json]       dry-run execution walk over subagent contracts\n"
-            "  :capability-request <goal> [--submit] [--json]\n"
-            "                                    propose missing connector/capability boundaries\n"
-            "  :subagent-proposal <goal> [--submit]  autonomous subagent initiative proposal\n"
-            "  :learn [goal] [flags]           plan sources, then ingest selected learning set\n"
-            "  :learn-project [goal] [flags]   alias for :learn\n"
-            "      flags: --dry-run  --write-memory  --no-memory  --limit N\n"
-            "  :auto-run [goal] [flags]        bounded autonomous health pass\n"
-            "      flags: --dry-run  --allow-effects  --limit N  --learning-limit N  --no-tests\n"
-            "  :work-session [goal] [flags]    bounded multi-cycle session with time budget\n"
-            "      flags: --dry-run  --allow-effects  --minutes N  --max-cycles N  --report-every N\n"
-            "  :campaign-start [goal] [flags]  budgeted autonomous campaign with per-cycle ledger\n"
-            "      flags: --dry-run  --allow-effects  --cycles N  --max-llm-calls N  --max-cost-units N  --max-idle N\n"
-            "  :campaign-status [--recent N]   read the campaign ledger digest (no budget spent)\n"
-            "  :auto-status                    inspect autonomous runtime inbox/status\n"
-            "  :conflicts [--limit N|--json]   inspect source claim conflicts and suggestions\n"
-            "  :budget-status                  inspect default autonomous runtime budgets\n"
-            "  :budget-window-status [--json] inspect persistent hour/day budget windows\n"
-            "  :budget-kill-switch [--json] [--clear] inspect/reset autonomous day-budget kill-switch\n"
-            "  :state-store-drill [--json]    prove JSONL quarantine/recovery on an isolated file\n"
-            "  :release-audit [--json]         inspect release artifact hygiene exclusions\n"
-            "  :supply-chain-audit [--json]   inspect pinned deps and CI release gates\n"
-            "  :approval-list [status|all]     list pending/approved/denied approval items\n"
-            "  :approval-triage                read-only triage: clusters/duplicates/stale + advice\n"
-            "  :best-next-action [--json]      choose the single most important next action (advisory)\n"
-            "  :self-issue-verify <fingerprint> run the issue's fixed targeted verifier and resolve on green\n"
-            "  :ack <action> [--ttl H] [why]   acknowledge an advisory alert so it stops dominating BNA\n"
-            "  :ack-list                       list active acknowledgements\n"
-            "  :ack-clear <action>             restore an acknowledged alert to the top-pick race\n"
-            "  :approval-approve <id>          mark an approval inbox item approved\n"
-            "  :approval-deny <id>             mark an approval inbox item denied\n"
-            "  :approval-run <id>              execute one approved whitelisted operation\n"
-            "  :self-apply-run <id>            run one approved low-risk self-apply proposal\n"
-        "  :self-build-produce             produce one low-risk self-apply proposal into the inbox\n"
-        "  :self-split <path.py>           plan one deterministic incremental split step for an oversized module\n"
-            "  :self-task-propose              propose one coding task + failing test for approval (Stage A)\n"
-            "  :self-task-build <id>           implement an approved coding task so its frozen test passes (Stage B)\n"
-            "  :value-review <id> <verdict> [note]  record a human value verdict for an applied proposal\n"
-            "  :value-review-list              list applied self-build proposals and their value verdicts\n"
-            "  :approval-abort <id>            mark an approval inbox item aborted\n"
-            "  :inbox                          shortcut: list pending approvals\n"
-            "  :approve <id>                   shortcut: :approval-approve\n"
-            "  :deny <id>                      shortcut: :approval-deny\n"
-            "  :queue-status                   inspect runtime task queue summary\n"
-            "  :scheduler-status               inspect scheduler summary\n"
-            "  :task-add [goal] [flags]        enqueue persistent autonomous task\n"
-            "  :task-list [status|all]         list runtime tasks\n"
-            "  :task-run [--limit N]           run due pending runtime task(s)\n"
-            "  :task-cancel <task_id>          cancel one queued task\n"
-            "  :schedule-add <min> <goal>      create recurring scheduler entry\n"
-            "      flags: --name NAME  --no-tests  --limit N  --learning-limit N\n"
-            "  :schedule-list [status|all]     list schedules\n"
-            "  :schedule-disable <id>          disable a runtime schedule without running it\n"
-            "  :schedule-tick [--run]          enqueue due schedule tasks, optionally run them\n"
-            "  :hygiene [subcmd] [--dry-run]   memory hygiene; subcmd:\n"
-            "      backups    delete old .bak.<ts> files (keep last 3, >14d old)\n"
-            "      expire     drop persistent records past their TTL\n"
-            "      dedupe     collapse near-duplicate persistent records\n"
-            "      episodic   prune old low-quality episodes (retrieval distractors)\n"
-            "      summarise <tag>  merge records sharing <tag> via LLM\n"
-            "      archive [--threshold=N] [--min-age=N]  move low-value records to archive\n"
-            "      (no subcmd)      run expire, dedupe, episodic, then backups\n"
-            "  :rollback [plan_id]             apply latest compensation plan (or by id);\n"
-            "                                  no arg = LIFO pop; 'list' = show registered plans\n"
-            "  :repair <target> <proposal> [tests...] [--pattern PAT]\n"
-            "                                  guarded self-repair: diff, approval, write, tests, rollback\n"
-            "  :propose-repair <target> [tests...] [--pattern PAT] [--trace TRACE]\n"
-            "                                  generate a RepairProposal without writing files\n"
-            "  :assumptions [--json]           show the last 20 logged planning assumptions\n"
-            "  :help | ?                       show this command help\n"
-            "  :quit | :exit                   exit\n"
-            "  empty line                      ignored (use :quit or Ctrl+C to exit)",
-            file=sys.stderr,
-        )
-        print(
-            "\nConversational shortcuts:\n"
-            "  Check the project and tell me what needs attention\n"
-            "  Show which models are in use\n"
-            "  How many tokens were spent and what is the budget\n"
-            "  Is there anything urgent\n"
-            "  What should we do next\n"
-            "  Is autonomy ready to run",
-            file=sys.stderr,
-        )
+        print(render_help(), file=sys.stderr)
         return True
 
     if head in {":quit", ":exit"}:
@@ -1931,7 +1803,7 @@ def main() -> int:
     print(
         f"Agent ready. file_hint={args.file or '-'}  memory=on  persistent=on  "
         f"approval={type(approval_provider).__name__}. "
-        "Commands: :memory  :smart-memory  :memory-consolidate  :audit  :learn  :auto-run  :work-session  :capability-request  :subagent-proposal  :operator-check  :operator-budget  :budget-config  :urgent-status  :next-actions  :autonomy-readiness  :dry-health-pass  :coding-readiness  :operator-task  :task-begin  :conflicts  :budget-status  :budget-window-status  :budget-kill-switch  :state-store-drill  :release-audit  :supply-chain-audit  :model-usage  :team-plan  :team-run  :architecture-audit  :model-registry-audit  :model-discovery-audit  :provider-catalog-refresh  :approval-list  :approval-triage  :best-next-action  :self-issue-verify  :ack  :ack-list  :ack-clear  :approval-run  :self-apply-run  :self-build-produce  :self-split  :self-task-propose  :self-task-build  :value-review  :value-review-list  :task-add  :schedule-disable  :schedule-tick  :auto-status  :source-library  :source-registry  :source-review-plan  :implementation-plan  :patch-proposal-plan  :self-build-propose  :self-build-supervisor  :connectors  :connector-plan  :models  :ingest-web  :ingest-rss  :ingest-source  :ingest-project  :remember  :forget  :propose-repair  :repair  :help  :quit",
+        + render_startup_commands(),
         file=sys.stderr,
     )
     while True:
