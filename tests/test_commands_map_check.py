@@ -124,10 +124,13 @@ def test_dispatch_extraction_handles_both_forms():
 
 
 def test_dispatch_parser_still_matches_the_live_registry():
-    """While dispatch is still in main.py, the two must agree exactly."""
+    """The dispatch chain (now in cli/command_dispatch.py) and the registry must
+    agree exactly."""
     mod = _load_module()
-    main_source = open(os.path.join(_ROOT, "main.py"), encoding="utf-8").read()
-    assert mod.dispatched_commands(main_source) == mod.registry_commands()
+    dispatch_source = open(
+        os.path.join(_ROOT, "cli", "command_dispatch.py"), encoding="utf-8"
+    ).read()
+    assert mod.dispatched_commands(dispatch_source) == mod.registry_commands()
 
 
 def test_script_is_read_only():
