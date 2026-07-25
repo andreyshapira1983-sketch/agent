@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import main as main_module
 
+import cli.commands_proposals as proposals_module
 from cli.commands_approval import _handle_approval_run
 from core.approval_inbox import ApprovalInbox
 from core.subagent_contract import (
@@ -207,7 +208,10 @@ def test_submit_command_persists_versioned_canonical_payload(
         proposal=proposal,
         user_summary=lambda: "proposal ready",
     )
-    monkeypatch.setattr(main_module, "propose_subagent", lambda *args, **kwargs: result)
+    # `_handle_subagent_proposal` lives in cli/commands_proposals.py (main re-exports
+    # it), so the stand-in has to replace the name in that module's namespace —
+    # patching `main` would leave the handler resolving the real function.
+    monkeypatch.setattr(proposals_module, "propose_subagent", lambda *args, **kwargs: result)
     agent = SimpleNamespace(
         model_router=MagicMock(),
         logger=MagicMock(),
