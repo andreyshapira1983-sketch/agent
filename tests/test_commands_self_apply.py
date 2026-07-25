@@ -208,23 +208,34 @@ def test_every_attempt_is_journalled_with_the_full_result(agent, tmp_path, monke
     assert lane["episodes"] == [{"kind": "self-apply-run", "result": APPLIED}]
 
 
-def test_a_lone_json_flag_is_taken_as_an_id_and_prints_json(
-    agent, tmp_path, capsys, monkeypatch, lane
-):
-    """Current behaviour, pinned so it cannot change silently.
+def test_a_lone_json_flag_is_just_an_unknown_id(agent, tmp_path, capsys, monkeypatch, lane):
+    """`--json` is a single token, so it passes the guard and becomes the id.
 
-    `--json` is a single token, so it passes the "exactly one argument" guard
-    and becomes the approval id. The lane refuses it (there is no such item) and
-    the handler then prints the result as JSON because the token is still in
-    `parts`. Harmless today — but it is behaviour, so it gets a test.
+    The lane refuses it (no such item) and the refusal is reported the same way
+    every other refusal is. There is no JSON mode on this command: its documented
+    surface is `<inbox_id>` and the one-argument guard means a `--json` token
+    could only ever arrive *as* the id — the branch that used to special-case it
+    could therefore only pretty-print a refusal, never a real run.
     """
-    result = {"proposal_id": None, "status": "refused", "reason": "approval not found: --json"}
-    use_result(monkeypatch, lane, result)
+    use_result(
+        monkeypatch,
+        lane,
+        {
+            "proposal_id": "--json",
+            "status": "needs_validated_proposal",
+            "reason": "approval not found: --json",
+            "next_human_action": "Check :approval-list for a valid approved id.",
+        },
+    )
 
     assert _handle_self_apply_run("--json", agent, tmp_path) is True
 
     assert lane["calls"][0]["item_id"] == "--json"
-    assert json.loads(capsys.readouterr().err) == result
+    err = capsys.readouterr().err
+    assert "=== self-apply run ===" in err, "a refusal reads the same however it was typed"
+    assert "reason: approval not found: --json" in err
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(err)
 
 
 # ── best-effort side hooks ───────────────────────────────────────────────────
