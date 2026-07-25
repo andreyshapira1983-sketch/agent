@@ -218,7 +218,7 @@ def test_submit_command_persists_versioned_canonical_payload(
         approval_inbox=inbox,
     )
 
-    assert main_module._handle_subagent_proposal(
+    assert proposals_module._handle_subagent_proposal(
         "audit legacy item --submit",
         agent,
         tmp_path,

@@ -10,11 +10,12 @@ test does not.
 
 ## What `main` exposes and who actually needs it
 
-| | |
-|---|---|
-| names on `main` (module-level imports + defs) | **52** |
-| of those, needed by **non-test** code | **1** — `build_agent` |
-| names the test suite patches on `main` | **14**, across **127** sites in **12** files |
+| | at the start of Phase 7 | now |
+|---|---|---|
+| names on `main` (module-level imports + defs) | **52** | **2** (`run_cli`, `main`) |
+| of those, needed by **non-test** code | **1** — `build_agent` | **0** |
+| names the test suite patches on `main` | **14**, across **127** sites in **12** files | **0** |
+| `main.py` | 2250 lines at `9daa9bf` | **47** |
 
 The only production consumers *were* `agent_tick.py:739`, `agent_tick.py:1175`
 and `api/server.py:83`, all doing `from main import build_agent` lazily. Since
@@ -111,6 +112,17 @@ runs in ~2s (an 84s run means fakes stopped intercepting), and
    `_build_server_agent()` with a spy, and `agent_tick.py:1175` — the unattended
    campaign path, which the suite does not exercise — by reading the parsed
    import back out of the AST.
-6. **Remaining:** delete the re-export block itself. It now serves *test imports
-   only* — **28 names across 24 test modules** still do `from main import …`.
-   That is mechanical, touches no production code, and is the last step.
+6. **Done — the block is gone.** 35 `from main import …` statements in 10 test
+   modules and 19 `main.X` attribute reads in 10 more were re-pointed at the
+   module that owns each name (the mapping was read out of `main.py`'s own
+   imports, not typed by hand). `main.py` is **47 lines**: docstring,
+   `from cli.app import run_cli`, `def main(): return run_cli()`, launcher tail.
+
+   Six module docstrings that still promised `from main import …` keeps working
+   were corrected in the same change, and `test_main_public_surface.py` was
+   rewritten: its 31 inventory assertions pinned a surface that no longer exists,
+   so they gave way to two that pin the launcher shape — `main.py` may import
+   nothing but `cli.app.run_cli` and define nothing but `main`.
+
+   Only the *entry point* remains reachable through `main`: `main.main()` and
+   `main.__file__` as a repo-root anchor.

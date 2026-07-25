@@ -41,7 +41,7 @@ def test_model_confirms_real_capability_request_dispatches(monkeypatch):
 
     monkeypatch.setattr(bridge, "_dispatch_operator_intent", _fake_dispatch)
     agent = _fake_agent('{"kind":"action","action":"capability_check","confidence":0.95,"reasoning":"asks"}')
-    handled = main.handle_conversational_operator_input("что ты умеешь делать сейчас", agent, Path("."))
+    handled = bridge.handle_conversational_operator_input("что ты умеешь делать сейчас", agent, Path("."))
     assert handled is True
     assert dispatched.get("kind") == "capability_check"
 
@@ -52,7 +52,7 @@ def test_model_judges_conversation_suppresses_dispatch(monkeypatch):
                         lambda *a, **k: dispatched.setdefault("called", True) or True)
     # A rambling message that merely contains the phrase -> model says conversation.
     agent = _fake_agent('{"kind":"conversation","action":null,"confidence":0.9,"reasoning":"just musing"}')
-    handled = main.handle_conversational_operator_input(
+    handled = bridge.handle_conversational_operator_input(
         "починка виднелась мне во сне, я лишь написал предложение что ты умеешь делать, прикольно",
         agent, Path("."),
     )
@@ -71,6 +71,6 @@ def test_uncertain_model_preserves_deterministic_routing(monkeypatch):
 
     monkeypatch.setattr(bridge, "_dispatch_operator_intent", _fake_dispatch)
     agent = _fake_agent("not json at all, just a stub")
-    handled = main.handle_conversational_operator_input("Проверь проект", agent, Path("."))
+    handled = bridge.handle_conversational_operator_input("Проверь проект", agent, Path("."))
     assert handled is True
     assert dispatched.get("kind") == "project_health"
