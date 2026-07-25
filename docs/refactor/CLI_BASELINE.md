@@ -203,6 +203,14 @@ Those bindings resolve against `main`'s namespace, so moving `main()` elsewhere
 turns such patches into silent no-ops unless the re-exports remain. Inventory
 frozen by `test_main_public_surface.py`.
 
+> **Superseded 2026-07-26 (Phase 7 step 5).** The three runtime call sites now
+> import `build_agent` from `app.bootstrap`; **no module outside `tests/` imports
+> from `main` any more**, and `test_main_public_surface.py::
+> test_no_production_module_imports_from_main` holds them to it. The suites moved
+> with them: CLI fakes live on `cli.app` / the owner modules, and the `agent_tick`
+> fakes on `app.bootstrap`. What is left of the re-export block serves test
+> imports only — see `docs/refactor/MAIN_SURFACE_AUDIT.md`.
+
 `main.py:2247-2248` is already the target launcher shape; only the import source
 would change.
 

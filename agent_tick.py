@@ -736,7 +736,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     from core.task_queue import TaskQueueStore
     from core.autonomous_runtime import AutonomousRuntime, _config_from_task
     from core.incident import IncidentLog
-    from main import build_agent
+    from app.bootstrap import build_agent
 
     tick_start = _now_iso()
     summary: dict = {
@@ -1172,7 +1172,7 @@ def run_paced_campaign(
     else:
         from dotenv import load_dotenv
         load_dotenv(workspace / ".env")
-        from main import build_agent
+        from app.bootstrap import build_agent
         agent = build_agent(
             workspace, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
         )
