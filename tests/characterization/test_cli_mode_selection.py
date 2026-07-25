@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import cli.app as app_module
 import app.budget_guard as budget_guard_module
 import cli.intent_bridge as bridge_module
 import main as main_module
@@ -50,13 +51,13 @@ def _scripted_reader(lines: list[str]):
 
 
 def _patch_common(monkeypatch: pytest.MonkeyPatch, build_calls: list[dict]) -> None:
-    monkeypatch.setattr(main_module, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(app_module, "load_dotenv", lambda *a, **k: None)
 
     def fake_build_agent(workspace, **kwargs):
         build_calls.append({"workspace": workspace, **kwargs})
         return _fake_agent()
 
-    monkeypatch.setattr(main_module, "build_agent", fake_build_agent)
+    monkeypatch.setattr(app_module, "build_agent", fake_build_agent)
 
 
 def test_ask_selects_one_shot_and_returns_zero(tmp_path, monkeypatch, capsys):
@@ -90,9 +91,7 @@ def test_no_ask_selects_repl_and_eof_returns_zero(tmp_path, monkeypatch, capsys)
     build_calls: list[dict] = []
     _patch_common(monkeypatch, build_calls)
     order: list[str] = []
-    monkeypatch.setattr(
-        main_module,
-        "_print_daemon_inbox_notice",
+    monkeypatch.setattr(app_module, "_print_daemon_inbox_notice",
         lambda *a, **k: order.append("daemon_notice"),
     )
     reader_kwargs: list[dict] = []
@@ -101,7 +100,7 @@ def test_no_ask_selects_repl_and_eof_returns_zero(tmp_path, monkeypatch, capsys)
         reader_kwargs.append(kwargs)
         return _scripted_reader([])  # immediate EOF
 
-    monkeypatch.setattr(main_module, "_StdinLineReader", factory)
+    monkeypatch.setattr(app_module, "_StdinLineReader", factory)
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
 
     assert main_module.main() == 0
@@ -119,8 +118,8 @@ def test_no_ask_selects_repl_and_eof_returns_zero(tmp_path, monkeypatch, capsys)
 def test_repl_builds_agent_with_memory_and_default_persistent(tmp_path, monkeypatch):
     build_calls: list[dict] = []
     _patch_common(monkeypatch, build_calls)
-    monkeypatch.setattr(main_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
-    monkeypatch.setattr(main_module, "_StdinLineReader", lambda **k: _scripted_reader([]))
+    monkeypatch.setattr(app_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
+    monkeypatch.setattr(app_module, "_StdinLineReader", lambda **k: _scripted_reader([]))
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
 
     assert main_module.main() == 0
@@ -137,8 +136,8 @@ def test_repl_builds_agent_with_memory_and_default_persistent(tmp_path, monkeypa
 def test_repl_default_auto_approve_is_interactive_cli_provider(tmp_path, monkeypatch, capsys):
     build_calls: list[dict] = []
     _patch_common(monkeypatch, build_calls)
-    monkeypatch.setattr(main_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
-    monkeypatch.setattr(main_module, "_StdinLineReader", lambda **k: _scripted_reader([]))
+    monkeypatch.setattr(app_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
+    monkeypatch.setattr(app_module, "_StdinLineReader", lambda **k: _scripted_reader([]))
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
 
     assert main_module.main() == 0
@@ -156,8 +155,8 @@ def test_workspace_default_is_cwd_and_flag_is_resolved(tmp_path, monkeypatch):
     """`--workspace` is resolved; its default is the process CWD."""
     build_calls: list[dict] = []
     _patch_common(monkeypatch, build_calls)
-    monkeypatch.setattr(main_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
-    monkeypatch.setattr(main_module, "_StdinLineReader", lambda **k: _scripted_reader([]))
+    monkeypatch.setattr(app_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
+    monkeypatch.setattr(app_module, "_StdinLineReader", lambda **k: _scripted_reader([]))
     nested = tmp_path / "nested"
     nested.mkdir()
     monkeypatch.setattr(
@@ -231,13 +230,13 @@ def test_one_shot_run_writes_only_inside_the_tmp_workspace(tmp_path, monkeypatch
     monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda *a, **k: False)
     monkeypatch.setattr(bridge_module, "handle_conversational_operator_input", lambda *a, **k: False)
     monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", lambda *a, **k: "ok")
-    monkeypatch.setattr(main_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
+    monkeypatch.setattr(app_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
     monkeypatch.setattr(
         sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", "baseline question"]
     )
     assert main_module.main() == 0
 
-    monkeypatch.setattr(main_module, "_StdinLineReader", lambda **k: _scripted_reader([]))
+    monkeypatch.setattr(app_module, "_StdinLineReader", lambda **k: _scripted_reader([]))
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
     assert main_module.main() == 0
 

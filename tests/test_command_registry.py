@@ -31,6 +31,7 @@ from cli import command_registry as reg
 
 REPO_ROOT = Path(main_module.__file__).resolve().parent
 MAIN_SOURCE = (REPO_ROOT / "main.py").read_text(encoding="utf-8")
+APP_SOURCE = (REPO_ROOT / "cli" / "app.py").read_text(encoding="utf-8")
 # The `head` dispatch chain moved to cli/command_dispatch.py (Phase 3); the
 # pre-load_dotenv() fast paths, the REPL block tokens and the intent bridge are
 # still in main.py, so both sources are read here.
@@ -69,9 +70,11 @@ def _dispatch_branches() -> list[tuple[str, ...]]:
 
 
 def _pre_dotenv_tokens() -> set[str]:
+    # The startup sequence lives in cli/app.py since the launcher split; reading
+    # main.py here would match nothing and freeze an empty set.
     marker = "\n    load_dotenv()"
-    assert marker in MAIN_SOURCE, "load_dotenv() call site moved"
-    prefix = MAIN_SOURCE.split(marker, 1)[0]
+    assert marker in APP_SOURCE, "load_dotenv() call site moved"
+    prefix = APP_SOURCE.split(marker, 1)[0]
     return set(re.findall(r'head\.lower\(\)\s*==\s*"(' + _CMD + r')"', prefix))
 
 

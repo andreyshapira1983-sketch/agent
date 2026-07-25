@@ -22,6 +22,7 @@ import pytest
 
 import app.bootstrap as bootstrap_module
 import cli.parsers as parsers_module
+import cli.app as app_module
 import cli.command_dispatch as dispatch_module
 import main as main_module
 
@@ -89,28 +90,32 @@ def test_runtime_callers_import_build_agent_from_main(monkeypatch):
         assert "from main import build_agent" in source, rel
 
 
-def test_monkeypatching_build_agent_by_name_is_observed_by_main(tmp_path, monkeypatch):
-    """The patch-by-name contract several suites rely on."""
-    seen: list[dict] = []
+def test_monkeypatching_build_agent_by_name_is_observed_by_lazy_importers(monkeypatch):
+    """The patch-by-name contract `agent_tick.py` and `api/server.py` rely on.
 
-    def fake_build_agent(workspace, **kwargs):
-        seen.append({"workspace": workspace, **kwargs})
-        return SimpleNamespace(log=SimpleNamespace(log=lambda *a, **k: None))
+    They do `from main import build_agent` *inside a function*, so the binding is
+    read off `main` at call time and a fake set there is picked up. That is the
+    only reason the re-export still has to exist; the CLI itself no longer goes
+    through `main` (its wiring lives in `cli/app.py`, and
+    tests/test_autonomous_runtime.py:284 documents the lazy-import path).
+    """
+    sentinel = SimpleNamespace(log=SimpleNamespace(log=lambda *a, **k: None))
+    monkeypatch.setattr(main_module, "build_agent", lambda *a, **k: sentinel)
 
-    monkeypatch.setattr(main_module, "load_dotenv", lambda *a, **k: None)
-    monkeypatch.setattr(main_module, "build_agent", fake_build_agent)
-    monkeypatch.setattr(dispatch_module, "handle_meta_command", lambda *a, **k: True)
-    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", ":models"])
+    def lazy_caller():  # mirrors agent_tick.py:739
+        from main import build_agent
 
-    assert main_module.main() == 0
-    assert len(seen) == 1
+        return build_agent(Path("."))
+
+    assert lazy_caller() is sentinel
 
 
-def test_monkeypatching_load_dotenv_by_name_is_observed_by_main(tmp_path, monkeypatch):
+def test_dotenv_is_loaded_through_cli_app_not_through_main(tmp_path, monkeypatch):
+    """Where the fake has to go now: `main` re-exports `load_dotenv`, `cli.app` calls it."""
     calls: list[int] = []
-    monkeypatch.setattr(main_module, "load_dotenv", lambda *a, **k: calls.append(1))
+    monkeypatch.setattr(app_module, "load_dotenv", lambda *a, **k: calls.append(1))
     monkeypatch.setattr(
-        main_module,
+        app_module,
         "build_agent",
         lambda *a, **k: SimpleNamespace(log=SimpleNamespace(log=lambda *x, **y: None)),
     )
@@ -134,9 +139,9 @@ def test_monkeypatching_dispatch_operator_intent_by_name_is_observed(tmp_path, m
 
 
 def test_main_is_callable_and_returns_an_int(tmp_path, monkeypatch):
-    monkeypatch.setattr(main_module, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(app_module, "load_dotenv", lambda *a, **k: None)
     monkeypatch.setattr(
-        main_module,
+        app_module,
         "build_agent",
         lambda *a, **k: SimpleNamespace(log=SimpleNamespace(log=lambda *x, **y: None)),
     )
