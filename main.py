@@ -1744,6 +1744,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :connector-plan <goal> [flags]  recommend source connectors for a task\n"
             "      flags: --limit N  --json\n"
             "  :models [--json]                inspect model routes and registry\n"
+            "  :refresh-models                 query providers, persist model catalog\n"
             "  :model-registry-audit [--json] inspect selected vs available model candidates\n"
             "  :model-discovery-audit [--json] local (no-network) provider discovery readiness\n"
             "  :provider-catalog-refresh --dry-run [--anthropic] [--openai] [--json]\n"
@@ -1830,6 +1831,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
             "  :propose-repair <target> [tests...] [--pattern PAT] [--trace TRACE]\n"
             "                                  generate a RepairProposal without writing files\n"
             "  :assumptions [--json]           show the last 20 logged planning assumptions\n"
+            "  :help | ?                       show this command help\n"
             "  :quit | :exit                   exit\n"
             "  empty line                      ignored (use :quit or Ctrl+C to exit)",
             file=sys.stderr,
