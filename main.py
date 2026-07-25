@@ -34,7 +34,6 @@ Usage examples:
 """
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -104,6 +103,7 @@ from cli.intent_bridge import (
     _local_operator_reply,
     handle_conversational_operator_input,
 )
+from cli.args import build_parser
 from cli.help import render_startup_commands
 # The one-shot `--ask` run (memory-free agent, command precedence, deep
 # escalation) lives in cli/one_shot.py; main() only decides which mode to enter.
@@ -142,68 +142,7 @@ def _preflight_file_hint(file_hint: str | None, workspace: Path) -> tuple[bool, 
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Autonomous agent MVP-4 — LLM picks tools, sessions have working memory."
-        )
-    )
-    parser.add_argument(
-        "--ask",
-        help="One-shot question (no memory). Omit to enter the interactive REPL.",
-    )
-    parser.add_argument(
-        "--file",
-        help=(
-            "Optional file hint. The planner MAY call file_read with it. "
-            "Without this hint, file_read is never used."
-        ),
-    )
-    parser.add_argument(
-        "--workspace",
-        default=".",
-        help="Workspace root (default: current directory).",
-    )
-    parser.add_argument(
-        "--auto-approve",
-        choices=["off", "approve", "deny"],
-        default="off",
-        help=(
-            "Approval policy for escalated (irreversible / external) actions: "
-            "'off' (default) = interactive prompts in the REPL, deny in one-shot; "
-            "'approve' = auto-approve everything (use only in tests / scripts); "
-            "'deny' = auto-deny everything."
-        ),
-    )
-    parser.add_argument(
-        "--resume",
-        metavar="TRACE_ID",
-        default=None,
-        help=(
-            "Resume a previous run by trace ID. If the run completed synthesis, "
-            "the cached answer is printed immediately (no LLM call). "
-            "Budget-paused runs resume with saved phase/step context; "
-            "crash-partial runs are re-run from scratch."
-        ),
-    )
-    parser.add_argument(
-        "--reason",
-        default=None,
-        help=(
-            "Deep/Opus escalation reason (one-shot --ask only). Without it, a "
-            "deep request downgrades to the standard model — the agent never "
-            "opens Opus for itself. Valid: operator_explicitly_requested_opus, "
-            "planner_multi_file_architecture_change."
-        ),
-    )
-    parser.add_argument(
-        "--expect",
-        default=None,
-        help=(
-            "Expected deep output (used with --reason). Valid: minimal_patch_plan, "
-            "architecture_tradeoff, cross_file_synthesis, final_answer_high_stakes."
-        ),
-    )
-    args = parser.parse_args()
+    args = build_parser().parse_args()
 
     # Must run BEFORE any non-ASCII input flows through stdin / out.
     _force_utf8_io()
