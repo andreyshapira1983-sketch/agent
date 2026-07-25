@@ -79,10 +79,17 @@ def _help_tokens() -> set[str]:
 
 
 def _banner_tokens() -> set[str]:
-    """Tokens in the startup banner literal that `main()` prints to stderr."""
-    m = re.search(r'"Commands: (.*?)",\n', MAIN_SOURCE, re.S)
-    assert m, "startup banner literal not found in main.py"
-    return set(_STANDALONE.findall(m.group(1)))
+    """Tokens in the startup banner `main()` prints to stderr.
+
+    The banner used to be a string literal inside ``main.py``; Phase 2 moved it to
+    ``cli.help``, which renders it from this registry. The comparison against the
+    **live** banner output lives in
+    ``tests/characterization/test_command_surface_snapshot.py`` — that one drives
+    a real REPL run, so it still checks observable behaviour rather than data.
+    """
+    from cli.help import BANNER_TOKENS
+
+    return set(BANNER_TOKENS)
 
 
 def _help_usage() -> dict[str, str]:
