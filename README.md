@@ -66,3 +66,9 @@ Run the project's tests after making changes, and focus on the specific area aff
 When in doubt, keep this README limited to navigation, and update the
 authoritative document (doctrine, architecture, roadmap, or progress) that
 actually owns the decision.
+
+## License
+
+Proprietary — **All rights reserved.** This project is not open source. Use,
+copying, modification, and distribution require the copyright holder's prior
+written permission. See [`LICENSE`](LICENSE).
