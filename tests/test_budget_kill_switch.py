@@ -173,12 +173,12 @@ def test_daemon_skips_llm_work_when_day_budget_exhausted(tmp_path: Path, monkeyp
     queue = TaskQueueStore(workspace / "data" / "task_queue.jsonl")
     queue.add(goal="anything", dry_run=True, include_tests=False, limit=1)
 
-    import main
+    import app.bootstrap as bootstrap
 
     def _boom(*_a, **_k):  # pragma: no cover - must never run
         raise AssertionError("build_agent must not run when kill-switch active")
 
-    monkeypatch.setattr(main, "build_agent", _boom)
+    monkeypatch.setattr(bootstrap, "build_agent", _boom)
 
     exit_code = agent_tick.run_tick(workspace, dry_run=True)
     assert exit_code == 0

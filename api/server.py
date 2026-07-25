@@ -80,7 +80,7 @@ _WORKSPACE = Path(os.getenv("AGENT_WORKSPACE", ".")).resolve()
 
 def _build_server_agent():
     """Build an AgentLoop configured for server use (no interactive approvals)."""
-    from main import build_agent  # lazy to avoid top-level side effects
+    from app.bootstrap import build_agent  # lazy to avoid top-level side effects
     return build_agent(_WORKSPACE, with_memory=True, approval_provider=None)
 
 
