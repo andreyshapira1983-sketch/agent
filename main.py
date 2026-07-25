@@ -42,7 +42,6 @@ from dotenv import load_dotenv
 
 from app.io import _force_utf8_io
 from core.approval import ApprovalProvider, AutoApprover, CLIApprovalProvider
-from core.loop import format_human_response
 
 
 # Parsers and small text helpers live in cli/parsers.py; re-exported here so
@@ -94,6 +93,7 @@ from cli.repl import (
     _collect_instruction_buffer,
     _StdinLineReader,
     _stdin_is_interactive,
+    run_repl,
 )
 from cli.command_dispatch import handle_meta_command
 # Plain-language -> command routing lives in cli/intent_bridge.py; re-exported
@@ -299,151 +299,21 @@ def main() -> int:
         + render_startup_commands(),
         file=sys.stderr,
     )
-    while True:
-        try:
-            q = _reader.read_message("> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return 0
-        if not q:
-            # An empty Enter must NOT exit — otherwise pasting a long
-            # multi-line block whose first line is blank (or pressing
-            # Enter to clear the prompt) drops the user back into the
-            # parent shell, which then tries to interpret the rest of
-            # the paste as commands. Use :quit / :exit / Ctrl+C / EOF.
-            continue
-        # ── Multi-line input modes ────────────────────────────────────────────
-        # Mode 1: explicit block  <<<  … >>>
-        #   Start a line with <<< to enter block mode; finish with >>>
-        #   Useful when pasting text that contains newlines.
-        if q == "<<<":
-            block_parts: list[str] = []
-            print("(multi-line mode: paste text, finish with >>> on its own line)",
-                  file=sys.stderr)
-            while True:
-                try:
-                    bline = _reader.prompt_line("... ")
-                except (EOFError, KeyboardInterrupt):
-                    print()
-                    return 0
-                stripped = bline.strip()
-                if stripped == ">>>":
-                    break
-                # Tolerate the terminator glued to the end of a paste:
-                # "...last sentence.>>>" should also end the block, otherwise
-                # users get stuck in `... ` prompt forever after a single
-                # Ctrl+V whose buffer ended with ">>>" without a newline.
-                if stripped.endswith(">>>"):
-                    block_parts.append(bline.rstrip()[:-3].rstrip())
-                    break
-                block_parts.append(bline)
-            q = "\n".join(block_parts).strip()
-            if not q:
-                continue
-        # Mode 2: line continuation with trailing backslash
-        #   Each line ending in \ is joined with the next (backslash removed).
-        elif q.endswith("\\"):
-            continuation_parts: list[str] = [q[:-1]]
-            while True:
-                try:
-                    cline = _reader.prompt_line("... ")
-                except (EOFError, KeyboardInterrupt):
-                    print()
-                    return 0
-                if cline.endswith("\\"):
-                    continuation_parts.append(cline[:-1])
-                else:
-                    continuation_parts.append(cline)
-                    break
-            q = " ".join(p.strip() for p in continuation_parts if p.strip())
-        # ─────────────────────────────────────────────────────────────────────
-        if q == ":operator-task":
-            block_lines: list[str] = []
-            print("(operator task block started; finish with :end)", file=sys.stderr)
-            while True:
-                try:
-                    line = _reader.prompt_line("... ")
-                except (EOFError, KeyboardInterrupt):
-                    print()
-                    return 0
-                if line.strip().lower() == ":end":
-                    break
-                block_lines.append(line)
-            _handle_operator_task("\n".join(block_lines), agent, workspace)
-            continue
-        # ── CLI instruction buffer ────────────────────────────────────────────
-        # :task-begin … :task-end lets the operator compose a complex,
-        # multi-line instruction that is sent straight to the agent, bypassing
-        # the operator keyword router. This is the reliable way to give an
-        # instruction whose wording would otherwise be hijacked by a shortcut
-        # (e.g. text that merely *mentions* budget / approval / implementation).
-        # :task-abort discards the buffer.
-        if q == ":task-begin":
-            print(
-                "(instruction buffer started; finish with :task-end, "
-                "discard with :task-abort)",
-                file=sys.stderr,
-            )
-            try:
-                buffered, cancelled = _collect_instruction_buffer(
-                    lambda: _reader.prompt_line("... ")
-                )
-            except (EOFError, KeyboardInterrupt):
-                print()
-                return 0
-            if cancelled:
-                print("(instruction buffer cancelled)", file=sys.stderr)
-                continue
-            if not buffered:
-                print("(instruction buffer empty — nothing sent)", file=sys.stderr)
-                continue
-            if _handle_local_operator_reply(buffered, agent):
-                continue
-            rl = _rate_limiter.consume()
-            if not rl.allowed:
-                print(
-                    f"(rate limit: too many requests — "
-                    f"retry in {rl.retry_after_seconds:.1f}s, "
-                    f"tokens remaining: {rl.tokens_remaining:.2f})",
-                    file=sys.stderr,
-                )
-                continue
-            answer = _run_agent_with_budget_guard(
-                agent,
-                user_question=buffered,
-                file_hint=args.file,
-                workspace=workspace,
-                stream=False,
-            )
-            print("\n" + format_human_response(answer) + "\n")
-            continue
-        if q.startswith(":") or q == "?":
-            if handle_meta_command(q, agent, workspace):
-                continue
-            print(f"(unknown command: {q})", file=sys.stderr)
-            continue
-        if _handle_local_operator_reply(q, agent):
-            continue
-        if handle_conversational_operator_input(q, agent, workspace):
-            continue
-        # ── Rate-limit check ─────────────────────────────────────────────────
-        rl = _rate_limiter.consume()
-        if not rl.allowed:
-            print(
-                f"(rate limit: too many requests — "
-                f"retry in {rl.retry_after_seconds:.1f}s, "
-                f"tokens remaining: {rl.tokens_remaining:.2f})",
-                file=sys.stderr,
-            )
-            continue
-        answer = _run_agent_with_budget_guard(
-            agent,
-            user_question=q,
-            file_hint=args.file,
-            workspace=workspace,
-            stream=False,
-        )
-        print("\n" + format_human_response(answer) + "\n")
+    # The dialogue loop itself lives in cli/repl.py. Same seam as one-shot: the
+    # five collaborators are passed in so patches on `main` stay observable
+    # (docs/refactor/CLI_BASELINE.md §2.5).
+    return run_repl(
+        agent,
+        reader=_reader,
+        rate_limiter=_rate_limiter,
+        workspace=workspace,
+        file_hint=args.file,
+        handle_meta_command=handle_meta_command,
+        handle_local_operator_reply=_handle_local_operator_reply,
+        handle_conversational=handle_conversational_operator_input,
+        run_agent_with_budget_guard=_run_agent_with_budget_guard,
+        handle_operator_task=_handle_operator_task,
+    )
 
 
 if __name__ == "__main__":

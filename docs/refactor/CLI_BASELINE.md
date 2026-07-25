@@ -337,13 +337,15 @@ issue."* Phase gates are local-only until that is resolved.
 > | `:auto-status` | `app/runtime_cli.py` |
 > | `:assumptions` | `cli/commands_misc.py` |
 > | `_StdinLineReader`, `_coalesce_burst`, `_collect_instruction_buffer`, `_stdin_is_interactive`, `PASTE_COALESCE_GAP_SECONDS` | `cli/repl.py` |
+> | the dialogue loop: both multi-line input modes, `:operator-task`/`:end`, `:task-begin`/`:task-end`/`:task-abort`, dispatch, intent routing, rate-limit check, agent call | `cli/repl.py` (`run_repl`) |
 > | the `--resume` branch of `main()` + `_resume_question_from_checkpoint` | `cli/resume.py` (`resolve_resume` -> `ResumeDecision`) |
 > | the one-shot `--ask` run (provider choice, memory-free build, `:command` precedence, deep escalation) | `cli/one_shot.py` (`run_one_shot`) |
 >
-> Still in `main.py`: `main()` itself (argparse, startup ordering, mode selection,
-> the REPL loop) and `_preflight_file_hint` — plus the re-export block that keeps
-> `from main import …` working for 25 test modules, `agent_tick.py` and
-> `api/server.py`.
+> Still in `main.py`: `main()` itself — argparse, the two pre-dotenv fast paths,
+> startup ordering, mode selection, and the one-time REPL *wiring* (stdin reader,
+> approval provider, agent build, rate limiter, daemon notice, banner) — plus
+> `_preflight_file_hint` and the re-export block that keeps `from main import …`
+> working for 25 test modules, `agent_tick.py` and `api/server.py`.
 >
 > **The section 2.5 patch surface constrains how far a call site can move.** The
 > one-shot extraction proved it: importing `build_agent`, `handle_meta_command`,
@@ -354,7 +356,14 @@ issue."* Phase gates are local-only until that is resolved.
 > therefore takes those five as keyword parameters and `main()` passes its own
 > module-level bindings, so a patch on `main` is still observed. The parameters are
 > a compatibility seam, not a design preference: they come out in Phase 7 with the
-> re-export block.
+> re-export block. `run_repl` takes the same five (with `_handle_operator_task` in
+> place of `build_agent`, which stays in `main()`'s wiring) for the same reason.
+>
+> **One guard did have to follow the code**, and it is the kind section 3.1 warns
+> about: `test_command_surface_snapshot.py::_repl_control_tokens` found the REPL
+> block tokens by *text-scanning `main.py`* for `q == ":…"`. With the loop gone it
+> failed loudly (good), and now reads `cli/repl.py`; left pointing at `main.py` it
+> would have silently frozen an empty set.
 >
 > **Every behaviour recorded in sections 1 and 2 was verified unchanged after the
 > move**: 36 of the 38 functions that existed at `9daa9bf` are byte-identical
