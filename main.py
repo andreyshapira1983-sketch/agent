@@ -35,7 +35,6 @@ Usage examples:
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from pathlib import Path
@@ -87,6 +86,9 @@ from cli.commands_proposals import _handle_subagent_proposal
 from cli.commands_self_apply import _handle_self_apply_run
 # Paste-safe stdin ownership for the REPL lives in cli/repl.py; re-exported here
 # because main() drives the loop and several tests reach these through `main`.
+# --resume decision-making lives in cli/resume.py; the question builder is
+# re-exported because tests/test_budget_resume.py imports it through `main`.
+from cli.resume import _resume_question_from_checkpoint, resolve_resume
 from cli.repl import (
     PASTE_COALESCE_GAP_SECONDS,
     _coalesce_burst,
@@ -134,32 +136,6 @@ def _preflight_file_hint(file_hint: str | None, workspace: Path) -> tuple[bool, 
         "ERROR: file hint does not exist:\n"
         f"{path}\n\n"
         "No model calls were made.",
-    )
-
-
-def _resume_question_from_checkpoint(ctx) -> str:
-    paused = getattr(ctx, "paused", None) or {}
-    if not paused:
-        return ctx.question
-    original = str(paused.get("original_user_question") or ctx.question)
-    planned = paused.get("planned_steps") or []
-    completed = paused.get("completed_steps") or []
-    remaining = paused.get("remaining_steps") or []
-    blocked = paused.get("blocked_model") or {}
-    return "\n".join(
-        [
-            "Resume the interrupted task from this saved budget checkpoint.",
-            f"Original user question: {original}",
-            f"Active goal: {paused.get('active_goal') or original}",
-            f"Interrupted phase: {paused.get('current_phase') or ctx.last_phase}",
-            f"Stop reason: {paused.get('stop_reason') or 'budget_exhausted'}",
-            f"Blocked model/counter: {json.dumps(blocked, ensure_ascii=False)}",
-            f"Completed steps: {json.dumps(completed, ensure_ascii=False)}",
-            f"Remaining steps: {json.dumps(remaining, ensure_ascii=False)}",
-            f"Planned steps: {json.dumps(planned, ensure_ascii=False)}",
-            "Continue from the remaining steps when they are still relevant. "
-            "Do not repeat completed discovery unless it must be refreshed.",
-        ]
     )
 
 
@@ -244,60 +220,16 @@ def main() -> int:
     # §3.5 Resume: if --resume is given, look up the checkpoint file and
     # short-circuit before building the full agent stack when possible.
     if args.resume:
-        import re as _re
-        # Mirror the allowlist that CheckpointWriter uses: alphanumerics plus
-        # hyphens and underscores only.  Reject anything with slashes, dots,
-        # or other characters that could produce a path-traversal when the
-        # loader constructs its file path (core/checkpoint.py:166).
-        _SAFE_TRACE_RE = _re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$')
-        if not _SAFE_TRACE_RE.match(args.resume):
-            print(
-                f"[resume] Invalid trace_id {args.resume!r}: "
-                "only letters, digits, hyphens and underscores are allowed.",
-                file=sys.stderr,
-            )
-            return 2
-        from core.checkpoint import CheckpointLoader as _CPLoader, PHASE_PAUSED as _PHASE_PAUSED
-        _log_dir = workspace / "logs"
-        _loader = _CPLoader(_log_dir)
-        _ctx = _loader.load(args.resume)
-        if _ctx is None:
-            print(
-                f"[resume] No usable checkpoint found for trace_id={args.resume!r}. "
-                "Running fresh.",
-                file=sys.stderr,
-            )
-        elif _ctx.last_phase == _PHASE_PAUSED and _ctx.paused:
-            print(
-                f"[resume] Resuming budget-paused checkpoint "
-                f"trace_id={args.resume!r} phase={_ctx.paused.get('current_phase')!r}.",
-                file=sys.stderr,
-            )
-            if not args.ask:
-                args.ask = _resume_question_from_checkpoint(_ctx)
-            if not args.file:
-                args.file = _ctx.file_hint
-        elif _ctx.answer is not None:
-            # Full cycle completed previously — replay the cached answer.
-            print(
-                f"[resume] Replaying cached answer for trace_id={args.resume!r} "
-                f"(phase={_ctx.last_phase}, artifacts={list(_ctx.artifacts)})",
-                file=sys.stderr,
-            )
-            print("\n" + format_human_response(_ctx.answer) + "\n")
-            return 0
-        else:
-            # Cycle did not complete — fall through to a normal run so the
-            # agent re-tries from scratch (safe default).
-            print(
-                f"[resume] Checkpoint found but synthesis incomplete "
-                f"(last_phase={_ctx.last_phase!r}). Re-running from scratch.",
-                file=sys.stderr,
-            )
-            if not args.ask:
-                args.ask = _ctx.question
-            if not args.file:
-                args.file = _ctx.file_hint
+        decision = resolve_resume(
+            args.resume,
+            workspace=workspace,
+            ask=args.ask,
+            file_hint=args.file,
+        )
+        if decision.exit_code is not None:
+            return decision.exit_code
+        args.ask = decision.ask
+        args.file = decision.file_hint
 
     file_hint_ok, file_hint_error = _preflight_file_hint(args.file, workspace)
     if not file_hint_ok:
