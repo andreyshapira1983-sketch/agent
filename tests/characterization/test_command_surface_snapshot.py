@@ -44,7 +44,9 @@ FROZEN = {
     "dispatched": 140,
     "pre_dotenv_fast_paths": 2,
     "repl_control_tokens": 4,
-    "help_tokens": 96,
+    # 96 at 9daa9bf; 98 after the two documented help gaps were closed
+    # (`:refresh-models` and `:help` itself were added to the page).
+    "help_tokens": 98,
     # 72 tokens are printed, but one of them (`:task-begin`) is a REPL block
     # token rather than a dispatched command — see the divergence tests below.
     "startup_tokens": 72,
@@ -186,13 +188,16 @@ def test_startup_banner_advertises_one_non_dispatched_token(tmp_path, monkeypatc
     assert len(startup_tokens & _dispatched()) == FROZEN["startup_dispatched_tokens"]
 
 
-def test_startup_banner_is_not_a_subset_of_the_help_page(tmp_path, monkeypatch, capsys):
-    """Recorded: the banner advertises `:help`, but the help page omits itself."""
+def test_startup_banner_is_now_a_subset_of_the_help_page(tmp_path, monkeypatch, capsys):
+    """At 9daa9bf the banner advertised `:help` while the help page omitted
+    itself, so the banner was *not* a subset. That gap is fixed: every token the
+    banner shows is now documented on the help page too."""
     help_tokens = _help_tokens(tmp_path, capsys)
     startup_tokens = _startup_tokens(tmp_path, monkeypatch, capsys)
-    assert not startup_tokens <= help_tokens
-    assert startup_tokens - help_tokens == {":help"}
+    assert startup_tokens - help_tokens == set()
+    assert startup_tokens <= help_tokens
     assert ":help" in _dispatched()
+    assert ":help" in help_tokens
 
 
 def test_commands_absent_from_the_startup_banner_are_counted(tmp_path, monkeypatch, capsys):
@@ -207,6 +212,8 @@ def test_commands_absent_from_the_help_page_are_aliases(tmp_path, capsys):
     """Recorded: `:help` omits many working aliases the dispatcher accepts."""
     missing = _dispatched() - _help_tokens(tmp_path, capsys)
     assert {":memory-status", ":reset", ":kill-switch", ":assumption-log"} <= missing
+    # 48 at 9daa9bf; 46 after `:refresh-models` and `:help` were added to the page.
+    assert len(missing) == 46
 
 
 def test_question_mark_is_a_help_alias_outside_the_colon_namespace():

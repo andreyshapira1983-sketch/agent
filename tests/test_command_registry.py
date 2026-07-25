@@ -312,10 +312,16 @@ def test_in_startup_summary_matches_the_banner():
         )
 
 
-def test_recorded_divergences_between_help_and_banner():
-    """The known gaps from CLI_BASELINE.md section 3.1, now expressed as data."""
-    not_in_help = sorted(spec.canonical for spec in reg.COMMANDS if not spec.in_help)
-    assert not_in_help == [":help", ":refresh-models"]
+def test_the_help_page_lists_every_command():
+    """Regression guard for the two gaps CLI_BASELINE.md 3.1 recorded and this
+    branch fixed: ``:refresh-models`` was dispatched but absent from ``:help``
+    entirely, and ``:help`` did not list itself. Every command is now listed."""
+    missing = sorted(spec.canonical for spec in reg.COMMANDS if not spec.in_help)
+    assert missing == [], f"these commands are dispatched but undocumented in :help: {missing}"
+
+
+def test_recorded_surface_sizes():
+    """The banner is still deliberately a subset -- only the help gap was fixed."""
     in_banner = sum(1 for spec in reg.COMMANDS if spec.in_startup_summary)
     assert in_banner == 71
     assert len(reg.COMMANDS) == 91
