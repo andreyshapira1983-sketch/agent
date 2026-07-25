@@ -25,6 +25,7 @@ question, which single file is authoritative.
 | I want to know… | Open | Authoritative for | **Not** authoritative for |
 |---|---|---|---|
 | What capabilities exist, and in what order they were built | [ROADMAP.md](ROADMAP.md) | intended order + per-track IMPLEMENTED/PARTIAL/PLANNED | defect status; per-PR daemon state |
+| Project Intelligence package status (standalone vs wired) | [ROADMAP.md](ROADMAP.md) (Track H) | whether the package exists and is integrated | scan/extractor/API/UI design details |
 | Which module does what | [AGENT_ANATOMY.md](AGENT_ANATOMY.md) | the `core/` module index (script-guarded) | whether a module is *wired* into a live path |
 | Which operator commands exist | [COMMANDS_MAP.md](COMMANDS_MAP.md) | the `:command` surface + NL-routing parity | anything `main.py` added after this file's last sync |
 | What the agent may do on its own vs. needs a human | [CENTRAL_AGENT_GOVERNANCE.md](CENTRAL_AGENT_GOVERNANCE.md) | the authority contract (Policy Gate, modes, approval, budget, human-reserved rights) | sub-agent specifics (→ next row) |
@@ -36,6 +37,7 @@ question, which single file is authoritative.
 | **Where the cognitive-memory work stands right now**, and the architectural thesis behind it | [audit/PROVIDER_AUDIT_CHECKPOINT.md](audit/PROVIDER_AUDIT_CHECKPOINT.md) | session state: what is decided, what is open, what was deliberately not done, and the discipline record of withdrawn claims. **Filename is historical** — it began as a provider-audit checkpoint | issue status; measured provider facts; the target design |
 | What the provider/model layer can and cannot express (structured outputs, routing, streaming, refusal, truncation) | [audit/PROVIDER_STRUCTURED_OUTPUT_AUDIT.md](audit/PROVIDER_STRUCTURED_OUTPUT_AUDIT.md) | the measured provider-layer audit + its labeled dated addendum §A1–A9 on architectural placement | whether any model actually supports strict JSON Schema — **undetermined, no probe was run** |
 | Daemon build state, item by item | [daemon-progress.md](daemon-progress.md) | per-sub-item implementation/PR/hotfix/acceptance | anything outside the daemon plan |
+| What process Docker/Compose actually runs | [DOCKER.md](DOCKER.md) | production supervisor process | async `app/daemon.py` composition (→ daemon-progress) |
 | Problem *classes* already fixed, and how to run the next audit | [self-audit-lessons.md](self-audit-lessons.md) | the 6 recurring anti-patterns + audit procedure. **History of regressions — never delete** | current defect status |
 | How each document was classified, and where docs drifted from code | [audit/DOCUMENT_INVENTORY.md](audit/DOCUMENT_INVENTORY.md) | per-document classification as of Stage 1 | current code facts |
 | Failure classes seen in *someone else's* system, as a checklist | [OPERATIONAL_FAILURE_MODES.md](OPERATIONAL_FAILURE_MODES.md) | the external OFM taxonomy — **no number in it measures this repo** | our defect status (see §4) |

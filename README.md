@@ -16,6 +16,22 @@ Read these in priority order; a higher entry overrides a lower one:
    sub-items are merged, in review, or not started).
 5. **`README.md`** (this file) — entry point and brief navigation only.
 
+## What actually runs on `main`
+
+| Path | Entry | Role |
+| ---- | ----- | ---- |
+| Interactive / one-shot | `python main.py` or `python main.py --ask "..."` | Primary human-operated agent (REPL or single question). |
+| Unattended tick | `python agent_tick.py --workspace <dir>` | Bounded one-shot autonomous cycle (production unattended path). |
+| Docker long-lived | `docker compose up` → `docker/daemon_loop.py` | Process supervisor that **repeatedly runs `agent_tick.py`**. Not `app.daemon.DaemonLoop`. |
+| Optional HTTP API | `uvicorn api.server:app` | FastAPI `/ask`, `/health`, `/usage` (requires `AGENT_API_TOKEN`). |
+
+**Not production-composed:** `app/daemon.py` (`DaemonLoop`) and related async
+building blocks (`WorkerPool`, `FileWatcher`, priority queue, etc.) exist and
+are tested, but are **not** the process Compose or `agent_tick` starts. See
+`docs/daemon-progress.md` and `docs/DOCKER.md`.
+
+Routing map for documents: [`docs/INDEX.md`](docs/INDEX.md).
+
 ## Purpose
 
 The goal of this project is to provide a clear, maintainable foundation with a small, low-risk surface area for change.

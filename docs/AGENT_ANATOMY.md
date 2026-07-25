@@ -1,10 +1,15 @@
 # Agent Anatomy
 
-Grouped module index for the `core/` package, organized by the
+Grouped module index for the **`core/`** package only, organized by the
 architecture sections (§1–§12). Modules physically live flat in `core/`
 — their paths are used as semantic identifiers elsewhere (planner
 self-build targets, locators, audits), so this map groups them
 *logically* without moving files.
+
+**Scope limit:** this file is **not** a full system map. It does **not**
+catalog `app/`, `api/`, `docker/`, `cli/`, `tools/`, or
+`project_intelligence/`. For entry points and wiring, see `README.md`,
+`docs/ROADMAP.md`, and `docs/daemon-progress.md`.
 
 Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
