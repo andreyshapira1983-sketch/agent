@@ -33,6 +33,10 @@ import main as main_module
 
 REPO_ROOT = Path(main_module.__file__).resolve().parent
 MAIN_SOURCE = (REPO_ROOT / "main.py").read_text(encoding="utf-8")
+# The `head` dispatch chain moved to cli/command_dispatch.py (Phase 3); the
+# pre-load_dotenv() fast paths, the REPL block tokens and the intent bridge are
+# still in main.py, so both sources are read here.
+DISPATCH_SOURCE = (REPO_ROOT / "cli" / "command_dispatch.py").read_text(encoding="utf-8")
 
 # Captured before any monkeypatch replaces the attribute (see the reader factory
 # in _startup_tokens, which must build the real class, not its own stand-in).
@@ -64,7 +68,7 @@ def _dispatched() -> set[str]:
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.dispatched_commands(MAIN_SOURCE)
+    return mod.dispatched_commands(DISPATCH_SOURCE)
 
 
 def _pre_dotenv_fast_paths() -> set[str]:
@@ -217,8 +221,8 @@ def test_commands_absent_from_the_help_page_are_aliases(tmp_path, capsys):
 
 
 def test_question_mark_is_a_help_alias_outside_the_colon_namespace():
-    assert 'head in {":help", "?"}' in MAIN_SOURCE
-    assert '":help", "?"' in MAIN_SOURCE
+    assert 'head in {":help", "?"}' in DISPATCH_SOURCE
+    assert '":help", "?"' in DISPATCH_SOURCE
     # `?` cannot appear in any `:token` set, so a registry must model it apart.
     assert "?" not in _dispatched()
 
