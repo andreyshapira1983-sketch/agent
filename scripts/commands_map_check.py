@@ -46,7 +46,6 @@ import sys
 from typing import List, Set
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_MAIN = os.path.join(_ROOT, "main.py")
 _MAP = os.path.join(_ROOT, "docs", "COMMANDS_MAP.md")
 
 if _ROOT not in sys.path:  # allow `python scripts/commands_map_check.py`
