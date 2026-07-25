@@ -28,7 +28,7 @@ from core.smart_memory import (
 )
 from core.source_registry_store import SourceRegistryStore
 from core.user_profile import UserProfileStore
-from main import handle_meta_command
+from cli.command_dispatch import handle_meta_command
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool

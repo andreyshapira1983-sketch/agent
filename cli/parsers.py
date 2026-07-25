@@ -2,7 +2,8 @@
 
 These are pure, dependency-light functions split out of ``main.py`` to keep
 the entry point focused on the REPL loop and command dispatch. ``main.py``
-re-exports every name below, so ``from main import _parse_remember`` (and the
+used to re-export every name below; Phase 7 removed that block, so import them
+from here. (Historical note: ``from main import _parse_remember`` and the
 rest) keep working exactly as before.
 """
 from __future__ import annotations

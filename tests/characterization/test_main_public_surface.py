@@ -1,95 +1,72 @@
-"""C12 — the `main` module's importable/monkeypatchable surface.
+"""C12 — what `main` is allowed to be: a launcher, and nothing else.
 
-`main` is not only a script: production code and tests import names *from it*.
-`agent_tick.py` and `api/server.py` do `from main import build_agent` at call
-time, and several suites patch attributes by name on the module object
-(`monkeypatch.setattr(main, "build_agent", …)`). Those bindings resolve against
-`main`'s namespace, so an extraction that moves `main()` elsewhere silently turns
-such patches into no-ops unless the re-exports stay.
+This module used to pin a compatibility *inventory*. At `9daa9bf`, `main` was an
+import surface as much as a script: `agent_tick.py` and `api/server.py` did
+`from main import build_agent` at call time, and 24 test modules imported 27
+more names from it, so every extraction step had to keep re-exporting them or
+silently break a caller.
 
-`main.py` already documents this compatibility contract for the `cli.parsers`
-helpers (main.py:68-80, cli/__init__.py:4-5). This module pins the whole surface
-so Phase 7's "remove compatibility re-exports" step has an inventory to audit
-against.
+Phase 7 retired that surface. The runtime imports `build_agent` from
+`app.bootstrap`, the suites import each helper from the module that defines it,
+and `main.py` is down to a docstring, `return run_cli()` and the `SystemExit`
+tail. What this module pins now is that it stays that way — the inventory is
+gone because there is nothing left to inventory.
+
+The companion guard is `test_main_patch_seams.py`, which fails if any test tries
+to fake something on `main` (or on `cli.app`) where the call site would not see
+it.
 """
 from __future__ import annotations
 
+import ast
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 import app.bootstrap as bootstrap_module
-import cli.parsers as parsers_module
 import cli.app as app_module
 import cli.command_dispatch as dispatch_module
 import main as main_module
 
 REPO_ROOT = Path(main_module.__file__).resolve().parent
 
-# Re-exported from cli/parsers.py for backwards compatibility (main.py:70-80).
-PARSER_REEXPORTS = (
-    "_compact_one_line",
-    "_env_bool",
-    "_parse_ingest_options",
-    "_parse_remember",
-    "_parse_repair_generation_args",
-    "_parse_source_planning_args",
-    "_resolve_workspace_text_file",
-    "_split_meta_args",
-    "_truncate_text",
-)
 
-# Names other modules or test suites reach for on `main` today.
-IMPORTED_ELSEWHERE = (
-    "main",
-    "build_agent",
-    "load_dotenv",
-    "handle_meta_command",
-    "handle_conversational_operator_input",
-    "_dispatch_operator_intent",
-    "_handle_local_operator_reply",
-    "_local_operator_reply",
-    "_run_agent_with_budget_guard",
-    "_resume_question_from_checkpoint",
-    "_preflight_file_hint",
-    "_collect_instruction_buffer",
-    "_coalesce_burst",
-    "_StdinLineReader",
-    "_force_utf8_io",
-    "PASTE_COALESCE_GAP_SECONDS",
-    "CLIApprovalProvider",
-    "_print_daemon_inbox_notice",
-    "_handle_operator_task",
-    "_handle_self_build_propose",
-    "_schedule_disable_message",
-)
+def test_main_imports_nothing_but_the_cli_entry_point():
+    """No re-export block may grow back."""
+    tree = ast.parse((REPO_ROOT / "main.py").read_text(encoding="utf-8"))
+    imports = {
+        f"{node.module}.{alias.name}"
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+    }
+    assert imports == {"__future__.annotations", "cli.app.run_cli"}, sorted(imports)
+    assert not [node for node in tree.body if isinstance(node, ast.Import)]
 
 
-@pytest.mark.parametrize("name", PARSER_REEXPORTS)
-def test_parser_reexport_is_the_same_object_as_in_cli_parsers(name):
-    assert hasattr(main_module, name), f"main lost the {name} re-export"
-    assert getattr(main_module, name) is getattr(parsers_module, name)
+def test_main_defines_only_the_launcher():
+    tree = ast.parse((REPO_ROOT / "main.py").read_text(encoding="utf-8"))
+    defined = [
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    ]
+    assert defined == ["main"]
 
 
-@pytest.mark.parametrize("name", IMPORTED_ELSEWHERE)
-def test_name_is_present_on_the_main_module(name):
-    assert hasattr(main_module, name), f"main.{name} is imported elsewhere and must exist"
-
-
-def test_build_agent_is_a_reexport_of_app_bootstrap():
-    """`main` does not define agent construction — it re-exports it."""
-    assert main_module.build_agent is bootstrap_module.build_agent
+def test_launcher_raises_system_exit_with_the_return_value():
+    tail = (REPO_ROOT / "main.py").read_text(encoding="utf-8").rstrip().splitlines()[-2:]
+    assert tail[0].strip() == 'if __name__ == "__main__":'
+    assert tail[1].strip() == "raise SystemExit(main())"
 
 
 def test_no_production_module_imports_from_main():
-    """The runtime no longer goes through `main` at all.
+    """The runtime does not go through `main` at all.
 
     `agent_tick.py` and `api/server.py` used to do `from main import build_agent`
-    lazily; they now import it from its home, `app.bootstrap`. Nothing outside
-    `tests/` may reach into `main` again — that is what makes the re-export block
-    removable.
+    lazily; they import it from its home now. Nothing outside `tests/` may reach
+    into `main` again — that is what made the re-export block removable, and this
+    is what keeps it removed.
     """
     for rel in ("agent_tick.py", "api/server.py"):
         source = (REPO_ROOT / rel).read_text(encoding="utf-8")
@@ -97,13 +74,13 @@ def test_no_production_module_imports_from_main():
         assert "from app.bootstrap import build_agent" in source, rel
 
 
-def test_lazy_callers_are_faked_on_app_bootstrap_now(monkeypatch):
-    """Where a `build_agent` fake belongs after the runtime was rewired.
+def test_lazy_callers_are_faked_on_app_bootstrap(monkeypatch):
+    """Where a `build_agent` fake belongs.
 
     `agent_tick.run_tick` and `api.server._build_server_agent` import it inside a
-    function, so the binding is read off `app.bootstrap` at call time — that is
-    the target `tests/test_autonomous_runtime.py` and `tests/test_budget_kill
-    _switch.py` now patch. A fake on `main` would sit there unused.
+    function, so the binding is read off `app.bootstrap` at call time — the
+    target `tests/test_autonomous_runtime.py` and `tests/test_budget_kill_switch.py`
+    patch. A fake on `main` would sit there unused.
     """
     sentinel = SimpleNamespace(log=SimpleNamespace(log=lambda *a, **k: None))
     monkeypatch.setattr(bootstrap_module, "build_agent", lambda *a, **k: sentinel)
@@ -116,8 +93,8 @@ def test_lazy_callers_are_faked_on_app_bootstrap_now(monkeypatch):
     assert lazy_caller() is sentinel
 
 
-def test_dotenv_is_loaded_through_cli_app_not_through_main(tmp_path, monkeypatch):
-    """Where the fake has to go now: `main` re-exports `load_dotenv`, `cli.app` calls it."""
+def test_dotenv_is_loaded_through_cli_app(tmp_path, monkeypatch):
+    """`cli.app` performs the startup sequence, so the fakes go there."""
     calls: list[int] = []
     monkeypatch.setattr(app_module, "load_dotenv", lambda *a, **k: calls.append(1))
     monkeypatch.setattr(
@@ -130,18 +107,6 @@ def test_dotenv_is_loaded_through_cli_app_not_through_main(tmp_path, monkeypatch
 
     assert main_module.main() == 0
     assert calls == [1]
-
-
-def test_monkeypatching_dispatch_operator_intent_by_name_is_observed(tmp_path, monkeypatch):
-    """`main` re-exports the symbol and the re-export stays rebindable.
-
-    This asserts the *surface*, not interception: since the bridge moved to
-    `cli/intent_bridge.py`, `main` no longer calls it, and
-    tests/test_intent_bridge.py:42 correctly patches `cli.intent_bridge`
-    instead. test_main_patch_seams.py exempts this module for that reason.
-    """
-    monkeypatch.setattr(main_module, "_dispatch_operator_intent", lambda *a, **k: True)
-    assert main_module._dispatch_operator_intent(None, None, tmp_path) is True
 
 
 def test_main_is_callable_and_returns_an_int(tmp_path, monkeypatch):
@@ -157,16 +122,3 @@ def test_main_is_callable_and_returns_an_int(tmp_path, monkeypatch):
     result = main_module.main()
     assert isinstance(result, int)
     assert result == 0
-
-
-def test_launcher_raises_system_exit_with_the_return_value():
-    """The module tail is already the thin-launcher shape."""
-    tail = (REPO_ROOT / "main.py").read_text(encoding="utf-8").rstrip().splitlines()[-2:]
-    assert tail[0].strip() == 'if __name__ == "__main__":'
-    assert tail[1].strip() == "raise SystemExit(main())"
-
-
-def test_force_utf8_io_is_reexported_from_app_io():
-    import app.io as io_module
-
-    assert main_module._force_utf8_io is io_module._force_utf8_io

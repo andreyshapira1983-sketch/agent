@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 import cli.commands_health as health
-from main import handle_meta_command
+from cli.command_dispatch import handle_meta_command
 
 
 def _write_json(path: Path, payload: dict) -> None:

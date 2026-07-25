@@ -29,6 +29,8 @@ from types import SimpleNamespace
 
 import pytest
 
+import cli.command_dispatch as dispatch_module
+import cli.repl as repl_module
 import cli.app as app_module
 import main as main_module
 
@@ -43,7 +45,7 @@ BRIDGE_SOURCE = (REPO_ROOT / "cli" / "intent_bridge.py").read_text(encoding="utf
 
 # Captured before any monkeypatch replaces the attribute (see the reader factory
 # in _startup_tokens, which must build the real class, not its own stand-in).
-_REAL_STDIN_READER = main_module._StdinLineReader
+_REAL_STDIN_READER = repl_module._StdinLineReader
 
 # Frozen snapshot at 9daa9bf. A diff here means a surface moved — update this
 # table together with docs/refactor/CLI_BASELINE.md.
@@ -107,7 +109,7 @@ def _nl_intent_kinds() -> set[str]:
 
 def _help_tokens(tmp_path: Path, capsys) -> set[str]:
     """Tokens the live `:help` page prints (it needs no agent state)."""
-    assert main_module.handle_meta_command(":help", SimpleNamespace(), tmp_path) is True
+    assert dispatch_module.handle_meta_command(":help", SimpleNamespace(), tmp_path) is True
     return set(_STANDALONE_TOKEN.findall(capsys.readouterr().err))
 
 
@@ -236,7 +238,7 @@ def test_question_mark_is_a_help_alias_outside_the_colon_namespace():
 
 def test_help_page_carries_non_command_prose(tmp_path, capsys):
     """Headings, the `empty line` note and shortcut prose are not commands."""
-    assert main_module.handle_meta_command(":help", SimpleNamespace(), tmp_path) is True
+    assert dispatch_module.handle_meta_command(":help", SimpleNamespace(), tmp_path) is True
     text = capsys.readouterr().err
     assert "Commands:" in text
     assert "Conversational shortcuts:" in text

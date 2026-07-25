@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import cli.repl as repl_module
 import cli.app as app_module
 import app.budget_guard as budget_guard_module
 import cli.command_dispatch as dispatch_module
@@ -26,7 +27,7 @@ from core.checkpoint import CheckpointWriter
 from core.loop import format_human_response
 
 
-_REAL_STDIN_READER = main_module._StdinLineReader
+_REAL_STDIN_READER = repl_module._StdinLineReader
 
 
 def _fake_agent() -> SimpleNamespace:
@@ -115,7 +116,7 @@ def test_unknown_one_shot_command_message_is_stderr_and_returns_zero(
 
 def test_help_page_is_written_to_stderr(tmp_path, capsys):
     """`:help` needs no agent state — it only prints."""
-    assert main_module.handle_meta_command(":help", SimpleNamespace(), tmp_path) is True
+    assert dispatch_module.handle_meta_command(":help", SimpleNamespace(), tmp_path) is True
 
     out = capsys.readouterr()
     assert out.out == ""

@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import cli.repl as repl_module
 import cli.app as app_module
 import app.budget_guard as budget_guard_module
 import cli.intent_bridge as bridge_module
@@ -25,7 +26,7 @@ REPO_ROOT = Path(main_module.__file__).resolve().parent
 
 # Captured before any monkeypatch replaces the attribute, so the scripted reader
 # below instantiates the real class instead of recursing into its own stand-in.
-_REAL_STDIN_READER = main_module._StdinLineReader
+_REAL_STDIN_READER = repl_module._StdinLineReader
 
 
 def _fake_agent() -> SimpleNamespace:

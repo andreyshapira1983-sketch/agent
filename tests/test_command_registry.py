@@ -26,6 +26,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import cli.command_dispatch as dispatch_module
 import main as main_module
 from cli import command_registry as reg
 
@@ -81,7 +82,7 @@ def _pre_dotenv_tokens() -> set[str]:
 def _help_tokens() -> set[str]:
     buf = io.StringIO()
     with redirect_stderr(buf), redirect_stdout(io.StringIO()):
-        assert main_module.handle_meta_command(":help", SimpleNamespace(), REPO_ROOT) is True
+        assert dispatch_module.handle_meta_command(":help", SimpleNamespace(), REPO_ROOT) is True
     return set(_STANDALONE.findall(buf.getvalue()))
 
 
@@ -103,7 +104,7 @@ def _help_usage() -> dict[str, str]:
     """token -> the sketch printed between the token(s) and the description."""
     buf = io.StringIO()
     with redirect_stderr(buf), redirect_stdout(io.StringIO()):
-        main_module.handle_meta_command(":help", SimpleNamespace(), REPO_ROOT)
+        dispatch_module.handle_meta_command(":help", SimpleNamespace(), REPO_ROOT)
     sketches: dict[str, str] = {}
     for line in buf.getvalue().splitlines():
         m = re.match(r"^  (" + _CMD + r")([^\n]*)$", line)

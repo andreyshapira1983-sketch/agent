@@ -41,7 +41,7 @@ def test_capability_router_stays_narrow():
 # --- 2. content: live runtime facts --------------------------------------
 
 def test_runtime_capability_facts_lists_live_tools():
-    from main import _runtime_capability_facts
+    from app.operator_status import _runtime_capability_facts
 
     fake_agent = SimpleNamespace(
         registry=SimpleNamespace(
