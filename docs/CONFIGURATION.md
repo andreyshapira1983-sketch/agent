@@ -114,9 +114,12 @@ survive image rebuilds and container replacement.
 | `source_registry.jsonl` | Ingested sources + extracted claims. |
 | `daemon_heartbeat.json` | Last-tick heartbeat the Docker healthcheck reads. |
 
-`data/` also holds runtime queues, approvals and budget-window state. The live
-`*.jsonl` payloads are git-ignored (runtime data); the `.lock` markers are
-tracked so the directory shape is versioned.
+`data/` also holds runtime queues, approvals and budget-window state. **The whole
+directory is git-ignored** (`.gitignore` line 25 lists `data/`), so nothing in it
+— neither the `*.jsonl` payloads nor the `.lock` markers — is under version
+control; `git ls-files data/` returns nothing. A fresh checkout therefore starts
+with no agent memory at all, and any `.lock` file you see was created by a local
+run opening that store, not restored by git.
 
 **Recovery:** JSONL stores are quarantine/recover-safe — prove it on an isolated
 copy with `:state-store-drill` before trusting a repair. Inspect memory with
