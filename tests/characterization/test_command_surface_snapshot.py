@@ -83,8 +83,11 @@ def _pre_dotenv_fast_paths() -> set[str]:
 
 def _repl_control_tokens() -> set[str]:
     """Block/buffer tokens the REPL intercepts itself (never head-dispatched)."""
+    # the loop itself is still in main(); the instruction-buffer collector that
+    # matches :task-end / :task-abort moved to cli/repl.py with the stdin reader.
+    repl_source = (REPO_ROOT / "cli" / "repl.py").read_text(encoding="utf-8")
     tokens = set(re.findall(r'q\s*==\s*"(:[a-z0-9-]+)"', MAIN_SOURCE))
-    tokens |= set(re.findall(r'marker\s*==\s*"(:[a-z0-9-]+)"', MAIN_SOURCE))
+    tokens |= set(re.findall(r'marker\s*==\s*"(:[a-z0-9-]+)"', repl_source))
     tokens |= set(re.findall(r'\.lower\(\)\s*==\s*"(:end)"', MAIN_SOURCE))
     return tokens
 
