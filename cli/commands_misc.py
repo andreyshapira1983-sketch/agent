@@ -452,3 +452,38 @@ def _handle_team_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     else:
         print(report.user_summary(), file=sys.stderr)
     return True
+
+
+# -- :assumptions -------------------------------------------------------------
+# Shows the most recent assumptions the planner logged (Layer 5), extracted
+# verbatim from main.py. Read-only.
+
+
+def _handle_assumptions(rest: str, agent: AgentLoop) -> bool:  # Layer 5
+    """Show the most-recent assumptions logged by the Assumption Registry."""
+    use_json = "--json" in rest
+    store = getattr(agent, "assumption_store", None)
+    if store is None:
+        print("(assumption store not enabled in this session)", file=sys.stderr)
+        return True
+    try:
+        recent = store.load_recent(20)
+    except Exception as exc:
+        print(f"(assumption store error: {exc})", file=sys.stderr)
+        return True
+    if not recent:
+        print("(no assumptions recorded yet)", file=sys.stderr)
+        return True
+    if use_json:
+        print(json.dumps([a.to_dict() for a in recent], ensure_ascii=False, indent=2))
+        return True
+    current_run = getattr(getattr(agent, "log", None), "trace_id", None)
+    for a in recent:
+        run_tag = " [current]" if a.run_id == current_run else f" [run …{a.run_id[-8:]}]"
+        verified_tag = " ✓" if a.verified is True else (" ✗" if a.verified is False else "")
+        conf = int(a.confidence * 100)
+        print(
+            f"  [{a.category}] {a.text} ({conf}%){verified_tag}{run_tag}",
+            file=sys.stderr,
+        )
+    return True
