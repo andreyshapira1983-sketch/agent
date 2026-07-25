@@ -5,12 +5,9 @@ how to report a vulnerability and the security controls the project relies on.
 
 ## Reporting a vulnerability
 
-**Do not open a public issue for a security problem.** Report it privately:
-
-- Use GitHub's **private vulnerability reporting** for this repository, or
-- Contact the repository owner directly.
-
-> Maintainers: set a dedicated security contact address here.
+**Do not open a public issue for a security problem.** Report it privately
+through GitHub's **private vulnerability reporting** for this repository (open
+the repository's **Security** tab → **Report a vulnerability**).
 
 Please include a description, affected paths/versions, and reproduction steps.
 
