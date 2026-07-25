@@ -17,6 +17,9 @@ from types import SimpleNamespace
 
 import pytest
 
+import app.budget_guard as budget_guard_module
+import app.operator_task as operator_task_module
+import cli.intent_bridge as bridge_module
 import main as main_module
 
 
@@ -44,14 +47,14 @@ def _run_repl(monkeypatch: pytest.MonkeyPatch, tmp_path, lines: list[str]) -> li
     monkeypatch.setattr(main_module, "load_dotenv", lambda *a, **k: None)
     monkeypatch.setattr(main_module, "build_agent", lambda *a, **k: _fake_agent())
     monkeypatch.setattr(main_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
-    monkeypatch.setattr(main_module, "_handle_local_operator_reply", lambda *a, **k: False)
-    monkeypatch.setattr(main_module, "handle_conversational_operator_input", lambda *a, **k: False)
+    monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda *a, **k: False)
+    monkeypatch.setattr(bridge_module, "handle_conversational_operator_input", lambda *a, **k: False)
 
     def fake_run(agent, **kwargs):
         runs.append(kwargs)
         return "ANSWER"
 
-    monkeypatch.setattr(main_module, "_run_agent_with_budget_guard", fake_run)
+    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", fake_run)
     monkeypatch.setattr(main_module, "_StdinLineReader", lambda **k: _scripted_reader(lines))
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
     assert main_module.main() == 0
@@ -136,14 +139,11 @@ def test_instruction_buffer_bypasses_the_keyword_router(tmp_path, monkeypatch):
     monkeypatch.setattr(main_module, "load_dotenv", lambda *a, **k: None)
     monkeypatch.setattr(main_module, "build_agent", lambda *a, **k: _fake_agent())
     monkeypatch.setattr(main_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
-    monkeypatch.setattr(main_module, "_handle_local_operator_reply", lambda *a, **k: False)
-    monkeypatch.setattr(
-        main_module,
-        "handle_conversational_operator_input",
+    monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda *a, **k: False)
+    monkeypatch.setattr(bridge_module, "handle_conversational_operator_input",
         lambda *a, **k: pytest.fail("instruction buffer must bypass the intent router"),
     )
-    monkeypatch.setattr(
-        main_module, "_run_agent_with_budget_guard", lambda agent, **kw: runs.append(kw) or "A"
+    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", lambda agent, **kw: runs.append(kw) or "A"
     )
     monkeypatch.setattr(
         main_module,
@@ -169,14 +169,10 @@ def test_operator_task_block_ends_on_end_and_calls_its_handler(tmp_path, monkeyp
     monkeypatch.setattr(main_module, "load_dotenv", lambda *a, **k: None)
     monkeypatch.setattr(main_module, "build_agent", lambda *a, **k: _fake_agent())
     monkeypatch.setattr(main_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
-    monkeypatch.setattr(
-        main_module,
-        "_handle_operator_task",
+    monkeypatch.setattr(operator_task_module, "_handle_operator_task",
         lambda text, agent, workspace: seen.append(text) or True,
     )
-    monkeypatch.setattr(
-        main_module,
-        "_run_agent_with_budget_guard",
+    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard",
         lambda *a, **k: pytest.fail("operator-task block must not run the agent loop"),
     )
     monkeypatch.setattr(
@@ -205,9 +201,9 @@ def test_repl_creates_exactly_one_reader(tmp_path, monkeypatch):
     monkeypatch.setattr(main_module, "load_dotenv", lambda *a, **k: None)
     monkeypatch.setattr(main_module, "build_agent", lambda *a, **k: _fake_agent())
     monkeypatch.setattr(main_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
-    monkeypatch.setattr(main_module, "_handle_local_operator_reply", lambda *a, **k: False)
-    monkeypatch.setattr(main_module, "handle_conversational_operator_input", lambda *a, **k: False)
-    monkeypatch.setattr(main_module, "_run_agent_with_budget_guard", lambda *a, **k: "A")
+    monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda *a, **k: False)
+    monkeypatch.setattr(bridge_module, "handle_conversational_operator_input", lambda *a, **k: False)
+    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", lambda *a, **k: "A")
     monkeypatch.setattr(main_module, "_StdinLineReader", factory)
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
 

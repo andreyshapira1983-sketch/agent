@@ -15,6 +15,9 @@ from types import SimpleNamespace
 
 import pytest
 
+import app.budget_guard as budget_guard_module
+import cli.command_dispatch as dispatch_module
+import cli.intent_bridge as bridge_module
 import main as main_module
 
 
@@ -55,12 +58,10 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         calls.append(f"conversational:{text}")
         return True  # claim it, so no agent run is needed
 
-    monkeypatch.setattr(main_module, "handle_meta_command", fake_meta)
-    monkeypatch.setattr(main_module, "_handle_local_operator_reply", fake_local)
-    monkeypatch.setattr(main_module, "handle_conversational_operator_input", fake_conversational)
-    monkeypatch.setattr(
-        main_module,
-        "_run_agent_with_budget_guard",
+    monkeypatch.setattr(dispatch_module, "handle_meta_command", fake_meta)
+    monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", fake_local)
+    monkeypatch.setattr(bridge_module, "handle_conversational_operator_input", fake_conversational)
+    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard",
         lambda *a, **k: pytest.fail("no agent run expected on these paths"),
     )
     return calls
@@ -106,7 +107,7 @@ def test_one_shot_plain_text_reaches_the_intent_router(tmp_path, monkeypatch):
 
 def test_one_shot_local_reply_short_circuits_before_the_intent_router(tmp_path, monkeypatch):
     calls = _patch(monkeypatch)
-    monkeypatch.setattr(main_module, "_handle_local_operator_reply", lambda text, agent: True)
+    monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda text, agent: True)
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", "anything"])
 
     assert main_module.main() == 0
@@ -143,7 +144,7 @@ def test_repl_plain_text_reaches_the_intent_router(tmp_path, monkeypatch):
 
 def test_repl_unknown_command_reports_and_keeps_the_loop_alive(tmp_path, monkeypatch, capsys):
     calls = _patch(monkeypatch)
-    monkeypatch.setattr(main_module, "handle_meta_command", lambda *a, **k: False)
+    monkeypatch.setattr(dispatch_module, "handle_meta_command", lambda *a, **k: False)
     monkeypatch.setattr(
         main_module, "_StdinLineReader", lambda **k: _scripted_reader([":nope", ":also-nope"])
     )
@@ -161,12 +162,12 @@ def test_repl_quit_propagates_system_exit_zero(tmp_path, monkeypatch):
     """`:quit` raises SystemExit from inside the dispatcher rather than
     returning a value; extraction must keep that observable behavior."""
     _patch(monkeypatch)
-    monkeypatch.setattr(main_module, "handle_meta_command", main_module.handle_meta_command)
+    monkeypatch.setattr(dispatch_module, "handle_meta_command", main_module.handle_meta_command)
 
     def quitting_meta(cmd, agent, workspace):
         raise SystemExit(0)
 
-    monkeypatch.setattr(main_module, "handle_meta_command", quitting_meta)
+    monkeypatch.setattr(dispatch_module, "handle_meta_command", quitting_meta)
     monkeypatch.setattr(main_module, "_StdinLineReader", lambda **k: _scripted_reader([":quit"]))
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
 

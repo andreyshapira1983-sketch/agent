@@ -360,6 +360,15 @@ issue."* Phase gates are local-only until that is resolved.
 > re-export block. `run_repl` takes the same five (with `_handle_operator_task` in
 > place of `build_agent`, which stays in `main()`'s wiring) for the same reason.
 >
+> **Phase 7 step 2 retired most of that seam** (2026-07-26): `cli/one_shot.py` and
+> `cli/repl.py` now import `command_dispatch`, `intent_bridge`, `budget_guard` and
+> `operator_task` **as modules** and call through the attribute, so one patch on
+> the module that *defines* a function is observed from both paths. The 5
+> collaborator names were re-pointed across 49 sites in 8 test modules, and
+> `run_repl` takes no seam parameters at all. Only `build_agent` is still handed
+> over by `main()`, because the startup wiring has not moved yet. Inventory and
+> remaining order: `docs/refactor/MAIN_SURFACE_AUDIT.md`.
+>
 > **One guard did have to follow the code**, and it is the kind section 3.1 warns
 > about: `test_command_surface_snapshot.py::_repl_control_tokens` found the REPL
 > block tokens by *text-scanning `main.py`* for `q == ":…"`. With the loop gone it
