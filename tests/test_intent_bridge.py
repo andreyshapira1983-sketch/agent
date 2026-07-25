@@ -11,6 +11,9 @@ from types import SimpleNamespace
 from pathlib import Path
 
 import main
+# `handle_conversational_operator_input` resolves `_dispatch_operator_intent` in
+# cli/intent_bridge.py, so a stand-in has to replace the name there, not on main.
+import cli.intent_bridge as bridge
 
 
 class _FakeLLM:
@@ -36,7 +39,7 @@ def test_model_confirms_real_capability_request_dispatches(monkeypatch):
         dispatched["kind"] = intent.kind
         return True
 
-    monkeypatch.setattr(main, "_dispatch_operator_intent", _fake_dispatch)
+    monkeypatch.setattr(bridge, "_dispatch_operator_intent", _fake_dispatch)
     agent = _fake_agent('{"kind":"action","action":"capability_check","confidence":0.95,"reasoning":"asks"}')
     handled = main.handle_conversational_operator_input("что ты умеешь делать сейчас", agent, Path("."))
     assert handled is True
@@ -45,7 +48,7 @@ def test_model_confirms_real_capability_request_dispatches(monkeypatch):
 
 def test_model_judges_conversation_suppresses_dispatch(monkeypatch):
     dispatched = {}
-    monkeypatch.setattr(main, "_dispatch_operator_intent",
+    monkeypatch.setattr(bridge, "_dispatch_operator_intent",
                         lambda *a, **k: dispatched.setdefault("called", True) or True)
     # A rambling message that merely contains the phrase -> model says conversation.
     agent = _fake_agent('{"kind":"conversation","action":null,"confidence":0.9,"reasoning":"just musing"}')
@@ -66,7 +69,7 @@ def test_uncertain_model_preserves_deterministic_routing(monkeypatch):
         dispatched["kind"] = intent.kind
         return True
 
-    monkeypatch.setattr(main, "_dispatch_operator_intent", _fake_dispatch)
+    monkeypatch.setattr(bridge, "_dispatch_operator_intent", _fake_dispatch)
     agent = _fake_agent("not json at all, just a stub")
     handled = main.handle_conversational_operator_input("Проверь проект", agent, Path("."))
     assert handled is True

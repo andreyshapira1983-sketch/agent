@@ -18,6 +18,8 @@ from types import SimpleNamespace
 import pytest
 
 import main as main_module
+# the intent bridge resolves handler names in its own module (cli/intent_bridge.py)
+import cli.intent_bridge as bridge_module
 from core.approval import AutoApprover
 from core.budget_ledger import BudgetLedger, BudgetWindow
 from core.logger import TraceLogger
@@ -1808,7 +1810,7 @@ Produce a patch proposal for the routing bug.
         def _apply_must_not_be_called(*args, **kwargs):
             raise AssertionError("_handle_self_apply_run must not run — no code may be applied")
 
-        monkeypatch.setattr(main_module, "_handle_self_build_produce", _spy_produce)
+        monkeypatch.setattr(bridge_module, "_handle_self_build_produce", _spy_produce)
         monkeypatch.setattr(main_module, "_handle_self_apply_run", _apply_must_not_be_called)
         monkeypatch.setattr(agent, "run", _run_must_not_be_called)
 
@@ -1835,7 +1837,7 @@ Produce a patch proposal for the routing bug.
         def _produce_must_not_run(*args, **kwargs):
             raise AssertionError("producer must not run for a self-build question")
 
-        monkeypatch.setattr(main_module, "_handle_self_build_produce", _produce_must_not_run)
+        monkeypatch.setattr(bridge_module, "_handle_self_build_produce", _produce_must_not_run)
 
         assert handle_conversational_operator_input(
             "Может ли агент программировать себя?",

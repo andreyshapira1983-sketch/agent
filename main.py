@@ -52,11 +52,7 @@ from core.subagent_memory_scope import (
     needs_delegation,
     propose_subagent,
 )
-from core.loop import AgentLoop, format_human_response
-from core.model_router import ModelRole
-from core.intent_understanding import understand_intent
-from core.operator_intent import OperatorIntent, route_operator_intent
-from core.strategy_router import classify_operator_strategy
+from core.loop import format_human_response
 
 
 # Parsers and small text helpers live in cli/parsers.py; re-exported here so
@@ -157,14 +153,12 @@ from cli.commands_repair import _handle_propose_repair, _handle_repair
 from cli.commands_self_apply import _handle_self_apply_run
 # :self-build-produce runs the subagent producer that generates one low-risk
 # self-apply proposal into the approval inbox (cli/commands_self_build.py).
-from cli.commands_self_build import _handle_self_build_produce, _handle_self_build_supervisor
 # :self-split plans one deterministic (no-LLM) incremental extraction step for
 # an oversized module and publishes it as a self-apply approval item.
 from cli.commands_self_split import _handle_self_split
 # :self-task-propose runs the Stage-A coding-task producer that turns a real code
 # TODO/FIXME into a task + failing acceptance test approval item
 # (cli/commands_self_task.py, roadmap Stage 1).
-from cli.commands_self_task import _handle_self_task_propose
 # :self-task-build implements one APPROVED coding task (Stage B): it writes code
 # to make the frozen acceptance test pass and proposes it to the self-apply lane
 # (cli/commands_self_task.py, roadmap Stage 1).
@@ -188,6 +182,14 @@ from cli.commands_proposals import (
 # Explicit ':command' dispatch lives in cli/command_dispatch.py; re-exported
 # here so `from main import handle_meta_command` keeps working unchanged.
 from cli.command_dispatch import handle_meta_command
+# Plain-language -> command routing lives in cli/intent_bridge.py; re-exported
+# here because tests and the REPL reach these through `main`.
+from cli.intent_bridge import (
+    _dispatch_operator_intent,
+    _handle_local_operator_reply,
+    _local_operator_reply,
+    handle_conversational_operator_input,
+)
 from cli.help import render_help, render_startup_commands
 from app.bootstrap import build_agent
 # The budget guard (wrap agent.run so an exhausted model budget becomes a
@@ -240,175 +242,6 @@ from app.task_scheduler_cli import (
     _scheduler_for,
     _task_queue_for,
 )
-
-
-_REPLY_ONLY_STOP_RE = re.compile(
-    r"\breply\s+only\s+with:\s*(?:\"([^\"]+)\"|'([^']+)'|“([^”]+)”)",
-    re.IGNORECASE | re.DOTALL,
-)
-
-
-def _local_operator_reply(text: str, agent: AgentLoop | None = None) -> str | None:
-    """Return a local response for explicit stop/ack operator instructions.
-
-    TD-001: some operator-control messages are intentionally local and must not
-    enter Planner/Synthesizer. Keep this narrow: only honour a quoted
-    "Reply only with:" directive when the same instruction explicitly forbids
-    the expensive model path.
-    """
-    normalized = " ".join((text or "").casefold().split())
-    if "reply only with:" not in normalized:
-        return None
-    llm_stop_markers = (
-        "do not call planner",
-        "do not call planner or synthesizer",
-        "do not use claude",
-        "do not make a plan with llm",
-        "не вызывай planner",
-        "не вызывай synthesizer",
-        "не используй claude",
-        "не использовать claude",
-    )
-    if not any(marker in normalized for marker in llm_stop_markers):
-        return None
-    match = _REPLY_ONLY_STOP_RE.search(text)
-    if match is None:
-        return None
-    answer = next((part for part in match.groups() if part), "").strip()
-    if not answer:
-        return None
-    if agent is not None:
-        agent.log.log(
-            "local_operator_reply",
-            {"reason": "reply_only_stop_instruction", "answer_preview": answer[:120]},
-        )
-    return answer
-
-
-def _handle_local_operator_reply(text: str, agent: AgentLoop) -> bool:
-    answer = _local_operator_reply(text, agent)
-    if answer is None:
-        return False
-    print("\n" + format_human_response(answer) + "\n")
-    return True
-
-
-# "Soft" status/capability intents that conversational phrasing can trip. For
-# these, the keyword match is VERIFIED by the model (it tells a request apart
-# from a passing mention) before dispatch. Explicit imperative intents are not
-# gated.
-_VERIFY_INTENTS: frozenset[str] = frozenset({
-    "capability_check", "project_health", "smart_memory_status",
-    "current_gaps_check", "weakness_finder", "next_safe_test",
-    "best_next_action", "next_actions", "autonomy_readiness",
-    "model_status", "budget_status", "approval_status", "urgent_status",
-})
-
-
-def _model_says_conversation(text: str, intent: OperatorIntent, agent: AgentLoop) -> bool:
-    """True only when the model gives a CLEAR, parseable "this is conversation"
-    verdict for a soft keyword match.
-
-    On a confirmed action, or any uncertainty (model error / unparseable /
-    ungrounded / low confidence / no model), returns False — so deterministic
-    routing is preserved and the model only ever *vetoes* an obvious
-    conversational false-positive (model advises, kernel decides).
-    """
-    try:
-        llm = agent.model_router.for_role(ModelRole.PLANNER)
-    except Exception:  # noqa: BLE001 — no model to consult -> keep routing
-        return False
-    decision = understand_intent(text, available_actions=(intent.kind,), llm=llm)
-    return decision.kind == "conversation" and decision.source == "model"
-
-
-def handle_conversational_operator_input(text: str, agent: AgentLoop, workspace: Path) -> bool:
-    strategy = classify_operator_strategy(text)
-    agent.log.log(
-        "strategy_classified",
-        {"strategy": strategy.value, "text_preview": text[:120]},
-    )
-    intent = route_operator_intent(text)
-    if intent is None:
-        return False
-    # Bridge: for a soft match, let the model VETO an obvious conversational
-    # false-positive. It only suppresses on a clear "this is conversation"
-    # verdict; on uncertainty the deterministic route is preserved.
-    if intent.kind in _VERIFY_INTENTS and _model_says_conversation(text, intent, agent):
-        agent.log.log(
-            "operator_intent_suppressed",
-            {"kind": intent.kind, "reason": "model judged conversation, not a request"},
-        )
-        return False
-    agent.log.log("operator_intent", intent.to_dict())
-    if intent.kind == "shell_command_hint":
-        print(
-            "This looks like a shell/PowerShell command. "
-            "Run it in PowerShell, not inside the agent REPL.",
-            file=sys.stderr,
-        )
-        return True
-    print(
-        f"(operator intent: {intent.kind}; internal={intent.command})",
-        file=sys.stderr,
-    )
-    return _dispatch_operator_intent(intent, agent, workspace, original_text=text)
-
-
-def _dispatch_operator_intent(
-    intent: OperatorIntent,
-    agent: AgentLoop,
-    workspace: Path,
-    *,
-    original_text: str = "",
-) -> bool:
-    if intent.kind == "capability_request":
-        return _handle_capability_request(original_text, agent, workspace)
-    if intent.kind == "self_build_request":
-        return _handle_self_build_produce("", agent, workspace)
-    if intent.kind == "subagent_proposal":
-        return _handle_subagent_proposal(original_text.strip(), agent, workspace)
-    if intent.kind == "architecture_audit":
-        return _handle_architecture_audit("", agent, workspace)
-    if intent.kind == "self_task_proposal":
-        return _handle_self_task_propose("", agent, workspace)
-    if intent.kind == "safe_self_check":
-        return _handle_operator_check("", agent, workspace)
-    if intent.kind == "capability_check":
-        return _handle_operator_capability_check(agent, workspace)
-    if intent.kind == "programming_readiness":
-        return _handle_programming_readiness("", agent, workspace)
-    if intent.kind == "current_gaps_check":
-        return _handle_operator_gaps_check(agent, workspace)
-    if intent.kind == "weakness_finder":
-        return _handle_operator_weakness_finder(agent, workspace)
-    if intent.kind == "next_safe_test":
-        return _handle_next_safe_test(agent, workspace)
-    if intent.kind == "project_health":
-        return _handle_operator_check("", agent, workspace)
-    if intent.kind == "smart_memory_status":
-        return _handle_smart_memory("", agent)
-    if intent.kind == "model_status":
-        return _handle_models("", agent)
-    if intent.kind == "budget_status":
-        return _handle_operator_budget("", agent, workspace)
-    if intent.kind == "approval_status":
-        return _handle_approval_list("all", agent, workspace)
-    if intent.kind == "urgent_status":
-        return _handle_urgent_status("", agent, workspace)
-    if intent.kind == "best_next_action":
-        return _handle_best_next_action("", agent, workspace)
-    if intent.kind == "next_actions":
-        return _handle_next_actions("", agent, workspace)
-    if intent.kind == "autonomy_readiness":
-        return _handle_autonomy_readiness("", agent, workspace)
-    if intent.kind == "source_review_plan":
-        return _handle_source_review_plan(original_text, agent, workspace)
-    if intent.kind == "implementation_plan":
-        return _handle_implementation_plan(original_text, agent, workspace)
-    if intent.kind == "patch_proposal":
-        return _handle_patch_proposal_plan(original_text, agent, workspace)
-    return False
 
 
 def _collect_instruction_buffer(
