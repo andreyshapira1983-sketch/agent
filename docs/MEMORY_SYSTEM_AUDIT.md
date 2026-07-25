@@ -9,6 +9,14 @@ separately from `docs/OPERATIONAL_FAILURE_MODES.md` (external operational failur
 classes) and from `docs/self-audit-lessons.md` (already-fixed repo defects with
 passing regression tests).
 
+> **⚠️ STATUS LEDGER SUPERSEDED (2026-07-25).** The open / needs-e2e judgements on
+> the MGA-* findings below were current when written (audited `3f4f8fa`, older than
+> `main`); several have since been fixed with regression tests. Read **no** open/closed
+> status from this file — statuses live only in
+> [`audit/MASTER_ISSUE_REGISTRY.md`](audit/MASTER_ISSUE_REGISTRY.md), which holds each
+> MGA-* finding's canonical `MIR-` id, its resolution and the guarding test. The audit's
+> method, evidence and reasoning below remain valuable and are unchanged.
+
 ---
 
 ## Provenance

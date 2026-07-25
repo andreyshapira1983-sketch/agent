@@ -86,13 +86,17 @@ Worked examples of the same defect under several names:
 
 ## 4. Known contradictions — navigation warnings
 
-These are real and **not corrected in the source files**; they are listed so you
-do not read a stale status as current. The registry wins in all four cases.
+These are real. The four historical audit docs (CORE_AUDIT, OPERATIONAL_FAILURE_MODES,
+MEMORY_SYSTEM_AUDIT, LIVE_PROBE_FINDINGS) now each carry a dated **status-ledger
+superseded** banner redirecting all status to the registry; the warnings below are kept
+as a navigation aid. The registry wins in every case.
 
-1. **CORE_AUDIT §7 says "None is yet fixed in code."** Stale. Several of its
-   findings have since been fixed with named regression tests.
+1. **CORE_AUDIT §7 says "None is yet fixed in code."** Stale; banner-annotated at
+   source (2026-07-20). Several of its findings have since been fixed with named
+   regression tests.
 2. **OPERATIONAL_FAILURE_MODES §11 presents OFM-010 as the sole confirmed gap.**
-   Stale — it maps to `MIR-017`, whose status the registry owns.
+   Stale; banner-annotated at source (2026-07-20). It maps to `MIR-017`, whose
+   status the registry owns.
 3. **MEMORY_FIX_PLAN A3 was not applied as written.** The code kept the `1.0`
    return and reframed it; the plan's "floor 0.3" is not what shipped.
 4. **Counts drift between files.** Chronological log entries quoting "47 issues"
