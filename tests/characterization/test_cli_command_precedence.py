@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import cli.repl as repl_module
 import cli.app as app_module
 import app.budget_guard as budget_guard_module
 import cli.command_dispatch as dispatch_module
@@ -22,7 +23,7 @@ import cli.intent_bridge as bridge_module
 import main as main_module
 
 
-_REAL_STDIN_READER = main_module._StdinLineReader
+_REAL_STDIN_READER = repl_module._StdinLineReader
 
 
 def _fake_agent() -> SimpleNamespace:
@@ -161,7 +162,7 @@ def test_repl_quit_propagates_system_exit_zero(tmp_path, monkeypatch):
     """`:quit` raises SystemExit from inside the dispatcher rather than
     returning a value; extraction must keep that observable behavior."""
     _patch(monkeypatch)
-    monkeypatch.setattr(dispatch_module, "handle_meta_command", main_module.handle_meta_command)
+    monkeypatch.setattr(dispatch_module, "handle_meta_command", dispatch_module.handle_meta_command)
 
     def quitting_meta(cmd, agent, workspace):
         raise SystemExit(0)
@@ -178,5 +179,5 @@ def test_repl_quit_propagates_system_exit_zero(tmp_path, monkeypatch):
 def test_real_dispatcher_raises_system_exit_for_quit_and_exit(tmp_path):
     for cmd in (":quit", ":exit"):
         with pytest.raises(SystemExit) as excinfo:
-            main_module.handle_meta_command(cmd, SimpleNamespace(), tmp_path)
+            dispatch_module.handle_meta_command(cmd, SimpleNamespace(), tmp_path)
         assert excinfo.value.code == 0, cmd

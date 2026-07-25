@@ -351,11 +351,12 @@ issue."* Phase gates are local-only until that is resolved.
 > | the seven-flag argparse surface of section 1.1 | `cli/args.py` (`build_parser`) |
 > | `main()` itself: startup ordering, the two pre-dotenv fast paths, mode selection, the session wiring, `_preflight_file_hint` | `cli/app.py` (`run_cli`) |
 >
-> Still in `main.py` (**134 lines**): the module docstring, `def main(): return
-> run_cli()`, the `raise SystemExit(main())` tail, and the re-export block that
-> keeps `from main import …` working for 25 test modules, `agent_tick.py` and
-> `api/server.py`. Nothing else — `test_main_patch_seams.py` asserts the launcher
-> calls nothing but `run_cli()`.
+> Still in `main.py` (**47 lines**): the module docstring, `from cli.app import
+> run_cli`, `def main(): return run_cli()` and the `raise SystemExit(main())`
+> tail. The re-export block is gone (Phase 7, 2026-07-26) — every caller imports
+> from the module that owns the name. `test_main_patch_seams.py` asserts the
+> launcher calls nothing but `run_cli()`, and `test_main_public_surface.py`
+> asserts it imports nothing but `run_cli` and defines nothing but `main`.
 >
 > **The section 2.5 patch surface constrains how far a call site can move.** The
 > one-shot extraction proved it: importing `build_agent`, `handle_meta_command`,

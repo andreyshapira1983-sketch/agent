@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import cli.repl as repl_module
 import cli.app as app_module
 import app.budget_guard as budget_guard_module
 import app.operator_task as operator_task_module
@@ -24,7 +25,7 @@ import cli.intent_bridge as bridge_module
 import main as main_module
 
 
-_REAL_STDIN_READER = main_module._StdinLineReader
+_REAL_STDIN_READER = repl_module._StdinLineReader
 
 
 def _fake_agent() -> SimpleNamespace:
@@ -217,4 +218,4 @@ def test_reader_prompts_go_to_stdout_and_eof_raises(capsys):
 
 
 def test_paste_gap_constant_is_frozen():
-    assert main_module.PASTE_COALESCE_GAP_SECONDS == 0.05
+    assert repl_module.PASTE_COALESCE_GAP_SECONDS == 0.05

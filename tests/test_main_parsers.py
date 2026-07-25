@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from main import (
+from cli.parsers import (
     _env_bool,
     _parse_ingest_options,
     _parse_remember,

@@ -24,7 +24,7 @@ from core.smart_memory import (
     procedure_credit_allowed,
     procedure_from_episode,
 )
-from main import handle_meta_command
+from cli.command_dispatch import handle_meta_command
 from tests.conftest import FakeLLM
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool

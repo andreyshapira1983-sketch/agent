@@ -12,9 +12,9 @@ Making :class:`_StdinLineReader` the ONLY consumer of stdin is what keeps the
 top-level prompt, the block modes and the approval prompt from racing each other
 -- they all pull from the same queue.
 
-Extracted verbatim from ``main.py``; it re-exports every name here, so
-``from main import _StdinLineReader`` and ``main.PASTE_COALESCE_GAP_SECONDS``
-keep working for the test modules that use them.
+Extracted verbatim from ``main.py``, which re-exported these names until
+Phase 7 removed the compatibility block; ``_StdinLineReader`` and
+``PASTE_COALESCE_GAP_SECONDS`` are imported from here now.
 
 :func:`run_repl` at the bottom of this file is the dialogue loop itself, moved
 here from ``main()`` in a later step. It owns everything that happens *per

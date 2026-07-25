@@ -37,25 +37,25 @@ from core.policy import PolicyGate
 from core.scheduler import SchedulerStore
 from core.source_registry import SourceRegistry
 from core.source_registry_store import SourceRegistryStore
-from main import (
+from app.budget_guard import _run_agent_with_budget_guard
+from app.io import _force_utf8_io
+from app.operator_status import _format_next_actions
+from app.runtime_cli import _handle_auto_run
+from cli.app import _preflight_file_hint
+from cli.command_dispatch import handle_meta_command
+from cli.commands_budget import (
     _autonomy_readiness_payload,
     _budget_enforcement_status,
-    _collect_instruction_buffer,
-    _force_utf8_io,
-    _format_next_actions,
     _format_operator_budget_digest,
-    _handle_auto_run,
-    _handle_hygiene,
-    _handle_local_operator_reply,
-    _handle_rollback,
-    _local_operator_reply,
-    _parse_remember,
-    _preflight_file_hint,
-    _print_persistent,
-    _run_agent_with_budget_guard,
-    handle_conversational_operator_input,
-    handle_meta_command,
 )
+from cli.commands_memory import _handle_hygiene, _handle_rollback, _print_persistent
+from cli.intent_bridge import (
+    _handle_local_operator_reply,
+    _local_operator_reply,
+    handle_conversational_operator_input,
+)
+from cli.parsers import _parse_remember
+from cli.repl import _collect_instruction_buffer
 from tests.conftest import FakeLLM
 from tools.base import Tool, ToolRegistry
 from tools.file_read import FileReadTool
