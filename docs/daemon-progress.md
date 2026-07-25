@@ -3,6 +3,17 @@
 Tracker for the incremental asyncio-daemon plan. One sub-item per run, one PR
 per sub-item. `agent_tick.py` stays as the single-shot fallback mode throughout.
 
+**Production vs this plan:** The process that Docker/Compose and operators run
+unattended today is **`agent_tick.py`** (optionally looped by
+**`docker/daemon_loop.py`**). Modules under this plan (`app/daemon.py`,
+`WorkerPool`, `FileWatcher`, …) are incremental **building blocks**. They are
+not the production supervisor until a composition entry point is explicitly
+merged and documented here.
+
+- **Production unattended runtime:** `docker/daemon_loop.py` → `agent_tick.py`.
+- **Async plan (`app/daemon.py` and related modules):** not-yet-composed
+  production entry point; tracked per sub-item below.
+
 Each sub-item reports four independent fields so the status is unambiguous:
 
 - **implementation** — is the code for the sub-item done (`completed` / `partial` / `not started`)
@@ -442,9 +453,10 @@ Each sub-item reports four independent fields so the status is unambiguous:
 
 ## 4.1 In-flight task checkpointing
 
-- **implementation:** completed | **main_pr:** open | **hotfix:** none | **acceptance:** pending
+- **implementation:** completed | **main_pr:** #91 merged | **hotfix:** none | **acceptance:** pending
 - **Branch:** `daemon/4.1-in-flight-checkpointing`
-- **Last updated:** 2026-07-16
+- **Pull Request:** #91 (merged 2026-07-17)
+- **Last updated:** 2026-07-24
 - **Implementation:** Extended the existing `WorkerPool` with an optional
   `InFlightCheckpointStore`. Before handler code is awaited, the worker writes
   a JSON-safe snapshot of the complete `DaemonEvent` plus worker id and an
@@ -479,8 +491,9 @@ Each sub-item reports four independent fields so the status is unambiguous:
   deliberately does not scan, requeue, or execute leftover checkpoints on
   startup; that is item 4.2. The standalone WorkerPool still has no daemon
   composition entry point, so its owner must inject the checkpoint path.
-- **Blockers:** none. **Human action:** review and merge the open PR; do not
-  implement startup recovery in this item.
+- **Blockers:** none. **Human action:** none for merge — PR #91 is merged; plan
+  acceptance (Definition of Done sign-off) still pending. Do not implement
+  startup recovery in this item (that is 4.2).
 
 | Item | Title | Status |
 | --- | --- | --- |
@@ -496,7 +509,7 @@ Each sub-item reports four independent fields so the status is unambiguous:
 | 3.2 | Worker pool | merged (acceptance pending) |
 | 3.3 | Task timeout and cancellation | merged (acceptance pending) |
 | 3.4 | Event deduplication | merged (acceptance pending) |
-| 4.1 | In-flight task checkpointing | open (acceptance pending) |
+| 4.1 | In-flight task checkpointing | merged #91 (acceptance pending) |
 | 4.2 | Recovery on start | not started |
 | 4.3 | Circuit breaker | not started |
 | 4.4 | Heartbeat and watchdog | not started |

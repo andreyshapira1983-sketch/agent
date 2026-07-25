@@ -5,6 +5,15 @@
 > (the `if head == ":…"` chain) and the CLI flags in `main.py --help`. Only
 > commands that exist in code are listed. If a command is not here, it does not
 > exist. Aliases are grouped on one row (`a | b`).
+>
+> **Verification (2026-07-24 reconciliation):** spot-checked against current
+> `main` — `:team-run` / `:team-execute` / `:subagents-run`,
+> `:self-build-produce`, and the model-assisted veto path
+> (`core/intent_understanding`) are present in code. A full automated
+> registry-to-doc enumeration of every `if head in {…}` branch was **not**
+> re-run in this pass; if `main.py` adds a command after the last manual sync,
+> this file may lag until updated. When this file and `main.py` disagree,
+> **`main.py` wins**.
 
 Enter these at the interactive REPL (`python main.py` with no `--ask`). A few
 are also reachable one-shot via `--ask ":command args"`.
@@ -89,7 +98,6 @@ are also reachable one-shot via `--ask ":command args"`.
 | `:rollback` | Apply/inspect compensation (undo) plans. |
 | `:self-build-produce` | Produce a grounded self-apply proposal (TD-025/036). |
 | `:self-build-propose <…>` | Produce a self-build proposal (also one-shot). |
-| `:self-build-supervisor` | Read-only self-build supervisor cycle. |
 | `:self-split <path.py>` | No-LLM incremental module split proposal. |
 | `:self-task-propose` | Stage A: task + failing acceptance test (Ступень 1). |
 | `:self-task-build <approval_id>` | Stage B: implement one approved task. |
