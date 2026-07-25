@@ -11,7 +11,6 @@ path: a human runs it explicitly, one proposal at a time.
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -91,10 +90,11 @@ def _handle_self_apply_run(rest: str, agent: "AgentLoop", workspace: Path) -> bo
     except Exception:  # noqa: BLE001 — rule recording must never break the command
         pass
 
-    if "--json" in parts:  # never true (len==1 guard) but keep symmetry cheap
-        print(json.dumps(result, ensure_ascii=False, indent=2), file=sys.stderr)
-        return True
-
+    # No `--json` mode here on purpose. The documented surface of this command is
+    # `<inbox_id>` and nothing else (cli/command_registry.py, docs/COMMANDS_MAP.md,
+    # the :help page all agree), and the one-argument guard above means a
+    # `--json` token could only ever arrive *as* the id — so the branch that used
+    # to live here could only pretty-print a refusal, never a real run.
     lines = [
         "=== self-apply run ===",
         f"proposal: {result.get('proposal_id')}",
