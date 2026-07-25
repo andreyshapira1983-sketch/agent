@@ -83,27 +83,33 @@ def test_build_agent_is_a_reexport_of_app_bootstrap():
     assert main_module.build_agent is bootstrap_module.build_agent
 
 
-def test_runtime_callers_import_build_agent_from_main(monkeypatch):
-    """agent_tick.py and api/server.py bind `build_agent` through `main`."""
+def test_no_production_module_imports_from_main():
+    """The runtime no longer goes through `main` at all.
+
+    `agent_tick.py` and `api/server.py` used to do `from main import build_agent`
+    lazily; they now import it from its home, `app.bootstrap`. Nothing outside
+    `tests/` may reach into `main` again — that is what makes the re-export block
+    removable.
+    """
     for rel in ("agent_tick.py", "api/server.py"):
         source = (REPO_ROOT / rel).read_text(encoding="utf-8")
-        assert "from main import build_agent" in source, rel
+        assert "from main import" not in source, rel
+        assert "from app.bootstrap import build_agent" in source, rel
 
 
-def test_monkeypatching_build_agent_by_name_is_observed_by_lazy_importers(monkeypatch):
-    """The patch-by-name contract `agent_tick.py` and `api/server.py` rely on.
+def test_lazy_callers_are_faked_on_app_bootstrap_now(monkeypatch):
+    """Where a `build_agent` fake belongs after the runtime was rewired.
 
-    They do `from main import build_agent` *inside a function*, so the binding is
-    read off `main` at call time and a fake set there is picked up. That is the
-    only reason the re-export still has to exist; the CLI itself no longer goes
-    through `main` (its wiring lives in `cli/app.py`, and
-    tests/test_autonomous_runtime.py:284 documents the lazy-import path).
+    `agent_tick.run_tick` and `api.server._build_server_agent` import it inside a
+    function, so the binding is read off `app.bootstrap` at call time — that is
+    the target `tests/test_autonomous_runtime.py` and `tests/test_budget_kill
+    _switch.py` now patch. A fake on `main` would sit there unused.
     """
     sentinel = SimpleNamespace(log=SimpleNamespace(log=lambda *a, **k: None))
-    monkeypatch.setattr(main_module, "build_agent", lambda *a, **k: sentinel)
+    monkeypatch.setattr(bootstrap_module, "build_agent", lambda *a, **k: sentinel)
 
     def lazy_caller():  # mirrors agent_tick.py:739
-        from main import build_agent
+        from app.bootstrap import build_agent
 
         return build_agent(Path("."))
 
