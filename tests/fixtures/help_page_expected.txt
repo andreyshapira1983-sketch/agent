@@ -1,0 +1,127 @@
+Commands:
+  :mem | :memory                  inspect working + persistent memory
+  :smart-memory [--json]          inspect episodic/procedural/consolidation memory
+  :memory-consolidate [--json]    link episodes to reusable procedures now
+  :audit [on|off|status]          read-only audit mode: freeze all durable memory writes
+  :clear                          wipe working memory only
+  :remember [tags] <text>         save to persistent memory (Write Policy gated)
+  :forget [id|all]                delete persistent record(s)
+  :ingest-source <path> [flags]   ingest one UTF-8 text/code file into Source Registry
+  :ingest-project [path] [flags]  ingest project text/code files (default limit 80)
+  :source-library [group|all]     list curated online source families
+  :source-registry [flags]        list ingested sources and claim counts
+      flags: --claims  --limit N  --json
+  :source-review-plan <goal>      compare requested files/sources against Source Registry
+      flags: --limit N  --json
+  :implementation-plan <goal>     local source-backed implementation plan
+      flags: --limit N  --json
+  :patch-proposal-plan <goal>     local read-only patch proposal plan
+      flags: --limit N  --json
+  :self-build-propose             propose a self-build patch or NO_PATCH
+  :self-build-supervisor          read-only supervisor: wait/stop/propose one candidate
+  :ingest-web <topic> [flags]     search/fetch curated web library sources
+      flags: --sources wikis|books|science|docs|all|id,id  --limit N  --per-source N
+  :ingest-rss <url> [flags]       fetch RSS/Atom feed entries into Source Registry
+      flags: --limit N  --dry-run  --write-memory  --no-memory
+  :connectors [status] [--json]   list source connectors and rough costs
+  :connector-plan <goal> [flags]  recommend source connectors for a task
+      flags: --limit N  --json
+  :models [--json]                inspect model routes and registry
+  :refresh-models                 query providers, persist model catalog
+  :model-registry-audit [--json] inspect selected vs available model candidates
+  :model-discovery-audit [--json] local (no-network) provider discovery readiness
+  :provider-catalog-refresh --dry-run [--anthropic] [--openai] [--json]
+                                 dry-run live model discovery + catalog diff (no write)
+  :architecture-audit [--json]   inspect layers and multi-agent gaps
+  :operator-check [--json]       conversational project/status digest
+  :operator-budget [--json]      concise budget + model usage digest
+  :budget-config [--json]        inspect budget limit config and env overrides
+  :urgent-status [--json]        approvals + queue + scheduler urgency digest
+  :next-actions [--json]         architecture priorities + recommendations
+  :autonomy-readiness [--json]   whether autonomy is safe to run now
+  :dry-health-pass [--json]      local read-only autonomous health panel
+  :coding-readiness [--json]     safe programming task readiness report
+  :operator-task ... :end        one safe multi-line operator task report
+  :task-begin ... :task-end       buffer a complex instruction (bypasses keyword router; :task-abort discards)
+  :model-usage [--json]           inspect model calls/tokens/cost units
+  :team-plan <goal> [--json]      dry-run bounded subagent contracts
+  :team-run <goal> [--json]       dry-run execution walk over subagent contracts
+  :capability-request <goal> [--submit] [--json]
+                                    propose missing connector/capability boundaries
+  :subagent-proposal <goal> [--submit]  autonomous subagent initiative proposal
+  :learn [goal] [flags]           plan sources, then ingest selected learning set
+  :learn-project [goal] [flags]   alias for :learn
+      flags: --dry-run  --write-memory  --no-memory  --limit N
+  :auto-run [goal] [flags]        bounded autonomous health pass
+      flags: --dry-run  --allow-effects  --limit N  --learning-limit N  --no-tests
+  :work-session [goal] [flags]    bounded multi-cycle session with time budget
+      flags: --dry-run  --allow-effects  --minutes N  --max-cycles N  --report-every N
+  :campaign-start [goal] [flags]  budgeted autonomous campaign with per-cycle ledger
+      flags: --dry-run  --allow-effects  --cycles N  --max-llm-calls N  --max-cost-units N  --max-idle N
+  :campaign-status [--recent N]   read the campaign ledger digest (no budget spent)
+  :auto-status                    inspect autonomous runtime inbox/status
+  :conflicts [--limit N|--json]   inspect source claim conflicts and suggestions
+  :budget-status                  inspect default autonomous runtime budgets
+  :budget-window-status [--json] inspect persistent hour/day budget windows
+  :budget-kill-switch [--json] [--clear] inspect/reset autonomous day-budget kill-switch
+  :state-store-drill [--json]    prove JSONL quarantine/recovery on an isolated file
+  :release-audit [--json]         inspect release artifact hygiene exclusions
+  :supply-chain-audit [--json]   inspect pinned deps and CI release gates
+  :approval-list [status|all]     list pending/approved/denied approval items
+  :approval-triage                read-only triage: clusters/duplicates/stale + advice
+  :best-next-action [--json]      choose the single most important next action (advisory)
+  :self-issue-verify <fingerprint> run the issue's fixed targeted verifier and resolve on green
+  :ack <action> [--ttl H] [why]   acknowledge an advisory alert so it stops dominating BNA
+  :ack-list                       list active acknowledgements
+  :ack-clear <action>             restore an acknowledged alert to the top-pick race
+  :approval-approve <id>          mark an approval inbox item approved
+  :approval-deny <id>             mark an approval inbox item denied
+  :approval-run <id>              execute one approved whitelisted operation
+  :self-apply-run <id>            run one approved low-risk self-apply proposal
+  :self-build-produce             produce one low-risk self-apply proposal into the inbox
+  :self-split <path.py>           plan one deterministic incremental split step for an oversized module
+  :self-task-propose              propose one coding task + failing test for approval (Stage A)
+  :self-task-build <id>           implement an approved coding task so its frozen test passes (Stage B)
+  :value-review <id> <verdict> [note]  record a human value verdict for an applied proposal
+  :value-review-list              list applied self-build proposals and their value verdicts
+  :approval-abort <id>            mark an approval inbox item aborted
+  :inbox                          shortcut: list pending approvals
+  :approve <id>                   shortcut: :approval-approve
+  :deny <id>                      shortcut: :approval-deny
+  :queue-status                   inspect runtime task queue summary
+  :scheduler-status               inspect scheduler summary
+  :task-add [goal] [flags]        enqueue persistent autonomous task
+  :task-list [status|all]         list runtime tasks
+  :task-run [--limit N]           run due pending runtime task(s)
+  :task-cancel <task_id>          cancel one queued task
+  :schedule-add <min> <goal>      create recurring scheduler entry
+      flags: --name NAME  --no-tests  --limit N  --learning-limit N
+  :schedule-list [status|all]     list schedules
+  :schedule-disable <id>          disable a runtime schedule without running it
+  :schedule-tick [--run]          enqueue due schedule tasks, optionally run them
+  :hygiene [subcmd] [--dry-run]   memory hygiene; subcmd:
+      backups    delete old .bak.<ts> files (keep last 3, >14d old)
+      expire     drop persistent records past their TTL
+      dedupe     collapse near-duplicate persistent records
+      episodic   prune old low-quality episodes (retrieval distractors)
+      summarise <tag>  merge records sharing <tag> via LLM
+      archive [--threshold=N] [--min-age=N]  move low-value records to archive
+      (no subcmd)      run expire, dedupe, episodic, then backups
+  :rollback [plan_id]             apply latest compensation plan (or by id);
+                                  no arg = LIFO pop; 'list' = show registered plans
+  :repair <target> <proposal> [tests...] [--pattern PAT]
+                                  guarded self-repair: diff, approval, write, tests, rollback
+  :propose-repair <target> [tests...] [--pattern PAT] [--trace TRACE]
+                                  generate a RepairProposal without writing files
+  :assumptions [--json]           show the last 20 logged planning assumptions
+  :help | ?                       show this command help
+  :quit | :exit                   exit
+  empty line                      ignored (use :quit or Ctrl+C to exit)
+
+Conversational shortcuts:
+  Check the project and tell me what needs attention
+  Show which models are in use
+  How many tokens were spent and what is the budget
+  Is there anything urgent
+  What should we do next
+  Is autonomy ready to run
