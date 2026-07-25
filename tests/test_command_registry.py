@@ -31,6 +31,10 @@ from cli import command_registry as reg
 
 REPO_ROOT = Path(main_module.__file__).resolve().parent
 MAIN_SOURCE = (REPO_ROOT / "main.py").read_text(encoding="utf-8")
+# The `head` dispatch chain moved to cli/command_dispatch.py (Phase 3); the
+# pre-load_dotenv() fast paths, the REPL block tokens and the intent bridge are
+# still in main.py, so both sources are read here.
+DISPATCH_SOURCE = (REPO_ROOT / "cli" / "command_dispatch.py").read_text(encoding="utf-8")
 CMAP_SOURCE = (REPO_ROOT / "docs" / "COMMANDS_MAP.md").read_text(encoding="utf-8")
 
 _CMD = r":[a-z0-9][a-z0-9-]*"
@@ -46,13 +50,13 @@ def _dispatched_tokens() -> set[str]:
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return set(mod.dispatched_commands(MAIN_SOURCE))
+    return set(mod.dispatched_commands(DISPATCH_SOURCE))
 
 
 def _dispatch_branches() -> list[tuple[str, ...]]:
     """Token tuples, one per ``if head == …`` / ``if head in {…}`` branch."""
     branches: list[tuple[str, ...]] = []
-    for line in MAIN_SOURCE.splitlines():
+    for line in DISPATCH_SOURCE.splitlines():
         m_eq = re.search(r'if\s+head\s*==\s*"(' + _CMD + r')"\s*:', line)
         m_in = re.search(r"if\s+head\s+in\s*\{([^}]*)\}\s*:", line)
         if m_eq:
@@ -342,7 +346,7 @@ def test_question_mark_and_repl_block_tokens_are_not_in_the_registry():
         assert reg.lookup(excluded) is None, excluded
     # `?` really is dispatched as a :help alias -- it is excluded on purpose
     # because it lives outside the `:token` namespace, not by oversight.
-    assert 'head in {":help", "?"}' in MAIN_SOURCE
+    assert 'head in {":help", "?"}' in DISPATCH_SOURCE
     assert reg.lookup(":help") is not None
 
 
