@@ -22,6 +22,7 @@ import pytest
 
 import app.bootstrap as bootstrap_module
 import cli.parsers as parsers_module
+import cli.command_dispatch as dispatch_module
 import main as main_module
 
 REPO_ROOT = Path(main_module.__file__).resolve().parent
@@ -98,7 +99,7 @@ def test_monkeypatching_build_agent_by_name_is_observed_by_main(tmp_path, monkey
 
     monkeypatch.setattr(main_module, "load_dotenv", lambda *a, **k: None)
     monkeypatch.setattr(main_module, "build_agent", fake_build_agent)
-    monkeypatch.setattr(main_module, "handle_meta_command", lambda *a, **k: True)
+    monkeypatch.setattr(dispatch_module, "handle_meta_command", lambda *a, **k: True)
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", ":models"])
 
     assert main_module.main() == 0
@@ -113,7 +114,7 @@ def test_monkeypatching_load_dotenv_by_name_is_observed_by_main(tmp_path, monkey
         "build_agent",
         lambda *a, **k: SimpleNamespace(log=SimpleNamespace(log=lambda *x, **y: None)),
     )
-    monkeypatch.setattr(main_module, "handle_meta_command", lambda *a, **k: True)
+    monkeypatch.setattr(dispatch_module, "handle_meta_command", lambda *a, **k: True)
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", ":models"])
 
     assert main_module.main() == 0
@@ -139,7 +140,7 @@ def test_main_is_callable_and_returns_an_int(tmp_path, monkeypatch):
         "build_agent",
         lambda *a, **k: SimpleNamespace(log=SimpleNamespace(log=lambda *x, **y: None)),
     )
-    monkeypatch.setattr(main_module, "handle_meta_command", lambda *a, **k: True)
+    monkeypatch.setattr(dispatch_module, "handle_meta_command", lambda *a, **k: True)
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", ":models"])
 
     result = main_module.main()

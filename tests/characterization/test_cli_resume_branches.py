@@ -21,6 +21,8 @@ from types import SimpleNamespace
 
 import pytest
 
+import app.budget_guard as budget_guard_module
+import cli.intent_bridge as bridge_module
 import main as main_module
 from core.checkpoint import CheckpointWriter
 from core.loop import format_human_response
@@ -46,9 +48,9 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> dict:
         return "fresh answer"
 
     monkeypatch.setattr(main_module, "build_agent", fake_build_agent)
-    monkeypatch.setattr(main_module, "_run_agent_with_budget_guard", fake_run)
-    monkeypatch.setattr(main_module, "_handle_local_operator_reply", lambda *a, **k: False)
-    monkeypatch.setattr(main_module, "handle_conversational_operator_input", lambda *a, **k: False)
+    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", fake_run)
+    monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda *a, **k: False)
+    monkeypatch.setattr(bridge_module, "handle_conversational_operator_input", lambda *a, **k: False)
     return state
 
 

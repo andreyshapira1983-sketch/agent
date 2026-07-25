@@ -17,6 +17,9 @@ from types import SimpleNamespace
 
 import pytest
 
+import app.budget_guard as budget_guard_module
+import cli.command_dispatch as dispatch_module
+import cli.intent_bridge as bridge_module
 import main as main_module
 from core.checkpoint import CheckpointWriter
 from core.loop import format_human_response
@@ -44,15 +47,15 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(main_module, "load_dotenv", lambda *a, **k: None)
     monkeypatch.setattr(main_module, "build_agent", lambda *a, **k: _fake_agent())
     monkeypatch.setattr(main_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
-    monkeypatch.setattr(main_module, "_handle_local_operator_reply", lambda *a, **k: False)
-    monkeypatch.setattr(main_module, "handle_conversational_operator_input", lambda *a, **k: False)
+    monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda *a, **k: False)
+    monkeypatch.setattr(bridge_module, "handle_conversational_operator_input", lambda *a, **k: False)
 
 
 def test_one_shot_answer_goes_to_stdout_with_the_blank_line_wrapper(
     tmp_path, monkeypatch, capsys
 ):
     _patch(monkeypatch)
-    monkeypatch.setattr(main_module, "_run_agent_with_budget_guard", lambda *a, **k: "ANSWER-BODY")
+    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", lambda *a, **k: "ANSWER-BODY")
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", "q"])
 
     assert main_module.main() == 0
@@ -97,7 +100,7 @@ def test_unknown_one_shot_command_message_is_stderr_and_returns_zero(
     tmp_path, monkeypatch, capsys
 ):
     _patch(monkeypatch)
-    monkeypatch.setattr(main_module, "handle_meta_command", lambda *a, **k: False)
+    monkeypatch.setattr(dispatch_module, "handle_meta_command", lambda *a, **k: False)
     monkeypatch.setattr(
         sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", ":no-such-command"]
     )
@@ -136,7 +139,7 @@ def test_repl_banner_is_stderr_and_repl_prompt_is_stdout(tmp_path, monkeypatch, 
 
 def test_block_mode_prompt_also_goes_to_stdout(tmp_path, monkeypatch, capsys):
     _patch(monkeypatch)
-    monkeypatch.setattr(main_module, "_run_agent_with_budget_guard", lambda *a, **k: "A")
+    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", lambda *a, **k: "A")
     monkeypatch.setattr(
         main_module, "_StdinLineReader", lambda **k: _scripted_reader(["<<<", "body", ">>>"])
     )

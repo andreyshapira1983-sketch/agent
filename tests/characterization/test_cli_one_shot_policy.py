@@ -26,6 +26,9 @@ from types import SimpleNamespace
 
 import pytest
 
+import app.budget_guard as budget_guard_module
+import cli.command_dispatch as dispatch_module
+import cli.intent_bridge as bridge_module
 import main as main_module
 
 
@@ -46,9 +49,9 @@ def _patch(monkeypatch: pytest.MonkeyPatch, order: list[str]) -> list[dict]:
 
     monkeypatch.setattr(main_module, "load_dotenv", fake_load_dotenv)
     monkeypatch.setattr(main_module, "build_agent", fake_build_agent)
-    monkeypatch.setattr(main_module, "_handle_local_operator_reply", lambda *a, **k: False)
-    monkeypatch.setattr(main_module, "handle_conversational_operator_input", lambda *a, **k: False)
-    monkeypatch.setattr(main_module, "_run_agent_with_budget_guard", lambda *a, **k: "answer")
+    monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda *a, **k: False)
+    monkeypatch.setattr(bridge_module, "handle_conversational_operator_input", lambda *a, **k: False)
+    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", lambda *a, **k: "answer")
     return build_calls
 
 
@@ -118,7 +121,7 @@ def test_ordinary_meta_command_builds_the_agent_before_dispatch(tmp_path, monkey
         order.append(f"handle_meta_command:{cmd}")
         return True
 
-    monkeypatch.setattr(main_module, "handle_meta_command", fake_meta)
+    monkeypatch.setattr(dispatch_module, "handle_meta_command", fake_meta)
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", ":models"])
 
     assert main_module.main() == 0
@@ -128,7 +131,7 @@ def test_ordinary_meta_command_builds_the_agent_before_dispatch(tmp_path, monkey
 def test_meta_command_one_shot_is_still_memory_free(tmp_path, monkeypatch):
     order: list[str] = []
     build_calls = _patch(monkeypatch, order)
-    monkeypatch.setattr(main_module, "handle_meta_command", lambda *a, **k: True)
+    monkeypatch.setattr(dispatch_module, "handle_meta_command", lambda *a, **k: True)
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", ":models"])
 
     assert main_module.main() == 0
@@ -145,7 +148,7 @@ def test_deep_escalation_is_opt_in_via_reason_and_expect(tmp_path, monkeypatch):
         seen.append(kwargs["deep_escalation"])
         return "answer"
 
-    monkeypatch.setattr(main_module, "_run_agent_with_budget_guard", fake_run)
+    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", fake_run)
 
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", "q"])
     assert main_module.main() == 0
