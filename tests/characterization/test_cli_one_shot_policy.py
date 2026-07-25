@@ -26,6 +26,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import cli.app as app_module
 import app.budget_guard as budget_guard_module
 import cli.command_dispatch as dispatch_module
 import cli.intent_bridge as bridge_module
@@ -47,8 +48,8 @@ def _patch(monkeypatch: pytest.MonkeyPatch, order: list[str]) -> list[dict]:
         build_calls.append({"workspace": workspace, **kwargs})
         return _fake_agent()
 
-    monkeypatch.setattr(main_module, "load_dotenv", fake_load_dotenv)
-    monkeypatch.setattr(main_module, "build_agent", fake_build_agent)
+    monkeypatch.setattr(app_module, "load_dotenv", fake_load_dotenv)
+    monkeypatch.setattr(app_module, "build_agent", fake_build_agent)
     monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda *a, **k: False)
     monkeypatch.setattr(bridge_module, "handle_conversational_operator_input", lambda *a, **k: False)
     monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", lambda *a, **k: "answer")
@@ -187,7 +188,7 @@ def test_self_build_propose_returns_before_dotenv_and_agent(tmp_path, monkeypatc
         seen.append((rest, agent, workspace))
         return True
 
-    monkeypatch.setattr(main_module, "_handle_self_build_propose", fake_propose)
+    monkeypatch.setattr(app_module, "_handle_self_build_propose", fake_propose)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -206,8 +207,7 @@ def test_self_build_propose_returns_before_dotenv_and_agent(tmp_path, monkeypatc
 def test_schedule_disable_returns_before_dotenv_and_agent(tmp_path, monkeypatch, capsys):
     order: list[str] = []
     build_calls = _patch(monkeypatch, order)
-    monkeypatch.setattr(
-        main_module, "_schedule_disable_message", lambda rest, ws: f"SCHEDULE_DISABLED {rest}"
+    monkeypatch.setattr(app_module, "_schedule_disable_message", lambda rest, ws: f"SCHEDULE_DISABLED {rest}"
     )
     monkeypatch.setattr(
         sys,
@@ -231,9 +231,7 @@ def test_fast_path_matching_is_case_insensitive(spelling, tmp_path, monkeypatch)
     order: list[str] = []
     _patch(monkeypatch, order)
     seen: list[str] = []
-    monkeypatch.setattr(
-        main_module,
-        "_handle_self_build_propose",
+    monkeypatch.setattr(app_module, "_handle_self_build_propose",
         lambda rest, agent, workspace: seen.append(rest) or True,
     )
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", spelling])
@@ -247,9 +245,7 @@ def test_fast_path_only_applies_to_the_head_token(tmp_path, monkeypatch):
     """A mention of the command mid-sentence must not trigger the fast path."""
     order: list[str] = []
     _patch(monkeypatch, order)
-    monkeypatch.setattr(
-        main_module,
-        "_handle_self_build_propose",
+    monkeypatch.setattr(app_module, "_handle_self_build_propose",
         lambda *a, **k: pytest.fail("fast path must not fire for a mid-sentence mention"),
     )
     monkeypatch.setattr(

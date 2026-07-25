@@ -37,8 +37,53 @@ SURFACE_INVENTORY_MODULE = "characterization/test_main_public_surface.py"
 
 
 def _names_main_resolves() -> set[str]:
-    """Every name loaded anywhere in main.py's own body."""
+    """Names for which a patch on `main` is still observed by something.
+
+    Two ways that can be true:
+
+    * `main.py` loads the name in its own body — the launcher itself calls it;
+    * a non-test module does `from main import NAME` **inside a function**, so
+      the binding is looked up on `main` at call time. `agent_tick.py` and
+      `api/server.py` do exactly that with `build_agent`, which is why faking it
+      on `main` still works for their paths (CLI_BASELINE.md §2.5).
+    """
+    names: set[str] = set()
     tree = ast.parse((REPO_ROOT / "main.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            names.add(node.value.id)
+    return names | _names_imported_from_main_at_call_time()
+
+
+def _names_imported_from_main_at_call_time() -> set[str]:
+    """`from main import NAME` inside a function, anywhere outside tests."""
+    names: set[str] = set()
+    skip = {"tests", ".git", "__pycache__", ".venv", "venv", "node_modules"}
+    for path in REPO_ROOT.rglob("*.py"):
+        parts = set(path.relative_to(REPO_ROOT).parts)
+        if parts & skip or path.name == "main.py":
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "from main import" not in text:
+            continue
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:  # pragma: no cover - repo is expected to parse
+            continue
+        for func in ast.walk(tree):
+            if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for node in ast.walk(func):
+                if isinstance(node, ast.ImportFrom) and node.module == "main":
+                    names.update(alias.name for alias in node.names)
+    return names
+
+
+def _names_cli_app_resolves() -> set[str]:
+    """Every name loaded in cli/app.py's body — where the startup wiring runs."""
+    tree = ast.parse((REPO_ROOT / "cli" / "app.py").read_text(encoding="utf-8"))
     names: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
@@ -48,14 +93,14 @@ def _names_main_resolves() -> set[str]:
     return names
 
 
-def _patch_sites() -> list[tuple[str, int, str]]:
-    """(relative path, line, patched name) for every setattr on the main module."""
+def _patch_sites(module: str = "main") -> list[tuple[str, int, str]]:
+    """(relative path, line, patched name) for every setattr on that module."""
     sites: list[tuple[str, int, str]] = []
     for path in sorted(TESTS_ROOT.rglob("test_*.py")):
         text = path.read_text(encoding="utf-8")
-        aliases = set(re.findall(r"^\s*import main as (\w+)", text, re.M))
-        if re.search(r"^\s*import main\s*$", text, re.M):
-            aliases.add("main")
+        aliases = set(re.findall(rf"^\s*import {re.escape(module)} as (\w+)", text, re.M))
+        if re.search(rf"^\s*import {re.escape(module)}\s*$", text, re.M):
+            aliases.add(module)
         rel = path.relative_to(TESTS_ROOT).as_posix()
         for alias in aliases:
             for match in re.finditer(
@@ -68,18 +113,36 @@ def _patch_sites() -> list[tuple[str, int, str]]:
 
 def test_the_scanner_itself_finds_the_known_sites():
     """Guard the guard: a broken regex must not turn this file green."""
-    sites = _patch_sites()
-    assert len(sites) > 50, "patch-site scan collapsed — the regex or layout changed"
-    patched_names = {name for _, _, name in sites}
+    app_sites = _patch_sites("cli.app")
+    assert len(app_sites) > 50, "patch-site scan collapsed — the regex or layout changed"
+    app_names = {name for _, _, name in app_sites}
     for expected in ("build_agent", "load_dotenv", "_StdinLineReader"):
-        assert expected in patched_names, f"scan lost the {expected} sites"
+        assert expected in app_names, f"scan lost the cli.app {expected} sites"
+    # `build_agent` is still faked on `main` too, for the agent_tick / api paths.
+    assert "build_agent" in {name for _, _, name in _patch_sites("main")}
+
+
+def test_every_patch_on_cli_app_is_still_observed():
+    """The same rule for `cli.app`, the module the wiring fakes moved to."""
+    resolved = _names_cli_app_resolves()
+    inert = [
+        (rel, line, name)
+        for rel, line, name in _patch_sites("cli.app")
+        if name not in resolved
+    ]
+    assert not inert, "\n".join(
+        [
+            "These fakes are inert — cli/app.py does not resolve the name:",
+            *(f"  tests/{rel}:{line} patches cli.app.{name}" for rel, line, name in inert),
+        ]
+    )
 
 
 def test_every_patch_on_main_is_still_observed():
     resolved = _names_main_resolves()
     inert = [
         (rel, line, name)
-        for rel, line, name in _patch_sites()
+        for rel, line, name in _patch_sites("main")
         if name not in resolved and rel != SURFACE_INVENTORY_MODULE
     ]
     assert not inert, "\n".join(
@@ -92,14 +155,31 @@ def test_every_patch_on_main_is_still_observed():
     )
 
 
-@pytest.mark.parametrize("name", ["build_agent", "load_dotenv"])
-def test_wiring_names_are_still_resolved_by_main(name):
-    """The startup wiring `main()` still performs itself, spelled out.
+def test_build_agent_stays_patchable_through_main():
+    """`agent_tick.py` and `api/server.py` bind it lazily, so faking it works.
 
-    Collaborators such as `handle_meta_command` are deliberately absent: their
-    call sites live in `cli/…` and the suite patches them there. `main` keeps
-    re-exporting the names (`test_main_public_surface.py` pins that), but a
-    patch on `main` no longer intercepts — which is exactly what
-    `test_every_patch_on_main_is_still_observed` above now enforces.
+    This is the one name for which a patch on `main` is still the right target,
+    and the reason is not that `main` calls it — the launcher no longer calls
+    anything — but that those two modules do `from main import build_agent`
+    inside a function.
     """
-    assert name in _names_main_resolves()
+    assert "build_agent" in _names_imported_from_main_at_call_time()
+
+
+def test_the_launcher_performs_no_wiring_of_its_own():
+    """`main.py` is a launcher: it hands off to `cli/app.py` and nothing else.
+
+    `load_dotenv`, `_StdinLineReader`, `CLIApprovalProvider` and friends are
+    still *re-exported* (pinned by `test_main_public_surface.py`) but no longer
+    *called* here, so their fakes belong on `cli.app`.
+    """
+    tree = ast.parse((REPO_ROOT / "main.py").read_text(encoding="utf-8"))
+    called = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert called == {"run_cli", "main", "SystemExit"}, (
+        "main.py should only contain `return run_cli()` and the "
+        "`raise SystemExit(main())` tail; calls found: " + str(sorted(called))
+    )

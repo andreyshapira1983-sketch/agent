@@ -20,6 +20,12 @@ The only production consumers are `agent_tick.py:739`, `agent_tick.py:1175` and
 `api/server.py:83`, all doing `from main import build_agent` lazily. Everything
 else in the re-export block exists for tests.
 
+Because those three are *lazy* (the import runs inside a function), a fake set on
+`main.build_agent` is still picked up on their paths — that is the one patch
+target on `main` that stays correct after step 4, and
+`test_main_patch_seams.py::test_build_agent_stays_patchable_through_main` pins
+it.
+
 ### The 14 patched names, by test file
 
 | file | names patched on `main` |
@@ -83,8 +89,17 @@ runs in ~2s (an 84s run means fakes stopped intercepting), and
    `build_agent`. Each new target was proven to intercept by driving both paths
    with a spy: 9/9 fired.
 3. ~~Drop the parameter seam~~ — folded into step 2 above.
-4. Move the startup wiring (reader, approval provider, agent build, rate limiter,
-   daemon notice, banner) out of `main()`; re-point the *wiring* patches (7
-   names) in the same change, because that is what moving them costs.
+4. **Done.** `main()` moved wholesale to `cli/app.py::run_cli`; `main.py` is
+   **134 lines** of docstring, `return run_cli()`, launcher tail and re-exports.
+   The 7 wiring names were re-pointed at `cli.app` in the same change — **66
+   sites in 9 files**, plus two tests in the surface module that drove `main()`
+   for real. Four fakes on `main` deliberately stayed: `build_agent` in
+   `test_autonomous_runtime.py` and `test_budget_kill_switch.py`, because
+   `agent_tick.run_tick` binds it through `from main import build_agent` at call
+   time. Two more text-scanning guards had to follow the code
+   (`test_command_surface_snapshot.py`, `test_command_registry.py`) — both failed
+   loudly first. Every new target proven by driving `main()` with spies: 7/7
+   wiring fakes fired, and the two fast paths correctly fired *without*
+   `load_dotenv` or `build_agent`.
 5. Point `agent_tick.py` and `api/server.py` at `app.bootstrap` and remove the
    last re-export. This one touches production code, so it goes last and alone.

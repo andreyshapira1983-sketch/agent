@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import cli.app as app_module
 import app.budget_guard as budget_guard_module
 import cli.command_dispatch as dispatch_module
 import cli.intent_bridge as bridge_module
@@ -44,9 +45,9 @@ def _scripted_reader(lines: list[str]):
 
 
 def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(main_module, "load_dotenv", lambda *a, **k: None)
-    monkeypatch.setattr(main_module, "build_agent", lambda *a, **k: _fake_agent())
-    monkeypatch.setattr(main_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
+    monkeypatch.setattr(app_module, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(app_module, "build_agent", lambda *a, **k: _fake_agent())
+    monkeypatch.setattr(app_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
     monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda *a, **k: False)
     monkeypatch.setattr(bridge_module, "handle_conversational_operator_input", lambda *a, **k: False)
 
@@ -125,7 +126,7 @@ def test_help_page_is_written_to_stderr(tmp_path, capsys):
 
 def test_repl_banner_is_stderr_and_repl_prompt_is_stdout(tmp_path, monkeypatch, capsys):
     _patch(monkeypatch)
-    monkeypatch.setattr(main_module, "_StdinLineReader", lambda **k: _scripted_reader([]))
+    monkeypatch.setattr(app_module, "_StdinLineReader", lambda **k: _scripted_reader([]))
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
 
     assert main_module.main() == 0
@@ -140,8 +141,7 @@ def test_repl_banner_is_stderr_and_repl_prompt_is_stdout(tmp_path, monkeypatch, 
 def test_block_mode_prompt_also_goes_to_stdout(tmp_path, monkeypatch, capsys):
     _patch(monkeypatch)
     monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", lambda *a, **k: "A")
-    monkeypatch.setattr(
-        main_module, "_StdinLineReader", lambda **k: _scripted_reader(["<<<", "body", ">>>"])
+    monkeypatch.setattr(app_module, "_StdinLineReader", lambda **k: _scripted_reader(["<<<", "body", ">>>"])
     )
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
 
@@ -164,8 +164,8 @@ def test_approval_prompt_is_written_to_stderr_and_reads_the_repl_reader(
         def __init__(self, input_fn):
             captured["input_fn"] = input_fn
 
-    monkeypatch.setattr(main_module, "CLIApprovalProvider", _CapturingProvider)
-    monkeypatch.setattr(main_module, "_StdinLineReader", lambda **k: _scripted_reader([]))
+    monkeypatch.setattr(app_module, "CLIApprovalProvider", _CapturingProvider)
+    monkeypatch.setattr(app_module, "_StdinLineReader", lambda **k: _scripted_reader([]))
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
 
     assert main_module.main() == 0
