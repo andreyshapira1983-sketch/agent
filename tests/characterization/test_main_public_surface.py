@@ -121,7 +121,13 @@ def test_monkeypatching_load_dotenv_by_name_is_observed_by_main(tmp_path, monkey
 
 
 def test_monkeypatching_dispatch_operator_intent_by_name_is_observed(tmp_path, monkeypatch):
-    """tests/test_intent_bridge.py patches this symbol on `main`."""
+    """`main` re-exports the symbol and the re-export stays rebindable.
+
+    This asserts the *surface*, not interception: since the bridge moved to
+    `cli/intent_bridge.py`, `main` no longer calls it, and
+    tests/test_intent_bridge.py:42 correctly patches `cli.intent_bridge`
+    instead. test_main_patch_seams.py exempts this module for that reason.
+    """
     monkeypatch.setattr(main_module, "_dispatch_operator_intent", lambda *a, **k: True)
     assert main_module._dispatch_operator_intent(None, None, tmp_path) is True
 
