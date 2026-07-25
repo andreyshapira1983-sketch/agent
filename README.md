@@ -8,7 +8,7 @@ that do. When a document below conflicts with this README, that document wins.
 
 Read these in priority order; a higher entry overrides a lower one:
 
-1. **`AGENT_DOCTRINE.md`** — authoritative rules for how agents must behave.
+1. **`docs/AGENT_DOCTRINE.md`** — authoritative rules for how agents must behave.
 2. **Target architecture and component boundaries** — the intended design and
    the responsibilities/limits of each component.
 3. **`docs/ROADMAP.md`** — the order in which capabilities are developed.

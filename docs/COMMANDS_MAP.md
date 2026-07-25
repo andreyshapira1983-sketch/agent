@@ -34,6 +34,7 @@ are also reachable one-shot via `--ask ":command args"`.
 
 | Command | Purpose |
 | ------- | ------- |
+| `:mem \| :memory` | Show working-memory summary + persistent records. |
 | `:remember [tags] <text>` | Save a fact/preference to persistent memory. |
 | `:forget [id\|all]` | Delete persistent record(s). |
 | `:clear \| :reset` | Clear working memory (persistent untouched). |
@@ -71,7 +72,7 @@ are also reachable one-shot via `--ask ":command args"`.
 | `:budget-status` | Current budget status. |
 | `:budget-config \| :budget-limits` | Show budget limits. |
 | `:budget-window-status \| :budget-windows \| :budget-ledger` | Budget windows. |
-| `:budget-kill-switch \| :kill-switch [--clear]` | Inspect / clear the budget kill-switch. |
+| `:budget-kill-switch \| :budget-killswitch \| :kill-switch [--clear]` | Inspect / clear the budget kill-switch. |
 | `:operator-budget \| :budget-digest` | Operator-facing budget digest. |
 
 ## Approvals & alerts
@@ -98,6 +99,7 @@ are also reachable one-shot via `--ask ":command args"`.
 | `:rollback` | Apply/inspect compensation (undo) plans. |
 | `:self-build-produce` | Produce a grounded self-apply proposal (TD-025/036). |
 | `:self-build-propose <…>` | Produce a self-build proposal (also one-shot). |
+| `:self-build-supervisor` | Read-only self-build supervisor cycle. |
 | `:self-split <path.py>` | No-LLM incremental module split proposal. |
 | `:self-task-propose` | Stage A: task + failing acceptance test (Ступень 1). |
 | `:self-task-build <approval_id>` | Stage B: implement one approved task. |
@@ -134,6 +136,7 @@ are also reachable one-shot via `--ask ":command args"`.
 | `:autonomy-readiness \| :operator-readiness` | Autonomy readiness report. |
 | `:coding-readiness \| :programming-readiness` | Coding readiness report. |
 | `:dry-health-pass` | Read-only health-pass collector. |
+| `:assumptions \| :assumption-log [--json]` | Show the last 20 logged planning assumptions. |
 | `:architecture-audit \| :arch-audit \| :roadmap-audit` | Static architecture gap audit. |
 | `:conflicts \| :conflict-status` | Source Registry conflicts. |
 | `:state-store-drill \| :state-drill \| :state-recovery-drill` | State-store recovery drill. |
@@ -225,6 +228,7 @@ planner before, so every matcher carries paired negative tests in
 | Command | Purpose |
 | ------- | ------- |
 | `:help \| ?` | Show command help. |
+| `:quit \| :exit` | Exit the REPL. |
 
 _Source of facts: the REPL dispatch in `main.py` and `cli/commands_*.py`
 handlers. When a command is added/renamed in `main.py`, update this table.
