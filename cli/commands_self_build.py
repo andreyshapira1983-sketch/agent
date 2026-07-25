@@ -24,6 +24,7 @@ command (TD-024).
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -31,9 +32,13 @@ from typing import TYPE_CHECKING
 from core.budget_kill_switch import BudgetKillSwitch, default_path
 from core.safe_vcs import SafeVCS
 from core.self_build_producer import produce_self_apply_proposal
+from core.self_build_supervisor import evaluate_self_build_supervisor
 
 from cli.commands_approval import _approval_inbox_for
 from cli.commands_budget import _budget_ledger_snapshot
+from cli.commands_ingest import _self_build_propose_payload
+from cli.parsers import _split_meta_args
+from app.task_scheduler_cli import _scheduler_for, _task_queue_for
 from cli.self_build_memory import (
     recent_self_build_lessons,
     recently_vetoed_self_build_targets,
@@ -140,5 +145,148 @@ def _handle_self_build_produce(rest: str, agent: "AgentLoop", workspace: Path) -
             + ", ".join(f"{r['role']}:{r['decision']}" for r in roles)
         )
     lines.append(f"next: {result.get('next_human_action')}")
+    print("\n".join(lines), file=sys.stderr)
+    return True
+
+
+# ── :self-build-supervisor ───────────────────────────────────────────────────
+# Read-only supervisor cycle, extracted verbatim from main.py. It decides
+# whether to wait, stop, or propose one evidence-backed candidate; the helpers
+# below are its read-only evidence collectors.
+
+
+def _tech_debt_summary(workspace: Path) -> dict:
+    """Best-effort, read-only TECH_DEBT.md digest: counts of TD entries by status."""
+    path = workspace / "TECH_DEBT.md"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {"present": False}
+    td_re = re.compile(r"^\s*TD-\d+\b")
+    status_re = re.compile(r"^\s*Статус\s*:\s*(.+?)\s*$", re.IGNORECASE)
+    total = open_count = done_count = 0
+    awaiting_status = False
+    for line in text.splitlines():
+        if td_re.match(line):
+            total += 1
+            awaiting_status = True
+            continue
+        if awaiting_status:
+            match = status_re.match(line)
+            if match:
+                if match.group(1).strip().lower().startswith("done"):
+                    done_count += 1
+                else:
+                    open_count += 1
+                awaiting_status = False
+    return {
+        "present": True,
+        "total": total,
+        "done": done_count,
+        "open": open_count,
+    }
+
+
+def _recent_error_lines(workspace: Path, *, max_errors: int = 5) -> list[str]:
+    """Best-effort scan of the newest trace log for recent error events.
+
+    Read-only and defensive: any failure returns an empty list. Only compact,
+    log-safe identifiers (event name + optional error type) are surfaced.
+    """
+    try:
+        log_dir = workspace / "logs"
+        candidates = sorted(
+            (p for p in log_dir.glob("*.jsonl") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError:
+        return []
+    if not candidates:
+        return []
+    errors: list[str] = []
+    try:
+        lines = candidates[0].read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    for raw in reversed(lines):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            event = json.loads(raw)
+        except (ValueError, TypeError):
+            continue
+        name = str(event.get("event") or event.get("type") or "")
+        if not name:
+            continue
+        lowered = name.lower()
+        if "error" in lowered or "fail" in lowered or "blocked" in lowered:
+            errors.append(name)
+            if len(errors) >= max_errors:
+                break
+    return errors
+
+
+def _handle_self_build_supervisor(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """Read-only supervisor cycle: decide whether to wait, stop, or propose one
+    evidence-backed self-build candidate. Never applies changes / runs tests /
+    writes files / calls shell_exec / refreshes models."""
+    as_json = "--json" in _split_meta_args(rest)
+    budget_windows = _budget_ledger_snapshot(agent)
+    approvals_pending = int(
+        _approval_inbox_for(agent, workspace).snapshot().get("pending", 0) or 0
+    )
+    task_queue = _task_queue_for(agent, workspace).summary()
+    scheduler = _scheduler_for(agent, workspace).summary()
+    recent_errors = _recent_error_lines(workspace)
+    tech_debt = _tech_debt_summary(workspace)
+
+    report = evaluate_self_build_supervisor(
+        budget_windows=budget_windows,
+        approvals_pending=approvals_pending,
+        task_queue=task_queue,
+        scheduler=scheduler,
+        recent_errors=recent_errors,
+        tech_debt=tech_debt,
+        candidate_provider=lambda: _self_build_propose_payload(workspace),
+    )
+
+    # Log a compact, secret-free copy: never dump a full candidate diff.
+    candidate = report.get("candidate")
+    if isinstance(candidate, dict):
+        candidate_log = {
+            "file": candidate.get("file"),
+            "has_diff": candidate.get("diff") not in (None, "NO_PATCH"),
+        }
+    else:
+        candidate_log = candidate
+    agent.log.log(
+        "self_build_supervisor",
+        {
+            "status": report.get("status"),
+            "reason": report.get("reason"),
+            "checked_sections": report.get("checked_sections"),
+            "candidate": candidate_log,
+            "recommended_next_action": report.get("recommended_next_action"),
+        },
+    )
+
+    if as_json:
+        print(json.dumps(report, ensure_ascii=False, indent=2), file=sys.stderr)
+        return True
+
+    lines = [
+        "=== self-build supervisor ===",
+        f"status: {report.get('status')}",
+        f"reason: {report.get('reason')}",
+        f"checked: {', '.join(report.get('checked_sections') or [])}",
+    ]
+    if isinstance(candidate, dict):
+        lines.append(f"candidate file: {candidate.get('file')}")
+        lines.append(f"candidate diagnosis: {candidate.get('diagnosis')}")
+    else:
+        lines.append(f"candidate: {candidate}")
+    lines.append(f"next: {report.get('recommended_next_action')}")
     print("\n".join(lines), file=sys.stderr)
     return True
