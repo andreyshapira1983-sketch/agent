@@ -340,9 +340,10 @@ issue."* Phase gates are local-only until that is resolved.
 > | the dialogue loop: both multi-line input modes, `:operator-task`/`:end`, `:task-begin`/`:task-end`/`:task-abort`, dispatch, intent routing, rate-limit check, agent call | `cli/repl.py` (`run_repl`) |
 > | the `--resume` branch of `main()` + `_resume_question_from_checkpoint` | `cli/resume.py` (`resolve_resume` -> `ResumeDecision`) |
 > | the one-shot `--ask` run (provider choice, memory-free build, `:command` precedence, deep escalation) | `cli/one_shot.py` (`run_one_shot`) |
+> | the seven-flag argparse surface of section 1.1 | `cli/args.py` (`build_parser`) |
 >
-> Still in `main.py`: `main()` itself — argparse, the two pre-dotenv fast paths,
-> startup ordering, mode selection, and the one-time REPL *wiring* (stdin reader,
+> Still in `main.py`: `main()` itself — the two pre-dotenv fast paths, startup
+> ordering, mode selection, and the one-time REPL *wiring* (stdin reader,
 > approval provider, agent build, rate limiter, daemon notice, banner) — plus
 > `_preflight_file_hint` and the re-export block that keeps `from main import …`
 > working for 25 test modules, `agent_tick.py` and `api/server.py`.
