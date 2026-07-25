@@ -240,6 +240,26 @@ Consequence for Phase 2: a registry must model dispatched commands, aliases,
 REPL block tokens, the `?` alias (which cannot live in a `:token` set), help
 prose and the banner subset as *separate* concerns.
 
+> **ADDENDUM — two help gaps closed (2026-07-25, after Phase 1).** The table and
+> list above remain the true record of `9daa9bf`. Two of the divergences were
+> since fixed in `main.py`'s help text, so the current numbers differ:
+>
+> - **`:refresh-models` is now listed.** It was dispatched (`main.py:1517`) yet
+>   absent from `:help` *entirely* — the only command in that state, so operators
+>   had no way to discover it from the agent itself.
+> - **`:help` now lists itself**, so the banner **is** a subset of the help page.
+>
+> Current sizes: `:help` **98** tokens (was 96); dispatched-but-absent-from-help
+> **46** (was 48). The banner is untouched at **72** tokens (71 dispatched +
+> `:task-begin`), and **69** dispatched commands are still absent from it — that
+> subset is deliberate and was not changed. Everything else in §3.1 still holds,
+> including the four REPL block tokens the help page prints and the prose it
+> carries.
+>
+> Guarded by `tests/test_command_registry.py::test_the_help_page_lists_every_command`
+> and the updated counts in
+> `tests/characterization/test_command_surface_snapshot.py`.
+
 ### 3.2 Natural-language intents partially duplicate handler selection
 
 `_dispatch_operator_intent` (`main.py:1106-1159`) selects handlers itself across

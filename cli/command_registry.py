@@ -354,11 +354,10 @@ COMMANDS: tuple[CommandSpec, ...] = (
     ),
     CommandSpec(
         canonical=":refresh-models",
-        description="Query providers, persist catalog.",
+        description="query providers, persist model catalog",
         category="Models & budget",
         handler_key="refresh_models",
         aliases=(":model-catalog-refresh", ":model-refresh",),
-        in_help=False,
     ),
     CommandSpec(
         canonical=":model-discovery-audit",
@@ -802,10 +801,9 @@ COMMANDS: tuple[CommandSpec, ...] = (
     # ── Help ────────────────────────────────────────────────────────
     CommandSpec(
         canonical=":help",
-        description="Show command help.",
+        description="show this command help",
         category="Help",
         handler_key="help",
-        in_help=False,
         in_startup_summary=True,
     ),
     CommandSpec(
