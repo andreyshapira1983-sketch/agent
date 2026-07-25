@@ -92,7 +92,14 @@ def test_every_patch_on_main_is_still_observed():
     )
 
 
-@pytest.mark.parametrize("name", ["build_agent", "handle_meta_command", "load_dotenv"])
-def test_load_bearing_names_are_still_resolved_by_main(name):
-    """The three the rest of the repo leans on hardest, spelled out."""
+@pytest.mark.parametrize("name", ["build_agent", "load_dotenv"])
+def test_wiring_names_are_still_resolved_by_main(name):
+    """The startup wiring `main()` still performs itself, spelled out.
+
+    Collaborators such as `handle_meta_command` are deliberately absent: their
+    call sites live in `cli/…` and the suite patches them there. `main` keeps
+    re-exporting the names (`test_main_public_surface.py` pins that), but a
+    patch on `main` no longer intercepts — which is exactly what
+    `test_every_patch_on_main_is_still_observed` above now enforces.
+    """
     assert name in _names_main_resolves()

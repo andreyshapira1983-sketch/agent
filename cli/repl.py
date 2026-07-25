@@ -33,13 +33,8 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from app.budget_guard import _run_agent_with_budget_guard
-from app.operator_task import _handle_operator_task
-from cli.command_dispatch import handle_meta_command as _handle_meta_command
-from cli.intent_bridge import (
-    _handle_local_operator_reply,
-    handle_conversational_operator_input as _handle_conversational_operator_input,
-)
+from app import budget_guard, operator_task
+from cli import command_dispatch, intent_bridge
 from core.loop import format_human_response
 
 if TYPE_CHECKING:  # annotation only -- it was an unresolved string in main.py
@@ -214,12 +209,12 @@ def _stdin_is_interactive() -> bool:
 # ``tests/characterization/test_repl_input_modes.py``,
 # ``test_cli_command_precedence.py`` and ``test_repl_rate_limit_paths.py`` pin.
 #
-# The five collaborators are keyword parameters for the same reason as in
-# ``cli/one_shot.py``: ``main`` is a monkeypatch surface
-# (``docs/refactor/CLI_BASELINE.md`` section 2.5), and a patch on ``main`` is
-# only observed where the call site resolves the name in ``main``'s namespace.
-# ``main()`` passes its own bindings in; the defaults here are for direct
-# callers. Both seams come out in Phase 7 with the re-export block.
+# The four collaborator modules are imported as *modules* and called through
+# the attribute, for the reason spelled out in ``cli/one_shot.py``: a
+# ``monkeypatch.setattr`` is observed only where the call site resolves the name
+# (``docs/refactor/CLI_BASELINE.md`` section 2.5). One patch on the module that
+# defines the function is therefore seen from the REPL and from one-shot alike;
+# binding the names here at import time would silently ignore it.
 
 
 def run_repl(
@@ -229,11 +224,6 @@ def run_repl(
     rate_limiter: CLIRateLimiter,
     workspace: Path,
     file_hint: str | None = None,
-    handle_meta_command: Callable[..., bool] = _handle_meta_command,
-    handle_local_operator_reply: Callable[..., bool] = _handle_local_operator_reply,
-    handle_conversational: Callable[..., bool] = _handle_conversational_operator_input,
-    run_agent_with_budget_guard: Callable[..., str] = _run_agent_with_budget_guard,
-    handle_operator_task: Callable[..., object] = _handle_operator_task,
 ) -> int:
     """Run the interactive dialogue until EOF/Ctrl+C and return the exit code.
 
@@ -311,7 +301,7 @@ def run_repl(
                 if line.strip().lower() == ":end":
                     break
                 block_lines.append(line)
-            handle_operator_task("\n".join(block_lines), agent, workspace)
+            operator_task._handle_operator_task("\n".join(block_lines), agent, workspace)
             continue
         # ── CLI instruction buffer ────────────────────────────────────────────
         # :task-begin … :task-end lets the operator compose a complex,
@@ -339,7 +329,7 @@ def run_repl(
             if not buffered:
                 print("(instruction buffer empty — nothing sent)", file=sys.stderr)
                 continue
-            if handle_local_operator_reply(buffered, agent):
+            if intent_bridge._handle_local_operator_reply(buffered, agent):
                 continue
             rl = rate_limiter.consume()
             if not rl.allowed:
@@ -350,7 +340,7 @@ def run_repl(
                     file=sys.stderr,
                 )
                 continue
-            answer = run_agent_with_budget_guard(
+            answer = budget_guard._run_agent_with_budget_guard(
                 agent,
                 user_question=buffered,
                 file_hint=file_hint,
@@ -360,13 +350,13 @@ def run_repl(
             print("\n" + format_human_response(answer) + "\n")
             continue
         if q.startswith(":") or q == "?":
-            if handle_meta_command(q, agent, workspace):
+            if command_dispatch.handle_meta_command(q, agent, workspace):
                 continue
             print(f"(unknown command: {q})", file=sys.stderr)
             continue
-        if handle_local_operator_reply(q, agent):
+        if intent_bridge._handle_local_operator_reply(q, agent):
             continue
-        if handle_conversational(q, agent, workspace):
+        if intent_bridge.handle_conversational_operator_input(q, agent, workspace):
             continue
         # ── Rate-limit check ─────────────────────────────────────────────────
         rl = rate_limiter.consume()
@@ -378,7 +368,7 @@ def run_repl(
                 file=sys.stderr,
             )
             continue
-        answer = run_agent_with_budget_guard(
+        answer = budget_guard._run_agent_with_budget_guard(
             agent,
             user_question=q,
             file_hint=file_hint,

@@ -71,11 +71,18 @@ signals to check together: the suite passes, `tests/characterization/` still
 runs in ~2s (an 84s run means fakes stopped intercepting), and
 `test_main_patch_seams.py` stays green.
 
-1. **Done here** — the seam guard plus the two fixes above.
-2. Re-point the *collaborator* patches (5 names) at the modules that own their
-   call sites, one test file per change.
-3. Drop the parameter seam from `run_one_shot` / `run_repl` once nothing patches
-   those names on `main`.
+1. **Done** — the seam guard plus the two fixes above.
+2. **Done, together with step 3** (they could not be separated: re-pointing a
+   patch at the owner module only bites once the call site stops binding the
+   name at import time). `cli/one_shot.py` and `cli/repl.py` now import the four
+   collaborator modules *as modules* and call through the attribute --
+   `command_dispatch.handle_meta_command(...)` -- so **one** patch on the module
+   that defines a function is observed from both paths. The 5 collaborator
+   names moved to their owners across **49 sites in 8 files**, and the seam
+   parameters are gone from `run_repl` entirely and from `run_one_shot` except
+   `build_agent`. Each new target was proven to intercept by driving both paths
+   with a spy: 9/9 fired.
+3. ~~Drop the parameter seam~~ — folded into step 2 above.
 4. Move the startup wiring (reader, approval provider, agent build, rate limiter,
    daemon notice, banner) out of `main()`; re-point the *wiring* patches (7
    names) in the same change, because that is what moving them costs.
