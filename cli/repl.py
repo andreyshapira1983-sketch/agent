@@ -14,8 +14,16 @@ top-level prompt, the block modes and the approval prompt from racing each other
 
 Extracted verbatim from ``main.py``; it re-exports every name here, so
 ``from main import _StdinLineReader`` and ``main.PASTE_COALESCE_GAP_SECONDS``
-keep working for the test modules that use them. The REPL loop itself still
-lives in ``main()`` and will join this module in a later step.
+keep working for the test modules that use them.
+
+:func:`run_repl` at the bottom of this file is the dialogue loop itself, moved
+here from ``main()`` in a later step. It owns everything that happens *per
+message*: the two multi-line input modes (``<<< … >>>`` and trailing ``\\``),
+the ``:operator-task``/``:end`` and ``:task-begin``/``:task-end`` blocks,
+``:command`` dispatch, the plain-language intent router, the rate-limit check
+and the agent call. What stays in ``main()`` is the one-time *wiring* around it
+(reader, approval provider, agent, rate limiter, daemon notice, banner), because
+that is startup ordering and several suites freeze it by patching ``main``.
 """
 from __future__ import annotations
 
@@ -25,8 +33,20 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from app.budget_guard import _run_agent_with_budget_guard
+from app.operator_task import _handle_operator_task
+from cli.command_dispatch import handle_meta_command as _handle_meta_command
+from cli.intent_bridge import (
+    _handle_local_operator_reply,
+    handle_conversational_operator_input as _handle_conversational_operator_input,
+)
+from core.loop import format_human_response
+
 if TYPE_CHECKING:  # annotation only -- it was an unresolved string in main.py
     from io import TextIOBase
+    from pathlib import Path
+
+    from core.rate_limiter import CLIRateLimiter
 
 
 def _collect_instruction_buffer(
@@ -183,3 +203,186 @@ def _stdin_is_interactive() -> bool:
         return bool(sys.stdin.isatty())
     except Exception:
         return False
+
+
+# ── The dialogue loop ─────────────────────────────────────────────────────────
+# Moved out of ``main()``; the body below is the original ``while True:`` block
+# dedented one level, with the locals it used renamed to parameters
+# (``_reader`` -> ``reader``, ``_rate_limiter`` -> ``rate_limiter``,
+# ``args.file`` -> ``file_hint``). Every printed string, every branch and the
+# order of the checks are untouched, and that order is what
+# ``tests/characterization/test_repl_input_modes.py``,
+# ``test_cli_command_precedence.py`` and ``test_repl_rate_limit_paths.py`` pin.
+#
+# The five collaborators are keyword parameters for the same reason as in
+# ``cli/one_shot.py``: ``main`` is a monkeypatch surface
+# (``docs/refactor/CLI_BASELINE.md`` section 2.5), and a patch on ``main`` is
+# only observed where the call site resolves the name in ``main``'s namespace.
+# ``main()`` passes its own bindings in; the defaults here are for direct
+# callers. Both seams come out in Phase 7 with the re-export block.
+
+
+def run_repl(
+    agent: object,
+    *,
+    reader: _StdinLineReader,
+    rate_limiter: CLIRateLimiter,
+    workspace: Path,
+    file_hint: str | None = None,
+    handle_meta_command: Callable[..., bool] = _handle_meta_command,
+    handle_local_operator_reply: Callable[..., bool] = _handle_local_operator_reply,
+    handle_conversational: Callable[..., bool] = _handle_conversational_operator_input,
+    run_agent_with_budget_guard: Callable[..., str] = _run_agent_with_budget_guard,
+    handle_operator_task: Callable[..., object] = _handle_operator_task,
+) -> int:
+    """Run the interactive dialogue until EOF/Ctrl+C and return the exit code.
+
+    Returns ``0`` on every way out: end of input, Ctrl+C, or an abandoned block
+    mode. ``:quit``/``:exit`` leave through ``SystemExit`` raised by the
+    dispatcher, which passes straight through this loop.
+    """
+    while True:
+        try:
+            q = reader.read_message("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if not q:
+            # An empty Enter must NOT exit — otherwise pasting a long
+            # multi-line block whose first line is blank (or pressing
+            # Enter to clear the prompt) drops the user back into the
+            # parent shell, which then tries to interpret the rest of
+            # the paste as commands. Use :quit / :exit / Ctrl+C / EOF.
+            continue
+        # ── Multi-line input modes ────────────────────────────────────────────
+        # Mode 1: explicit block  <<<  … >>>
+        #   Start a line with <<< to enter block mode; finish with >>>
+        #   Useful when pasting text that contains newlines.
+        if q == "<<<":
+            block_parts: list[str] = []
+            print("(multi-line mode: paste text, finish with >>> on its own line)",
+                  file=sys.stderr)
+            while True:
+                try:
+                    bline = reader.prompt_line("... ")
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    return 0
+                stripped = bline.strip()
+                if stripped == ">>>":
+                    break
+                # Tolerate the terminator glued to the end of a paste:
+                # "...last sentence.>>>" should also end the block, otherwise
+                # users get stuck in `... ` prompt forever after a single
+                # Ctrl+V whose buffer ended with ">>>" without a newline.
+                if stripped.endswith(">>>"):
+                    block_parts.append(bline.rstrip()[:-3].rstrip())
+                    break
+                block_parts.append(bline)
+            q = "\n".join(block_parts).strip()
+            if not q:
+                continue
+        # Mode 2: line continuation with trailing backslash
+        #   Each line ending in \ is joined with the next (backslash removed).
+        elif q.endswith("\\"):
+            continuation_parts: list[str] = [q[:-1]]
+            while True:
+                try:
+                    cline = reader.prompt_line("... ")
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    return 0
+                if cline.endswith("\\"):
+                    continuation_parts.append(cline[:-1])
+                else:
+                    continuation_parts.append(cline)
+                    break
+            q = " ".join(p.strip() for p in continuation_parts if p.strip())
+        # ─────────────────────────────────────────────────────────────────────
+        if q == ":operator-task":
+            block_lines: list[str] = []
+            print("(operator task block started; finish with :end)", file=sys.stderr)
+            while True:
+                try:
+                    line = reader.prompt_line("... ")
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    return 0
+                if line.strip().lower() == ":end":
+                    break
+                block_lines.append(line)
+            handle_operator_task("\n".join(block_lines), agent, workspace)
+            continue
+        # ── CLI instruction buffer ────────────────────────────────────────────
+        # :task-begin … :task-end lets the operator compose a complex,
+        # multi-line instruction that is sent straight to the agent, bypassing
+        # the operator keyword router. This is the reliable way to give an
+        # instruction whose wording would otherwise be hijacked by a shortcut
+        # (e.g. text that merely *mentions* budget / approval / implementation).
+        # :task-abort discards the buffer.
+        if q == ":task-begin":
+            print(
+                "(instruction buffer started; finish with :task-end, "
+                "discard with :task-abort)",
+                file=sys.stderr,
+            )
+            try:
+                buffered, cancelled = _collect_instruction_buffer(
+                    lambda: reader.prompt_line("... ")
+                )
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return 0
+            if cancelled:
+                print("(instruction buffer cancelled)", file=sys.stderr)
+                continue
+            if not buffered:
+                print("(instruction buffer empty — nothing sent)", file=sys.stderr)
+                continue
+            if handle_local_operator_reply(buffered, agent):
+                continue
+            rl = rate_limiter.consume()
+            if not rl.allowed:
+                print(
+                    f"(rate limit: too many requests — "
+                    f"retry in {rl.retry_after_seconds:.1f}s, "
+                    f"tokens remaining: {rl.tokens_remaining:.2f})",
+                    file=sys.stderr,
+                )
+                continue
+            answer = run_agent_with_budget_guard(
+                agent,
+                user_question=buffered,
+                file_hint=file_hint,
+                workspace=workspace,
+                stream=False,
+            )
+            print("\n" + format_human_response(answer) + "\n")
+            continue
+        if q.startswith(":") or q == "?":
+            if handle_meta_command(q, agent, workspace):
+                continue
+            print(f"(unknown command: {q})", file=sys.stderr)
+            continue
+        if handle_local_operator_reply(q, agent):
+            continue
+        if handle_conversational(q, agent, workspace):
+            continue
+        # ── Rate-limit check ─────────────────────────────────────────────────
+        rl = rate_limiter.consume()
+        if not rl.allowed:
+            print(
+                f"(rate limit: too many requests — "
+                f"retry in {rl.retry_after_seconds:.1f}s, "
+                f"tokens remaining: {rl.tokens_remaining:.2f})",
+                file=sys.stderr,
+            )
+            continue
+        answer = run_agent_with_budget_guard(
+            agent,
+            user_question=q,
+            file_hint=file_hint,
+            workspace=workspace,
+            stream=False,
+        )
+        print("\n" + format_human_response(answer) + "\n")
