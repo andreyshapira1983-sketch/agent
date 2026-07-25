@@ -118,8 +118,9 @@ def test_the_scanner_itself_finds_the_known_sites():
     app_names = {name for _, _, name in app_sites}
     for expected in ("build_agent", "load_dotenv", "_StdinLineReader"):
         assert expected in app_names, f"scan lost the cli.app {expected} sites"
-    # `build_agent` is still faked on `main` too, for the agent_tick / api paths.
-    assert "build_agent" in {name for _, _, name in _patch_sites("main")}
+    # The runtime no longer binds anything through `main`, so the only fake left
+    # on it is the surface module's own `_dispatch_operator_intent` rebind.
+    assert {name for _, _, name in _patch_sites("main")} == {"_dispatch_operator_intent"}
 
 
 def test_every_patch_on_cli_app_is_still_observed():
@@ -155,15 +156,16 @@ def test_every_patch_on_main_is_still_observed():
     )
 
 
-def test_build_agent_stays_patchable_through_main():
-    """`agent_tick.py` and `api/server.py` bind it lazily, so faking it works.
+def test_nothing_outside_tests_imports_from_main_any_more():
+    """The last reason to fake anything on `main` is gone.
 
-    This is the one name for which a patch on `main` is still the right target,
-    and the reason is not that `main` calls it — the launcher no longer calls
-    anything — but that those two modules do `from main import build_agent`
-    inside a function.
+    `agent_tick.py` and `api/server.py` used to bind `build_agent` lazily through
+    `main`, which made a patch there legitimate. They now import it from
+    `app.bootstrap`, so no name qualifies for that exemption and every patch on
+    `main` must be justified by `main.py` resolving it itself — which, for a
+    launcher that only calls `run_cli()`, means none.
     """
-    assert "build_agent" in _names_imported_from_main_at_call_time()
+    assert _names_imported_from_main_at_call_time() == set()
 
 
 def test_the_launcher_performs_no_wiring_of_its_own():

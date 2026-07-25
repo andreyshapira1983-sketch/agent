@@ -279,9 +279,9 @@ def test_tick_marks_timed_out_run_inconclusive_not_healthy(workspace: Path, monk
         max_replan_attempts=1,
     )
 
-    # run_tick lazily does `from main import build_agent`; patch that symbol.
-    import main
-    monkeypatch.setattr(main, "build_agent", lambda *a, **k: agent)
+    # run_tick lazily does `from app.bootstrap import build_agent`; patch that symbol.
+    import app.bootstrap as bootstrap
+    monkeypatch.setattr(bootstrap, "build_agent", lambda *a, **k: agent)
 
     # run_tick does os.environ.setdefault("AGENT_TEST_TIMEOUT_SECONDS", ...);
     # pin it via monkeypatch so the global env mutation is reverted on teardown
@@ -404,8 +404,8 @@ def test_tick_failed_tests_drive_a_repair_proposal_into_the_inbox(
         max_replan_attempts=1,
     )
 
-    import main
-    monkeypatch.setattr(main, "build_agent", lambda *a, **k: agent)
+    import app.bootstrap as bootstrap
+    monkeypatch.setattr(bootstrap, "build_agent", lambda *a, **k: agent)
     monkeypatch.setenv("AGENT_TEST_TIMEOUT_SECONDS", "300")
 
     queue = TaskQueueStore(workspace / "data" / "task_queue.jsonl")
@@ -460,8 +460,8 @@ def test_tick_dry_run_streak_grows_then_resets_on_live(workspace: Path, monkeypa
     (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
 
     agent = _agent(workspace, with_tests=False)
-    import main
-    monkeypatch.setattr(main, "build_agent", lambda *a, **k: agent)
+    import app.bootstrap as bootstrap
+    monkeypatch.setattr(bootstrap, "build_agent", lambda *a, **k: agent)
     monkeypatch.setenv("AGENT_TEST_TIMEOUT_SECONDS", "300")
 
     hb_path = workspace / "data" / "daemon_heartbeat.json"

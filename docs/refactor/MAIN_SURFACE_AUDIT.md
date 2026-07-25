@@ -16,9 +16,10 @@ test does not.
 | of those, needed by **non-test** code | **1** — `build_agent` |
 | names the test suite patches on `main` | **14**, across **127** sites in **12** files |
 
-The only production consumers are `agent_tick.py:739`, `agent_tick.py:1175` and
-`api/server.py:83`, all doing `from main import build_agent` lazily. Everything
-else in the re-export block exists for tests.
+The only production consumers *were* `agent_tick.py:739`, `agent_tick.py:1175`
+and `api/server.py:83`, all doing `from main import build_agent` lazily. Since
+step 5 they import it from `app.bootstrap`, so **the whole re-export block now
+serves tests only**.
 
 Because those three are *lazy* (the import runs inside a function), a fake set on
 `main.build_agent` is still picked up on their paths — that is the one patch
@@ -101,5 +102,15 @@ runs in ~2s (an 84s run means fakes stopped intercepting), and
    loudly first. Every new target proven by driving `main()` with spies: 7/7
    wiring fakes fired, and the two fast paths correctly fired *without*
    `load_dotenv` or `build_agent`.
-5. Point `agent_tick.py` and `api/server.py` at `app.bootstrap` and remove the
-   last re-export. This one touches production code, so it goes last and alone.
+5. **Production half done.** `agent_tick.py:739`, `agent_tick.py:1175` and
+   `api/server.py:83` import `build_agent` from `app.bootstrap`; nothing outside
+   `tests/` reaches into `main` any more, and the four `main.build_agent` fakes
+   in `test_autonomous_runtime.py` / `test_budget_kill_switch.py` moved to
+   `app.bootstrap` with them. Verified three ways: `agent_tick.py:739` by a test
+   that **fails** when the old import is put back, `api/server.py:83` by calling
+   `_build_server_agent()` with a spy, and `agent_tick.py:1175` — the unattended
+   campaign path, which the suite does not exercise — by reading the parsed
+   import back out of the AST.
+6. **Remaining:** delete the re-export block itself. It now serves *test imports
+   only* — **28 names across 24 test modules** still do `from main import …`.
+   That is mechanical, touches no production code, and is the last step.
