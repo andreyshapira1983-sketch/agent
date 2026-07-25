@@ -32,6 +32,30 @@ are tested, but are **not** the process Compose or `agent_tick` starts. See
 
 Routing map for documents: [`docs/INDEX.md`](docs/INDEX.md).
 
+## Quickstart
+
+**Requirements:** Python 3.11.
+
+```bash
+# 1. Install (hash-locked core dependencies)
+python -m pip install --upgrade pip
+pip install --require-hashes -r requirements.lock
+
+# 2. Configure — copy .env.example to .env (safe default: mock provider, no keys)
+
+# 3. Run — interactive REPL (exit with :quit)
+python main.py --workspace .
+
+# ...or ask a single question:
+python main.py --ask "What does this project do?"
+```
+
+- **Unattended one-shot:** `python agent_tick.py --workspace .` — `AGENT_TICK_DRY_RUN=1` by default, so no real effects.
+- **Long-lived (Docker):** `docker compose up -d` — see [`docs/DOCKER.md`](docs/DOCKER.md).
+- **HTTP API:** `pip install fastapi "uvicorn[standard]"`, then `uvicorn api.server:app` — see [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
+
+Configuration reference: [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md).
+
 ## Purpose
 
 The goal of this project is to provide a clear, maintainable foundation with a small, low-risk surface area for change.

@@ -38,6 +38,8 @@ question, which single file is authoritative.
 | What the provider/model layer can and cannot express (structured outputs, routing, streaming, refusal, truncation) | [audit/PROVIDER_STRUCTURED_OUTPUT_AUDIT.md](audit/PROVIDER_STRUCTURED_OUTPUT_AUDIT.md) | the measured provider-layer audit + its labeled dated addendum §A1–A9 on architectural placement | whether any model actually supports strict JSON Schema — **undetermined, no probe was run** |
 | Daemon build state, item by item | [daemon-progress.md](daemon-progress.md) | per-sub-item implementation/PR/hotfix/acceptance | anything outside the daemon plan |
 | What process Docker/Compose actually runs | [DOCKER.md](DOCKER.md) | production supervisor process | async `app/daemon.py` composition (→ daemon-progress) |
+| How to run, operate, drive the HTTP API, and diagnose failures | [OPERATIONS.md](OPERATIONS.md) | run modes, API operator guide, troubleshooting, recovery | container mechanics (→ DOCKER.md); config values (→ CONFIGURATION.md) |
+| How the agent is configured, and where it keeps state | [CONFIGURATION.md](CONFIGURATION.md) | env vars, `config/` files, `data/` state layout | issue status; runtime behaviour |
 | Problem *classes* already fixed, and how to run the next audit | [self-audit-lessons.md](self-audit-lessons.md) | the 6 recurring anti-patterns + audit procedure. **History of regressions — never delete** | current defect status |
 | How each document was classified, and where docs drifted from code | [audit/DOCUMENT_INVENTORY.md](audit/DOCUMENT_INVENTORY.md) | per-document classification as of Stage 1 | current code facts |
 | Failure classes seen in *someone else's* system, as a checklist | [OPERATIONAL_FAILURE_MODES.md](OPERATIONAL_FAILURE_MODES.md) | the external OFM taxonomy — **no number in it measures this repo** | our defect status (see §4) |
@@ -45,6 +47,10 @@ question, which single file is authoritative.
 | The coordination-layer proposal (Agent Mail, Decision Log, …) | [MULTI_AGENT_COORDINATION_LAYER.md](MULTI_AGENT_COORDINATION_LAYER.md) | a self-declared **proposal**, not implemented | current behaviour |
 | Behavioural doctrine / repo working rules | [AGENT_DOCTRINE.md](AGENT_DOCTRINE.md), [AGENTS.md](AGENTS.md) | correctness-first priority order; change discipline | technical facts |
 | Entry point + source-of-truth hierarchy | [../README.md](../README.md) | navigation only | everything else |
+| How to report a vulnerability + security controls | [../SECURITY.md](../SECURITY.md) | reporting path + secret/runtime/dependency controls | — |
+| How to set up, test, and contribute changes | [../CONTRIBUTING.md](../CONTRIBUTING.md) | dev workflow, tests, doc discipline | — |
+| Notable changes over time | [../CHANGELOG.md](../CHANGELOG.md) | the Unreleased change log | capability status (→ ROADMAP) |
+| Licence terms | [../LICENSE](../LICENSE) | proprietary, all-rights-reserved terms | — |
 
 ### Historical audit sources (read for *method and context*, not for status)
 
