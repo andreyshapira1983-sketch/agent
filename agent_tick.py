@@ -58,6 +58,10 @@ SCHEDULES_PATH     = "data/runtime_schedules.jsonl"
 TASK_QUEUE_PATH    = "data/task_queue.jsonl"
 INCIDENT_LOG_PATH  = "data/incidents.jsonl"
 HEARTBEAT_PATH     = "data/daemon_heartbeat.json"
+# The single-instance lock every queue consumer must hold while draining. Same
+# path app/single_instance.py documents, so a future always-on daemon and this
+# cron tick exclude each other rather than both claiming tasks.
+DAEMON_LOCK_PATH   = "data/daemon.lock"
 BUDGET_LEDGER_PATH = "data/budget_ledger.jsonl"
 BUDGET_CONFIG_PATH = "config/budget_limits.json"
 # Persistent cooldown state for the autonomous self-build producer (TD-026).
@@ -734,9 +738,16 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     from core.approval_inbox import ApprovalInbox
     from core.scheduler import SchedulerStore
     from core.task_queue import TaskQueueStore
+    from core.task_lifecycle import (
+        apply_run_exception,
+        apply_run_outcome,
+        recover_orphaned_tasks,
+        task_heartbeat,
+    )
     from core.autonomous_runtime import AutonomousRuntime, _config_from_task
     from core.incident import IncidentLog
     from app.bootstrap import build_agent
+    from app.single_instance import AlreadyRunningError, SingleInstanceLock
 
     tick_start = _now_iso()
     summary: dict = {
@@ -786,6 +797,8 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
          **visibility},
     )
 
+    # Bound before the try so the error path can always release it.
+    _consumer_lock: "SingleInstanceLock | None" = None
     try:
         # ── 0. Budget kill-switch gate (TD-022) ───────────────────────────────
         # Safety-by-default: if the persistent DAY budget is exhausted, skip all
@@ -826,9 +839,53 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         _log_tick(workspace, {"event": "scheduler_tick", **tick_report.to_dict()})
 
         # ── 2. Claim and run pending tasks ────────────────────────────────────
-        pending_tasks = task_store.list(status="pending")
+        # Draining the queue happens under the single-instance lock. Two things
+        # depend on it: no second consumer may claim the same task, and startup
+        # recovery may only reclaim an abandoned row when nothing else can be
+        # holding one in flight. If another consumer holds the lock, this tick
+        # skips the drain and does the rest of its work — that is the correct
+        # outcome, not an error.
+        _consumer_lock = SingleInstanceLock(workspace / DAEMON_LOCK_PATH)
+        try:
+            _consumer_lock.acquire()
+        except AlreadyRunningError as exc:
+            _consumer_lock = None
+            summary["task_drain"] = "skipped_locked"
+            _log_tick(workspace, {"event": "task_drain_skipped",
+                                  "reason": "another consumer holds the lock",
+                                  "details": getattr(exc, "details", {})})
+
+        pending_tasks = []
+        if _consumer_lock is not None:
+            # Recovery on start (daemon-progress 4.2): tasks abandoned by a
+            # process that died mid-run. Safe here and only here — the lock
+            # proves no consumer is live, and the heartbeat proves the row is
+            # not merely slow (MIR-039 / MIR-040).
+            try:
+                _orphans = recover_orphaned_tasks(
+                    task_store, lock=_consumer_lock
+                )
+                if _orphans:
+                    _log_tick(workspace, {
+                        "event": "tasks_recovered",
+                        "count": len(_orphans),
+                        "tasks": [
+                            {"id": t.id, "status": t.status,
+                             "attempts": t.attempts, "error": t.last_error}
+                            for t in _orphans
+                        ],
+                    })
+            except Exception as exc:  # noqa: BLE001
+                _log_tick(workspace, {"event": "task_recovery_error",
+                                      "error": f"{type(exc).__name__}: {exc}"})
+            # `pending()` rather than `list(status="pending")`: it honours
+            # `run_after`, so a task re-queued behind the retry backoff is not
+            # immediately re-run by this consumer.
+            pending_tasks = task_store.pending()
+
         if not pending_tasks:
-            _log_tick(workspace, {"event": "no_pending_tasks"})
+            if _consumer_lock is not None:
+                _log_tick(workspace, {"event": "no_pending_tasks"})
             # Still check approval inbox below
         else:
             agent = build_agent(
@@ -856,7 +913,31 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
                 if dry_run and not config.dry_run:
                     config = dataclasses.replace(config, dry_run=True)
 
-                run_report = runtime.run(config)
+                try:
+                    # Heartbeat while the run happens, so a killed process is
+                    # distinguishable from a slow one and startup recovery can
+                    # act without risking a double run (MIR-040).
+                    with task_heartbeat(task_store, task.id):
+                        run_report = runtime.run(config)
+                except Exception as exc:   # noqa: BLE001
+                    # Previously this escaped to the outer handler, which wrote
+                    # an error heartbeat and returned WITHOUT touching the task —
+                    # leaving it `running` forever with nothing in the live
+                    # system able to recover it (MIR-039 + MIR-040).
+                    failed, decision = apply_run_exception(
+                        task_store, task.id, exc
+                    )
+                    summary["tasks_processed"] += 1
+                    summary["result_status"] = "failed"
+                    _log_tick(workspace, {
+                        "event": "task_failed",
+                        "task_id": task.id,
+                        "status": failed.status,
+                        "error_type": type(exc).__name__,
+                        **decision.to_log_payload(),
+                    })
+                    continue
+
                 summary["tasks_processed"] += 1
 
                 # Per-task honest verdict (kept distinct from run_status below).
@@ -913,17 +994,37 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
                                 },
                             )
 
-                task_store.mark_done(task.id, report=run_report.to_dict())
+                # One shared mapping with the CLI/campaign consumer: completed →
+                # done, blocked-on-approval → blocked, stopped → failed with the
+                # stop reason. The unconditional `mark_done` this replaces
+                # recorded a budget-stopped or approval-blocked run as a success
+                # (MIR-039).
+                updated, decision = apply_run_outcome(
+                    task_store,
+                    task.id,
+                    status=run_report.status,
+                    stop_reason=run_report.stop_reason,
+                    report=run_report.to_dict(),
+                )
                 # run_status = did the run finish (completed); result_status =
-                # what the work actually established (done/failed/inconclusive).
-                # mode/processed_effects make it explicit that a dry-run task
-                # applied nothing.
+                # what the work actually established (done/failed/inconclusive);
+                # task_status = where the queue row ended up. Three axes, kept
+                # apart on purpose. mode/processed_effects make it explicit that
+                # a dry-run task applied nothing.
                 _log_tick(workspace, {"event": "task_done", "task_id": task.id,
                                       "run_status": run_report.status,
+                                      "task_status": updated.status,
+                                      "lifecycle_reason": decision.reason,
                                       "result_status": task_result_status,
                                       "mode": summary["mode"],
                                       "effects": summary["effects"],
                                       "processed_effects": summary["processed_effects"]})
+
+        # The queue is drained; nothing below claims tasks, so hand the
+        # single-instance lock back before the slower producer work.
+        if _consumer_lock is not None:
+            _consumer_lock.release()
+            _consumer_lock = None
 
         # ── 3. Autonomous self-build producer (TD-026) ────────────────────────
         # At most one proposal per tick, gated by a persistent cooldown that runs
@@ -944,6 +1045,15 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         summary["inbox_pending_after"] = len(inbox_check.pending())
 
     except Exception as exc:  # noqa: BLE001
+        # Release before reporting: a crashed tick must not leave the queue
+        # locked for the next one. (The OS would release it when this process
+        # exits, but run_tick is also called in-process.)
+        if _consumer_lock is not None:
+            try:
+                _consumer_lock.release()
+            except Exception:  # noqa: BLE001
+                pass
+            _consumer_lock = None
         summary["error"] = f"{type(exc).__name__}: {exc}"
         _log_tick(workspace, {"event": "tick_error", "error": summary["error"],
                               "traceback": traceback.format_exc()})

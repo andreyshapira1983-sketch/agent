@@ -339,8 +339,8 @@ def test_recorded_surface_sizes():
     """The banner is still deliberately a subset -- only the help gap was fixed."""
     in_banner = sum(1 for spec in reg.COMMANDS if spec.in_startup_summary)
     assert in_banner == 71
-    assert len(reg.COMMANDS) == 91
-    assert len(reg.all_tokens()) == 140
+    assert len(reg.COMMANDS) == 92
+    assert len(reg.all_tokens()) == 141
 
 
 # ── deliberate exclusions ────────────────────────────────────────────────────

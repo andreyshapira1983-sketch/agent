@@ -8,6 +8,8 @@ pending task, run it, and record the result.
 from __future__ import annotations
 
 import logging
+import os
+import socket
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,9 +23,20 @@ from core.state_integrity import read_state_jsonl_unlocked, rewrite_state_jsonl_
 logger = logging.getLogger(__name__)
 
 RuntimeTaskKind = Literal["auto_run", "resume_checkpoint"]
-RuntimeTaskStatus = Literal["pending", "running", "done", "failed", "cancelled", "paused"]
+RuntimeTaskStatus = Literal[
+    "pending", "running", "done", "failed", "cancelled", "paused", "blocked"
+]
 _VALID_KINDS = {"auto_run", "resume_checkpoint"}
-_VALID_STATUSES = {"pending", "running", "done", "failed", "cancelled", "paused"}
+_VALID_STATUSES = {
+    "pending", "running", "done", "failed", "cancelled", "paused", "blocked",
+}
+
+#: A run that stopped because a human must approve something is neither a
+#: success nor a failure — retrying it on a timer cannot help, and burning the
+#: attempt budget on it hides the real reason. `blocked` is its own resting
+#: state: invisible to `pending()`, visible in `summary()`, and left for the
+#: operator (`:task-unblock` once the approval is resolved). See MIR-039.
+_BLOCKED_STATUS: RuntimeTaskStatus = "blocked"
 
 # Exponential backoff for re-queued failed tasks (OFM-010 / CORE-07): a
 # deterministic failure must not be immediately eligible again on the next tick.
@@ -92,9 +105,25 @@ class RuntimeTask:
     last_report: dict | None = None
     created_at: str = field(default_factory=_iso)
     updated_at: str = field(default_factory=_iso)
+    #: Liveness, refreshed by the consumer *while the task runs* (see
+    #: `core.task_lifecycle.task_heartbeat`). `updated_at` cannot serve this
+    #: purpose: it is written once at `mark_running` and then stands still, so a
+    #: task legitimately running for an hour is indistinguishable from one whose
+    #: process was killed — the ambiguity that made the first attempt at wiring
+    #: `recover_stuck` unsafe (MIR-040). Empty on rows written before this field
+    #: existed; recovery falls back to `updated_at` for those.
+    heartbeat_at: str = ""
+    #: Who claimed the task. Diagnostics for the operator; recovery does not
+    #: trust them (a pid can be reused), it trusts the heartbeat going stale.
+    owner_pid: int = 0
+    owner_host: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    def liveness_at(self) -> str:
+        """Timestamp recovery measures staleness against."""
+        return self.heartbeat_at or self.updated_at
 
     @classmethod
     def from_dict(cls, data: dict) -> "RuntimeTask":
@@ -115,6 +144,9 @@ class RuntimeTask:
             last_report=data.get("last_report") if isinstance(data.get("last_report"), dict) else None,
             created_at=str(data.get("created_at") or _iso()),
             updated_at=str(data.get("updated_at") or _iso()),
+            heartbeat_at=str(data.get("heartbeat_at") or ""),
+            owner_pid=int(data.get("owner_pid") or 0),
+            owner_host=str(data.get("owner_host") or ""),
         )
 
     def with_updates(self, **updates) -> "RuntimeTask":
@@ -122,6 +154,38 @@ class RuntimeTask:
         data.update(updates)
         data["updated_at"] = _iso()
         return RuntimeTask.from_dict(data)
+
+
+def _failure_transition(
+    task: RuntimeTask,
+    *,
+    error: str,
+    report: dict | None = None,
+    now: datetime,
+) -> RuntimeTask:
+    """The single decider for "this attempt did not succeed".
+
+    Terminal ``failed`` once the attempt budget is spent, otherwise re-queued
+    with exponential backoff. Both ``mark_failed`` (the run reported a failure)
+    and ``recover_stuck`` (the run's process vanished) go through here, so the
+    retry cap cannot be honoured on one path and bypassed on the other.
+    """
+    if task.attempts >= task.max_attempts:
+        return task.with_updates(
+            status="failed",
+            last_error=error,
+            last_report=report or task.last_report,
+        )
+    delay = min(
+        _RETRY_BACKOFF_MAX_SECONDS,
+        _RETRY_BACKOFF_BASE_SECONDS * (2 ** max(0, task.attempts - 1)),
+    )
+    return task.with_updates(
+        status="pending",
+        last_error=error,
+        last_report=report or task.last_report,
+        run_after=_iso(now + timedelta(seconds=delay)),
+    )
 
 
 TaskAddedCallback = Callable[[RuntimeTask], None]
@@ -270,16 +334,91 @@ class TaskQueueStore:
                 return task
         return None
 
-    def mark_running(self, task_id: str) -> RuntimeTask:
+    def mark_running(
+        self,
+        task_id: str,
+        *,
+        owner_pid: int | None = None,
+        owner_host: str | None = None,
+    ) -> RuntimeTask:
+        pid = os.getpid() if owner_pid is None else int(owner_pid)
+        host = socket.gethostname() if owner_host is None else str(owner_host)
         task = self._update_one(
             task_id,
             lambda task: task.with_updates(
                 status="running",
                 attempts=task.attempts + 1,
                 last_error="",
+                heartbeat_at=_iso(),
+                owner_pid=pid,
+                owner_host=host,
             ),
         )
         return task
+
+    def heartbeat(self, task_id: str) -> RuntimeTask | None:
+        """Refresh liveness for a task that is still running.
+
+        Returns the updated task, or ``None`` when the task is gone or no longer
+        ``running`` — a heartbeat must never resurrect a finished task, and a
+        consumer whose heartbeat thread outlives the run must not be able to
+        keep a stale row looking alive.
+        """
+        with exclusive_file_lock(self._lock_path):
+            tasks = self._load_unlocked()
+            out: list[RuntimeTask] = []
+            updated: RuntimeTask | None = None
+            for task in tasks:
+                if task.id == task_id and task.status == "running":
+                    updated = task.with_updates(heartbeat_at=_iso())
+                    out.append(updated)
+                else:
+                    out.append(task)
+            if updated is None:
+                return None
+            self._save_unlocked(out)
+            return updated
+
+    def mark_blocked(
+        self,
+        task_id: str,
+        *,
+        reason: str,
+        report: dict | None = None,
+    ) -> RuntimeTask:
+        """Park a task that cannot proceed without a human decision.
+
+        Distinct from ``failed`` on purpose: nothing went wrong, and no retry
+        schedule can unblock it. It leaves ``pending()`` (so no consumer picks
+        it up) and waits for the operator.
+        """
+        return self._update_one(
+            task_id,
+            lambda task: task.with_updates(
+                status=_BLOCKED_STATUS,
+                last_error=reason,
+                last_report=report or task.last_report,
+            ),
+        )
+
+    def unblock(self, task_id: str, *, now: datetime | None = None) -> RuntimeTask:
+        """Return a blocked task to the queue once the human decision is made.
+
+        Raises ``ValueError`` when the task is not blocked: this is the operator
+        undoing a specific, visible state, not a generic status setter.
+        """
+        def update(task: RuntimeTask) -> RuntimeTask:
+            if task.status != _BLOCKED_STATUS:
+                raise ValueError(
+                    f"task {task.id} is {task.status}, not blocked"
+                )
+            return task.with_updates(
+                status="pending",
+                last_error="",
+                run_after=_iso(now),
+            )
+
+        return self._update_one(task_id, update)
 
     def mark_done(self, task_id: str, *, report: dict | None = None) -> RuntimeTask:
         return self._update_one(
@@ -300,65 +439,74 @@ class TaskQueueStore:
         now: datetime | None = None,
     ) -> RuntimeTask:
         retry_from = (now or _now()).astimezone(timezone.utc)
-
-        def update(task: RuntimeTask) -> RuntimeTask:
-            if task.attempts >= task.max_attempts:
-                return task.with_updates(
-                    status="failed",
-                    last_error=error,
-                    last_report=report or task.last_report,
-                )
-            # Re-queue with exponential backoff so a deterministic failure does
-            # not hot-retry every tick (OFM-010 / CORE-07).
-            delay = min(
-                _RETRY_BACKOFF_MAX_SECONDS,
-                _RETRY_BACKOFF_BASE_SECONDS * (2 ** max(0, task.attempts - 1)),
-            )
-            return task.with_updates(
-                status="pending",
-                last_error=error,
-                last_report=report or task.last_report,
-                run_after=_iso(retry_from + timedelta(seconds=delay)),
-            )
-
-        return self._update_one(task_id, update)
+        # Exponential backoff so a deterministic failure does not hot-retry
+        # every tick (OFM-010 / CORE-07); shared with recovery so the retry cap
+        # holds on both paths.
+        return self._update_one(
+            task_id,
+            lambda task: _failure_transition(
+                task, error=error, report=report, now=retry_from
+            ),
+        )
 
     def cancel(self, task_id: str) -> RuntimeTask:
         return self._update_one(task_id, lambda task: task.with_updates(status="cancelled"))
 
-    def recover_stuck(self, *, timeout_minutes: int = 30) -> list[RuntimeTask]:
-        """Reset tasks stuck in ``'running'`` state back to ``'pending'``.
+    def recover_stuck(
+        self,
+        *,
+        timeout_minutes: int = 30,
+        now: datetime | None = None,
+    ) -> list[RuntimeTask]:
+        """Finalise tasks left ``running`` by a process that died mid-run.
 
-        A task is considered stuck when its ``updated_at`` timestamp is older
-        than *timeout_minutes* minutes.  This can happen if the agent process
-        was killed mid-run and never transitioned the task to a terminal state.
+        A task is orphaned when its **heartbeat** (``heartbeat_at``, falling
+        back to ``updated_at`` for rows written before heartbeats existed) is
+        older than *timeout_minutes*. Staleness is a liveness signal only
+        because the consumer refreshes it while the task runs; that is the whole
+        point of :func:`core.task_lifecycle.task_heartbeat`.
 
-        Returns the list of tasks that were recovered (empty if none).
+        Recovery is routed through the ordinary failure policy rather than
+        resetting straight to ``pending``:
+
+        * a task with attempts left is re-queued with the standard exponential
+          backoff, so a task that kills its process is not hot-retried;
+        * a task that has exhausted ``max_attempts`` becomes terminal
+          ``failed`` — the earlier version resurrected it and ran one attempt
+          past the cap (MIR-040).
+
+        **Caller contract.** This must run only where no consumer can be
+        holding a task in flight — at startup, under the single-instance lock.
+        :func:`core.task_lifecycle.recover_orphaned_tasks` enforces that; call
+        it rather than this method. Called concurrently with a live consumer,
+        this reclaims a task that is still executing and two processes run the
+        same work.
         """
-        cutoff_ts = datetime.now(tz=timezone.utc).timestamp() - timeout_minutes * 60
+        moment = (now or _now()).astimezone(timezone.utc)
+        cutoff_ts = moment.timestamp() - timeout_minutes * 60
         recovered: list[RuntimeTask] = []
         with exclusive_file_lock(self._lock_path):
             tasks = self._load_unlocked()
             out: list[RuntimeTask] = []
             for task in tasks:
-                if task.status == "running":
-                    try:
-                        updated_ts = datetime.fromisoformat(
-                            task.updated_at.replace("Z", "+00:00")
-                        ).timestamp()
-                    except (ValueError, AttributeError):
-                        updated_ts = 0.0  # unparseable → treat as very old
-                    if updated_ts < cutoff_ts:
-                        fixed = task.with_updates(
-                            status="pending",
-                            last_error="recovered from stuck running state",
-                        )
-                        out.append(fixed)
-                        recovered.append(fixed)
-                    else:
-                        out.append(task)
-                else:
+                if task.status != "running":
                     out.append(task)
+                    continue
+                try:
+                    live_ts = _parse_iso(task.liveness_at()).timestamp()
+                except (ValueError, AttributeError, TypeError):
+                    live_ts = 0.0  # unparseable → treat as very old
+                if live_ts >= cutoff_ts:
+                    out.append(task)  # still beating: leave it alone
+                    continue
+                error = (
+                    f"orphaned: no heartbeat for over {timeout_minutes} min "
+                    f"(owner pid={task.owner_pid or '?'} "
+                    f"host={task.owner_host or '?'})"
+                )
+                fixed = _failure_transition(task, error=error, now=moment)
+                out.append(fixed)
+                recovered.append(fixed)
             if recovered:
                 self._save_unlocked(out)
         return recovered

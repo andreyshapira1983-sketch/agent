@@ -120,10 +120,10 @@ def test_layout_entry_kinds_are_known_and_counted():
     for entry in help_module.HELP_LAYOUT:
         kinds[entry[0]] = kinds.get(entry[0], 0) + 1
     assert set(kinds) == {"cmd", "raw", "blank"}
-    # Frozen shape: 82 lines render from the registry, 44 are verbatim (24
+    # Frozen shape: 83 lines render from the registry, 44 are verbatim (24
     # `flags:` continuations, 9 irregular command lines, 2 non-command lines,
     # 7 prose lines, 2 headings), 1 blank separates the two blocks.
-    assert kinds == {"cmd": 82, "raw": 44, "blank": 1}
+    assert kinds == {"cmd": 83, "raw": 44, "blank": 1}
 
 
 def test_help_module_imports_only_the_registry():
