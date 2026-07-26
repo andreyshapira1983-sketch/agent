@@ -102,7 +102,10 @@ def _handle_refresh_models(rest: str, agent: AgentLoop) -> bool:
     requested = [t.lstrip("-") for t in tokens if t.startswith("--")]
     providers = requested if requested else None  # None = all available
 
-    print("\n(refresh-models: запрашиваю актуальный список моделей у провайдеров...)", file=sys.stderr)
+    print(
+        "\n(refresh-models: asking each provider for its current model list…)",
+        file=sys.stderr,
+    )
 
     try:
         catalog = refresh_catalog(providers=providers)
@@ -117,8 +120,8 @@ def _handle_refresh_models(rest: str, agent: AgentLoop) -> bool:
                 "error": str(exc)[:200],
             },
         )
-        print(f"(refresh-models ошибка: {exc})", file=sys.stderr)
-        print("  Проверьте ANTHROPIC_API_KEY / OPENAI_API_KEY в .env", file=sys.stderr)
+        print(f"(refresh-models error: {exc})", file=sys.stderr)
+        print("  Check ANTHROPIC_API_KEY / OPENAI_API_KEY in .env", file=sys.stderr)
         return True
 
     # Structured audit trail for the successful write path. Payload is safe:
@@ -141,22 +144,22 @@ def _handle_refresh_models(rest: str, agent: AgentLoop) -> bool:
         },
     )
 
-    print("\n── Результат ────────────────────────────────────────────────────────", file=sys.stderr)
+    print("\n── Result ───────────────────────────────────────────────────────────", file=sys.stderr)
     for provider, pdata in catalog.get("providers", {}).items():
         print(f"\n  {provider.upper()}", file=sys.stderr)
         tier_best = pdata.get("tier_best", {})
         all_models = pdata.get("models", [])
         for tier in ComplexityTier:
-            best = tier_best.get(tier.value, "(не найдено)")
+            best = tier_best.get(tier.value, "(none found)")
             candidates = [m["id"] for m in all_models if m["tier"] == tier.value]
             print(f"    {tier.value:<8} → {best}", file=sys.stderr)
             if len(candidates) > 1:
                 others = [m for m in candidates if m != best]
-                print(f"             (другие: {', '.join(others[:4])})", file=sys.stderr)
+                print(f"             (others: {', '.join(others[:4])})", file=sys.stderr)
 
-    print("\n── Каталог сохранён → config/model_catalog.json ────────────────────", file=sys.stderr)
-    print("  Агент автоматически использует эти модели при следующем запуске.", file=sys.stderr)
-    print("  Для override задайте в .env:", file=sys.stderr)
+    print("\n── Catalog saved → config/model_catalog.json ───────────────────────", file=sys.stderr)
+    print("  The agent picks these models up automatically on its next start.", file=sys.stderr)
+    print("  To override a tier, set it in .env:", file=sys.stderr)
     print("    AGENT_MODEL_TIER_LIGHT    = <model-id>", file=sys.stderr)
     print("    AGENT_MODEL_TIER_STANDARD = <model-id>", file=sys.stderr)
     print("    AGENT_MODEL_TIER_DEEP     = <model-id>", file=sys.stderr)
