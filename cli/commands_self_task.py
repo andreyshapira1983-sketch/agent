@@ -1,4 +1,4 @@
-"""``:self-task-propose`` REPL command (roadmap Ступень 1, Stage A).
+"""``:self-task-propose`` REPL command (roadmap Stage 1, Stage A).
 
 A single narrow operator trigger that runs the Stage-A *task producer*: from a
 real ``# TODO``/``# FIXME`` comment in the codebase it generates one coding task
