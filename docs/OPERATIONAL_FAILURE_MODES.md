@@ -160,13 +160,21 @@ Everything in Sections 3–9 is an external observation. It earns a status of
 - **Maps to control:** `AutonomousRuntime.run_task_queue()`
   (`core/autonomous_runtime.py:313`) IS a real consumer (pulls `pending`,
   `mark_running` → execute → `mark_done`/`mark_failed`); `RuntimeTaskStore`
-  distinguishes `pending/running/done/failed/cancelled/paused`;
-  `recover_stuck()` resets crashed `running` tasks; queue-depth summary exists.
-  Approval inbox separates `approved` from `executed`
-  (`core/approval_inbox.py`). **Verified control present.**
+  distinguishes `pending/running/done/failed/cancelled/paused/blocked`;
+  queue-depth summary exists. Approval inbox separates `approved` from
+  `executed` (`core/approval_inbox.py`). **Verified control present.**
+- **Correction (2026-07-26).** This entry used to credit `recover_stuck()` here
+  without qualification. That was misleading for most of this document's life:
+  the function existed and was unit-tested but had **no production caller**, and
+  the one attempt to wire it was reverted as unsafe (MIR-040). It is now wired,
+  under conditions that make it safe — a task heartbeat, startup-only execution
+  under the single-instance lock, and respect for `max_attempts` — via
+  `core/task_lifecycle.py::recover_orphaned_tasks`, which raises rather than
+  running unlocked. Both queue consumers also share one outcome→status mapping
+  now (MIR-039); the cron consumer previously marked every run `done`.
 - **Status:** `external-only` for the "no consumer at all" case; the *residual*
-  gap is whether the consumer is actually running in the production loop
-  (Section 11).
+  gap is that there is still no **always-on** drain — the queue moves when cron
+  invokes `agent_tick` or an operator runs `:task-run` (MIR-033, Section 11).
 - **Required test:** an approved task with no running consumer raises a backlog
   alarm; and an integration test proves the consumer drains the queue end-to-end.
 
@@ -198,8 +206,14 @@ Everything in Sections 3–9 is an external observation. It earns a status of
   immediately eligible again with **no backoff**. Default `max_attempts=1` makes
   most tasks fail once (no re-pend); the gap bites tasks created with
   `max_attempts > 1`.
-- **Status:** **`confirmed-gap`** — `core/task_queue.py` `mark_failed()` has no
-  `run_after` backoff (see Section 11).
+- **Status:** **`fixed`** (was `confirmed-gap`; §11 already recorded the fix and
+  this line contradicted it until 2026-07-26). `mark_failed()` computes an
+  exponential `run_after` delay (30s doubling, capped at 1h) and becomes terminal
+  `failed` at the cap; `pending()` honours `run_after`. Since 2026-07-26 the same
+  decider (`_failure_transition`) also serves orphan recovery, so the cap cannot
+  hold on one path and be bypassed on the other, and the cron consumer — which
+  used to call neither `mark_failed` nor `pending()` — now uses both.
+  *Proof:* `tests/test_task_queue_retry_backoff.py`, `tests/test_task_lifecycle.py`.
 - **Required test:** a task with `max_attempts>1` that fails deterministically is
   re-scheduled with an increasing `run_after` delay (backoff), and a final
   failure marker + notification appears when attempts are exhausted.
@@ -343,10 +357,10 @@ Verified against code on the audited `main` (source of truth):
 
 | OFM | Repo control (verified) | Coverage |
 |---|---|---|
-| 008 | `AutonomousRuntime.run_task_queue()` (`core/autonomous_runtime.py:313`), `RuntimeTaskStore` statuses, `recover_stuck()` | consumer + recovery present; production-loop wiring unproven |
+| 008 | `AutonomousRuntime.run_task_queue()` (`core/autonomous_runtime.py:313`), `RuntimeTaskStore` statuses, `core/task_lifecycle.py` (shared outcome→status mapping, heartbeat, lock-guarded recovery) | consumer + recovery present and wired on both paths since 2026-07-26; no always-on drain |
 | 006 | `core/approval_inbox.py` (`pending/approved/denied/aborted/executed`, TTL 24h, `expire_stale`), `core/actuation_gateway.py` | single inbox present; repo-wide single-choke-point unproven |
 | 009 | `data/daemon_heartbeat.json` + `core/incident.py` staleness + `cli/commands_health.py` | detection present, advisory only (no self-heal) |
-| 010 | `RuntimeTaskStore.attempts/max_attempts` (`core/task_queue.py`) | retry **cap** present; **backoff absent** → see Section 11 |
+| 010 | `RuntimeTaskStore.attempts/max_attempts` + `_failure_transition` (`core/task_queue.py`) | retry cap **and** exponential backoff present, shared by the failure and recovery paths |
 | 011 | `core/safe_vcs.py` — no `push/fetch/pull/remote` by design | strong: self-apply cannot force-push |
 | 004 | `core/tool_receipts.py` (append-only) | proves tool call, **not** external business outcome |
 | 005/016 | `core/proposal_value_gate.py`, `core/value_review.py` | separate "applied" from "valuable" (self-change scope) |
@@ -369,14 +383,13 @@ Verified against code on the audited `main` (source of truth):
 
 Only gaps verified against our code appear here.
 
-- **OFM-010 — no retry backoff.** `core/task_queue.py` `mark_failed()` sets a
-  non-exhausted task back to `pending` **without changing `run_after`**, so it is
-  immediately eligible on the next tick. There is a retry *cap*
-  (`attempts >= max_attempts` → `failed`) but **no backoff** in this path.
-  Impact is bounded to tasks with `max_attempts > 1` (default is 1). This is a
-  confirmed gap, not a hypothesis.
+- ~~**OFM-010 — no retry backoff.**~~ **CLOSED** (see the superseded notice
+  above; the §9 entry now says so too, which it did not until 2026-07-26).
+  `mark_failed()` applies an exponential `run_after` delay and goes terminal at
+  the cap, and orphan recovery shares that same decider.
 
-Everything else below is **not** yet a confirmed gap — it needs a test.
+**No confirmed gap is currently open in this section.** Everything else below is
+**not** a confirmed gap — it needs a test.
 
 ---
 

@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from core import heartbeat_io as _hb
 from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH
 
 
@@ -57,7 +58,7 @@ APPROVAL_INBOX_PATH = DEFAULT_APPROVAL_INBOX_PATH
 SCHEDULES_PATH     = "data/runtime_schedules.jsonl"
 TASK_QUEUE_PATH    = "data/task_queue.jsonl"
 INCIDENT_LOG_PATH  = "data/incidents.jsonl"
-HEARTBEAT_PATH     = "data/daemon_heartbeat.json"
+HEARTBEAT_PATH     = _hb.HEARTBEAT_PATH
 # The single-instance lock every queue consumer must hold while draining. Same
 # path app/single_instance.py documents, so a future always-on daemon and this
 # cron tick exclude each other rather than both claiming tasks.
@@ -72,14 +73,12 @@ SELF_BUILD_STATE_PATH = "data/self_build_producer_state.json"
 # override via AGENT_SELF_BUILD_COOLDOWN_HOURS.
 SELF_BUILD_COOLDOWN_HOURS_DEFAULT = 12.0
 
-# Expected wall-clock gap between ticks. The daemon is normally driven by Task
-# Scheduler every 30 minutes. If the newest heartbeat is older than
-# STALENESS_FACTOR * this interval, the daemon is considered stale (likely not
-# running) rather than merely idle. Override via AGENT_TICK_INTERVAL_SECONDS.
-EXPECTED_TICK_INTERVAL_SECONDS = int(
-    os.environ.get("AGENT_TICK_INTERVAL_SECONDS", "1800")
-)
-STALENESS_FACTOR = 2
+# Liveness constants and helpers live in core/heartbeat_io.py: whether the daemon
+# is alive is an input to a decision (best_next_action asks it), and the core may
+# not import this script to find out. Re-exported here under the original names
+# so existing callers and tests are unaffected.
+EXPECTED_TICK_INTERVAL_SECONDS = _hb.EXPECTED_TICK_INTERVAL_SECONDS
+STALENESS_FACTOR = _hb.STALENESS_FACTOR
 
 # Memory profile for the unattended (daemon/cron) agent. Defined once here
 # because all three build sites below must stay identical.
@@ -121,52 +120,10 @@ def _log_tick(workspace: Path, payload: dict) -> None:
         fh.write(json.dumps({"ts": _now_iso(), **payload}, ensure_ascii=False) + "\n")
 
 
-def _write_heartbeat(workspace: Path, payload: dict) -> None:
-    """Persist the latest daemon liveness record (overwrites previous).
-
-    A single small JSON file gives O(1) staleness checks without scanning the
-    append-only tick log. Always stamped with the current time.
-    """
-    hb_path = workspace / HEARTBEAT_PATH
-    hb_path.parent.mkdir(parents=True, exist_ok=True)
-    record = {"ts": _now_iso(), **payload}
-    tmp = hb_path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(hb_path)  # atomic swap
-
-
-def _read_heartbeat(workspace: Path) -> dict | None:
-    hb_path = workspace / HEARTBEAT_PATH
-    if not hb_path.exists():
-        return None
-    try:
-        return json.loads(hb_path.read_text(encoding="utf-8"))
-    except (ValueError, OSError):
-        return None
-
-
-def _heartbeat_age_seconds(heartbeat: dict | None, *, now: datetime | None = None) -> float | None:
-    """Return seconds since the heartbeat timestamp, or None if unavailable."""
-    if not heartbeat:
-        return None
-    ts = heartbeat.get("ts")
-    if not ts:
-        return None
-    try:
-        when = datetime.fromisoformat(str(ts))
-    except (ValueError, TypeError):
-        return None
-    if when.tzinfo is None:
-        when = when.replace(tzinfo=timezone.utc)
-    now = now or datetime.now(timezone.utc)
-    return max(0.0, (now - when).total_seconds())
-
-
-def _is_stale(age_seconds: float | None) -> bool:
-    """True when the daemon has not ticked within the staleness window."""
-    if age_seconds is None:
-        return True
-    return age_seconds > EXPECTED_TICK_INTERVAL_SECONDS * STALENESS_FACTOR
+_write_heartbeat = _hb.write_heartbeat
+_read_heartbeat = _hb.read_heartbeat
+_heartbeat_age_seconds = _hb.heartbeat_age_seconds
+_is_stale = _hb.is_stale
 
 
 def _check_budget_kill_switch(workspace: Path):

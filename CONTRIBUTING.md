@@ -46,8 +46,12 @@ The doc set is governed, not free-form:
 - These read-only guards must stay green (they run via `pytest` in CI):
   `scripts/docs_link_check.py` (links resolve), `scripts/commands_map_check.py`
   (every `main.py` command is in `COMMANDS_MAP.md`),
-  `scripts/agent_anatomy_check.py` (the `core/` index), and
-  `scripts/registry_tally.py` (the issue registry).
+  `scripts/agent_anatomy_check.py` (the `core/` index),
+  `scripts/docs_code_conformance.py` (code references in prose resolve),
+  `scripts/architecture_invariants.py` (the architecture's load-bearing claims:
+  core imports downward only, no orphaned deciders, documented env flags exist,
+  every verifier verdict is bucketed), and `scripts/registry_tally.py` (the
+  issue registry).
 - **Code wins.** When a doc and the code disagree, fix the doc.
 
 ## Dependency changes
