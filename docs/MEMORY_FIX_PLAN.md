@@ -71,7 +71,7 @@ a first-class, agent-visible record.
 **Plan:** for each defect A1–A8 (and retroactively `#9`, `LPF-001`), register an
 issue with:
 - `related_files` = the source file **and** its regression test
-  (e.g. A1 → `core/loop.py` + `tests/test_data_classifier_web_fetch.py`);
+  (e.g. A1 → `core/loop.py` + `tests/test_web_fetch_classification.py`);
 - `suggested_next_action` = the exact fix direction + the test command;
 - `status` starts `open`; the fix lands; `:self-issue-verify` moves it to
   `resolved`.
