@@ -27,6 +27,11 @@ from core.learning_planner import (
 )
 from core.models import ToolCall
 from core.redaction import prepare_text_for_llm_boundary
+from core.task_lifecycle import (
+    apply_run_exception,
+    apply_run_outcome,
+    task_heartbeat,
+)
 from core.task_queue import RuntimeTask, TaskQueueStore
 from core.reflection import ReflectionConfig, ReflectionEngine
 from core.tool_receipts import ReceiptPath, receipt_context
@@ -335,13 +340,29 @@ class AutonomousRuntime:
         for task in pending:
             task_queue.mark_running(task.id)
             try:
-                run_report = self.run(
-                    _config_from_task(task),
-                    budget=queue_budget,
-                    circuit=queue_circuit,
-                )
+                # The heartbeat is what lets startup recovery tell a killed
+                # process from a slow one (MIR-040); without it a long run and
+                # an abandoned row are the same observation.
+                with task_heartbeat(
+                    task_queue,
+                    task.id,
+                    on_error=lambda exc: self._log(
+                        "task_heartbeat_failed",
+                        {"task_id": task.id, "error": type(exc).__name__},
+                    ),
+                ):
+                    run_report = self.run(
+                        _config_from_task(task),
+                        budget=queue_budget,
+                        circuit=queue_circuit,
+                    )
             except Exception as exc:
-                failed = task_queue.mark_failed(task.id, error=f"{type(exc).__name__}: {exc}")
+                failed, decision = apply_run_exception(task_queue, task.id, exc)
+                self._log(
+                    "task_lifecycle",
+                    {"task_id": task.id, "status": failed.status,
+                     **decision.to_log_payload()},
+                )
                 processed.append(
                     AutonomousQueuedTaskReport(
                         task_id=failed.id,
@@ -352,31 +373,37 @@ class AutonomousRuntime:
                 )
                 continue
 
-            if run_report.status == "completed":
-                done = task_queue.mark_done(task.id, report=run_report.to_dict())
+            updated, decision = apply_run_outcome(
+                task_queue,
+                task.id,
+                status=run_report.status,
+                stop_reason=run_report.stop_reason,
+                report=run_report.to_dict(),
+            )
+            self._log(
+                "task_lifecycle",
+                {"task_id": task.id, "status": updated.status,
+                 "run_status": run_report.status, **decision.to_log_payload()},
+            )
+            if decision.outcome == "done":
                 processed.append(
                     AutonomousQueuedTaskReport(
-                        task_id=done.id,
-                        goal=done.goal,
-                        status=done.status,
+                        task_id=updated.id,
+                        goal=updated.goal,
+                        status=updated.status,
                         run_status=run_report.status,
                         summary=f"tasks={len(run_report.tasks)}",
                     )
                 )
                 continue
 
-            failed = task_queue.mark_failed(
-                task.id,
-                error=run_report.stop_reason or run_report.status,
-                report=run_report.to_dict(),
-            )
             processed.append(
                 AutonomousQueuedTaskReport(
-                    task_id=failed.id,
-                    goal=failed.goal,
-                    status=failed.status,
+                    task_id=updated.id,
+                    goal=updated.goal,
+                    status=updated.status,
                     run_status=run_report.status,
-                    summary=failed.last_error,
+                    summary=updated.last_error,
                 )
             )
             if run_report.status == "stopped":

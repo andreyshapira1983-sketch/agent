@@ -123,6 +123,7 @@ are also reachable one-shot via `--ask ":command args"`.
 | `:campaign-status \| :campaign-ledger` | Campaign status/ledger. |
 | `:queue-status` | Task queue status. |
 | `:task-add \| :task-list \| :task-run \| :task-cancel` | Manage the persistent task queue. |
+| `:task-unblock <task_id>` | Return a task parked in `blocked` (a run stopped for approval) to `pending`. Only a human can clear that state — no retry timer applies to it. |
 | `:scheduler-status` | Scheduler status. |
 | `:schedule-add \| :schedule-list \| :schedule-disable \| :schedule-tick` | Manage scheduled tasks (`:schedule-disable` also one-shot). |
 | `:capability-request \| :capability-proposal` | Propose a capability request. |

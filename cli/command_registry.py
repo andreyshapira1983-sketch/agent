@@ -648,6 +648,13 @@ COMMANDS: tuple[CommandSpec, ...] = (
         usage="<task_id>",
     ),
     CommandSpec(
+        canonical=":task-unblock",
+        description="return an approval-blocked task to pending",
+        category="Autonomous runtime, tasks & scheduling",
+        handler_key="task_unblock",
+        usage="<task_id>",
+    ),
+    CommandSpec(
         canonical=":schedule-add",
         description="create recurring scheduler entry",
         category="Autonomous runtime, tasks & scheduling",

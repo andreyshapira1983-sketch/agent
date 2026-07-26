@@ -53,6 +53,7 @@ EvidenceKind = Literal[
     "shell_output",     # shell_exec — captured stdout/stderr
     "diff_preview",     # diff_file — unified diff, not yet applied
     "memory",           # memory record retrieved from working / persistent store
+    "session_dialogue", # verbatim earlier turn of THIS session (issue #119)
     "user_explicit",    # :remember / explicit consent / direct user command
     "llm_claim",        # LLM-generated text WITHOUT external grounding
     "unknown",          # last-resort bucket
@@ -61,7 +62,7 @@ EvidenceKind = Literal[
 ALL_EVIDENCE_KINDS: tuple[EvidenceKind, ...] = (
     "file", "web_page", "web_search_hit", "tool_output", "test_result",
     "log_event", "shell_output", "diff_preview", "memory",
-    "user_explicit", "llm_claim", "unknown",
+    "session_dialogue", "user_explicit", "llm_claim", "unknown",
 )
 
 
@@ -83,6 +84,11 @@ DEFAULT_CONFIDENCE: dict[EvidenceKind, float] = {
     "diff_preview":     0.80,
     "web_page":         0.75,
     "tool_output":      0.70,
+    # A recording of what was actually said in this session. Fidelity is high —
+    # higher than a recollected memory record — but its *scope* is one turn of
+    # dialogue, so the verifier never lets it confirm a world claim (see
+    # core/evidence_classes.py). The number ranks retrieval, not authority.
+    "session_dialogue": 0.60,
     "memory":           0.55,
     "web_search_hit":   0.35,
     "llm_claim":        0.20,
@@ -618,6 +624,36 @@ def evidence_from_memory_record(
         # verifier can weigh provenance without parsing the sentence.
         origin=source,
         fetched_at=created_at,
+    )
+
+
+def evidence_from_prior_turn(
+    *,
+    turn_id: str,
+    turn_index: int,
+    question: str,
+    answer: str,
+) -> Evidence:
+    """One earlier turn of THIS session, verbatim (issue #119).
+
+    This is a recording, not a recollection: the excerpt is the text the
+    operator sent and the text the agent replied. It is admitted so that a
+    conversational-correction turn can support statements about the preceding
+    exchange. The verifier scopes it deliberately — a claim resolved against
+    this evidence becomes ``dialogue_supported``, never ``verified``, and only
+    when the claim is itself about the dialogue.
+    """
+    body = (
+        f"user asked: {question.strip()}\n"
+        f"agent answered: {answer.strip()}"
+    )
+    return make_evidence(
+        kind="session_dialogue",
+        source_id=f"session_dialogue:turn_{turn_index}:{turn_id}",
+        obtained_via="working_memory",
+        claim=f"Verbatim turn {turn_index} of the current session",
+        excerpt=body,
+        origin="session",
     )
 
 

@@ -94,6 +94,10 @@ Facts:
       [tool:<name>]              generic tool output (current_time, etc.)
       [diff:<path>]              proposed diff preview
       [memory:<record_id>]       long-term memory record
+      [dialogue:<turn>]          verbatim earlier turn of THIS session; use it
+                                 ONLY for statements about the exchange itself
+                                 (what was asked, what you answered, why that
+                                 answer was wrong) — never for a world fact
       [user]                     explicit user directive
       [user:target]              analysis_target material (local critique)
       [prior_turn:<turn_id>]     prior-turn answer/material under critique

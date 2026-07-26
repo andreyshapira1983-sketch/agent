@@ -50,12 +50,12 @@ _REAL_STDIN_READER = repl_module._StdinLineReader
 # Frozen snapshot at 9daa9bf. A diff here means a surface moved — update this
 # table together with docs/refactor/CLI_BASELINE.md.
 FROZEN = {
-    "dispatched": 140,
+    "dispatched": 141,
     "pre_dotenv_fast_paths": 2,
     "repl_control_tokens": 4,
     # 96 at 9daa9bf; 98 after the two documented help gaps were closed
     # (`:refresh-models` and `:help` itself were added to the page).
-    "help_tokens": 98,
+    "help_tokens": 99,
     # 72 tokens are printed, but one of them (`:task-begin`) is a REPL block
     # token rather than a dispatched command — see the divergence tests below.
     "startup_tokens": 72,

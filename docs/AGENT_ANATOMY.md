@@ -73,7 +73,7 @@ _Planning, verification, clarification, control loop._
 | `core/best_next_action` | Priority intelligence: choose the single most important next action. |
 | `core/task_complexity` | Task Complexity Assessment — automatic model tier selection. |
 | `core/low_evidence_policy` | Low-evidence answer policy. |
-| `core/unsupported_claims` | Claim-level answer enforcement (critique plan PR3): separates insufficient-evidence, verifier-failure soft-fail, and unsupported world-claim outcomes; flag `AGENT_ENFORCE_UNSUPPORTED_CLAIMS`. |
+| `core/unsupported_claims` | Claim-level answer enforcement (critique plan PR3): separates insufficient-evidence, verifier-failure soft-fail, and unsupported world-claim outcomes. Long-answer truncation is always on; `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` gates only the claim-level short path. |
 | `core/subsystem_disagreement` | Detect disagreements between cognitive subsystems on the same turn. |
 | `core/strategy_router` | Strategy Router: deliberation kernel layer BEFORE the LLM planner. |
 | `core/role_router` | Role / mode routing for the agent core. |
@@ -91,6 +91,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/smart_memory` | Episodic, procedural and consolidation memory for autonomous operation. |
 | `core/memory_policy` | Memory Write Policy + Memory Retrieval Policy (§4 + §12.4). |
 | `core/memory_echo_antibody` | Memory Echo Antibody (A1) — refuse agent-auto memory that *echoes* itself. |
+| `core/heartbeat_io` | Daemon liveness record — write, read, age, staleness. Owned by the core because "is the daemon alive" is an input to a decision. |
 | `core/hygiene` | Memory Hygiene (§4 Memory Governance — cleanup, dedup, expiry, summarise). |
 | `core/episodic_hygiene` | Episodic memory hygiene — staleness scoring and pruning. |
 | `core/knowledge_use_policy` | Contextual memory-use policy. |
@@ -101,6 +102,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/structured_facts` | Structured fact extraction for tool outputs. |
 | `core/evidence` | MVP-14.1 — Evidence + Provenance model. |
 | `core/evidence_budget` | Evidence Budget — caps context sent to the synthesizer LLM. |
+| `core/evidence_classes` | Evidence classes — what kind of support a claim needs (external world / session dialogue / trace / self-analysis / generative); issue #119. |
 | `core/completion_marker` | Nonce-bearing channel for the synthesizer's task-completion declaration (MIR-057). |
 | `core/conflict_review` | Operator-facing conflict review for the Source Registry. |
 | `core/source_registry` | Source Registry and extracted claims. |
@@ -136,6 +138,7 @@ _Autonomous loop, scheduling, budgets, state durability._
 | `core/campaign_ledger` | Extracted from `core/campaign` by autonomous self-build module split. |
 | `core/campaign_io` | Extracted from `core/campaign` by autonomous self-build module split. |
 | `core/work_session` | MVP-17.1  Long Work Session Skeleton. |
+| `core/task_lifecycle` | One place that decides what a finished run does to its queue row: outcome → status, task heartbeat, guarded startup recovery (MIR-039/MIR-040). |
 | `core/task_queue` | Persistent task queue for autonomous runtime work. |
 | `core/checkpoint` | §3.5 Checkpoint / Resume — durable mid-run state. |
 | `core/circuit_breaker` | Circuit breaker for bounded autonomous runtime runs. |

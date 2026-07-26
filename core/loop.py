@@ -37,6 +37,7 @@ from core.evidence import (
     Evidence,
     ProvenanceChain,
     evidence_from_memory_record,
+    evidence_from_prior_turn,
     evidence_from_tool_result,
     make_evidence,
 )
@@ -74,6 +75,10 @@ from core.low_evidence_policy import (
     is_evidence_expected,
 )
 from core.unsupported_claims import apply_answer_enforcement
+from core.evidence_classes import (
+    SelfAnalysisDecision,
+    is_self_analysis_turn,
+)
 from core.referent_resolver import (
     FileHintRef,
     PriorTurnRef,
@@ -472,6 +477,10 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
 
         self.last_verification: _VR | None = None
         self.last_referent_decision: ReferentDecision | None = None
+        # Issue #119 — was this turn a conversational correction / request to
+        # explain the agent's own previous reply? Decided per turn, exposed so
+        # tests and operators can see why dialogue evidence was (not) admitted.
+        self.last_self_analysis: SelfAnalysisDecision | None = None
         # MVP-14.3/14.3x — trust metadata over the Evidence chain.
         # Source ranking is logged/exposed, and Ranker-to-Output Policy uses
         # it to cap confidence for unsuitable realtime sources.
@@ -824,6 +833,23 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                         "artifacts_cached": len(self.memory.artifacts),
                     },
                 )
+
+        # Issue #119 — conversational correction / self-analysis classification.
+        # Decided here, before planning, because it changes which evidence class
+        # the answer is later judged against: a claim about THIS session's own
+        # exchange is backed by the transcript, not by an external source.
+        # Deterministic and always on (no feature flag): its only effect is to
+        # admit dialogue evidence that the verifier then scopes narrowly, and a
+        # bug the operator cannot report is worse than the risk of that.
+        _self_analysis = is_self_analysis_turn(
+            user_question,
+            has_prior_turn=bool(
+                self.memory is not None and self.memory.recent_turns(1)
+            ),
+        )
+        self.last_self_analysis = _self_analysis
+        if _self_analysis.is_self_analysis:
+            self.log.log("self_analysis_turn", _self_analysis.to_log_payload())
 
         # Referent resolver (critique PR1/PR2) — shadow logs; on enables path.
         self._maybe_resolve_referent(user_question, file_hint=file_hint)
@@ -1504,6 +1530,43 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     ))
                 except Exception:
                     pass
+
+        # Issue #119 — session-dialogue evidence. Admitted ONLY on a
+        # conversational-correction turn: the operator is asking about the
+        # exchange, so the exchange is the material. Verbatim, not summarised —
+        # the point is that this is a recording. The verifier scopes what it can
+        # support (`dialogue_supported`, never `verified`), so admitting it here
+        # cannot make an external claim look confirmed.
+        if self.last_self_analysis is not None and self.last_self_analysis.is_self_analysis:
+            _dialogue_added = 0
+            if self.memory is not None:
+                for _turn in self.memory.recent_turns(3):
+                    try:
+                        chain.add(
+                            evidence_from_prior_turn(
+                                turn_id=_turn.id,
+                                turn_index=_turn.index,
+                                question=_turn.question,
+                                answer=_turn.answer,
+                            )
+                        )
+                        _dialogue_added += 1
+                    except Exception as exc:  # noqa: BLE001
+                        self.log.log(
+                            "dialogue_evidence_skipped",
+                            {
+                                "turn_id": getattr(_turn, "id", None),
+                                "error": type(exc).__name__,
+                                "message": str(exc)[:200],
+                            },
+                        )
+            self.log.log(
+                "dialogue_evidence_admitted",
+                {
+                    "turns": _dialogue_added,
+                    "reason": self.last_self_analysis.reason,
+                },
+            )
 
         # Store the chain on the agent so tests / future Verifier code
         # can consult it after `run()` returns.
@@ -2284,6 +2347,13 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 + verification.cited_but_unmatched_chunks
                 + verification.receipt_missing_chunks
                 + verification.topic_supported_but_claim_unverified_chunks
+                # Issue #119: a self-analysis answer is legitimately shippable
+                # and legitimately NOT a reusable procedure. Counted as weak so
+                # `episode_from_agent_cycle` banks it `partial`, not `success` —
+                # otherwise verified=0/unverified=0 would score a perfect run
+                # (MIR-002) and promote "explaining my own mistake" into
+                # procedural memory.
+                + verification.dialogue_supported_chunks
             )
         # Layer 4 — update user profile from this interaction.
         if may_profile and self.user_profile_store is not None:
@@ -3997,6 +4067,9 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             return f"[diff:{body}]"
         if ev.kind == "memory":
             return f"[memory:{source_id}]"
+        if ev.kind == "session_dialogue" and source_id.startswith("session_dialogue:"):
+            body = source_id[len("session_dialogue:"):]
+            return f"[dialogue:{body}]"
         if ev.kind == "user_explicit":
             return "[user]"
         return None

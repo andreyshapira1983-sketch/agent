@@ -136,6 +136,7 @@ from app.task_scheduler_cli import (
     _handle_task_cancel,
     _handle_task_list,
     _handle_task_run,
+    _handle_task_unblock,
 )
 
 if TYPE_CHECKING:  # annotations only
@@ -443,6 +444,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
 
     if head == ":task-cancel":
         return _handle_task_cancel(rest.strip(), agent, workspace)
+
+    if head == ":task-unblock":
+        return _handle_task_unblock(rest.strip(), agent, workspace)
 
     if head == ":schedule-add":
         return _handle_schedule_add(rest.strip(), agent, workspace)

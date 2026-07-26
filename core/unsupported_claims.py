@@ -9,9 +9,30 @@ Separates outcomes the chunk-count gate used to conflate:
 * ``unsupported_world_claims`` — short categorical world claims without
   non-user support (hedge, do not nuke)
 
-Feature flag ``AGENT_ENFORCE_UNSUPPORTED_CLAIMS``: ``off`` | ``shadow`` | ``on``.
-Local-critique empty-rewrite skip is an invariant and does **not** require
-the flag. Verifier exception soft-fail is also always on.
+Feature flag ``AGENT_ENFORCE_UNSUPPORTED_CLAIMS``: ``off`` (default) | ``shadow``
+| ``on``. It is the rollout switch for the **new claim-level short path only**,
+not a master switch for enforcement. Precisely:
+
+===============================  ==========================================
+path                             gated by the flag?
+===============================  ==========================================
+``insufficient_evidence``        **No — always on.** Long-answer truncation
+                                 returns ``applied=True`` whatever the mode,
+                                 and the loop writes that answer back. This
+                                 predates PR3.
+``unsupported_world_claims``     **Yes.** ``applied = mode == "on"``;
+                                 ``shadow`` reports ``would_change_answer``.
+``verifier_failure`` /           Keeping the draft is unconditional (the
+``malformed_report``             function returns before any truncation);
+                                 only the explanatory note appended to the
+                                 answer is flag-gated.
+``local_critique_preserved``     No — invariant.
+===============================  ==========================================
+
+Reading ``off`` as "enforcement does nothing" is wrong and was wrong in
+``docs/COGNITIVE_CORE.md`` §8.11 until 2026-07-26; issue #119 is a recorded
+production turn where the always-on path truncated a real answer with the flag
+unset.
 """
 from __future__ import annotations
 
@@ -152,7 +173,13 @@ def _count_categorical_unsupported(report: Any) -> int:
     n = 0
     for c in chunks:
         verdict = getattr(c, "verdict", "") or ""
-        if verdict in ("verified", "self_declared", "structural"):
+        # `dialogue_supported` joins the exempt set: a categorical statement
+        # about the agent's own previous reply ("я всегда отвечаю по вопросу")
+        # is backed by the transcript, and hedging it would reintroduce the
+        # issue #119 defect through the short path.
+        if verdict in (
+            "verified", "self_declared", "structural", "dialogue_supported"
+        ):
             continue
         text = getattr(c, "text", "") or ""
         # Skip pure target-descriptive critique lines.

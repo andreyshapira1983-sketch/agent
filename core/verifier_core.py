@@ -3,6 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from core.evidence import Evidence, ProvenanceChain, make_evidence
+from core.evidence_classes import (
+    classify_evidence,
+    dialogue_evidence_present,
+    is_dialogue_scoped_claim,
+)
 from .verifier_models import ClaimChunk, VerificationReport
 from .verifier_patterns import (
     DISCLAIMER_ALL_SELF_DECLARED,
@@ -55,6 +60,22 @@ def _memory_citation_is_independent(ev: Evidence) -> bool:
     return ev.origin in _INDEPENDENT_MEMORY_ORIGINS
 
 
+def _dialogue_verdict_for(chunk_text: str, chain: ProvenanceChain) -> Evidence | None:
+    """Session-dialogue evidence that legitimately supports this chunk.
+
+    Scope is the whole point (issue #119): the verbatim record of what was said
+    this session supports a claim *about that exchange* and nothing else. A
+    world claim sitting in the same answer gets no credit from it, so the
+    ordinary unsupported-claim filtering is untouched.
+    """
+    if not is_dialogue_scoped_claim(chunk_text):
+        return None
+    for ev in chain.evidences:
+        if classify_evidence(ev) == "session_dialogue":
+            return ev
+    return None
+
+
 def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_question: str | None = None, receipt_ledger: Any = None, trace_id: str | None = None, expects_contract_headers: bool = True) -> VerificationReport:
     chain_empty = len(chain) == 0
     if user_question and user_question.strip():
@@ -69,6 +90,8 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
         return VerificationReport(total_chunks=0, verified_chunks=0, unverified_chunks=0, cited_but_unmatched_chunks=0, self_declared_chunks=0, structural_chunks=0, chunks=(), annotated_answer=answer, fully_unverified=True, chain_was_empty=chain_empty, disclaimer=(DISCLAIMER_NO_CHAIN if chain_empty else DISCLAIMER_FULLY_UNVERIFIED))
     examined_chunks: list[ClaimChunk] = []
     verified = unverified = cited_unmatched = topic_supported = memory_only_unmatched = self_declared = structural = 0
+    dialogue_supported = 0
+    has_dialogue_evidence = dialogue_evidence_present(chain)
     annotated_chunks: list[str] = []
     # Index into ``annotated_chunks`` for each examined (non-structural) chunk,
     # so the downgrade pass below can patch the exact rendered line instead of
@@ -103,14 +126,33 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                 matched_ids.append(struct_ev.id)
                 annotated = chunk_text.rstrip() + " " + _tool_citation_for(struct_ev)
             else:
-                verdict = "unverified"
-                unverified += 1
-                annotated = chunk_text.rstrip() + " [unverified]"
+                dlg_ev = (
+                    _dialogue_verdict_for(chunk_text, chain)
+                    if has_dialogue_evidence
+                    else None
+                )
+                if dlg_ev is not None:
+                    # A statement about this session's own exchange. The
+                    # synthesizer routinely writes these without a citation
+                    # ("Мой предыдущий ответ не отвечал на вопрос") and the
+                    # bare `unverified` verdict is what fed the truncation
+                    # that deleted a valid self-correction (issue #119).
+                    verdict = "dialogue_supported"
+                    dialogue_supported += 1
+                    matched_ids.append(dlg_ev.id)
+                    annotated = chunk_text.rstrip() + " [dialogue-supported]"
+                else:
+                    verdict = "unverified"
+                    unverified += 1
+                    annotated = chunk_text.rstrip() + " [unverified]"
         else:
             stat_figures = extract_statistical_figures(chunk_text)
             stat_claim = is_statistical_claim(chunk_text)
             any_matched = any_self_declared = any_topic_only = False
+            any_dialogue = False
             topic_only_replacements: list[tuple[str, str]] = []
+            dialogue_replacements: list[tuple[str, str]] = []
+            dialogue_ids: list[str] = []
             for c in cits:
                 if c.prefix in SELF_DECLARED_PREFIXES:
                     any_self_declared = True
@@ -119,6 +161,24 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                     continue
                 ev = match_citation(c, chain)
                 if ev is None:
+                    continue
+                if classify_evidence(ev) == "session_dialogue":
+                    # The recording of the exchange proves what was SAID. It is
+                    # never promoted to `verified`, and it credits only claims
+                    # that are themselves about the exchange — a world claim
+                    # citing [dialogue:…] stays unsupported (issue #119).
+                    body_part = f":{c.body}" if c.body else ""
+                    if is_dialogue_scoped_claim(chunk_text):
+                        any_dialogue = True
+                        dialogue_ids.append(ev.id)
+                        dialogue_replacements.append(
+                            (c.raw, f"[dialogue-supported:{c.prefix}{body_part}]")
+                        )
+                    else:
+                        any_topic_only = True
+                        topic_only_replacements.append(
+                            (c.raw, f"[topic-only:{c.prefix}{body_part}]")
+                        )
                     continue
                 strict_ok = True
                 if not _memory_citation_is_independent(ev):
@@ -149,7 +209,13 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
             if any_matched:
                 verdict = "verified"
                 verified += 1
-                for raw, rewrite in topic_only_replacements:
+                for raw, rewrite in topic_only_replacements + dialogue_replacements:
+                    annotated = annotated.replace(raw, rewrite)
+            elif any_dialogue:
+                verdict = "dialogue_supported"
+                dialogue_supported += 1
+                matched_ids.extend(dialogue_ids)
+                for raw, rewrite in topic_only_replacements + dialogue_replacements:
                     annotated = annotated.replace(raw, rewrite)
             elif any_self_declared:
                 verdict = "self_declared"
@@ -232,7 +298,11 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
     fully_unverified = (verified == 0 and self_declared == 0)
     disclaimer: str | None = None
     if fully_unverified:
-        if cited_unmatched > 0 and cited_unmatched == memory_only_unmatched:
+        if dialogue_supported > 0:
+            # Honest on both counts: nothing external was verified, and the
+            # support the answer does have is this session's own transcript.
+            disclaimer = DISCLAIMER_SESSION_MEMORY
+        elif cited_unmatched > 0 and cited_unmatched == memory_only_unmatched:
             disclaimer = DISCLAIMER_SESSION_MEMORY
         elif chain_empty:
             disclaimer = DISCLAIMER_NO_CHAIN
@@ -242,4 +312,4 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
         disclaimer = DISCLAIMER_ALL_SELF_DECLARED
     if disclaimer is not None:
         annotated_answer = annotated_answer.rstrip() + "\n\n" + disclaimer
-    return VerificationReport(total_chunks=len(examined_chunks), verified_chunks=verified, unverified_chunks=unverified, cited_but_unmatched_chunks=cited_unmatched, self_declared_chunks=self_declared, structural_chunks=structural, chunks=tuple(examined_chunks), annotated_answer=annotated_answer, fully_unverified=fully_unverified, chain_was_empty=chain_empty, disclaimer=disclaimer, malformed_output=malformed_output, topic_supported_but_claim_unverified_chunks=topic_supported, subagent_asserted_chunks=subagent_asserted, receipt_missing_chunks=receipt_missing)
+    return VerificationReport(total_chunks=len(examined_chunks), verified_chunks=verified, unverified_chunks=unverified, cited_but_unmatched_chunks=cited_unmatched, self_declared_chunks=self_declared, structural_chunks=structural, chunks=tuple(examined_chunks), annotated_answer=annotated_answer, fully_unverified=fully_unverified, chain_was_empty=chain_empty, disclaimer=disclaimer, malformed_output=malformed_output, topic_supported_but_claim_unverified_chunks=topic_supported, subagent_asserted_chunks=subagent_asserted, receipt_missing_chunks=receipt_missing, dialogue_supported_chunks=dialogue_supported)

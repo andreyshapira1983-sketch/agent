@@ -94,6 +94,7 @@ Commands:
   :task-list [status|all]         list runtime tasks
   :task-run [--limit N]           run due pending runtime task(s)
   :task-cancel <task_id>          cancel one queued task
+  :task-unblock <task_id>         return an approval-blocked task to pending
   :schedule-add <min> <goal>      create recurring scheduler entry
       flags: --name NAME  --no-tests  --limit N  --learning-limit N
   :schedule-list [status|all]     list schedules

@@ -6,6 +6,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from app.daemon import DaemonLoop
 from core.state_integrity import read_state_jsonl_unlocked, rewrite_state_jsonl_unlocked
 from core.task_queue import TaskQueueStore
@@ -191,7 +193,13 @@ def test_task_queue_skips_invalid_records_and_parses_string_booleans(workspace: 
 
 
 def _backdate_updated_at(path: Path, task_id: str, minutes_ago: int) -> None:
-    """Rewrite a single task's ``updated_at`` to be ``minutes_ago`` minutes in the past."""
+    """Age a task: both ``updated_at`` and the heartbeat that supersedes it.
+
+    Recovery measures liveness on ``heartbeat_at`` since MIR-040 — a task
+    running for 45 minutes and still beating is alive, and reclaiming it would
+    start a second execution of the same work. Ageing only ``updated_at`` no
+    longer makes a task look orphaned, which is the point.
+    """
     backdated = (
         datetime.now(tz=timezone.utc) - timedelta(minutes=minutes_ago)
     ).isoformat()
@@ -199,10 +207,16 @@ def _backdate_updated_at(path: Path, task_id: str, minutes_ago: int) -> None:
     for row in rows:
         if row.get("id") == task_id:
             row["updated_at"] = backdated
+            row["heartbeat_at"] = backdated
     rewrite_state_jsonl_unlocked(path, rows)
 
 
-def test_recover_stuck_resets_running_task_older_than_timeout(workspace: Path):
+def test_recover_stuck_finalises_orphan_that_exhausted_its_attempts(workspace: Path):
+    """Default ``max_attempts=1``: one claim spends the budget.
+
+    The pre-MIR-040 version reset such a task straight to ``pending``, so a task
+    that kills its own process was resurrected and ran one attempt past the cap.
+    """
     path = workspace / "tasks.jsonl"
     queue = TaskQueueStore(path)
     task = queue.add(goal="stuck")
@@ -213,11 +227,45 @@ def test_recover_stuck_resets_running_task_older_than_timeout(workspace: Path):
 
     assert len(recovered) == 1
     assert recovered[0].id == task.id
-    assert recovered[0].status == "pending"
-    assert "stuck" in recovered[0].last_error.lower()
+    assert recovered[0].status == "failed"
+    assert "orphaned" in recovered[0].last_error.lower()
 
     reloaded = TaskQueueStore(path).load()
-    assert reloaded[0].status == "pending"
+    assert reloaded[0].status == "failed"
+
+
+def test_recover_stuck_requeues_orphan_with_attempts_left(workspace: Path):
+    """With budget remaining the orphan is re-queued — behind the backoff."""
+    path = workspace / "tasks.jsonl"
+    queue = TaskQueueStore(path)
+    task = queue.add(goal="stuck", max_attempts=3)
+    queue.mark_running(task.id)
+    _backdate_updated_at(path, task.id, minutes_ago=45)
+
+    recovered = queue.recover_stuck(timeout_minutes=30)
+
+    assert len(recovered) == 1
+    assert recovered[0].status == "pending"
+    assert "orphaned" in recovered[0].last_error.lower()
+    # Not immediately eligible again: a task that killed its process must not
+    # be hot-retried on the next tick.
+    assert queue.pending() == []
+
+
+def test_recover_stuck_leaves_a_beating_long_task_alone(workspace: Path):
+    """The hazard that reverted the first wiring: slow is not dead."""
+    path = workspace / "tasks.jsonl"
+    queue = TaskQueueStore(path)
+    task = queue.add(goal="slow-but-alive")
+    queue.mark_running(task.id)
+    # 45 minutes of work, still beating.
+    _backdate_updated_at(path, task.id, minutes_ago=45)
+    queue.heartbeat(task.id)
+
+    recovered = queue.recover_stuck(timeout_minutes=30)
+
+    assert recovered == []
+    assert TaskQueueStore(path).load()[0].status == "running"
 
 
 def test_recover_stuck_leaves_fresh_running_task_alone(workspace: Path):
@@ -249,17 +297,76 @@ def test_recover_stuck_ignores_non_running_tasks(workspace: Path):
 def test_recover_stuck_treats_unparseable_timestamp_as_very_old(workspace: Path):
     path = workspace / "tasks.jsonl"
     queue = TaskQueueStore(path)
-    task = queue.add(goal="garbled")
+    task = queue.add(goal="garbled", max_attempts=3)
     queue.mark_running(task.id)
-    # corrupt updated_at directly
+    # corrupt both liveness fields directly
     rows = read_state_jsonl_unlocked(path)
     rows[0]["updated_at"] = "not-a-timestamp"
+    rows[0]["heartbeat_at"] = "not-a-timestamp"
     rewrite_state_jsonl_unlocked(path, rows)
 
     recovered = queue.recover_stuck(timeout_minutes=30)
 
     assert len(recovered) == 1
     assert recovered[0].status == "pending"
+
+
+def test_recover_stuck_falls_back_to_updated_at_on_legacy_rows(workspace: Path):
+    """Rows written before heartbeats existed still recover."""
+    path = workspace / "tasks.jsonl"
+    queue = TaskQueueStore(path)
+    task = queue.add(goal="legacy", max_attempts=3)
+    queue.mark_running(task.id)
+    backdated = (
+        datetime.now(tz=timezone.utc) - timedelta(minutes=45)
+    ).isoformat()
+    rows = read_state_jsonl_unlocked(path)
+    rows[0]["updated_at"] = backdated
+    rows[0].pop("heartbeat_at", None)  # the shape of an old row
+    rewrite_state_jsonl_unlocked(path, rows)
+
+    recovered = queue.recover_stuck(timeout_minutes=30)
+
+    assert len(recovered) == 1
+    assert recovered[0].status == "pending"
+
+
+def test_heartbeat_only_touches_a_running_task(workspace: Path):
+    path = workspace / "tasks.jsonl"
+    queue = TaskQueueStore(path)
+    task = queue.add(goal="finished")
+    queue.mark_running(task.id)
+    queue.mark_done(task.id)
+
+    assert queue.heartbeat(task.id) is None
+    assert queue.heartbeat("no-such-task") is None
+    assert TaskQueueStore(path).load()[0].status == "done"
+
+
+def test_blocked_task_waits_for_the_operator(workspace: Path):
+    path = workspace / "tasks.jsonl"
+    queue = TaskQueueStore(path)
+    task = queue.add(goal="needs approval")
+    queue.mark_running(task.id)
+
+    blocked = queue.mark_blocked(task.id, reason="approval required: appr_1")
+    assert blocked.status == "blocked"
+    assert "approval required" in blocked.last_error
+    # No consumer may pick it up, and no timer can unblock it.
+    assert queue.pending() == []
+    assert queue.summary()["statuses"]["blocked"] == 1
+
+    released = queue.unblock(task.id)
+    assert released.status == "pending"
+    assert [t.id for t in queue.pending()] == [task.id]
+
+
+def test_unblock_refuses_a_task_that_is_not_blocked(workspace: Path):
+    queue = TaskQueueStore(workspace / "tasks.jsonl")
+    task = queue.add(goal="ordinary")
+
+    with pytest.raises(ValueError, match="not blocked"):
+        queue.unblock(task.id)
 
 
 def test_recover_stuck_returns_empty_when_no_tasks(workspace: Path):
