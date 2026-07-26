@@ -137,6 +137,7 @@ _Autonomous loop, scheduling, budgets, state durability._
 | `core/campaign_ledger` | Extracted from `core/campaign` by autonomous self-build module split. |
 | `core/campaign_io` | Extracted from `core/campaign` by autonomous self-build module split. |
 | `core/work_session` | MVP-17.1  Long Work Session Skeleton. |
+| `core/task_lifecycle` | One place that decides what a finished run does to its queue row: outcome → status, task heartbeat, guarded startup recovery (MIR-039/MIR-040). |
 | `core/task_queue` | Persistent task queue for autonomous runtime work. |
 | `core/checkpoint` | §3.5 Checkpoint / Resume — durable mid-run state. |
 | `core/circuit_breaker` | Circuit breaker for bounded autonomous runtime runs. |

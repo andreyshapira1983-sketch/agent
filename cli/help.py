@@ -130,6 +130,7 @@ HELP_LAYOUT: tuple[tuple, ...] = (
     ("cmd", ":task-list", ":task-list [status|all]", 34),
     ("cmd", ":task-run", ":task-run [--limit N]", 34),
     ("cmd", ":task-cancel", ":task-cancel <task_id>", 34),
+    ("cmd", ":task-unblock", ":task-unblock <task_id>", 34),
     ("cmd", ":schedule-add", ":schedule-add <min> <goal>", 34),
     ("raw", "      flags: --name NAME  --no-tests  --limit N  --learning-limit N"),
     ("cmd", ":schedule-list", ":schedule-list [status|all]", 34),
