@@ -1,10 +1,61 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 
 def _has_any(text: str, terms: tuple[str, ...]) -> bool:
     return any(term in text for term in terms)
+
+
+@lru_cache(maxsize=2048)
+def _loose_patterns(term: str) -> tuple[re.Pattern[str], ...]:
+    """Regexes matching ``term`` with exactly ONE extra word wedged into it.
+
+    A trigger phrase is a sequence of words; an operator types the same question
+    with a filler in the middle ("готов **уже** к автономной работе"). One
+    pattern per gap, strict everywhere else, so at most one insertion is ever
+    tolerated — the looseness cannot compound across a long phrase.
+
+    Single-word terms get nothing: there is no gap to be tolerant about, and
+    loosening them would only invite false matches.
+    """
+    words = term.split()
+    if len(words) < 2:
+        return ()
+    escaped = [re.escape(w) for w in words]
+    patterns = []
+    for gap in range(1, len(words)):
+        body = (
+            r"\s+".join(escaped[:gap])
+            + r"\s+\S+\s+"
+            + r"\s+".join(escaped[gap:])
+        )
+        patterns.append(re.compile(body))
+    return tuple(patterns)
+
+
+def _has_any_loose(text: str, terms: tuple[str, ...]) -> bool:
+    """``_has_any`` plus tolerance for one word inserted into a phrase.
+
+    Used by the *positive* intent matchers only. The suppression guards
+    (``_looks_like_*``) deliberately keep strict substring matching: loosening
+    them would change *when routing is blocked*, which is a different and riskier
+    decision than widening what is recognised.
+
+    Why this exists: measured 2026-07-26, 283 of 372 natural phrasings (76%) of
+    the pattern file's own trigger phrases stopped routing when a single neutral
+    word was inserted, and the turn went to the LLM — which then answered as a
+    generic model rather than from the agent's own state. See
+    ``docs/COGNITIVE_CORE.md`` section 8.1.
+    """
+    if _has_any(text, terms):
+        return True
+    for term in terms:
+        for pattern in _loose_patterns(term):
+            if pattern.search(text):
+                return True
+    return False
 
 
 def _looks_like_meta_instruction(text: str) -> bool:
@@ -112,7 +163,7 @@ def _matches_self_build_request(text: str) -> bool:
     # BEFORE the _looks_like_self_build_request None-guard so ONLY these explicit
     # start phrases reach the producer; every other self-build mention still
     # falls through to the planner.
-    target = _has_any(
+    target = _has_any_loose(
         text,
         (
             "программировать себя",
@@ -130,7 +181,7 @@ def _matches_self_build_request(text: str) -> bool:
             "improve your own code",
         ),
     )
-    start = _has_any(
+    start = _has_any_loose(
         text,
         (
             "начни",
@@ -181,7 +232,7 @@ def _matches_self_build_request(text: str) -> bool:
         "matcher",
         "формулировк",
     )
-    if _has_any(text, blockers):
+    if _has_any_loose(text, blockers):
         return False
     # Reuse the shared meta-instruction guard to reject genuine rule/spec text,
     # but first neutralize the apply-consent phrasing that is legitimate inside a
@@ -219,7 +270,7 @@ def _matches_inbox_task_request(text: str) -> bool:
         "create inbox task",
         "add to inbox",
     )
-    return _has_any(text, inbox_markers)
+    return _has_any_loose(text, inbox_markers)
 
 
 def _looks_like_shell_command(text: str) -> bool:
@@ -270,7 +321,7 @@ def _matches_patch_proposal(text: str) -> bool:
     stripped = text.strip()
     if stripped.startswith(":patch-proposal-plan") or stripped.startswith(":patch-plan"):
         return True
-    return _has_any(
+    return _has_any_loose(
         text,
         (
             "propose a patch",
@@ -353,11 +404,11 @@ def _matches_capability_request(text: str) -> bool:
         "persistent memory",
         "записывал в память",
     )
-    if _has_any(text, explicit_capability_terms):
+    if _has_any_loose(text, explicit_capability_terms):
         return True
-    if _has_any(text, autonomous_need_terms):
+    if _has_any_loose(text, autonomous_need_terms):
         return True
-    return _has_any(text, concrete_capabilities) and _has_any(
+    return _has_any_loose(text, concrete_capabilities) and _has_any_loose(
         text,
         (
             "нужен",
@@ -388,9 +439,9 @@ def _matches_source_review(text: str) -> bool:
         "сравнить файлы",
     )
     filename_markers = (".py", ".md", ".txt", "\\", "/")
-    if _has_any(text, source_review_terms):
+    if _has_any_loose(text, source_review_terms):
         return True
-    return _has_any(text, filename_markers) and _has_any(
+    return _has_any_loose(text, filename_markers) and _has_any_loose(
         text,
         ("сравни", "сравнить", "review", "compare"),
     )
@@ -407,9 +458,9 @@ def _matches_implementation_plan(text: str) -> bool:
         "operator task layer",
     )
     filename_markers = (".py", ".md", ".txt", "\\", "/")
-    if _has_any(text, planning_terms):
+    if _has_any_loose(text, planning_terms):
         return True
-    return _has_any(text, filename_markers) and _has_any(
+    return _has_any_loose(text, filename_markers) and _has_any_loose(
         text,
         (
             "план",
@@ -422,7 +473,7 @@ def _matches_implementation_plan(text: str) -> bool:
 
 
 def _matches_safe_self_check(text: str) -> bool:
-    return _has_any(
+    return _has_any_loose(
         text,
         (
             "начни безопасную проверку себя",
@@ -459,7 +510,7 @@ _CAPABILITY_GAP_PATTERNS: tuple[re.Pattern[str], ...] = (
 
 
 def _matches_capability_check(text: str) -> bool:
-    if _has_any(
+    if _has_any_loose(
         text,
         (
             "проверь свои возможности",
@@ -493,19 +544,19 @@ def _matches_programming_readiness(text: str) -> bool:
         "safe coding task",
         "safe programming task",
     )
-    if _has_any(text, readiness_terms):
+    if _has_any_loose(text, readiness_terms):
         return True
-    return _has_any(
+    return _has_any_loose(
         text,
         ("готов", "готовность", "readiness", "ready"),
-    ) and _has_any(
+    ) and _has_any_loose(
         text,
         ("код", "программ", "coding", "programming", "patch", "тест"),
     )
 
 
 def _matches_current_gaps_check(text: str) -> bool:
-    return _has_any(
+    return _has_any_loose(
         text,
         (
             "посмотри, что у тебя сейчас не готово",
@@ -522,7 +573,7 @@ def _matches_current_gaps_check(text: str) -> bool:
 
 
 def _matches_weakness_finder(text: str) -> bool:
-    return _has_any(
+    return _has_any_loose(
         text,
         (
             "найди слабое место в своей системе",
@@ -538,7 +589,7 @@ def _matches_weakness_finder(text: str) -> bool:
 
 
 def _matches_next_safe_test(text: str) -> bool:
-    return _has_any(
+    return _has_any_loose(
         text,
         (
             "скажи, какой безопасный тест сделать следующим",
@@ -568,9 +619,9 @@ def _matches_project_health(text: str) -> bool:
         "requires attention",
         "needs attention",
     )
-    if _has_any(text, direct_phrases):
+    if _has_any_loose(text, direct_phrases):
         return True
-    return _has_any(text, ("проект", "project")) and _has_any(
+    return _has_any_loose(text, ("проект", "project")) and _has_any_loose(
         text,
         (
             "проверь",
@@ -587,7 +638,7 @@ def _matches_project_health(text: str) -> bool:
 def _matches_model_status(text: str) -> bool:
     # Include Russian case forms (моделей / моделями / моделях) so phrases like
     # "какие роли моделей сейчас активны" route to :models instead of web_search.
-    return _has_any(
+    return _has_any_loose(
         text,
         (
             "модель",
@@ -599,7 +650,7 @@ def _matches_model_status(text: str) -> bool:
             "model",
             "models",
         ),
-    ) and _has_any(
+    ) and _has_any_loose(
         text,
         (
             "покажи",
@@ -632,9 +683,9 @@ def _matches_urgent_status(text: str) -> bool:
         "needs immediate attention",
         "requires immediate attention",
     )
-    if _has_any(text, direct_phrases):
+    if _has_any_loose(text, direct_phrases):
         return True
-    return _has_any(text, ("сроч", "urgent", "immediate")) and _has_any(
+    return _has_any_loose(text, ("сроч", "urgent", "immediate")) and _has_any_loose(
         text,
         ("есть", "что", "anything", "attention"),
     )
@@ -654,7 +705,7 @@ def _matches_next_actions(text: str) -> bool:
         "next step",
         "next steps",
     )
-    return _has_any(text, direct_phrases)
+    return _has_any_loose(text, direct_phrases)
 
 
 def _matches_best_next_action(text: str) -> bool:
@@ -663,7 +714,7 @@ def _matches_best_next_action(text: str) -> bool:
     # requiring singular / top-priority wording. Must be routed BEFORE
     # _matches_next_actions because the English form "most important next
     # action" contains the "next action" trigger that matcher fires on.
-    return _has_any(
+    return _has_any_loose(
         text,
         (
             "важнее всего",
@@ -693,11 +744,11 @@ def _matches_self_task_propose(text: str) -> bool:
     # "find X" traffic or a bare bug note. Routed BEFORE the plan/source-review
     # matchers so a "TODO in foo.py + предложи тесты" phrasing does not fall
     # into the generic implementation-plan (.py + тесты) branch.
-    debt = _has_any(
+    debt = _has_any_loose(
         text,
         ("todo", "fixme", "tech debt", "техдолг", "технический долг"),
     )
-    propose = _has_any(
+    propose = _has_any_loose(
         text,
         (
             "предложи задач",
@@ -726,8 +777,8 @@ def _matches_architecture_audit(text: str) -> bool:
     # "проверь проект" (project health) or a mere mention of architecture.
     # Must be routed BEFORE _matches_project_health, because
     # "проверь архитектуру проекта" also satisfies that broad project branch.
-    architecture = _has_any(text, ("архитектур", "architecture", "architectural"))
-    audit_verb = _has_any(
+    architecture = _has_any_loose(text, ("архитектур", "architecture", "architectural"))
+    audit_verb = _has_any_loose(
         text,
         (
             "аудит",
@@ -757,11 +808,11 @@ def _matches_subagent_proposal(text: str) -> bool:
     # missing capability): this needs an explicit PROPOSE/DESIGN verb next to
     # the subagent term. Routed BEFORE capability_request so "предложи
     # ограниченного субагента" wins over any capability overlap.
-    subagent = _has_any(
+    subagent = _has_any_loose(
         text,
         ("субагент", "суб-агент", "подагент", "под-агент", "subagent", "sub-agent"),
     )
-    propose_verb = _has_any(
+    propose_verb = _has_any_loose(
         text,
         (
             "предлож",
@@ -780,7 +831,7 @@ def _matches_subagent_proposal(text: str) -> bool:
     return subagent and propose_verb
 
 def _matches_autonomy_readiness(text: str) -> bool:
-    return _has_any(
+    return _has_any_loose(
         text,
         (
             "можно ли запускать автономность",
@@ -803,7 +854,7 @@ def _matches_budget_status(text: str) -> bool:
         return False
     if _is_explicit_budget_status_command(text):
         return True
-    if not _has_any(
+    if not _has_any_loose(
         text,
         (
             "бюджет",
@@ -824,7 +875,7 @@ def _matches_budget_status(text: str) -> bool:
         ),
     ):
         return False
-    return _has_any(
+    return _has_any_loose(
         text,
         (
             "сколько",
@@ -925,7 +976,7 @@ def _looks_like_engineering_change_request(text: str) -> bool:
 
 
 def _matches_smart_memory_status(text: str) -> bool:
-    if _has_any(
+    if _has_any_loose(
         text,
         (
             "smart memory",
@@ -940,7 +991,7 @@ def _matches_smart_memory_status(text: str) -> bool:
         ),
     ):
         return True
-    return _has_any(text, ("память", "memory")) and _has_any(
+    return _has_any_loose(text, ("память", "memory")) and _has_any_loose(
         text,
         (
             "какая",
@@ -1019,18 +1070,18 @@ _APPROVAL_CONSENT_REQUEST = (
 
 
 def _matches_approval_status(text: str) -> bool:
-    if _has_any(text, ("без одобр", "without approval", "no approval", "без явного")):
+    if _has_any_loose(text, ("без одобр", "without approval", "no approval", "без явного")):
         return False
     # A consent-request aimed at the agent ("запроси моё подтверждение") must not
     # be read as an approval-inbox query — otherwise the engineering task it is
     # attached to is silently swallowed by `:approval-list all`.
-    if _has_any(text, _APPROVAL_CONSENT_REQUEST):
+    if _has_any_loose(text, _APPROVAL_CONSENT_REQUEST):
         return False
-    if _has_any(text, _APPROVAL_STRONG):
+    if _has_any_loose(text, _APPROVAL_STRONG):
         return True
     # Ambiguous stems ("подтвержд", "разрешени") only count when paired with an
     # approval/inbox context word — otherwise phrases like "подтверждённые
     # факты" must NOT be routed to the approval inbox.
-    if _has_any(text, _APPROVAL_AMBIGUOUS) and _has_any(text, _APPROVAL_CONTEXT):
+    if _has_any_loose(text, _APPROVAL_AMBIGUOUS) and _has_any_loose(text, _APPROVAL_CONTEXT):
         return True
     return False
