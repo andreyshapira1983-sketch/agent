@@ -536,3 +536,60 @@ def test_self_build_mention_without_start_verb_still_falls_through():
     assert route_operator_intent(
         "проанализируй self-build и предложи улучшение кода"
     ) is None
+
+
+# ── capability questions with a filler word in the middle ────────────────────
+#
+# Measured from a live session (2026-07-26): the operator typed "что ты уже
+# умеешь". Literal substring matching missed it, the turn went to the LLM, and
+# the answer was generic model boilerplate ("I can translate texts") instead of
+# the factual capability report the local handler produces. Two model calls to
+# say nothing about THIS agent — and the verifier scored the result 0.8%.
+
+def test_capability_question_survives_an_inserted_filler_word():
+    for phrase in (
+        "что ты умеешь",
+        "что ты уже умеешь",
+        "что ты теперь умеешь",
+        "что ты сейчас умеешь делать",
+        "что вы уже умеете",
+        "какие у тебя сейчас возможности",
+        "какие у вас есть возможности",
+        "what can you do",
+        "what can you already do",
+        "what are you actually capable of",
+    ):
+        intent = route_operator_intent(phrase)
+        assert intent is not None, f"fell through to the LLM: {phrase!r}"
+        assert intent.kind == "capability_check", (phrase, intent.kind)
+
+
+def test_the_filler_tolerance_does_not_swallow_ordinary_prose():
+    """The gap patterns need both halves of the question within two words.
+
+    The last two phrases are the ones that matter: they contain *both* halves,
+    far apart, inside an ordinary sentence. A wider gap tolerance would capture
+    them and turn a normal question into an operator command — so widening
+    `{0,2}` must fail this test.
+    """
+    for phrase in (
+        "напиши текст про то, что умеет наш продукт",
+        "что ты думаешь про этот код",
+        "объясни, что делает эта функция",
+        "я уже умею писать тесты",
+        "как у тебя дела",
+        "что ты сделаешь, если я скажу, что ты совсем не умеешь считать",
+        "что ты ответишь человеку, который заявляет, будто вы не умеете читать",
+    ):
+        intent = route_operator_intent(phrase)
+        kind = intent.kind if intent is not None else None
+        assert kind != "capability_check", (phrase, kind)
+
+
+def test_a_social_turn_still_reaches_the_llm():
+    """The conversational guard runs first and must keep winning.
+
+    A greeting-laden turn is answered naturally rather than dumping a rigid
+    operator report — that guard predates this fix and the fix must not defeat it.
+    """
+    assert route_operator_intent("привет, как дела, что ты уже умеешь?") is None

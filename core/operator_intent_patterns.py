@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 
 def _has_any(text: str, terms: tuple[str, ...]) -> bool:
     return any(term in text for term in terms)
@@ -436,8 +438,28 @@ def _matches_safe_self_check(text: str) -> bool:
     )
 
 
+#: The same question with a filler word wedged into the middle. Literal
+#: substring matching misses those, and the miss is expensive: measured in a live
+#: session, "что ты уже умеешь" (one inserted "уже") fell through to the LLM,
+#: which answered with generic model boilerplate ("I can translate texts")
+#: instead of the factual capability report the local handler produces — two
+#: model calls spent to say less than nothing about THIS agent.
+#: Deliberately tight: both halves must be present with at most ONE word between
+#: them. Two was tried first and over-captured — 'что ты совсем не умеешь считать'
+#: became a capability command. One covers every real spelling
+#: ('уже', 'сейчас', 'теперь', 'already') and halves the surface. The conversational
+#: guard still runs first, so "привет, что ты уже умеешь?" keeps going to the LLM.
+_CAPABILITY_GAP_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"что\s+(?:ты|вы)(?:\s+\S+){0,1}\s+умее(?:шь|те)"),
+    re.compile(r"что(?:\s+\S+){0,1}\s+умее(?:шь|те)\s+делать"),
+    re.compile(r"как\w+\s+(?:у\s+)?(?:тебя|вас)(?:\s+\S+){0,1}\s+возможност"),
+    re.compile(r"what\s+can\s+you(?:\s+\S+){0,1}\s+do"),
+    re.compile(r"what\s+are\s+you(?:\s+\S+){0,1}\s+capable\s+of"),
+)
+
+
 def _matches_capability_check(text: str) -> bool:
-    return _has_any(
+    if _has_any(
         text,
         (
             "проверь свои возможности",
@@ -454,7 +476,9 @@ def _matches_capability_check(text: str) -> bool:
             "what can you do",
             "what are you capable of",
         ),
-    )
+    ):
+        return True
+    return any(pattern.search(text) for pattern in _CAPABILITY_GAP_PATTERNS)
 
 
 def _matches_programming_readiness(text: str) -> bool:
