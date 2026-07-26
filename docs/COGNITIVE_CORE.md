@@ -23,6 +23,21 @@ Every mechanism carries a status, and the status is the honest part:
 | **OBSERVING** | it detects the condition and writes it to the journal, but nothing changes |
 | **ABSENT** | the core needs it; the repository does not have it |
 
+**AMENDMENT (2026-07-26): the status above is only half of the question, and the
+missing half is the one that bit.** A mechanism can be ENFORCING — correct
+whenever it fires — and still almost never fire. This document's first pass
+audited *precision* (does the guard decide correctly?) and never *recall* (does
+it fire when it should?). Sections 8.1 and 8.11 below carry the corrections, and
+they came from a live session, not from re-reading the code:
+
+| dimension | question | audited in pass 1 |
+|---|---|---|
+| precision | when it fires, is the decision right? | yes |
+| **recall** | **does it fire on the inputs it exists for?** | **no — measured below** |
+
+Every "ENFORCING" verdict in section 8 should be read as *precision only* until a
+recall number sits next to it.
+
 The distinction matters more than any diagram: a system full of OBSERVING
 mechanisms *looks* defended and is not.
 
@@ -235,6 +250,39 @@ nothing, spend nothing, and remember nothing on its own.*
    *Proof:* `tests/test_operator_intent.py`, `tests/test_strategy_router.py`;
    the fast path's guards are in `core/loop.py:862-928`.
 
+> **RECALL CORRECTION (2026-07-26) — this is the tooth that misses, and it misses
+> most of the time.** Precision is fine: when the router matches, it routes
+> correctly. Recall is not. Measured over the pattern file's own trigger phrases:
+> **62 natural Russian phrases of three or more words route on their own; insert
+> ONE neutral word (`уже` / `сейчас` / `теперь`) at a plausible position and 283
+> of 372 variants — 76% — stop being recognised** and go to the LLM instead.
+> Six intents lose **every** variant: `autonomy_readiness`, `best_next_action`,
+> `safe_self_check`, `source_review_plan`, `next_actions`, `project_health`.
+> Real examples: `«где слабое место»` routes, `«где сейчас слабое место»` does
+> not; `«готов к автономной работе»` routes, `«готов уже к автономной работе»`
+> does not.
+>
+> **Root cause — one shared primitive, not 31 separate bugs:**
+> ```python
+> def _has_any(text: str, terms: tuple[str, ...]) -> bool:
+>     return any(term in text for term in terms)   # literal substring
+> ```
+> `core/operator_intent_patterns.py` calls it **58 times from 31 matcher
+> functions**, against only **5** compiled regexes (added 2026-07-26 for the
+> capability family alone, PR #170). Any word wedged between two words of a
+> trigger phrase defeats the match.
+>
+> **Consequence, observed live:** the operator asked «что ты уже умеешь». The
+> question fell through to the planner, which answered as a *generic language
+> model* — "I can translate texts" — about an agent that has 140 commands, budget
+> guards, self-repair and subagents. Cost: 2 model calls, ~9k tokens, 15 cost
+> units, verifier confidence **0.008**. The same question phrased as
+> «проанализируй сам себя: какие у тебя есть инструменты» produced **8 verified
+> chunks out of 8**. The capability existed; the door to it was closed.
+>
+> PR #170 fixed one of the 31 families. The other 30 remain, and patching them
+> one phrase at a time is the wrong shape of fix — see section 10, finding 7.
+
 ### 8.2 Call budgets — **ENFORCING, with one default worth a decision**
 
 1. *Plain:* a run may spend only so many cycles, calls and tokens before it
@@ -350,6 +398,34 @@ nothing, spend nothing, and remember nothing on its own.*
    `low_confidence_gate`."* The threshold (0.45) and the penalties are already
    parameterised for the day the switch is flipped.
 
+> **CORRECTION (2026-07-26).** The sentence above — "the gate is the main gap" —
+> was measured and is **wrong in its diagnosis**. An enforcement layer already
+> exists and is already wired into the loop: `core/low_evidence_policy.py` (its
+> own docstring calls itself *"the enforcement layer paired with the gate"*) plus
+> `core/unsupported_claims.py::apply_answer_enforcement`, called at
+> `core/loop.py:2170`. It rewrites a severely under-supported answer into a short
+> honest reply and downgrades the Confidence line.
+>
+> Three separate reasons it changed nothing in practice, all measured by replaying
+> the real functions against 8 recorded answers in `logs/` (the replay reproduced
+> the logged verdicts 8 for 8):
+>
+> 1. **It runs in `mode=off` by default.** `enforce_unsupported_claims_mode()`
+>    reads env `AGENT_ENFORCE_UNSUPPORTED_CLAIMS`; unset → `off`, so `applied`
+>    can never become true. A `shadow` mode exists that logs what it *would*
+>    change.
+> 2. **The 8-chunk floor.** `_DEFAULT_MIN_TOTAL = 8`; every real firing had 3-6
+>    chunks → `reason=too_few_chunks_to_truncate`.
+> 3. **`no_evidence_expected`.** For an empty evidence chain with no realtime
+>    intent — or any role in `_GENERATIVE_ROLES` — the gate is skipped *by
+>    design*, correctly: a pure reasoning answer has nothing to cite.
+>
+> Measured outcome of each option, on those 8 answers: flipping `mode=on` alone
+> changes **0**; `on` plus a floor of 3 *only when `verified == 0`* changes **3**.
+> Turning the gate itself into a blocker — the fix this document originally
+> implied — would have changed **nothing**, because the gate is not where the
+> decision lives. See [[fix at the decider, not the observer]].
+
 ### 8.12 The decision journal — **ENFORCING**
 
 1. *Plain:* every decision is written down with its reason, so it can be
@@ -387,8 +463,13 @@ nothing, spend nothing, and remember nothing on its own.*
    notice.
 3. **Five sensors do not bite.** Confidence gate, stagnation, premature
    completion, reasoning↔action mismatch and subsystem disagreement all detect
-   and log. The most consequential is the confidence gate: an answer can be
-   fully unverified and still ship, with an event nobody reads.
+   and log. ~~The most consequential is the confidence gate: an answer can be
+   fully unverified and still ship, with an event nobody reads.~~ **Corrected
+   2026-07-26 (see §8.11):** the answer *can* still ship unverified, but the gate
+   is not the reason. Enforcement exists and is wired; it is inert because
+   `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` defaults to `off`, the truncation floor is
+   8 chunks, and pure-reasoning turns are skipped by design. Measured: flipping
+   the mode alone would change 0 of 8 recorded answers.
 4. **One budget is off by default.** `BudgetLimits.max_llm_calls = 0` means
    unlimited on the plain autonomous path.
 5. **`core/loop.py` is where the boundary blurs** — 3882 lines mixing the
@@ -398,6 +479,34 @@ nothing, spend nothing, and remember nothing on its own.*
 6. **Deep escalation covers only the `for_task` path.** Roles routed through
    `for_role` (verifier, repair, subagent) cannot reach the deep tier at all —
    which is safe, and documented, but means the gate is narrower than it looks.
+7. **The most expensive finding is a recall failure, and it is one line of code**
+   (added 2026-07-26; see §8.1 for the measurement). `_has_any` matches trigger
+   phrases as literal substrings and is called 58 times from 31 matchers, so one
+   word inserted into a phrase sends the turn to the LLM: **76% of natural
+   phrasings miss**. Six intents lose every variant. The agent then answers
+   *about a generic language model instead of about itself* — the operator saw
+   exactly that, and the system scored its own answer 0.008.
+
+   Why this is a core defect and not a wording annoyance: D1 ("do we need the
+   model at all?") is the cheapest and first decision in the whole sequence, and
+   it is the one gate whose failure *costs money and produces a wrong answer at
+   the same time*. Everything downstream then behaves correctly — the verifier
+   flags the answer, the confidence vector scores it 0.8% — and none of it helps,
+   because the question was already in the wrong lane.
+
+   **Shape of the fix.** Not 30 more phrase lists: one tolerant matching
+   primitive, with the loosening measured in both directions. Widening recall
+   without measuring over-capture is how a router starts hijacking ordinary
+   questions into operator commands — the tolerance for the capability family had
+   to be cut from two inserted words to one for exactly that reason, and the test
+   that caught it was a deliberate over-capture case, not a passing suite.
+8. **No document in this repository measured recall before this pass** — not this
+   one, not `LIVE_PROBE_FINDINGS.md`, not `MASTER_ISSUE_REGISTRY.md`. The
+   registry's related entry diagnoses a *missing intent kind*; the measured root
+   is a *brittle primitive*, which is why fixing the former would not have
+   changed the operator's session at all: the intent kind existed and was still
+   missed. An audit that only asks "is this guard correct?" cannot find this
+   class of defect.
 
 ---
 
@@ -423,6 +532,16 @@ that raises on any call; drive every local strategy and the episodic fast path;
 assert answers are still produced. Today's claim "two of twenty gates use the
 model" becomes a test.
 
+**Step 3b — a RECALL proof, per intent (added 2026-07-26; this is the step whose
+absence hid finding 7).**
+`test_local_routing_recall.py`: for every local strategy, take the trigger
+phrases the pattern file itself declares, generate the variants a human actually
+types — one inserted adverb, the polite form, a different word order — and assert
+they still route to the same intent. Then the mirror half, in the same file: a
+corpus of ordinary questions that must **not** route, so widening recall cannot
+be paid for with over-capture. A bite test proves a guard is right when it fires;
+only this proves it fires at all.
+
 **Step 4 — a bite test per tooth.**
 For every ENFORCING mechanism, a scenario where removing it changes the outcome
 — proven the way we proved the patch seams: break it deliberately, watch the
@@ -447,18 +566,35 @@ follow-up that can be done — or not — at leisure.
 
 ## 12. Decisions the owner has to make
 
-1. **Should the confidence gate bite?** Today a fully unverified answer ships
-   with a log line. The alternative is: below threshold → one forced replan,
-   then an explicitly hedged answer. This is the single highest-value switch in
-   the system, and it is already parameterised.
-2. **Should stagnation stop the run?** Two identical failure signatures
-   currently cost the full remaining attempt budget.
-3. **Should `max_llm_calls` have a real default** instead of unlimited?
-4. **Which of the five sensors flips first?** They should not all flip at once;
-   each changes the failure profile of every run.
-5. **Is `core/loop.py` the next extraction?** It is the last place where the
+**Re-ordered 2026-07-26 by measured damage.** The list below used to open with the
+confidence gate; measurement moved it down and put a recall failure on top.
+
+1. **Fix `_has_any` recall at the primitive, or keep patching phrase lists?**
+   76% of natural phrasings miss (§8.1, finding 7). This is the only defect on
+   this list that both wastes money *and* produces a wrong answer, every time it
+   fires. It is also the one the operator hit in practice: he asked what the agent
+   can do and was answered by a generic language model.
+2. **Should a worthless answer be banked as a success?** A run the system itself
+   scored `overall_confidence = 0.008` was written to episodic memory as
+   `outcome=success`. Unlike the others this one **compounds**: later runs read
+   that memory as experience, so the agent is learning that unsupported
+   self-praise is good work.
+3. **Should `_GENERATIVE_ROLES` exempt factual questions?** Measured: "how many
+   TODO/FIXME are in `core/`?" ran under `role=programmer`, so evidence checking
+   was skipped entirely for a counting question. Counting is not code generation.
+4. **`AGENT_ENFORCE_UNSUPPORTED_CLAIMS=on`, and then the truncation floor?**
+   Arming the mode is free — measured 0 of 8 answers change. The floor is the
+   real decision (3 of 8 change with a floor of 3 when nothing is verified), and
+   it should wait for more than 8 recorded answers.
+5. **Should stagnation stop the run?** Two identical failure signatures currently
+   cost the full remaining attempt budget.
+6. **Should `max_llm_calls` have a real default** instead of unlimited?
+7. **Is `core/loop.py` the next extraction?** It is the last place where the
    core's sequence is entangled with orchestration.
 
 _Source of facts: `core/` (134 modules), `app/`, `cli/`, `tools/`, `api/` read at
 `main` @ `eec6507` on 2026-07-26; module docstrings quoted verbatim where they
-state a limitation._
+state a limitation. The 2026-07-26 amendments add: a recall measurement over the
+pattern file's own 62 natural trigger phrases (372 variants), a replay of the real
+enforcement functions against the 8 answers recorded in `logs/` (reproducing the
+logged verdicts 8 for 8), and one live operator session._
