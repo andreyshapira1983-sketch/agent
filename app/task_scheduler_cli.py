@@ -195,6 +195,29 @@ def _handle_task_cancel(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     return True
 
 
+def _handle_task_unblock(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """Return an approval-blocked task to the queue.
+
+    A `blocked` row is waiting on a human decision, so a human is the only thing
+    that can move it — no timer, no retry schedule. This is that move.
+    """
+    task_id = rest.strip()
+    if not task_id:
+        print("Usage: :task-unblock <task_id>", file=sys.stderr)
+        return True
+    try:
+        task = _task_queue_for(agent, workspace).unblock(task_id)
+    except (KeyError, ValueError) as exc:
+        print(f"(task unblock failed: {exc})", file=sys.stderr)
+        return True
+    agent.log.log("runtime_task_unblocked", task.to_dict())
+    print(
+        f"(task unblocked: {task.id}; back to pending, goal={task.goal})",
+        file=sys.stderr,
+    )
+    return True
+
+
 def _parse_schedule_add(rest: str) -> tuple[dict, str | None]:
     tokens = _split_meta_args(rest)
     every_minutes: int | None = None
