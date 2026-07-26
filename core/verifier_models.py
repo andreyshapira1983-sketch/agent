@@ -40,6 +40,12 @@ class VerificationReport:
     topic_supported_but_claim_unverified_chunks: int = 0
     subagent_asserted_chunks: int = 0
     receipt_missing_chunks: int = 0
+    #: Claims about THIS session's dialogue, backed by the verbatim prior turn
+    #: (issue #119). Deliberately its own counter: such a claim is neither
+    #: `verified` (no external source confirms it) nor `unverified` (the
+    #: recording of the exchange does support it), so collapsing it into either
+    #: bucket is what produced the original defect.
+    dialogue_supported_chunks: int = 0
 
     def to_log_payload(self) -> dict[str, Any]:
         return {
@@ -52,6 +58,7 @@ class VerificationReport:
             "topic_supported_but_claim_unverified_chunks": self.topic_supported_but_claim_unverified_chunks,
             "subagent_asserted_chunks": self.subagent_asserted_chunks,
             "receipt_missing_chunks": self.receipt_missing_chunks,
+            "dialogue_supported_chunks": self.dialogue_supported_chunks,
             "fully_unverified": self.fully_unverified,
             "chain_was_empty": self.chain_was_empty,
             "malformed_output": self.malformed_output,

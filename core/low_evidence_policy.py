@@ -25,11 +25,13 @@ borderline answers.
 
 Trigger contract::
 
+    supported = verified + dialogue_supported
+
     triggered iff
         report.total_chunks >= MIN_TOTAL
-      and verified_ratio = verified / total <= MAX_VERIFIED_RATIO
+      and supported_ratio = supported / total <= MAX_VERIFIED_RATIO
       and (
-            verified == 0
+            supported == 0
          or unverified + cited_unmatched + topic_supported >= UNVERIFIED_FLOOR
       )
 
@@ -37,6 +39,13 @@ The last clause is a safety net: a 5-chunk answer with 1 verified +
 4 unverified would otherwise pass the ratio gate accidentally because
 the small denominator leaves the agent room to be wrong about most
 claims.
+
+``dialogue_supported`` joins the numerator because of issue #119: a
+claim about *this session's own exchange* is backed by the verbatim
+transcript, so counting it as unsupported mass is what let the gate
+delete a valid self-correction. It is support, not verification — it
+is never folded into ``verified_chunks``, and a world claim never
+earns it (the scoping test lives in :mod:`core.evidence_classes`).
 """
 
 from __future__ import annotations
@@ -98,13 +107,26 @@ class LowEvidencePolicyResult:
     locale: str = "en"
     suppressed_chars: int = 0
     notes: tuple[str, ...] = field(default_factory=tuple)
+    dialogue_supported_chunks: int = 0
+
+    @property
+    def supported_chunks(self) -> int:
+        """Claims the answer is entitled to keep: verified + dialogue-scoped."""
+        return self.verified_chunks + self.dialogue_supported_chunks
 
     def to_log_payload(self) -> dict[str, Any]:
         return {
             "triggered": self.triggered,
             "verified_chunks": self.verified_chunks,
+            "dialogue_supported_chunks": self.dialogue_supported_chunks,
+            "supported_chunks": self.supported_chunks,
             "total_chunks": self.total_chunks,
+            # `verified_ratio` is kept for existing log consumers, but the value
+            # is and always was the ratio the gate DECIDES on — since issue #119
+            # that is (verified + dialogue_supported) / total. `supported_ratio`
+            # is the name that says so; prefer it in new consumers.
             "verified_ratio": round(self.verified_ratio, 3),
+            "supported_ratio": round(self.verified_ratio, 3),
             "unverified_total": self.unverified_total,
             "reason": self.reason,
             "locale": self.locale,
@@ -130,24 +152,54 @@ def _insufficient_data_notice(locale: str) -> str:
     )
 
 
-def _conclusion_stub(verified_count: int, locale: str) -> str:
+def _conclusion_stub(
+    verified_count: int, locale: str, dialogue_count: int = 0
+) -> str:
+    """Conclusion line for the rebuilt short answer.
+
+    ``dialogue_count`` is stated separately, never merged into the verified
+    tally: claims about this session's own exchange are supported by the
+    transcript, not confirmed by a source (issue #119).
+    """
     if locale == "ru":
-        if verified_count == 0:
+        if verified_count == 0 and dialogue_count == 0:
             return (
                 "Conclusion: ни одно утверждение не подтверждено "
                 "источниками этого цикла."
             )
+        if verified_count == 0:
+            return (
+                "Conclusion: внешние источники не подтвердили ничего; "
+                f"сохранено {dialogue_count} утверждений о самом диалоге "
+                "(по стенограмме сессии)."
+            )
+        tail = (
+            f" плюс {dialogue_count} о самом диалоге;"
+            if dialogue_count
+            else ";"
+        )
         return (
-            f"Conclusion: подтверждено {verified_count} утверждений; "
+            f"Conclusion: подтверждено {verified_count} утверждений{tail} "
             "остальное скрыто как недостаточно обоснованное."
         )
-    if verified_count == 0:
+    if verified_count == 0 and dialogue_count == 0:
         return (
             "Conclusion: no claim could be backed by the sources "
             "gathered this cycle."
         )
+    if verified_count == 0:
+        return (
+            "Conclusion: no external source confirmed anything; "
+            f"{dialogue_count} claim(s) about this session's own exchange "
+            "were kept (backed by the transcript)."
+        )
+    tail = (
+        f", plus {dialogue_count} about this session's own exchange;"
+        if dialogue_count
+        else ";"
+    )
     return (
-        f"Conclusion: {verified_count} claim(s) verified; the rest of "
+        f"Conclusion: {verified_count} claim(s) verified{tail} the rest of "
         "the planned reply was suppressed for lack of support."
     )
 
@@ -180,13 +232,16 @@ def _build_short_answer(
     verified_claim_texts: list[str],
     suppressed_count: int,
     locale: str,
+    dialogue_count: int = 0,
 ) -> str:
     """Assemble a deterministic short reply that follows the Output
     Contract section order. We rebuild from scratch — never paraphrase
     the LLM's prose — so the truncation is visibly mechanical."""
     notice = _insufficient_data_notice(locale)
     parts = [
-        _conclusion_stub(len(verified_claim_texts), locale),
+        _conclusion_stub(
+            len(verified_claim_texts) - dialogue_count, locale, dialogue_count
+        ),
         _facts_block(verified_claim_texts, locale),
         "Sources: only verified claims listed above (if any)",
         "Confidence: low",
@@ -242,6 +297,7 @@ def evaluate_low_evidence_policy(
 
     total = int(getattr(report, "total_chunks", 0) or 0)
     verified = int(getattr(report, "verified_chunks", 0) or 0)
+    dialogue = int(getattr(report, "dialogue_supported_chunks", 0) or 0)
     unverified = int(getattr(report, "unverified_chunks", 0) or 0)
     cited_unmatched = int(
         getattr(report, "cited_but_unmatched_chunks", 0) or 0
@@ -257,14 +313,25 @@ def evaluate_low_evidence_policy(
     unverified_total = (
         unverified + cited_unmatched + topic_supported + subagent_asserted
     )
-    verified_ratio = (verified / total) if total > 0 else 0.0
+    supported = verified + dialogue
+    supported_ratio = (supported / total) if total > 0 else 0.0
+
+    def _result(*, triggered: bool, answer_out: str, reason: str,
+                locale: str = "en", suppressed_chars: int = 0
+                ) -> LowEvidencePolicyResult:
+        return LowEvidencePolicyResult(
+            triggered=triggered, answer=answer_out,
+            verified_chunks=verified, total_chunks=total,
+            verified_ratio=supported_ratio,
+            unverified_total=unverified_total,
+            dialogue_supported_chunks=dialogue,
+            reason=reason, locale=locale,
+            suppressed_chars=suppressed_chars,
+        )
 
     if local_critique_active:
-        return LowEvidencePolicyResult(
-            triggered=False, answer=answer,
-            verified_chunks=verified, total_chunks=total,
-            verified_ratio=verified_ratio,
-            unverified_total=unverified_total,
+        return _result(
+            triggered=False, answer_out=answer,
             reason="local_critique_skip_empty_rewrite",
         )
 
@@ -275,41 +342,28 @@ def evaluate_low_evidence_policy(
         # has nothing to cite — the model's synthesis IS the deliverable.
         # Factual / realtime questions keep the full gate (evidence_expected
         # stays True for them).
-        return LowEvidencePolicyResult(
-            triggered=False, answer=answer,
-            verified_chunks=verified, total_chunks=total,
-            verified_ratio=verified_ratio,
-            unverified_total=unverified_total,
-            reason="no_evidence_expected",
+        return _result(
+            triggered=False, answer_out=answer, reason="no_evidence_expected",
         )
 
     if total < min_total_chunks:
-        return LowEvidencePolicyResult(
-            triggered=False, answer=answer,
-            verified_chunks=verified, total_chunks=total,
-            verified_ratio=verified_ratio,
-            unverified_total=unverified_total,
+        return _result(
+            triggered=False, answer_out=answer,
             reason="too_few_chunks_to_truncate",
         )
 
-    if verified_ratio > max_verified_ratio:
-        return LowEvidencePolicyResult(
-            triggered=False, answer=answer,
-            verified_chunks=verified, total_chunks=total,
-            verified_ratio=verified_ratio,
-            unverified_total=unverified_total,
+    if supported_ratio > max_verified_ratio:
+        return _result(
+            triggered=False, answer_out=answer,
             reason="verified_ratio_above_threshold",
         )
 
-    if verified > 0 and unverified_total < unverified_floor:
-        # Borderline: verified > 0 but unverified mass too small to
-        # justify the truncation hammer. The standard ConfidenceGate
-        # log will still surface it.
-        return LowEvidencePolicyResult(
-            triggered=False, answer=answer,
-            verified_chunks=verified, total_chunks=total,
-            verified_ratio=verified_ratio,
-            unverified_total=unverified_total,
+    if supported > 0 and unverified_total < unverified_floor:
+        # Borderline: some support exists but the unverified mass is too small
+        # to justify the truncation hammer. The standard ConfidenceGate log
+        # will still surface it.
+        return _result(
+            triggered=False, answer_out=answer,
             reason="unverified_mass_below_floor",
         )
 
@@ -319,29 +373,35 @@ def evaluate_low_evidence_policy(
 
     chunks_iter = getattr(report, "chunks", ()) or ()
     verified_texts: list[str] = []
+    dialogue_texts: list[str] = []
     for c in chunks_iter:
         verdict = getattr(c, "verdict", "")
         text = getattr(c, "text", "")
-        if verdict == "verified" and text.strip():
+        if not text.strip():
+            continue
+        if verdict == "verified":
             verified_texts.append(text.strip())
+        # Dialogue-scoped claims survive the truncation alongside verified ones:
+        # the answer loses its unsupported world claims and keeps the part the
+        # session transcript backs (issue #119). Even when the gate fires, a
+        # self-correction is never erased wholesale.
+        elif verdict == "dialogue_supported":
+            dialogue_texts.append(text.strip())
 
-    suppressed_count = total - verified
+    suppressed_count = total - supported
     short_answer = _build_short_answer(
-        verified_claim_texts=verified_texts,
+        verified_claim_texts=verified_texts + dialogue_texts,
         suppressed_count=suppressed_count,
         locale=locale,
+        dialogue_count=len(dialogue_texts),
     )
     reason = (
-        f"verified_ratio={verified_ratio:.2f} <= {max_verified_ratio} "
+        f"supported_ratio={supported_ratio:.2f} <= {max_verified_ratio} "
         f"and unverified_total={unverified_total} >= {unverified_floor}"
     )
-    return LowEvidencePolicyResult(
+    return _result(
         triggered=True,
-        answer=short_answer,
-        verified_chunks=verified,
-        total_chunks=total,
-        verified_ratio=verified_ratio,
-        unverified_total=unverified_total,
+        answer_out=short_answer,
         reason=reason,
         locale=locale,
         suppressed_chars=max(0, len(answer) - len(short_answer)),

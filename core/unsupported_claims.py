@@ -152,7 +152,13 @@ def _count_categorical_unsupported(report: Any) -> int:
     n = 0
     for c in chunks:
         verdict = getattr(c, "verdict", "") or ""
-        if verdict in ("verified", "self_declared", "structural"):
+        # `dialogue_supported` joins the exempt set: a categorical statement
+        # about the agent's own previous reply ("я всегда отвечаю по вопросу")
+        # is backed by the transcript, and hedging it would reintroduce the
+        # issue #119 defect through the short path.
+        if verdict in (
+            "verified", "self_declared", "structural", "dialogue_supported"
+        ):
             continue
         text = getattr(c, "text", "") or ""
         # Skip pure target-descriptive critique lines.

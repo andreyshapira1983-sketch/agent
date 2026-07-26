@@ -12,6 +12,9 @@ CITATION_PREFIXES: dict[str, str] = {
     "tool": "tool_output",
     "diff": "diff_preview",
     "memory": "memory",
+    # Verbatim earlier turn of this session (issue #119). Resolves only to
+    # dialogue-scoped claims; see core/evidence_classes.py.
+    "dialogue": "session_dialogue",
     "user": "user_explicit",
     "general-knowledge": "llm_claim",
 }
@@ -79,7 +82,7 @@ _NO_TOKEN_FALLBACK_PREFIXES: frozenset[str] = frozenset({"web", "search", "file"
 _TOKEN_STOPWORDS: frozenset[str] = frozenset({
     "http", "https", "www", "ftp",
     "file", "web", "search", "test", "log", "shell", "tool", "diff",
-    "memory", "user", "general", "knowledge",
+    "memory", "user", "general", "knowledge", "dialogue", "session_dialogue",
     "web_page", "web_search_hit", "tool_output", "test_result",
     "log_event", "shell_output", "diff_preview",
     "user_explicit", "llm_claim", "unknown",
