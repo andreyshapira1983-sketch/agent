@@ -73,7 +73,7 @@ _Planning, verification, clarification, control loop._
 | `core/best_next_action` | Priority intelligence: choose the single most important next action. |
 | `core/task_complexity` | Task Complexity Assessment — automatic model tier selection. |
 | `core/low_evidence_policy` | Low-evidence answer policy. |
-| `core/unsupported_claims` | Claim-level answer enforcement (critique plan PR3): separates insufficient-evidence, verifier-failure soft-fail, and unsupported world-claim outcomes; flag `AGENT_ENFORCE_UNSUPPORTED_CLAIMS`. |
+| `core/unsupported_claims` | Claim-level answer enforcement (critique plan PR3): separates insufficient-evidence, verifier-failure soft-fail, and unsupported world-claim outcomes. Long-answer truncation is always on; `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` gates only the claim-level short path. |
 | `core/subsystem_disagreement` | Detect disagreements between cognitive subsystems on the same turn. |
 | `core/strategy_router` | Strategy Router: deliberation kernel layer BEFORE the LLM planner. |
 | `core/role_router` | Role / mode routing for the agent core. |
@@ -91,6 +91,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/smart_memory` | Episodic, procedural and consolidation memory for autonomous operation. |
 | `core/memory_policy` | Memory Write Policy + Memory Retrieval Policy (§4 + §12.4). |
 | `core/memory_echo_antibody` | Memory Echo Antibody (A1) — refuse agent-auto memory that *echoes* itself. |
+| `core/heartbeat_io` | Daemon liveness record — write, read, age, staleness. Owned by the core because "is the daemon alive" is an input to a decision. |
 | `core/hygiene` | Memory Hygiene (§4 Memory Governance — cleanup, dedup, expiry, summarise). |
 | `core/episodic_hygiene` | Episodic memory hygiene — staleness scoring and pruning. |
 | `core/knowledge_use_policy` | Contextual memory-use policy. |

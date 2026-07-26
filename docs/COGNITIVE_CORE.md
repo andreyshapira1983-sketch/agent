@@ -283,6 +283,36 @@ nothing, spend nothing, and remember nothing on its own.*
 > PR #170 fixed one of the 31 families. The other 30 remain, and patching them
 > one phrase at a time is the wrong shape of fix — see section 10, finding 7.
 
+> **RESOLVED (2026-07-26, PR #172).** Fixed at the primitive, not per family.
+> `_has_any_loose` in `core/operator_intent_patterns.py` tries, for a multi-word
+> trigger phrase, one regex per gap that allows exactly **one** extra token and
+> stays strict everywhere else, so the tolerance cannot compound across a long
+> phrase; single-word terms get nothing, because there is no gap to be tolerant
+> about. Applied to the 50 `_has_any` calls inside the 24 positive `_matches_*`
+> matchers. The 7 calls inside the `_looks_like_*` suppression guards stay
+> **strict on purpose** — widening what is recognised is one decision, widening
+> what is *blocked* is another and riskier one — and both halves are asserted at
+> source level so neither can silently revert.
+>
+> Re-measured on the same corpus: **0 of 372 variants lost** (was 283). Recall
+> was not bought with over-capture, and that was measured too: the repo's own 19
+> must-not-route cases (including «проверь свои возможности по документации» and
+> «расскажи по README, что ты умеешь», which must reach the LLM) — 0 violations;
+> 25 further ordinary turns — 0 captured; two adversarial sentences where both
+> halves of a trigger phrase sit far apart — not captured, and they catch a
+> mutation that widens the tolerance to two insertions.
+>
+> The 5 special-case regexes from PR #170 stay: they cover inflection and the
+> polite form («что вы уже умеете»), which insertion tolerance cannot reach —
+> verified by gutting them and re-measuring (8/10 instead of 10/10).
+> *Proof:* `tests/test_local_routing_recall.py` (38 tests), whose corpus is
+> derived **from the pattern file**, so a trigger phrase added later is covered
+> without anyone remembering to extend a list.
+>
+> What this does **not** fix: recall for phrasings that are not near-variants of
+> a listed trigger phrase. The router is still a phrase list; it is now a phrase
+> list that survives an inserted word.
+
 ### 8.2 Call budgets — **ENFORCING, with one default worth a decision**
 
 1. *Plain:* a run may spend only so many cycles, calls and tokens before it
@@ -410,10 +440,10 @@ nothing, spend nothing, and remember nothing on its own.*
 > the real functions against 8 recorded answers in `logs/` (the replay reproduced
 > the logged verdicts 8 for 8):
 >
-> 1. **It runs in `mode=off` by default.** `enforce_unsupported_claims_mode()`
+> 1. ~~**It runs in `mode=off` by default.** `enforce_unsupported_claims_mode()`
 >    reads env `AGENT_ENFORCE_UNSUPPORTED_CLAIMS`; unset → `off`, so `applied`
->    can never become true. A `shadow` mode exists that logs what it *would*
->    change.
+>    can never become true.~~ **WRONG — corrected below; the flag governs a
+>    different, narrower path than this said.**
 > 2. **The 8-chunk floor.** `_DEFAULT_MIN_TOTAL = 8`; every real firing had 3-6
 >    chunks → `reason=too_few_chunks_to_truncate`.
 > 3. **`no_evidence_expected`.** For an empty evidence chain with no realtime
@@ -425,6 +455,42 @@ nothing, spend nothing, and remember nothing on its own.*
 > Turning the gate itself into a blocker — the fix this document originally
 > implied — would have changed **nothing**, because the gate is not where the
 > decision lives. See [[fix at the decider, not the observer]].
+
+> **CORRECTION TO THE CORRECTION (2026-07-26).** Reason 1 above was wrong about
+> what the flag controls, and the error mattered: it described the enforcement
+> layer as fully inert, when its most consequential path ships on every run.
+> `apply_answer_enforcement` (`core/unsupported_claims.py`) has **two** paths and
+> the flag governs only one of them.
+>
+> | path | what it does | gated by the flag? |
+> |---|---|---|
+> | `insufficient_evidence` — long-answer truncation | rebuilds a severely under-supported answer into a short honest stub | **No. Always on.** It returns `applied=True` regardless of mode, and `core/loop.py` writes that answer back. |
+> | `unsupported_world_claims` — short categorical hedge | downgrades `Confidence` and adds an `Unverified:` note for `< 8`-chunk answers carrying categorical world claims | **Yes** — `applied = mode == "on"`; `shadow` logs `would_change_answer` only. |
+> | `verifier_failure` / `malformed_report` soft-fail | *keeping* the draft is unconditional; only the explanatory note appended to it is flag-gated | note only |
+> | `local_critique_preserved` | invariant, never flag-gated | no |
+>
+> So `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` is the rollout switch for the **new,
+> claim-level short path** (critique plan PR3), not a master switch for
+> enforcement. `off` is the default and means: the pre-PR3 long truncation is
+> live, the new short-answer hedge is not.
+>
+> The measurement above is still correct and now reads correctly too: flipping
+> `mode=on` changed 0 of those 8 answers because none of them reached the short
+> categorical path — not because enforcement was switched off.
+>
+> **Proof it is live:** issue #119 is a recorded production turn with the flag
+> unset in which `low_evidence_truncation` fired and suppressed 1287 characters
+> of the agent's own self-analysis. An inert layer cannot do that.
+>
+> **What changed since (issue #119).** The truncation gate now decides on
+> `(verified + dialogue_supported) / total`. `core/evidence_classes.py` splits
+> the evidence the system holds into `external_world`, `session_dialogue`,
+> `trace`, `self_analysis` and `generative`, and the verifier gives a claim about
+> *this session's own exchange* its own verdict, `dialogue_supported` — supported
+> by the transcript, never counted as `verified`, and never available to a claim
+> about the outside world. Unsupported world claims are filtered exactly as
+> before; what stopped being deleted is the agent explaining its own mistake.
+> *Proof:* `tests/test_self_analysis_evidence.py`.
 
 ### 8.12 The decision journal — **ENFORCING**
 
@@ -457,19 +523,31 @@ nothing, spend nothing, and remember nothing on its own.*
 1. **The cognitive core already exists** — roughly thirty deterministic
    deciders, a twenty-gate sequence, and a 71-event journal. This was never a
    greenfield question. The work is to *declare* the boundary, not to invent it.
-2. **The boundary is real but unguarded.** `core/` imports nothing from `cli/`,
-   `app/` or `main` today. Nothing enforces that; one import in the wrong
-   direction would put a decision inside a command handler, and no test would
-   notice.
+2. ~~**The boundary is real but unguarded.**~~ **GUARDED (2026-07-26).** The
+   claim that `core/` imported nothing upward was also not quite true when it was
+   written: `core/campaign_io.py` reached into `agent_tick._read_heartbeat` and
+   two sibling private helpers. Those moved to `core/heartbeat_io.py` — whether
+   the daemon is alive is an *input to a decision*, so reading it belongs in the
+   core; the tick script still owns when to write it. The boundary is now
+   enforced by `scripts/architecture_invariants.py` (INV-1), together with three
+   further invariants the architecture rests on: no orphaned deciders (INV-2 —
+   the `recover_stuck` anti-pattern), documented env flags exist (INV-3), and
+   every verifier verdict is bucketed by its consumers (INV-4). Each check is
+   itself tested against a planted violation, so it cannot decay into a no-op:
+   `tests/test_architecture_invariants.py`.
 3. **Five sensors do not bite.** Confidence gate, stagnation, premature
    completion, reasoning↔action mismatch and subsystem disagreement all detect
    and log. ~~The most consequential is the confidence gate: an answer can be
    fully unverified and still ship, with an event nobody reads.~~ **Corrected
    2026-07-26 (see §8.11):** the answer *can* still ship unverified, but the gate
-   is not the reason. Enforcement exists and is wired; it is inert because
-   `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` defaults to `off`, the truncation floor is
-   8 chunks, and pure-reasoning turns are skipped by design. Measured: flipping
-   the mode alone would change 0 of 8 recorded answers.
+   is not the reason. Enforcement exists and is wired. ~~it is inert because
+   `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` defaults to `off`~~ — **corrected again the
+   same day:** the long-answer truncation path is **always on** (issue #119 is a
+   production turn where it fired with the flag unset); the flag gates only the
+   new claim-level short path. What kept it quiet on the 8 recorded answers is
+   the 8-chunk floor and the by-design skip for pure-reasoning turns. Measured:
+   flipping the mode alone would change 0 of 8, because none of them reached the
+   path the mode controls.
 4. **One budget is off by default.** `BudgetLimits.max_llm_calls = 0` means
    unlimited on the plain autonomous path.
 5. **`core/loop.py` is where the boundary blurs** — 3882 lines mixing the
@@ -569,11 +647,12 @@ follow-up that can be done — or not — at leisure.
 **Re-ordered 2026-07-26 by measured damage.** The list below used to open with the
 confidence gate; measurement moved it down and put a recall failure on top.
 
-1. **Fix `_has_any` recall at the primitive, or keep patching phrase lists?**
-   76% of natural phrasings miss (§8.1, finding 7). This is the only defect on
-   this list that both wastes money *and* produces a wrong answer, every time it
-   fires. It is also the one the operator hit in practice: he asked what the agent
-   can do and was answered by a generic language model.
+1. ~~**Fix `_has_any` recall at the primitive, or keep patching phrase lists?**
+   76% of natural phrasings miss (§8.1, finding 7).~~ **DECIDED and DONE
+   (2026-07-26, PR #172): at the primitive.** `_has_any_loose` tolerates one
+   inserted word per gap in the positive matchers, and nothing in the
+   suppression guards. Re-measured 0 of 372 variants lost, with no over-capture
+   on the repo's 19 must-not-route cases. See §8.1.
 2. **Should a worthless answer be banked as a success?** A run the system itself
    scored `overall_confidence = 0.008` was written to episodic memory as
    `outcome=success`. Unlike the others this one **compounds**: later runs read
@@ -583,9 +662,12 @@ confidence gate; measurement moved it down and put a recall failure on top.
    TODO/FIXME are in `core/`?" ran under `role=programmer`, so evidence checking
    was skipped entirely for a counting question. Counting is not code generation.
 4. **`AGENT_ENFORCE_UNSUPPORTED_CLAIMS=on`, and then the truncation floor?**
-   Arming the mode is free — measured 0 of 8 answers change. The floor is the
-   real decision (3 of 8 change with a floor of 3 when nothing is verified), and
-   it should wait for more than 8 recorded answers.
+   Arming the mode is free — measured 0 of 8 answers change. Note what the
+   question is *not* asking (§8.11 correction): the long-answer truncation is
+   already live and unaffected by the mode; what would be armed is the
+   claim-level short-answer hedge. The floor is the real decision (3 of 8 change
+   with a floor of 3 when nothing is verified), and it should wait for more than
+   8 recorded answers.
 5. **Should stagnation stop the run?** Two identical failure signatures currently
    cost the full remaining attempt budget.
 6. **Should `max_llm_calls` have a real default** instead of unlimited?

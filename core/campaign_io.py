@@ -47,15 +47,19 @@ def _action_focused_goal(goal: str, action: BestNextAction) -> str:
 
 
 def _default_gather_signals(agent: Any, workspace: Any, approval_inbox: Any) -> dict[str, Any]:
-    import agent_tick
+    from core.heartbeat_io import (
+        heartbeat_age_seconds,
+        is_stale,
+        read_heartbeat,
+    )
     from core.alert_ack import AlertAckStore
     from core.approval_inbox import ApprovalInbox
     from core.approval_triage import triage_inbox
     from core.best_next_action import select_best_next_action
 
     ws = Path(workspace)
-    heartbeat = agent_tick._read_heartbeat(ws)
-    age = agent_tick._heartbeat_age_seconds(heartbeat)
+    heartbeat = read_heartbeat(ws)
+    age = heartbeat_age_seconds(heartbeat)
     hb = heartbeat or {}
     inbox = approval_inbox or ApprovalInbox(path=ws / "data" / "approval_inbox.jsonl")
     triage = triage_inbox(inbox.pending())
@@ -66,7 +70,7 @@ def _default_gather_signals(agent: Any, workspace: Any, approval_inbox: Any) -> 
         tests_health=str(hb.get("tests_health", "none")),
         dry_run_streak=int(hb.get("dry_run_streak", 0) or 0),
         heartbeat_missing=heartbeat is None,
-        heartbeat_stale=agent_tick._is_stale(age),
+        heartbeat_stale=is_stale(age),
         heartbeat_age_seconds=age,
         last_event=str(hb.get("event", "")),
         tick_error=hb.get("error"),
