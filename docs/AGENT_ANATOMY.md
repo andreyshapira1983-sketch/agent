@@ -101,6 +101,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/structured_facts` | Structured fact extraction for tool outputs. |
 | `core/evidence` | MVP-14.1 — Evidence + Provenance model. |
 | `core/evidence_budget` | Evidence Budget — caps context sent to the synthesizer LLM. |
+| `core/evidence_classes` | Evidence classes — what kind of support a claim needs (external world / session dialogue / trace / self-analysis / generative); issue #119. |
 | `core/completion_marker` | Nonce-bearing channel for the synthesizer's task-completion declaration (MIR-057). |
 | `core/conflict_review` | Operator-facing conflict review for the Source Registry. |
 | `core/source_registry` | Source Registry and extracted claims. |

@@ -276,7 +276,11 @@ class TestLowEvidenceTrigger:
         assert payload["verified_ratio"] == 0.0
         assert payload["unverified_total"] == 10
         assert payload["locale"] == "en"
-        assert "verified_ratio" in payload["reason"]
+        # The gate decides on (verified + dialogue_supported) / total since
+        # issue #119, so the reason names `supported_ratio`. The
+        # `verified_ratio` payload key is kept as an alias for old consumers.
+        assert payload["supported_ratio"] == 0.0
+        assert "supported_ratio" in payload["reason"]
 
 
 class TestIsEvidenceExpected:
