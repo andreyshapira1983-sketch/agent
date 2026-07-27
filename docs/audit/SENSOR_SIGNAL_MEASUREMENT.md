@@ -195,3 +195,27 @@ These are the judgement calls the numbers cannot make:
 
 _Measured 2026-07-27 against `main` @ `388fac1`. Sensors read at that commit;
 traces are whatever was in `logs/` at the time of measurement._
+
+---
+
+## Addendum — operator decision, 2026-07-27
+
+The measurement above was delivered without a recommendation, as required. The
+operator's ruling on it, recorded here so the numbers and what was done with
+them stay together:
+
+| Sensor | Decision |
+|---|---|
+| **S1** | Do **not** connect to replan. Stop calling it "confidence". Keep the computation as evidence-support telemetry and change its **semantics**: `no_evidence_expected` → `applicable=False, score=None`; expected-and-absent → `0.0`; fabricated citations → `0.0` **plus** an integrity flag. |
+| **S2** | Do not delete. Build targeted replan scenarios, then shadow-log `would_stop` / `would_save_attempts` / `would_change_result` before any real stop. |
+| **S3** | Keep the requirement, replace the detector. A keyword list over the user's wording is not the architecture; the question is whether a **tool/evidence obligation** was incurred and left unsatisfied. Keywords may survive only as a high-precision fallback. |
+| **S4** | Keep as an observer, keep measuring. Later, tie the reaction to the **risk of the action**: read-only mismatch → telemetry; unjustified effectful/irreversible action → replan or approval escalation. Not a universal blocker. |
+| **S5** | Do not delete. Build targeted scenarios for each declared conflict kind plus negatives, shadow-policy first. |
+
+Operator's summary: sensors may not be removed in bulk, but **S1 in its current
+form is not a confidence gate and S3 in its current form is not a reliable
+premature-completion detector** — one needs redefining, the other replacing.
+S2 and S5 simply have not had a chance to be judged.
+
+**Implemented so far:** S1 (`core/evidence_support.py`, event `evidence_support`).
+S2, S3, S5 remain as measured; S4 unchanged by decision.
