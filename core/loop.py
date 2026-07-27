@@ -1038,6 +1038,11 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         planner_out: PlannerOutput | None = None
         plan: Plan | None = None
         replan_exhausted = False
+        # S2 shadow: set when stagnation is detected, read at the end of the run
+        # to report what an early stop would have cost. Never stops anything.
+        _stagnation_shadow: dict[str, Any] | None = None
+        # S5 shadow: every disagreement seen this run, for the same purpose.
+        _disagreement_shadow: list[dict[str, Any]] = []
         # Cheap-path cost gate: set True only when the planner-skip branch
         # below fires for a trivial no-tool turn. Downstream this trims the
         # synthesizer context, forces the LIGHT (cheap) model tier and skips
@@ -1381,6 +1386,16 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 )
                 if _stag is not None:
                     self.log.log("stagnation_detected", _stag.to_log_payload())
+                    # Shadow accounting (operator ruling 2026-07-27): record
+                    # WHERE a stop would have happened, so the run can report at
+                    # the end what stopping would have cost or saved. Nothing is
+                    # stopped.
+                    _stagnation_shadow = {
+                        "attempt": attempt,
+                        "artifacts_at_detection": sorted(attempt_artifacts.keys()),
+                        "repeat_count": _stag.repeat_count,
+                        "failure_codes": list(_stag.failure_codes),
+                    }
             except Exception:
                 pass
 
@@ -1826,6 +1841,19 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 )
                 for _ev in _disagreements:
                     self.log.log("subsystem_disagreement", _ev)
+                    # Shadow accounting (operator ruling 2026-07-27): what a
+                    # connected S5 would have done, recorded and never acted on.
+                    # Severity decides the action: a full planner/verifier
+                    # contradiction is an escalation, the rest is a replan.
+                    _disagreement_shadow.append({
+                        "kind": _ev.get("kind"),
+                        "severity": _ev.get("severity"),
+                        "attempt": _ev.get("attempt"),
+                        "would_action": (
+                            "escalate" if _ev.get("severity") == "high"
+                            else "replan"
+                        ),
+                    })
             except Exception:
                 pass
 
@@ -2381,6 +2409,46 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 },
             )
         answer = safe_answer
+
+        # ── Sensor shadow accounting (S2, S5) ───────────────────────────────
+        # Emitted at the end of the run because the interesting question —
+        # "would stopping there have changed anything?" — can only be answered
+        # once it is known what the remaining attempts actually produced.
+        # Reported, never acted on: neither sensor stops or replans anything.
+        if _stagnation_shadow is not None:
+            try:
+                _at = int(_stagnation_shadow.get("attempt") or 0)
+                _seen_then = set(_stagnation_shadow.get("artifacts_at_detection") or ())
+                _new_after = sorted(set(artifacts) - _seen_then)
+                self.log.log("stagnation_shadow", {
+                    **_stagnation_shadow,
+                    "would_stop": True,
+                    "would_save_attempts": max(0, self._current_attempt - _at),
+                    # The honest form of "would it have changed the result":
+                    # did anything new actually arrive after the stop point?
+                    "would_change_result": bool(_new_after),
+                    "artifacts_gained_after_detection": _new_after,
+                    "replan_exhausted": replan_exhausted,
+                })
+            except Exception:
+                pass
+        if _disagreement_shadow:
+            try:
+                self.log.log("subsystem_disagreement_shadow", {
+                    "events": _disagreement_shadow,
+                    "would_escalate": sum(
+                        1 for d in _disagreement_shadow
+                        if d.get("would_action") == "escalate"
+                    ),
+                    "would_replan": sum(
+                        1 for d in _disagreement_shadow
+                        if d.get("would_action") == "replan"
+                    ),
+                    "attempts_used": self._current_attempt,
+                    "replan_exhausted": replan_exhausted,
+                })
+            except Exception:
+                pass
 
         self.log.log(
             "respond",
