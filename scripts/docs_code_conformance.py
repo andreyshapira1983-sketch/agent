@@ -71,6 +71,26 @@ _NON_COMMAND_TOKENS = {
 #: correct documentation, not drift.
 _PLANNED_MARKERS = ("proposed", "missing test", "planned", "should be added", "to be written")
 
+#: Files that were RENAMED, old path -> new path.
+#:
+#: A dated audit document that says "the defect was in `core/foo.py`" stays true
+#: after `foo.py` is renamed — the finding happened to that file, under that
+#: name. Rewriting the sentence would falsify the record; leaving the reference
+#: unresolvable would make the guard useless. So the rename is declared once,
+#: here, and this table is the single place that records it. A path that is
+#: merely missing (deleted, never written, mistyped) still fails.
+#:
+#: Add an entry only for a real rename, and only together with the commit that
+#: performs it.
+_RENAMED_PATHS: dict[str, str] = {
+    # Renamed 2026-07-27: the module stopped computing "confidence" and started
+    # reporting evidence support with an explicit applicability flag, after
+    # measurement showed the old scalar conflated three different situations
+    # (docs/audit/SENSOR_SIGNAL_MEASUREMENT.md).
+    "core/confidence_gate.py": "core/evidence_support.py",
+    "tests/test_confidence_gate.py": "tests/test_evidence_support.py",
+}
+
 
 def _registry_commands() -> set[str]:
     src = (REPO / "cli" / "command_registry.py").read_text(encoding="utf-8")
@@ -86,6 +106,7 @@ def main() -> int:
     stale_anchors: list[str] = []
     historical_anchors = 0
     planned_paths = 0
+    renamed_paths = 0
     unknown_commands: list[str] = []
     checked_paths = checked_anchors = checked_commands = 0
 
@@ -99,7 +120,19 @@ def main() -> int:
                 checked_paths += 1
                 if not target.is_file():
                     lowered = line.lower()
-                    if any(marker in lowered for marker in _PLANNED_MARKERS):
+                    if path_text in _RENAMED_PATHS:
+                        # The record is about the file under its old name; the
+                        # rename is declared, so the reference still resolves.
+                        renamed = REPO / _RENAMED_PATHS[path_text]
+                        if renamed.is_file():
+                            renamed_paths += 1
+                            continue
+                        missing_paths.append(
+                            f"{rel_doc}:{lineno}  {path_text} "
+                            f"(declared renamed to {_RENAMED_PATHS[path_text]}, "
+                            f"which does not exist either)"
+                        )
+                    elif any(marker in lowered for marker in _PLANNED_MARKERS):
                         planned_paths += 1   # documented as not existing yet
                     else:
                         missing_paths.append(f"{rel_doc}:{lineno}  {path_text}")
@@ -129,7 +162,8 @@ def main() -> int:
     print("Docs <-> code conformance check (read-only)")
     print(f"  documents scanned      : {len(list(DOCS.rglob('*.md')))}")
     print(f"  code paths referenced  : {checked_paths}  "
-          f"(missing: {len(missing_paths)}, declared not-yet-written: {planned_paths})")
+          f"(missing: {len(missing_paths)}, declared not-yet-written: {planned_paths}, "
+          f"declared renamed: {renamed_paths})")
     print(f"  line anchors checked   : {checked_anchors}  "
           f"(out of range: {len(stale_anchors)}, declared historical: {historical_anchors})")
     print(f"  :command tokens        : {checked_commands}  (unknown: {len(set(unknown_commands))})")

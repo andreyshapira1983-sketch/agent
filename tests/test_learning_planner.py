@@ -4,7 +4,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.learning_planner import LearningPlanner
+from core.learning_planner import (
+    LearningPlanner,
+    is_confidence_evidence_learning_goal,
+)
 
 
 def test_learning_planner_prefers_architecture_readme_and_core(workspace: Path):
@@ -77,7 +80,7 @@ def test_learning_planner_confidence_goal_prefers_verifier_confidence_sources(
     (workspace / "tools" / "file_read.py").write_text("tool", encoding="utf-8")
     (workspace / "tests" / "test_architecture_audit.py").write_text("audit", encoding="utf-8")
     (workspace / "tests" / "test_verifier.py").write_text("verifier tests", encoding="utf-8")
-    (workspace / "tests" / "test_confidence_gate.py").write_text("gate", encoding="utf-8")
+    (workspace / "tests" / "test_evidence_support.py").write_text("gate", encoding="utf-8")
     (workspace / "tests" / "test_confidence_vector.py").write_text("vector", encoding="utf-8")
 
     plan = LearningPlanner().plan(
@@ -89,7 +92,7 @@ def test_learning_planner_confidence_goal_prefers_verifier_confidence_sources(
     assert plan.source_paths == (
         "core/verifier.py",
         "tests/test_verifier.py",
-        "tests/test_confidence_gate.py",
+        "tests/test_evidence_support.py",
         "tests/test_confidence_vector.py",
     )
 
@@ -111,7 +114,7 @@ def test_learning_planner_mixed_doctrine_confidence_selects_both_layers(
     (workspace / "core" / "verifier.py").write_text("verifier", encoding="utf-8")
     (workspace / "tools" / "shell_exec.py").write_text("tool", encoding="utf-8")
     (workspace / "tests" / "test_verifier.py").write_text("verifier tests", encoding="utf-8")
-    (workspace / "tests" / "test_confidence_gate.py").write_text("gate", encoding="utf-8")
+    (workspace / "tests" / "test_evidence_support.py").write_text("gate", encoding="utf-8")
     (workspace / "tests" / "test_confidence_vector.py").write_text("vector", encoding="utf-8")
 
     plan = LearningPlanner().plan(
@@ -126,7 +129,7 @@ def test_learning_planner_mixed_doctrine_confidence_selects_both_layers(
     assert set(plan.source_paths) == {
         "core/verifier.py",
         "tests/test_verifier.py",
-        "tests/test_confidence_gate.py",
+        "tests/test_evidence_support.py",
         "tests/test_confidence_vector.py",
         "docs/future/CORPORATE_MODEL.md",
         "docs/CENTRAL_AGENT_GOVERNANCE.md",
@@ -146,21 +149,26 @@ def test_learning_planner_local_project_evidence_does_not_force_verifier_sources
     (workspace / "core" / "source_ranker.py").write_text("ranker", encoding="utf-8")
     (workspace / "core" / "verifier.py").write_text("verifier", encoding="utf-8")
     (workspace / "tests" / "test_verifier.py").write_text("verifier tests", encoding="utf-8")
-    (workspace / "tests" / "test_confidence_gate.py").write_text("gate", encoding="utf-8")
+    (workspace / "tests" / "test_evidence_support.py").write_text("gate", encoding="utf-8")
     (workspace / "tests" / "test_confidence_vector.py").write_text("vector", encoding="utf-8")
 
-    plan = LearningPlanner().plan(
-        workspace=workspace,
-        goal="use local project evidence to summarize current project health",
-        limit=3,
-    )
+    goal = "use local project evidence to summarize current project health"
+    plan = LearningPlanner().plan(workspace=workspace, goal=goal, limit=3)
 
+    # The property under test is that this goal does NOT trigger the forced
+    # confidence-diagnostic source set.
+    assert is_confidence_evidence_learning_goal(goal) is False
     assert "core/evidence.py" in plan.source_paths
     assert "core/source_ranker.py" in plan.source_paths
     assert "core/verifier.py" not in plan.source_paths
     assert "tests/test_verifier.py" not in plan.source_paths
-    assert "tests/test_confidence_gate.py" not in plan.source_paths
     assert "tests/test_confidence_vector.py" not in plan.source_paths
+    # `tests/test_evidence_support.py` is deliberately NOT asserted absent.
+    # After the confidence_gate -> evidence_support rename its name shares the
+    # word "evidence" with this goal, so ordinary relevance ranking may pick it
+    # — and does, with the reason "matches learning goal". That is selection by
+    # relevance, not by forcing, and the assertion above is what distinguishes
+    # them. Using a filename as a proxy for "the forced set" is what broke here.
 
 
 def test_learning_planner_rejects_workspace_escape(workspace: Path, tmp_path: Path):

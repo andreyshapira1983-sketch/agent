@@ -1,6 +1,6 @@
 """Decompose answer confidence into a three-axis vector.
 
-The existing :func:`core.confidence_gate.compute_confidence` collapses
+The existing :func:`core.evidence_support.compute_evidence_support` collapses
 everything into one scalar, which hides *why* the agent is uncertain:
 "is the evidence weak?", "is the answer self-contradicting?", "is the
 answer drifting away from what was asked?". Berkeley MAST 2025
@@ -14,7 +14,7 @@ scalar gate. The user-facing `Confidence: high|medium|low` rewrite in
 Axes:
 
 * ``evidence_score`` — verification coverage. Reuses the same chunk
-  accounting as :func:`compute_confidence` (verified=1.0,
+  accounting as :func:`compute_evidence_support` (verified=1.0,
   cited_but_unmatched=-0.25, unverified=-0.25, self_declared=0) but is
   reported separately so it can be read independently.
 * ``coherence_score`` — internal consistency. Drops when subsystem
@@ -35,7 +35,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-from core.confidence_gate import compute_confidence
+from core.evidence_support import compute_evidence_support
 
 
 # Severity weight applied to disagreement events when computing
@@ -120,11 +120,15 @@ def _tokenise(text: str) -> set[str]:
 def evidence_score(report: Any) -> float:
     """Verification coverage as a 0..1 score.
 
-    Delegates to :func:`core.confidence_gate.compute_confidence` so the two
-    axes can never drift apart; exposed separately so callers can read this
-    axis without depending on the full scalar gate's semantics.
+    Delegates to :func:`core.evidence_support.compute_evidence_support` so the
+    two axes can never drift apart; exposed separately so callers can read this
+    axis without depending on the applicability question that module also asks.
+
+    Note this axis is a bare ratio and therefore still conflates "no evidence
+    was owed" with "evidence was owed and is missing". Callers that need that
+    distinction must read `evaluate_evidence_support`, not this number.
     """
-    return compute_confidence(report)
+    return compute_evidence_support(report)
 
 
 def coherence_score(disagreements: Sequence[dict] | None) -> float:

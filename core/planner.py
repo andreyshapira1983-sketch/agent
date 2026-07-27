@@ -312,6 +312,9 @@ _CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS = (
     "low_confidence",
     "low_confidence_gate",
     "confidence gate",
+    "evidence_support",
+    "evidence support",
+    "evidence_support_score",
     "evidence_score",
     "overall_confidence",
     "citation",
@@ -327,7 +330,7 @@ _CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS = (
 _CONFIDENCE_EVIDENCE_SOURCE_PATHS = (
     "core/verifier.py",
     "tests/test_verifier.py",
-    "tests/test_confidence_gate.py",
+    "tests/test_evidence_support.py",
     "tests/test_confidence_vector.py",
 )
 _CONFIDENCE_LOW_SIGNAL_DEFAULT_PATHS = (
@@ -1757,10 +1760,10 @@ class LLMPlanner:
         if _is_confidence_evidence_diagnostic_question(question):
             confidence_evidence_block = (
                 "[CONFIDENCE_EVIDENCE_DIAGNOSTIC_SOURCES=required — for questions "
-                "about confidence, low-confidence gate, evidence, citations, "
+                "about evidence support, evidence, citations, "
                 "verifier, verified/unverified chunks, or source registry, start "
                 "with core/verifier.py, tests/test_verifier.py, "
-                "tests/test_confidence_gate.py, and "
+                "tests/test_evidence_support.py, and "
                 "tests/test_confidence_vector.py. Do NOT use README.md or "
                 "list_dir tools/ as primary evidence for confidence-gate internals.]\n"
             )
