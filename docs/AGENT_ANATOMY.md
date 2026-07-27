@@ -122,6 +122,7 @@ _Effect gateways, receipts, compensation, VCS safety._
 | `core/gateway_consult` | Gateway hard-stop consult helpers (G5a). |
 | `core/tool_receipts` | Append-only tool receipt ledger — Stage 1 evidence layer (slice 1a + G5b). |
 | `core/receipt_consumer` | Tool receipts slice 1c — minimal consumer for verifier integration. |
+| `core/completion_obligation` | Premature completion as an UNMET OBLIGATION (S3): intent / plan / freshness are wired, `acceptance_criteria` is reported `not_wired`. Replaces the keyword detector as the source of truth. |
 | `core/compensation` | Compensation System (§5 Undo) — first introduced for MVP-11 shell_exec. |
 | `core/safe_vcs` | Narrow, safe VCS helper for the trusted self-apply lane (TD-023). |
 | `core/supply_chain` | Release/supply-chain audit helpers. |
