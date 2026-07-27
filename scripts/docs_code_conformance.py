@@ -238,9 +238,10 @@ def main(argv: list[str] | None = None) -> int:
     renamed_refs = 0
     historical_renamed = 0
     unknown_commands: list[str] = []
-    checked_paths = checked_anchors = checked_commands = 0
+    checked_paths = checked_anchors = checked_commands = docs_scanned = 0
 
     for doc in sorted(docs_root.rglob("*.md")):
+        docs_scanned += 1
         rel_doc = doc.relative_to(docs_root).as_posix()
         historical = rel_doc in _HISTORICAL_ANCHOR_DOCS
         for lineno, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
@@ -309,7 +310,7 @@ def main(argv: list[str] | None = None) -> int:
     stale_renames = len(missing_paths) - len(genuinely_missing)
 
     print("Docs <-> code conformance check (read-only)")
-    print(f"  documents scanned      : {len(list(docs_root.rglob('*.md')))}")
+    print(f"  documents scanned      : {docs_scanned}")
     print(f"  code paths referenced  : {checked_paths}  "
           f"(valid: {valid_paths}, missing: {len(genuinely_missing)}, "
           f"declared not-yet-written: {planned_paths})")

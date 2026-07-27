@@ -74,16 +74,26 @@ def guard_fixture():
     return _load_guard()
 
 
-def _count(out: str, label: str) -> int:
-    """First integer reported for that label.
+def _count(out: str, label: str, *, within: str | None = None) -> int:
+    """First integer reported for that label, optionally on one summary line.
 
     Parsed with a regex rather than `split(":")` because one of the labels
     (`:command tokens`) contains a colon itself — the naive split reads the
     label instead of the number.
+
+    ``within`` scopes the search to the summary line owning that counter.
+    `declared historical` is reported twice — once for renamed paths, once for
+    line anchors — so without it the answer depends on print order rather than
+    on which counter the test means.
     """
-    line = next(l for l in out.splitlines() if label in l)
-    match = re.search(r":\s*(\d+)", line[line.index(label) + len(label):])
-    assert match is not None, line
+    rows = [row for row in out.splitlines() if label in row]
+    if within is not None:
+        rows = [row for row in rows if within in row]
+    scope = f" on the {within!r} line" if within else ""
+    assert rows, f"no line reporting {label!r}{scope} in:\n{out}"
+    row = rows[0]
+    match = re.search(r":\s*(\d+)", row[row.index(label) + len(label):])
+    assert match is not None, row
     return int(match.group(1))
 
 
@@ -198,7 +208,8 @@ def test_an_inline_historical_marker_accepts_the_old_name(tmp_path):
     result = _run("--docs", str(root))
     assert result.returncode == 0, result.stdout
     assert "every code reference resolves" in result.stdout
-    assert _count(result.stdout, "declared historical") == 1
+    assert _count(result.stdout, "declared historical",
+                  within="renamed-path refs") == 1
     assert _count(result.stdout, "live references") == 0
 
 
@@ -213,7 +224,8 @@ def test_the_marker_covers_only_its_own_line(tmp_path):
     result = _run("--docs", str(root))
     assert result.returncode == 1, result.stdout
     assert "CURRENT_ARCHITECTURE.md:3" in result.stdout
-    assert _count(result.stdout, "declared historical") == 1
+    assert _count(result.stdout, "declared historical",
+                  within="renamed-path refs") == 1
     assert _count(result.stdout, "live references") == 1
 
 
@@ -227,7 +239,8 @@ def test_a_document_declared_historical_keeps_the_old_name(tmp_path):
     )
     result = _run("--docs", str(root))
     assert result.returncode == 0, result.stdout
-    assert _count(result.stdout, "declared historical") == 1
+    assert _count(result.stdout, "declared historical",
+                  within="renamed-path refs") == 1
 
 
 def test_a_rename_whose_replacement_is_gone_still_fails(guard, tmp_path,

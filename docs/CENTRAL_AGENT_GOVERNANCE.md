@@ -63,7 +63,7 @@ rewrites the answer (`core/low_evidence_policy`,
 `core/unsupported_claims`) rather than bluffing — that pair is the only layer
 here that changes what the operator receives.
 
-**Observational.** These report and change nothing:
+**Observational.** Each of these reports, and changes nothing:
 
 - `core/evidence_support` (event `evidence_support`) — whether this turn owed
   evidence at all, the support score when it did, a weak-support flag, and any
