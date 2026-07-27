@@ -4,7 +4,6 @@ public surface are unchanged."""
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 from core.models import (
     Action,
@@ -25,8 +24,8 @@ from core.smart_memory import (
     EpisodicMemoryStore,
     MemoryConsolidationStore,
     ProceduralMemoryStore,
+    admit_for_storage,
     consolidate_memory,
-    decide_usage_eligibility,
     effective_completion,
     resolve_used_procedures,
     episode_from_agent_cycle,
@@ -593,7 +592,7 @@ class AgentLoopExtractedMethods2:
                 # (or curated lessons) become reusable experience. Everything
                 # else stays fail-closed, and `None` remains reserved for rows
                 # that predate the field. See `decide_usage_eligibility`.
-                usage_eligible=None,   # replaced below, once the record exists
+                usage_eligible=None,   # resolved by `admit_for_storage` below
                 # Attribution comes from what actually executed, over the
                 # procedures this run selected -- never matched by workflow_key,
                 # which MIR-050 measured to pool unrelated goals. () is a real
@@ -609,9 +608,10 @@ class AgentLoopExtractedMethods2:
                 declared_completion=declared_completion,
                 on_audit=self.log.log,
             )
-            episode = replace(
-                episode, usage_eligible=decide_usage_eligibility(episode)
-            )
+            # The same helper the store applies. Called here so the write event
+            # below can report the verdict that actually landed; the store's own
+            # call is then a no-op, and no write site can skip the policy.
+            episode = admit_for_storage(episode)
             if self.episodic_store is not None and may_episode:
                 # save_once, not save: a run that reaches this site twice must
                 # bank one episode, not two. Bounded by the store's FIFO window.
@@ -639,6 +639,11 @@ class AgentLoopExtractedMethods2:
                         "verified_chunks": episode.verified_chunks,
                         "unverified_chunks": episode.unverified_chunks,
                         "weak_chunks": episode.weak_chunks,
+                        # The admission verdict was not reportable before: an
+                        # operator reading this event could see what was banked
+                        # but not whether anything would ever be allowed to read
+                        # it back.
+                        "usage_eligible": episode.usage_eligible,
                     },
                 )
 

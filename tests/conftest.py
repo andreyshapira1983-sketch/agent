@@ -145,3 +145,30 @@ def _neutralize_operator_model_env(monkeypatch, tmp_path_factory):
 def workspace(tmp_path: Path) -> Path:
     """An isolated workspace directory."""
     return tmp_path
+
+
+def write_legacy_episode(path: Path, episode) -> None:
+    """Append an episode row the way it looked BEFORE `usage_eligible` existed.
+
+    A legacy row is an artefact of an older schema, so a test needs to write one
+    the way that schema wrote it: with the key simply absent. Seeding it through
+    `EpisodicMemoryStore.save(...)` no longer works and must not — `save` is the
+    admission boundary, and an episode that reaches it always leaves with an
+    explicit verdict. Manufacturing "never classified" through the door that
+    exists to classify is what the boundary closes.
+    """
+    from core.state_integrity import (
+        append_state_jsonl_unlocked,
+        read_state_jsonl_unlocked,
+        rewrite_state_jsonl_unlocked,
+    )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = episode.to_dict()
+    row.pop("usage_eligible", None)
+    if path.exists():
+        rows = read_state_jsonl_unlocked(path)
+        rows.append(row)
+        rewrite_state_jsonl_unlocked(path, rows)
+    else:
+        append_state_jsonl_unlocked(path, [row])

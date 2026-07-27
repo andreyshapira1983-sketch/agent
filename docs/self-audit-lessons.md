@@ -29,6 +29,17 @@ any future audit:
 6. **A whole module written to fix a live failure mode, but never wired into its
    entry point** — the failure mode stays live. Verify capabilities are actually
    reachable from a CLI/loop, not just unit-tested.
+7. **A policy applied at the call site instead of at the boundary it guards.**
+   The variant of #6 that is harder to see, because the policy *is* wired — just
+   not everywhere. Some writers call it, others reach the same store or gate
+   directly, and the records they leave behind sit in a state every reader
+   refuses. It never shows up as an error; it shows up as a feature that quietly
+   does nothing. Two instances so far: MIR-039 (two queue consumers, only one
+   mapping run outcomes honestly) and MIR-062 (three episodic writers, one of
+   them applying the admission policy). Fix: move the decision inside the
+   boundary, keep an explicit caller verdict as a pass-through, and make the
+   function idempotent so both layers may call it. Test: enumerate *every* writer
+   of a store, not just the one the feature was built for.
 
 ## The 13 findings and their fixes
 
