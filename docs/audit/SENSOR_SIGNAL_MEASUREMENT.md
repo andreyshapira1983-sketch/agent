@@ -237,4 +237,19 @@ S2 and S5 simply have not had a chance to be judged.
   is a planner-recall problem, not something this sensor should paper over with
   a keyword list.
 
-S2 and S5 remain as measured; S4 unchanged by decision.
+* **S2** — the five ruled scenarios exist as tests
+  (`tests/test_sensor_shadow_scenarios.py`), and the loop now emits
+  `stagnation_shadow` at the END of a run: `would_stop`,
+  `would_save_attempts`, and `would_change_result` — the last one answered
+  honestly, by whether any artifact actually arrived after the detection point.
+  It stops nothing.
+* **S5** — each declared conflict kind and its negatives exist as tests, and the
+  loop emits `subsystem_disagreement_shadow` with `would_replan` /
+  `would_escalate` counts (severity `high` → escalate, otherwise replan). It
+  replans nothing.
+
+Both shadow events are emitted at the end of the cycle on purpose: *"would
+stopping there have changed anything?"* can only be answered once it is known
+what the remaining attempts produced.
+
+S4 unchanged by decision — still an observer, still measured.
