@@ -772,3 +772,10 @@ state a limitation. The 2026-07-26 amendments add: a recall measurement over the
 pattern file's own 62 natural trigger phrases (372 variants), a replay of the real
 enforcement functions against the 8 answers recorded in `logs/` (reproducing the
 logged verdicts 8 for 8), and one live operator session._
+
+_**Mixed provenance, stated rather than hidden.** The audit above was read at
+`eec6507`; the present-tense sections listed in the header note were re-read and
+corrected at `main` @ `3128d4c` (the PR #177 merge) when the sensor work landed.
+So a dated finding here is provenance from `eec6507`, while every statement
+about what the code does **today** is grounded at `3128d4c`. Where the two would
+have contradicted each other, the later reading wins and says so at the spot._

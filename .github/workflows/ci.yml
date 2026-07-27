@@ -68,8 +68,8 @@ jobs:
         # importorskip — so on a clean runner those two tests ERROR rather than
         # skip. fastapi is deliberately OUT of the hash-locked core set
         # (`requirements.in` says so at the top); installing it here honours that
-        # decision while still exercising the HTTP surface. Operator's call of
-        # 2026-07-28: run the real check, not a skipped one.
+        # decision while still exercising the HTTP surface. Operator's call on
+        # PR #178: run the real check, not a skipped one.
         #
         # Placed AFTER every supply-chain gate on purpose. `pip check`, the SBOM
         # check and `audit_release.py` all describe the hash-locked set, and this
@@ -85,7 +85,7 @@ jobs:
           pip check
 
       - name: Run tests with branch coverage
-        # Operator decision (2026-07-28): the suite runs WITH real credentials,
+        # Operator decision (PR #178): the suite runs WITH real credentials,
         # not in offline mock mode. Two reasons, both measured:
         #
         #  1. `AGENT_ALLOW_MOCK_ROUTING=1` cannot work here — `tests/conftest.py`
