@@ -5,6 +5,14 @@ It answers one question: *which part of this system is the cognitive core, and h
 do we know?* Everything below was read out of the repository at
 `main` @ `eec6507`; every claim names the file that backs it.
 
+> **Reconciled 2026-07-27 after PR #177.** This is a mixed document: dated
+> findings and amendments sit next to a present-tense description of the current
+> architecture. The present-tense parts (§4 boundary, §6 gate stack, §8.5, §8.7,
+> §8.11, §10 finding 3, §12) were re-grounded against the code after the sensor
+> work landed. Where an older sentence names `core/confidence_gate.py` <!-- historical-ref -->,
+> it is **narrating the rename** and is marked as such on its own line; the live
+> module is `core/evidence_support.py`.
+
 ## 0. How to read this — the rule every claim obeys
 
 A claim earns a place here only if it passes three checks:
@@ -127,7 +135,7 @@ a guarded rule.
 | Planning admission | the plan-validation path in `loop.py`, `reasoning_action_check`, `prompt_registry` |
 | Action permission | `policy`, `actuation_gateway`, `gateway_consult`, `approval`, `approval_triage`, `governance` |
 | Cost & model choice | `model_router`, `role_router`, `deep_escalation`, `model_usage`, `budget_ledger`, `budget_governor`, `budget_kill_switch`, `evidence_budget` |
-| Truth control | `verifier*`, `evidence`, `confidence_gate`, `confidence_vector`, `low_evidence_policy`, `unsupported_claims`, `truth_hype_filter`, `subsystem_disagreement`, `structured_facts` |
+| Truth control | `verifier*`, `evidence`, `evidence_support`, `confidence_vector`, `low_evidence_policy`, `unsupported_claims`, `truth_hype_filter`, `subsystem_disagreement`, `completion_obligation`, `structured_facts` |
 | Continue / stop | `replan`, `termination_guard`, `step_repetition`, `circuit_breaker`, `completion_marker`, `synth_resilience` |
 | Run state | `run_context`, `checkpoint`, `state_integrity` |
 | Durable-write permission | `memory_policy`, `knowledge_use_policy`, `memory_echo_antibody` |
@@ -360,8 +368,12 @@ nothing, spend nothing, and remember nothing on its own.*
    risk *including its arguments* (`file_write` is reversible for a new file,
    irreversible for an overwrite), the gateway adds kill-switch and readiness
    stops. Postconditions are weaker: the verifier reports, and `completion_marker`
-   exists, but the completion claim is not systematically re-checked against the
-   evidence chain except through the confidence gate — which only logs (8.11).
+   exists, but nothing *blocks* on the completion claim. Since 2026-07-27 the
+   claim is at least examined structurally — `core/completion_obligation.py`
+   asks whether the cycle incurred a duty to observe or run something and left
+   it unmet **without saying so**, from the object the question names, the
+   admitted plan steps and `realtime_required` rather than from wording. It
+   emits `completion_obligation` and remains observational (8.11).
 
 ### 8.6 State control — **ENFORCING**
 
@@ -380,11 +392,16 @@ nothing, spend nothing, and remember nothing on its own.*
 3. *Here:* `StepRepetitionTracker` fires at the third identical
    `(tool, arguments)` pair; `TerminationGuard.observe_attempt` fires when two
    consecutive replans produce the same failure signature. Both emit an event
-   (`step_repetition_detected`, `stagnation_detected`) and **nothing else** —
-   `core/loop.py:1358` logs the stagnation and proceeds to the ordinary replan
-   decision. The remaining attempt budget is still spent on the same broken plan.
+   (`step_repetition_detected`, `stagnation_detected`) and **change nothing** —
+   the loop logs the stagnation and proceeds to the ordinary replan decision.
+   The remaining attempt budget is still spent on the same broken plan.
+   Since 2026-07-27 stagnation additionally gets **shadow accounting**: at the
+   end of the cycle the loop emits `stagnation_shadow` with `would_stop`,
+   `would_save_attempts` and `would_change_result` — the last answered honestly,
+   by whether any artifact actually arrived after the detection point. It stops
+   nothing; it makes the cost of stopping measurable before anyone decides to.
    *Proof of the current behaviour:* `tests/test_step_repetition.py`,
-   `tests/test_termination_guard.py`.
+   `tests/test_termination_guard.py`, `tests/test_sensor_shadow_scenarios.py`.
 
 ### 8.8 Autonomy limits — **ENFORCING**
 
@@ -439,13 +456,20 @@ nothing, spend nothing, and remember nothing on its own.*
    supported.
 2. *Core:* D6.
 3. *Here:* the machinery is built and running — `Verifier` labels every claim
-   chunk, `compute_confidence` turns that into a scalar with fabricated
-   citations penalised exactly like unverified text, `confidence_vector`
-   decomposes it into three axes, `subsystem_disagreement` finds contradictions
-   between subsystems. **All five write to the journal and change nothing.**
-   `core/confidence_gate.py` says it outright: *"Today the loop only logs
-   `low_confidence_gate`."* The threshold (0.45) and the penalties are already
-   parameterised for the day the switch is flipped.
+   chunk, `core/evidence_support.py` turns that into an **applicability-aware**
+   report (does this turn owe evidence at all; if so, what fraction of the
+   claims is backed; is any citation fabricated), `confidence_vector` decomposes
+   the verdict into three axes, `subsystem_disagreement` finds contradictions
+   between subsystems. **All of those write to the journal and change nothing.**
+   `core/evidence_support.py` says so in its own docstring: *"Still
+   observational."* The weak-support threshold (0.45) survives only to keep
+   historical log comparisons meaningful — it gates a boolean in telemetry,
+   never behaviour.
+
+   The layer that *does* change the answer is separate and enforcing:
+   `core/low_evidence_policy.py` + `core/unsupported_claims.py`. Reading
+   `evidence_support` as the thing that could "block" an answer is the mistake
+   the notes below record and correct.
 
 > **MEASURED AND ACTED ON (2026-07-27).** "Parameterised for the day the switch
 > is flipped" turned out to be the wrong frame for this sensor: the problem was
@@ -460,7 +484,7 @@ nothing, spend nothing, and remember nothing on its own.*
 > Operator ruling: **do not connect it to replan** (measured cost: +86% model
 > calls to re-run mostly honest general-knowledge answers, and a signal present
 > on 86% of turns separates almost nothing), and **redefine what it measures**.
-> `core/confidence_gate.py` is now `core/evidence_support.py`: it reports
+> `core/confidence_gate.py` is now `core/evidence_support.py`: <!-- historical-ref: the rename itself --> it reports
 > `applicable=False, score=None` when no evidence was owed, a real `0.0` when it
 > was owed and missing, and a separate `citation_integrity_violation` flag when
 > the answer cited sources that resolve to nothing. Applicability is decided by
@@ -589,6 +613,20 @@ nothing, spend nothing, and remember nothing on its own.*
    the 8-chunk floor and the by-design skip for pure-reasoning turns. Measured:
    flipping the mode alone would change 0 of 8, because none of them reached the
    path the mode controls.
+
+   **Still true after 2026-07-27, but two of the five were rebuilt rather than
+   connected** (PR #177; measurement in
+   [audit/SENSOR_SIGNAL_MEASUREMENT.md](audit/SENSOR_SIGNAL_MEASUREMENT.md)).
+   None of the five enforces anything today. What changed is *what they say*:
+
+   | sensor | current module / event | current state |
+   |---|---|---|
+   | S1 evidence support | `core/evidence_support.py` → `evidence_support` | redefined: applicability, support score, weak-support flag, citation-integrity flag. Not a confidence gate, not connected to replan. |
+   | S2 stagnation | `core/termination_guard.py` → `stagnation_detected` + `stagnation_shadow` | shadow accounting only; stops nothing. |
+   | S3 unmet obligation | `core/completion_obligation.py` → `completion_obligation` | detector replaced; the keyword detector survives only as `shadow_keyword_detector` inside the new event. |
+   | S4 reasoning ↔ action | `core/reasoning_action_check.py` → `reasoning_action_mismatch` | unchanged by decision; still an observer. |
+   | S5 subsystem disagreement | `core/subsystem_disagreement.py` → `subsystem_disagreement` + `subsystem_disagreement_shadow` | shadow accounting only; replans and escalates nothing. |
+
 4. **One budget is off by default.** `BudgetLimits.max_llm_calls = 0` means
    unlimited on the plain autonomous path.
 5. **`core/loop.py` is where the boundary blurs** — 3882 lines mixing the
@@ -688,6 +726,15 @@ follow-up that can be done — or not — at leisure.
 **Re-ordered 2026-07-26 by measured damage.** The list below used to open with the
 confidence gate; measurement moved it down and put a recall failure on top.
 
+**Settled on 2026-07-27 (PR #177), so no longer on this list:** whether S1
+becomes a replan trigger (**no** — it is evidence-support telemetry now,
+`core/evidence_support.py`), and whether S3's keyword list is worth repairing
+(**no** — replaced by `core/completion_obligation.py`). S2 and S5 were not
+decided; they were given shadow accounting so that deciding them later rests on
+numbers. The addendum in
+[audit/SENSOR_SIGNAL_MEASUREMENT.md](audit/SENSOR_SIGNAL_MEASUREMENT.md) records
+the ruling per sensor.
+
 1. ~~**Fix `_has_any` recall at the primitive, or keep patching phrase lists?**
    76% of natural phrasings miss (§8.1, finding 7).~~ **DECIDED and DONE
    (2026-07-26, PR #172): at the primitive.** `_has_any_loose` tolerates one
@@ -709,8 +756,12 @@ confidence gate; measurement moved it down and put a recall failure on top.
    claim-level short-answer hedge. The floor is the real decision (3 of 8 change
    with a floor of 3 when nothing is verified), and it should wait for more than
    8 recorded answers.
-5. **Should stagnation stop the run?** Two identical failure signatures currently
-   cost the full remaining attempt budget.
+5. **Should stagnation stop the run?** Two identical failure signatures still
+   cost the full remaining attempt budget. Open on purpose, but no longer
+   unmeasurable: `stagnation_shadow` now records `would_stop`,
+   `would_save_attempts` and `would_change_result` per run (§8.7), so the answer
+   can come from traffic instead of from intuition. Same for S5 via
+   `subsystem_disagreement_shadow`.
 6. **Should `max_llm_calls` have a real default** instead of unlimited?
 7. **Is `core/loop.py` the next extraction?** It is the last place where the
    core's sequence is entangled with orchestration.

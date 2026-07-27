@@ -15,15 +15,28 @@ verifies each one against the working tree:
   A stale anchor is reported as INFO, not an error, when the document declares it
   as historical provenance (see the `_HISTORICAL_ANCHOR_DOCS` allowlist), because
   those anchors intentionally point at an old commit.
+* **renamed modules** — a path in `_RENAMED_PATHS` still resolves *as history*,
+  never as live architecture. Declaring a rename used to exempt the old name
+  everywhere, which let a source-of-truth document go on describing a removed
+  module in the present tense while this guard reported success. Now the old name
+  passes only where it is explicitly declared historical — the document is in
+  `_HISTORICAL_RENAME_DOCS`, or the line carries the `<!-- historical-ref -->`
+  marker for a mixed document — and it is matched in **both** spellings,
+  `core/foo.py` and the extensionless `core/foo` that prose usually uses.
 * **`:command` tokens** — is the command in `cli/command_registry.py`?
 
 Anything unresolved is printed with its file and line so it can be fixed or
 declared. Nothing is written.
+
+Usage: ``python scripts/docs_code_conformance.py [--docs DIR]`` — `--docs` scans
+an alternative documentation tree (used by the tests to check a temporary tree
+without touching the repository's own documents).
 """
 from __future__ import annotations
 
 import re
 import sys
+from collections.abc import Callable, Collection, Mapping
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -80,6 +93,10 @@ _PLANNED_MARKERS = ("proposed", "missing test", "planned", "should be added", "t
 #: here, and this table is the single place that records it. A path that is
 #: merely missing (deleted, never written, mistyped) still fails.
 #:
+#: Declaring a rename here does **not** license the old name: it only says which
+#: new path the old one maps to. Where the old name may still appear is decided
+#: by `_HISTORICAL_RENAME_DOCS` / `_HISTORICAL_REF_MARKER` below.
+#:
 #: Add an entry only for a real rename, and only together with the commit that
 #: performs it.
 _RENAMED_PATHS: dict[str, str] = {
@@ -91,6 +108,91 @@ _RENAMED_PATHS: dict[str, str] = {
     "tests/test_confidence_gate.py": "tests/test_evidence_support.py",
 }
 
+#: Documents whose renamed-path references are provenance **by nature**: dated
+#: audits, frozen findings, chronological pass logs, per-issue records. Their job
+#: is to say what was true when they were written, so the old name is the correct
+#: word there and rewriting it would falsify the record.
+#:
+#: Deliberately separate from `_HISTORICAL_ANCHOR_DOCS`: that one is about line
+#: numbers drifting, this one is about a module name that no longer exists. A
+#: document can need one and not the other.
+_HISTORICAL_RENAME_DOCS = {
+    "CORE_AUDIT_2026-07-18.md",
+    "LIVE_PROBE_FINDINGS.md",
+    "audit/AUDIT_PROGRESS.md",
+    "audit/DOCUMENT_INVENTORY.md",
+    "audit/MASTER_ISSUE_REGISTRY.md",
+}
+
+#: Inline escape hatch for a **mixed** document — a current-facing page that
+#: narrates the rename itself, or a dated table inside a living document. Put it
+#: on the same line as the old name:
+#:
+#:     `core/confidence_gate.py` is now `core/evidence_support.py` <!-- historical-ref -->
+#:
+#: One line, one declaration. A whole document is never exempted this way, which
+#: is the point: the author has to mark each historical sentence, so a *new*
+#: present-tense claim about a removed module still fails the guard.
+_HISTORICAL_REF_MARKER = "<!-- historical-ref"
+
+#: Classification of one occurrence of a renamed path.
+RENAMED_OLD_PATH_EXISTS = "old_path_exists"          # the rename was undone
+RENAMED_HISTORICAL = "historical_provenance"         # declared, allowed
+RENAMED_LIVE_REFERENCE = "live_reference"            # DRIFT: reads as current
+RENAMED_REPLACEMENT_MISSING = "replacement_missing"  # DRIFT: map is stale
+
+
+def _renamed_ref_pattern(renames: Mapping[str, str] = _RENAMED_PATHS) -> re.Pattern[str]:
+    """Match every declared old path in both spellings.
+
+    Prose writes `core/confidence_gate`; only code-ish references carry `.py`.
+    The old `_PATH_RE` required the extension, so the extensionless form — the
+    one a source-of-truth document actually uses — was invisible to this guard.
+    """
+    stems = sorted(
+        {p[:-3] if p.endswith(".py") else p for p in renames},
+        key=len,
+        reverse=True,
+    )
+    if not stems:
+        return re.compile(r"(?!x)x")  # matches nothing
+    return re.compile(
+        r"(?<![\w/.\-])(" + "|".join(re.escape(s) for s in stems) + r")(\.py)?(?![\w/\-])"
+    )
+
+
+_RENAMED_REF_RE = _renamed_ref_pattern()
+
+
+def classify_renamed_reference(
+    old_path: str,
+    *,
+    doc: str,
+    line: str,
+    exists: Callable[[str], bool],
+    renames: Mapping[str, str] = _RENAMED_PATHS,
+    historical_docs: Collection[str] = _HISTORICAL_RENAME_DOCS,
+) -> str:
+    """Decide what one occurrence of a renamed path is. Pure.
+
+    ``old_path`` is normalised to the key in ``renames`` (with `.py`), ``doc`` is
+    the path relative to the docs root, ``exists`` answers "is this repo-relative
+    path a file". No I/O of its own, so the whole rule is testable without a
+    documentation tree.
+
+    Order matters: a stale rename map is reported even in a document that is
+    allowed to keep the old name, because "declared renamed to something that
+    does not exist" is a broken declaration, not provenance.
+    """
+    if exists(old_path):
+        return RENAMED_OLD_PATH_EXISTS
+    replacement = renames.get(old_path)
+    if replacement is None or not exists(replacement):
+        return RENAMED_REPLACEMENT_MISSING
+    if doc in historical_docs or _HISTORICAL_REF_MARKER in line:
+        return RENAMED_HISTORICAL
+    return RENAMED_LIVE_REFERENCE
+
 
 def _registry_commands() -> set[str]:
     src = (REPO / "cli" / "command_registry.py").read_text(encoding="utf-8")
@@ -99,44 +201,75 @@ def _registry_commands() -> set[str]:
     )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    docs_root = DOCS
+    if "--docs" in args:
+        at = args.index("--docs") + 1
+        if at >= len(args):
+            print("usage: docs_code_conformance.py [--docs DIR]")
+            return 2
+        docs_root = Path(args[at]).resolve()
+
+    def _exists(rel: str) -> bool:
+        return (REPO / rel).is_file()
+
     commands = _registry_commands()
     line_counts: dict[Path, int] = {}
     missing_paths: list[str] = []
     stale_anchors: list[str] = []
+    live_renamed: list[str] = []
     historical_anchors = 0
     planned_paths = 0
-    renamed_paths = 0
+    valid_paths = 0
+    renamed_refs = 0
+    historical_renamed = 0
     unknown_commands: list[str] = []
     checked_paths = checked_anchors = checked_commands = 0
 
-    for doc in sorted(DOCS.rglob("*.md")):
-        rel_doc = doc.relative_to(DOCS).as_posix()
+    for doc in sorted(docs_root.rglob("*.md")):
+        rel_doc = doc.relative_to(docs_root).as_posix()
         historical = rel_doc in _HISTORICAL_ANCHOR_DOCS
         for lineno, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
+            # Renamed paths first, and in both spellings. Owned entirely by this
+            # pass so the two spellings cannot be judged by two different rules.
+            for match in _RENAMED_REF_RE.finditer(line):
+                old_path = match.group(1) + ".py"
+                verdict = classify_renamed_reference(
+                    old_path, doc=rel_doc, line=line, exists=_exists
+                )
+                if verdict == RENAMED_OLD_PATH_EXISTS:
+                    continue  # the rename was undone; _PATH_RE handles it
+                renamed_refs += 1
+                if verdict == RENAMED_HISTORICAL:
+                    historical_renamed += 1
+                elif verdict == RENAMED_REPLACEMENT_MISSING:
+                    missing_paths.append(
+                        f"{rel_doc}:{lineno}  {match.group(0)} "
+                        f"(declared renamed to "
+                        f"{_RENAMED_PATHS.get(old_path, '<not in the rename map>')}, "
+                        f"which does not exist either)"
+                    )
+                else:
+                    live_renamed.append(
+                        f"{rel_doc}:{lineno}  {match.group(0)} "
+                        f"-> now {_RENAMED_PATHS[old_path]}"
+                    )
+
             for match in _PATH_RE.finditer(line):
                 path_text, anchor = match.group(1), match.group(2)
                 target = REPO / path_text
+                if path_text in _RENAMED_PATHS and not target.is_file():
+                    continue  # counted and judged by the renamed pass above
                 checked_paths += 1
                 if not target.is_file():
                     lowered = line.lower()
-                    if path_text in _RENAMED_PATHS:
-                        # The record is about the file under its old name; the
-                        # rename is declared, so the reference still resolves.
-                        renamed = REPO / _RENAMED_PATHS[path_text]
-                        if renamed.is_file():
-                            renamed_paths += 1
-                            continue
-                        missing_paths.append(
-                            f"{rel_doc}:{lineno}  {path_text} "
-                            f"(declared renamed to {_RENAMED_PATHS[path_text]}, "
-                            f"which does not exist either)"
-                        )
-                    elif any(marker in lowered for marker in _PLANNED_MARKERS):
+                    if any(marker in lowered for marker in _PLANNED_MARKERS):
                         planned_paths += 1   # documented as not existing yet
                     else:
                         missing_paths.append(f"{rel_doc}:{lineno}  {path_text}")
                     continue
+                valid_paths += 1
                 if anchor:
                     checked_anchors += 1
                     if target not in line_counts:
@@ -159,11 +292,18 @@ def main() -> int:
                 if token not in commands:
                     unknown_commands.append(f"{rel_doc}:{lineno}  {token}")
 
+    genuinely_missing = [m for m in missing_paths if "declared renamed" not in m]
+    stale_renames = len(missing_paths) - len(genuinely_missing)
+
     print("Docs <-> code conformance check (read-only)")
-    print(f"  documents scanned      : {len(list(DOCS.rglob('*.md')))}")
+    print(f"  documents scanned      : {len(list(docs_root.rglob('*.md')))}")
     print(f"  code paths referenced  : {checked_paths}  "
-          f"(missing: {len(missing_paths)}, declared not-yet-written: {planned_paths}, "
-          f"declared renamed: {renamed_paths})")
+          f"(valid: {valid_paths}, missing: {len(genuinely_missing)}, "
+          f"declared not-yet-written: {planned_paths})")
+    print(f"  renamed-path refs      : {renamed_refs}  "
+          f"(declared historical: {historical_renamed}, "
+          f"live references: {len(live_renamed)}, "
+          f"replacement missing: {stale_renames})")
     print(f"  line anchors checked   : {checked_anchors}  "
           f"(out of range: {len(stale_anchors)}, declared historical: {historical_anchors})")
     print(f"  :command tokens        : {checked_commands}  (unknown: {len(set(unknown_commands))})")
@@ -173,6 +313,13 @@ def main() -> int:
         failed = True
         print("\n  MISSING PATHS — the document points at a file that does not exist:")
         for item in missing_paths:
+            print(f"    {item}")
+    if live_renamed:
+        failed = True
+        print("\n  RENAMED MODULE PRESENTED AS CURRENT — the module no longer exists;")
+        print("  fix the sentence, or declare the line historical with"
+              f" '{_HISTORICAL_REF_MARKER} -->':")
+        for item in live_renamed:
             print(f"    {item}")
     if stale_anchors:
         failed = True
