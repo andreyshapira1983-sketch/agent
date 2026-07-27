@@ -44,6 +44,7 @@ from core.smart_memory import (
     EpisodicMemoryStore,
     decide_usage_eligibility,
 )
+from tests.conftest import write_legacy_episode
 from tests.test_memory_core_wiring import _drive_one_cycle
 
 QUESTION = "how much is two plus two"
@@ -117,7 +118,12 @@ def test_policy_returns_a_bool_never_none() -> None:
 def test_verified_cycle_banks_an_admitted_episode(tmp_path: Path) -> None:
     """An evidenced run becomes reusable experience end to end."""
     agent = build_agent(tmp_path, with_memory=True, approval_provider=None)
-    agent.episodic_store.save(_ep(verified=4, unverified=0))
+    # Seeded as a legacy row on purpose: the point of this test is that the
+    # CYCLE decides, so the pre-existing row must carry no verdict to be
+    # confused with. `save()` would give it one — it is the admission boundary.
+    write_legacy_episode(
+        tmp_path / DEFAULT_EPISODIC_MEMORY_PATH, _ep(verified=4, unverified=0)
+    )
     seeded = EpisodicMemoryStore(tmp_path / DEFAULT_EPISODIC_MEMORY_PATH).load()[0]
 
     assert seeded.usage_eligible is None, "hand-built seed is unclassified"
@@ -145,8 +151,11 @@ def test_ungrounded_cycle_is_not_admitted(tmp_path: Path) -> None:
 
 def test_legacy_episodes_stay_excluded_after_the_lift(tmp_path: Path) -> None:
     """Lifting the quarantine must not retroactively admit unclassified rows."""
-    store = EpisodicMemoryStore(tmp_path / DEFAULT_EPISODIC_MEMORY_PATH)
-    store.save(_ep(verified=9, unverified=0))          # usage_eligible=None
+    # A row from before the field existed — written the way that schema wrote
+    # it, since `save()` now always attaches a verdict.
+    write_legacy_episode(
+        tmp_path / DEFAULT_EPISODIC_MEMORY_PATH, _ep(verified=9, unverified=0)
+    )
     agent = build_agent(tmp_path, with_memory=True, approval_provider=None)
 
     assert not agent._retrieve_experience_memory(QUESTION).strip(), (
