@@ -203,7 +203,7 @@ event, which is what makes the sequence auditable rather than a claim.
 | 15 | Confidence gate, confidence vector, subsystem disagreement | no | `low_confidence_gate`, `confidence_vector`, `subsystem_disagreement` |
 | 16 | Replan decision under a capped policy | no | `replan`, `replan_attempt`, `replan_exhausted`, `verify_replan_capped` |
 | 17 | Stagnation and premature-completion checks | no | `stagnation_detected`, `premature_completion_risk` |
-| 18 | Synthesis under the output contract | **yes** | `respond`, `output_contract_violation`, `output_policy`, `answer_enforcement` |
+| 18 | Synthesis under the output contract | **yes** | `respond`, `output_contract_violation`, `output_policy`, `answer_enforcement`, `response_composed` |
 | 19 | Durable-write permission | no | `memory_write`, `knowledge_pipeline_skipped` |
 | 20 | Budget exhaustion → resumable pause | no | `resumable_checkpoint_paused` |
 
@@ -413,6 +413,25 @@ nothing, spend nothing, and remember nothing on its own.*
    answer; deep escalation downgrades instead of failing; `synth_resilience`
    retries synthesis; `low_evidence_policy` truncates unsupported output.
    OBSERVING — low confidence produces an event, not a retreat (8.11).
+
+> **Two of those had been cancelling each other (measured and fixed 2026-07-27).**
+> The B-1 clarification gate prepends its questions when the loop is stuck, and
+> `low_evidence_policy` rebuilds the answer when the evidence is thin. Both fire
+> on the same turn — a stuck loop that still produced a long unsupported answer
+> is the expected shape, not an exotic one — and the rebuild deleted the
+> questions, because both deciders were writing to one string and the truncation
+> ran later. Reproduced through the real loop in the default configuration:
+> `output_policy applied=True`, `clarification_gate` with three questions,
+> `answer_enforcement applied=True`, and none of the four strings in the 426
+> characters that shipped.
+>
+> The cycle now composes the response through `core/response_draft.py`, which
+> separates **claims** (which truncation may delete — that is its purpose) from
+> **notices** (prose *about* the answer, which no verdict on the evidence can
+> make untrue). Composition happens once, in `render()`, and the journal event
+> `response_composed` reports every contribution and anything that failed to
+> survive. This is the first place in the cycle where two deciders are
+> *reconciled* rather than merely ordered. See MIR-063.
 
 ### 8.11 Independent evaluation of the result — **OBSERVING (the main gap)**
 
