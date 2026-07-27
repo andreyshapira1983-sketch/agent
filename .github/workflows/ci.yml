@@ -27,6 +27,13 @@ jobs:
         # build on any finding. Placed first so a leak fails fast.
         uses: gitleaks/gitleaks-action@v2
         env:
+          # Required since gitleaks-action v2 for `pull_request` events — the
+          # action reads the PR's commit range through the API. Without it the
+          # job dies at this step with "GITHUB_TOKEN is now required to scan
+          # pull requests", which is why this workflow had only ever gone green
+          # on direct pushes to main. This is the automatic per-run token, not a
+          # stored secret: nothing to configure, and it expires with the job.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
 
       - name: Set up Python 3.11
