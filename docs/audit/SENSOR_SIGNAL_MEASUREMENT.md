@@ -217,5 +217,24 @@ form is not a confidence gate and S3 in its current form is not a reliable
 premature-completion detector** — one needs redefining, the other replacing.
 S2 and S5 simply have not had a chance to be judged.
 
-**Implemented so far:** S1 (`core/evidence_support.py`, event `evidence_support`).
-S2, S3, S5 remain as measured; S4 unchanged by decision.
+**Implemented so far:**
+
+* **S1** — `core/evidence_support.py`, event `evidence_support`.
+* **S3** — `core/completion_obligation.py`, event `completion_obligation`.
+  Three sources wired (`intent`, `plan`, `freshness`); `acceptance_criteria` is
+  reported through `unavailable_sources` and draws no conclusion. The keyword
+  detector is retained **only** as a shadow verdict inside the new event
+  (`shadow_keyword_detector`), so the disagreement between old and new is a
+  number on real traffic rather than a claim.
+
+  `intent` is read structurally — from the **object** the question names (a
+  workspace path, or a turn-scoped `file_hint`) — not from a verb list. That is
+  what makes «объясни разницу…» a non-event while «сколько строк в
+  core/loop.py» is one. The limit is stated rather than hidden: a verb-only
+  demand with no named object and no admitted plan step (*«запусти тесты»* where
+  the planner planned nothing) is **not** caught by `intent`; it is caught by
+  `plan` whenever the step is admitted, and when the planner admits nothing that
+  is a planner-recall problem, not something this sensor should paper over with
+  a keyword list.
+
+S2 and S5 remain as measured; S4 unchanged by decision.

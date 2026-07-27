@@ -71,6 +71,7 @@ from core.models import (
     ToolResult,
 )
 from core.output_policy import apply_ranker_output_policy
+from core.completion_obligation import evaluate_completion_obligations
 from core.response_draft import ResponseDraft
 from core.low_evidence_policy import (
     is_evidence_expected,
@@ -1570,8 +1571,14 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # can consult it after `run()` returns.
         self.last_provenance = chain
 
-        # MAST FM-3.1 — premature completion risk: empty evidence chain
-        # on a question whose phrasing demanded tools. Observational.
+        # MAST FM-3.1 — premature completion risk, keyword detector.
+        # RETAINED FOR SHADOW COMPARISON ONLY. It is no longer the source of
+        # truth: measured at 1/12 recall on phrasings that unambiguously demand
+        # a tool, and it fires on «объясни разницу…» because `разниц` is a
+        # diff-tool keyword. The obligation check that replaces it runs after
+        # composition, and this verdict is carried into its event so the two can
+        # be compared on real traffic.
+        _premature_keyword_fired = False
         try:
             _pc = self._termination_guard.check_completion(
                 question=user_question,
@@ -1579,6 +1586,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 had_any_artifacts=bool(artifacts),
             )
             if _pc is not None:
+                _premature_keyword_fired = True
                 self.log.log(
                     "premature_completion_risk", _pc.to_log_payload()
                 )
@@ -2311,6 +2319,42 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # Strip internal verification markers before user-facing output.
         # Must happen AFTER output_policy which needs [verified:...] markers.
         answer = _strip_verification_markers(answer)
+
+        # Premature completion, asked as an OBLIGATION question rather than a
+        # keyword question (S3). Runs here, after composition, because three of
+        # the four obligation states turn on whether the operator was actually
+        # told — and that can only be read off the answer they receive.
+        # Observational; the old keyword detector still fires above, so the two
+        # can be compared in the journal before anything is decided.
+        try:
+            _denied = tuple(
+                str(getattr(t, "tool_name", "") or "")
+                for t in failure_history
+                if getattr(t, "code", "") == "policy_blocked"
+            )
+            _obl = evaluate_completion_obligations(
+                question=user_question,
+                answer=answer,
+                plan_steps=list(getattr(plan, "steps", ()) or ()),
+                artifacts=artifacts,
+                chain_size=len(chain),
+                realtime_required=bool(
+                    getattr(self.last_source_ranking, "realtime_required", False)
+                ),
+                file_hint=file_hint,
+                failure_codes=[
+                    str(getattr(t, "code", "") or "") for t in failure_history
+                ],
+                denied_tools=_denied,
+            )
+            _payload = _obl.to_log_payload()
+            # Shadow comparison against the detector this replaces, so the
+            # disagreement between them is a number in the journal rather than
+            # something a later reader has to reconstruct.
+            _payload["shadow_keyword_detector"] = bool(_premature_keyword_fired)
+            self.log.log("completion_obligation", _payload)
+        except Exception:
+            pass
 
         # Defence-in-depth: redact once more on the way out so even an
         # LLM hallucinating a credential or PII cannot bypass the kernel.
