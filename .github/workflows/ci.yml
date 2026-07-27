@@ -56,7 +56,51 @@ jobs:
         # manifest leaks local secrets or the supply-chain audit fails.
         run: python scripts/audit_release.py
 
+      - name: Install optional HTTP-server extra (test-only)
+        # `api/server.py` imports fastapi, and `tests/test_api_server.py` has no
+        # importorskip — so on a clean runner those two tests ERROR rather than
+        # skip. fastapi is deliberately OUT of the hash-locked core set
+        # (`requirements.in` says so at the top); installing it here honours that
+        # decision while still exercising the HTTP surface. Operator's call of
+        # 2026-07-28: run the real check, not a skipped one.
+        #
+        # Placed AFTER every supply-chain gate on purpose. `pip check`, the SBOM
+        # check and `audit_release.py` all describe the hash-locked set, and this
+        # extra must not appear in what they measure. The re-run of `pip check`
+        # below is the safety net: if the extra ever disturbs a pinned
+        # dependency, CI says so here instead of failing obscurely in a test.
+        #
+        # Pinned to the version the operator runs locally, so a green CI and a
+        # green workstation mean the same thing. uvicorn is not installed: the
+        # tests import the app, they never serve it.
+        run: |
+          pip install "fastapi==0.136.1"
+          pip check
+
       - name: Run tests with branch coverage
+        # Operator decision (2026-07-28): the suite runs WITH real credentials,
+        # not in offline mock mode. Two reasons, both measured:
+        #
+        #  1. `AGENT_ALLOW_MOCK_ROUTING=1` cannot work here — `tests/conftest.py`
+        #     (`_neutralize_operator_model_env`) deletes that variable before
+        #     every test on purpose, so routing assertions cannot inherit the
+        #     ambient shell. Supplying a credential is the only way the suite
+        #     reaches the same state a real operator runs in.
+        #  2. It costs nothing. No test constructs a real provider client
+        #     (no `anthropic.Anthropic(`, `OpenAI(` or `httpx.post` anywhere
+        #     under `tests/`); the credential is only read by
+        #     `core/model_router._provider_has_credentials` so `AgentLoop` can
+        #     be built. Verified locally: a full run with live keys left
+        #     `data/model_usage.jsonl` untouched.
+        #
+        # An absent secret expands to an empty string, which
+        # `_provider_has_credentials` already treats as "no credential" — so a
+        # fork PR (which GitHub denies secrets to) behaves exactly as before
+        # rather than failing in a new way.
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: coverage run --branch -m pytest
 
       - name: Coverage report (fail under threshold)
