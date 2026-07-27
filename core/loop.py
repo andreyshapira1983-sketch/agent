@@ -71,6 +71,7 @@ from core.models import (
     ToolResult,
 )
 from core.output_policy import apply_ranker_output_policy
+from core.response_draft import ResponseDraft
 from core.low_evidence_policy import (
     is_evidence_expected,
 )
@@ -2184,30 +2185,49 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             answer = draft_answer
             self.last_verification = None
 
+        # From here the response is a DRAFT, not a string. Deciders below either
+        # rewrite the claims (`set_body`) or attach something about them
+        # (`add_notice`); composition happens once, at `render()`. Before this,
+        # everything wrote to one variable and the last writer won — which is how
+        # a truncation could delete the clarifying questions the loop had just
+        # decided to ask (measured; see core/response_draft.py).
+        draft = ResponseDraft(body=answer)
+
         policy_result = apply_ranker_output_policy(
-            answer=answer,
+            answer=draft.body,
             ranking=self.last_source_ranking,
             question=user_question,
             replan_exhausted=replan_exhausted,
         )
         if policy_result.applied:
-            answer = policy_result.answer
+            # Body edits (capped Confidence, downgraded realtime tags) are
+            # corrections to the claims; the warnings are about the run and are
+            # composed onto whatever body survives.
+            draft.set_body(policy_result.answer, by="output_policy")
+            for _warning in policy_result.warnings:
+                draft.add_notice(
+                    author="output_policy",
+                    channel="unverified_note",
+                    text=_warning,
+                )
             self.log.log("output_policy", policy_result.to_log_payload())
 
         # B-1 Clarification Gate — режим переспроса. When the loop is STUCK
         # (replan exhausted == loop_suspected), the mature response is to ASK,
-        # not to keep building. Prepend the gate's minimal clarifying questions
-        # to the honest answer so the operator can narrow the frame. Pure and
+        # not to keep building. The gate's minimal clarifying questions go above
+        # the honest answer so the operator can narrow the frame. Pure and
         # deterministic (no LLM, no I/O); best-effort so it can never take down
         # the response path.
         if replan_exhausted and self.clarification_gate_enabled:
             try:
                 from core.clarification_gate import clarification_for_replan_exhausted
                 _clarify = clarification_for_replan_exhausted()
-                _clarify_prompt = _clarify.prompt()
-                if _clarify_prompt and _clarify_prompt not in answer:
+                if draft.add_notice(
+                    author="clarification_gate",
+                    channel="prepend",
+                    text=_clarify.prompt(),
+                ):
                     self.log.log("clarification_gate", _clarify.to_dict())
-                    answer = f"{_clarify_prompt}\n\n{answer}"
             except Exception:
                 pass
 
@@ -2230,8 +2250,12 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 chain_was_empty=_chain_empty,
                 realtime_required=_realtime,
             )
+            # Enforcement judges the CLAIMS, so it is handed the body alone.
+            # Handing it the composed text would let it measure — and delete —
+            # notices that are not claims and that no verdict about the evidence
+            # can make untrue.
             _enf = apply_answer_enforcement(
-                answer=answer,
+                answer=draft.body,
                 report=_report,
                 question=user_question,
                 evidence_expected=_evidence_expected,
@@ -2245,20 +2269,19 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     _enf.low_evidence_payload or _enf.to_log_payload(),
                 )
             if _enf.applied:
-                answer = _enf.answer
+                draft.set_body(_enf.answer, by="answer_enforcement")
         except Exception:
             # Defence-in-depth: truncation must NEVER take down
             # the loop. A failed evaluation falls back to the
             # original answer the user would otherwise have got.
             pass
 
-        # Strip internal verification markers before user-facing output.
-        # Must happen AFTER output_policy which needs [verified:...] markers.
-        answer = _strip_verification_markers(answer)
-
         file_scope_notice = self._file_scope_notice(user_question, artifacts)
-        if file_scope_notice and file_scope_notice not in answer:
-            answer = f"{file_scope_notice}\n\n{answer}"
+        if draft.add_notice(
+            author="file_scope",
+            channel="prepend",
+            text=file_scope_notice,
+        ):
             self.log.log(
                 "file_scope_notice",
                 {
@@ -2266,6 +2289,19 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     "artifact_labels": list(artifacts.keys()),
                 },
             )
+
+        # ── Compose ─────────────────────────────────────────────────────────
+        # The single arbitration point: claims and notices are joined here and
+        # nowhere else, so no decider can silently outrank another by running
+        # later. The journal carries the ledger, including anything that failed
+        # to survive — a contribution that goes missing is now visible instead
+        # of having to be found by reading the code.
+        answer = draft.render()
+        self.log.log("response_composed", draft.to_log_payload(answer))
+
+        # Strip internal verification markers before user-facing output.
+        # Must happen AFTER output_policy which needs [verified:...] markers.
+        answer = _strip_verification_markers(answer)
 
         # Defence-in-depth: redact once more on the way out so even an
         # LLM hallucinating a credential or PII cannot bypass the kernel.

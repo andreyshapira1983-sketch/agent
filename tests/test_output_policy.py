@@ -51,9 +51,16 @@ def test_realtime_insufficient_source_downgrades_verified_claims_and_confidence(
     assert result.applied is True
     assert result.confidence_ceiling == "low"
     assert result.downgraded_realtime_claims == 2
+    # Body edits stay in the answer: they are corrections to the claims.
     assert "Confidence: low" in result.answer
     assert "[unverified:insufficient_for_realtime]" in result.answer
-    assert "недостаточны для подтверждения realtime-значения" in result.answer
+    # The warning is REPORTED, not merged here. It is prose about the answer,
+    # so `ResponseDraft` composes it onto whatever body survives — merging it
+    # at this layer is what let a later body rewrite delete it.
+    assert any(
+        "недостаточны для подтверждения realtime-значения" in w
+        for w in result.warnings
+    )
 
 
 def test_realtime_live_source_keeps_high_confidence() -> None:
@@ -83,7 +90,7 @@ def test_realtime_live_source_keeps_high_confidence() -> None:
     assert result.answer == answer
 
 
-def test_replan_exhausted_warning_is_merged_into_unverified() -> None:
+def test_replan_exhausted_warning_is_reported_for_composition() -> None:
     chain = ProvenanceChain()
     ranking = rank_chain(chain, question="Проверь страницу")
     answer = (
@@ -105,4 +112,6 @@ def test_replan_exhausted_warning_is_merged_into_unverified() -> None:
     )
 
     assert result.applied is True
-    assert "исчерпания replan-бюджета" in result.answer
+    # Reported rather than merged — see the note above and core/response_draft.py.
+    assert any("исчерпания replan-бюджета" in w for w in result.warnings)
+    assert result.answer == answer, "a replan warning is not a claim edit"
