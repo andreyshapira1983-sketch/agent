@@ -142,13 +142,18 @@ RENAMED_LIVE_REFERENCE = "live_reference"            # DRIFT: reads as current
 RENAMED_REPLACEMENT_MISSING = "replacement_missing"  # DRIFT: map is stale
 
 
-def _renamed_ref_pattern(renames: Mapping[str, str] = _RENAMED_PATHS) -> re.Pattern[str]:
+def _renamed_ref_pattern(renames: Mapping[str, str] | None = None) -> re.Pattern[str]:
     """Match every declared old path in both spellings.
 
     Prose writes `core/confidence_gate`; only code-ish references carry `.py`.
     The old `_PATH_RE` required the extension, so the extensionless form — the
     one a source-of-truth document actually uses — was invisible to this guard.
+
+    ``renames`` defaults to `None` rather than to the module table itself: a
+    mutable default is bound once at definition time, so a caller amending the
+    table would silently not be seen here.
     """
+    renames = _RENAMED_PATHS if renames is None else renames
     stems = sorted(
         {p[:-3] if p.endswith(".py") else p for p in renames},
         key=len,
@@ -170,8 +175,8 @@ def classify_renamed_reference(
     doc: str,
     line: str,
     exists: Callable[[str], bool],
-    renames: Mapping[str, str] = _RENAMED_PATHS,
-    historical_docs: Collection[str] = _HISTORICAL_RENAME_DOCS,
+    renames: Mapping[str, str] | None = None,
+    historical_docs: Collection[str] | None = None,
 ) -> str:
     """Decide what one occurrence of a renamed path is. Pure.
 
@@ -180,10 +185,18 @@ def classify_renamed_reference(
     path a file". No I/O of its own, so the whole rule is testable without a
     documentation tree.
 
+    Both tables default to `None` and are resolved per call, so amending the
+    module-level table is seen here — a mutable default would have frozen the
+    object this function consults at definition time.
+
     Order matters: a stale rename map is reported even in a document that is
     allowed to keep the old name, because "declared renamed to something that
     does not exist" is a broken declaration, not provenance.
     """
+    renames = _RENAMED_PATHS if renames is None else renames
+    historical_docs = (
+        _HISTORICAL_RENAME_DOCS if historical_docs is None else historical_docs
+    )
     if exists(old_path):
         return RENAMED_OLD_PATH_EXISTS
     replacement = renames.get(old_path)

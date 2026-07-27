@@ -68,8 +68,9 @@ def _load_guard():
     return module
 
 
-@pytest.fixture()
-def guard():
+@pytest.fixture(name="guard")
+def guard_fixture():
+    """Named so the injected `guard` argument shadows nothing at module scope."""
     return _load_guard()
 
 
@@ -233,9 +234,9 @@ def test_a_rename_whose_replacement_is_gone_still_fails(guard, tmp_path,
                                                        monkeypatch, capsys):
     """A declared rename is not a licence — the new path must exist.
 
-    Mutates the map in place rather than rebinding it: `classify_renamed
-    _reference` captures the dict as a default argument, so rebinding the module
-    attribute would leave the real map in force and the test would prove nothing.
+    Amends the map through the module the guard actually reads, and rebuilds the
+    pattern from it, so the new entry is visible to both halves of the rule —
+    the extractor and the classifier.
     """
     monkeypatch.setitem(guard._RENAMED_PATHS, "core/gone_module.py",
                         "core/never_written.py")
