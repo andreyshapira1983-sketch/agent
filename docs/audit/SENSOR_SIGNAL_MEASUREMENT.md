@@ -12,11 +12,17 @@
 > useful+accurate → connect to policy, useful but risky → keep observing,
 > noisy+duplicating → remove.
 
-## The five
+## The five — *as they were at the measured commit*
 
-| | Sensor | Module | Event |
+This table is part of the dated record: it names the modules and events that
+existed at `main` @ `388fac1`, which is what was measured. **Two of the five have
+since been rebuilt** — see the addendum for the current module and event names,
+and `docs/COGNITIVE_CORE.md` §10 for their current wiring. Do not read this
+table as current architecture.
+
+| | Sensor | Module *(at `388fac1`)* | Event *(at `388fac1`)* |
 |---|---|---|---|
-| S1 | Confidence gate | `core/confidence_gate.py` | `low_confidence_gate` |
+| S1 | Confidence gate | `core/confidence_gate.py` <!-- historical-ref: measured before the rename --> | `low_confidence_gate` |
 | S2 | Stagnation | `core/termination_guard.py` | `stagnation_detected` |
 | S3 | Premature completion | `core/termination_guard.py` | `premature_completion_risk` |
 | S4 | Reasoning ↔ action mismatch | `core/reasoning_action_check.py` | `reasoning_action_mismatch` |

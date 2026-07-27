@@ -21,8 +21,14 @@ Observe → Interpret → Plan → Act → Verify → Respond, driven by an LLM 
 
 - Control loop: `core/loop` (+ `loop_helpers`, `loop_methods`).
 - Planner: `core/planner`; deliberation kernel before the LLM: `core/strategy_router`.
-- Verifier + confidence gating: `core/verifier*`, `core/confidence_gate`,
-  `core/confidence_vector`, `core/low_evidence_policy`.
+- Verifier: `core/verifier*`, `core/confidence_vector`. The layer that may
+  actually **rewrite or downgrade** a thinly supported answer is
+  `core/low_evidence_policy` + `core/unsupported_claims`.
+- Evidence-support telemetry (**observational**): `core/evidence_support`
+  reports applicability, support score, weak-support state and
+  citation-integrity violations. It is not a confidence gate and does not
+  trigger replan — operator ruling of 2026-07-27, see
+  `docs/audit/SENSOR_SIGNAL_MEASUREMENT.md`.
 - Evidence / provenance: `core/evidence`, `core/source_registry*`,
   `core/source_ranker`, `core/evidence_budget`.
 - Entry point: `main.py --ask` (one-shot) or interactive REPL.
