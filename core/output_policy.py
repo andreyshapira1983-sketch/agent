@@ -4,6 +4,19 @@ The Verifier answers "did this citation resolve to evidence?".
 The Source Ranker answers "is that evidence strong enough for this type of
 question?".  This module is the bridge between the two: it applies ranker
 constraints to the user-facing answer after verification.
+
+Two kinds of output, kept apart on purpose:
+
+* **body edits** — a capped ``Confidence:`` line, realtime ``[verified:…]`` tags
+  downgraded. These are corrections *to the claims*, so they belong in the text
+  and are applied here.
+* **warnings** — prose *about* the answer. Reported in ``warnings`` and merged
+  into the ``Unverified:`` section by :class:`core.response_draft.ResponseDraft`
+  at composition time, not here. This module used to merge them itself, which
+  meant a later decider that rewrote the body deleted them: a measured
+  ``replan_exhausted`` turn logged ``applied=True`` and shipped an answer with
+  no trace of the warning. A caveat about a run outlives the claims it was
+  attached to, so it is composed onto whatever body survives.
 """
 
 from __future__ import annotations
@@ -56,26 +69,20 @@ def apply_ranker_output_policy(
         # confidence, even if normal citation matching succeeded.
         if insufficient and not direct:
             confidence_ceiling = "low"
-            note = _realtime_warning(question)
-            warnings.append(note)
+            warnings.append(_realtime_warning(question))
             updated, downgraded = _downgrade_realtime_verified_tags(updated)
             updated = _rewrite_confidence(updated, "low")
-            updated = _merge_unverified(updated, note)
         elif direct:
             # Direct-but-capped realtime evidence (for example stale or
             # undated) can be useful, but still may not justify "high".
             ceiling = min(rank.confidence_ceiling for rank in direct)
             if ceiling <= 0.55:
                 confidence_ceiling = "medium"
-                note = _stale_realtime_warning(question)
-                warnings.append(note)
+                warnings.append(_stale_realtime_warning(question))
                 updated = _rewrite_confidence(updated, "medium")
-                updated = _merge_unverified(updated, note)
 
     if replan_exhausted:
-        note = _replan_warning(question)
-        warnings.append(note)
-        updated = _merge_unverified(updated, note)
+        warnings.append(_replan_warning(question))
 
     applied = updated != answer or bool(warnings)
     return OutputPolicyResult(

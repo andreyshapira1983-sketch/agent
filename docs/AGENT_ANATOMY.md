@@ -26,7 +26,8 @@ _Operator-facing I/O, intent routing, output shaping._
 | `core/operator_intent` | Conversational routing for operator-control requests. |
 | `core/operator_intent_patterns` | Extracted from `core/operator_intent` by autonomous self-build module split. |
 | `core/intent_understanding` | Model-based intent translator: plain language → grounded agent action or conversation (kernel-truth grounded, safe fallback). |
-| `core/output_policy` | Ranker-to-output policy. |
+| `core/output_policy` | Ranker-to-output policy: body edits applied here, warnings reported for composition. |
+| `core/response_draft` | The answer under construction — claims vs. notices, and the single point where the deciders' contributions are composed. |
 | `core/user_profile` | User Profile — Layer 4 (User Mental Model). |
 | `core/truth_hype_filter` | Truth/Hype Filter — the first LEARNING antibody (правда vs шумиха). |
 | `core/alert_ack` | Operator acknowledgement for advisory alerts — retire accepted signals. |
