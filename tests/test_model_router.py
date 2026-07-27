@@ -354,7 +354,15 @@ def test_standard_task_stays_on_anthropic_balanced_route(monkeypatch):
 def test_cost_policy_respects_max_cost_and_model_availability(monkeypatch):
     monkeypatch.setenv("AGENT_MODEL_POLICY", "cost")
     monkeypatch.setenv("AGENT_MODEL_MAX_COST", "low")
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    # A provider credential decides whether its route is *selectable*, so this
+    # test has to own them instead of inheriting whatever the environment
+    # carries. It already dropped OPENAI_API_KEY for exactly that reason;
+    # HF_TOKEN was missed, and it only surfaced once CI began running with real
+    # secrets — huggingface became selectable and the reason turned into
+    # `policy:cost:hf-default` instead of `default`.
+    for key in ("OPENAI_API_KEY", "HF_TOKEN"):
+        monkeypatch.delenv(key, raising=False)
 
     # This test verifies policy fallback, not explicit role routes from .env.
     for key in (

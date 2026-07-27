@@ -306,6 +306,10 @@ _IMPLEMENTATION_DETAIL_TERMS = (
     "баг",
 )
 _CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS = (
+    # Operator *wording*, not module names. The `confidence` / `low_confidence_gate`
+    # entries are the pre-2026-07-27 vocabulary, kept so a question phrased the old
+    # way still routes here. The live module is `core/evidence_support.py` and the
+    # live journal event is `evidence_support`.
     "confidence",
     "low-confidence",
     "low confidence",

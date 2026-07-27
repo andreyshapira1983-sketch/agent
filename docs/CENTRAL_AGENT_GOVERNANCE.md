@@ -57,11 +57,24 @@ memory. All of that stays with the human-gated central agent.
 
 ## 4. Verification before belief (IMPLEMENTED)
 
-- Verifier + confidence gate: `core/verifier*`, `core/confidence_gate`,
-  `core/confidence_vector`. Low evidence downgrades the answer
-  (`core/low_evidence_policy`) rather than bluffing.
-- Reasoning↔action consistency and subsystem disagreement are checked
-  (`core/reasoning_action_check`, `core/subsystem_disagreement`).
+**Enforcing.** The verifier labels every claim chunk (`core/verifier*`) and
+`core/confidence_vector` decomposes the verdict. Thin evidence downgrades or
+rewrites the answer (`core/low_evidence_policy`,
+`core/unsupported_claims`) rather than bluffing — that pair is the only layer
+here that changes what the operator receives.
+
+**Observational.** Each of these reports, and changes nothing:
+
+- `core/evidence_support` (event `evidence_support`) — whether this turn owed
+  evidence at all, the support score when it did, a weak-support flag, and any
+  citation-integrity violation. It is **not** a confidence gate and does not
+  trigger replan (operator ruling of 2026-07-27,
+  `docs/audit/SENSOR_SIGNAL_MEASUREMENT.md`).
+- `core/completion_obligation` (event `completion_obligation`) — whether an
+  observation/execution duty was incurred and left unmet without disclosure.
+- `core/reasoning_action_check` and `core/subsystem_disagreement` — the latter
+  additionally accounts for what it *would* have done
+  (`subsystem_disagreement_shadow`), and replans nothing.
 
 ## 5. Human approval (IMPLEMENTED)
 

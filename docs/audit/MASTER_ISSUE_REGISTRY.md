@@ -681,6 +681,7 @@ for MIR-002 and MIR-041 (approved next step) · then the minimal file set for th
 - **Existing tests:** gate computation tested; blocking behaviour not.
 - **Status:** `open` (by-design observational; whether it *should* hard-block is a policy decision, tied to MIR-015 and low-evidence policy).
 - **Alternatives (undecided):** keep observational vs. hard-gate on `fully_unverified` for world-claim turns (interacts with MIR-002/MIR-023 general-knowledge handling).
+- **Note (2026-07-27, PR #177) — the symptom/root-cause lines above are the record as written; they are not current module names.** The module is now `core/evidence_support.py` and the event is `evidence_support`; the operator's ruling was **not** to connect it to replan but to redefine what it reports (applicability, support score, weak-support flag, citation-integrity flag). See `docs/audit/SENSOR_SIGNAL_MEASUREMENT.md` and `docs/COGNITIVE_CORE.md` §8.11. The *issue* stays `open`: nothing blocks on evidence support, and the enforcing layer remains `core/low_evidence_policy.py` + `core/unsupported_claims.py`.
 
 ### MIR-062 — the admission policy ran at one write site out of three, so lessons were written unreadable
 - **Aliases:** none. **Provenance:** newly_discovered (core connectivity audit, 2026-07-27).
