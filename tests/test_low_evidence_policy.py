@@ -2,7 +2,7 @@
 
 Triggers a deterministic truncation of the user-facing answer when the
 verifier's verdict distribution is severely below threshold. Pairs
-with `core.confidence_gate.ConfidenceGate` (which is observation-only)
+with `core.evidence_support` (which is observation-only)
 to actually enforce the "недостаточно данных" reply shape.
 """
 from __future__ import annotations

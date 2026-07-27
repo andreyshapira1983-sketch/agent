@@ -71,6 +71,7 @@ from core.models import (
     ToolResult,
 )
 from core.output_policy import apply_ranker_output_policy
+from core.completion_obligation import evaluate_completion_obligations
 from core.response_draft import ResponseDraft
 from core.low_evidence_policy import (
     is_evidence_expected,
@@ -134,7 +135,7 @@ from core.assumption_registry import (  # Layer 5
     extract_from_question,
 )
 from core.knowledge_use_policy import KnowledgeUsePolicy
-from core.confidence_gate import ConfidenceGate
+from core.evidence_support import evaluate_evidence_support
 from core.reasoning_action_check import check_reasoning_actions
 from core.role_router import RoleContext, RoleRouter
 from core.step_repetition import StepRepetitionTracker
@@ -437,9 +438,6 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         self._step_repetition: StepRepetitionTracker = StepRepetitionTracker()
         # MAST FM-1.5 / FM-3.1 termination guard; replaced per `run()` call.
         self._termination_guard: TerminationGuard = TerminationGuard()
-        # Post-verifier confidence gate (Berkeley MAST 2025, Horvitz 1999).
-        # Constructed once; threshold/min_total can be overridden by tests.
-        self._confidence_gate: ConfidenceGate = ConfidenceGate()
         self.last_provenance: ProvenanceChain = ProvenanceChain()
         self.last_role_context: RoleContext = self.role_router.route("")
         # MVP-14.4 — Verifier wiring. `verifier_enabled=False` skips the
@@ -1040,6 +1038,11 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         planner_out: PlannerOutput | None = None
         plan: Plan | None = None
         replan_exhausted = False
+        # S2 shadow: set when stagnation is detected, read at the end of the run
+        # to report what an early stop would have cost. Never stops anything.
+        _stagnation_shadow: dict[str, Any] | None = None
+        # S5 shadow: every disagreement seen this run, for the same purpose.
+        _disagreement_shadow: list[dict[str, Any]] = []
         # Cheap-path cost gate: set True only when the planner-skip branch
         # below fires for a trivial no-tool turn. Downstream this trims the
         # synthesizer context, forces the LIGHT (cheap) model tier and skips
@@ -1383,6 +1386,16 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 )
                 if _stag is not None:
                     self.log.log("stagnation_detected", _stag.to_log_payload())
+                    # Shadow accounting (operator ruling 2026-07-27): record
+                    # WHERE a stop would have happened, so the run can report at
+                    # the end what stopping would have cost or saved. Nothing is
+                    # stopped.
+                    _stagnation_shadow = {
+                        "attempt": attempt,
+                        "artifacts_at_detection": sorted(attempt_artifacts.keys()),
+                        "repeat_count": _stag.repeat_count,
+                        "failure_codes": list(_stag.failure_codes),
+                    }
             except Exception:
                 pass
 
@@ -1573,8 +1586,14 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # can consult it after `run()` returns.
         self.last_provenance = chain
 
-        # MAST FM-3.1 — premature completion risk: empty evidence chain
-        # on a question whose phrasing demanded tools. Observational.
+        # MAST FM-3.1 — premature completion risk, keyword detector.
+        # RETAINED FOR SHADOW COMPARISON ONLY. It is no longer the source of
+        # truth: measured at 1/12 recall on phrasings that unambiguously demand
+        # a tool, and it fires on «объясни разницу…» because `разниц` is a
+        # diff-tool keyword. The obligation check that replaces it runs after
+        # composition, and this verdict is carried into its event so the two can
+        # be compared on real traffic.
+        _premature_keyword_fired = False
         try:
             _pc = self._termination_guard.check_completion(
                 question=user_question,
@@ -1582,6 +1601,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 had_any_artifacts=bool(artifacts),
             )
             if _pc is not None:
+                _premature_keyword_fired = True
                 self.log.log(
                     "premature_completion_risk", _pc.to_log_payload()
                 )
@@ -1821,6 +1841,19 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 )
                 for _ev in _disagreements:
                     self.log.log("subsystem_disagreement", _ev)
+                    # Shadow accounting (operator ruling 2026-07-27): what a
+                    # connected S5 would have done, recorded and never acted on.
+                    # Severity decides the action: a full planner/verifier
+                    # contradiction is an escalation, the rest is a replan.
+                    _disagreement_shadow.append({
+                        "kind": _ev.get("kind"),
+                        "severity": _ev.get("severity"),
+                        "attempt": _ev.get("attempt"),
+                        "would_action": (
+                            "escalate" if _ev.get("severity") == "high"
+                            else "replan"
+                        ),
+                    })
             except Exception:
                 pass
 
@@ -1851,17 +1884,29 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             self.last_verification = report
             self.last_provenance = chain
 
-            # Berkeley MAST 2025 / Horvitz 1999 — post-verifier confidence
-            # gate. Observational only: the loop may still ship the answer,
-            # but a `low_confidence_gate` event is emitted when the
-            # verified/cited mass is below threshold so operators can
-            # detect over-confident-but-unsupported answers.
+            # Evidence support — telemetry, never a gate (operator ruling
+            # 2026-07-27). Emitted on every verified turn, including the
+            # not-applicable ones: "this turn owed no evidence" is exactly the
+            # case the old `low_confidence_gate` reported as a zero score, and
+            # distinguishing it is the whole point of the rewrite.
+            #
+            # Applicability is asked with the SAME inputs the enforcing layer
+            # uses further down, so observer and enforcer cannot hold opposite
+            # opinions about whether evidence was owed on this turn.
             try:
-                _gate = self._confidence_gate.evaluate(report)
-                if _gate.triggered:
-                    self.log.log(
-                        "low_confidence_gate", _gate.to_log_payload()
-                    )
+                _ev_expected = is_evidence_expected(
+                    role=getattr(self.last_role_context, "role", ""),
+                    chain_was_empty=bool(
+                        getattr(report, "chain_was_empty", False)
+                    ),
+                    realtime_required=bool(
+                        getattr(self.last_source_ranking, "realtime_required", True)
+                    ),
+                )
+                _support = evaluate_evidence_support(
+                    report, evidence_expected=_ev_expected
+                )
+                self.log.log("evidence_support", _support.to_log_payload())
             except Exception:
                 pass
 
@@ -2233,7 +2278,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
 
         # Answer enforcement (PR3): low-evidence truncation, local-critique
         # empty-rewrite skip, verifier soft-fail, claim-level short path.
-        # ConfidenceGate stays observational; this is the structural layer.
+        # Evidence support stays observational; this is the structural layer.
         try:
             _ranking = self.last_source_ranking
             _report = self.last_verification
@@ -2303,6 +2348,42 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # Must happen AFTER output_policy which needs [verified:...] markers.
         answer = _strip_verification_markers(answer)
 
+        # Premature completion, asked as an OBLIGATION question rather than a
+        # keyword question (S3). Runs here, after composition, because three of
+        # the four obligation states turn on whether the operator was actually
+        # told — and that can only be read off the answer they receive.
+        # Observational; the old keyword detector still fires above, so the two
+        # can be compared in the journal before anything is decided.
+        try:
+            _denied = tuple(
+                str(getattr(t, "tool_name", "") or "")
+                for t in failure_history
+                if getattr(t, "code", "") == "policy_blocked"
+            )
+            _obl = evaluate_completion_obligations(
+                question=user_question,
+                answer=answer,
+                plan_steps=list(getattr(plan, "steps", ()) or ()),
+                artifacts=artifacts,
+                chain_size=len(chain),
+                realtime_required=bool(
+                    getattr(self.last_source_ranking, "realtime_required", False)
+                ),
+                file_hint=file_hint,
+                failure_codes=[
+                    str(getattr(t, "code", "") or "") for t in failure_history
+                ],
+                denied_tools=_denied,
+            )
+            _payload = _obl.to_log_payload()
+            # Shadow comparison against the detector this replaces, so the
+            # disagreement between them is a number in the journal rather than
+            # something a later reader has to reconstruct.
+            _payload["shadow_keyword_detector"] = bool(_premature_keyword_fired)
+            self.log.log("completion_obligation", _payload)
+        except Exception:
+            pass
+
         # Defence-in-depth: redact once more on the way out so even an
         # LLM hallucinating a credential or PII cannot bypass the kernel.
         safe_answer, answer_findings, answer_pii_findings = redact_dlp_text(answer)
@@ -2328,6 +2409,46 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 },
             )
         answer = safe_answer
+
+        # ── Sensor shadow accounting (S2, S5) ───────────────────────────────
+        # Emitted at the end of the run because the interesting question —
+        # "would stopping there have changed anything?" — can only be answered
+        # once it is known what the remaining attempts actually produced.
+        # Reported, never acted on: neither sensor stops or replans anything.
+        if _stagnation_shadow is not None:
+            try:
+                _at = int(_stagnation_shadow.get("attempt") or 0)
+                _seen_then = set(_stagnation_shadow.get("artifacts_at_detection") or ())
+                _new_after = sorted(set(artifacts) - _seen_then)
+                self.log.log("stagnation_shadow", {
+                    **_stagnation_shadow,
+                    "would_stop": True,
+                    "would_save_attempts": max(0, self._current_attempt - _at),
+                    # The honest form of "would it have changed the result":
+                    # did anything new actually arrive after the stop point?
+                    "would_change_result": bool(_new_after),
+                    "artifacts_gained_after_detection": _new_after,
+                    "replan_exhausted": replan_exhausted,
+                })
+            except Exception:
+                pass
+        if _disagreement_shadow:
+            try:
+                self.log.log("subsystem_disagreement_shadow", {
+                    "events": _disagreement_shadow,
+                    "would_escalate": sum(
+                        1 for d in _disagreement_shadow
+                        if d.get("would_action") == "escalate"
+                    ),
+                    "would_replan": sum(
+                        1 for d in _disagreement_shadow
+                        if d.get("would_action") == "replan"
+                    ),
+                    "attempts_used": self._current_attempt,
+                    "replan_exhausted": replan_exhausted,
+                })
+            except Exception:
+                pass
 
         self.log.log(
             "respond",

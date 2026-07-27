@@ -68,7 +68,7 @@ _Planning, verification, clarification, control loop._
 | `core/clarification_gate` | Clarification Gate — режим переспроса (ask, don't build). |
 | `core/clarification_policy` | Clarification Policy (§3 Cognitive Core — Clarification Policy). |
 | `core/assumption_registry` | Assumption Registry — Layer 5 (Explicit Planning Assumptions). |
-| `core/confidence_gate` | Post-verifier confidence gate. |
+| `core/evidence_support` | Evidence support for one answer — the ratio **and** whether the question applies at all (`no_evidence_expected` -> score `None`). Telemetry, not a gate. Renamed from `confidence_gate` 2026-07-27. |
 | `core/confidence_vector` | Decompose answer confidence into a three-axis vector. |
 | `core/reasoning_action_check` | Reasoning ↔ action consistency check — MAST FM-2.6 (13.2%). |
 | `core/best_next_action` | Priority intelligence: choose the single most important next action. |
@@ -122,6 +122,7 @@ _Effect gateways, receipts, compensation, VCS safety._
 | `core/gateway_consult` | Gateway hard-stop consult helpers (G5a). |
 | `core/tool_receipts` | Append-only tool receipt ledger — Stage 1 evidence layer (slice 1a + G5b). |
 | `core/receipt_consumer` | Tool receipts slice 1c — minimal consumer for verifier integration. |
+| `core/completion_obligation` | Premature completion as an UNMET OBLIGATION (S3): intent / plan / freshness are wired, `acceptance_criteria` is reported `not_wired`. Replaces the keyword detector as the source of truth. |
 | `core/compensation` | Compensation System (§5 Undo) — first introduced for MVP-11 shell_exec. |
 | `core/safe_vcs` | Narrow, safe VCS helper for the trusted self-apply lane (TD-023). |
 | `core/supply_chain` | Release/supply-chain audit helpers. |

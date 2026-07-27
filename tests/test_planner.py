@@ -488,7 +488,7 @@ def test_confidence_evidence_question_forces_verifier_confidence_sources(
     assert paths[:4] == [
         "core/verifier.py",
         "tests/test_verifier.py",
-        "tests/test_confidence_gate.py",
+        "tests/test_evidence_support.py",
         "tests/test_confidence_vector.py",
     ]
     assert "README.md" not in paths
@@ -536,7 +536,7 @@ def test_mixed_doctrine_confidence_question_selects_docs_and_verifier_sources(
     for path in (
         "core/verifier.py",
         "tests/test_verifier.py",
-        "tests/test_confidence_gate.py",
+        "tests/test_evidence_support.py",
         "tests/test_confidence_vector.py",
     ):
         assert path in paths
@@ -580,7 +580,7 @@ def test_confidence_diagnostic_drops_readme_and_tools_defaults(
     assert [item[1] for item in paths_by_tool[:4]] == [
         "core/verifier.py",
         "tests/test_verifier.py",
-        "tests/test_confidence_gate.py",
+        "tests/test_evidence_support.py",
         "tests/test_confidence_vector.py",
     ]
     assert any("dropped low-signal defaults" in w for w in out.warnings)
@@ -627,7 +627,7 @@ def test_local_project_evidence_does_not_force_confidence_sources(
         and src["arguments"].get("path") in {
             "core/verifier.py",
             "tests/test_verifier.py",
-            "tests/test_confidence_gate.py",
+            "tests/test_evidence_support.py",
             "tests/test_confidence_vector.py",
         }
         for src in out.sources

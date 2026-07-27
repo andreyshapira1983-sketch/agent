@@ -4,8 +4,8 @@ Empirical observation from live runs: when the verifier produces a low
 ``evidence_score`` (e.g. 0.0 with ``verified=6, unverified=33``), the
 agent still emits a long, polished answer — a 30-day product launch
 plan, a market report, a step-by-step business strategy. The
-:mod:`core.confidence_gate` already detects this as
-``low_confidence_gate``, but it is purely observational: the long,
+:mod:`core.evidence_support` already reports this as
+``evidence_support``, but it is purely observational: the long,
 under-supported answer ships unchanged.
 
 This module is the *enforcement* layer paired with the gate. When
@@ -20,7 +20,7 @@ final answer is rewritten to a short, honest reply that:
     the count is visible to the operator.
 
 The policy fires *strictly* — its trigger is more conservative than the
-informational :class:`ConfidenceGate` so it cannot quietly truncate
+informational evidence-support telemetry so it cannot quietly truncate
 borderline answers.
 
 Trigger contract::
@@ -360,8 +360,8 @@ def evaluate_low_evidence_policy(
 
     if supported > 0 and unverified_total < unverified_floor:
         # Borderline: some support exists but the unverified mass is too small
-        # to justify the truncation hammer. The standard ConfidenceGate log
-        # will still surface it.
+        # to justify the truncation hammer. The evidence-support
+        # telemetry will still surface it.
         return _result(
             triggered=False, answer_out=answer,
             reason="unverified_mass_below_floor",

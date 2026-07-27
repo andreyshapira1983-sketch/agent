@@ -45,7 +45,7 @@ def test_realtime_question_detector_handles_market_language():
 def test_repo_local_task_with_current_is_not_realtime():
     # Regression: repo-local architecture tasks must not be flagged realtime just
     # because they contain "current"/"latest"/"now" — that downgrades confidence
-    # on purely local evidence (low_confidence_gate false positive).
+    # on purely local evidence (weak evidence-support false positive).
     assert not is_realtime_question(
         "Find the safest next project action after Gateway G2. "
         "Use current repo docs/code only."

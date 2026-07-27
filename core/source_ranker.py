@@ -160,7 +160,7 @@ _REALTIME_FRAGMENT_TERMS = frozenset({
 # "latest commit", "use current repo docs/code only") they are NOT time-sensitive.
 # When a repo-local marker is present these are ignored so repo/architecture
 # tasks are not misclassified as realtime (which would downgrade confidence and
-# trip low_confidence_gate on purely local evidence).
+# report weak evidence support on purely local evidence).
 _AMBIGUOUS_REALTIME_TERMS = frozenset({
     "current",
     "currently",
