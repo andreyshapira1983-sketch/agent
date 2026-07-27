@@ -1,6 +1,6 @@
 """P1/P2: confidence vector decomposition.
 
-The single scalar from :mod:`core.confidence_gate` hides whether the
+The single scalar from :mod:`core.evidence_support` hides whether the
 agent is uncertain because of weak evidence, internal incoherence, or
 topic drift. The vector exposes those three axes separately and
 combines them with a weakest-link geometric mean.

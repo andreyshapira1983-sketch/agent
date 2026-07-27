@@ -169,7 +169,7 @@ def test_auto_runtime_confidence_learning_uses_verifier_sources_even_when_rotati
     (workspace / "scripts").mkdir()
     (workspace / "core" / "verifier.py").write_text("verifier", encoding="utf-8")
     (workspace / "tests" / "test_verifier.py").write_text("verifier tests", encoding="utf-8")
-    (workspace / "tests" / "test_confidence_gate.py").write_text("gate", encoding="utf-8")
+    (workspace / "tests" / "test_evidence_support.py").write_text("gate", encoding="utf-8")
     (workspace / "tests" / "test_confidence_vector.py").write_text("vector", encoding="utf-8")
     (workspace / "scripts" / "audit_release.py").write_text("release", encoding="utf-8")
     monkeypatch.setattr("core.autonomous_runtime._rotation_index", lambda n: n - 1)
@@ -192,7 +192,7 @@ def test_auto_runtime_confidence_learning_uses_verifier_sources_even_when_rotati
     assert learning.details["learning_plan"]["source_paths"] == [
         "core/verifier.py",
         "tests/test_verifier.py",
-        "tests/test_confidence_gate.py",
+        "tests/test_evidence_support.py",
         "tests/test_confidence_vector.py",
     ]
 

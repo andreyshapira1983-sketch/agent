@@ -58,7 +58,7 @@ without changing how the agent thinks. The core cannot.
 core executes, but it is not the core: it is 3882 lines of orchestration that
 *calls* the deciders. The deciders are separate, pure, and testable —
 `core/policy.py`, `core/replan.py`, `core/deep_escalation.py`,
-`core/confidence_gate.py` and about thirty more. The core is that set of
+`core/evidence_support.py` and about thirty more. The core is that set of
 deciders plus the sequence in which the loop consults them.
 
 ---
@@ -101,7 +101,7 @@ job description.
 | D3 | What is the plan, and is this plan admissible? | `core/planner.py` proposes; `core/loop.py` admits (`plan_parse_failed`, `plan_tool_drop`) |
 | D4 | May this specific action execute? | `core/policy.py`, `core/actuation_gateway.py`, `core/approval.py` |
 | D5 | Which model tier, at what price? | `core/model_router.py`, `core/deep_escalation.py`, `core/role_router.py` |
-| D6 | Is the produced answer actually supported? | `core/verifier.py`, `core/evidence.py`, `core/confidence_gate.py` |
+| D6 | Is the produced answer actually supported? | `core/verifier.py`, `core/evidence.py`, `core/evidence_support.py` |
 | D7 | Continue, replan, ask, or stop? | `core/replan.py`, `core/termination_guard.py`, `core/completion_marker.py` |
 | D8 | What may be written to durable memory? | `core/memory_policy.py`, `core/knowledge_use_policy.py` |
 | D9 | Must the cycle pause and become resumable? | `core/model_usage.py` (`ModelBudgetExceeded`) → `core/checkpoint.py` → `app/budget_guard.py` |
@@ -200,7 +200,7 @@ event, which is what makes the sequence auditable rather than a claim.
 | 12 | Injection guard on tool output | no | `injection_*` |
 | 13 | Evidence collection and trimming to budget | no | `evidence_collected`, `evidence_budget_trim` |
 | 14 | Verify the draft against the evidence chain | partly | `verify`, `verification`, `verifier_failure` |
-| 15 | Confidence gate, confidence vector, subsystem disagreement | no | `low_confidence_gate`, `confidence_vector`, `subsystem_disagreement` |
+| 15 | Evidence support, confidence vector, subsystem disagreement | no | `evidence_support`, `confidence_vector`, `subsystem_disagreement` |
 | 16 | Replan decision under a capped policy | no | `replan`, `replan_attempt`, `replan_exhausted`, `verify_replan_capped` |
 | 17 | Stagnation and premature-completion checks | no | `stagnation_detected`, `premature_completion_risk` |
 | 18 | Synthesis under the output contract | **yes** | `respond`, `output_contract_violation`, `output_policy`, `answer_enforcement`, `response_composed` |
@@ -446,6 +446,28 @@ nothing, spend nothing, and remember nothing on its own.*
    `core/confidence_gate.py` says it outright: *"Today the loop only logs
    `low_confidence_gate`."* The threshold (0.45) and the penalties are already
    parameterised for the day the switch is flipped.
+
+> **MEASURED AND ACTED ON (2026-07-27).** "Parameterised for the day the switch
+> is flipped" turned out to be the wrong frame for this sensor: the problem was
+> never the threshold. Measurement
+> ([audit/SENSOR_SIGNAL_MEASUREMENT.md](audit/SENSOR_SIGNAL_MEASUREMENT.md))
+> showed the scalar gave almost the same zero to three different situations —
+> evidence never required, evidence required and absent, and citations that
+> resolve to nothing — and that **11 of its 12 firings on real traffic were the
+> first case**, on 6 of which the enforcing layer had already recorded
+> `no_evidence_expected` for the same turn.
+>
+> Operator ruling: **do not connect it to replan** (measured cost: +86% model
+> calls to re-run mostly honest general-knowledge answers, and a signal present
+> on 86% of turns separates almost nothing), and **redefine what it measures**.
+> `core/confidence_gate.py` is now `core/evidence_support.py`: it reports
+> `applicable=False, score=None` when no evidence was owed, a real `0.0` when it
+> was owed and missing, and a separate `citation_integrity_violation` flag when
+> the answer cited sources that resolve to nothing. Applicability is decided by
+> the same `is_evidence_expected` the enforcing layer uses, so observer and
+> enforcer can no longer disagree about whether this turn owed evidence.
+> The journal event is `evidence_support`, emitted on every verified turn.
+> It remains **observational**.
 
 > **CORRECTION (2026-07-26).** The sentence above — "the gate is the main gap" —
 > was measured and is **wrong in its diagnosis**. An enforcement layer already
