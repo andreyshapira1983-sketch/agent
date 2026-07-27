@@ -30,6 +30,7 @@ import pytest
 from app.bootstrap import DEFAULT_EPISODIC_MEMORY_PATH, build_agent
 from core.loop import AgentLoop
 from core.smart_memory import EpisodeRecord, EpisodicMemoryStore
+from tests.conftest import write_legacy_episode
 
 QUESTION = "how do I deploy the service"
 
@@ -60,9 +61,18 @@ def _episode(eid: str, *, outcome: str = "success", eligible: bool | None = True
 
 
 def _seed(workspace: Path, episodes: list[EpisodeRecord]) -> None:
-    store = EpisodicMemoryStore(workspace / DEFAULT_EPISODIC_MEMORY_PATH)
+    """Seed episodes, keeping `eligible=None` genuinely unclassified.
+
+    `save()` is the admission boundary, so it cannot produce the legacy state;
+    a row that predates the field is written the way that schema wrote it.
+    """
+    path = workspace / DEFAULT_EPISODIC_MEMORY_PATH
+    store = EpisodicMemoryStore(path)
     for episode in episodes:
-        store.save(episode)
+        if episode.usage_eligible is None:
+            write_legacy_episode(path, episode)
+        else:
+            store.save(episode)
 
 
 def _event(agent: AgentLoop, name: str) -> dict:

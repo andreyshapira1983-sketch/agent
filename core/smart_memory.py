@@ -468,10 +468,18 @@ class EpisodicMemoryStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.max_episodes = max_episodes
 
-    def save(self, episode: EpisodeRecord) -> None:
+    def save(self, episode: EpisodeRecord) -> EpisodeRecord:
+        """Append one episode, admitting it first. Returns the stored record.
+
+        The return value is the record as written, so a caller that wants to
+        report the admission verdict reads it from what actually landed rather
+        than recomputing it.
+        """
+        admitted = admit_for_storage(episode)
         with state_file_lock(self.path):
-            append_state_jsonl_unlocked(self.path, [episode.to_dict()])
+            append_state_jsonl_unlocked(self.path, [admitted.to_dict()])
             self._maybe_prune_unlocked()
+        return admitted
 
     def save_once(self, episode: EpisodeRecord) -> bool:
         """Append the episode unless its id is already stored.
@@ -485,11 +493,12 @@ class EpisodicMemoryStore:
         writable again. No separate ledger is kept, so this is deduplication
         for a run and its immediate retries — not a permanent claim.
         """
+        admitted = admit_for_storage(episode)
         with state_file_lock(self.path):
             for row in read_state_jsonl_unlocked(self.path):
                 if row.get("id") == episode.id:
                     return False
-            append_state_jsonl_unlocked(self.path, [episode.to_dict()])
+            append_state_jsonl_unlocked(self.path, [admitted.to_dict()])
             self._maybe_prune_unlocked()
             return True
 
@@ -1201,6 +1210,36 @@ def is_usage_eligible(episode: EpisodeRecord) -> bool:
     provenance was never established is not evidence that it is trustworthy.
     """
     return episode.usage_eligible is True
+
+
+def admit_for_storage(episode: EpisodeRecord) -> EpisodeRecord:
+    """Resolve the admission verdict for an episode about to be written.
+
+    The policy belongs to the boundary it guards, not to the call site. It used
+    to live at exactly one of the three write sites: the cycle applied
+    :func:`decide_usage_eligibility`, while ``core/self_repair.py`` (repair
+    lessons) and ``core/self_build_memory.py`` (self-build / self-apply
+    outcomes) called ``save()`` straight through. Those records landed with
+    ``usage_eligible=None``, and since every reader is fail-closed on ``None``,
+    the three ``lesson``-specific branches in ``_retrieve_experience_memory``
+    were dead for exactly the records they exist to surface — while
+    ``decide_usage_eligibility`` would have admitted them (the ``lesson`` tag is
+    its first rule). Measured: the store found such a lesson by name, by tag,
+    and at similarity 1.0; the planner saw 0 characters of it.
+
+    ``None`` means "no one has decided yet" and is the only state this resolves.
+    An explicit ``True``/``False`` from the caller is a decision already taken
+    and is passed through untouched — that is how an aborted run stays
+    quarantined even though the policy is willing to look at it.
+
+    Idempotent, so calling it at the write site *and* inside the store is a
+    no-op the second time. Applied on **write only**: a ``None`` read back off
+    disk is a row that predates the field, and re-deciding it now would rewrite
+    history with today's rule.
+    """
+    if episode.usage_eligible is not None:
+        return episode
+    return replace(episode, usage_eligible=decide_usage_eligibility(episode))
 
 
 def episode_id_for_run(run_id: str) -> str:

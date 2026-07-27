@@ -33,6 +33,7 @@ import pytest
 from app.bootstrap import DEFAULT_EPISODIC_MEMORY_PATH, build_agent
 from core.loop import AgentLoop
 from core.smart_memory import EpisodeRecord, EpisodicMemoryStore
+from tests.conftest import write_legacy_episode
 from tests.test_memory_core_wiring import _drive_one_cycle
 
 
@@ -72,8 +73,19 @@ def _interactive(workspace: Path) -> AgentLoop:
 
 
 def _seed(workspace: Path, episode: EpisodeRecord) -> EpisodicMemoryStore:
+    """Seed one episode, preserving the eligibility state the test asked for.
+
+    `usage_eligible=None` is the legacy state, and `save()` is the admission
+    boundary — an episode that goes through it always comes out with an explicit
+    verdict. A legacy row therefore has to be written the way the older schema
+    wrote it: with the key absent. Everything else goes through `save()` as
+    normal, where an explicit True/False is passed through untouched.
+    """
     store = EpisodicMemoryStore(workspace / DEFAULT_EPISODIC_MEMORY_PATH)
-    store.save(episode)
+    if episode.usage_eligible is None:
+        write_legacy_episode(workspace / DEFAULT_EPISODIC_MEMORY_PATH, episode)
+    else:
+        store.save(episode)
     return store
 
 

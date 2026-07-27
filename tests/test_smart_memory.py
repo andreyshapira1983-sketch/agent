@@ -696,10 +696,14 @@ def test_search_boosts_lesson_episodes(tmp_path: Path) -> None:
     store.save(lesson)
 
     results = store.search("fix bug in core", limit=2)
+    # Compared by id: `save()` is the admission boundary, so what comes back off
+    # disk carries the eligibility verdict the in-memory seed does not, and
+    # whole-record equality would be comparing the seed to the stored row.
+    ids = [e.id for e in results]
     # Lesson must appear (either first or second)
-    assert lesson in results
+    assert lesson.id in ids
     # Lesson must be ranked above or equal to ordinary
-    assert results.index(lesson) <= results.index(ordinary)
+    assert ids.index(lesson.id) <= ids.index(ordinary.id)
 
 
 def test_search_by_tags_returns_matching_episodes(tmp_path: Path) -> None:
@@ -716,8 +720,9 @@ def test_search_by_tags_returns_matching_episodes(tmp_path: Path) -> None:
     store.save(other)
 
     results = store.search_by_tags(["lesson"])
-    assert lesson in results
-    assert other not in results
+    ids = [e.id for e in results]     # by id — see the note in the test above
+    assert lesson.id in ids
+    assert other.id not in ids
 
 
 # ── Episodic fast-path environment-safety guard ──────────────────────────────
