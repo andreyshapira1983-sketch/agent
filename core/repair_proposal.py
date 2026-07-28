@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -78,6 +79,10 @@ class ProposalGenerationReport:
     baseline_tests: dict[str, Any] | None = None
     diagnostic_logs: dict[str, Any] | None = None
     diff_preview: dict[str, Any] | None = None
+    #: Whether a model was reached at all. A refusal issued *before* the call
+    #: has no reply to report, and rendering it as an empty one would recreate
+    #: the ambiguity `raw_response_head` exists to remove.
+    llm_was_called: bool = True
 
     @property
     def ok(self) -> bool:
@@ -101,7 +106,8 @@ class ProposalGenerationReport:
             # prefixed prose from one that returned nothing, and the two need
             # opposite fixes. Redacted and capped — this is a diagnostic, not a
             # transcript.
-            "raw_response_head": _raw_head(self.raw_response)
+            "raw_response_head": _raw_head(self.raw_response,
+                                           called=self.llm_was_called)
             if self.status in ("llm_error", "rejected")
             else None,
         }
@@ -147,6 +153,7 @@ class RepairProposalGenerator:
         logger: Any | None = None,
         max_context_chars: int = DEFAULT_MAX_CONTEXT_CHARS,
         max_changed_lines: int = DEFAULT_MAX_CHANGED_LINES,
+        max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     ):
         if not Path(workspace_root).is_dir():
             raise ValueError(f"workspace_root must be a directory: {workspace_root}")
@@ -154,11 +161,17 @@ class RepairProposalGenerator:
             raise ValueError("max_context_chars must be > 0")
         if max_changed_lines <= 0:
             raise ValueError("max_changed_lines must be > 0")
+        if max_output_tokens <= 0:
+            raise ValueError("max_output_tokens must be > 0")
         self.workspace_root = Path(workspace_root).resolve()
         self.llm = llm
         self.log = logger
         self.max_context_chars = int(max_context_chars)
         self.max_changed_lines = int(max_changed_lines)
+        # Per-instance like the window, not a module constant read at the call
+        # site: the two budgets describe the same request and one of them being
+        # untunable makes the pair impossible to size together.
+        self.max_output_tokens = int(max_output_tokens)
         self.file_read = FileReadTool(self.workspace_root)
         self.run_tests = RunTestsTool(self.workspace_root)
         self.read_logs = ReadLogsTool(self.workspace_root)
@@ -215,6 +228,10 @@ class RepairProposalGenerator:
                 diagnostic_logs=logs_output,
             ))
 
+        current_safe, findings = redact_text(current_content)
+        if findings:
+            warnings.append("target file content was redacted before LLM prompt")
+
         # Refuse before spending anything. The prompt asks for the complete
         # replacement file, so a target larger than the window would be a
         # request to reproduce what was never shown — the model either invents
@@ -222,24 +239,31 @@ class RepairProposalGenerator:
         # `self_build_producer` applies with `_MAX_SPLIT_TARGET_LINES`: an
         # oversized target is refused up front rather than burning a doomed
         # generation.
-        if len(current_content) > self.max_context_chars:
+        #
+        # Measured on `current_safe`, not on the file: `_build_prompt` truncates
+        # the REDACTED copy, and `[REDACTED:<kind>]` is not the same length as
+        # what it replaces. Checking the raw file would let a secret-dense
+        # module pass here and still be truncated downstream — the same "asked
+        # to reproduce what it never saw" failure through a different door.
+        if len(current_safe) > self.max_context_chars:
+            grew = len(current_safe) > len(current_content)
             return self._finish(ProposalGenerationReport(
                 status="rejected",
                 warnings=[
                     *warnings,
                     f"target file too large for a single-shot repair: "
-                    f"{len(current_content)} chars > context window "
-                    f"{self.max_context_chars}. The proposal must contain the "
-                    f"whole file, so it cannot be generated from a truncated "
-                    f"view. Narrow the target or split the module first.",
+                    f"{len(current_safe)} chars > context window "
+                    f"{self.max_context_chars}"
+                    + (f" (redaction grew it from {len(current_content)})"
+                       if grew else "")
+                    + ". The proposal must contain the whole file, so it cannot "
+                      "be generated from a truncated view. Narrow the target or "
+                      "split the module first.",
                 ],
                 baseline_tests=baseline_output,
                 diagnostic_logs=logs_output,
+                llm_was_called=False,
             ))
-
-        current_safe, findings = redact_text(current_content)
-        if findings:
-            warnings.append("target file content was redacted before LLM prompt")
 
         prompt = self._build_prompt(
             target_path=target_path,
@@ -253,7 +277,7 @@ class RepairProposalGenerator:
         raw = self.llm.complete(
             system=_SYSTEM_PROMPT,
             user=prompt,
-            max_tokens=DEFAULT_MAX_OUTPUT_TOKENS,
+            max_tokens=self.max_output_tokens,
             temperature=0.0,
         )
         parsed = _parse_json_object(raw)
@@ -497,38 +521,54 @@ except ImportError:  # pragma: no cover
     pass
 
 
-def _embedded_json_object(text: str) -> str | None:
-    """The first balanced ``{...}`` in `text`, or None.
+def _embedded_json_objects(text: str) -> Iterator[str]:
+    """Every balanced ``{...}`` span in `text`, left to right.
 
-    Brace counting, string-aware: a `{` inside a JSON string value — common
+    Yields rather than returning the first, because the first is often not the
+    answer: a model narrating "the block builds {'k': 1} before writing" leaves
+    a balanced span that parses as nothing, and an earlier illustrative object
+    ("here is the shape I will return: {...}") parses fine while being the wrong
+    object. Taking only the leftmost defeats the fix in exactly the
+    narrating-model case it exists for.
+
+    Brace counting is string-aware: a `{` inside a JSON string value — common
     here, since `proposed_content` carries Python code — must not open a level,
     and the matching `}` must not close one early.
     """
-    start = text.find("{")
-    if start < 0:
-        return None
-    depth = 0
-    in_string = False
-    escaped = False
-    for index in range(start, len(text)):
-        char = text[index]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-            continue
-        if char == '"':
-            in_string = True
-        elif char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start:index + 1]
-    return None
+    index = 0
+    length = len(text)
+    while index < length:
+        start = text.find("{", index)
+        if start < 0:
+            return
+        depth = 0
+        in_string = False
+        escaped = False
+        closed_at = -1
+        for pos in range(start, length):
+            char = text[pos]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    closed_at = pos
+                    break
+        if closed_at < 0:
+            # Unbalanced from here on: nothing further can close either.
+            return
+        yield text[start:closed_at + 1]
+        index = closed_at + 1
 
 
 def _parse_json_object(raw: str) -> dict[str, Any]:
@@ -550,13 +590,11 @@ def _parse_json_object(raw: str) -> dict[str, Any]:
         text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\s*```$", "", text)
 
-    candidates = [text]
-    embedded = _embedded_json_object(text)
-    if embedded is not None and embedded != text:
-        candidates.append(embedded)
-
     error: json.JSONDecodeError | None = None
-    for candidate in candidates:
+    saw_object = False
+    fallback: dict[str, Any] | None = None
+
+    for candidate in (text, *_embedded_json_objects(text)):
         try:
             data = json.loads(candidate)
         except json.JSONDecodeError as exc:
@@ -564,9 +602,22 @@ def _parse_json_object(raw: str) -> dict[str, Any]:
                 error = exc
             continue
         if not isinstance(data, dict):
-            return {"ok": False, "error": "LLM JSON must be an object"}
-        return {"ok": True, "data": data}
+            continue
+        saw_object = True
+        # Prefer the object that answers the question. An earlier balanced span
+        # can parse perfectly and still be an illustration ("the shape I will
+        # return: {...}"); the first parseable object is not automatically the
+        # proposal. Keep looking, and fall back to the first only if nothing
+        # carries the contract's required key.
+        if "proposed_content" in data:
+            return {"ok": True, "data": data}
+        if fallback is None:
+            fallback = data
 
+    if fallback is not None:
+        return {"ok": True, "data": fallback}
+    if saw_object:
+        return {"ok": False, "error": "LLM JSON must be an object"}
     return {"ok": False, "error": f"LLM returned invalid JSON: {error}"}
 
 
@@ -603,8 +654,12 @@ def _is_safe_relative_ascii_path(value: str) -> bool:
 _RAW_HEAD_CHARS = 300
 
 
-def _raw_head(raw: str) -> dict[str, Any] | None:
+def _raw_head(raw: str, *, called: bool = True) -> dict[str, Any] | None:
     """The opening of an unusable model reply, redacted and capped."""
+    if not called:
+        # Never asked ≠ asked and got nothing. Collapsing the two would undo
+        # the only thing this field is for.
+        return {"note": "model not called — refused before the request"}
     if not raw:
         return {"length": 0, "head": "", "note": "empty reply"}
     safe, _ = redact_text(raw[:_RAW_HEAD_CHARS])
