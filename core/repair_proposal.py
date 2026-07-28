@@ -188,7 +188,7 @@ class RepairProposalGenerator:
         max_context_chars: int = DEFAULT_MAX_CONTEXT_CHARS,
         max_changed_lines: int = DEFAULT_MAX_CHANGED_LINES,
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
-        llm_selector: Callable[[int], Any] | None = None,
+        llm_selector: Callable[[int], LLM | None] | None = None,
     ):
         if not Path(workspace_root).is_dir():
             raise ValueError(f"workspace_root must be a directory: {workspace_root}")
