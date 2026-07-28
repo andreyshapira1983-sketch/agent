@@ -228,7 +228,7 @@ def test_error_status_from_producer_does_not_spend_cooldown(tmp_path: Path):
 def test_default_builder_calls_app_bootstrap_not_a_string_import(tmp_path: Path,
                                                                  monkeypatch):
     """No `build_agent_fn`: the real branch must reach `app.bootstrap`."""
-    import app.bootstrap as bootstrap
+    from app import bootstrap
 
     seen: list[dict] = []
 
@@ -257,7 +257,7 @@ def test_default_builder_calls_app_bootstrap_not_a_string_import(tmp_path: Path,
 def test_default_builder_passes_the_unattended_memory_profile(tmp_path: Path,
                                                               monkeypatch):
     """An unattended tick must not silently get the interactive memory profile."""
-    import app.bootstrap as bootstrap
+    from app import bootstrap
 
     seen: list[dict] = []
     monkeypatch.setattr(
