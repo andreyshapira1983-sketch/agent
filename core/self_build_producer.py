@@ -91,6 +91,7 @@ CRITICAL_DENY: tuple[str, ...] = (
     "core/self_build_producer.py",
     "AGENT_DOCTRINE.md",
     "docs/AGENT_DOCTRINE.md",
+    "docs/COGNITIVE_CORE.md",
     "config/",
 )
 
