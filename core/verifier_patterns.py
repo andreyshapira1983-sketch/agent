@@ -1,4 +1,7 @@
-"""Extracted from `core/verifier` by autonomous self-build module split."""
+"""Compiled patterns the verifier matches with: citations, sentence splits, headings, and statistical figures.
+
+Extracted from `core/verifier` by autonomous self-build module split.
+"""
 from __future__ import annotations
 
 import re

@@ -21,6 +21,8 @@ import importlib.util
 import os
 import re
 
+import pytest
+
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SCRIPT = os.path.join(_ROOT, "scripts", "agent_anatomy_check.py")
 _GENERATOR = os.path.join(_ROOT, "scripts", "gen_anatomy.py")
@@ -139,6 +141,48 @@ def test_first_doc_line_rejoins_a_wrapped_summary(tmp_path, monkeypatch):
         "Intent understanding — the translator between plain human language "
         "and the agent's actions."
     )
+
+
+def test_build_document_raises_rather_than_killing_the_caller(monkeypatch):
+    """A library function must not exit the process on bad input.
+
+    `SystemExit` derives from `BaseException`, so an ordinary
+    `except Exception` around a call would not catch it — and this function is
+    now called from tests and could be called from elsewhere.
+    """
+    gen = _load_generator()
+    monkeypatch.setattr(gen, "GROUPS", [("Only group", "desc", ["loop"])])
+    with pytest.raises(ValueError, match="not grouped"):
+        gen.build_document()
+
+    monkeypatch.setattr(
+        gen, "GROUPS", [("A", "d", ["loop"]), ("B", "d", ["loop"])]
+    )
+    with pytest.raises(ValueError, match="listed twice"):
+        gen.build_document()
+
+
+def test_main_reports_a_bad_group_table_as_exit_1(monkeypatch, capsys):
+    """The operator-visible contract is unchanged: message on stderr, exit 1."""
+    gen = _load_generator()
+    monkeypatch.setattr(gen, "GROUPS", [("Only group", "desc", ["loop"])])
+    assert gen.main() == 1
+    assert "not grouped" in capsys.readouterr().err
+
+
+def test_no_map_row_leads_with_split_provenance():
+    """The map says what a module does, not where it was carved from.
+
+    Twelve modules used to open with "Extracted from ... by autonomous
+    self-build module split", which told a reader nothing. The provenance is
+    kept as a second paragraph, which `_first_doc_line` does not read.
+    """
+    gen = _load_generator()
+    offenders = [
+        line for line in gen.build_document().splitlines()
+        if line.startswith("| `core/") and "| Extracted from" in line
+    ]
+    assert not offenders, "rows leading with provenance boilerplate:\n" + "\n".join(offenders)
 
 
 def test_first_doc_line_is_empty_for_a_module_without_one(tmp_path, monkeypatch):

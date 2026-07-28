@@ -1,4 +1,7 @@
-"""Extracted from `core/operator_intent` by autonomous self-build module split."""
+"""Trigger phrases and matchers behind the no-LLM operator-intent router, including the one-inserted-word tolerance and the suppression guards that stay strict.
+
+Extracted from `core/operator_intent` by autonomous self-build module split.
+"""
 from __future__ import annotations
 
 import re

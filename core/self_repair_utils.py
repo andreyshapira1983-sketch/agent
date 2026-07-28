@@ -1,4 +1,7 @@
-"""Extracted from `core/self_repair` by autonomous self-build module split."""
+"""Self-repair helpers: reading test output, judging a diagnosis or an empty diff, and summarising approval state.
+
+Extracted from `core/self_repair` by autonomous self-build module split.
+"""
 from __future__ import annotations
 
 from typing import Any
