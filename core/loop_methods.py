@@ -268,26 +268,41 @@ class AgentLoopExtractedMethods:
             # size 0 simply means "no case for the expensive model".
             _target_chars = 0
 
-        _tier = repair_complexity(target_chars=_target_chars, failing_tests=0)
-        _limit = deep_call_budget()
-        _escalation = OperatorEscalation(
-            reason="high_value_repair",
-            expected_output="minimal_patch_plan",
-            budget_ok=deep_budget_ok(self.model_router.usage_ledger, limit=_limit),
-            # Never true here. A human typing `--reason` is approving; an
-            # autonomous repair is not, and marking it approved would skip the
-            # budget check that makes this safe.
-            operator_approved=False,
-        )
+        def _select_llm(failing_tests: int):
+            """Pick the model once the baseline is known.
+
+            Deferred on purpose: the failing-test count is half the difficulty
+            signal and only exists after `generate()` runs the baseline. An
+            earlier version passed a literal 0 here, which silently disabled
+            that half — the logic and its tests existed while production always
+            saw zero.
+            """
+            tier = repair_complexity(
+                target_chars=_target_chars, failing_tests=failing_tests
+            )
+            limit = deep_call_budget()
+            escalation = OperatorEscalation(
+                reason="high_value_repair",
+                expected_output="minimal_patch_plan",
+                budget_ok=deep_budget_ok(self.model_router.usage_ledger, limit=limit),
+                # Never true here. A human typing `--reason` is approving; an
+                # autonomous repair is not, and marking it approved would skip
+                # the budget check that makes this safe.
+                operator_approved=False,
+            )
+            return self.model_router.for_task(
+                ModelRole.REPAIR_PROPOSAL,
+                f"repair {target_path}",
+                escalation=escalation,
+                force_tier=tier,
+            )
 
         return RepairProposalGenerator(
             workspace_root=workspace_root,
-            llm=self.model_router.for_task(
-                ModelRole.REPAIR_PROPOSAL,
-                f"repair {target_path}",
-                escalation=_escalation,
-                force_tier=_tier,
-            ),
+            # Built from size alone, and only used if the generator never gets
+            # as far as the baseline (e.g. an unreadable target).
+            llm=self.model_router.for_role(ModelRole.REPAIR_PROPOSAL),
+            llm_selector=_select_llm,
             logger=self.log,
         ).generate(
             target_path=target_path,

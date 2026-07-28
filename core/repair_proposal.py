@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -185,6 +185,7 @@ class RepairProposalGenerator:
         max_context_chars: int = DEFAULT_MAX_CONTEXT_CHARS,
         max_changed_lines: int = DEFAULT_MAX_CHANGED_LINES,
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+        llm_selector: Callable[[int], Any] | None = None,
     ):
         if not Path(workspace_root).is_dir():
             raise ValueError(f"workspace_root must be a directory: {workspace_root}")
@@ -196,6 +197,14 @@ class RepairProposalGenerator:
             raise ValueError("max_output_tokens must be > 0")
         self.workspace_root = Path(workspace_root).resolve()
         self.llm = llm
+        # Called with the number of failing baseline tests once they are known,
+        # to pick the model for THIS job. The count is a difficulty signal — many
+        # red tests at once rarely share a one-line cause — but it only exists
+        # after the baseline runs, which is inside `generate()`. Building the
+        # model in the caller meant that signal was always zero. Optional: with
+        # no selector the pre-built `llm` is used, so every existing caller is
+        # unaffected.
+        self.llm_selector = llm_selector
         self.log = logger
         self.max_context_chars = int(max_context_chars)
         self.max_changed_lines = int(max_changed_lines)
@@ -240,6 +249,18 @@ class RepairProposalGenerator:
                 warnings=["baseline tests are already green; refusing to invent a repair"],
                 baseline_tests=baseline_output,
             ))
+
+        # Choose the model now, with the baseline in hand. Difficulty is a
+        # property of the job — how much code must be reproduced, and how many
+        # assertions are red — and the second half is only knowable here.
+        llm = self.llm
+        if self.llm_selector is not None:
+            failing = int(baseline_output.get("failed") or 0) + int(
+                baseline_output.get("errors") or 0
+            )
+            selected = self.llm_selector(failing)
+            if selected is not None:
+                llm = selected
 
         logs_output: dict[str, Any] | None = None
         if trace_id:
@@ -305,7 +326,7 @@ class RepairProposalGenerator:
             test_paths=test_paths,
             test_pattern=test_pattern,
         )
-        raw = self.llm.complete(
+        raw = llm.complete(
             system=_SYSTEM_PROMPT,
             user=prompt,
             max_tokens=self.max_output_tokens,
