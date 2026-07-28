@@ -1,6 +1,13 @@
-# Memory Lifecycle Contract — M1 (canonical design, **v2-draft**)
+# Memory Lifecycle Contract — M1 (canonical design, **v3-draft**)
 
-> **Status: v2-draft — target design only. Not a runtime specification.**
+> **Status: v3-draft — target design only. Not a runtime specification.**
+>
+> **v3 = v2 plus §17; the normative body is unchanged.** §1–§16 carry exactly the
+> rules v2-draft carried, still unapproved and still implemented by nothing. The
+> version was bumped because §17 is new *content in this document*, not because a
+> prescription changed — the header log requires amendments to happen here, so a
+> non-normative addendum still moves the number. Anything citing "the v2 normative
+> draft" is citing text that is present and unmodified below.
 >
 > **Do not read this document as current behavior.** Owners of *what the code
 > does today*:
@@ -18,11 +25,21 @@
 >   continued to prescribe it; (2) `conflicted` was conflated with procedure
 >   `needs_review`; (3) the closed-loop procedural design existed only as chat analysis,
 >   not contract text; (4) unresolved forks were presented as prescriptions.
-> - **v2-draft (this).** Option A removed from the entire normative body; consolidation
+> - **v2-draft.** Option A removed from the entire normative body; consolidation
 >   **retirement** is the single prescription; the closed-loop attributed bidirectional
 >   procedural lifecycle is written as normative §6.4 + §7.7; `conflicted` is reserved for
 >   genuine contradiction (degradation demotes to `extracted`); every unresolved decision
 >   is isolated in §16 "Open decisions" and nothing unresolved is phrased as prescription.
+> - **v3-draft (this). Adds §17 — the measured contract↔code reconciliation.** No
+>   normative rule changed. `docs/INDEX.md` §4 warning 5 said the contract and the code
+>   describe different lifecycle models and told readers not to plan from either side
+>   until they are reconciled "in one version bump"; that reconciliation had never been
+>   performed, so the warning blocked the whole memory workstream. §17 performs it as a
+>   read-only measurement: for each of the six dimensions, what the code actually has,
+>   under what name, with what vocabulary. Four new open decisions (D-3…D-6) are added to
+>   §16 — including the two the warning named (the completion axis, and `blocked` meaning
+>   two different things). **Nothing in §17 prescribes an outcome**; per the operator's
+>   standing rule, the measurement is mine and the classification is his.
 
 - Baseline: `main` @ `f317c4c`.
 - Built on: completed M0 (`docs/audit/MEMORY_MAP.md` incl. its labeled post-M0 addendum §14)
@@ -539,8 +556,126 @@ only then a `fixed` claim, per-phase, in the registry.
   exists; re-enabling would require the same §7.3 gate plus an unattended-specific risk
   review.
 
+The four below were raised by the §17 reconciliation. Each is a naming/ownership
+question, not an implementation question — which is why none is prescribed here.
+
+- **D-3 — What is `usage_eligibility` in code?** The contract wants a four-value enum
+  (`allowed · restricted · quarantined · blocked`). The code has
+  `EpisodeRecord.usage_eligible: bool | None` — three states, where `None` means "the
+  admission policy never ran" and every reader is fail-closed on it (MIR-062). Options:
+  **(a)** widen the field to the contract enum and map `True→allowed`, `False→quarantined`,
+  `None→` a new explicit `unclassified`; **(b)** keep the boolean as the enforcement switch
+  and drop `restricted`/`quarantined` from the contract as unbuilt; **(c)** add the enum
+  alongside, boolean derived from it during migration. Note the contract's own §13 rule:
+  migration may not infer state from indirect fields, and `None` is exactly the "we do not
+  know" case that rule exists for.
+- **D-4 — Who gives up the word `blocked`?** The contract uses it for a terminal
+  `usage_eligibility` state (§6.3). The code already uses it, as a value, in **14 modules
+  under `core/`** — `CompletionState`, `CompletionDeclaration`, `RuntimeTaskStatus`,
+  `TaskOutcome`, `AutonomousRunStatus`, `RepairStatus`, `InjectionVerdict`,
+  `ReceiptStatus`, `TeamExecutionStatus`, `WorkSessionStopReason` — everywhere meaning
+  *"this run/action did not proceed"*, never *"this record may not be used"*. Options:
+  **(a)** the contract renames its state (e.g. `withheld`); **(b)** the code renames its
+  completion value; **(c)** both keep the word and every site is disambiguated by context.
+  Weight of evidence: (b) touches 14 modules and a persisted vocabulary, (a) touches one
+  unimplemented draft.
+- **D-5 — One `claim_status` vocabulary, or three?** The contract's D4 is
+  `extracted · active · conflicted · superseded · obsolete · rejected`, and §4.2 says the
+  registry's corroboration-`verified` is renamed `active` so that "verified" belongs to D2
+  alone. Today there are three lists and no two agree:
+  `source_registry.ClaimStatus = extracted · verified · conflicted · unverified`;
+  `smart_memory.ProcedureStatus = candidate · active · needs_review · obsolete`;
+  and the contract's own D4. Options: **(a)** converge all three on D4 (a rename with a
+  data migration for both stores); **(b)** keep per-family vocabularies and have the
+  contract define only the *mapping* between them; **(c)** converge the two code lists on
+  each other first and leave D4 as the eventual target.
+- **D-6 — Does the completion axis belong in the envelope?** The contract has six
+  dimensions and no completion axis. The code has one, shipped and persisted:
+  `EpisodeRecord.completion_state` / `declared_completion`, with
+  `CompletionState = achieved · partially_achieved · blocked · refused · failed ·
+  cancelled · unknown` (MIR-057, landed a day after v2-draft). Options: **(a)** admit it as
+  a seventh dimension D7 and state its independence from D2 explicitly — *an answer can be
+  fully verified and still not achieve the task*; **(b)** declare it out of scope as an
+  episode-only event property that the envelope does not carry. This is the axis
+  `docs/INDEX.md` §4 warning 5 named first.
+
+## 17. Contract ↔ code reconciliation — measured, not assumed
+
+> **Why this section exists.** `docs/INDEX.md` §4 warning 5 (added 2026-07-21) told
+> readers not to plan from the contract *or* from the code until the two were reconciled
+> in one version bump. That reconciliation had never been done, so the warning stood as an
+> open blocker over the entire memory workstream. This is it — a read-only pass over
+> `core/`, performed 2026-07-28 against `main` @ `a20e0fc`. It changes no rule above and
+> prescribes no outcome; the four decisions it surfaced are in §16 (D-3…D-6).
+
+### 17.1 Method — and what it cannot see
+
+**(a) Declaration scan (the reconciliation proper).** Parsed every dataclass under `core/`
+for the record types §4.1–§4.2 names, plus every module-level `Literal[...]` vocabulary,
+and asked one question per contract dimension: *does a field of this name exist, and if
+not, what carries the same meaning?* Source parsing only — no store opened, nothing
+written. **Everything in §17.2 comes from this scan and nothing else.**
+
+**(b) Two observations that the scan could NOT produce**, carried in from named sources
+and labelled here so they are not mistaken for scan output:
+
+| Observation | Where it actually comes from |
+|---|---|
+| `usage_eligible=None` is treated fail-closed by readers | **MIR-062** in the registry (execution-path trace of every `episodic_store` writer). A field scan sees the type `bool \| None`; it cannot see how readers branch on it. |
+| The code's `blocked` means "this run did not proceed", in 14 modules | A separate **value-occurrence count** over `core/` (`"blocked"` as a `Literal` member / literal value), plus reading each enclosing vocabulary. Counting is mechanical; *"what the word means there"* is my reading of those vocabularies, not a measurement. |
+
+This distinction matters more than it looks: a declaration scan establishes what exists,
+never what is honoured at runtime. Whether a declared field is respected on every
+production path is a different question with a different owner — `MEMORY_MAP.md` §6 and
+§12 — and §17 does not answer it.
+
+### 17.2 The six dimensions against the code
+
+| Dim | Contract field | Exists in code? | What actually carries it today | Nature of the gap |
+|---|---|---|---|---|
+| **D1** | `response_origin` | **no** | `Evidence.origin`, `EpisodeRecord.source_labels`, `MemoryRecord.type` / `owner` | *Scattered.* The information exists across three record types with three shapes; no single closed vocabulary. |
+| **D2** | `verification_status` | **no** | `EpisodeRecord.verified_chunks / unverified_chunks / weak_chunks` (counts), verifier verdicts inside `VerificationReport` | *Numbers, not a state.* A per-record status is genuinely absent — the contract's central invariant (§3) has nowhere to be written. |
+| **D3** | `trust_class` | **no** | `referent_resolver.TrustLevel` (`trusted_path · session_artifact · prior_turn · user_data · untrusted`), `source_ranker.SourceTier` | *Different vocabularies.* Two exist, neither matches the contract's six values, and they answer different questions. |
+| **D4** | `claim_status` | **partly** | `ClaimRecord.status` (`ClaimStatus`), `ProcedureRecord.status` (`ProcedureStatus`) | *Three lists, no two agree.* See §16 D-5. |
+| **D5** | `usage_eligibility` | **partly** | `EpisodeRecord.usage_eligible: bool \| None` | *Narrower than specified.* Three states vs four; `restricted` and `quarantined` have nowhere to be stored. See §16 D-3. |
+| **D6** | confidence / weight | **yes** | `Evidence.confidence`, `ProcedureRecord.confidence`, source `trust_level` | Present as specified — ranking inputs, not gates. |
+
+Envelope bookkeeping fields (§4.1) — `schema_version`, `source_episode_id`,
+`envelope_updated_at` — exist nowhere. `task_id` **does** exist on `EpisodeRecord`.
+
+### 17.3 What the code has that the contract does not
+
+The `evidence` column says which of the two methods in §17.1 produced each row, so a
+scan result is never confused with a reading.
+
+| In code | Where | Evidence | Contract's position |
+|---|---|---|---|
+| Completion axis — `completion_state`, `declared_completion` | `EpisodeRecord`; `CompletionState`, `CompletionDeclaration` | scan (a) | **Absent.** §16 D-6. |
+| `usage_eligible = None`, and readers that fail closed on it | `EpisodeRecord` | field type from scan (a); the fail-closed *behaviour* from **MIR-062**, not from this pass | No equivalent; §13 forbids inferring it away. §16 D-3. |
+| `blocked` as a run/action outcome | 14 modules under `core/` | value-occurrence count (b); the *meaning* is my reading of those vocabularies | Same word, different meaning. §16 D-4. |
+| `used_procedure_ids` | `EpisodeRecord` | scan (a) | Matches §7.7(b) — one place the code is *ahead* of the draft. |
+
+### 17.4 Persistent memory is the emptiest of the four
+
+`MemoryRecord` carries `ttl_seconds`, `importance`, `archived`, `tags`, `owner`, `type`
+and nothing else about lifecycle: no status, no supersession, no validity window, no
+confirmation refs. So of the four families it is the one where "this record was wrong,
+here is the correction, the old one may no longer be applied" cannot be expressed **at
+all** — not merely expressed imprecisely. This is MIR-009 (`planned_gap`) seen from the
+contract's side, and it is why D4/D5 have no persistent-memory column above.
+
+### 17.5 What this section does *not* claim
+
+- It does not say the code is wrong. Most of these differences are the code having
+  shipped a narrower, working mechanism while the draft described a wider unbuilt one.
+- It does not measure behaviour — only declared fields and vocabularies. Whether a field
+  is *honoured* on every path is a separate question, owned by `MEMORY_MAP.md` §6 and §12.
+- It does not resolve anything. Six dimensions were checked; four decisions came out; all
+  four are in §16, unprescribed.
+
 ---
 
-*This contract is the single canonical M1 document (v2-draft). Amendments happen here,
+*This contract is the single canonical M1 document (v3-draft = v2's normative body,
+unchanged, plus the §17 reconciliation). Amendments happen here,
 versioned in the header log. Upon operator approval, implementation starts at P0 on a
 clean branch from `f317c4c`. Until then: no production code, tests, or schema changes.*
