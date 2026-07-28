@@ -1,4 +1,7 @@
-"""Extracted from `core/campaign` by autonomous self-build module split."""
+"""Append-only campaign ledger: one record per cycle, plus loading and summarising the rows.
+
+Extracted from `core/campaign` by autonomous self-build module split.
+"""
 from __future__ import annotations
 
 import json

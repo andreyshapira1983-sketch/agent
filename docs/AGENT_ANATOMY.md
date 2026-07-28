@@ -19,7 +19,7 @@ _Operator-facing I/O, intent routing, output shaping._
 | Module | Purpose |
 | ------ | ------- |
 | `core/operator_intent` | Conversational routing for operator-control requests. |
-| `core/operator_intent_patterns` | Extracted from `core/operator_intent` by autonomous self-build module split. |
+| `core/operator_intent_patterns` | Trigger phrases and matchers behind the no-LLM operator-intent router, including the one-inserted-word tolerance and the suppression guards that stay strict. |
 | `core/intent_understanding` | Intent understanding — the translator between plain human language and the autonomous agent's actions. |
 | `core/lang_match` | Language-aware term matching for question routing. |
 | `core/output_policy` | Ranker-to-output policy. |
@@ -51,10 +51,10 @@ _Planning, verification, clarification, control loop._
 | `core/loop_methods2` | Methods extracted verbatim from ``AgentLoop`` in ``core/loop.py`` by the incremental splitter. |
 | `core/planner` | LLM-driven Planner (§3 Cognitive Core: Planning). |
 | `core/verifier` | MVP-14.4 — Verifier. |
-| `core/verifier_core` | Extracted from `core/verifier` by autonomous self-build module split. |
-| `core/verifier_models` | Extracted from `core/verifier` by autonomous self-build module split. |
-| `core/verifier_patterns` | Extracted from `core/verifier` by autonomous self-build module split. |
-| `core/verifier_utils` | Extracted from `core/verifier` by autonomous self-build module split. |
+| `core/verifier_core` | The verifier's `verify()` entry point: turns a draft answer and its evidence chain into a per-claim verdict report. |
+| `core/verifier_models` | Verifier value types: a citation, a claim chunk, and the verification report. |
+| `core/verifier_patterns` | Compiled patterns the verifier matches with: citations, sentence splits, headings, and statistical figures. |
+| `core/verifier_utils` | Verifier text utilities: chunk splitting, citation parsing and matching, and statistical-claim detection. |
 | `core/replan` | MVP-12 — Re-planning policy: structured failure types + retry budgets. |
 | `core/reflection` | Reflection engine — self-improvement feedback loop. |
 | `core/clarification_gate` | Clarification Gate — режим переспроса (ask, don't build). |
@@ -94,8 +94,8 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/knowledge_use_policy` | Contextual memory-use policy. |
 | `core/knowledge_pipeline` | Knowledge pipeline integration. |
 | `core/ingestion` | Controlled document/code ingestion. |
-| `core/ingestion_reports` | Extracted from `core/ingestion` by autonomous self-build module split. |
-| `core/ingestion_utils` | Extracted from `core/ingestion` by autonomous self-build module split. |
+| `core/ingestion_reports` | Ingestion result types: what a file, web or RSS ingest run reports back. |
+| `core/ingestion_utils` | Ingestion helpers: workspace-confined path resolution, project file walking, and text chunking. |
 | `core/structured_facts` | Structured fact extraction for tool outputs. |
 | `core/evidence` | MVP-14.1 — Evidence + Provenance model. |
 | `core/evidence_classes` | Evidence classes — *what kind* of support a claim actually needs (issue #119). |
@@ -130,9 +130,9 @@ _Autonomous loop, scheduling, budgets, state durability._
 | `core/autonomous_runtime` | Autonomous runtime orchestrator. |
 | `core/scheduler` | Persistent scheduler for autonomous runtime tasks. |
 | `core/campaign` | 24/48h autonomous work campaign engine. |
-| `core/campaign_io` | Extracted from `core/campaign` by autonomous self-build module split. |
-| `core/campaign_ledger` | Extracted from `core/campaign` by autonomous self-build module split. |
-| `core/campaign_types` | Extracted from `core/campaign` by autonomous self-build module split. |
+| `core/campaign_io` | Campaign I/O helpers: journal writes, cost totals, and the default signal-gathering and action-executing callbacks. |
+| `core/campaign_ledger` | Append-only campaign ledger: one record per cycle, plus loading and summarising the rows. |
+| `core/campaign_types` | Campaign value types: configuration, per-action outcome, and the result of a finished campaign. |
 | `core/work_session` | MVP-17.1  Long Work Session Skeleton. |
 | `core/task_queue` | Persistent task queue for autonomous runtime work. |
 | `core/task_lifecycle` | One place that decides what a finished run does to its queue row (MIR-039). |
@@ -186,8 +186,8 @@ _Reflection-driven repair, self-build, value gating._
 | Module | Purpose |
 | ------ | ------- |
 | `core/self_repair` | MVP-13.2 self-repair controller. |
-| `core/self_repair_models` | Extracted from `core/self_repair` by autonomous self-build module split. |
-| `core/self_repair_utils` | Extracted from `core/self_repair` by autonomous self-build module split. |
+| `core/self_repair_models` | Self-repair value types: the proposal, the per-step record, and the report a repair run produces. |
+| `core/self_repair_utils` | Self-repair helpers: reading test output, judging a diagnosis or an empty diff, and summarising approval state. |
 | `core/repair_proposal` | MVP-13.3 repair proposal generation. |
 | `core/self_apply_bridge` | Approval -> trusted self-apply lane bridge (TD-024). |
 | `core/self_apply_lane` | Trusted low-risk self-apply lane (TD-023). |

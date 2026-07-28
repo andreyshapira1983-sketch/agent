@@ -1,4 +1,7 @@
-"""Extracted from `core/ingestion` by autonomous self-build module split."""
+"""Ingestion helpers: workspace-confined path resolution, project file walking, and text chunking.
+
+Extracted from `core/ingestion` by autonomous self-build module split.
+"""
 from __future__ import annotations
 
 from pathlib import Path
