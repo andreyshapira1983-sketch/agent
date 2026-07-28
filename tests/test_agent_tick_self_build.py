@@ -329,8 +329,15 @@ def test_status_line_degrades_to_the_bare_status_when_nothing_explains_it():
     assert line == "[agent_tick] Self-build producer: no_patch."
 
 
-def test_the_wrapper_passes_the_producer_reason_through():
-    """`reason` must survive the wrapper, or the status line has nothing to say."""
+def test_the_wrapper_passes_the_producer_reason_through(tmp_path: Path):
+    """`reason` must survive the wrapper, or the status line has nothing to say.
+
+    Runs in `tmp_path`, not `Path(".")`. The first version of this test used the
+    real repository as its workspace, so it read the live
+    `data/self_build_producer_state.json` and started returning `cooldown_wait`
+    the moment a real tick had run — green or red depending on what the operator
+    had done that hour, which is not a test.
+    """
     class _ReasonedReport:
         def to_dict(self):
             return {
@@ -340,7 +347,7 @@ def test_the_wrapper_passes_the_producer_reason_through():
             }
 
     out = _maybe_produce_self_build(
-        Path("."), _FakeInbox(),
+        tmp_path, _FakeInbox(),
         now_iso="2026-07-01T12:00:00+00:00", cooldown_hours=12.0,
         build_agent_fn=_SpyBuildAgent(),
         producer_fn=_SpyProducer(_ReasonedReport()),
