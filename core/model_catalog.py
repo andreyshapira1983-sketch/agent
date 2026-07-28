@@ -395,6 +395,52 @@ def tier_model_for(tier: ComplexityTier, provider: str) -> str:
     return ""
 
 
+def catalog_freshness() -> dict[str, Any]:
+    """Is the cache usable, and if not, why — in numbers the operator can act on.
+
+    Expiry used to be silent. `_load_catalog` returned `None`, every
+    `tier_model_for` returned `""`, and the escalation gate reported
+    ``no_deep_model`` — which reads as "your provider has no such model" and
+    sends the reader to check credentials and registries that are all fine. The
+    truth was "this cached list is 12 days old at a 7-day TTL".
+
+    Measured on this repository: that state disabled complexity routing for
+    **every** `for_task` caller — planner and synthesizer as well as repair —
+    and nothing anywhere said so.
+
+    Statuses are kept distinct because they need different actions:
+    ``missing`` (never built), ``expired`` (stale, refresh it), ``fresh``,
+    ``unreadable`` (corrupt file).
+    """
+    hint = "run :refresh-models to rebuild the catalog"
+    path = _catalog_path()
+    if not path.exists():
+        return {"status": "missing", "expired": False, "age_days": None,
+                "ttl_days": _ttl_days(), "path": str(path), "hint": hint}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        updated_at = data.get("updated_at", "")
+        age_days = (
+            (datetime.now(timezone.utc) - datetime.fromisoformat(updated_at)).days
+            if updated_at else None
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "unreadable", "expired": False, "age_days": None,
+                "ttl_days": _ttl_days(), "path": str(path),
+                "error": f"{type(exc).__name__}: {exc}", "hint": hint}
+
+    ttl = _ttl_days()
+    expired = age_days is not None and age_days >= ttl
+    return {
+        "status": "expired" if expired else "fresh",
+        "expired": expired,
+        "age_days": age_days,
+        "ttl_days": ttl,
+        "path": str(path),
+        "hint": hint,
+    }
+
+
 def catalog_summary() -> dict[str, Any]:
     """Return a human/log-friendly snapshot of the current catalog."""
     catalog = _load_catalog()
