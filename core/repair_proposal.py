@@ -43,7 +43,26 @@ ProposalStatus = Literal[
     "tool_error",
 ]
 
-DEFAULT_MAX_CONTEXT_CHARS = 16_000
+#: How much of the target file the model is shown — and therefore the largest
+#: file this generator may attempt at all. The prompt asks for
+#: ``proposed_content`` = the COMPLETE replacement file (see ``_SYSTEM_PROMPT``),
+#: so a target that does not fit is a request to reproduce bytes the model was
+#: never given. It is refused up front instead (MIR-065).
+#:
+#: Sized to `core.self_build_producer._MAX_CONTENT_BYTES`, deliberately: both
+#: paths answer the same question — "how large a file may a single shot
+#: rewrite?" — and two different answers would mean the smaller one silently
+#: decides what the agent can repair. Raised from 16 000, at which 43 of 145
+#: `core/` modules were truncated before the model ever saw them.
+DEFAULT_MAX_CONTEXT_CHARS = 60_000
+
+#: Output budget for the proposal. The reply must carry the whole post-image, so
+#: this tracks the context window above (~4 chars per token) rather than the
+#: client default. `self_build_producer` learned the same thing the same way:
+#: too small a cap truncates the JSON mid-file, and the result surfaces as
+#: "empty generated content" rather than as a size problem.
+DEFAULT_MAX_OUTPUT_TOKENS = 16_000
+
 DEFAULT_MAX_CHANGED_LINES = 200
 
 
@@ -76,6 +95,15 @@ class ProposalGenerationReport:
             "baseline_tests": _test_summary(self.baseline_tests),
             "diagnostic_logs": _log_summary(self.diagnostic_logs),
             "diff_preview": _diff_summary(self.diff_preview),
+            # Only when the reply could not be used, and only its head. A
+            # failure whose cause is unreadable costs another paid call to
+            # diagnose: "invalid JSON" alone does not distinguish a model that
+            # prefixed prose from one that returned nothing, and the two need
+            # opposite fixes. Redacted and capped — this is a diagnostic, not a
+            # transcript.
+            "raw_response_head": _raw_head(self.raw_response)
+            if self.status in ("llm_error", "rejected")
+            else None,
         }
 
     def user_summary(self) -> str:
@@ -187,6 +215,28 @@ class RepairProposalGenerator:
                 diagnostic_logs=logs_output,
             ))
 
+        # Refuse before spending anything. The prompt asks for the complete
+        # replacement file, so a target larger than the window would be a
+        # request to reproduce what was never shown — the model either invents
+        # the missing part or declines, and both cost a call. Same rule
+        # `self_build_producer` applies with `_MAX_SPLIT_TARGET_LINES`: an
+        # oversized target is refused up front rather than burning a doomed
+        # generation.
+        if len(current_content) > self.max_context_chars:
+            return self._finish(ProposalGenerationReport(
+                status="rejected",
+                warnings=[
+                    *warnings,
+                    f"target file too large for a single-shot repair: "
+                    f"{len(current_content)} chars > context window "
+                    f"{self.max_context_chars}. The proposal must contain the "
+                    f"whole file, so it cannot be generated from a truncated "
+                    f"view. Narrow the target or split the module first.",
+                ],
+                baseline_tests=baseline_output,
+                diagnostic_logs=logs_output,
+            ))
+
         current_safe, findings = redact_text(current_content)
         if findings:
             warnings.append("target file content was redacted before LLM prompt")
@@ -203,7 +253,7 @@ class RepairProposalGenerator:
         raw = self.llm.complete(
             system=_SYSTEM_PROMPT,
             user=prompt,
-            max_tokens=4096,
+            max_tokens=DEFAULT_MAX_OUTPUT_TOKENS,
             temperature=0.0,
         )
         parsed = _parse_json_object(raw)
@@ -447,18 +497,77 @@ except ImportError:  # pragma: no cover
     pass
 
 
+def _embedded_json_object(text: str) -> str | None:
+    """The first balanced ``{...}`` in `text`, or None.
+
+    Brace counting, string-aware: a `{` inside a JSON string value — common
+    here, since `proposed_content` carries Python code — must not open a level,
+    and the matching `}` must not close one early.
+    """
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:index + 1]
+    return None
+
+
 def _parse_json_object(raw: str) -> dict[str, Any]:
+    """Parse the model's reply, tolerating a reply that thinks out loud first.
+
+    The prompt asks for JSON only, and that is still what it asks for. But a
+    reasoning model narrating before it answers is ordinary behaviour, not
+    misbehaviour: `claude-opus-4-8` opened a 41 000-character reply with "I'll
+    analyze the failing tests…" and put a perfectly good object underneath.
+    Reading only character 0 turned that into "invalid JSON" and threw the
+    proposal away — the mechanism worked only for models terse enough to skip
+    the preamble, which is the opposite of the selection anyone wants.
+
+    Order matters: try the whole reply first, so a well-formed answer is never
+    reinterpreted, and only then look for an embedded object.
+    """
     text = raw.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\s*```$", "", text)
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        return {"ok": False, "error": f"LLM returned invalid JSON: {exc}"}
-    if not isinstance(data, dict):
-        return {"ok": False, "error": "LLM JSON must be an object"}
-    return {"ok": True, "data": data}
+
+    candidates = [text]
+    embedded = _embedded_json_object(text)
+    if embedded is not None and embedded != text:
+        candidates.append(embedded)
+
+    error: json.JSONDecodeError | None = None
+    for candidate in candidates:
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            if error is None:
+                error = exc
+            continue
+        if not isinstance(data, dict):
+            return {"ok": False, "error": "LLM JSON must be an object"}
+        return {"ok": True, "data": data}
+
+    return {"ok": False, "error": f"LLM returned invalid JSON: {error}"}
 
 
 def _coerce_confidence(value: Any) -> float | None:
@@ -486,6 +595,24 @@ def _is_safe_relative_ascii_path(value: str) -> bool:
         return False
     p = Path(value)
     return not p.is_absolute() and ".." not in p.parts
+
+
+#: How much of an unusable reply is worth keeping to tell failure modes apart.
+#: Enough to see whether it opens with `{`, with prose, with a fence, or with
+#: nothing at all — and no more.
+_RAW_HEAD_CHARS = 300
+
+
+def _raw_head(raw: str) -> dict[str, Any] | None:
+    """The opening of an unusable model reply, redacted and capped."""
+    if not raw:
+        return {"length": 0, "head": "", "note": "empty reply"}
+    safe, _ = redact_text(raw[:_RAW_HEAD_CHARS])
+    return {
+        "length": len(raw),
+        "head": safe.replace("\n", "\\n"),
+        "starts_with_brace": raw.lstrip().startswith("{"),
+    }
 
 
 def _truncate(text: str, limit: int) -> str:
