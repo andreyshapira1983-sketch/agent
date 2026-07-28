@@ -104,15 +104,19 @@ as a navigation aid. The registry wins in every case.
    return and reframed it; the plan's "floor 0.3" is not what shipped.
 4. **Counts drift between files.** Chronological log entries quoting "47 issues"
    are historical snapshots. Only the registry's tally is current.
-5. **The M1 contract and the code now describe different lifecycle models, and
-   the word `blocked` means two different things.** (Added 2026-07-21.) The
-   contract's six dimensions contain **no completion axis**; `completion_state` /
-   `declared_completion` (MIR-057) landed a day after it, and the contract's §11
-   MIR-map does not know MIR-057. Meanwhile the contract's D2
-   `verification_status` does not exist in code. And `blocked` is a terminal
-   `usage_eligibility` state in the contract but a **completion** state in the
-   code — two normative vocabularies, one token. Do not plan from either side
-   alone until they are reconciled in one version bump.
+5. ~~**The M1 contract and the code now describe different lifecycle models…**
+   Do not plan from either side alone until they are reconciled in one version
+   bump.~~ (Added 2026-07-21.) **RECONCILED 2026-07-28 — the blocker is lifted.**
+   The differences were real and are now measured rather than warned about:
+   `MEMORY_LIFECYCLE_CONTRACT.md` **§17** (v3-draft) checks all six dimensions
+   against `core/` and reports, per dimension, what the code actually has and
+   under what name. Confirmed by that pass: the completion axis exists in code
+   and not in the contract; D2 `verification_status` exists nowhere; `blocked`
+   carries two meanings — and the code's meaning occupies **14 modules**, which
+   the original warning did not know. Four naming/ownership decisions came out
+   of it and are open in §16 (D-3…D-6). Planning may now proceed **from §17**,
+   which states both sides; a decision that touches D-3…D-6 still needs the
+   operator first.
 
 Two more traps that are *by design*, not drift:
 
