@@ -43,9 +43,11 @@ def test_architecture_audit_summary_is_operator_readable(tmp_path: Path):
     assert "ready_for_multi_agent_execution" in summary
 
 
-def test_architecture_audit_recognizes_doctrine_source_of_truth(tmp_path: Path):
-    _touch(tmp_path / "AGENT_DOCTRINE.md")
-    _touch(tmp_path / "архитектура автономного Агента.txt")
+def test_architecture_audit_recognizes_doctrine_source_of_truth(
+    tmp_path: Path,
+):
+    _touch(tmp_path / "docs" / "AGENT_DOCTRINE.md")
+    _touch(tmp_path / "docs" / "COGNITIVE_CORE.md")
     _touch(tmp_path / "README.md")
 
     audit = audit_architecture(tmp_path)
@@ -53,4 +55,5 @@ def test_architecture_audit_recognizes_doctrine_source_of_truth(tmp_path: Path):
 
     doctrine = checks["doctrine_and_architecture_docs"]
     assert doctrine.status == "present"
-    assert "AGENT_DOCTRINE.md" in doctrine.evidence_files
+    assert "docs/AGENT_DOCTRINE.md" in doctrine.evidence_files
+    assert "docs/COGNITIVE_CORE.md" in doctrine.evidence_files

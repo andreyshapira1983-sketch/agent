@@ -112,7 +112,11 @@ def _build_checks(workspace: Path) -> list[ArchitectureLayerCheck]:
             workspace,
             id="doctrine_and_architecture_docs",
             title="Doctrine and Architecture Source of Truth",
-            evidence=("AGENT_DOCTRINE.md", "архитектура автономного Агента.txt", "README.md"),
+            evidence=(
+                "docs/AGENT_DOCTRINE.md",
+                "docs/COGNITIVE_CORE.md",
+                "README.md",
+            ),
             tests=(),
             summary="Project intent and high-level architecture are documented.",
             next_step="Keep docs updated when execution semantics change.",
