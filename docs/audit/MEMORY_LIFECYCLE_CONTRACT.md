@@ -1,6 +1,13 @@
-# Memory Lifecycle Contract — M1 (canonical design, **v2-draft**)
+# Memory Lifecycle Contract — M1 (canonical design, **v3-draft**)
 
-> **Status: v2-draft — target design only. Not a runtime specification.**
+> **Status: v3-draft — target design only. Not a runtime specification.**
+>
+> **v3 = v2 plus §17; the normative body is unchanged.** §1–§16 carry exactly the
+> rules v2-draft carried, still unapproved and still implemented by nothing. The
+> version was bumped because §17 is new *content in this document*, not because a
+> prescription changed — the header log requires amendments to happen here, so a
+> non-normative addendum still moves the number. Anything citing "the v2 normative
+> draft" is citing text that is present and unmodified below.
 >
 > **Do not read this document as current behavior.** Owners of *what the code
 > does today*:
@@ -601,12 +608,26 @@ question, not an implementation question — which is why none is prescribed her
 > `core/`, performed 2026-07-28 against `main` @ `a20e0fc`. It changes no rule above and
 > prescribes no outcome; the four decisions it surfaced are in §16 (D-3…D-6).
 
-### 17.1 Method
+### 17.1 Method — and what it cannot see
 
-Parsed every dataclass under `core/` for the record types §4.1–§4.2 names, plus every
-module-level `Literal[...]` vocabulary, and asked one question per contract dimension:
-*does a field of this name exist, and if not, what carries the same meaning?* Source
-parsing only — no store was opened, nothing was written.
+**(a) Declaration scan (the reconciliation proper).** Parsed every dataclass under `core/`
+for the record types §4.1–§4.2 names, plus every module-level `Literal[...]` vocabulary,
+and asked one question per contract dimension: *does a field of this name exist, and if
+not, what carries the same meaning?* Source parsing only — no store opened, nothing
+written. **Everything in §17.2 comes from this scan and nothing else.**
+
+**(b) Two observations that the scan could NOT produce**, carried in from named sources
+and labelled here so they are not mistaken for scan output:
+
+| Observation | Where it actually comes from |
+|---|---|
+| `usage_eligible=None` is treated fail-closed by readers | **MIR-062** in the registry (execution-path trace of every `episodic_store` writer). A field scan sees the type `bool \| None`; it cannot see how readers branch on it. |
+| The code's `blocked` means "this run did not proceed", in 14 modules | A separate **value-occurrence count** over `core/` (`"blocked"` as a `Literal` member / literal value), plus reading each enclosing vocabulary. Counting is mechanical; *"what the word means there"* is my reading of those vocabularies, not a measurement. |
+
+This distinction matters more than it looks: a declaration scan establishes what exists,
+never what is honoured at runtime. Whether a declared field is respected on every
+production path is a different question with a different owner — `MEMORY_MAP.md` §6 and
+§12 — and §17 does not answer it.
 
 ### 17.2 The six dimensions against the code
 
@@ -624,12 +645,15 @@ Envelope bookkeeping fields (§4.1) — `schema_version`, `source_episode_id`,
 
 ### 17.3 What the code has that the contract does not
 
-| In code | Where | Contract's position |
-|---|---|---|
-| Completion axis — `completion_state`, `declared_completion` | `EpisodeRecord`; `CompletionState`, `CompletionDeclaration` | **Absent.** §16 D-6. |
-| `usage_eligible = None` meaning "policy never ran" | `EpisodeRecord`, all readers fail-closed (MIR-062) | No equivalent; §13 forbids inferring it away. §16 D-3. |
-| `blocked` as a run/action outcome | 14 modules under `core/` | Same word, different meaning. §16 D-4. |
-| `used_procedure_ids` | `EpisodeRecord` | Matches §7.7(b) — one place the code is *ahead* of the draft. |
+The `evidence` column says which of the two methods in §17.1 produced each row, so a
+scan result is never confused with a reading.
+
+| In code | Where | Evidence | Contract's position |
+|---|---|---|---|
+| Completion axis — `completion_state`, `declared_completion` | `EpisodeRecord`; `CompletionState`, `CompletionDeclaration` | scan (a) | **Absent.** §16 D-6. |
+| `usage_eligible = None`, and readers that fail closed on it | `EpisodeRecord` | field type from scan (a); the fail-closed *behaviour* from **MIR-062**, not from this pass | No equivalent; §13 forbids inferring it away. §16 D-3. |
+| `blocked` as a run/action outcome | 14 modules under `core/` | value-occurrence count (b); the *meaning* is my reading of those vocabularies | Same word, different meaning. §16 D-4. |
+| `used_procedure_ids` | `EpisodeRecord` | scan (a) | Matches §7.7(b) — one place the code is *ahead* of the draft. |
 
 ### 17.4 Persistent memory is the emptiest of the four
 
@@ -651,6 +675,7 @@ contract's side, and it is why D4/D5 have no persistent-memory column above.
 
 ---
 
-*This contract is the single canonical M1 document (v2-draft). Amendments happen here,
+*This contract is the single canonical M1 document (v3-draft = v2's normative body,
+unchanged, plus the §17 reconciliation). Amendments happen here,
 versioned in the header log. Upon operator approval, implementation starts at P0 on a
 clean branch from `f317c4c`. Until then: no production code, tests, or schema changes.*
