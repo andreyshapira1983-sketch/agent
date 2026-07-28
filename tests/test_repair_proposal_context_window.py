@@ -33,8 +33,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from core.repair_proposal import (
     DEFAULT_MAX_CONTEXT_CHARS,
     RepairProposalGenerator,
