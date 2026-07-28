@@ -35,7 +35,7 @@ question, which single file is authoritative.
 | How the deep revision is progressing | [audit/AUDIT_PROGRESS.md](audit/AUDIT_PROGRESS.md) | stage/group state, per-pass verification limits | per-issue status (registry owns it) |
 | How memory actually flows (stores, reads, writes, dead sinks) | [audit/MEMORY_MAP.md](audit/MEMORY_MAP.md) | the read-only M0 census (§1–§13 = accepted baseline; §14 = labeled post-M0 addendum) | issue status; the target design |
 | **How well the five observational sensors actually signal, and what was decided about each** | [audit/SENSOR_SIGNAL_MEASUREMENT.md](audit/SENSOR_SIGNAL_MEASUREMENT.md) | §1–§6 = the dated measurement (accuracy, signal uniqueness, connect-cost per sensor — numbers only, classifying nothing, read at `main` @ `388fac1`); the **addendum** = the operator's per-sensor ruling and what has been implemented against it | the sensors' current wiring in the loop (→ `COGNITIVE_CORE.md` §8.7/§8.11/§10) |
-| The **target** memory design | [audit/MEMORY_LIFECYCLE_CONTRACT.md](audit/MEMORY_LIFECYCLE_CONTRACT.md) | the canonical M1 design — **v2-draft, not approved, no code implements it** | what the code does today; the completion axis (see §4.5) |
+| The **target** memory design, and how far the code is from it | [audit/MEMORY_LIFECYCLE_CONTRACT.md](audit/MEMORY_LIFECYCLE_CONTRACT.md) | the canonical M1 design — **v3-draft, not approved, no code implements the normative body**; plus **§17**, the measured contract↔code reconciliation, which *does* describe today's fields | whether a declared field is honoured at runtime (→ audit/MEMORY_MAP.md §6, §12) |
 | **Where the cognitive-memory work stands right now**, and the architectural thesis behind it | [audit/PROVIDER_AUDIT_CHECKPOINT.md](audit/PROVIDER_AUDIT_CHECKPOINT.md) | session state: what is decided, what is open, what was deliberately not done, and the discipline record of withdrawn claims. **Filename is historical** — it began as a provider-audit checkpoint | issue status; measured provider facts; the target design |
 | What the provider/model layer can and cannot express (structured outputs, routing, streaming, refusal, truncation) | [audit/PROVIDER_STRUCTURED_OUTPUT_AUDIT.md](audit/PROVIDER_STRUCTURED_OUTPUT_AUDIT.md) | the measured provider-layer audit + its labeled dated addendum §A1–A9 on architectural placement | whether any model actually supports strict JSON Schema — **undetermined, no probe was run** |
 | Daemon build state, item by item | [daemon-progress.md](daemon-progress.md) | per-sub-item implementation/PR/hotfix/acceptance | anything outside the daemon plan |
@@ -104,22 +104,32 @@ as a navigation aid. The registry wins in every case.
    return and reframed it; the plan's "floor 0.3" is not what shipped.
 4. **Counts drift between files.** Chronological log entries quoting "47 issues"
    are historical snapshots. Only the registry's tally is current.
-5. **The M1 contract and the code now describe different lifecycle models, and
-   the word `blocked` means two different things.** (Added 2026-07-21.) The
-   contract's six dimensions contain **no completion axis**; `completion_state` /
-   `declared_completion` (MIR-057) landed a day after it, and the contract's §11
-   MIR-map does not know MIR-057. Meanwhile the contract's D2
-   `verification_status` does not exist in code. And `blocked` is a terminal
-   `usage_eligibility` state in the contract but a **completion** state in the
-   code — two normative vocabularies, one token. Do not plan from either side
-   alone until they are reconciled in one version bump.
+5. ~~**The M1 contract and the code now describe different lifecycle models…**
+   Do not plan from either side alone until they are reconciled in one version
+   bump.~~ (Added 2026-07-21.) **RECONCILED 2026-07-28 — the blocker is lifted.**
+   The differences were real and are now measured rather than warned about:
+   `MEMORY_LIFECYCLE_CONTRACT.md` **§17** (v3-draft — v2's normative body
+   unchanged, §17 added) checks all six dimensions against `core/` and reports,
+   per dimension, what the code actually has and under what name. From that
+   declaration scan: the completion axis exists in code and not in the contract,
+   and **no per-record `verification_status` field exists** for D2 (verifier
+   verdicts do exist, inside `VerificationReport` — the missing thing is a
+   status stored on the record). Separately verified, not products of the scan:
+   `blocked` carries two meanings, and the code's meaning occupies **14
+   modules** (value-occurrence count) — which the original warning did not know.
+   Four naming/ownership decisions came out of it and are open in §16 (D-3…D-6).
+   Planning may now proceed **from §17**, which states both sides; a decision
+   that touches D-3…D-6 still needs the operator first.
 
 Two more traps that are *by design*, not drift:
 
 - OFM numbers describe an **external** operator's system. None of them measures
   this repo.
-- `MEMORY_LIFECYCLE_CONTRACT.md` is a **v2-draft awaiting approval**. Nothing in
-  it is implemented; do not read it as behaviour.
+- `MEMORY_LIFECYCLE_CONTRACT.md` is a **v3-draft awaiting approval**. Nothing in
+  its normative body (§1–§16) is implemented; do not read those as behaviour.
+  **§17 is the exception** and is the opposite kind of text: a measured report of
+  what the code has today, added so the two sides could stop contradicting each
+  other. Read §1–§16 as target, §17 as fact.
 
 ## 5. Housekeeping
 
