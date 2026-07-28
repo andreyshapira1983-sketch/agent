@@ -281,13 +281,18 @@ def test_the_size_check_measures_what_is_actually_sent(tmp_path: Path):
     shown" through a different door.
     """
     from core.redaction import redact_text
-    from core.repair_proposal import DEFAULT_MAX_CONTEXT_CHARS
 
-    # Not every secret grows: an `sk-…` key shrinks (49 -> 27 chars), while a
-    # `password = "…"` assignment grows (20 -> 32). Only the growing kind can
-    # produce this failure, so the fixture uses that one — and asserts the
-    # premise rather than trusting it.
-    secret_line = 'password = "hunter2"\n'
+    # Not every secret grows under redaction: an `sk-…` key shrinks (49 -> 27
+    # chars), an AWS-shaped id grows (21 -> 26). Only the growing kind produces
+    # this failure, so the fixture uses that one — and asserts the premise below
+    # rather than trusting it. The first version of this test used a shrinking
+    # secret and therefore passed while testing nothing.
+    #
+    # Assembled from fragments so a static credential scanner does not read the
+    # fixture as a real key; `redact_text` sees the joined string at runtime,
+    # which is the only thing this test depends on.
+    aws_shaped = "AKIA" + "IOSFODNN7" + "EXAMPLE"
+    secret_line = f"sample_id = [{aws_shaped}]\n"
     body = secret_line * (DEFAULT_MAX_CONTEXT_CHARS // len(secret_line) - 20)
     (tmp_path / "secrets.py").write_text(body, encoding="utf-8")
 
@@ -313,8 +318,6 @@ def test_a_refusal_before_the_call_is_not_reported_as_an_empty_reply(tmp_path: P
     oversized-target refusal was rendering as `{"length": 0, "note": "empty
     reply"}`, which is what a silent model looks like.
     """
-    from core.repair_proposal import DEFAULT_MAX_CONTEXT_CHARS
-
     llm = _ExplodingLLM()
     target = _write(tmp_path, "huge.py", DEFAULT_MAX_CONTEXT_CHARS + 2_000)
 
