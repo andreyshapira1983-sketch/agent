@@ -51,6 +51,7 @@ def test_policy_rejects_critical_organs():
         "core/self_build_producer.py",
         "AGENT_DOCTRINE.md",
         "docs/AGENT_DOCTRINE.md",
+        "docs/COGNITIVE_CORE.md",
         "config/anything.yaml",
     ):
         assert not _is_self_build_target_allowed(organ), organ
@@ -106,20 +107,27 @@ def test_grounded_audit_target_now_selected(tmp_path):
     assert out.data["grounded"] is True
 
 
-def test_grounded_doctrine_doc_targets_are_refused(tmp_path):
+def test_grounded_governance_doc_targets_are_refused(tmp_path):
     (tmp_path / "AGENT_DOCTRINE.md").write_text("# Doctrine\n", encoding="utf-8")
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "AGENT_DOCTRINE.md").write_text(
         "# Doctrine\n", encoding="utf-8"
     )
+    (tmp_path / "docs" / "COGNITIVE_CORE.md").write_text(
+        "# Cognitive Core\n", encoding="utf-8"
+    )
 
-    for target in ("AGENT_DOCTRINE.md", "docs/AGENT_DOCTRINE.md"):
+    for target in (
+        "AGENT_DOCTRINE.md",
+        "docs/AGENT_DOCTRINE.md",
+        "docs/COGNITIVE_CORE.md",
+    ):
         candidate = _Candidate(
             target, "Doctrine and Architecture Source of Truth"
         )
 
         out = _manager_from_grounded(
-            lambda: candidate,
+            lambda c=candidate: c,
             DEFAULT_CANDIDATE_TARGETS,
             workspace=tmp_path,
         )
