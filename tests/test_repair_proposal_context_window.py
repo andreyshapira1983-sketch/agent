@@ -226,6 +226,114 @@ def test_an_unusable_reply_is_diagnosable_from_the_journal():
     assert head["length"] > 0
 
 
+# ── 3b. the holes review found in the first version of this fix ──────────────
+#
+# All three were real, and two of them defeated the fix in exactly the case it
+# was built for. Kept as their own tests so the next change cannot quietly undo
+# them.
+
+
+def test_a_brace_in_the_preamble_does_not_hide_the_real_object():
+    """The reasoning itself may mention braces — that must not shadow the JSON.
+
+    The first version locked onto `text.find("{")`. A model narrating "the code
+    builds {'k': 1} before writing" produces a balanced span that parses as
+    nothing, and the real object further down was never tried. That is the
+    narrating-model case this whole fix exists for.
+    """
+    from core.repair_proposal import _parse_json_object
+
+    raw = (
+        "I'll analyze this. The block currently builds {not: json} before the "
+        "write, and a second literal {a, b} appears in the comment.\n\n"
+        '{"diagnosis": "d", "target_file": "core/x.py", '
+        '"proposed_content": "x = 1\\n", "evidence": [], "confidence": 0.6}'
+    )
+    parsed = _parse_json_object(raw)
+
+    assert parsed["ok"], parsed.get("error")
+    assert parsed["data"]["confidence"] == 0.6
+
+
+def test_a_json_looking_but_wrong_object_does_not_win_over_the_real_one():
+    """A parseable non-answer earlier in the reply must not be accepted."""
+    from core.repair_proposal import _parse_json_object
+
+    raw = (
+        'Example of the shape I will return: {"note": "illustration only"}\n\n'
+        '{"diagnosis": "real", "target_file": "core/x.py", '
+        '"proposed_content": "x = 1\\n", "evidence": [], "confidence": 0.9}'
+    )
+    parsed = _parse_json_object(raw)
+
+    assert parsed["ok"], parsed.get("error")
+    assert parsed["data"].get("diagnosis") == "real", (
+        "an illustrative object earlier in the reply was accepted as the answer"
+    )
+
+
+def test_the_size_check_measures_what_is_actually_sent(tmp_path: Path):
+    """Redaction can grow the text, and the prompt is built from the redacted copy.
+
+    `[REDACTED:<kind>]` is not the same length as the secret it replaces. A file
+    that fits before redaction can exceed the window after it, and then
+    `_build_prompt` truncates — reintroducing "reproduce what you were not
+    shown" through a different door.
+    """
+    from core.redaction import redact_text
+    from core.repair_proposal import DEFAULT_MAX_CONTEXT_CHARS
+
+    # Not every secret grows: an `sk-…` key shrinks (49 -> 27 chars), while a
+    # `password = "…"` assignment grows (20 -> 32). Only the growing kind can
+    # produce this failure, so the fixture uses that one — and asserts the
+    # premise rather than trusting it.
+    secret_line = 'password = "hunter2"\n'
+    body = secret_line * (DEFAULT_MAX_CONTEXT_CHARS // len(secret_line) - 20)
+    (tmp_path / "secrets.py").write_text(body, encoding="utf-8")
+
+    redacted, _ = redact_text(body)
+    assert len(body) <= DEFAULT_MAX_CONTEXT_CHARS, "fixture must fit before redaction"
+    assert len(redacted) > DEFAULT_MAX_CONTEXT_CHARS, (
+        "fixture does not exercise the case: redaction did not grow it past the "
+        f"window ({len(body)} -> {len(redacted)})"
+    )
+
+    llm = _ExplodingLLM()
+    report = _generator(llm, tmp_path).generate(target_path="secrets.py")
+
+    assert llm.calls == 0, "redaction-expanded content reached the model unchecked"
+    assert report.status in {"rejected", "tool_error"}, report.status
+    assert any("redaction grew it" in w for w in report.warnings), report.warnings
+
+
+def test_a_refusal_before_the_call_is_not_reported_as_an_empty_reply(tmp_path: Path):
+    """"Never asked" and "answered with nothing" need to stay distinguishable.
+
+    That distinction is the entire reason `raw_response_head` exists; the
+    oversized-target refusal was rendering as `{"length": 0, "note": "empty
+    reply"}`, which is what a silent model looks like.
+    """
+    from core.repair_proposal import DEFAULT_MAX_CONTEXT_CHARS
+
+    llm = _ExplodingLLM()
+    target = _write(tmp_path, "huge.py", DEFAULT_MAX_CONTEXT_CHARS + 2_000)
+
+    head = _generator(llm, tmp_path).generate(target_path=target).summary()["raw_response_head"]
+
+    assert llm.calls == 0
+    assert head is None or "not called" in str(head).lower(), (
+        f"a pre-call refusal renders as a model reply: {head}"
+    )
+
+
+def test_the_output_budget_is_configurable_like_the_window(tmp_path: Path):
+    """Both budgets belong to the instance, or only one of them is tunable."""
+    llm = _RecordingLLM()
+    generator = _generator(llm, tmp_path, max_output_tokens=1234)
+
+    assert generator.max_output_tokens == 1234
+
+
 # ── 4. the window must actually cover the codebase ───────────────────────────
 
 def test_the_window_matches_the_self_build_builder(tmp_path: Path):
