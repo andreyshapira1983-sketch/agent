@@ -213,6 +213,87 @@ def test_error_status_from_producer_does_not_spend_cooldown(tmp_path: Path):
     assert _read_producer_state(tmp_path) == {}
 
 
+# ── the DEFAULT builder — the path no test used to exercise ──────────────────
+#
+# Every test above hands in `build_agent_fn`, so the branch a real tick takes
+# (`build_agent_fn is None`) was never executed by the suite. It had been broken
+# since the Phase-7 extraction: the call read
+# `__import__("main", fromlist=["build_agent"])`, `main.py` shrank to 47 lines,
+# and `build_agent` moved to `app.bootstrap` — so every real tick failed with
+# `AttributeError: module 'main' has no attribute 'build_agent'`, reported to the
+# operator as the single word "error". Naming the target in a string is what hid
+# it: there is no import for a linter or for architecture_invariants to resolve.
+
+
+def test_default_builder_calls_app_bootstrap_not_a_string_import(tmp_path: Path,
+                                                                 monkeypatch):
+    """No `build_agent_fn`: the real branch must reach `app.bootstrap`."""
+    import app.bootstrap as bootstrap
+
+    seen: list[dict] = []
+
+    def _fake_build_agent(workspace, **kwargs):
+        seen.append({"workspace": workspace, **kwargs})
+        return SimpleNamespace(
+            model_router=SimpleNamespace(for_role=lambda role: object())
+        )
+
+    monkeypatch.setattr(bootstrap, "build_agent", _fake_build_agent)
+
+    producer = _SpyProducer(_FakeReport("no_patch"))
+    out = _maybe_produce_self_build(
+        tmp_path, _FakeInbox(),
+        now_iso="2026-07-01T12:00:00+00:00", cooldown_hours=12.0,
+        producer_fn=producer,          # deliberately NO build_agent_fn
+    )
+
+    assert out["self_build_status"] != "error", out.get("error")
+    assert seen, "the default builder never reached app.bootstrap.build_agent"
+    assert seen[0]["workspace"] == tmp_path
+    assert seen[0]["approval_provider"] is None
+    assert producer.calls == 1
+
+
+def test_default_builder_passes_the_unattended_memory_profile(tmp_path: Path,
+                                                              monkeypatch):
+    """An unattended tick must not silently get the interactive memory profile."""
+    import app.bootstrap as bootstrap
+
+    seen: list[dict] = []
+    monkeypatch.setattr(
+        bootstrap, "build_agent",
+        lambda workspace, **kw: (
+            seen.append(kw),
+            SimpleNamespace(model_router=SimpleNamespace(for_role=lambda r: object())),
+        )[1],
+    )
+
+    _maybe_produce_self_build(
+        tmp_path, _FakeInbox(),
+        now_iso="2026-07-01T12:00:00+00:00", cooldown_hours=12.0,
+        producer_fn=_SpyProducer(_FakeReport("no_patch")),
+    )
+
+    assert seen, "build_agent was never called"
+    for key, value in agent_tick.UNATTENDED_MEMORY_PROFILE.items():
+        assert seen[0].get(key) == value, key
+
+
+def test_no_build_site_names_its_target_in_a_string():
+    """The shape of the defect, banned at source level.
+
+    `__import__("main", ...)` cannot be resolved by a linter or by
+    `scripts/architecture_invariants.py`, so it survives a refactor that moves
+    the function it names. A plain import breaks loudly instead.
+    """
+    src = Path(agent_tick.__file__).read_text(encoding="utf-8")
+    code = "\n".join(
+        line for line in src.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert '__import__("main"' not in code
+    assert "__import__('main'" not in code
+
+
 # ── hard safety: no lane execution / no git side effects ─────────────────────
 
 
