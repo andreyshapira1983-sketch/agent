@@ -1,3 +1,4 @@
+"""Extracted from `core/operator_intent` by autonomous self-build module split."""
 from __future__ import annotations
 
 import re

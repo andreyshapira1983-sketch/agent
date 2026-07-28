@@ -1,3 +1,4 @@
+"""Extracted from `core/ingestion` by autonomous self-build module split."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
