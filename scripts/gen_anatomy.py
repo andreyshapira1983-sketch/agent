@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import os
 import re
+import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORE = os.path.join(ROOT, "core")
@@ -136,21 +137,27 @@ def build_document() -> str:
     enforced that equality before, which is exactly how `GROUPS` drifted 37
     modules behind `core/` while the map itself looked in sync — the drift check
     compares module *names*, and hand-edits kept those correct.
+
+    Raises :class:`ValueError` on a bad `GROUPS`, never `SystemExit`: this is a
+    library function now, and killing the caller's process is not its decision.
+    `SystemExit` derives from `BaseException`, so an ordinary
+    ``except Exception`` around it would not even catch it. :func:`main` turns
+    the error into a message and exit code 1, exactly as before.
     """
     actual = _actual_modules()
     seen: set[str] = set()
     for _title, _desc, mods in GROUPS:
         for m in mods:
             if m in seen:
-                raise SystemExit(f"module listed twice in GROUPS: {m}")
+                raise ValueError(f"module listed twice in GROUPS: {m}")
             seen.add(m)
 
     missing = sorted(actual - seen)
     unknown = sorted(seen - actual)
     if missing:
-        raise SystemExit(f"modules in core/ not grouped: {missing}")
+        raise ValueError(f"modules in core/ not grouped: {missing}")
     if unknown:
-        raise SystemExit(f"grouped names with no core/ module: {unknown}")
+        raise ValueError(f"grouped names with no core/ module: {unknown}")
 
     out: list[str] = []
     out.append("# Agent Anatomy")
@@ -182,7 +189,13 @@ def build_document() -> str:
 
 
 def main() -> int:
-    text = build_document()
+    try:
+        text = build_document()
+    except ValueError as exc:
+        # Same operator-visible contract the old `raise SystemExit(msg)` had:
+        # the message on stderr, exit code 1.
+        print(exc, file=sys.stderr)
+        return 1
     doc_dir = os.path.join(ROOT, "docs")
     os.makedirs(doc_dir, exist_ok=True)
     with open(os.path.join(doc_dir, "AGENT_ANATOMY.md"), "w", encoding="utf-8", newline="\n") as fh:

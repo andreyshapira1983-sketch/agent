@@ -1,4 +1,7 @@
-"""Extracted from `core/campaign` by autonomous self-build module split."""
+"""Campaign I/O helpers: journal writes, cost totals, and the default signal-gathering and action-executing callbacks.
+
+Extracted from `core/campaign` by autonomous self-build module split.
+"""
 from __future__ import annotations
 
 from pathlib import Path
