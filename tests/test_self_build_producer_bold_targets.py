@@ -39,7 +39,6 @@ def test_policy_accepts_lane_low_risk_files():
     assert _is_self_build_target_allowed("tools/anything.py")
     assert _is_self_build_target_allowed("tests/test_something.py")
     assert _is_self_build_target_allowed("docs/whatever.md")
-    assert _is_self_build_target_allowed("AGENT_DOCTRINE.md")
 
 
 def test_policy_rejects_critical_organs():
@@ -50,6 +49,8 @@ def test_policy_rejects_critical_organs():
         "core/safe_vcs.py",
         "core/self_apply_lane.py",
         "core/self_build_producer.py",
+        "AGENT_DOCTRINE.md",
+        "docs/AGENT_DOCTRINE.md",
         "config/anything.yaml",
     ):
         assert not _is_self_build_target_allowed(organ), organ
@@ -105,20 +106,25 @@ def test_grounded_audit_target_now_selected(tmp_path):
     assert out.data["grounded"] is True
 
 
-def test_grounded_doctrine_doc_target_now_selected(tmp_path):
+def test_grounded_doctrine_doc_targets_are_refused(tmp_path):
     (tmp_path / "AGENT_DOCTRINE.md").write_text("# Doctrine\n", encoding="utf-8")
-    candidate = _Candidate(
-        "AGENT_DOCTRINE.md", "Doctrine and Architecture Source of Truth"
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "AGENT_DOCTRINE.md").write_text(
+        "# Doctrine\n", encoding="utf-8"
     )
 
-    out = _manager_from_grounded(
-        lambda: candidate,
-        DEFAULT_CANDIDATE_TARGETS,
-        workspace=tmp_path,
-    )
+    for target in ("AGENT_DOCTRINE.md", "docs/AGENT_DOCTRINE.md"):
+        candidate = _Candidate(
+            target, "Doctrine and Architecture Source of Truth"
+        )
 
-    assert out.decision == "selected"
-    assert out.data["target"] == "AGENT_DOCTRINE.md"
+        out = _manager_from_grounded(
+            lambda: candidate,
+            DEFAULT_CANDIDATE_TARGETS,
+            workspace=tmp_path,
+        )
+
+        assert out.decision == "no_target", target
 
 
 def test_grounded_critical_target_still_refused(tmp_path):
