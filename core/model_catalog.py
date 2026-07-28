@@ -186,6 +186,21 @@ def _ttl_days() -> int:
         return _DEFAULT_TTL_DAYS
 
 
+def _catalog_age_days(data: dict[str, Any]) -> int | None:
+    """Age of a loaded catalog in whole days, or None when it is undated.
+
+    One definition, used by both the loader (which decides whether to serve the
+    cache) and `catalog_freshness` (which explains why it was not served). Two
+    copies of "is this expired?" that agree today are two copies that can stop
+    agreeing, and the disagreement would show up as a diagnosis contradicting
+    the behaviour it is diagnosing.
+    """
+    updated_at = data.get("updated_at", "")
+    if not updated_at:
+        return None
+    return (datetime.now(timezone.utc) - datetime.fromisoformat(updated_at)).days
+
+
 def _load_catalog() -> dict[str, Any] | None:
     """Load the cached catalog if it exists and is not expired."""
     path = _catalog_path()
@@ -193,12 +208,10 @@ def _load_catalog() -> dict[str, Any] | None:
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        updated_at = data.get("updated_at", "")
-        if updated_at:
-            age = datetime.now(timezone.utc) - datetime.fromisoformat(updated_at)
-            if age.days >= _ttl_days():
-                logger.debug("model_catalog expired (age=%d days)", age.days)
-                return None
+        age_days = _catalog_age_days(data)
+        if age_days is not None and age_days >= _ttl_days():
+            logger.debug("model_catalog expired (age=%d days)", age_days)
+            return None
         return data
     except Exception as exc:
         logger.warning("model_catalog load error: %s", exc)
@@ -419,11 +432,7 @@ def catalog_freshness() -> dict[str, Any]:
                 "ttl_days": _ttl_days(), "path": str(path), "hint": hint}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        updated_at = data.get("updated_at", "")
-        age_days = (
-            (datetime.now(timezone.utc) - datetime.fromisoformat(updated_at)).days
-            if updated_at else None
-        )
+        age_days = _catalog_age_days(data)
     except Exception as exc:  # noqa: BLE001
         return {"status": "unreadable", "expired": False, "age_days": None,
                 "ttl_days": _ttl_days(), "path": str(path),
