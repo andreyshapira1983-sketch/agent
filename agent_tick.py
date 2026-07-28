@@ -640,13 +640,19 @@ def _maybe_produce_self_build(
         # *string*: no import to update, nothing for a linter or for
         # `scripts/architecture_invariants.py` to resolve. A plain import cannot
         # rot the same way — it breaks loudly at import time instead.
-        from app.bootstrap import build_agent as _build_agent
+        if build_agent_fn is not None:
+            builder = build_agent_fn
+        else:
+            # Imported here, not at module scope: `app.bootstrap` pulls in the
+            # whole agent graph, and a caller that supplied its own builder
+            # should not pay for loading it.
+            from app.bootstrap import build_agent as _build_agent
 
-        builder = build_agent_fn or (
-            lambda ws: _build_agent(
-                ws, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
-            )
-        )
+            def builder(ws):
+                return _build_agent(
+                    ws, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
+                )
+
         agent = builder(workspace)
         llm = agent.model_router.for_role("synthesizer")
 
@@ -683,6 +689,11 @@ def _maybe_produce_self_build(
             "approval_id": result.get("approval_id"),
             "target_path": result.get("target_path"),
             "next_human_action": result.get("next_human_action", ""),
+            # `ProducerReport.reason` explains every non-exception outcome
+            # (`dirty_tree_wait`, `veto`, `no_patch`, …). Dropping it here left
+            # the caller with a bare status word for exactly the cases that are
+            # NOT crashes — the common ones.
+            "reason": result.get("reason", ""),
         }
     except Exception as exc:  # noqa: BLE001
         return {
@@ -690,6 +701,31 @@ def _maybe_produce_self_build(
             "error": f"{type(exc).__name__}: {exc}",
             "next_human_action": "",
         }
+
+
+def _self_build_status_line(sb_status: str, sb: dict) -> str:
+    """The operator-facing line for a self-build outcome. Pure, so it is testable.
+
+    Printing the bare status word threw away everything that made the outcome
+    actionable. Three fields carry that, and each covers a different case:
+
+    * ``error``            — the swallowed exception (the wrapper turns every
+      exception into ``status="error"`` so a tick cannot crash, which is right,
+      but left the operator reading one word while the cause went to a
+      different event in ``logs/daemon_tick.jsonl``);
+    * ``reason``           — every *ordinary* refusal: dirty tree, veto,
+      no_patch. These are the common outcomes, and they are not crashes;
+    * ``next_human_action`` — what to do about it.
+    """
+    detail = sb.get("error") or sb.get("reason") or ""
+    advice = sb.get("next_human_action") or ""
+    line = f"[agent_tick] Self-build producer: {sb_status}"
+    if detail:
+        line += f" - {detail}"
+    line += "."
+    if advice:
+        line += f" {advice}"
+    return line
 
 
 # ── main tick ─────────────────────────────────────────────────────────────────
@@ -1151,14 +1187,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
             file=sys.stderr,
         )
     elif sb_status not in ("none", "cooldown_wait"):
-        # Print WHY, not just the status word. The wrapper swallows every
-        # exception into `status="error"` so a tick cannot crash here — which is
-        # right, but it left the operator reading a bare "error" while the cause
-        # sat in `logs/daemon_tick.jsonl` under a different event. A failure the
-        # operator cannot act on is barely better than a silent one.
-        detail = sb.get("error") or sb.get("reason") or ""
-        suffix = f" - {detail}" if detail else ""
-        print(f"[agent_tick] Self-build producer: {sb_status}{suffix}.", file=sys.stderr)
+        print(_self_build_status_line(sb_status, sb), file=sys.stderr)
     if pending:
         print(f"[agent_tick] {pending} item(s) waiting in approval inbox.", file=sys.stderr)
     else:

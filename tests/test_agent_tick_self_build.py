@@ -294,6 +294,64 @@ def test_no_build_site_names_its_target_in_a_string():
     assert "__import__('main'" not in code
 
 
+# ── what the operator is actually told ───────────────────────────────────────
+
+
+def test_status_line_reports_a_swallowed_exception():
+    line = agent_tick._self_build_status_line(
+        "error", {"error": "AttributeError: module 'main' has no attribute 'build_agent'"}
+    )
+    assert "error" in line
+    assert "AttributeError" in line, line
+
+
+def test_status_line_reports_an_ordinary_refusal_and_what_to_do():
+    """The case the first attempt at this missed.
+
+    `dirty_tree_wait` / `veto` / `no_patch` are not exceptions, so they carry a
+    `reason` rather than an `error`. Reading only `error` printed a bare status
+    word for exactly the outcomes that happen most often.
+    """
+    line = agent_tick._self_build_status_line(
+        "dirty_tree_wait",
+        {
+            "reason": "working tree has uncommitted changes",
+            "next_human_action": "Commit or stash local changes, then retry.",
+        },
+    )
+    assert "dirty_tree_wait" in line
+    assert "uncommitted changes" in line, line
+    assert "Commit or stash" in line, line
+
+
+def test_status_line_degrades_to_the_bare_status_when_nothing_explains_it():
+    line = agent_tick._self_build_status_line("no_patch", {})
+    assert line == "[agent_tick] Self-build producer: no_patch."
+
+
+def test_the_wrapper_passes_the_producer_reason_through():
+    """`reason` must survive the wrapper, or the status line has nothing to say."""
+    class _ReasonedReport:
+        def to_dict(self):
+            return {
+                "status": "dirty_tree_wait",
+                "reason": "working tree has uncommitted changes",
+                "next_human_action": "Commit or stash local changes, then retry.",
+            }
+
+    out = _maybe_produce_self_build(
+        Path("."), _FakeInbox(),
+        now_iso="2026-07-01T12:00:00+00:00", cooldown_hours=12.0,
+        build_agent_fn=_SpyBuildAgent(),
+        producer_fn=_SpyProducer(_ReasonedReport()),
+    )
+    assert out["self_build_status"] == "dirty_tree_wait"
+    assert out["reason"] == "working tree has uncommitted changes"
+    assert "uncommitted changes" in agent_tick._self_build_status_line(
+        out["self_build_status"], out
+    )
+
+
 # ── hard safety: no lane execution / no git side effects ─────────────────────
 
 
