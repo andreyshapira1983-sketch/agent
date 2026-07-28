@@ -648,9 +648,9 @@ def _maybe_produce_self_build(
             # should not pay for loading it.
             from app.bootstrap import build_agent as _build_agent
 
-            def builder(ws):
+            def builder(ws_path):
                 return _build_agent(
-                    ws, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
+                    ws_path, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
                 )
 
         agent = builder(workspace)
