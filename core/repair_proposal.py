@@ -23,7 +23,10 @@ import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:  # import-time cycle otherwise; only needed for the annotation
+    from core.task_complexity import ComplexityTier
 
 from core.llm import LLM
 from core.redaction import redact_payload, redact_text
@@ -79,7 +82,7 @@ DEEP_REPAIR_CHARS = 20_000
 DEEP_REPAIR_FAILING_TESTS = 4
 
 
-def repair_complexity(*, target_chars: int, failing_tests: int) -> Any:
+def repair_complexity(*, target_chars: int, failing_tests: int) -> "ComplexityTier":
     """How hard is this repair, from the work itself rather than from wording.
 
     `assess_complexity` reads prose for signals ("архитектур", "from scratch"),

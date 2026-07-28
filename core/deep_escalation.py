@@ -114,11 +114,13 @@ class DeepEscalationRequest:
     deep_model_available: bool = True
     budget_ok: bool = False
     operator_approved: bool = False
-    #: The model cache is stale, so "no model at this tier" is a cache fact, not
-    #: a provider fact. Same downgrade either way — but the recorded reason has
-    #: to send the operator to `:refresh-models` rather than to their provider
-    #: dashboard, which is where `no_deep_model` sent them.
-    catalog_expired: bool = False
+    #: State of the model cache when the tier could not be resolved: `expired`,
+    #: `missing`, `unreadable`, or `fresh`/None when the cache is not the
+    #: explanation. All three bad states mean "no model at this tier" is a
+    #: *cache* fact rather than a provider fact, and all three are fixed by
+    #: `:refresh-models` — but they are reported separately because "never built"
+    #: and "went stale" are different things to read in a ledger.
+    catalog_status: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -128,7 +130,7 @@ class DeepEscalationRequest:
             "deep_model_available": self.deep_model_available,
             "budget_ok": self.budget_ok,
             "operator_approved": self.operator_approved,
-            "catalog_expired": self.catalog_expired,
+            "catalog_status": self.catalog_status,
         }
 
 
@@ -221,12 +223,16 @@ def evaluate_deep_escalation(request: DeepEscalationRequest) -> DeepEscalationDe
         return _downgrade("role_not_eligible")
     if not request.deep_model_available:
         # Same outcome, different instruction. "No model at this tier" tells the
-        # operator to look at their provider; "catalog expired" tells them the
-        # cached list went stale and one command fixes it. Reporting the first
-        # when the second is true costs an investigation.
-        return _downgrade(
-            "catalog_expired" if request.catalog_expired else "no_deep_model"
-        )
+        # operator to look at their provider; a cache state tells them the list
+        # is stale/absent and one command fixes it. Reporting the first when the
+        # second is true costs an investigation — that is the whole point of
+        # carrying the status. `missing` and `unreadable` count too: they were
+        # falling through to `no_deep_model`, which is exactly the misleading
+        # message this distinction exists to remove.
+        status = request.catalog_status
+        if status and status != "fresh":
+            return _downgrade(f"catalog_{status}")
+        return _downgrade("no_deep_model")
     if request.reason not in ACTIVE_REASONS:
         return _downgrade("missing_reason")
     if request.expected_output not in EXPECTED_OUTPUTS:

@@ -1285,9 +1285,16 @@ class ModelRouter:
             # empty `tier_model`, and used to produce the same downgrade reason.
             # They need different actions from the operator, so the gate is told
             # which one it is.
-            from core.model_catalog import catalog_freshness
+            #
+            # Read only when the tier failed to resolve: when a model was found
+            # the cache is self-evidently usable, and this would be a second
+            # disk read on the routing path for nothing.
+            _catalog_status = None
+            if not tier_model:
+                from core.model_catalog import catalog_freshness
 
-            _catalog_state = catalog_freshness()
+                _catalog_status = catalog_freshness().get("status")
+
             decision = evaluate_deep_escalation(DeepEscalationRequest(
                 role=role_key,
                 reason=getattr(escalation, "reason", None),
@@ -1295,7 +1302,7 @@ class ModelRouter:
                 deep_model_available=bool(tier_model),
                 budget_ok=getattr(escalation, "budget_ok", False),
                 operator_approved=getattr(escalation, "operator_approved", False),
-                catalog_expired=bool(_catalog_state.get("expired")),
+                catalog_status=_catalog_status,
             ))
             # No extra event: the router has no logger of its own, and the
             # decision's `route_reason` is already written to the usage ledger

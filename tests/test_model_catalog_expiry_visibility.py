@@ -108,8 +108,7 @@ def test_a_fresh_catalog_still_resolves_the_tier(tmp_path, monkeypatch):
 
 # ── the gate distinguishes the two causes ────────────────────────────────────
 
-def test_the_downgrade_reason_separates_stale_from_absent():
-    """`no_deep_model` and `catalog_expired` send the operator to different places."""
+def _gate(**overrides):
     from core.deep_escalation import DeepEscalationRequest, evaluate_deep_escalation
 
     base = dict(
@@ -118,19 +117,36 @@ def test_the_downgrade_reason_separates_stale_from_absent():
         expected_output="minimal_patch_plan",
         budget_ok=True,
         operator_approved=False,
+        deep_model_available=False,
     )
+    base.update(overrides)
+    return evaluate_deep_escalation(DeepEscalationRequest(**base))
 
-    absent = evaluate_deep_escalation(
-        DeepEscalationRequest(deep_model_available=False, **base)
-    )
-    stale = evaluate_deep_escalation(
-        DeepEscalationRequest(deep_model_available=False,
-                              catalog_expired=True, **base)
-    )
 
-    assert absent.downgraded and stale.downgraded
-    assert absent.route_reason == "deep_downgraded:no_deep_model"
+def test_the_downgrade_reason_separates_cache_state_from_provider_fact():
+    """`no_deep_model` and a cache state send the operator to different places."""
+    provider_really_has_none = _gate(catalog_status=None)
+    stale = _gate(catalog_status="expired")
+
+    assert provider_really_has_none.downgraded and stale.downgraded
+    assert provider_really_has_none.route_reason == "deep_downgraded:no_deep_model"
     assert stale.route_reason == "deep_downgraded:catalog_expired", (
         "a stale cache is reported as a missing model, which sends the operator "
         "to check their provider instead of running :refresh-models"
     )
+
+
+def test_every_unusable_cache_state_is_named(monkeypatch):
+    """`missing` and `unreadable` need the same rescue, and were falling through.
+
+    Raised in review: both used to land on `no_deep_model` — the very message
+    this distinction exists to stop showing.
+    """
+    for status in ("expired", "missing", "unreadable"):
+        decision = _gate(catalog_status=status)
+        assert decision.route_reason == f"deep_downgraded:catalog_{status}", status
+
+
+def test_a_fresh_cache_does_not_excuse_a_missing_model():
+    """With the cache healthy, an empty tier really is a provider fact."""
+    assert _gate(catalog_status="fresh").route_reason == "deep_downgraded:no_deep_model"
