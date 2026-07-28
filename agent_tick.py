@@ -630,8 +630,20 @@ def _maybe_produce_self_build(
         if vcs is None:
             vcs = SafeVCS(workspace=workspace)
 
+        # `app.bootstrap`, like the other two build sites in this file. This used
+        # to read `__import__("main", fromlist=["build_agent"])`, and the Phase-7
+        # extraction that reduced `main.py` to 47 lines moved `build_agent` out
+        # from under it — so every real tick died here with
+        # `AttributeError: module 'main' has no attribute 'build_agent'`.
+        #
+        # It survived the extraction because the call named its target in a
+        # *string*: no import to update, nothing for a linter or for
+        # `scripts/architecture_invariants.py` to resolve. A plain import cannot
+        # rot the same way — it breaks loudly at import time instead.
+        from app.bootstrap import build_agent as _build_agent
+
         builder = build_agent_fn or (
-            lambda ws: __import__("main", fromlist=["build_agent"]).build_agent(
+            lambda ws: _build_agent(
                 ws, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
             )
         )
@@ -1139,7 +1151,14 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
             file=sys.stderr,
         )
     elif sb_status not in ("none", "cooldown_wait"):
-        print(f"[agent_tick] Self-build producer: {sb_status}.", file=sys.stderr)
+        # Print WHY, not just the status word. The wrapper swallows every
+        # exception into `status="error"` so a tick cannot crash here — which is
+        # right, but it left the operator reading a bare "error" while the cause
+        # sat in `logs/daemon_tick.jsonl` under a different event. A failure the
+        # operator cannot act on is barely better than a silent one.
+        detail = sb.get("error") or sb.get("reason") or ""
+        suffix = f" - {detail}" if detail else ""
+        print(f"[agent_tick] Self-build producer: {sb_status}{suffix}.", file=sys.stderr)
     if pending:
         print(f"[agent_tick] {pending} item(s) waiting in approval inbox.", file=sys.stderr)
     else:
