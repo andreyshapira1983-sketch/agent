@@ -108,6 +108,68 @@ def test_deep_work_is_allowed_once_the_operator_funds_it(monkeypatch):
     assert decision.approved, decision.route_reason
 
 
+# ── the failing-test signal must actually reach the decision ─────────────────
+#
+# The first version of this wiring passed `failing_tests=0` as a literal, so the
+# "many red tests → deep" half of `repair_complexity` could never fire in the
+# real path — the logic existed, the tests covered it, the docstring described
+# it, and production always got zero. Caught in review by Aikido.
+#
+# The count is only knowable *after* the baseline run, which happens inside
+# `generate()`, while the model was being built before it. So the generator now
+# asks for its model once the baseline is in, and these tests pin that the
+# question carries the real number.
+
+
+def test_the_generator_asks_for_its_model_after_the_baseline(tmp_path):
+    """The selector is called with the count the baseline actually produced."""
+    from core.repair_proposal import RepairProposalGenerator
+
+    (tmp_path / "target.py").write_text("x = 1\n", encoding="utf-8")
+    asked: list[int] = []
+
+    class _Recorder:
+        def complete(self, **kwargs):
+            return '{"diagnosis": "d", "target_file": "target.py", ' \
+                   '"proposed_content": "x = 2\\n", "evidence": [], "confidence": 0.5}'
+
+    class _RunTests:
+        def run(self, **kwargs):
+            return {"exit_code": 1, "passed": 1, "failed": 3, "errors": 0,
+                    "timed_out": False, "skipped": 0, "total": 4}
+
+        def validate_output(self, output):
+            return True, []
+
+    def _selector(failing_tests: int):
+        asked.append(failing_tests)
+        return _Recorder()
+
+    generator = RepairProposalGenerator(
+        workspace_root=tmp_path, llm=_Recorder(), llm_selector=_selector
+    )
+    generator.run_tests = _RunTests()
+    generator.generate(target_path="target.py")
+
+    assert asked == [3], (
+        f"the model was chosen with {asked} failing tests, not the 3 the "
+        f"baseline reported"
+    )
+
+
+def test_the_wiring_does_not_hardcode_the_failing_count():
+    """Source-level guard: the literal that made this unreachable is banned."""
+    source = Path("core/loop_methods.py").read_text(encoding="utf-8")
+    start = source.index("def propose_repair(")
+    end = source.index("def repair(", start)
+    body = source[start:end]
+
+    assert "failing_tests=0" not in body, (
+        "the failing-test signal is pinned to zero again, so the count can "
+        "never influence the tier no matter what the baseline reports"
+    )
+
+
 # ── the wiring itself ────────────────────────────────────────────────────────
 
 def test_propose_repair_no_longer_uses_the_unescalatable_path():
@@ -117,13 +179,19 @@ def test_propose_repair_no_longer_uses_the_unescalatable_path():
     end = source.index("def repair(", start)
     body = source[start:end]
 
-    # The call, not the word: the docstring explains why `for_role` was wrong,
-    # and a substring check would trip over its own explanation.
-    assert "model_router.for_role(" not in body, (
-        "propose_repair still builds its model through for_role, which cannot "
-        "escalate whatever the task turns out to be"
+    # The model that answers the request must come from `for_task`, chosen by a
+    # selector once the baseline is known. A `for_role` call may still appear as
+    # the placeholder for paths that never reach the model at all (unreadable
+    # target, already-green tests) — so the invariant is about how the *request*
+    # is routed, not about the word being absent.
+    assert "model_router.for_task(" in body, (
+        "propose_repair does not route its request through for_task, which is "
+        "the only path that can escalate"
     )
-    assert "model_router.for_task(" in body
+    assert "llm_selector=" in body, (
+        "the model is fixed before the baseline runs, so the failing-test half "
+        "of the difficulty signal cannot reach the decision"
+    )
 
 
 def test_propose_repair_asks_with_a_concrete_deliverable():
