@@ -1,21 +1,16 @@
 # Agent Anatomy
 
-Grouped module index for the **`core/`** package only, organized by the
+Grouped module index for the `core/` package, organized by the
 architecture sections (§1–§12). Modules physically live flat in `core/`
 — their paths are used as semantic identifiers elsewhere (planner
 self-build targets, locators, audits), so this map groups them
 *logically* without moving files.
 
-**Scope limit:** this file is **not** a full system map. It does **not**
-catalog `app/`, `api/`, `docker/`, `cli/`, `tools/`, or
-`project_intelligence/`. For entry points and wiring, see `README.md`,
-`docs/ROADMAP.md`, and `docs/daemon-progress.md`.
-
 Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 138 modules across 12 groups._
+_Total: 144 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -25,9 +20,9 @@ _Operator-facing I/O, intent routing, output shaping._
 | ------ | ------- |
 | `core/operator_intent` | Conversational routing for operator-control requests. |
 | `core/operator_intent_patterns` | Extracted from `core/operator_intent` by autonomous self-build module split. |
-| `core/intent_understanding` | Model-based intent translator: plain language → grounded agent action or conversation (kernel-truth grounded, safe fallback). |
-| `core/output_policy` | Ranker-to-output policy: body edits applied here, warnings reported for composition. |
-| `core/response_draft` | The answer under construction — claims vs. notices, and the single point where the deciders' contributions are composed. |
+| `core/intent_understanding` | Intent understanding — the translator between plain human language and the autonomous agent's actions. |
+| `core/lang_match` | Language-aware term matching for question routing. |
+| `core/output_policy` | Ranker-to-output policy. |
 | `core/user_profile` | User Profile — Layer 4 (User Mental Model). |
 | `core/truth_hype_filter` | Truth/Hype Filter — the first LEARNING antibody (правда vs шумиха). |
 | `core/alert_ack` | Operator acknowledgement for advisory alerts — retire accepted signals. |
@@ -51,31 +46,33 @@ _Planning, verification, clarification, control loop._
 | Module | Purpose |
 | ------ | ------- |
 | `core/loop` | Control Loop — Observe -> Interpret -> Plan -> Act -> Verify -> Respond. |
-| `core/referent_resolver` | Deterministic referent resolution for local critique and show-only turns. |
-| `core/loop_helpers` | Extracted from `core/loop` by autonomous self-build module split. |
-| `core/loop_methods` | Extracted from `core/loop` by autonomous self-build module split. |
-| `core/loop_methods2` | Extracted from `core/loop` by autonomous self-build module split. |
-| `core/run_context` | Run-scoped identity for one agent cycle (run_id per attempt, task_id per logical task). |
+| `core/loop_helpers` | Helpers extracted verbatim from ``core/loop.py`` by the incremental splitter. |
+| `core/loop_methods` | Methods extracted verbatim from ``AgentLoop`` in ``core/loop.py`` by the incremental splitter. |
+| `core/loop_methods2` | Methods extracted verbatim from ``AgentLoop`` in ``core/loop.py`` by the incremental splitter. |
 | `core/planner` | LLM-driven Planner (§3 Cognitive Core: Planning). |
-| `core/lang_match` | Token-boundary, morphology-aware term matching (RU/EN) for routing heuristics. |
 | `core/verifier` | MVP-14.4 — Verifier. |
-| `core/verifier_patterns` | Extracted from `core/verifier` by autonomous self-build module split. |
-| `core/verifier_models` | Extracted from `core/verifier` by autonomous self-build module split. |
-| `core/verifier_utils` | Extracted from `core/verifier` by autonomous self-build module split. |
 | `core/verifier_core` | Extracted from `core/verifier` by autonomous self-build module split. |
+| `core/verifier_models` | Extracted from `core/verifier` by autonomous self-build module split. |
+| `core/verifier_patterns` | Extracted from `core/verifier` by autonomous self-build module split. |
+| `core/verifier_utils` | Extracted from `core/verifier` by autonomous self-build module split. |
 | `core/replan` | MVP-12 — Re-planning policy: structured failure types + retry budgets. |
 | `core/reflection` | Reflection engine — self-improvement feedback loop. |
 | `core/clarification_gate` | Clarification Gate — режим переспроса (ask, don't build). |
 | `core/clarification_policy` | Clarification Policy (§3 Cognitive Core — Clarification Policy). |
 | `core/assumption_registry` | Assumption Registry — Layer 5 (Explicit Planning Assumptions). |
-| `core/evidence_support` | Evidence support for one answer — the ratio **and** whether the question applies at all (`no_evidence_expected` -> score `None`). Telemetry, not a gate. Renamed from `confidence_gate` 2026-07-27. |
+| `core/referent_resolver` | Referent resolution for local critique / show-only turns (plan critique PR1). |
+| `core/evidence_support` | Evidence support — how well the gathered sources back THIS answer; telemetry, not a gate. |
 | `core/confidence_vector` | Decompose answer confidence into a three-axis vector. |
 | `core/reasoning_action_check` | Reasoning ↔ action consistency check — MAST FM-2.6 (13.2%). |
 | `core/best_next_action` | Priority intelligence: choose the single most important next action. |
 | `core/task_complexity` | Task Complexity Assessment — automatic model tier selection. |
 | `core/low_evidence_policy` | Low-evidence answer policy. |
-| `core/unsupported_claims` | Claim-level answer enforcement (critique plan PR3): separates insufficient-evidence, verifier-failure soft-fail, and unsupported world-claim outcomes. Long-answer truncation is always on; `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` gates only the claim-level short path. |
+| `core/unsupported_claims` | Claim-level answer enforcement (critique plan PR3) — long-answer truncation is always on, while `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` gates only the claim-level short path. |
 | `core/subsystem_disagreement` | Detect disagreements between cognitive subsystems on the same turn. |
+| `core/completion_marker` | An attempt-bound channel for the synthesizer's completion declaration. |
+| `core/completion_obligation` | Did this cycle incur an obligation to observe or act, and leave it unmet? |
+| `core/response_draft` | The answer under construction — an object the deciders contribute to. |
+| `core/synth_resilience` | Synthesizer resilience ladder. |
 | `core/strategy_router` | Strategy Router: deliberation kernel layer BEFORE the LLM planner. |
 | `core/role_router` | Role / mode routing for the agent core. |
 | `core/prompt_registry` | §3.x Prompt Registry — centralised tracking of all LLM system prompts. |
@@ -92,7 +89,6 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/smart_memory` | Episodic, procedural and consolidation memory for autonomous operation. |
 | `core/memory_policy` | Memory Write Policy + Memory Retrieval Policy (§4 + §12.4). |
 | `core/memory_echo_antibody` | Memory Echo Antibody (A1) — refuse agent-auto memory that *echoes* itself. |
-| `core/heartbeat_io` | Daemon liveness record — write, read, age, staleness. Owned by the core because "is the daemon alive" is an input to a decision. |
 | `core/hygiene` | Memory Hygiene (§4 Memory Governance — cleanup, dedup, expiry, summarise). |
 | `core/episodic_hygiene` | Episodic memory hygiene — staleness scoring and pruning. |
 | `core/knowledge_use_policy` | Contextual memory-use policy. |
@@ -102,9 +98,8 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/ingestion_utils` | Extracted from `core/ingestion` by autonomous self-build module split. |
 | `core/structured_facts` | Structured fact extraction for tool outputs. |
 | `core/evidence` | MVP-14.1 — Evidence + Provenance model. |
+| `core/evidence_classes` | Evidence classes — *what kind* of support a claim actually needs (issue #119). |
 | `core/evidence_budget` | Evidence Budget — caps context sent to the synthesizer LLM. |
-| `core/evidence_classes` | Evidence classes — what kind of support a claim needs (external world / session dialogue / trace / self-analysis / generative); issue #119. |
-| `core/completion_marker` | Nonce-bearing channel for the synthesizer's task-completion declaration (MIR-057). |
 | `core/conflict_review` | Operator-facing conflict review for the Source Registry. |
 | `core/source_registry` | Source Registry and extracted claims. |
 | `core/source_registry_store` | Persistent store for SourceRegistry. |
@@ -122,7 +117,6 @@ _Effect gateways, receipts, compensation, VCS safety._
 | `core/gateway_consult` | Gateway hard-stop consult helpers (G5a). |
 | `core/tool_receipts` | Append-only tool receipt ledger — Stage 1 evidence layer (slice 1a + G5b). |
 | `core/receipt_consumer` | Tool receipts slice 1c — minimal consumer for verifier integration. |
-| `core/completion_obligation` | Premature completion as an UNMET OBLIGATION (S3): intent / plan / freshness are wired, `acceptance_criteria` is reported `not_wired`. Replaces the keyword detector as the source of truth. |
 | `core/compensation` | Compensation System (§5 Undo) — first introduced for MVP-11 shell_exec. |
 | `core/safe_vcs` | Narrow, safe VCS helper for the trusted self-apply lane (TD-023). |
 | `core/supply_chain` | Release/supply-chain audit helpers. |
@@ -136,12 +130,12 @@ _Autonomous loop, scheduling, budgets, state durability._
 | `core/autonomous_runtime` | Autonomous runtime orchestrator. |
 | `core/scheduler` | Persistent scheduler for autonomous runtime tasks. |
 | `core/campaign` | 24/48h autonomous work campaign engine. |
-| `core/campaign_types` | Extracted from `core/campaign` by autonomous self-build module split. |
-| `core/campaign_ledger` | Extracted from `core/campaign` by autonomous self-build module split. |
 | `core/campaign_io` | Extracted from `core/campaign` by autonomous self-build module split. |
+| `core/campaign_ledger` | Extracted from `core/campaign` by autonomous self-build module split. |
+| `core/campaign_types` | Extracted from `core/campaign` by autonomous self-build module split. |
 | `core/work_session` | MVP-17.1  Long Work Session Skeleton. |
-| `core/task_lifecycle` | One place that decides what a finished run does to its queue row: outcome → status, task heartbeat, guarded startup recovery (MIR-039/MIR-040). |
 | `core/task_queue` | Persistent task queue for autonomous runtime work. |
+| `core/task_lifecycle` | One place that decides what a finished run does to its queue row (MIR-039). |
 | `core/checkpoint` | §3.5 Checkpoint / Resume — durable mid-run state. |
 | `core/circuit_breaker` | Circuit breaker for bounded autonomous runtime runs. |
 | `core/termination_guard` | Termination awareness — addresses MAST FM-1.5 and FM-3.1. |
@@ -150,15 +144,14 @@ _Autonomous loop, scheduling, budgets, state durability._
 | `core/budget_governor` | Budget governor for autonomous runtime loops. |
 | `core/budget_ledger` | Persistent budget windows for long-running autonomous work. |
 | `core/budget_kill_switch` | Persistent budget kill-switch for autonomous / daemon execution (TD-022). |
+| `core/run_context` | Run-scoped identity for one agent cycle. |
 | `core/state_integrity` | Integrity helpers for small JSONL state stores. |
 | `core/state_store_drill` | Live state-store recovery drill for operator readiness checks. |
 | `core/file_lock` | Small cross-platform file lock for JSONL state stores. |
+| `core/heartbeat_io` | Daemon liveness record — write, read, age, staleness. |
 | `core/backlog_selector` | Grounded backlog selector for the self-build producer (TD-036, Phase 1). |
 | `core/backlog_signals` | Read-only parsers for grounded self-build backlog signals (TD-036, Phase 1). |
 | `core/backlog_target_mapper` | Deterministic mapper from abstract backlog items to concrete self-build targets. |
-| `core/dependency_map` | Project import/dependency map: who imports a module, which symbols, which tests — contract input for self-build changes. |
-| `core/self_build_rules` | Hard rules learned from rollbacks (e.g. ImportError symbols that must stay importable), enforced deterministically by the self-build critic. |
-| `core/incremental_splitter` | Deterministic (no-LLM) incremental splitter for oversized modules: moves one dependency-closed block per step verbatim into a sibling module (or a class mixin), keeping every import path working. |
 
 ## Security, Policy & Autonomy Governance (§7)
 
@@ -199,11 +192,14 @@ _Reflection-driven repair, self-build, value gating._
 | `core/self_apply_bridge` | Approval -> trusted self-apply lane bridge (TD-024). |
 | `core/self_apply_lane` | Trusted low-risk self-apply lane (TD-023). |
 | `core/self_build_producer` | Subagent-backed full self-apply proposal producer (TD-025). |
-| `core/self_build_memory` | Journals self-build/self-apply outcomes (and why) into episodic memory. |
-| `core/self_improvement_issues` | Durable open/verified/resolved lifecycle registry for self-improvement failures. |
-| `core/self_task_producer` | Stage-A coding-task producer: turns a code TODO/FIXME into a task + failing acceptance test for human approval (roadmap Ступень 1). |
-| `core/self_task_builder` | Stage-B coding-task builder: implements one approved coding task so its frozen acceptance test passes, then proposes it to the self-apply lane (roadmap Ступень 1). |
 | `core/self_build_supervisor` | Lightweight, read-only self-build supervisor cycle. |
+| `core/self_build_memory` | Record self-build / self-apply attempt outcomes into episodic memory. |
+| `core/self_build_rules` | Hard rules learned from self-build rollbacks. |
+| `core/self_task_producer` | Stage A of the coding-skill ladder (roadmap Ступень 1): propose a grounded coding TASK plus its acceptance test for HUMAN approval. |
+| `core/self_task_builder` | Stage B of the coding-skill ladder (roadmap Ступень 1): write code to make a HUMAN-APPROVED, FROZEN acceptance test pass. |
+| `core/self_improvement_issues` | Durable lifecycle registry for self-improvement failures. |
+| `core/incremental_splitter` | Incremental splitter for oversized Python modules (junior-plan item #5). |
+| `core/dependency_map` | Project import/dependency map for self-build changes. |
 | `core/learning_planner` | Learning planner. |
 | `core/value_review` | TD-032 — human value-review verdicts for self-build / self-apply outcomes. |
 | `core/proposal_value_gate` | Deterministic pre-publish value gate for self-build proposals (TD-035). |
@@ -219,21 +215,16 @@ _Model discovery, routing, usage accounting._
 | `core/model_discovery` | Live Model Discovery + Provider Catalog diff — read-only / dry-run (TD-011/012). |
 | `core/model_router` | Role-based model routing. |
 | `core/model_usage` | Model usage ledger and budget checks. |
-| `core/synth_resilience` | Synthesizer resilience ladder — retry, adapt, then honest degraded answer on model failure. |
 | `core/model_registry_audit` | Operator-facing audit for model registry and active routes. |
 
 ## Multi-Agent / Subagents (§6)
 
 _Subagent proposals, registry, execution, teams._
 
-> Lifecycle governance (normative spec, not a `core/` module):
-> `docs/SUBAGENT_LIFECYCLE.md` — how sub-agents are proposed, bounded, trusted,
-> evaluated, quarantined and retired.
-
 | Module | Purpose |
 | ------ | ------- |
-| `core/subagent_contract` | Canonical versioned subagent contract and legacy compatibility adapters. |
-| `core/subagent_contract_audit` | Pure post-run pass/fail/unknown policy over typed runtime execution receipts. |
+| `core/subagent_contract` | Canonical subagent contract bridge. |
+| `core/subagent_contract_audit` | Pure post-run audit policy for canonical subagent contracts. |
 | `core/subagent_memory_scope` | MVP-18.1  Autonomous Subagent Proposal Contract. |
 | `core/subagent_registry` | Subagent role performance ledger (TD-028). |
 | `core/subagent_runner` | SubAgent Runner — executes one bounded sub-agent contract using AgentLoop. |

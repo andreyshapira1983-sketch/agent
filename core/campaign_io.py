@@ -1,3 +1,4 @@
+"""Extracted from `core/campaign` by autonomous self-build module split."""
 from __future__ import annotations
 
 from pathlib import Path
