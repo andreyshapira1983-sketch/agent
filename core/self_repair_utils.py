@@ -1,3 +1,4 @@
+"""Extracted from `core/self_repair` by autonomous self-build module split."""
 from __future__ import annotations
 
 from typing import Any

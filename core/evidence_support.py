@@ -1,4 +1,4 @@
-"""Evidence support — how well the gathered sources back THIS answer.
+"""Evidence support — how well the gathered sources back THIS answer; telemetry, not a gate.
 
 Formerly `core/confidence_gate.py`, and the rename is the point. The old
 module computed a single scalar it called *confidence* and, below a threshold,
