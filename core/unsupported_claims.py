@@ -1,4 +1,4 @@
-"""Claim-level answer enforcement (critique plan PR3).
+"""Claim-level answer enforcement (critique plan PR3) — long-answer truncation is always on, while `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` gates only the claim-level short path.
 
 Separates outcomes the chunk-count gate used to conflate:
 

@@ -1,3 +1,4 @@
+"""Extracted from `core/verifier` by autonomous self-build module split."""
 from __future__ import annotations
 
 from dataclasses import dataclass

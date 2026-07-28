@@ -1,19 +1,42 @@
-"""Read-only tests for scripts/agent_anatomy_check.py (TD-029).
+"""Read-only tests for the anatomy map: its drift check AND its generator (TD-029).
 
-These tests only load the script's pure helpers and read existing repo files.
+These tests only load the scripts' pure helpers and read existing repo files.
 They do not run agent code, hit the network, or write files.
+
+## Why the generator is tested here too
+
+`agent_anatomy_check.py` compares *module names* between `core/` and the map, and
+that is all it compares. So the map could be hand-edited into name-sync while
+`gen_anatomy.py` — the thing that is supposed to produce it — drifted 37 modules
+behind `core/` and could not run at all. Nothing failed, because nothing checked
+that the committed document is what the generator actually emits.
+
+`test_the_committed_map_is_exactly_what_the_generator_emits` is that missing
+check. It fails if someone hand-edits the map, if a new `core/` module is not
+grouped, or if a module docstring changes without regenerating.
 """
 from __future__ import annotations
 
 import importlib.util
 import os
+import re
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SCRIPT = os.path.join(_ROOT, "scripts", "agent_anatomy_check.py")
+_GENERATOR = os.path.join(_ROOT, "scripts", "gen_anatomy.py")
+_DOC = os.path.join(_ROOT, "docs", "AGENT_ANATOMY.md")
 
 
 def _load_module():
     spec = importlib.util.spec_from_file_location("agent_anatomy_check", _SCRIPT)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _load_generator():
+    spec = importlib.util.spec_from_file_location("gen_anatomy", _GENERATOR)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -53,6 +76,78 @@ def test_drift_is_detectable_via_set_math():
     documented = mod._documented_modules("core/loop only")
     missing = actual - documented
     assert "planner" in missing  # present in core/, absent from this fake doc
+
+
+# ── The generator, and the equality nobody was checking ──────────────────────
+
+def test_the_committed_map_is_exactly_what_the_generator_emits():
+    """The map is a build artefact; a hand-edit must show up as a red test.
+
+    `build_document()` writes nothing, so this compares without side effects.
+    """
+    gen = _load_generator()
+    with open(_DOC, "r", encoding="utf-8") as handle:
+        committed = handle.read()
+    assert gen.build_document() == committed, (
+        "docs/AGENT_ANATOMY.md differs from `python scripts/gen_anatomy.py`. "
+        "Either regenerate it, or — if a new core/ module needs a home — add it "
+        "to GROUPS in scripts/gen_anatomy.py first."
+    )
+
+
+def test_groups_cover_core_exactly():
+    """Neither an ungrouped module nor a group entry with no module behind it."""
+    gen = _load_generator()
+    grouped = [m for _title, _desc, mods in gen.GROUPS for m in mods]
+    assert len(grouped) == len(set(grouped)), "a module is listed in two groups"
+    assert set(grouped) == gen._actual_modules()
+
+
+def test_every_purpose_cell_is_a_finished_sentence():
+    """The summary is unwrapped before it is cut.
+
+    Reading `splitlines()[0]` truncated wherever the author happened to wrap the
+    docstring, so rows ended mid-clause ("... and the"). Also catches an empty
+    cell, which is what a module with no docstring used to produce.
+    """
+    gen = _load_generator()
+    row = re.compile(r"^\| `core/([a-zA-Z0-9_]+)` \| (.*?) \|$")
+    bad: list[str] = []
+    for line in gen.build_document().splitlines():
+        match = row.match(line)
+        if not match:
+            continue
+        name, purpose = match.group(1), match.group(2).strip()
+        if not purpose or not purpose.endswith((".", "?", "!", ")")):
+            bad.append(f"core/{name}: {purpose!r}")
+    assert not bad, "purpose cells that are empty or cut mid-sentence:\n" + "\n".join(bad)
+
+
+def test_first_doc_line_rejoins_a_wrapped_summary(tmp_path, monkeypatch):
+    """The extraction rule itself, on a planted docstring — no real module needed."""
+    gen = _load_generator()
+    fake_core = tmp_path / "core"
+    fake_core.mkdir()
+    (fake_core / "wrapped.py").write_text(
+        '"""Intent understanding — the translator between plain human language\n'
+        'and the agent\'s actions.\n\n'
+        'A second paragraph that must not appear in the summary.\n"""\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(gen, "CORE", str(fake_core))
+    assert gen._first_doc_line("wrapped") == (
+        "Intent understanding — the translator between plain human language "
+        "and the agent's actions."
+    )
+
+
+def test_first_doc_line_is_empty_for_a_module_without_one(tmp_path, monkeypatch):
+    gen = _load_generator()
+    fake_core = tmp_path / "core"
+    fake_core.mkdir()
+    (fake_core / "bare.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(gen, "CORE", str(fake_core))
+    assert gen._first_doc_line("bare") == ""
 
 
 def test_script_does_not_import_core_or_git():
