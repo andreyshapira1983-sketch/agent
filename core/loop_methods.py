@@ -5,6 +5,8 @@ public surface are unchanged."""
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
 from core.memory_policy import (
     MemoryRetrievalPolicy,
     MemoryWriteDecision,
@@ -34,6 +36,31 @@ from core.model_router import ModelRole, ModelRouter
 from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult, RememberFn
 
 class AgentLoopExtractedMethods:
+    """Methods extracted from ``AgentLoop``, mixed back into it.
+
+    Everything below runs against state that lives on the composed
+    ``AgentLoop``, not here. The declarations that follow are annotations only —
+    no assignment, so nothing is created or shadowed at runtime — and exist so a
+    reader (and a static checker) can see what this mixin requires from its
+    host. They are typed as the loop supplies them.
+
+    Added when a review flagged ``self.model_router`` as an unknown member; the
+    honest fix was not to annotate that one attribute but to state the whole
+    contract, since eight are reached the same way.
+    """
+
+    if TYPE_CHECKING:  # pragma: no cover — declarations, never executed
+        log: Any
+        model_router: ModelRouter
+        persistent_store: Any
+        episodic_store: Any
+        write_policy: Any
+        memory_write_registry: Any
+        compensation_log: Any
+
+        def remember(self, **kwargs: Any) -> Any: ...
+        def _durable_learning_suppressed(self, sink: str) -> bool: ...
+
     def _remember_from_knowledge(
         self,
         content: str,
