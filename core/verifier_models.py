@@ -1,4 +1,7 @@
-"""Extracted from `core/verifier` by autonomous self-build module split."""
+"""Verifier value types: a citation, a claim chunk, and the verification report.
+
+Extracted from `core/verifier` by autonomous self-build module split.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass

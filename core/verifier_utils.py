@@ -1,4 +1,7 @@
-"""Extracted from `core/verifier` by autonomous self-build module split."""
+"""Verifier text utilities: chunk splitting, citation parsing and matching, and statistical-claim detection.
+
+Extracted from `core/verifier` by autonomous self-build module split.
+"""
 from __future__ import annotations
 
 import re

@@ -1,4 +1,7 @@
-"""Extracted from `core/campaign` by autonomous self-build module split."""
+"""Campaign value types: configuration, per-action outcome, and the result of a finished campaign.
+
+Extracted from `core/campaign` by autonomous self-build module split.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

@@ -1,4 +1,7 @@
-"""Extracted from `core/verifier` by autonomous self-build module split."""
+"""The verifier's `verify()` entry point: turns a draft answer and its evidence chain into a per-claim verdict report.
+
+Extracted from `core/verifier` by autonomous self-build module split.
+"""
 from __future__ import annotations
 
 from typing import Any
