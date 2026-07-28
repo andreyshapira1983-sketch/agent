@@ -66,6 +66,37 @@ DEFAULT_MAX_OUTPUT_TOKENS = 16_000
 
 DEFAULT_MAX_CHANGED_LINES = 200
 
+#: Above this much code to reproduce, a repair is deep work. The proposal must
+#: contain the WHOLE post-image (see `_SYSTEM_PROMPT`), so difficulty scales with
+#: file size in a way it does not for ordinary generation: the model has to
+#: reproduce every untouched line exactly *and* land the edit. Measured on
+#: MIR-052 — `gpt-4o-mini` returned all 36 959 chars of `core/loop_methods2.py`
+#: byte-identical, i.e. it spent the whole budget copying and never made the fix.
+DEEP_REPAIR_CHARS = 20_000
+
+#: Or this many red tests at once: several failing assertions rarely share a
+#: one-line cause, so the change is unlikely to be local.
+DEEP_REPAIR_FAILING_TESTS = 4
+
+
+def repair_complexity(*, target_chars: int, failing_tests: int) -> Any:
+    """How hard is this repair, from the work itself rather than from wording.
+
+    `assess_complexity` reads prose for signals ("архитектур", "from scratch"),
+    which is right for an operator's request and useless here: every repair asks
+    the same flat sentence, so it would always come out STANDARD no matter
+    whether the target is 40 lines or 4 000.
+
+    The result is passed to `ModelRouter.for_task` as `force_tier`, which still
+    runs it through the operator-escalation gate — a DEEP assessment is a
+    request, never a grant.
+    """
+    from core.task_complexity import ComplexityTier
+
+    if target_chars >= DEEP_REPAIR_CHARS or failing_tests >= DEEP_REPAIR_FAILING_TESTS:
+        return ComplexityTier.DEEP
+    return ComplexityTier.STANDARD
+
 
 @dataclass
 class ProposalGenerationReport:

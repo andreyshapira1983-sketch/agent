@@ -239,12 +239,55 @@ class AgentLoopExtractedMethods:
         trace_id: str | None = None,
         extra_context: str = "",
     ):
-        """Generate a guarded RepairProposal without applying it."""
-        from core.repair_proposal import RepairProposalGenerator
+        """Generate a guarded RepairProposal without applying it.
+
+        Routed through ``for_task``, not ``for_role``: rewriting a whole module
+        correctly is the hardest thing here, and ``for_role`` cannot escalate no
+        matter how large the target is. The tier is computed from the job (file
+        size, red tests) rather than from the request's wording, then passed as
+        ``force_tier`` — which the router still puts through the operator gate,
+        so this asks for the deep model and never grants it. With no
+        ``AGENT_DEEP_MAX_CALLS_PER_SESSION`` budget set, the ask is refused and
+        the behaviour is identical to before.
+        """
+        from core.deep_escalation import (
+            OperatorEscalation,
+            deep_budget_ok,
+            deep_call_budget,
+        )
+        from core.repair_proposal import RepairProposalGenerator, repair_complexity
+
+        try:
+            _target_chars = len(
+                (Path(workspace_root) / target_path).read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            )
+        except OSError:
+            # Unreadable target is the generator's error to report, not ours;
+            # size 0 simply means "no case for the expensive model".
+            _target_chars = 0
+
+        _tier = repair_complexity(target_chars=_target_chars, failing_tests=0)
+        _limit = deep_call_budget()
+        _escalation = OperatorEscalation(
+            reason="high_value_repair",
+            expected_output="minimal_patch_plan",
+            budget_ok=deep_budget_ok(self.model_router.usage_ledger, limit=_limit),
+            # Never true here. A human typing `--reason` is approving; an
+            # autonomous repair is not, and marking it approved would skip the
+            # budget check that makes this safe.
+            operator_approved=False,
+        )
 
         return RepairProposalGenerator(
             workspace_root=workspace_root,
-            llm=self.model_router.for_role(ModelRole.REPAIR_PROPOSAL),
+            llm=self.model_router.for_task(
+                ModelRole.REPAIR_PROPOSAL,
+                f"repair {target_path}",
+                escalation=_escalation,
+                force_tier=_tier,
+            ),
             logger=self.log,
         ).generate(
             target_path=target_path,
