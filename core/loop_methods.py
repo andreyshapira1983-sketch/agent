@@ -5,6 +5,8 @@ public surface are unchanged."""
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
 from core.memory_policy import (
     MemoryRetrievalPolicy,
     MemoryWriteDecision,
@@ -34,6 +36,31 @@ from core.model_router import ModelRole, ModelRouter
 from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult, RememberFn
 
 class AgentLoopExtractedMethods:
+    """Methods extracted from ``AgentLoop``, mixed back into it.
+
+    Everything below runs against state that lives on the composed
+    ``AgentLoop``, not here. The declarations that follow are annotations only —
+    no assignment, so nothing is created or shadowed at runtime — and exist so a
+    reader (and a static checker) can see what this mixin requires from its
+    host. They are typed as the loop supplies them.
+
+    Added when a review flagged ``self.model_router`` as an unknown member; the
+    honest fix was not to annotate that one attribute but to state the whole
+    contract, since eight are reached the same way.
+    """
+
+    if TYPE_CHECKING:  # pragma: no cover — declarations, never executed
+        log: Any
+        model_router: ModelRouter
+        persistent_store: Any
+        episodic_store: Any
+        write_policy: Any
+        memory_write_registry: Any
+        compensation_log: Any
+
+        def remember(self, **kwargs: Any) -> Any: ...
+        def _durable_learning_suppressed(self, sink: str) -> bool: ...
+
     def _remember_from_knowledge(
         self,
         content: str,
@@ -239,12 +266,70 @@ class AgentLoopExtractedMethods:
         trace_id: str | None = None,
         extra_context: str = "",
     ):
-        """Generate a guarded RepairProposal without applying it."""
-        from core.repair_proposal import RepairProposalGenerator
+        """Generate a guarded RepairProposal without applying it.
+
+        Routed through ``for_task``, not ``for_role``: rewriting a whole module
+        correctly is the hardest thing here, and ``for_role`` cannot escalate no
+        matter how large the target is. The tier is computed from the job (file
+        size, red tests) rather than from the request's wording, then passed as
+        ``force_tier`` — which the router still puts through the operator gate,
+        so this asks for the deep model and never grants it. With no
+        ``AGENT_DEEP_MAX_CALLS_PER_SESSION`` budget set, the ask is refused and
+        the behaviour is identical to before.
+        """
+        from core.deep_escalation import (
+            OperatorEscalation,
+            deep_budget_ok,
+            deep_call_budget,
+        )
+        from core.repair_proposal import RepairProposalGenerator, repair_complexity
+
+        try:
+            _target_chars = len(
+                (Path(workspace_root) / target_path).read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            )
+        except OSError:
+            # Unreadable target is the generator's error to report, not ours;
+            # size 0 simply means "no case for the expensive model".
+            _target_chars = 0
+
+        def _select_llm(failing_tests: int):
+            """Pick the model once the baseline is known.
+
+            Deferred on purpose: the failing-test count is half the difficulty
+            signal and only exists after `generate()` runs the baseline. An
+            earlier version passed a literal 0 here, which silently disabled
+            that half — the logic and its tests existed while production always
+            saw zero.
+            """
+            tier = repair_complexity(
+                target_chars=_target_chars, failing_tests=failing_tests
+            )
+            limit = deep_call_budget()
+            escalation = OperatorEscalation(
+                reason="high_value_repair",
+                expected_output="minimal_patch_plan",
+                budget_ok=deep_budget_ok(self.model_router.usage_ledger, limit=limit),
+                # Never true here. A human typing `--reason` is approving; an
+                # autonomous repair is not, and marking it approved would skip
+                # the budget check that makes this safe.
+                operator_approved=False,
+            )
+            return self.model_router.for_task(
+                ModelRole.REPAIR_PROPOSAL,
+                f"repair {target_path}",
+                escalation=escalation,
+                force_tier=tier,
+            )
 
         return RepairProposalGenerator(
             workspace_root=workspace_root,
+            # Built from size alone, and only used if the generator never gets
+            # as far as the baseline (e.g. an unreadable target).
             llm=self.model_router.for_role(ModelRole.REPAIR_PROPOSAL),
+            llm_selector=_select_llm,
             logger=self.log,
         ).generate(
             target_path=target_path,
