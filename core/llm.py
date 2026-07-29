@@ -375,10 +375,49 @@ class LLM:
 
     @staticmethod
     def _anthropic_supports_temperature(model: str) -> bool:
-        """claude-opus-4+ and some other gen-4 models deprecated the temperature param."""
+        """Whether *model* still accepts `temperature`. Generation 4 dropped it.
+
+        Read the generation as a NUMBER and compare, the way `_is_o_series`
+        below reads the GPT major version. The previous pattern spelled the
+        generation as a literal `4`, so it recognised exactly one generation:
+        every later family sailed past the check and sent `temperature` to an
+        API that rejects it with HTTP 400 — the whole call lost, not degraded.
+
+        That is the same defect the model catalog exists to prevent, one layer
+        down: a version number written into code ages into a bug the moment the
+        provider ships the next one. Nothing here needs editing for gen 6.
+        """
         import re
-        # Match "claude-*-4" or "claude-*-4-N" patterns (generation 4+)
-        return not bool(re.search(r"claude-\w+-4", model.casefold()))
+        # Anthropic changed the ordering at gen-4, and the two schemes must be
+        # told apart before any number can be read as a generation:
+        #   gen-3 and earlier: claude-<generation>-<minor>-<family>-<date>
+        #   gen-4 and later:   claude-<family>-<generation>[-<minor>][-<date>]
+        # Requiring LETTERS where the family belongs is what distinguishes them.
+        # A looser `\w+` matches "3" in "claude-3-5-sonnet" and then reads the
+        # MINOR version 5 as the generation — turning the oldest models into
+        # the newest and dropping a parameter they still accept.
+        match = re.search(r"claude-[a-z]+-(\d+)", model.casefold())
+        return not (match and int(match.group(1)) >= 4)
+
+    @staticmethod
+    def _anthropic_supports_prefill(model: str) -> bool:
+        """Whether *model* accepts a trailing assistant message to continue from.
+
+        Anthropic's native prefill — end the conversation on a partial assistant
+        turn and let the model resume it — is how `complete` continues a reply
+        cut off at `max_tokens`. Generation 5 rejects it: the request must end
+        with a user message, and sending one anyway costs the whole call.
+
+        Observed on claude-opus-5 (HTTP 400, "does not support assistant message
+        prefill"). Applied to generation 5 and later rather than to that one id,
+        for the same reason the temperature check is: a pinned model name is a
+        bug waiting for the next release. The asymmetry justifies erring this
+        way — a model wrongly sent down the fallback path still answers, just
+        via replay-and-ask; a model wrongly sent a prefill loses the call.
+        """
+        import re
+        match = re.search(r"claude-[a-z]+-(\d+)", model.casefold())
+        return not (match and int(match.group(1)) >= 5)
 
     def _complete_anthropic(
         self,
@@ -390,10 +429,18 @@ class LLM:
     ) -> tuple[str, str]:
         messages: list[dict] = [{"role": "user", "content": user}]
         if prior:
-            # Anthropic continues an assistant prefill natively. The prefill must
-            # not end with trailing whitespace, so send it rstripped; the raw
-            # continuation text is appended to the full answer by the caller.
-            messages.append({"role": "assistant", "content": prior.rstrip()})
+            if self._anthropic_supports_prefill(self.model):
+                # Anthropic continues an assistant prefill natively. The prefill must
+                # not end with trailing whitespace, so send it rstripped; the raw
+                # continuation text is appended to the full answer by the caller.
+                messages.append({"role": "assistant", "content": prior.rstrip()})
+            else:
+                # No native prefill: replay the partial answer and ask for the
+                # rest in a closing user turn — the same shape the
+                # OpenAI-compatible path already uses, and the shape these models
+                # require (the conversation must end with a user message).
+                messages.append({"role": "assistant", "content": prior.rstrip()})
+                messages.append({"role": "user", "content": _CONTINUE_INSTRUCTION})
         kwargs: dict = dict(
             model=self.model,
             system=system,
