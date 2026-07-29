@@ -367,13 +367,42 @@ class TestModelHelpers:
     @pytest.mark.parametrize(
         "model,supported",
         [
-            ("claude-3-5-sonnet-20241022", True),   # gen-3 → temperature allowed
+            # gen-3 → temperature allowed. Note the ordering: the generation
+            # comes FIRST here and the family last, the reverse of gen-4+. A
+            # check that grabs the first number it sees reads the minor "5" of
+            # claude-3-5-sonnet as a generation and wrongly drops temperature
+            # from the oldest models — so both gen-3 shapes are pinned.
+            ("claude-3-5-sonnet-20241022", True),
+            ("claude-3-opus-20240229", True),
             ("claude-sonnet-4-5", False),           # gen-4 → temperature dropped
             ("claude-opus-4-1", False),
+            # Generation 5 and beyond. The docstring always said "4+", but the
+            # test stopped at 4 and so did the pattern, so the first gen-5 model
+            # the catalog picked up sent `temperature` and got HTTP 400 back —
+            # observed live on claude-opus-5 through the repair path.
+            ("claude-opus-5", False),
+            ("claude-sonnet-5", False),
+            ("claude-haiku-4-5-20251001", False),
+            ("claude-opus-10", False),             # two-digit generation
         ],
     )
     def test_anthropic_supports_temperature(self, model, supported):
         assert LLM._anthropic_supports_temperature(model) is supported
+
+    @pytest.mark.parametrize(
+        "model,supported",
+        [
+            ("claude-3-5-sonnet-20241022", True),
+            ("claude-3-opus-20240229", True),
+            ("claude-sonnet-4-5", True),      # gen-4 still prefills natively
+            ("claude-opus-4-1", True),
+            ("claude-opus-5", False),         # gen-5 requires a closing user turn
+            ("claude-sonnet-5", False),
+            ("claude-opus-10", False),
+        ],
+    )
+    def test_anthropic_supports_prefill(self, model, supported):
+        assert LLM._anthropic_supports_prefill(model) is supported
 
     @pytest.mark.parametrize(
         "model,is_o",
@@ -664,7 +693,11 @@ class TestHuggingFaceFallsBackToComplete:
 
 import pytest
 
-from core.llm import _auto_continue_enabled, _max_continuations
+from core.llm import (
+    _CONTINUE_INSTRUCTION,
+    _auto_continue_enabled,
+    _max_continuations,
+)
 
 
 class _ScriptedAnthropicMessages:
@@ -781,6 +814,38 @@ class TestLargeOutputContinuation:
         out = llm.complete(system="s", user="u")
         assert out == "AAAA"
         assert len(llm._client.messages.calls) == 1
+
+    def test_gen5_continuation_ends_on_a_user_message(self):
+        """Generation 5 refuses a trailing assistant turn — ask, don't prefill.
+
+        Observed live: continuing a truncated claude-opus-5 reply raised HTTP
+        400 ("the conversation must end with a user message") and the whole
+        call was lost. The partial answer is still replayed, but the request
+        closes with an explicit instruction to resume.
+        """
+        llm = _scripted_anthropic_llm(
+            [("AAAA", 10, 5, "max_tokens"), ("BBBB", 3, 4, "end_turn")],
+            model="claude-opus-5",
+        )
+        out = llm.complete(system="s", user="u")
+        assert out == "AAAABBBB"
+
+        second = llm._client.messages.calls[1]["messages"]
+        assert second[-1]["role"] == "user", (
+            "a gen-5 request that ends on an assistant turn is rejected outright"
+        )
+        assert second[-1]["content"] == _CONTINUE_INSTRUCTION
+        # The partial answer must still be carried back, or the model restarts.
+        assert second[-2] == {"role": "assistant", "content": "AAAA"}
+
+    def test_gen4_continuation_still_uses_native_prefill(self):
+        """The fallback must not spread to models that continue natively."""
+        llm = _scripted_anthropic_llm(
+            [("AAAA", 10, 5, "max_tokens"), ("BBBB", 3, 4, "end_turn")],
+            model="claude-sonnet-4-5",
+        )
+        llm.complete(system="s", user="u")
+        assert llm._client.messages.calls[1]["messages"][-1]["role"] == "assistant"
 
     # --- openai -----------------------------------------------------------
 
