@@ -405,6 +405,26 @@ class TestModelHelpers:
         assert LLM._anthropic_supports_prefill(model) is supported
 
     @pytest.mark.parametrize(
+        "model,generation",
+        [
+            # gen-4+ scheme: claude-<family>-<generation>
+            ("claude-sonnet-4-5", 4),
+            ("claude-opus-4-1", 4),
+            ("claude-haiku-4-5-20251001", 4),
+            ("claude-opus-5", 5),
+            ("claude-opus-10", 10),
+            # gen-3 scheme puts the generation first, so there is no family
+            # name to anchor on and the answer is None, not a number. Reading
+            # a number here would pick up the MINOR version instead.
+            ("claude-3-5-sonnet-20241022", None),
+            ("claude-3-opus-20240229", None),
+            ("gpt-4o", None),
+        ],
+    )
+    def test_anthropic_generation(self, model, generation):
+        assert LLM._anthropic_generation(model) == generation
+
+    @pytest.mark.parametrize(
         "model,is_o",
         [
             ("o1", True),
@@ -846,6 +866,35 @@ class TestLargeOutputContinuation:
         )
         llm.complete(system="s", user="u")
         assert llm._client.messages.calls[1]["messages"][-1]["role"] == "assistant"
+
+    def test_gen5_replay_keeps_boundary_whitespace(self):
+        """Only a PREFILL may not end in whitespace — history may, and must.
+
+        `complete` keeps each leg unstripped precisely so a word split across
+        the truncation boundary rejoins correctly. In the gen-5 shape the
+        partial answer is followed by a user turn, so it is ordinary history
+        and the restriction does not apply: trimming it here would discard the
+        boundary at the one point that decides where the continuation lands.
+        """
+        llm = _scripted_anthropic_llm(
+            [("the quick brown \n", 10, 5, "max_tokens"), ("fox", 3, 4, "end_turn")],
+            model="claude-opus-5",
+        )
+        llm.complete(system="s", user="u")
+
+        replayed = llm._client.messages.calls[1]["messages"][-2]
+        assert replayed == {"role": "assistant", "content": "the quick brown \n"}
+
+    def test_gen4_prefill_is_still_trimmed(self):
+        """The other half of the same rule: a prefill IS rejected with it."""
+        llm = _scripted_anthropic_llm(
+            [("the quick brown \n", 10, 5, "max_tokens"), ("fox", 3, 4, "end_turn")],
+            model="claude-sonnet-4-5",
+        )
+        llm.complete(system="s", user="u")
+
+        prefill = llm._client.messages.calls[1]["messages"][-1]
+        assert prefill == {"role": "assistant", "content": "the quick brown"}
 
     # --- openai -----------------------------------------------------------
 

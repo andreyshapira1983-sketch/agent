@@ -374,33 +374,44 @@ class LLM:
         return "".join(accumulated).strip()
 
     @staticmethod
-    def _anthropic_supports_temperature(model: str) -> bool:
-        """Whether *model* still accepts `temperature`. Generation 4 dropped it.
+    def _anthropic_generation(model: str) -> Optional[int]:
+        """The Claude generation in *model*, or None when the name predates it.
 
-        Read the generation as a NUMBER and compare, the way `_is_o_series`
-        below reads the GPT major version. The previous pattern spelled the
-        generation as a literal `4`, so it recognised exactly one generation:
-        every later family sailed past the check and sent `temperature` to an
-        API that rejects it with HTTP 400 — the whole call lost, not degraded.
+        Read as a NUMBER and compared, the way `_is_o_series` below reads the
+        GPT major version — never spelled as a literal digit. A generation
+        written into code recognises exactly one generation and ages into a bug
+        the moment the provider ships the next: that is the same defect the
+        model catalog exists to prevent, one layer down. Nothing here needs
+        editing for gen 6.
 
-        That is the same defect the model catalog exists to prevent, one layer
-        down: a version number written into code ages into a bug the moment the
-        provider ships the next one. Nothing here needs editing for gen 6.
+        Anthropic changed the ordering at gen-4, and the two schemes must be
+        told apart before any number can be read as a generation:
+
+            gen-3 and earlier:  claude-<generation>-<minor>-<family>-<date>
+            gen-4 and later:    claude-<family>-<generation>[-<minor>][-<date>]
+
+        Requiring LETTERS where the family belongs is what distinguishes them.
+        A looser `\\w+` matches "3" in "claude-3-5-sonnet" and then reads the
+        MINOR version 5 as the generation, turning the oldest models into the
+        newest. So the gen-3 shapes return None here rather than a number, and
+        each caller decides what that means for its own rule.
         """
         import re
-        # Anthropic changed the ordering at gen-4, and the two schemes must be
-        # told apart before any number can be read as a generation:
-        #   gen-3 and earlier: claude-<generation>-<minor>-<family>-<date>
-        #   gen-4 and later:   claude-<family>-<generation>[-<minor>][-<date>]
-        # Requiring LETTERS where the family belongs is what distinguishes them.
-        # A looser `\w+` matches "3" in "claude-3-5-sonnet" and then reads the
-        # MINOR version 5 as the generation — turning the oldest models into
-        # the newest and dropping a parameter they still accept.
         match = re.search(r"claude-[a-z]+-(\d+)", model.casefold())
-        return not (match and int(match.group(1)) >= 4)
+        return int(match.group(1)) if match else None
 
-    @staticmethod
-    def _anthropic_supports_prefill(model: str) -> bool:
+    @classmethod
+    def _anthropic_supports_temperature(cls, model: str) -> bool:
+        """Whether *model* still accepts `temperature`. Generation 4 dropped it.
+
+        Sending it anyway is answered with HTTP 400 — the whole call lost, not
+        degraded. Pre-gen-4 names (no generation to read) still accept it.
+        """
+        generation = cls._anthropic_generation(model)
+        return generation is None or generation < 4
+
+    @classmethod
+    def _anthropic_supports_prefill(cls, model: str) -> bool:
         """Whether *model* accepts a trailing assistant message to continue from.
 
         Anthropic's native prefill — end the conversation on a partial assistant
@@ -410,14 +421,13 @@ class LLM:
 
         Observed on claude-opus-5 (HTTP 400, "does not support assistant message
         prefill"). Applied to generation 5 and later rather than to that one id,
-        for the same reason the temperature check is: a pinned model name is a
-        bug waiting for the next release. The asymmetry justifies erring this
-        way — a model wrongly sent down the fallback path still answers, just
-        via replay-and-ask; a model wrongly sent a prefill loses the call.
+        for the same reason the temperature rule is. The asymmetry justifies
+        erring this way — a model wrongly sent down the fallback path still
+        answers, just via replay-and-ask; a model wrongly sent a prefill loses
+        the call.
         """
-        import re
-        match = re.search(r"claude-[a-z]+-(\d+)", model.casefold())
-        return not (match and int(match.group(1)) >= 5)
+        generation = cls._anthropic_generation(model)
+        return generation is None or generation < 5
 
     def _complete_anthropic(
         self,
@@ -430,16 +440,23 @@ class LLM:
         messages: list[dict] = [{"role": "user", "content": user}]
         if prior:
             # The partial answer goes back either way, or the model restarts
-            # instead of resuming. It must not end with trailing whitespace,
-            # so send it rstripped; the raw continuation text is appended to
-            # the full answer by the caller.
-            messages.append({"role": "assistant", "content": prior.rstrip()})
-            if not self._anthropic_supports_prefill(self.model):
-                # Only the closing turn differs. Models that prefill natively
-                # resume from that trailing assistant message; the rest reject
-                # it outright and need the request to end on a user turn, so
-                # ask for the continuation explicitly — the same shape the
-                # OpenAI-compatible path in this file already uses.
+            # instead of resuming. What differs is whether it is the LAST
+            # message, and that decides both points below.
+            needs_closing_turn = not self._anthropic_supports_prefill(self.model)
+            # Trailing whitespace is rejected only on a trailing assistant turn
+            # — that is what makes it a prefill. Once a user turn follows, the
+            # partial answer is ordinary history and its boundary whitespace has
+            # to survive: `complete` deliberately keeps the legs unstripped so a
+            # continuation is not glued on at the wrong place, and trimming here
+            # would throw that away at the one point it matters. The
+            # OpenAI-compatible path below sends `prior` raw for the same reason.
+            messages.append({
+                "role": "assistant",
+                "content": prior if needs_closing_turn else prior.rstrip(),
+            })
+            if needs_closing_turn:
+                # These models reject a trailing assistant turn outright, so ask
+                # for the continuation explicitly instead of prefilling it.
                 messages.append({"role": "user", "content": _CONTINUE_INSTRUCTION})
         kwargs: dict = dict(
             model=self.model,
