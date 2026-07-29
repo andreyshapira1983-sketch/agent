@@ -1281,6 +1281,20 @@ class ModelRouter:
                 DeepEscalationRequest,
                 evaluate_deep_escalation,
             )
+            # A stale cache and a provider with no deep model produce the same
+            # empty `tier_model`, and used to produce the same downgrade reason.
+            # They need different actions from the operator, so the gate is told
+            # which one it is.
+            #
+            # Read only when the tier failed to resolve: when a model was found
+            # the cache is self-evidently usable, and this would be a second
+            # disk read on the routing path for nothing.
+            _catalog_status = None
+            if not tier_model:
+                from core.model_catalog import catalog_freshness
+
+                _catalog_status = catalog_freshness().get("status")
+
             decision = evaluate_deep_escalation(DeepEscalationRequest(
                 role=role_key,
                 reason=getattr(escalation, "reason", None),
@@ -1288,7 +1302,13 @@ class ModelRouter:
                 deep_model_available=bool(tier_model),
                 budget_ok=getattr(escalation, "budget_ok", False),
                 operator_approved=getattr(escalation, "operator_approved", False),
+                catalog_status=_catalog_status,
             ))
+            # No extra event: the router has no logger of its own, and the
+            # decision's `route_reason` is already written to the usage ledger
+            # with every call. `deep_downgraded:catalog_expired` in that ledger
+            # is the diagnosis; a second channel would only be a second thing to
+            # keep in sync.
             if decision.effective_tier == "standard":
                 return self._for_role_with_reason(role_key, decision.route_reason)
             tier_reason = decision.route_reason

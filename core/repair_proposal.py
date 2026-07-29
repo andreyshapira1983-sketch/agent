@@ -20,10 +20,13 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:  # import-time cycle otherwise; only needed for the annotation
+    from core.task_complexity import ComplexityTier
 
 from core.llm import LLM
 from core.redaction import redact_payload, redact_text
@@ -65,6 +68,37 @@ DEFAULT_MAX_CONTEXT_CHARS = 60_000
 DEFAULT_MAX_OUTPUT_TOKENS = 16_000
 
 DEFAULT_MAX_CHANGED_LINES = 200
+
+#: Above this much code to reproduce, a repair is deep work. The proposal must
+#: contain the WHOLE post-image (see `_SYSTEM_PROMPT`), so difficulty scales with
+#: file size in a way it does not for ordinary generation: the model has to
+#: reproduce every untouched line exactly *and* land the edit. Measured on
+#: MIR-052 — `gpt-4o-mini` returned all 36 959 chars of `core/loop_methods2.py`
+#: byte-identical, i.e. it spent the whole budget copying and never made the fix.
+DEEP_REPAIR_CHARS = 20_000
+
+#: Or this many red tests at once: several failing assertions rarely share a
+#: one-line cause, so the change is unlikely to be local.
+DEEP_REPAIR_FAILING_TESTS = 4
+
+
+def repair_complexity(*, target_chars: int, failing_tests: int) -> "ComplexityTier":
+    """How hard is this repair, from the work itself rather than from wording.
+
+    `assess_complexity` reads prose for signals ("архитектур", "from scratch"),
+    which is right for an operator's request and useless here: every repair asks
+    the same flat sentence, so it would always come out STANDARD no matter
+    whether the target is 40 lines or 4 000.
+
+    The result is passed to `ModelRouter.for_task` as `force_tier`, which still
+    runs it through the operator-escalation gate — a DEEP assessment is a
+    request, never a grant.
+    """
+    from core.task_complexity import ComplexityTier
+
+    if target_chars >= DEEP_REPAIR_CHARS or failing_tests >= DEEP_REPAIR_FAILING_TESTS:
+        return ComplexityTier.DEEP
+    return ComplexityTier.STANDARD
 
 
 @dataclass
@@ -154,6 +188,7 @@ class RepairProposalGenerator:
         max_context_chars: int = DEFAULT_MAX_CONTEXT_CHARS,
         max_changed_lines: int = DEFAULT_MAX_CHANGED_LINES,
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+        llm_selector: Callable[[int], LLM | None] | None = None,
     ):
         if not Path(workspace_root).is_dir():
             raise ValueError(f"workspace_root must be a directory: {workspace_root}")
@@ -165,6 +200,14 @@ class RepairProposalGenerator:
             raise ValueError("max_output_tokens must be > 0")
         self.workspace_root = Path(workspace_root).resolve()
         self.llm = llm
+        # Called with the number of failing baseline tests once they are known,
+        # to pick the model for THIS job. The count is a difficulty signal — many
+        # red tests at once rarely share a one-line cause — but it only exists
+        # after the baseline runs, which is inside `generate()`. Building the
+        # model in the caller meant that signal was always zero. Optional: with
+        # no selector the pre-built `llm` is used, so every existing caller is
+        # unaffected.
+        self.llm_selector = llm_selector
         self.log = logger
         self.max_context_chars = int(max_context_chars)
         self.max_changed_lines = int(max_changed_lines)
@@ -209,6 +252,18 @@ class RepairProposalGenerator:
                 warnings=["baseline tests are already green; refusing to invent a repair"],
                 baseline_tests=baseline_output,
             ))
+
+        # Choose the model now, with the baseline in hand. Difficulty is a
+        # property of the job — how much code must be reproduced, and how many
+        # assertions are red — and the second half is only knowable here.
+        llm = self.llm
+        if self.llm_selector is not None:
+            failing = int(baseline_output.get("failed") or 0) + int(
+                baseline_output.get("errors") or 0
+            )
+            selected = self.llm_selector(failing)
+            if selected is not None:
+                llm = selected
 
         logs_output: dict[str, Any] | None = None
         if trace_id:
@@ -274,7 +329,7 @@ class RepairProposalGenerator:
             test_paths=test_paths,
             test_pattern=test_pattern,
         )
-        raw = self.llm.complete(
+        raw = llm.complete(
             system=_SYSTEM_PROMPT,
             user=prompt,
             max_tokens=self.max_output_tokens,
