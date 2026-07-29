@@ -372,7 +372,7 @@ class AgentLoopExtractedMethods2:
         self._last_episode_records = list(episodes)
         self._last_procedure_records = list(procedures)
 
-        # ── Re-ask detection ──────────────────────────────────────────────
+        # ── Re-ask detection ──────────────────────────────────────────
         # Jaccard similarity on the question tokens only (not goal/summary).
         # High overlap (≥ 0.40) means the user is asking the SAME question
         # again — a strong signal that the previous answer was insufficient.
@@ -573,6 +573,13 @@ class AgentLoopExtractedMethods2:
         ):
             return
         run = current_run()
+        # Building the episode is guarded separately from writing it, because a
+        # `TypeError` here is a CALL-SIGNATURE DEFECT, not a memory fault: the
+        # factory was invoked with an argument it does not accept (or without
+        # one it requires). Laundering that into a `smart_memory_error` log line
+        # hid the defect completely — the cycle answered normally and simply
+        # banked nothing. So `TypeError` from this call PROPAGATES; every other
+        # failure of the factory stays best-effort, as before.
         try:
             episode = episode_from_agent_cycle(
                 goal=goal_description,
@@ -608,6 +615,19 @@ class AgentLoopExtractedMethods2:
                 declared_completion=declared_completion,
                 on_audit=self.log.log,
             )
+        except TypeError:
+            # Visible on purpose — see the comment above.
+            raise
+        except Exception as exc:  # noqa: BLE001
+            self.log.log(
+                "smart_memory_error",
+                {
+                    "error": type(exc).__name__,
+                    "message": str(exc),
+                },
+            )
+            return
+        try:
             # The same helper the store applies. Called here so the write event
             # below can report the verdict that actually landed; the store's own
             # call is then a no-op, and no write site can skip the policy.
