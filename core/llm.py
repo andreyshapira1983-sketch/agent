@@ -429,17 +429,17 @@ class LLM:
     ) -> tuple[str, str]:
         messages: list[dict] = [{"role": "user", "content": user}]
         if prior:
-            if self._anthropic_supports_prefill(self.model):
-                # Anthropic continues an assistant prefill natively. The prefill must
-                # not end with trailing whitespace, so send it rstripped; the raw
-                # continuation text is appended to the full answer by the caller.
-                messages.append({"role": "assistant", "content": prior.rstrip()})
-            else:
-                # No native prefill: replay the partial answer and ask for the
-                # rest in a closing user turn — the same shape the
-                # OpenAI-compatible path already uses, and the shape these models
-                # require (the conversation must end with a user message).
-                messages.append({"role": "assistant", "content": prior.rstrip()})
+            # The partial answer goes back either way, or the model restarts
+            # instead of resuming. It must not end with trailing whitespace,
+            # so send it rstripped; the raw continuation text is appended to
+            # the full answer by the caller.
+            messages.append({"role": "assistant", "content": prior.rstrip()})
+            if not self._anthropic_supports_prefill(self.model):
+                # Only the closing turn differs. Models that prefill natively
+                # resume from that trailing assistant message; the rest reject
+                # it outright and need the request to end on a user turn, so
+                # ask for the continuation explicitly — the same shape the
+                # OpenAI-compatible path in this file already uses.
                 messages.append({"role": "user", "content": _CONTINUE_INSTRUCTION})
         kwargs: dict = dict(
             model=self.model,
