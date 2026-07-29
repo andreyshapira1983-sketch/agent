@@ -113,9 +113,11 @@ def test_a_bad_call_is_not_reported_as_a_memory_error(tmp_path: Path,
     """And it must not be filed under the label that sends readers elsewhere."""
     agent = _agent(tmp_path)
 
+    def _signature_mismatch(**kwargs):
+        raise TypeError("bad keyword argument")
+
     monkeypatch.setattr(
-        "core.loop_methods2.episode_from_agent_cycle",
-        lambda **kwargs: (_ for _ in ()).throw(TypeError("bad keyword argument")),
+        "core.loop_methods2.episode_from_agent_cycle", _signature_mismatch
     )
 
     with pytest.raises(TypeError):
