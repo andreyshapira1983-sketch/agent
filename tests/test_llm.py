@@ -847,6 +847,35 @@ class TestLargeOutputContinuation:
         llm.complete(system="s", user="u")
         assert llm._client.messages.calls[1]["messages"][-1]["role"] == "assistant"
 
+    def test_gen5_replay_keeps_boundary_whitespace(self):
+        """Only a PREFILL may not end in whitespace — history may, and must.
+
+        `complete` keeps each leg unstripped precisely so a word split across
+        the truncation boundary rejoins correctly. In the gen-5 shape the
+        partial answer is followed by a user turn, so it is ordinary history
+        and the restriction does not apply: trimming it here would discard the
+        boundary at the one point that decides where the continuation lands.
+        """
+        llm = _scripted_anthropic_llm(
+            [("the quick brown \n", 10, 5, "max_tokens"), ("fox", 3, 4, "end_turn")],
+            model="claude-opus-5",
+        )
+        llm.complete(system="s", user="u")
+
+        replayed = llm._client.messages.calls[1]["messages"][-2]
+        assert replayed == {"role": "assistant", "content": "the quick brown \n"}
+
+    def test_gen4_prefill_is_still_trimmed(self):
+        """The other half of the same rule: a prefill IS rejected with it."""
+        llm = _scripted_anthropic_llm(
+            [("the quick brown \n", 10, 5, "max_tokens"), ("fox", 3, 4, "end_turn")],
+            model="claude-sonnet-4-5",
+        )
+        llm.complete(system="s", user="u")
+
+        prefill = llm._client.messages.calls[1]["messages"][-1]
+        assert prefill == {"role": "assistant", "content": "the quick brown"}
+
     # --- openai -----------------------------------------------------------
 
     def test_openai_continues_until_natural_stop(self):
