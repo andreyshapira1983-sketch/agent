@@ -405,6 +405,26 @@ class TestModelHelpers:
         assert LLM._anthropic_supports_prefill(model) is supported
 
     @pytest.mark.parametrize(
+        "model,generation",
+        [
+            # gen-4+ scheme: claude-<family>-<generation>
+            ("claude-sonnet-4-5", 4),
+            ("claude-opus-4-1", 4),
+            ("claude-haiku-4-5-20251001", 4),
+            ("claude-opus-5", 5),
+            ("claude-opus-10", 10),
+            # gen-3 scheme puts the generation first, so there is no family
+            # name to anchor on and the answer is None, not a number. Reading
+            # a number here would pick up the MINOR version instead.
+            ("claude-3-5-sonnet-20241022", None),
+            ("claude-3-opus-20240229", None),
+            ("gpt-4o", None),
+        ],
+    )
+    def test_anthropic_generation(self, model, generation):
+        assert LLM._anthropic_generation(model) == generation
+
+    @pytest.mark.parametrize(
         "model,is_o",
         [
             ("o1", True),
