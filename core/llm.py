@@ -430,16 +430,23 @@ class LLM:
         messages: list[dict] = [{"role": "user", "content": user}]
         if prior:
             # The partial answer goes back either way, or the model restarts
-            # instead of resuming. It must not end with trailing whitespace,
-            # so send it rstripped; the raw continuation text is appended to
-            # the full answer by the caller.
-            messages.append({"role": "assistant", "content": prior.rstrip()})
-            if not self._anthropic_supports_prefill(self.model):
-                # Only the closing turn differs. Models that prefill natively
-                # resume from that trailing assistant message; the rest reject
-                # it outright and need the request to end on a user turn, so
-                # ask for the continuation explicitly — the same shape the
-                # OpenAI-compatible path in this file already uses.
+            # instead of resuming. What differs is whether it is the LAST
+            # message, and that decides both points below.
+            needs_closing_turn = not self._anthropic_supports_prefill(self.model)
+            # Trailing whitespace is rejected only on a trailing assistant turn
+            # — that is what makes it a prefill. Once a user turn follows, the
+            # partial answer is ordinary history and its boundary whitespace has
+            # to survive: `complete` deliberately keeps the legs unstripped so a
+            # continuation is not glued on at the wrong place, and trimming here
+            # would throw that away at the one point it matters. The
+            # OpenAI-compatible path below sends `prior` raw for the same reason.
+            messages.append({
+                "role": "assistant",
+                "content": prior if needs_closing_turn else prior.rstrip(),
+            })
+            if needs_closing_turn:
+                # These models reject a trailing assistant turn outright, so ask
+                # for the continuation explicitly instead of prefilling it.
                 messages.append({"role": "user", "content": _CONTINUE_INSTRUCTION})
         kwargs: dict = dict(
             model=self.model,
