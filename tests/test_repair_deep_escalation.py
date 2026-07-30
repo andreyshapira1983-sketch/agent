@@ -143,12 +143,26 @@ def test_a_malformed_budget_is_treated_as_zero(monkeypatch):
 
 
 def test_budget_ok_counts_deep_calls_already_made():
-    """Spent budget is read from the ledger, not assumed."""
+    """Spent budget is read from the ledger, not assumed.
+
+    The stub carries `total_tokens` because the rule now reads it: a ceiling on
+    spend is decremented by spend, and an approved route that was refused before
+    any inference billed nothing. `ModelUsageRecord` always has the field, so a
+    stub without it modelled a record that cannot exist and quietly made every
+    call here look free. What is asserted below is unchanged.
+
+    See `tests/test_deep_budget_counts_real_spend.py` for the rule itself, and
+    the known gap it still depends on: when a continuation round raises,
+    `LLM.complete` never reaches its usage aggregation and the ledger records
+    zero tokens for a call that WAS billed. Until that is fixed, real spend can
+    still slip past this ceiling.
+    """
     from core.deep_escalation import deep_budget_ok
 
     class _Record:
-        def __init__(self, route_reason: str) -> None:
+        def __init__(self, route_reason: str, total_tokens: int = 12_000) -> None:
             self.route_reason = route_reason
+            self.total_tokens = total_tokens
 
     class _Ledger:
         def __init__(self, reasons: list[str]) -> None:
