@@ -1,12 +1,12 @@
 """Shared test fixtures and helpers."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from core.model_router import _DEFAULT_PROVIDER_ENV, _provider_has_credentials
 from core.planner import PlannerOutput
 
 
@@ -142,19 +142,28 @@ def _neutralize_operator_model_env(monkeypatch, tmp_path_factory):
     monkeypatch.setenv("AGENT_MODEL_REGISTRY_PATH", str(empty_registry))
 
 
-# Every provider credential `core.model_router` knows about, mirroring
-# `_DEFAULT_PROVIDER_ENV` there. Listed so the fixture below can tell "the
-# operator has *some* real credential" from "this machine has none at all".
-_PROVIDER_CREDENTIAL_ENV_VARS = (
-    "ANTHROPIC_API_KEY",
-    "OPENAI_API_KEY",
-    "HF_TOKEN",
-    "LOCAL_LLM_BASE_URL",
-)
-
 # Deliberately not a key shape any provider would accept: it must satisfy a
 # presence check and fail loudly if it ever reached a real client.
 _PLACEHOLDER_CREDENTIAL = "placeholder-not-a-real-key"
+
+
+def _real_credential_present() -> bool:
+    """True when the machine already has credentials for some real provider.
+
+    Deliberately asks `core.model_router` instead of re-listing env vars here.
+    Duplicating the list drifts: `local` needs *both* `LOCAL_LLM_BASE_URL` and
+    `LOCAL_LLM_MODEL`, and every check ignores whitespace-only values, so a
+    hand-rolled `any(os.environ.get(...))` would call a half-configured machine
+    "credentialed" and then leave it without a usable one.
+
+    `mock` is excluded because it requires nothing, so it would answer True
+    unconditionally and suppress the placeholder everywhere.
+    """
+    return any(
+        _provider_has_credentials(provider)
+        for provider, required in _DEFAULT_PROVIDER_ENV.items()
+        if required
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -162,7 +171,7 @@ def _ensure_placeholder_credential(monkeypatch):
     """Guarantee the suite sees *a* credential without needing a real one.
 
     `AgentLoop` is only buildable when `model_router._provider_has_credentials`
-    finds a provider env var set, so on a machine with no credentials at all a
+    finds a provider's env vars set, so on a machine with no credentials at all a
     handful of tests fail for an environmental reason rather than a real defect.
     Those tests never talk to a provider — no test constructs a real client — so
     the credential is read purely to answer "is one present?". A fake value
@@ -175,9 +184,9 @@ def _ensure_placeholder_credential(monkeypatch):
 
     Deliberately narrow:
 
-    * It defers to reality. If *any* provider credential is already set the
-      fixture does nothing, so CI keeps running under its real secrets and an
-      operator's own keys still drive routing.
+    * It defers to reality. If any provider is fully credentialed the fixture
+      does nothing, so CI keeps running under its real secrets and an operator's
+      own keys still drive routing.
     * It cannot leak. The value is a constant in this file, carries no secret
       and is never written anywhere.
     * It cannot shadow the daemon. A fixture only exists inside `pytest`; the
@@ -187,7 +196,7 @@ def _ensure_placeholder_credential(monkeypatch):
       manages credentials itself — several delete them to force offline routing
       — still wins.
     """
-    if any(os.environ.get(var) for var in _PROVIDER_CREDENTIAL_ENV_VARS):
+    if _real_credential_present():
         return
     monkeypatch.setenv("ANTHROPIC_API_KEY", _PLACEHOLDER_CREDENTIAL)
 
