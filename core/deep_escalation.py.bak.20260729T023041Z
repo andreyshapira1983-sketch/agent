@@ -197,24 +197,16 @@ def deep_call_budget() -> int:
 def deep_budget_ok(usage_ledger: Any, *, limit: int) -> bool:
     """Is there room under `limit` for one more deep call?
 
-    Spend is counted only for approved deep records that have positive token
-    usage. A rejected call has no billed tokens and does not consume budget;
-    an errored call with positive token usage does, because it may have failed
-    after the provider billed it. ``status`` is therefore not a spend signal.
-    ``limit <= 0`` is off — no ledger state can unlock it.
+    Spend is counted from the usage ledger's own records, so the number cannot
+    disagree with what was actually billed. `limit <= 0` is off — no ledger
+    state can unlock it.
     """
     if limit <= 0:
         return False
     records = getattr(usage_ledger, "records", None) or []
     spent = sum(
-        1
-        for record in records
-        if (
-            str(getattr(record, "route_reason", "")).startswith(
-                _DEEP_APPROVED_PREFIX
-            )
-            and (getattr(record, "total_tokens", 0) or 0) > 0
-        )
+        1 for record in records
+        if str(getattr(record, "route_reason", "")).startswith(_DEEP_APPROVED_PREFIX)
     )
     return spent < limit
 
