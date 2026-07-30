@@ -49,6 +49,19 @@ _OUTCOME_BY_STATUS: dict[str, str] = {
     "error": "failed",
 }
 
+# The completion axis is settled HERE, at banking, exactly as the cycle settles
+# it (`core/smart_memory.py:1341`), and never recomputed afterwards (MIR-057).
+# Leaving it unset was not neutral: `admit_for_storage` grants a `lesson`-tagged
+# record `usage_eligible=True` (the MIR-042 fix, so these lessons stop being
+# invisible), and retrieval then replays it while it carries no verdict at all —
+# the one thing `test_no_legacy_episode_in_the_live_store_is_ever_admitted`
+# forbids. `outcome` already answers the question, so there is nothing to infer.
+_COMPLETION_BY_OUTCOME: dict[str, str] = {
+    "success": "achieved",
+    "partial": "partially_achieved",
+    "failed": "failed",
+}
+
 
 def build_self_build_episode(kind: str, result: dict[str, Any]) -> Any:
     """Build an :class:`EpisodeRecord` describing one attempt (no I/O).
@@ -96,6 +109,9 @@ def build_self_build_episode(kind: str, result: dict[str, Any]) -> Any:
         outcome=outcome,  # type: ignore[arg-type]  # one of success/partial/failed
         summary=summary[:2000],
         tags=tuple(dict.fromkeys(t for t in tags if t)),  # dedup, keep order
+        completion_state=_COMPLETION_BY_OUTCOME.get(  # type: ignore[arg-type]
+            outcome, "unknown"
+        ),
     )
 
 

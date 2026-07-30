@@ -289,6 +289,26 @@ def test_successful_repair_writes_regression_guard_lesson(tmp_path: Path):
     assert any(e == "repair_lesson_saved" for e, _ in agent.log.events)
 
 
+def test_repair_lesson_is_classified_not_left_unclassified(tmp_path: Path):
+    """The repair lesson carries a verdict, so retrieval never replays a blank.
+
+    `admit_for_storage` grants a `lesson`-tagged record `usage_eligible=True`
+    (MIR-042) so repair lessons stop being invisible — and this writer tags every
+    record `lesson`. Leaving `completion_state` unset therefore did not mean
+    "neutral", it meant "replayed into a prompt carrying no verdict at all",
+    which `test_no_legacy_episode_in_the_live_store_is_ever_admitted` forbids.
+    This writer only runs for `status == "repaired"`, so the verdict is a fact.
+    """
+    agent = _FakeAgent(tool_outputs=_success_tool_outputs(), with_memory=True)
+    controller = SelfRepairController(agent, workspace_root=tmp_path)
+
+    report = controller.run(_proposal(path="core/widget.py", reason="off-by-one"))
+
+    assert report.status == "repaired"
+    episode = agent.episodic_saved[0]
+    assert episode.completion_state == "achieved"
+
+
 def test_successful_repair_without_memory_does_not_crash(tmp_path: Path):
     # No episodic_store, no remember side effects expected — the lesson writer
     # must never abort the repair report flow.
