@@ -1,6 +1,7 @@
 """Shared test fixtures and helpers."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -139,6 +140,56 @@ def _neutralize_operator_model_env(monkeypatch, tmp_path_factory):
     empty_registry = tmp_path_factory.getbasetemp() / "empty_model_registry.json"
     empty_registry.write_text('{"models": []}\n', encoding="utf-8")
     monkeypatch.setenv("AGENT_MODEL_REGISTRY_PATH", str(empty_registry))
+
+
+# Every provider credential `core.model_router` knows about, mirroring
+# `_DEFAULT_PROVIDER_ENV` there. Listed so the fixture below can tell "the
+# operator has *some* real credential" from "this machine has none at all".
+_PROVIDER_CREDENTIAL_ENV_VARS = (
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "HF_TOKEN",
+    "LOCAL_LLM_BASE_URL",
+)
+
+# Deliberately not a key shape any provider would accept: it must satisfy a
+# presence check and fail loudly if it ever reached a real client.
+_PLACEHOLDER_CREDENTIAL = "placeholder-not-a-real-key"
+
+
+@pytest.fixture(autouse=True)
+def _ensure_placeholder_credential(monkeypatch):
+    """Guarantee the suite sees *a* credential without needing a real one.
+
+    `AgentLoop` is only buildable when `model_router._provider_has_credentials`
+    finds a provider env var set, so on a machine with no credentials at all a
+    handful of tests fail for an environmental reason rather than a real defect.
+    Those tests never talk to a provider — no test constructs a real client — so
+    the credential is read purely to answer "is one present?". A fake value
+    answers that question exactly as well as a real one.
+
+    This closes the gap the CI comment (PR #178) left open: CI supplied real
+    secrets to reach an operator-like state, which a local clone cannot do. A
+    placeholder reaches the same state offline, so `pytest` is green on a fresh
+    checkout with nothing configured.
+
+    Deliberately narrow:
+
+    * It defers to reality. If *any* provider credential is already set the
+      fixture does nothing, so CI keeps running under its real secrets and an
+      operator's own keys still drive routing.
+    * It cannot leak. The value is a constant in this file, carries no secret
+      and is never written anywhere.
+    * It cannot shadow the daemon. A fixture only exists inside `pytest`; the
+      runtime entry points (`cli/app.py`, `agent_tick.py`, `api/server.py`) load
+      `.env` in a separate process and are untouched.
+    * It stays out of the way. Running before the test body means a test that
+      manages credentials itself — several delete them to force offline routing
+      — still wins.
+    """
+    if any(os.environ.get(var) for var in _PROVIDER_CREDENTIAL_ENV_VARS):
+        return
+    monkeypatch.setenv("ANTHROPIC_API_KEY", _PLACEHOLDER_CREDENTIAL)
 
 
 @pytest.fixture
