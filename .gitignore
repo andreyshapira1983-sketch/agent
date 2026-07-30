@@ -48,6 +48,11 @@ env/
 
 *.tmp
 *.bak
+# Self-repair writes `<path>.bak.<YYYYMMDDTHHMMSSZ>` (core/hygiene.py
+# BACKUP_NAME_RE, from FileWriteTool). That name ends in the timestamp, not in
+# `.bak`, so the line above never matched it — and on 2026-07-30 a full copy of
+# core/deep_escalation.py was committed to main by a `git add -A`.
+*.bak.*
 *.log
 
 .vscode/
