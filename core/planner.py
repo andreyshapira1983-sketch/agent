@@ -920,6 +920,66 @@ def _ensure_doctrine_docs_first(
     return ordered_docs + remainder
 
 
+def _ensure_thematic_docs_first(
+    sources: list[dict[str, Any]],
+    warnings: list[str],
+    *,
+    target_paths: tuple[str, ...],
+    lead_paths: tuple[str, ...],
+    warning_prefix: str,
+) -> list[dict[str, Any]]:
+    """Place one thematic doc group ahead of code, behind higher-priority groups.
+
+    Single implementation for every conditionally routed doc group. Each group
+    differs only in *which* docs it owns (`target_paths`), which groups outrank
+    it (`lead_paths`), and how the injection is reported (`warning_prefix`);
+    the ordering and de-duplication rule itself is an invariant and lives here
+    once, so a new group cannot re-introduce a fixed bug by copying the shape.
+
+    De-duplication is total: *every* request for a target doc is consumed, not
+    just the first. Keeping later duplicates in the remainder made the agent
+    `file_read` the same doctrine file twice and burn context for nothing.
+    """
+    target_norms = {_norm_source_path(path) for path in target_paths}
+    lead_norms = {_norm_source_path(path) for path in lead_paths}
+
+    found: dict[str, dict[str, Any]] = {}
+    rest: list[dict[str, Any]] = []
+    for src in sources:
+        args = src.get("arguments") or {}
+        path = args.get("path") if isinstance(args, dict) else None
+        norm = _norm_source_path(path) if isinstance(path, str) else ""
+        if src.get("tool") == "file_read" and norm in target_norms:
+            found.setdefault(norm, src)
+            continue
+        rest.append(src)
+
+    insert_at = 0
+    for src in rest:
+        args = src.get("arguments") or {}
+        path = args.get("path") if isinstance(args, dict) else None
+        norm = _norm_source_path(path) if isinstance(path, str) else ""
+        if src.get("tool") == "file_read" and norm in lead_norms:
+            insert_at += 1
+        else:
+            break
+
+    ordered_target: list[dict[str, Any]] = []
+    injected: list[str] = []
+    for path in target_paths:
+        norm = _norm_source_path(path)
+        existing = found.get(norm)
+        if existing is not None:
+            ordered_target.append(existing)
+        else:
+            ordered_target.append(_file_read_source_spec(path))
+            injected.append(path)
+
+    if injected:
+        warnings.append(warning_prefix + ", ".join(injected))
+    return rest[:insert_at] + ordered_target + rest[insert_at:]
+
+
 def _ensure_subagent_governance_docs_first(
     sources: list[dict[str, Any]],
     warnings: list[str],
@@ -930,51 +990,13 @@ def _ensure_subagent_governance_docs_first(
     doctrine+subagent question keeps corporate docs first, then the sub-agent
     contract), or at the very front when no corporate docs are present.
     """
-    target_norms = {
-        _norm_source_path(path): path for path in _SUBAGENT_GOVERNANCE_DOC_PATHS
-    }
-    corporate_norms = {
-        _norm_source_path(path) for path in _DOCTRINE_CORPORATE_DOC_PATHS
-    }
-
-    found: dict[str, dict[str, Any]] = {}
-    rest: list[dict[str, Any]] = []
-    for src in sources:
-        args = src.get("arguments") or {}
-        path = args.get("path") if isinstance(args, dict) else None
-        norm = _norm_source_path(path) if isinstance(path, str) else ""
-        if src.get("tool") == "file_read" and norm in target_norms and norm not in found:
-            found[norm] = src
-            continue
-        rest.append(src)
-
-    insert_at = 0
-    for src in rest:
-        args = src.get("arguments") or {}
-        path = args.get("path") if isinstance(args, dict) else None
-        norm = _norm_source_path(path) if isinstance(path, str) else ""
-        if src.get("tool") == "file_read" and norm in corporate_norms:
-            insert_at += 1
-        else:
-            break
-
-    ordered_target: list[dict[str, Any]] = []
-    injected: list[str] = []
-    for path in _SUBAGENT_GOVERNANCE_DOC_PATHS:
-        norm = _norm_source_path(path)
-        existing = found.get(norm)
-        if existing is not None:
-            ordered_target.append(existing)
-        else:
-            ordered_target.append(_file_read_source_spec(path))
-            injected.append(path)
-
-    if injected:
-        warnings.append(
-            "subagent governance docs injected for a sub-agent question: "
-            + ", ".join(injected)
-        )
-    return rest[:insert_at] + ordered_target + rest[insert_at:]
+    return _ensure_thematic_docs_first(
+        sources,
+        warnings,
+        target_paths=_SUBAGENT_GOVERNANCE_DOC_PATHS,
+        lead_paths=_DOCTRINE_CORPORATE_DOC_PATHS,
+        warning_prefix="subagent governance docs injected for a sub-agent question: ",
+    )
 
 
 def _ensure_memory_governance_docs_first(
@@ -988,52 +1010,13 @@ def _ensure_memory_governance_docs_first(
     (corporate → sub-agent → memory) instead of the two thematic groups
     competing for the same slot.
     """
-    target_norms = {
-        _norm_source_path(path): path for path in _MEMORY_GOVERNANCE_DOC_PATHS
-    }
-    lead_norms = {
-        _norm_source_path(path)
-        for path in _DOCTRINE_CORPORATE_DOC_PATHS + _SUBAGENT_GOVERNANCE_DOC_PATHS
-    }
-
-    found: dict[str, dict[str, Any]] = {}
-    rest: list[dict[str, Any]] = []
-    for src in sources:
-        args = src.get("arguments") or {}
-        path = args.get("path") if isinstance(args, dict) else None
-        norm = _norm_source_path(path) if isinstance(path, str) else ""
-        if src.get("tool") == "file_read" and norm in target_norms and norm not in found:
-            found[norm] = src
-            continue
-        rest.append(src)
-
-    insert_at = 0
-    for src in rest:
-        args = src.get("arguments") or {}
-        path = args.get("path") if isinstance(args, dict) else None
-        norm = _norm_source_path(path) if isinstance(path, str) else ""
-        if src.get("tool") == "file_read" and norm in lead_norms:
-            insert_at += 1
-        else:
-            break
-
-    ordered_target: list[dict[str, Any]] = []
-    injected: list[str] = []
-    for path in _MEMORY_GOVERNANCE_DOC_PATHS:
-        norm = _norm_source_path(path)
-        existing = found.get(norm)
-        if existing is not None:
-            ordered_target.append(existing)
-        else:
-            ordered_target.append(_file_read_source_spec(path))
-            injected.append(path)
-
-    if injected:
-        warnings.append(
-            "memory governance docs injected for a memory question: "
-            + ", ".join(injected)
-        )
-    return rest[:insert_at] + ordered_target + rest[insert_at:]
+    return _ensure_thematic_docs_first(
+        sources,
+        warnings,
+        target_paths=_MEMORY_GOVERNANCE_DOC_PATHS,
+        lead_paths=_DOCTRINE_CORPORATE_DOC_PATHS + _SUBAGENT_GOVERNANCE_DOC_PATHS,
+        warning_prefix="memory governance docs injected for a memory question: ",
+    )
 
 
 def _ensure_self_repair_doctrine_docs_first(
@@ -1047,56 +1030,19 @@ def _ensure_self_repair_doctrine_docs_first(
     memory → self-repair) instead of the thematic groups competing for the same
     slot.
     """
-    target_norms = {
-        _norm_source_path(path): path for path in _SELF_REPAIR_DOCTRINE_DOC_PATHS
-    }
-    lead_norms = {
-        _norm_source_path(path)
-        for path in (
+    return _ensure_thematic_docs_first(
+        sources,
+        warnings,
+        target_paths=_SELF_REPAIR_DOCTRINE_DOC_PATHS,
+        lead_paths=(
             _DOCTRINE_CORPORATE_DOC_PATHS
             + _SUBAGENT_GOVERNANCE_DOC_PATHS
             + _MEMORY_GOVERNANCE_DOC_PATHS
-        )
-    }
-
-    found: dict[str, dict[str, Any]] = {}
-    rest: list[dict[str, Any]] = []
-    for src in sources:
-        args = src.get("arguments") or {}
-        path = args.get("path") if isinstance(args, dict) else None
-        norm = _norm_source_path(path) if isinstance(path, str) else ""
-        if src.get("tool") == "file_read" and norm in target_norms and norm not in found:
-            found[norm] = src
-            continue
-        rest.append(src)
-
-    insert_at = 0
-    for src in rest:
-        args = src.get("arguments") or {}
-        path = args.get("path") if isinstance(args, dict) else None
-        norm = _norm_source_path(path) if isinstance(path, str) else ""
-        if src.get("tool") == "file_read" and norm in lead_norms:
-            insert_at += 1
-        else:
-            break
-
-    ordered_target: list[dict[str, Any]] = []
-    injected: list[str] = []
-    for path in _SELF_REPAIR_DOCTRINE_DOC_PATHS:
-        norm = _norm_source_path(path)
-        existing = found.get(norm)
-        if existing is not None:
-            ordered_target.append(existing)
-        else:
-            ordered_target.append(_file_read_source_spec(path))
-            injected.append(path)
-
-    if injected:
-        warnings.append(
+        ),
+        warning_prefix=(
             "self-repair doctrine docs injected for a self-repair question: "
-            + ", ".join(injected)
-        )
-    return rest[:insert_at] + ordered_target + rest[insert_at:]
+        ),
+    )
 
 
 def _drop_readme_status_sources(

@@ -1402,7 +1402,13 @@ def test_question_touching_both_themes_keeps_stable_order(workspace: Path) -> No
     assert len(paths) == len(set(paths)), paths
 
 
-from core.planner import _is_self_repair_doctrine_question
+from core.planner import (
+    _ensure_memory_governance_docs_first,
+    _ensure_self_repair_doctrine_docs_first,
+    _ensure_subagent_governance_docs_first,
+    _is_self_repair_doctrine_question,
+    _norm_source_path,
+)
 
 
 def test_self_repair_question_injects_doctrine_doc(workspace: Path) -> None:
@@ -1424,7 +1430,8 @@ def test_self_repair_question_injects_doctrine_doc(workspace: Path) -> None:
             ],
         }
     )
-    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
+    llm = FakeLLM(responses=[canned])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
     out = planner.plan(
         question="How must the root cause be proven before a self-repair is applied?",
         file_hint=None,
@@ -1438,7 +1445,9 @@ def test_self_repair_question_injects_doctrine_doc(workspace: Path) -> None:
     assert any(
         "self-repair doctrine docs injected" in w for w in out.warnings
     ), out.warnings
-
+    # Injecting the source is only half the contract: the model must also be
+    # *told* the question is self-repair, or it can plan around the doc.
+    assert "[SELF_REPAIR_DOCS=required" in llm.calls[0]["user"], llm.calls[0]["user"]
 
 def test_ordinary_bug_fix_task_omits_self_repair_doctrine_doc(workspace: Path) -> None:
     """The whole point of a thematic group: an ordinary task must not pay for it.
@@ -1592,3 +1601,53 @@ def test_question_touching_three_themes_keeps_stable_order(workspace: Path) -> N
         "docs/SELF_REPAIR_DOCTRINE.md"
     )
     assert len(paths) == len(set(paths)), paths
+
+
+@pytest.mark.parametrize(
+    ("injector", "doc_path"),
+    (
+        (_ensure_subagent_governance_docs_first, "docs/SUBAGENT_LIFECYCLE.md"),
+        (_ensure_memory_governance_docs_first, "docs/MEMORY_SYSTEM_AUDIT.md"),
+        (_ensure_self_repair_doctrine_docs_first, "docs/SELF_REPAIR_DOCTRINE.md"),
+    ),
+)
+def test_thematic_injector_collapses_repeated_doc_request(injector, doc_path) -> None:
+    """A doc the model asked for twice must be read once, not twice.
+
+    Fail-before: each thematic injector captured only the *first* occurrence
+    and let every later one fall through into the remainder, so the plan
+    carried the same `file_read` twice and burned context for nothing. The
+    second spelling uses a backslash to prove the collapse is on the
+    *normalised* path, not on raw string equality.
+    """
+    sources = [
+        {"tool": "file_read", "arguments": {"path": doc_path}},
+        {"tool": "file_read", "arguments": {"path": doc_path.replace("/", "\\")}},
+        {"tool": "file_read", "arguments": {"path": "core/loop.py"}},
+    ]
+    warnings: list[str] = []
+    ordered = injector(sources, warnings)
+    paths = [
+        _norm_source_path(src["arguments"]["path"])
+        for src in ordered
+        if src["tool"] == "file_read"
+    ]
+    assert len(paths) == len(set(paths)), paths
+    assert paths.count(_norm_source_path(doc_path)) == 1, paths
+    assert _norm_source_path("core/loop.py") in paths
+
+
+def test_thematic_injector_keeps_unrelated_duplicates_untouched() -> None:
+    """Scope check: the injector owns its docs only, not the whole source list.
+
+    De-duplicating everything would silently rewrite plans the injector has no
+    authority over, so a repeated *non-target* source must survive as-is.
+    """
+    sources = [
+        {"tool": "file_read", "arguments": {"path": "core/loop.py"}},
+        {"tool": "file_read", "arguments": {"path": "core/loop.py"}},
+    ]
+    warnings: list[str] = []
+    ordered = _ensure_self_repair_doctrine_docs_first(sources, warnings)
+    paths = [src["arguments"]["path"] for src in ordered if src["tool"] == "file_read"]
+    assert paths.count("core/loop.py") == 2, paths
