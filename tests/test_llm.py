@@ -1080,3 +1080,133 @@ class TestReasoningTokenBudget:
         finally:
             monkeypatch.delenv("AGENT_REASONING_TOKEN_FLOOR", raising=False)
             importlib.reload(llm_module)
+class TestEscalationStartsFromTheEffectiveBudget:
+    """Escalation must double what a leg REALLY costs, not what it asked for.
+
+    `_complete_openai_compatible` silently lifts a reasoning model's request to
+    `_REASONING_TOKEN_FLOOR`. Seeding the continuation loop from the smaller
+    requested number made every early "escalation" collapse back onto the same
+    floor, so the client paid for byte-identical failed calls and then hit its
+    ceiling without ever spending more than leg 1 already had.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_env(self, monkeypatch):
+        monkeypatch.delenv("AGENT_AUTO_CONTINUE", raising=False)
+        monkeypatch.delenv("AGENT_MAX_CONTINUATIONS", raising=False)
+
+    @staticmethod
+    def _budgets(llm, key):
+        return [c[key] for c in llm._client.chat.completions.calls]
+
+    def test_reasoning_model_escalates_above_the_floor(self):
+        # Every leg empty and truncated: the loop keeps escalating until the
+        # ceiling. Requested budget is far below the floor on purpose.
+        llm = _scripted_openai_llm(
+            [(None, 10, 10, "length")] * 6, model="gpt-5.6-terra"
+        )
+        llm.complete(system="s", user="u", max_tokens=1024)
+
+        budgets = self._budgets(llm, "max_completion_tokens")
+        floor = llm_module._REASONING_TOKEN_FLOOR
+
+        assert budgets[0] == floor, "leg 1 is already raised to the floor"
+        assert len(budgets) > 1, "an empty truncated leg must be retried"
+        # The real defect: legs 2..n repeated the floor verbatim.
+        assert budgets == sorted(set(budgets)), (
+            f"continuation budgets must strictly increase, got {budgets}"
+        )
+        assert budgets[1] > floor, (
+            "the first retry must cost more than leg 1, otherwise it is the "
+            f"same request twice: {budgets}"
+        )
+
+    def test_reasoning_escalation_still_respects_a_ceiling(self):
+        llm = _scripted_openai_llm(
+            [(None, 10, 10, "length")] * 8, model="gpt-5.6-terra"
+        )
+        llm.complete(system="s", user="u", max_tokens=1024)
+
+        budgets = self._budgets(llm, "max_completion_tokens")
+        ceiling = llm_module._REASONING_TOKEN_FLOOR * llm_module._CONTINUE_ESCALATION_CAP
+        assert max(budgets) <= ceiling
+        assert len(budgets) <= 1 + _max_continuations()
+
+    def test_non_reasoning_model_escalates_from_its_own_request(self):
+        # No floor applies here, so the effective budget IS the requested one.
+        llm = _scripted_openai_llm([(None, 10, 10, "length")] * 6, model="gpt-4o")
+        llm.complete(system="s", user="u", max_tokens=1000)
+
+        budgets = self._budgets(llm, "max_tokens")
+        assert budgets[0] == 1000
+        assert budgets[1] == 2000, f"expected a plain doubling, got {budgets}"
+
+    def test_effective_budget_matches_what_the_provider_receives(self):
+        reasoning = _scripted_openai_llm([("x", 1, 1, "stop")], model="gpt-5.6-terra")
+        plain = _scripted_openai_llm([("x", 1, 1, "stop")], model="gpt-4o")
+
+        reasoning.complete(system="s", user="u", max_tokens=1024)
+        plain.complete(system="s", user="u", max_tokens=1024)
+
+        assert (
+            reasoning._effective_budget(1024)
+            == reasoning._client.chat.completions.calls[0]["max_completion_tokens"]
+        )
+        assert (
+            plain._effective_budget(1024)
+            == plain._client.chat.completions.calls[0]["max_tokens"]
+        )
+
+    def test_anthropic_effective_budget_is_the_request(self):
+        llm = LLM(provider="mock")
+        llm.provider = "anthropic"
+        llm.model = "claude-sonnet-4-5"
+        assert llm._effective_budget(1024) == 1024
+
+
+class TestBudgetEnvVarsFailSoft:
+    """A malformed env var must degrade to the default, never break import.
+
+    `_max_continuations()` and `core.planner._plan_max_tokens()` already work
+    this way; a bare `int(os.getenv(...))` at module scope would instead raise
+    `ValueError` during import and take the whole process down.
+    """
+
+    @staticmethod
+    def _reload_with(monkeypatch, name, value):
+        monkeypatch.setenv(name, value)
+        try:
+            importlib.reload(llm_module)
+            return llm_module
+        finally:
+            monkeypatch.delenv(name, raising=False)
+
+    def test_malformed_floor_falls_back(self, monkeypatch):
+        try:
+            mod = self._reload_with(monkeypatch, "AGENT_REASONING_TOKEN_FLOOR", "not-a-number")
+            assert mod._REASONING_TOKEN_FLOOR == 8192
+        finally:
+            importlib.reload(llm_module)
+
+    def test_malformed_cap_falls_back(self, monkeypatch):
+        try:
+            mod = self._reload_with(monkeypatch, "AGENT_CONTINUE_ESCALATION_CAP", "oops")
+            assert mod._CONTINUE_ESCALATION_CAP == 4
+        finally:
+            importlib.reload(llm_module)
+
+    def test_cap_is_clamped_to_at_least_one(self, monkeypatch):
+        # A cap of 0 would push the ceiling below the starting budget and
+        # silently disable continuation as a side effect.
+        try:
+            mod = self._reload_with(monkeypatch, "AGENT_CONTINUE_ESCALATION_CAP", "0")
+            assert mod._CONTINUE_ESCALATION_CAP >= 1
+        finally:
+            importlib.reload(llm_module)
+
+    def test_valid_overrides_are_still_honoured(self, monkeypatch):
+        try:
+            mod = self._reload_with(monkeypatch, "AGENT_REASONING_TOKEN_FLOOR", "4096")
+            assert mod._REASONING_TOKEN_FLOOR == 4096
+        finally:
+            importlib.reload(llm_module)

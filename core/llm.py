@@ -64,12 +64,33 @@ _TRUNCATION_REASONS = frozenset({"max_tokens", "length"})
 # So for these models the requested budget is a FLOOR, not the whole story:
 # raise it so reasoning has room and the answer still fits. Applies only to
 # reasoning models; every other model keeps its exact requested budget.
-_REASONING_TOKEN_FLOOR = int(os.getenv("AGENT_REASONING_TOKEN_FLOOR", "8192"))
+#
+# Parsed defensively: a malformed value must degrade to the default, never
+# raise at import time and take the process down. Same contract as
+# `_max_continuations()` below and `_plan_max_tokens()` in core/planner.py.
+def _reasoning_token_floor() -> int:
+    try:
+        return int(str(os.getenv("AGENT_REASONING_TOKEN_FLOOR", "8192")).strip())
+    except (TypeError, ValueError):
+        return 8192
+
+
+_REASONING_TOKEN_FLOOR = _reasoning_token_floor()
+
 
 # How far a continuation round may escalate the per-leg budget when the
 # previous leg came back empty. Bounded so a model that never answers cannot
 # drive unbounded spend; `AGENT_MAX_CONTINUATIONS` is the other backstop.
-_CONTINUE_ESCALATION_CAP = int(os.getenv("AGENT_CONTINUE_ESCALATION_CAP", "4"))
+# Clamped at 1 so a zero or negative value cannot collapse the ceiling below
+# the starting budget and disable continuation as a side effect.
+def _continue_escalation_cap() -> int:
+    try:
+        return max(1, int(str(os.getenv("AGENT_CONTINUE_ESCALATION_CAP", "4")).strip()))
+    except (TypeError, ValueError):
+        return 4
+
+
+_CONTINUE_ESCALATION_CAP = _continue_escalation_cap()
 
 
 def _auto_continue_enabled() -> bool:
@@ -250,8 +271,15 @@ class LLM:
         # leg that was truncated *and* returned nothing is guaranteed to fail
         # the same way — the whole budget went to internal reasoning. So when a
         # leg produces no text, escalate before retrying instead of repeating.
-        round_budget = max_tokens
-        budget_ceiling = max(max_tokens, max_tokens * _CONTINUE_ESCALATION_CAP)
+        #
+        # Seeded from the EFFECTIVE budget, not the requested one: for reasoning
+        # models `_complete_openai_compatible` silently lifts the request to
+        # `_REASONING_TOKEN_FLOOR`. Doubling from the smaller requested number
+        # would re-send byte-identical calls until the doubling finally overtook
+        # that floor — paying repeatedly for the same failed request and then
+        # hitting the ceiling without ever exceeding what leg 1 already spent.
+        round_budget = self._effective_budget(max_tokens)
+        budget_ceiling = max(round_budget, round_budget * _CONTINUE_ESCALATION_CAP)
         last_leg_empty = not text
         while stop_reason in _TRUNCATION_REASONS and rounds < max_rounds:
             if last_leg_empty:
@@ -547,6 +575,21 @@ class LLM:
         if floor <= 0:
             return max_tokens
         return max(max_tokens, floor)
+
+    def _effective_budget(self, max_tokens: int) -> int:
+        """Tokens the next leg will really be allowed to spend.
+
+        Mirrors what :meth:`_complete_once` ends up sending: reasoning models
+        get the floor applied inside :meth:`_complete_openai_compatible`, every
+        other provider and model gets the caller's number verbatim.
+
+        Kept as a separate method so the continuation loop escalates from the
+        real cost of a leg rather than from a request that was already silently
+        raised underneath it.
+        """
+        if self.provider in {"openai", "huggingface", "local"} and self._is_o_series(self.model):
+            return self._reasoning_budget(max_tokens)
+        return max_tokens
 
     def _complete_openai_compatible(
         self,
