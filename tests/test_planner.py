@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+import core.planner as planner_module
 from core.planner import LLMPlanner
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
@@ -1750,3 +1751,86 @@ def test_docs_directive_is_emitted_when_file_read_is_available(
     planner.plan(question=question, file_hint=None)
 
     assert directive in llm.calls[0]["user"], llm.calls[0]["user"]
+
+# --- empty model output is a distinct, named failure -------------------------
+#
+# Regression guard for a production defect: an OpenAI reasoning model consumed
+# its entire token budget on internal reasoning and returned zero characters
+# with `status=success`. The planner reported `json_decode_error`, which sent
+# every reader looking for malformed JSON that was never emitted.
+
+
+@pytest.mark.parametrize("raw", ["", "   ", "\n\n\t  \n"])
+def test_empty_model_output_is_named_not_a_json_error(
+    workspace: Path, raw: str
+) -> None:
+    planner = LLMPlanner(llm=FakeLLM(responses=[raw]), registry=_registry(workspace))
+
+    out = planner.plan(question="something", file_hint=None)
+
+    assert "empty_model_output" in out.warnings
+    assert "json_decode_error" not in out.warnings
+    assert out.diagnostics["stage"] == "empty_output"
+    assert out.diagnostics["fallback"] == "empty_plan"
+    assert out.diagnostics["json_block_found"] is False
+    # The reason must point at the budget, not at JSON syntax.
+    assert "budget" in out.diagnostics["reason"].lower()
+
+
+def test_empty_output_still_falls_back_to_an_empty_plan(workspace: Path) -> None:
+    planner = LLMPlanner(llm=FakeLLM(responses=[""]), registry=_registry(workspace))
+
+    out = planner.plan(question="something", file_hint=None)
+
+    assert out.sources == []
+    assert "plan_parse_failed" in out.warnings
+
+
+def test_malformed_non_empty_output_is_still_a_json_error(workspace: Path) -> None:
+    # The new branch must not swallow genuine parse failures.
+    planner = LLMPlanner(
+        llm=FakeLLM(responses=["{not json at all"]), registry=_registry(workspace)
+    )
+
+    out = planner.plan(question="something", file_hint=None)
+
+    assert "empty_model_output" not in out.warnings
+    assert out.diagnostics["stage"] != "empty_output"
+
+
+# --- planner token budget ----------------------------------------------------
+
+
+def test_planner_budget_default_is_above_the_old_hard_coded_value() -> None:
+    # 1024 was provably too small: it was fully consumed by reasoning tokens.
+    assert planner_module._plan_max_tokens() > 1024
+
+
+def test_planner_budget_is_env_overridable(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_PLAN_MAX_TOKENS", "4096")
+    assert planner_module._plan_max_tokens() == 4096
+
+
+@pytest.mark.parametrize("bad", ["0", "-5", "abc", "", "  "])
+def test_planner_budget_rejects_unusable_values(monkeypatch, bad: str) -> None:
+    # A malformed environment must never yield a zero budget, which would
+    # guarantee an empty plan on every single run.
+    monkeypatch.setenv("AGENT_PLAN_MAX_TOKENS", bad)
+    assert planner_module._plan_max_tokens() == planner_module._PLAN_MAX_TOKENS_DEFAULT
+
+
+def test_planner_passes_the_configured_budget_to_the_llm(
+    workspace: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AGENT_PLAN_MAX_TOKENS", "3333")
+
+    # FakeLLM already records every argument of every `complete(...)` call,
+    # so a spy subclass would only add a second `complete` signature that can
+    # drift away from the base one. Read the recorded call instead: it stays
+    # correct whether the planner passes the budget positionally or by name.
+    llm = FakeLLM(responses=[json.dumps({"reasoning": "ok", "steps": []})])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
+    planner.plan(question="something", file_hint=None)
+
+    assert len(llm.calls) == 1
+    assert llm.calls[0]["max_tokens"] == 3333

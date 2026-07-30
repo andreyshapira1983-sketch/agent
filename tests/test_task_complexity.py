@@ -9,9 +9,11 @@ import pytest
 from core.task_complexity import (
     ComplexityTier,
     _ALWAYS_LIGHT_ROLES,
+    _NEVER_LIGHT_TASK_ROLES,
     _SHORT_TEXT_THRESHOLD,
     assess_complexity,
     can_skip_planner,
+    matched_light_signals,
     needs_live_grounding,
     tier_label,
 )
@@ -620,3 +622,128 @@ def test_can_skip_planner_handles_non_string_and_empty():
     assert can_skip_planner("   ") is False
 
 
+# ── LIGHT signal word boundaries (regression: substring collisions) ───────────
+#
+# `_LIGHT_SIGNALS` used to be matched with a raw `signal in normalized`
+# substring test. Short English words such as "hi", "hey" and "version"
+# therefore matched INSIDE unrelated words — "this", "they", "conversion" —
+# and routed genuine engineering work to the cheapest model.
+#
+# Observed in production: a 100-char root-cause investigation was routed to
+# gpt-5.4-nano with route_reason="complexity:light" because the word "this"
+# contains "hi".
+
+@pytest.mark.parametrize("text", [
+    # The exact class of question that was mis-routed in production.
+    "Investigate the root cause of this recurring self-build failure "
+    "and propose a safe repair procedure.",
+    # "hi" inside "this"
+    "Why is this failing?",
+    "Rewrite this function",
+    "Ship this patch",
+    # "hi" inside "which"
+    "Which module owns retries?",
+    # "hey" inside "they"
+    "They broke the parser",
+    # "version" inside "conversion"
+    "Check the conversion logic",
+    # "hi" inside "history"
+    "Explain the history of this bug",
+    # "hi" inside "machine"
+    "The machine is down, restart it",
+])
+def test_light_signal_does_not_match_inside_word(text):
+    """A LIGHT signal buried inside a longer word must NOT trigger LIGHT."""
+    assert assess_complexity(text) is not ComplexityTier.LIGHT, (
+        f"Expected non-LIGHT for {text!r}; "
+        f"matched signals = {matched_light_signals(text)}"
+    )
+    assert matched_light_signals(text) == []
+
+
+@pytest.mark.parametrize("text,expected_signal", [
+    ("hi", "hi"),
+    ("hi there", "hi"),
+    ("hey", "hey"),
+    ("hello", "hello"),
+    ("ping", "ping"),
+    ("summary please", "summary"),
+])
+def test_light_signal_still_matches_standalone_word(text, expected_signal):
+    """Boundary matching must not break the signals that genuinely apply."""
+    assert assess_complexity(text) is ComplexityTier.LIGHT
+    assert expected_signal in matched_light_signals(text)
+
+
+def test_cyrillic_light_signals_keep_prefix_semantics():
+    """Cyrillic entries are stems, so they must still match inflected forms.
+
+    A trailing \\b is only added when the signal ends in an ASCII alphanumeric
+    character, so "готов" keeps matching "готова" / "готовы".
+    """
+    for text in ("готова ли система", "готовы ли мы", "готов"):
+        assert assess_complexity(text) is ComplexityTier.LIGHT, text
+    # …but it must still respect the LEFT boundary.
+    assert "готов" not in matched_light_signals("неготовность модуля")
+
+
+def test_matched_light_signals_rejects_non_string():
+    assert matched_light_signals(None) == []  # type: ignore[arg-type]
+    assert matched_light_signals("") == []
+
+
+def test_matched_light_signals_is_deterministic():
+    """Diagnostics must be stable across processes (sorted at import)."""
+    first = matched_light_signals("привет, статус?")
+    assert first == matched_light_signals("привет, статус?")
+    assert first == sorted(first)
+
+
+# ── task_role gate (roles that must never get the cheap model) ────────────────
+
+def test_never_light_task_roles_is_not_empty():
+    assert _NEVER_LIGHT_TASK_ROLES
+    assert "repair" in _NEVER_LIGHT_TASK_ROLES
+    assert "programmer" in _NEVER_LIGHT_TASK_ROLES
+
+
+@pytest.mark.parametrize("task_role", sorted(_NEVER_LIGHT_TASK_ROLES))
+def test_never_light_task_role_blocks_light(task_role):
+    """A terse phrasing must not buy a weak model for code-touching roles."""
+    assert assess_complexity("hi", task_role=task_role) is ComplexityTier.STANDARD
+    assert assess_complexity("статус", task_role=task_role) is ComplexityTier.STANDARD
+
+
+def test_other_task_roles_keep_light():
+    """The gate is narrow: chat/research roles keep the cheap tier."""
+    for task_role in ("operator_chat", "researcher", "technical_report", "learning"):
+        assert assess_complexity("hi", task_role=task_role) is ComplexityTier.LIGHT, task_role
+
+
+def test_deep_still_wins_over_never_light_task_role():
+    """DEEP is checked first — the gate can only floor at STANDARD."""
+    deep_text = "спроектируй архитектуру системы с нуля"
+    assert assess_complexity(deep_text) is ComplexityTier.DEEP
+    assert assess_complexity(deep_text, task_role="repair") is ComplexityTier.DEEP
+
+
+def test_always_light_model_role_still_wins_over_task_role():
+    """memory_summary is a model-role override checked before anything else."""
+    assert assess_complexity(
+        "hi", role="memory_summary", task_role="repair"
+    ) is ComplexityTier.LIGHT
+
+
+def test_task_role_defaults_to_none_and_changes_nothing():
+    for text in ("hi", "статус", "напиши функцию сортировки списка"):
+        assert assess_complexity(text) == assess_complexity(text, task_role=None), text
+
+
+def test_unknown_task_role_is_ignored():
+    """An unrecognized role must not silently block LIGHT."""
+    assert assess_complexity("hi", task_role="totally_unknown") is ComplexityTier.LIGHT
+    assert assess_complexity("hi", task_role="") is ComplexityTier.LIGHT
+
+
+def test_non_string_task_role_is_ignored():
+    assert assess_complexity("hi", task_role=123) is ComplexityTier.LIGHT  # type: ignore[arg-type]
