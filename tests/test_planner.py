@@ -1400,3 +1400,195 @@ def test_question_touching_both_themes_keeps_stable_order(workspace: Path) -> No
     assert paths[1] == "docs/audit/MEMORY_MAP.md"
     # no duplicates from the two injectors touching the same list
     assert len(paths) == len(set(paths)), paths
+
+
+from core.planner import _is_self_repair_doctrine_question
+
+
+def test_self_repair_question_injects_doctrine_doc(workspace: Path) -> None:
+    """A self-diagnosis/self-repair question must lead with the repair protocol.
+
+    Fail-before: nothing injects it, so the source list is whatever the model
+    asked for (`core/self_repair.py` here) and the agent re-derives the protocol
+    from mechanics every time.
+    """
+    canned = json.dumps(
+        {
+            "reasoning": "answer directly",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "core/self_repair.py"},
+                    "rationale": "mechanics",
+                }
+            ],
+        }
+    )
+    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
+    out = planner.plan(
+        question="How must the root cause be proven before a self-repair is applied?",
+        file_hint=None,
+    )
+    paths = [
+        src["arguments"]["path"]
+        for src in out.sources
+        if src["tool"] == "file_read"
+    ]
+    assert paths[0] == "docs/SELF_REPAIR_DOCTRINE.md"
+    assert any(
+        "self-repair doctrine docs injected" in w for w in out.warnings
+    ), out.warnings
+
+
+def test_ordinary_bug_fix_task_omits_self_repair_doctrine_doc(workspace: Path) -> None:
+    """The whole point of a thematic group: an ordinary task must not pay for it.
+
+    "fix the bug in X" is a normal work item, not a request for the repair
+    reasoning protocol, so the doctrine must stay out of the source list.
+    """
+    canned = json.dumps(
+        {
+            "reasoning": "fix it",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "core/loop.py"},
+                    "rationale": "target file",
+                }
+            ],
+        }
+    )
+    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
+    out = planner.plan(question="fix the bug in core/loop.py", file_hint=None)
+    paths = [
+        src["arguments"]["path"]
+        for src in out.sources
+        if src["tool"] == "file_read"
+    ]
+    assert "docs/SELF_REPAIR_DOCTRINE.md" not in paths
+
+
+def test_non_self_repair_doctrine_question_omits_self_repair_doc(
+    workspace: Path,
+) -> None:
+    canned = json.dumps(
+        {
+            "reasoning": "doctrine",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "docs/ROADMAP.md"},
+                    "rationale": "roadmap",
+                }
+            ],
+        }
+    )
+    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
+    out = planner.plan(
+        question="Explain the corporate model and what is on the roadmap.",
+        file_hint=None,
+    )
+    paths = [
+        src["arguments"]["path"]
+        for src in out.sources
+        if src["tool"] == "file_read"
+    ]
+    assert "docs/SELF_REPAIR_DOCTRINE.md" not in paths
+
+
+def test_self_repair_doctrine_detector_strong_terms() -> None:
+    for q in (
+        "how does self-repair decide to roll back?",
+        "what is the root cause of this failure",
+        "объясни первопричину сбоя",
+        "why do we need a fail-before test",
+        "should this regression test exist",
+        "нужен ли регрессионный тест",
+        "is backfill of old records allowed",
+        "why must the migration be idempotent",
+        "что такое самодиагностика агента",
+    ):
+        assert _is_self_repair_doctrine_question(q), q
+
+
+def test_self_repair_doctrine_detector_contextual_pair() -> None:
+    # ordinary repair words only count together with a protocol/action word
+    assert _is_self_repair_doctrine_question(
+        "how should the agent diagnose its own bug?"
+    )
+    assert _is_self_repair_doctrine_question("как безопасно провести миграцию данных")
+    assert _is_self_repair_doctrine_question(
+        "what is the protocol for fixing a defect"
+    )
+    assert _is_self_repair_doctrine_question("почему self-build сломался, найди причину")
+
+
+def test_self_repair_doctrine_detector_does_not_overfire() -> None:
+    for q in (
+        "fix the bug in core/loop.py",
+        "исправь опечатку в README",
+        "run the tests and show coverage",
+        "explain the corporate model",
+        "what is on the roadmap",
+        "how do subagents get retired?",
+        "how is episodic memory consolidated?",
+        "какая погода сегодня",
+        # a broad governance overview that merely lists self-build as a topic
+        # must not drag the repair protocol in
+        (
+            "Explain the corporate model, central agent governance, subagents, "
+            "self-build, night observation, and safe autonomy."
+        ),
+    ):
+        assert not _is_self_repair_doctrine_question(q), q
+
+
+def test_self_repair_group_is_independent_of_other_thematic_groups() -> None:
+    """The three thematic groups must not collapse into one another."""
+    repair_q = "what is the root cause protocol for a self-repair?"
+    assert _is_self_repair_doctrine_question(repair_q)
+    assert not _is_memory_governance_question(repair_q)
+    assert not _is_subagent_governance_question(repair_q)
+
+    assert not _is_self_repair_doctrine_question("how is episodic memory consolidated?")
+    assert not _is_self_repair_doctrine_question("how do subagents get retired?")
+
+
+def test_question_touching_three_themes_keeps_stable_order(workspace: Path) -> None:
+    """All three thematic groups may fire at once; the order must be deterministic.
+
+    Sub-agent contract, then memory docs, then the repair protocol — the three
+    injectors must not compete for the same slot or duplicate each other.
+    """
+    canned = json.dumps(
+        {
+            "reasoning": "answer directly",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "core/subagent_runner.py"},
+                    "rationale": "mechanics",
+                }
+            ],
+        }
+    )
+    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
+    out = planner.plan(
+        question=(
+            "When a subagent writes episodic memory, what is the root cause "
+            "protocol if that write regresses?"
+        ),
+        file_hint=None,
+    )
+    paths = [
+        src["arguments"]["path"]
+        for src in out.sources
+        if src["tool"] == "file_read"
+    ]
+    assert paths.index("docs/SUBAGENT_LIFECYCLE.md") < paths.index(
+        "docs/audit/MEMORY_MAP.md"
+    )
+    assert paths.index("docs/audit/MEMORY_MAP.md") < paths.index(
+        "docs/SELF_REPAIR_DOCTRINE.md"
+    )
+    assert len(paths) == len(set(paths)), paths
