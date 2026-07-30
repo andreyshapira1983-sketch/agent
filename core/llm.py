@@ -51,6 +51,26 @@ DEFAULT_MAX_TOKENS = int(os.getenv("AGENT_MAX_TOKENS", "2048"))
 # model to continue where it left off instead of returning a truncated answer.
 _TRUNCATION_REASONS = frozenset({"max_tokens", "length"})
 
+# OpenAI reasoning models ("o-series" and gpt-5+) spend `max_completion_tokens`
+# on INTERNAL reasoning first and only then on visible output. A budget sized
+# for the answer alone can therefore be consumed entirely by reasoning, and the
+# API still returns success — with `content=None` and `finish_reason='length'`.
+#
+# Observed in production: the planner asked for 1024 tokens, got 0 characters
+# back, auto-continued once with the same 1024, got 0 characters again, and
+# reported `json_decode_error` on an answer that never existed (1024 + 1024 =
+# the 2048 output_tokens recorded in the run log).
+#
+# So for these models the requested budget is a FLOOR, not the whole story:
+# raise it so reasoning has room and the answer still fits. Applies only to
+# reasoning models; every other model keeps its exact requested budget.
+_REASONING_TOKEN_FLOOR = int(os.getenv("AGENT_REASONING_TOKEN_FLOOR", "8192"))
+
+# How far a continuation round may escalate the per-leg budget when the
+# previous leg came back empty. Bounded so a model that never answers cannot
+# drive unbounded spend; `AGENT_MAX_CONTINUATIONS` is the other backstop.
+_CONTINUE_ESCALATION_CAP = int(os.getenv("AGENT_CONTINUE_ESCALATION_CAP", "4"))
+
 
 def _auto_continue_enabled() -> bool:
     """Whether truncated answers are auto-continued. Defaults to ON.
@@ -226,16 +246,33 @@ class LLM:
         agg_in = int(self.last_usage.get("input_tokens", 0))
         agg_out = int(self.last_usage.get("output_tokens", 0))
         rounds = 0
+        # Budget used for the NEXT leg. Reissuing an identical request after a
+        # leg that was truncated *and* returned nothing is guaranteed to fail
+        # the same way — the whole budget went to internal reasoning. So when a
+        # leg produces no text, escalate before retrying instead of repeating.
+        round_budget = max_tokens
+        budget_ceiling = max(max_tokens, max_tokens * _CONTINUE_ESCALATION_CAP)
+        last_leg_empty = not text
         while stop_reason in _TRUNCATION_REASONS and rounds < max_rounds:
+            if last_leg_empty:
+                if round_budget >= budget_ceiling:
+                    # Already at the ceiling and still nothing came back.
+                    # Stop paying for a request that cannot succeed.
+                    break
+                round_budget = min(round_budget * 2, budget_ceiling)
             rounds += 1
             cont_text, stop_reason = self._complete_once(
-                system, user, max_tokens, temperature, prior=combined
+                system, user, round_budget, temperature, prior=combined
             )
             agg_in += int(self.last_usage.get("input_tokens", 0))
             agg_out += int(self.last_usage.get("output_tokens", 0))
-            if not cont_text:
+            last_leg_empty = not cont_text
+            if cont_text:
+                combined += cont_text
+            elif stop_reason not in _TRUNCATION_REASONS:
+                # Empty and NOT truncated: the model genuinely has nothing more
+                # to add. Escalating would not help.
                 break
-            combined += cont_text
 
         # Expose the aggregate usage of the whole continuation chain so the
         # budget wrapper records one honest total instead of just the last leg.
@@ -494,6 +531,23 @@ class LLM:
             return True
         return False
 
+    def _reasoning_budget(self, max_tokens: int) -> int:
+        """Effective token budget for an OpenAI reasoning model.
+
+        For these models ``max_completion_tokens`` covers internal reasoning
+        AND the visible answer, so a budget sized for the answer alone can be
+        spent entirely on reasoning — yielding ``content=None`` with
+        ``finish_reason='length'`` and no error. Treat the caller's request as
+        a floor and give reasoning room above it.
+
+        Never lowers a caller's budget: a caller that already asked for more
+        than the floor keeps its own, larger value.
+        """
+        floor = _REASONING_TOKEN_FLOOR
+        if floor <= 0:
+            return max_tokens
+        return max(max_tokens, floor)
+
     def _complete_openai_compatible(
         self,
         system: str,
@@ -516,7 +570,7 @@ class LLM:
         if self._is_o_series(model):
             response = self._client.chat.completions.create(
                 model=model,
-                max_completion_tokens=max_tokens,
+                max_completion_tokens=self._reasoning_budget(max_tokens),
                 messages=messages,
             )
         else:

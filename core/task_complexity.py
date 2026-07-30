@@ -37,9 +37,23 @@ class ComplexityTier(str, Enum):
 
 # ── role-level overrides ──────────────────────────────────────────────────────
 
-# Roles that are always LIGHT regardless of task text.
+# Model roles that are always LIGHT regardless of task text.
 _ALWAYS_LIGHT_ROLES: frozenset[str] = frozenset({
     "memory_summary",  # summaries never need a frontier model
+})
+
+# Task roles (as produced by core.role_router.RoleRouter) for which LIGHT is
+# never an acceptable tier, however the request happens to be phrased.
+#
+# The router already knows the request is a repair or a coding task before the
+# model is chosen — that signal used to be computed and then dropped, so a
+# short "fix this" could be answered by the cheapest model. These two roles are
+# the ones where a weak plan changes source code, so they are pinned to at
+# least STANDARD. DEEP is still reachable: the DEEP check runs first and is
+# unaffected. Every other role keeps the normal text-driven behaviour.
+_NEVER_LIGHT_TASK_ROLES: frozenset[str] = frozenset({
+    "repair",      # root-cause analysis, regression hunting, self-repair
+    "programmer",  # writes or edits code
 })
 
 
@@ -97,27 +111,91 @@ _LIGHT_SIGNALS: frozenset[str] = frozenset({
 _SHORT_TEXT_THRESHOLD = 45
 
 
+def _compile_light_signal(signal: str) -> re.Pattern[str]:
+    """Compile one LIGHT signal into a boundary-aware pattern.
+
+    LIGHT signals must NOT be matched as bare substrings. Doing so let short
+    English entries fire from inside unrelated words and quietly demoted real
+    engineering work to the cheapest model — ``"hi"`` matched ``"this"``,
+    ``"hey"`` matched ``"they"``, ``"version"`` matched ``"conversion"``.
+
+    Left edge
+        Always a word boundary. A signal may never start in the middle of a
+        longer word.
+
+    Right edge
+        A word boundary for signals ending in an ASCII letter or digit: the
+        English entries are written as whole words and gain nothing from
+        prefix matching. Signals ending in any other character (the Cyrillic
+        entries) keep prefix semantics on purpose, because they are written as
+        stems — ``"готов"`` must still match ``"готова"`` and ``"готовность"``.
+
+    Both edges only ever make the match *narrower*, so the failure direction is
+    LIGHT → STANDARD: a slightly more expensive model, never a weaker one.
+    """
+    pattern = r"\b" + re.escape(signal)
+    if signal and (signal[-1].isascii() and signal[-1].isalnum()):
+        pattern += r"\b"
+    return re.compile(pattern)
+
+
+# Compiled once at import; ordering is irrelevant because any single match
+# decides the tier. Sorted purely so diagnostics are deterministic.
+_LIGHT_SIGNAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (signal, _compile_light_signal(signal)) for signal in sorted(_LIGHT_SIGNALS)
+)
+
+
+def matched_light_signals(text: str) -> list[str]:
+    """Return every LIGHT signal that matches ``text`` under boundary rules.
+
+    Diagnostic helper: makes routing decisions explainable in tests and logs
+    without re-implementing the matching rule at the call site.
+    """
+    if not isinstance(text, str):
+        return []
+    normalized = text.strip().casefold()
+    if not normalized:
+        return []
+    return [signal for signal, pattern in _LIGHT_SIGNAL_PATTERNS if pattern.search(normalized)]
+
+
 # ── public API ────────────────────────────────────────────────────────────────
 
 def assess_complexity(
     text: str,
     *,
     role: str = "planner",
+    task_role: str | None = None,
 ) -> ComplexityTier:
     """Rule-based complexity assessment. No LLM call. O(n) in signal count.
+
+    Parameters
+    ──────────
+    role
+        The *model* role (planner, synthesizer, memory_summary, …).
+    task_role
+        The *task* role decided by :class:`core.role_router.RoleRouter`
+        (repair, programmer, researcher, …), when the caller knows it. Roles
+        in ``_NEVER_LIGHT_TASK_ROLES`` can never be classified LIGHT.
 
     Priority order
     ──────────────
     1. Role-level overrides  (e.g. memory_summary → always LIGHT)
     2. Empty / non-string    → STANDARD
     3. DEEP signals          (substring match in normalized text) → DEEP
-    4. LIGHT signals         (substring match) AND text shorter than
-       ``_SHORT_TEXT_THRESHOLD * 4`` (~180 chars) → LIGHT
+    4. LIGHT signals         (word-boundary match, see _compile_light_signal)
+       AND text shorter than ``_SHORT_TEXT_THRESHOLD * 4`` (~180 chars)
+       AND ``task_role`` not in ``_NEVER_LIGHT_TASK_ROLES`` → LIGHT
     5. Default               → STANDARD
 
     There is intentionally NO "any very short text → LIGHT" rule: short text
     with no recognized LIGHT signal still falls through to STANDARD (the
     conservative default). See ``test_very_short_text_no_signals_is_standard``.
+
+    DEEP signals remain plain substring matches. That direction is fail-safe —
+    a false positive buys a stronger model. Only the LIGHT gate, where a false
+    positive buys a *weaker* one, requires word boundaries.
     """
     if role in _ALWAYS_LIGHT_ROLES:
         return ComplexityTier.LIGHT
@@ -135,11 +213,15 @@ def assess_complexity(
         if signal in normalized:
             return ComplexityTier.DEEP
 
-    # LIGHT check — only when text is short enough
+    # LIGHT check — only when the text is short enough AND the task role
+    # tolerates a cheap model at all.
+    if isinstance(task_role, str) and task_role in _NEVER_LIGHT_TASK_ROLES:
+        return ComplexityTier.STANDARD
+
     is_short = len(stripped) < _SHORT_TEXT_THRESHOLD * 4  # ~180 chars
     if is_short:
-        for signal in _LIGHT_SIGNALS:
-            if signal in normalized:
+        for _signal, pattern in _LIGHT_SIGNAL_PATTERNS:
+            if pattern.search(normalized):
                 return ComplexityTier.LIGHT
 
     return ComplexityTier.STANDARD

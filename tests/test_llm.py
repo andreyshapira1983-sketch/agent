@@ -12,10 +12,13 @@ here — they require network and a real API key. We only verify that:
 """
 from __future__ import annotations
 
+import importlib
 import json
+import os
 
 import pytest
 
+import core.llm as llm_module
 from core.llm import LLM, _default_model
 
 
@@ -948,16 +951,65 @@ class TestLargeOutputContinuation:
         assert out == "AAAA"
         assert len(llm._client.messages.calls) == 1
 
-    def test_empty_continuation_breaks_loop(self):
+    def test_empty_continuation_escalates_then_stops(self):
         # A model that reports truncation but returns no further text must not
-        # loop; the chain stops and returns what we have.
+        # be re-asked with the SAME budget — that request already proved it
+        # cannot produce visible output. The chain escalates the per-leg budget
+        # instead, and stops once the ceiling is reached. It must still be
+        # bounded: no infinite loop, and whatever text we have is returned.
         llm = _scripted_anthropic_llm([
             ("AAAA", 5, 5, "max_tokens"),
+            ("", 1, 0, "max_tokens"),
+            ("", 1, 0, "max_tokens"),
+            ("", 1, 0, "max_tokens"),
+            ("", 1, 0, "max_tokens"),
             ("", 1, 0, "max_tokens"),
         ])
         out = llm.complete(system="s", user="u")
         assert out == "AAAA"
+        calls = llm._client.messages.calls
+        budgets = [c["max_tokens"] for c in calls]
+        # First retry reuses the original budget (the leg that produced "AAAA"
+        # DID return text, so there is no evidence the budget is the problem).
+        assert budgets[0] == budgets[1]
+        # After an empty leg the budget escalates, and never repeats a value
+        # that already came back empty.
+        assert budgets[2] > budgets[1]
+        assert budgets == sorted(budgets)
+        # Bounded: capped by the escalation ceiling and the continuation cap.
+        assert len(calls) <= 1 + int(os.getenv("AGENT_MAX_CONTINUATIONS", "4"))
+        assert max(budgets) <= budgets[0] * 4
+
+    def test_empty_and_finished_continuation_breaks_immediately(self):
+        # Empty AND not truncated means the model genuinely has nothing left to
+        # add. Escalating the budget cannot help, so stop at once.
+        llm = _scripted_anthropic_llm([
+            ("AAAA", 5, 5, "max_tokens"),
+            ("", 1, 0, "end_turn"),
+        ])
+        out = llm.complete(system="s", user="u")
+        assert out == "AAAA"
         assert len(llm._client.messages.calls) == 2
+
+    def test_escalation_never_exceeds_ceiling(self, monkeypatch):
+        monkeypatch.setenv("AGENT_CONTINUE_ESCALATION_CAP", "2")
+        importlib.reload(llm_module)
+        try:
+            llm = llm_module.LLM(provider="mock")
+            llm.provider = "anthropic"
+            llm.model = "claude-sonnet-4-5"
+            llm._client = _ScriptedAnthropicClient([
+                ("", 1, 0, "max_tokens"),
+                ("", 1, 0, "max_tokens"),
+                ("", 1, 0, "max_tokens"),
+                ("", 1, 0, "max_tokens"),
+            ])
+            llm.complete(system="s", user="u", max_tokens=100)
+            budgets = [c["max_tokens"] for c in llm._client.messages.calls]
+            assert max(budgets) <= 200
+        finally:
+            monkeypatch.delenv("AGENT_CONTINUE_ESCALATION_CAP", raising=False)
+            importlib.reload(llm_module)
 
     # --- boundary whitespace preservation --------------------------------
 
@@ -980,3 +1032,51 @@ class TestLargeOutputContinuation:
         out = llm.complete(system="s", user="u")
         assert out == "the quick brown fox jumps"
 
+class TestReasoningTokenBudget:
+    """OpenAI reasoning models spend the budget on thinking before answering.
+
+    `max_completion_tokens` covers internal reasoning AND visible output, so a
+    budget sized for the answer alone can be consumed entirely by reasoning --
+    the API returns success with `content=None`. The client therefore treats
+    the caller's request as a floor for these models only.
+    """
+
+    def test_reasoning_model_budget_is_raised_to_floor(self):
+        llm = _scripted_openai_llm(
+            [("{}", 5, 5, "stop")], model="gpt-5.6-terra"
+        )
+        llm.complete(system="s", user="u", max_tokens=1024)
+        call = llm._client.chat.completions.calls[0]
+        assert call["max_completion_tokens"] >= llm_module._REASONING_TOKEN_FLOOR
+        assert "max_tokens" not in call
+
+    def test_reasoning_budget_never_lowers_a_larger_request(self):
+        llm = _scripted_openai_llm(
+            [("{}", 5, 5, "stop")], model="gpt-5.6-terra"
+        )
+        big = llm_module._REASONING_TOKEN_FLOOR * 3
+        llm.complete(system="s", user="u", max_tokens=big)
+        assert llm._client.chat.completions.calls[0]["max_completion_tokens"] == big
+
+    def test_non_reasoning_model_keeps_exact_budget(self):
+        llm = _scripted_openai_llm([("{}", 5, 5, "stop")], model="gpt-4o")
+        llm.complete(system="s", user="u", max_tokens=1024)
+        call = llm._client.chat.completions.calls[0]
+        assert call["max_tokens"] == 1024
+        assert "max_completion_tokens" not in call
+
+    def test_floor_of_zero_disables_the_raise(self, monkeypatch):
+        monkeypatch.setenv("AGENT_REASONING_TOKEN_FLOOR", "0")
+        importlib.reload(llm_module)
+        try:
+            llm = llm_module.LLM(provider="mock")
+            llm.provider = "openai"
+            llm.model = "gpt-5.6-terra"
+            llm._client = _ScriptedOpenAIClient([("{}", 5, 5, "stop")])
+            llm.complete(system="s", user="u", max_tokens=1024)
+            assert (
+                llm._client.chat.completions.calls[0]["max_completion_tokens"] == 1024
+            )
+        finally:
+            monkeypatch.delenv("AGENT_REASONING_TOKEN_FLOOR", raising=False)
+            importlib.reload(llm_module)

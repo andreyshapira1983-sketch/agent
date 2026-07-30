@@ -1177,6 +1177,7 @@ class ModelRouter:
         *,
         escalation: Any = None,
         force_tier: Any = None,
+        task_role: str | None = None,
     ) -> Any:
         """Like :meth:`for_role` but auto-selects model based on task complexity.
 
@@ -1206,6 +1207,14 @@ class ModelRouter:
         deriving it from ``assess_complexity``. It can never open a more
         expensive tier without the normal escalation gate: a forced DEEP still
         passes through the operator-escalation check below.
+
+        ``task_role`` is the role decided by :class:`core.role_router.RoleRouter`
+        for this request (repair, programmer, researcher, …). The caller already
+        knows it before choosing a model; forwarding it lets
+        :func:`~core.task_complexity.assess_complexity` refuse the LIGHT tier
+        for roles that edit code or diagnose defects, however tersely the
+        request was phrased. It never opens a *stronger* tier on its own, so it
+        cannot bypass the escalation gate.
         """
         from core.task_complexity import ComplexityTier, assess_complexity
         from core.model_catalog import tier_model_for
@@ -1217,7 +1226,7 @@ class ModelRouter:
         if force_tier is not None:
             tier = force_tier if isinstance(force_tier, ComplexityTier) else ComplexityTier(str(force_tier))
         else:
-            tier = assess_complexity(task, role=role_key)
+            tier = assess_complexity(task, role=role_key, task_role=task_role)
 
         # ── TD-010: provider-by-complexity preference ────────────────────────
         # Pick the PROVIDER by complexity tier among already-supported

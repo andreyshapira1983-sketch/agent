@@ -151,39 +151,65 @@ class TestSynthesizeLLMOverride:
 
 # ── 3. AgentLoop.run() calls for_task() and logs adaptive_route ───────────────
 
+def _run_with_mock_router(
+    tmp_path: Path,
+    question: str,
+    *,
+    for_task_impl=None,
+) -> tuple[list[dict], list[tuple]]:
+    """Run the loop with a mock router, collect log events.
+
+    Module-level on purpose: sharing it by subclassing a test class makes
+    pytest re-collect and re-run every inherited test method.
+
+    ``for_task_impl`` lets a test substitute a router that misbehaves
+    (raises), so the loop's failure handling is exercised for real rather
+    than asserted about in the abstract.
+    """
+    fake_llm = FakeLLM(responses=[_make_answer("answer")])
+    planner = FakePlanner(sources=[], reasoning="no tools needed")
+
+    # Patch model_router.for_task to return fake_llm and record calls
+    for_task_calls: list[tuple] = []
+
+    def fake_for_task(role, task, *, escalation=None, task_role=None):
+        for_task_calls.append((role, task, task_role))
+        return fake_llm
+
+    router_impl = for_task_impl or fake_for_task
+
+    events: list[dict] = []
+
+    class SpyLogger:
+        def log(self, event_type: str, *args, **kwargs):
+            # The loop passes its payload positionally
+            # (`log("adaptive_route", {...})`), so merge that dict in too —
+            # capturing only **kwargs silently dropped every real payload.
+            payload: dict = {}
+            for arg in args:
+                if isinstance(arg, dict):
+                    payload.update(arg)
+            events.append({"type": event_type, **payload, **kwargs})
+
+    registry = _make_registry(tmp_path)
+    loop = AgentLoop(
+        registry=registry,
+        policy=PolicyGate(registry),
+        llm=fake_llm,
+        logger=TraceLogger(trace_id=new_trace_id(), log_dir=tmp_path / "logs", verbose=False),
+        planner=planner,
+    )
+    loop.model_router.for_task = router_impl  # type: ignore[method-assign]
+    loop.log = SpyLogger()  # type: ignore[assignment]
+
+    loop.run(question)
+
+    return events, for_task_calls
+
+
 class TestRunAdaptiveRoute:
-    def _run_with_mock_router(self, tmp_path: Path, question: str) -> list[dict]:
-        """Run the loop with a mock router, collect log events."""
-        fake_llm = FakeLLM(responses=[_make_answer("answer")])
-        planner = FakePlanner(sources=[], reasoning="no tools needed")
-
-        # Patch model_router.for_task to return fake_llm and record calls
-        for_task_calls: list[tuple] = []
-
-        def fake_for_task(role, task, *, escalation=None):
-            for_task_calls.append((role, task))
-            return fake_llm
-
-        events: list[dict] = []
-
-        class SpyLogger:
-            def log(self, event_type: str, *args, **kwargs):
-                events.append({"type": event_type, **kwargs})
-
-        registry = _make_registry(tmp_path)
-        loop = AgentLoop(
-            registry=registry,
-            policy=PolicyGate(registry),
-            llm=fake_llm,
-            logger=TraceLogger(trace_id=new_trace_id(), log_dir=tmp_path / "logs", verbose=False),
-            planner=planner,
-        )
-        loop.model_router.for_task = fake_for_task  # type: ignore[method-assign]
-        loop.log = SpyLogger()  # type: ignore[assignment]
-
-        loop.run(question)
-
-        return events, for_task_calls
+    def _run_with_mock_router(self, tmp_path: Path, question: str, **kwargs):
+        return _run_with_mock_router(tmp_path, question, **kwargs)
 
     def test_for_task_called_for_planner_and_synth(self, tmp_path: Path):
         """run() must call for_task() for both PLANNER and SYNTHESIZER roles."""
@@ -193,17 +219,129 @@ class TestRunAdaptiveRoute:
         # role may be ModelRole enum or plain string — normalise to value
         roles_called = [
             r.value if hasattr(r, "value") else str(r)
-            for r, _ in for_task_calls
+            for r, _, _ in for_task_calls
         ]
         assert "planner" in roles_called
         assert "synthesizer" in roles_called
+
+    def test_for_task_receives_task_role(self, tmp_path: Path):
+        """run() must forward the RoleRouter verdict to for_task().
+
+        Regression guard: the loop computed ``role_route`` and then dropped it,
+        so ``assess_complexity`` never learned that a repair/programming task
+        was in flight and could route it to the cheapest model.
+        """
+        _events, for_task_calls = self._run_with_mock_router(
+            tmp_path, "какой статус системы"
+        )
+        assert for_task_calls, "for_task() was never called"
+        task_roles = {tr for _, _, tr in for_task_calls}
+        # Every call carries the same, non-empty verdict.
+        assert len(task_roles) == 1
+        assert task_roles != {None}
+
+    def test_adaptive_route_log_includes_task_role(self, tmp_path: Path):
+        """The routing decision must be explainable from the log alone."""
+        events, _calls = self._run_with_mock_router(
+            tmp_path, "какой статус системы"
+        )
+        routes = [e for e in events if e.get("type") == "adaptive_route"]
+        assert routes, "adaptive_route was never logged"
+        assert "task_role" in routes[0]
 
     def test_for_task_receives_full_question(self, tmp_path: Path):
         """for_task() must receive the full user question as the task string."""
         question = "сделай полный архитектурный аудит системы"
         _events, for_task_calls = self._run_with_mock_router(tmp_path, question)
-        questions_passed = [task for _, task in for_task_calls]
+        questions_passed = [task for _, task, _ in for_task_calls]
         assert all(q == question for q in questions_passed)
+
+
+# ── 3b. Routing failures must never vanish ───────────────────────────────────
+
+class TestRoutingFailureIsVisible:
+    """The adaptive-routing block used to catch bare ``Exception`` and set the
+    LLMs to ``None`` with nothing written to the log.
+
+    Two distinct defects lived in that one handler:
+
+    1. A ``TypeError`` — i.e. ``for_task()`` called with an argument it does not
+       accept — is a call-signature defect, not a routing fault. Swallowing it
+       meant every task silently answered on the default model while the log
+       still looked healthy.
+    2. Genuine runtime failures degraded to the default model with no record,
+       so the degradation was undiagnosable after the fact.
+    """
+
+    def test_signature_drift_propagates(self, tmp_path: Path):
+        """A router that rejects the arguments the loop passes is a defect.
+
+        This is the exact drift that adding ``task_role=`` could introduce: an
+        implementation still on the old signature raises ``TypeError``. It must
+        surface, not degrade routing behind a healthy-looking log.
+        """
+        def stale_signature_for_task(role, task, *, escalation=None):
+            # No ``task_role`` — the pre-fix signature.
+            raise AssertionError("unreachable: TypeError is raised at call time")
+
+        with pytest.raises(TypeError):
+            _run_with_mock_router(
+                tmp_path,
+                "какой статус системы",
+                for_task_impl=stale_signature_for_task,
+            )
+
+    def test_explicit_type_error_is_not_laundered(self, tmp_path: Path):
+        """Even a hand-raised TypeError must not be converted into a fallback."""
+        def broken_for_task(role, task, *, escalation=None, task_role=None):
+            raise TypeError("unexpected keyword argument")
+
+        with pytest.raises(TypeError):
+            _run_with_mock_router(
+                tmp_path,
+                "какой статус системы",
+                for_task_impl=broken_for_task,
+            )
+
+    def test_runtime_failure_is_logged(self, tmp_path: Path):
+        """A non-signature failure keeps the fallback but must leave a record."""
+        def failing_for_task(role, task, *, escalation=None, task_role=None):
+            raise RuntimeError("model catalog unreachable")
+
+        events, _calls = _run_with_mock_router(
+            tmp_path,
+            "какой статус системы",
+            for_task_impl=failing_for_task,
+        )
+
+        errors = [e for e in events if e.get("type") == "adaptive_route_error"]
+        assert errors, "routing failure was swallowed with no log entry"
+        assert errors[0]["error"] == "RuntimeError"
+        assert "model catalog unreachable" in errors[0]["detail"]
+        assert errors[0]["fallback"] == "default_llm"
+
+    def test_runtime_failure_still_answers(self, tmp_path: Path):
+        """The fallback itself must be preserved — logging is additive."""
+        def failing_for_task(role, task, *, escalation=None, task_role=None):
+            raise RuntimeError("model catalog unreachable")
+
+        events, _calls = _run_with_mock_router(
+            tmp_path,
+            "какой статус системы",
+            for_task_impl=failing_for_task,
+        )
+        # The run completed: the loop got past routing to its normal stages.
+        assert any(e.get("type") == "interpret" for e in events)
+        # ...and no successful route was claimed.
+        assert not [e for e in events if e.get("type") == "adaptive_route"]
+
+    def test_successful_route_logs_no_error(self, tmp_path: Path):
+        """Negative control: the error event is absent on the happy path."""
+        events, _calls = _run_with_mock_router(
+            tmp_path, "какой статус системы"
+        )
+        assert not [e for e in events if e.get("type") == "adaptive_route_error"]
+        assert [e for e in events if e.get("type") == "adaptive_route"]
 
 
 # ── 4. for_task() fallback when no tier model found ──────────────────────────
