@@ -34,9 +34,12 @@ _ALL_PROVIDER_ENV_VARS = sorted(
 _fixture_body = _ensure_placeholder_credential.__wrapped__
 
 
-@pytest.fixture
-def bare_environment(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
-    """A process that looks like a fresh clone: no provider credentials at all."""
+def _strip_every_credential(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
+    """Make the process look like a fresh clone: no provider credentials at all.
+
+    A plain helper rather than a fixture so the tests below don't have to shadow
+    its name to receive it.
+    """
     for var in _ALL_PROVIDER_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
     assert not _real_credential_present()
@@ -52,21 +55,21 @@ def test_a_provider_credential_is_always_visible_to_the_suite() -> None:
 
 
 def test_fixture_supplies_a_credential_when_the_machine_has_none(
-    bare_environment: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The no-credential path, exercised directly.
 
     The invariant test above passes for free on any machine that already has a
     key, so it cannot tell a working fixture from a deleted one. This can.
     """
-    _fixture_body(bare_environment)
+    _fixture_body(_strip_every_credential(monkeypatch))
 
     assert _real_credential_present()
     assert os.environ["ANTHROPIC_API_KEY"] == _PLACEHOLDER_CREDENTIAL
 
 
 def test_a_half_configured_provider_still_gets_a_placeholder(
-    bare_environment: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A partially configured provider is not a credential.
 
@@ -75,36 +78,39 @@ def test_a_half_configured_provider_still_gets_a_placeholder(
     the placeholder and leave the suite with nothing usable — the exact failure
     the fixture exists to prevent.
     """
-    bare_environment.setenv("LOCAL_LLM_BASE_URL", "http://localhost:1234/v1")
+    bare = _strip_every_credential(monkeypatch)
+    bare.setenv("LOCAL_LLM_BASE_URL", "http://localhost:1234/v1")
     assert not _provider_has_credentials("local")
 
-    _fixture_body(bare_environment)
+    _fixture_body(bare)
 
     assert os.environ["ANTHROPIC_API_KEY"] == _PLACEHOLDER_CREDENTIAL
 
 
 def test_a_whitespace_only_key_is_not_a_credential(
-    bare_environment: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The router strips before testing, so the fixture must agree with it."""
-    bare_environment.setenv("ANTHROPIC_API_KEY", "   ")
+    bare = _strip_every_credential(monkeypatch)
+    bare.setenv("ANTHROPIC_API_KEY", "   ")
 
-    _fixture_body(bare_environment)
+    _fixture_body(bare)
 
     assert os.environ["ANTHROPIC_API_KEY"] == _PLACEHOLDER_CREDENTIAL
 
 
 def test_a_real_credential_takes_precedence(
-    bare_environment: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The fixture defers to reality instead of overwriting it.
 
     This is what keeps CI running under its real secrets, and what stops the
     fixture from silently redirecting an operator's own routing.
     """
-    bare_environment.setenv("ANTHROPIC_API_KEY", "operator-supplied")
+    bare = _strip_every_credential(monkeypatch)
+    bare.setenv("ANTHROPIC_API_KEY", "operator-supplied")
 
-    _fixture_body(bare_environment)
+    _fixture_body(bare)
 
     assert os.environ["ANTHROPIC_API_KEY"] == "operator-supplied"
 
