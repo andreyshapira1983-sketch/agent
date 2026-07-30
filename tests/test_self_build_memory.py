@@ -6,6 +6,8 @@ transient console log.
 """
 from __future__ import annotations
 
+import pytest
+
 from cli.self_build_memory import (
     build_self_build_episode,
     record_self_build_episode,
@@ -101,6 +103,36 @@ def test_unknown_status_defaults_to_partial() -> None:
     ep = build_self_build_episode("self-apply-run", {"status": "weird", "reason": "x"})
     assert ep is not None
     assert ep.outcome == "partial"
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        ("proposed", "achieved"),
+        ("critic_veto", "failed"),
+        ("rolled_back", "failed"),
+        ("no_patch", "partially_achieved"),
+        ("weird", "partially_achieved"),  # unknown status still lands somewhere
+    ],
+)
+def test_every_written_episode_carries_a_settled_completion_state(
+    status: str, expected: str
+) -> None:
+    """The axis is settled at write time, never left for retrieval to guess.
+
+    Leaving `completion_state=None` is not a harmless omission. `admit_for_storage`
+    grants a `lesson`-tagged record `usage_eligible=True` so these lessons stop
+    being invisible (MIR-042) — and every episode this writer builds is tagged
+    `lesson`. So an unset axis produces exactly the row shape that
+    `test_no_legacy_episode_in_the_live_store_is_ever_admitted` forbids: replayed
+    into a prompt while carrying no verdict. `outcome` already answers the
+    question, so there is nothing to infer and no excuse to defer it.
+    """
+    ep = build_self_build_episode("self-build-produce", {"status": status})
+    assert ep is not None
+    assert ep.completion_state == expected
+    # The shape the live-store invariant checks for: never unclassified.
+    assert ep.completion_state is not None
 
 
 def test_record_persists_to_store() -> None:

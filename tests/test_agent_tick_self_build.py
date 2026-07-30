@@ -417,3 +417,93 @@ def test_real_producer_creates_at_most_one_item_and_no_git(tmp_path: Path):
 def test_config_budget_limits_never_written(tmp_path: Path):
     _run(tmp_path, _FakeReport("proposed", approval_id="ain-1"))
     assert not (tmp_path / "config" / "budget_limits.json").exists()
+
+
+# ── outcome journaling (episodic memory) ─────────────────────────────────────
+
+
+class _SpyEpisodicStore:
+    """Captures what the tick journals; can be told to fail on write."""
+
+    def __init__(self, *, boom: bool = False) -> None:
+        self.saved: list = []
+        self._boom = boom
+
+    def save(self, episode):
+        if self._boom:
+            raise RuntimeError("disk full")
+        self.saved.append(episode)
+
+
+class _SpyBuildAgentWithMemory:
+    """Like _SpyBuildAgent, but the agent it returns carries an episodic store."""
+
+    def __init__(self, store: _SpyEpisodicStore) -> None:
+        self.store = store
+        self.calls = 0
+
+    def __call__(self, workspace):
+        self.calls += 1
+        return SimpleNamespace(
+            model_router=SimpleNamespace(for_role=lambda role: object()),
+            episodic_store=self.store,
+        )
+
+
+def _run_with_memory(tmp_path, report, *, store=None):
+    store = store or _SpyEpisodicStore()
+    out = _maybe_produce_self_build(
+        tmp_path, _FakeInbox(),
+        now_iso=_iso(datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)),
+        cooldown_hours=12.0,
+        build_agent_fn=_SpyBuildAgentWithMemory(store),
+        producer_fn=_SpyProducer(report),
+    )
+    return out, store
+
+
+def test_critic_veto_is_journaled_with_the_tags_both_readers_query(tmp_path: Path):
+    """A veto raised by the daemon has to become a retrievable lesson.
+
+    Two readers select on these tags and each needs a different subset:
+    ``recently_vetoed_self_build_targets()`` on ``self-build`` + ``critic_veto``,
+    ``recent_self_build_lessons()`` on ``self-build`` + ``failed`` + the target
+    path. Miss either set and the next tick retries the same target knowing
+    nothing about the veto it already earned.
+    """
+    out, store = _run_with_memory(
+        tmp_path, _FakeReport("critic_veto", target_path="core/redaction.py")
+    )
+    assert out["self_build_status"] == "critic_veto"
+    assert len(store.saved) == 1
+    tags = set(store.saved[0].tags)
+    assert {"self-build", "critic_veto"} <= tags
+    assert {"self-build", "failed", "core/redaction.py"} <= tags
+
+
+def test_a_successful_proposal_is_journaled_too_not_only_failures(tmp_path: Path):
+    out, store = _run_with_memory(
+        tmp_path,
+        _FakeReport("proposed", approval_id="ain-1", target_path="core/planner.py"),
+    )
+    assert out["self_build_status"] == "proposed"
+    assert len(store.saved) == 1
+    assert "success" in set(store.saved[0].tags)
+
+
+def test_journaling_failure_never_breaks_the_tick(tmp_path: Path):
+    """Memory is best-effort here: a dead store must not cost us the outcome."""
+    out, store = _run_with_memory(
+        tmp_path,
+        _FakeReport("proposed", approval_id="ain-1"),
+        store=_SpyEpisodicStore(boom=True),
+    )
+    assert out["self_build_status"] == "proposed"
+    assert store.saved == []
+    assert _read_producer_state(tmp_path)["last_proposed_at"]  # cooldown still spent
+
+
+def test_agent_without_an_episodic_store_is_tolerated(tmp_path: Path):
+    out, _, producer = _run(tmp_path, _FakeReport("no_patch"))
+    assert out["self_build_status"] == "no_patch"
+    assert producer.calls == 1

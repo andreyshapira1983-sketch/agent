@@ -613,6 +613,7 @@ def _maybe_produce_self_build(
         from core.budget_kill_switch import BudgetKillSwitch, default_path
         from core.budget_ledger import BudgetLedger
         from core.safe_vcs import SafeVCS
+        from core.self_build_memory import record_self_build_episode
         from core.self_build_producer import produce_self_apply_proposal
 
         produce = producer_fn or produce_self_apply_proposal
@@ -683,6 +684,17 @@ def _maybe_produce_self_build(
         # veto / no_patch / error must let the next tick try again immediately.
         if status == "proposed":
             _write_producer_state(workspace, now_iso)
+
+        # Journal the outcome so a refusal becomes a retrievable lesson.
+        # Every OTHER self-build touch-point already does this — the autonomous
+        # runtime and the `:self-build-*` / `:self-apply-run` operator commands —
+        # but the tick dropped `result` on the floor. The cost was silent and
+        # exact: `recently_vetoed_self_build_targets()` reads episodes tagged
+        # `self-build` + `critic_veto`, and nothing on this path ever wrote one,
+        # so a veto raised by the daemon taught it nothing and the next tick
+        # retried the same target forever. Best-effort by contract: it swallows
+        # every failure and returns a bool, so journaling cannot break a tick.
+        record_self_build_episode(agent, kind="self-build-produce", result=result)
 
         return {
             "self_build_status": status,
