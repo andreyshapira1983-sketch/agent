@@ -277,6 +277,19 @@ _MEMORY_GOVERNANCE_DOC_PATHS = (
     "docs/MEMORY_SYSTEM_AUDIT.md",
     "docs/self-audit-lessons.md",
 )
+# Thematic (conditional) doc group for self-diagnosis / self-repair reasoning:
+# how to prove a defect, separate symptom from cause, refuse guess-based data
+# recovery, migrate stored records safely, and bank a lesson only after the
+# verdict closes. Same discipline as the two groups above — deliberately NOT in
+# the universal corporate manifest, because an ordinary "fix this bug" turn must
+# not pay for a reasoning protocol it is not going to use.
+#
+# docs/self-audit-lessons.md is deliberately NOT duplicated here: it is the
+# historical record of defect classes already found and already belongs to the
+# memory group. This group carries the protocol, not the history.
+_SELF_REPAIR_DOCTRINE_DOC_PATHS = (
+    "docs/SELF_REPAIR_DOCTRINE.md",
+)
 _DOCTRINE_LOW_SIGNAL_DEFAULT_PATHS = (
     "README.md",
     "core/planner.py",
@@ -640,6 +653,104 @@ def _is_memory_governance_question(question: str) -> bool:
     return has_context and has_action
 
 
+# Two-tier, same shape and same reason as the two detectors above. The stakes
+# here are the inverse of "too narrow": a bare "fix the bug in core/loop.py" is
+# an ordinary task and must NOT drag in a reasoning protocol. So the strong list
+# holds only vocabulary that is unambiguously about the *repair protocol itself*
+# (root cause, fail-before, backfill, regression guard, idempotence), while
+# ordinary repair words ("fix", "bug", "migration", "self-build") are context
+# only and need an action word to fire. Each list carries paired negative tests.
+_SELF_REPAIR_DOC_STRONG_TERMS = (
+    "self-repair",
+    "self repair",
+    "self_repair",
+    "self-diagnos",
+    "self diagnos",
+    "самовосстановлен",
+    "саморемонт",
+    "самодиагност",
+    "root cause",
+    "root-cause",
+    "первопричин",
+    "корневая причина",
+    "корневой причин",
+    "корневую причину",
+    "fail-before",
+    "fail before test",
+    "regression test",
+    "regression guard",
+    "регрессионн",
+    "backfill",
+    "бэкфилл",
+    "бекфилл",
+    "post-mortem",
+    "postmortem",
+    "idempot",
+    "идемпотент",
+)
+_SELF_REPAIR_DOC_CONTEXT_TERMS = (
+    "repair",
+    "ремонт",
+    "починк",
+    "чинит",
+    "чинить",
+    "fix",
+    "исправ",
+    "bug",
+    "баг",
+    "defect",
+    "дефект",
+    "regression",
+    "регресс",
+    "migration",
+    "миграц",
+    "breakage",
+    "поломк",
+    "сломал",
+    "rollback",
+    "откат",
+    "self-build",
+    "self build",
+    "self_build",
+    "самосбор",
+)
+_SELF_REPAIR_DOC_ACTION_TERMS = (
+    "protocol",
+    "протокол",
+    "doctrine",
+    "доктрин",
+    "diagnos",
+    "диагност",
+    "investigate",
+    "расслед",
+    "cause",
+    "причин",
+    "invariant",
+    "инвариант",
+    "safely",
+    "безопасн",
+    "procedure",
+    "процедур",
+    "dry-run",
+    "dry run",
+    "сухой прогон",
+    "backup",
+    "бэкап",
+    "резервн",
+    "reproduce",
+    "воспроизв",
+)
+
+
+def _is_self_repair_doctrine_question(question: str) -> bool:
+    lowered = (question or "").casefold()
+    if any(term in lowered for term in _SELF_REPAIR_DOC_STRONG_TERMS):
+        return True
+    has_context = any(term in lowered for term in _SELF_REPAIR_DOC_CONTEXT_TERMS)
+    has_action = any(term in lowered for term in _SELF_REPAIR_DOC_ACTION_TERMS)
+    return has_context and has_action
+
+
 def _is_confidence_evidence_diagnostic_question(question: str) -> bool:
     lowered = (question or "").casefold()
     return any(term in lowered for term in _CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS)
@@ -809,22 +920,28 @@ def _ensure_doctrine_docs_first(
     return ordered_docs + remainder
 
 
-def _ensure_subagent_governance_docs_first(
+def _ensure_thematic_docs_first(
     sources: list[dict[str, Any]],
     warnings: list[str],
+    *,
+    target_paths: tuple[str, ...],
+    lead_paths: tuple[str, ...],
+    warning_prefix: str,
 ) -> list[dict[str, Any]]:
-    """Ensure the thematic sub-agent lifecycle doc leads a sub-agent question.
+    """Place one thematic doc group ahead of code, behind higher-priority groups.
 
-    Placed right after any leading doctrine/corporate docs (so a broad
-    doctrine+subagent question keeps corporate docs first, then the sub-agent
-    contract), or at the very front when no corporate docs are present.
+    Single implementation for every conditionally routed doc group. Each group
+    differs only in *which* docs it owns (`target_paths`), which groups outrank
+    it (`lead_paths`), and how the injection is reported (`warning_prefix`);
+    the ordering and de-duplication rule itself is an invariant and lives here
+    once, so a new group cannot re-introduce a fixed bug by copying the shape.
+
+    De-duplication is total: *every* request for a target doc is consumed, not
+    just the first. Keeping later duplicates in the remainder made the agent
+    `file_read` the same doctrine file twice and burn context for nothing.
     """
-    target_norms = {
-        _norm_source_path(path): path for path in _SUBAGENT_GOVERNANCE_DOC_PATHS
-    }
-    corporate_norms = {
-        _norm_source_path(path) for path in _DOCTRINE_CORPORATE_DOC_PATHS
-    }
+    target_norms = {_norm_source_path(path) for path in target_paths}
+    lead_norms = {_norm_source_path(path) for path in lead_paths}
 
     found: dict[str, dict[str, Any]] = {}
     rest: list[dict[str, Any]] = []
@@ -832,67 +949,8 @@ def _ensure_subagent_governance_docs_first(
         args = src.get("arguments") or {}
         path = args.get("path") if isinstance(args, dict) else None
         norm = _norm_source_path(path) if isinstance(path, str) else ""
-        if src.get("tool") == "file_read" and norm in target_norms and norm not in found:
-            found[norm] = src
-            continue
-        rest.append(src)
-
-    insert_at = 0
-    for src in rest:
-        args = src.get("arguments") or {}
-        path = args.get("path") if isinstance(args, dict) else None
-        norm = _norm_source_path(path) if isinstance(path, str) else ""
-        if src.get("tool") == "file_read" and norm in corporate_norms:
-            insert_at += 1
-        else:
-            break
-
-    ordered_target: list[dict[str, Any]] = []
-    injected: list[str] = []
-    for path in _SUBAGENT_GOVERNANCE_DOC_PATHS:
-        norm = _norm_source_path(path)
-        existing = found.get(norm)
-        if existing is not None:
-            ordered_target.append(existing)
-        else:
-            ordered_target.append(_file_read_source_spec(path))
-            injected.append(path)
-
-    if injected:
-        warnings.append(
-            "subagent governance docs injected for a sub-agent question: "
-            + ", ".join(injected)
-        )
-    return rest[:insert_at] + ordered_target + rest[insert_at:]
-
-
-def _ensure_memory_governance_docs_first(
-    sources: list[dict[str, Any]],
-    warnings: list[str],
-) -> list[dict[str, Any]]:
-    """Ensure the thematic memory docs lead a memory/durable-learning question.
-
-    Placed after any leading doctrine/corporate docs AND after the sub-agent
-    contract, so a question touching several themes keeps a stable order
-    (corporate → sub-agent → memory) instead of the two thematic groups
-    competing for the same slot.
-    """
-    target_norms = {
-        _norm_source_path(path): path for path in _MEMORY_GOVERNANCE_DOC_PATHS
-    }
-    lead_norms = {
-        _norm_source_path(path)
-        for path in _DOCTRINE_CORPORATE_DOC_PATHS + _SUBAGENT_GOVERNANCE_DOC_PATHS
-    }
-
-    found: dict[str, dict[str, Any]] = {}
-    rest: list[dict[str, Any]] = []
-    for src in sources:
-        args = src.get("arguments") or {}
-        path = args.get("path") if isinstance(args, dict) else None
-        norm = _norm_source_path(path) if isinstance(path, str) else ""
-        if src.get("tool") == "file_read" and norm in target_norms and norm not in found:
-            found[norm] = src
+        if src.get("tool") == "file_read" and norm in target_norms:
+            found.setdefault(norm, src)
             continue
         rest.append(src)
 
@@ -908,7 +966,7 @@ def _ensure_memory_governance_docs_first(
 
     ordered_target: list[dict[str, Any]] = []
     injected: list[str] = []
-    for path in _MEMORY_GOVERNANCE_DOC_PATHS:
+    for path in target_paths:
         norm = _norm_source_path(path)
         existing = found.get(norm)
         if existing is not None:
@@ -918,11 +976,73 @@ def _ensure_memory_governance_docs_first(
             injected.append(path)
 
     if injected:
-        warnings.append(
-            "memory governance docs injected for a memory question: "
-            + ", ".join(injected)
-        )
+        warnings.append(warning_prefix + ", ".join(injected))
     return rest[:insert_at] + ordered_target + rest[insert_at:]
+
+
+def _ensure_subagent_governance_docs_first(
+    sources: list[dict[str, Any]],
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    """Ensure the thematic sub-agent lifecycle doc leads a sub-agent question.
+
+    Placed right after any leading doctrine/corporate docs (so a broad
+    doctrine+subagent question keeps corporate docs first, then the sub-agent
+    contract), or at the very front when no corporate docs are present.
+    """
+    return _ensure_thematic_docs_first(
+        sources,
+        warnings,
+        target_paths=_SUBAGENT_GOVERNANCE_DOC_PATHS,
+        lead_paths=_DOCTRINE_CORPORATE_DOC_PATHS,
+        warning_prefix="subagent governance docs injected for a sub-agent question: ",
+    )
+
+
+def _ensure_memory_governance_docs_first(
+    sources: list[dict[str, Any]],
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    """Ensure the thematic memory docs lead a memory/durable-learning question.
+
+    Placed after any leading doctrine/corporate docs AND after the sub-agent
+    contract, so a question touching several themes keeps a stable order
+    (corporate → sub-agent → memory) instead of the two thematic groups
+    competing for the same slot.
+    """
+    return _ensure_thematic_docs_first(
+        sources,
+        warnings,
+        target_paths=_MEMORY_GOVERNANCE_DOC_PATHS,
+        lead_paths=_DOCTRINE_CORPORATE_DOC_PATHS + _SUBAGENT_GOVERNANCE_DOC_PATHS,
+        warning_prefix="memory governance docs injected for a memory question: ",
+    )
+
+
+def _ensure_self_repair_doctrine_docs_first(
+    sources: list[dict[str, Any]],
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    """Ensure the self-repair protocol leads a self-diagnosis/repair question.
+
+    Placed after any leading corporate, sub-agent AND memory docs, so a question
+    touching several themes keeps a stable order (corporate → sub-agent →
+    memory → self-repair) instead of the thematic groups competing for the same
+    slot.
+    """
+    return _ensure_thematic_docs_first(
+        sources,
+        warnings,
+        target_paths=_SELF_REPAIR_DOCTRINE_DOC_PATHS,
+        lead_paths=(
+            _DOCTRINE_CORPORATE_DOC_PATHS
+            + _SUBAGENT_GOVERNANCE_DOC_PATHS
+            + _MEMORY_GOVERNANCE_DOC_PATHS
+        ),
+        warning_prefix=(
+            "self-repair doctrine docs injected for a self-repair question: "
+        ),
+    )
 
 
 def _drop_readme_status_sources(
@@ -1629,28 +1749,21 @@ class LLMPlanner:
                             and not _explicitly_requests_readme(question)
                         ),
                     )
-        if _is_subagent_governance_question(question):
-            if "file_read" not in self.hidden_tools:
-                try:
-                    self.registry.get("file_read")
-                except KeyError:
-                    pass
-                else:
-                    sources = _ensure_subagent_governance_docs_first(
-                        sources,
-                        step_warnings,
-                    )
-        if _is_memory_governance_question(question):
-            if "file_read" not in self.hidden_tools:
-                try:
-                    self.registry.get("file_read")
-                except KeyError:
-                    pass
-                else:
-                    sources = _ensure_memory_governance_docs_first(
-                        sources,
-                        step_warnings,
-                    )
+        if _is_subagent_governance_question(question) and self._file_read_available():
+            sources = _ensure_subagent_governance_docs_first(
+                sources,
+                step_warnings,
+            )
+        if _is_memory_governance_question(question) and self._file_read_available():
+            sources = _ensure_memory_governance_docs_first(
+                sources,
+                step_warnings,
+            )
+        if _is_self_repair_doctrine_question(question) and self._file_read_available():
+            sources = _ensure_self_repair_doctrine_docs_first(
+                sources,
+                step_warnings,
+            )
         # Coverage enforcement: if the question is about test adequacy /
         # coverage and the planner produced a run_tests step without
         # coverage=True, inject it automatically so the synthesizer always
@@ -1677,6 +1790,25 @@ class LLMPlanner:
         )
 
     # ---------- prompt construction ----------
+
+    def _file_read_available(self) -> bool:
+        """Whether a `file_read` step can actually run on this path.
+
+        Doc injection and the matching prompt directive must agree. Injection
+        was already gated on this; the directives were not, so on the
+        autonomous path (where `file_read` is hidden) the prompt still ordered
+        the model to "read docs/X first" while the registered-tools list and
+        the [UNAVAILABLE_TOOLS=...] block said it could not. That contradiction
+        is exactly the noisy policy_blocked replan the hidden-tools directive
+        exists to prevent, so the gate lives here once and both sides use it.
+        """
+        if "file_read" in (getattr(self, "hidden_tools", frozenset()) or frozenset()):
+            return False
+        try:
+            self.registry.get("file_read")
+        except KeyError:
+            return False
+        return True
 
     def _build_user_prompt(
         self,
@@ -1731,7 +1863,11 @@ class LLMPlanner:
                 "architecture/reference facts.]\n"
             )
         doctrine_docs_block = ""
-        if _is_doctrine_corporate_question(question):
+        # Every "read docs/X first" directive is gated on file_read actually
+        # being usable — an unreachable instruction only produces plans the
+        # policy layer then blocks.
+        docs_readable = self._file_read_available()
+        if docs_readable and _is_doctrine_corporate_question(question):
             doctrine_docs_block = (
                 "[DOCTRINE_DOCS=required — for corporate model, central agent "
                 "governance, subagents, self-build, night observation, and "
@@ -1741,7 +1877,7 @@ class LLMPlanner:
                 "core/*.py mechanics.]\n"
             )
         subagent_docs_block = ""
-        if _is_subagent_governance_question(question):
+        if docs_readable and _is_subagent_governance_question(question):
             subagent_docs_block = (
                 "[SUBAGENT_DOCS=required — this question is about sub-agents / "
                 "delegation / team executor / role trust / quarantine / pause / "
@@ -1750,7 +1886,7 @@ class LLMPlanner:
                 "mechanics.]\n"
             )
         memory_docs_block = ""
-        if _is_memory_governance_question(question):
+        if docs_readable and _is_memory_governance_question(question):
             memory_docs_block = (
                 "[MEMORY_DOCS=required — this question is about memory / "
                 "episodic / procedural / consolidation / forgetting / retrieval "
@@ -1759,6 +1895,17 @@ class LLMPlanner:
                 "docs/self-audit-lessons.md first, before core/*.py mechanics. "
                 "These record known defects and their causes — do not "
                 "re-derive them from the code.]\n"
+            )
+        self_repair_docs_block = ""
+        if docs_readable and _is_self_repair_doctrine_question(question):
+            self_repair_docs_block = (
+                "[SELF_REPAIR_DOCS=required — this question is about "
+                "self-diagnosis / self-repair / root cause / regression / "
+                "backfill / data migration. Read docs/SELF_REPAIR_DOCTRINE.md "
+                "first (the normative repair protocol: prove the defect, "
+                "separate symptom from cause, never reconstruct data by guess, "
+                "fail closed, migrate safely, bank the lesson only after the "
+                "verdict closes) before core/*.py mechanics.]\n"
             )
         confidence_evidence_block = ""
         if _is_confidence_evidence_diagnostic_question(question):
@@ -1793,6 +1940,7 @@ class LLMPlanner:
             f"{doctrine_docs_block}"
             f"{subagent_docs_block}"
             f"{memory_docs_block}"
+            f"{self_repair_docs_block}"
             f"question: {question}\n"
             f"\n"
             f"Return your JSON plan now."
