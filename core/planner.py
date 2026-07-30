@@ -1749,39 +1749,21 @@ class LLMPlanner:
                             and not _explicitly_requests_readme(question)
                         ),
                     )
-        if _is_subagent_governance_question(question):
-            if "file_read" not in self.hidden_tools:
-                try:
-                    self.registry.get("file_read")
-                except KeyError:
-                    pass
-                else:
-                    sources = _ensure_subagent_governance_docs_first(
-                        sources,
-                        step_warnings,
-                    )
-        if _is_memory_governance_question(question):
-            if "file_read" not in self.hidden_tools:
-                try:
-                    self.registry.get("file_read")
-                except KeyError:
-                    pass
-                else:
-                    sources = _ensure_memory_governance_docs_first(
-                        sources,
-                        step_warnings,
-                    )
-        if _is_self_repair_doctrine_question(question):
-            if "file_read" not in self.hidden_tools:
-                try:
-                    self.registry.get("file_read")
-                except KeyError:
-                    pass
-                else:
-                    sources = _ensure_self_repair_doctrine_docs_first(
-                        sources,
-                        step_warnings,
-                    )
+        if _is_subagent_governance_question(question) and self._file_read_available():
+            sources = _ensure_subagent_governance_docs_first(
+                sources,
+                step_warnings,
+            )
+        if _is_memory_governance_question(question) and self._file_read_available():
+            sources = _ensure_memory_governance_docs_first(
+                sources,
+                step_warnings,
+            )
+        if _is_self_repair_doctrine_question(question) and self._file_read_available():
+            sources = _ensure_self_repair_doctrine_docs_first(
+                sources,
+                step_warnings,
+            )
         # Coverage enforcement: if the question is about test adequacy /
         # coverage and the planner produced a run_tests step without
         # coverage=True, inject it automatically so the synthesizer always
@@ -1808,6 +1790,25 @@ class LLMPlanner:
         )
 
     # ---------- prompt construction ----------
+
+    def _file_read_available(self) -> bool:
+        """Whether a `file_read` step can actually run on this path.
+
+        Doc injection and the matching prompt directive must agree. Injection
+        was already gated on this; the directives were not, so on the
+        autonomous path (where `file_read` is hidden) the prompt still ordered
+        the model to "read docs/X first" while the registered-tools list and
+        the [UNAVAILABLE_TOOLS=...] block said it could not. That contradiction
+        is exactly the noisy policy_blocked replan the hidden-tools directive
+        exists to prevent, so the gate lives here once and both sides use it.
+        """
+        if "file_read" in (getattr(self, "hidden_tools", frozenset()) or frozenset()):
+            return False
+        try:
+            self.registry.get("file_read")
+        except KeyError:
+            return False
+        return True
 
     def _build_user_prompt(
         self,
@@ -1862,7 +1863,11 @@ class LLMPlanner:
                 "architecture/reference facts.]\n"
             )
         doctrine_docs_block = ""
-        if _is_doctrine_corporate_question(question):
+        # Every "read docs/X first" directive is gated on file_read actually
+        # being usable — an unreachable instruction only produces plans the
+        # policy layer then blocks.
+        docs_readable = self._file_read_available()
+        if docs_readable and _is_doctrine_corporate_question(question):
             doctrine_docs_block = (
                 "[DOCTRINE_DOCS=required — for corporate model, central agent "
                 "governance, subagents, self-build, night observation, and "
@@ -1872,7 +1877,7 @@ class LLMPlanner:
                 "core/*.py mechanics.]\n"
             )
         subagent_docs_block = ""
-        if _is_subagent_governance_question(question):
+        if docs_readable and _is_subagent_governance_question(question):
             subagent_docs_block = (
                 "[SUBAGENT_DOCS=required — this question is about sub-agents / "
                 "delegation / team executor / role trust / quarantine / pause / "
@@ -1881,7 +1886,7 @@ class LLMPlanner:
                 "mechanics.]\n"
             )
         memory_docs_block = ""
-        if _is_memory_governance_question(question):
+        if docs_readable and _is_memory_governance_question(question):
             memory_docs_block = (
                 "[MEMORY_DOCS=required — this question is about memory / "
                 "episodic / procedural / consolidation / forgetting / retrieval "
@@ -1892,7 +1897,7 @@ class LLMPlanner:
                 "re-derive them from the code.]\n"
             )
         self_repair_docs_block = ""
-        if _is_self_repair_doctrine_question(question):
+        if docs_readable and _is_self_repair_doctrine_question(question):
             self_repair_docs_block = (
                 "[SELF_REPAIR_DOCS=required — this question is about "
                 "self-diagnosis / self-repair / root cause / regression / "

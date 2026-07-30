@@ -1651,3 +1651,102 @@ def test_thematic_injector_keeps_unrelated_duplicates_untouched() -> None:
     ordered = _ensure_self_repair_doctrine_docs_first(sources, warnings)
     paths = [src["arguments"]["path"] for src in ordered if src["tool"] == "file_read"]
     assert paths.count("core/loop.py") == 2, paths
+
+@pytest.mark.parametrize(
+    ("question", "directive"),
+    (
+        (
+            "Explain the corporate model, central agent governance, subagents, "
+            "self-build, night observation, and safe autonomy.",
+            "[DOCTRINE_DOCS=required",
+        ),
+        (
+            "How does delegation to a subagent work, and when is it retired?",
+            "[SUBAGENT_DOCS=required",
+        ),
+        (
+            "How does episodic memory get consolidated, and what is forgotten?",
+            "[MEMORY_DOCS=required",
+        ),
+        (
+            "How must the root cause be proven before a self-repair is applied?",
+            "[SELF_REPAIR_DOCS=required",
+        ),
+    ),
+)
+def test_docs_directive_is_suppressed_when_file_read_is_hidden(
+    workspace: Path, question: str, directive: str
+) -> None:
+    """Fail closed: never order a read the model is not allowed to perform.
+
+    Fail-before: doc *injection* was gated on `file_read` being usable, but the
+    matching prompt directive was not. On a path where `file_read` is hidden
+    the prompt therefore said "read docs/X first" while the same prompt's
+    registered-tools list and [UNAVAILABLE_TOOLS=...] block said that tool does
+    not exist -- a self-contradiction that can only end as a policy_blocked
+    step and a wasted replan. Both sides now share one gate.
+    """
+    canned = json.dumps(
+        {
+            "reasoning": "answer directly",
+            "steps": [
+                {
+                    "tool": "list_dir",
+                    "arguments": {"path": "."},
+                    "rationale": "no file_read available",
+                }
+            ],
+        }
+    )
+    llm = FakeLLM(responses=[canned])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
+    planner.hidden_tools = frozenset({"file_read"})
+
+    out = planner.plan(question=question, file_hint=None)
+
+    prompt = llm.calls[0]["user"]
+    assert directive not in prompt, prompt
+    assert not [src for src in out.sources if src["tool"] == "file_read"], out.sources
+
+
+@pytest.mark.parametrize(
+    ("question", "directive"),
+    (
+        (
+            "How does delegation to a subagent work, and when is it retired?",
+            "[SUBAGENT_DOCS=required",
+        ),
+        (
+            "How does episodic memory get consolidated, and what is forgotten?",
+            "[MEMORY_DOCS=required",
+        ),
+        (
+            "How must the root cause be proven before a self-repair is applied?",
+            "[SELF_REPAIR_DOCS=required",
+        ),
+    ),
+)
+def test_docs_directive_is_emitted_when_file_read_is_available(
+    workspace: Path, question: str, directive: str
+) -> None:
+    """Scope guard for the fail-closed gate above: it must not silence the
+    directive on the normal path, or the thematic groups stop working at all.
+    """
+    canned = json.dumps(
+        {
+            "reasoning": "answer directly",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "core/loop.py"},
+                    "rationale": "mechanics",
+                }
+            ],
+        }
+    )
+    llm = FakeLLM(responses=[canned])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
+
+    planner.plan(question=question, file_hint=None)
+
+    assert directive in llm.calls[0]["user"], llm.calls[0]["user"]
