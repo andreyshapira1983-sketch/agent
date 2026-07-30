@@ -100,10 +100,12 @@ jobs:
         #     be built. Verified locally: a full run with live keys left
         #     `data/model_usage.jsonl` untouched.
         #
-        # An absent secret expands to an empty string, which
-        # `_provider_has_credentials` already treats as "no credential" — so a
-        # fork PR (which GitHub denies secrets to) behaves exactly as before
-        # rather than failing in a new way.
+        # The keys below are therefore a parity choice, not a requirement:
+        # `tests/conftest.py::_ensure_placeholder_credential` supplies a fake
+        # credential when none is present, so the suite is green with no secrets
+        # at all. Passing the real ones keeps CI in the same state an operator
+        # runs in. A fork PR (which GitHub denies secrets to) expands each to an
+        # empty string and falls back to that placeholder rather than failing.
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
