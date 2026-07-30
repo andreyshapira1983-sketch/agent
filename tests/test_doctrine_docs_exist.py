@@ -19,6 +19,9 @@ from core.learning_planner import (
 from core.planner import _DOCTRINE_CORPORATE_DOC_PATHS as PLANNER_MANIFEST
 from core.planner import _MEMORY_GOVERNANCE_DOC_PATHS as MEMORY_MANIFEST
 from core.planner import _SUBAGENT_GOVERNANCE_DOC_PATHS as SUBAGENT_MANIFEST
+from core.planner import (
+    _SELF_REPAIR_DOCTRINE_DOC_PATHS as SELF_REPAIR_MANIFEST,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -124,3 +127,40 @@ def test_memory_manifest_excludes_unapproved_and_superseded_docs() -> None:
             f"{path} was added to the memory manifest. It is unapproved or "
             "partly superseded; if that changed, update this test and say why."
         )
+
+
+def test_self_repair_doctrine_docs_all_exist() -> None:
+    missing = [p for p in SELF_REPAIR_MANIFEST if not (REPO_ROOT / p).is_file()]
+    assert not missing, (
+        "self-repair doctrine manifest references files that do not exist: "
+        f"{missing}. Create the doc or remove it from "
+        "core.planner._SELF_REPAIR_DOCTRINE_DOC_PATHS."
+    )
+
+
+def test_self_repair_doc_is_thematic_not_in_other_manifests() -> None:
+    """Conditionally routed, never universal — same rule as the other two groups.
+
+    If the repair protocol leaks into the corporate manifest it is read on every
+    architecture question, which is exactly what a thematic group exists to
+    prevent.
+    """
+    for path in SELF_REPAIR_MANIFEST:
+        assert path not in PLANNER_MANIFEST, path
+        assert path not in LEARNING_MANIFEST, path
+        assert path not in SUBAGENT_MANIFEST, path
+        assert path not in MEMORY_MANIFEST, path
+
+
+def test_self_repair_doc_separates_implemented_from_planned() -> None:
+    text = (REPO_ROOT / "docs" / "SELF_REPAIR_DOCTRINE.md").read_text(
+        encoding="utf-8"
+    )
+    assert "NORMATIVE" in text
+    assert "IMPLEMENTED" in text
+    assert "PLANNED" in text
+    flat = " ".join(text.lower().replace(">", " ").split())
+    # honest boundary: this governs self-diagnosis/self-repair, and must not be
+    # sold as a closed self-evolution loop.
+    assert "governs **self-diagnosis and self-repair only**".lower() in flat
+    assert "it is *not* a self-evolution mechanism".lower() in flat

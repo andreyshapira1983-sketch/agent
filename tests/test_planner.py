@@ -1400,3 +1400,353 @@ def test_question_touching_both_themes_keeps_stable_order(workspace: Path) -> No
     assert paths[1] == "docs/audit/MEMORY_MAP.md"
     # no duplicates from the two injectors touching the same list
     assert len(paths) == len(set(paths)), paths
+
+
+from core.planner import (
+    _ensure_memory_governance_docs_first,
+    _ensure_self_repair_doctrine_docs_first,
+    _ensure_subagent_governance_docs_first,
+    _is_self_repair_doctrine_question,
+    _norm_source_path,
+)
+
+
+def test_self_repair_question_injects_doctrine_doc(workspace: Path) -> None:
+    """A self-diagnosis/self-repair question must lead with the repair protocol.
+
+    Fail-before: nothing injects it, so the source list is whatever the model
+    asked for (`core/self_repair.py` here) and the agent re-derives the protocol
+    from mechanics every time.
+    """
+    canned = json.dumps(
+        {
+            "reasoning": "answer directly",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "core/self_repair.py"},
+                    "rationale": "mechanics",
+                }
+            ],
+        }
+    )
+    llm = FakeLLM(responses=[canned])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
+    out = planner.plan(
+        question="How must the root cause be proven before a self-repair is applied?",
+        file_hint=None,
+    )
+    paths = [
+        src["arguments"]["path"]
+        for src in out.sources
+        if src["tool"] == "file_read"
+    ]
+    assert paths[0] == "docs/SELF_REPAIR_DOCTRINE.md"
+    assert any(
+        "self-repair doctrine docs injected" in w for w in out.warnings
+    ), out.warnings
+    # Injecting the source is only half the contract: the model must also be
+    # *told* the question is self-repair, or it can plan around the doc.
+    assert "[SELF_REPAIR_DOCS=required" in llm.calls[0]["user"], llm.calls[0]["user"]
+
+def test_ordinary_bug_fix_task_omits_self_repair_doctrine_doc(workspace: Path) -> None:
+    """The whole point of a thematic group: an ordinary task must not pay for it.
+
+    "fix the bug in X" is a normal work item, not a request for the repair
+    reasoning protocol, so the doctrine must stay out of the source list.
+    """
+    canned = json.dumps(
+        {
+            "reasoning": "fix it",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "core/loop.py"},
+                    "rationale": "target file",
+                }
+            ],
+        }
+    )
+    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
+    out = planner.plan(question="fix the bug in core/loop.py", file_hint=None)
+    paths = [
+        src["arguments"]["path"]
+        for src in out.sources
+        if src["tool"] == "file_read"
+    ]
+    assert "docs/SELF_REPAIR_DOCTRINE.md" not in paths
+
+
+def test_non_self_repair_doctrine_question_omits_self_repair_doc(
+    workspace: Path,
+) -> None:
+    canned = json.dumps(
+        {
+            "reasoning": "doctrine",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "docs/ROADMAP.md"},
+                    "rationale": "roadmap",
+                }
+            ],
+        }
+    )
+    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
+    out = planner.plan(
+        question="Explain the corporate model and what is on the roadmap.",
+        file_hint=None,
+    )
+    paths = [
+        src["arguments"]["path"]
+        for src in out.sources
+        if src["tool"] == "file_read"
+    ]
+    assert "docs/SELF_REPAIR_DOCTRINE.md" not in paths
+
+
+def test_self_repair_doctrine_detector_strong_terms() -> None:
+    for q in (
+        "how does self-repair decide to roll back?",
+        "what is the root cause of this failure",
+        "объясни первопричину сбоя",
+        "why do we need a fail-before test",
+        "should this regression test exist",
+        "нужен ли регрессионный тест",
+        "is backfill of old records allowed",
+        "why must the migration be idempotent",
+        "что такое самодиагностика агента",
+    ):
+        assert _is_self_repair_doctrine_question(q), q
+
+
+def test_self_repair_doctrine_detector_contextual_pair() -> None:
+    # ordinary repair words only count together with a protocol/action word
+    assert _is_self_repair_doctrine_question(
+        "how should the agent diagnose its own bug?"
+    )
+    assert _is_self_repair_doctrine_question("как безопасно провести миграцию данных")
+    assert _is_self_repair_doctrine_question(
+        "what is the protocol for fixing a defect"
+    )
+    assert _is_self_repair_doctrine_question("почему self-build сломался, найди причину")
+
+
+def test_self_repair_doctrine_detector_does_not_overfire() -> None:
+    for q in (
+        "fix the bug in core/loop.py",
+        "исправь опечатку в README",
+        "run the tests and show coverage",
+        "explain the corporate model",
+        "what is on the roadmap",
+        "how do subagents get retired?",
+        "how is episodic memory consolidated?",
+        "какая погода сегодня",
+        # a broad governance overview that merely lists self-build as a topic
+        # must not drag the repair protocol in
+        (
+            "Explain the corporate model, central agent governance, subagents, "
+            "self-build, night observation, and safe autonomy."
+        ),
+    ):
+        assert not _is_self_repair_doctrine_question(q), q
+
+
+def test_self_repair_group_is_independent_of_other_thematic_groups() -> None:
+    """The three thematic groups must not collapse into one another."""
+    repair_q = "what is the root cause protocol for a self-repair?"
+    assert _is_self_repair_doctrine_question(repair_q)
+    assert not _is_memory_governance_question(repair_q)
+    assert not _is_subagent_governance_question(repair_q)
+
+    assert not _is_self_repair_doctrine_question("how is episodic memory consolidated?")
+    assert not _is_self_repair_doctrine_question("how do subagents get retired?")
+
+
+def test_question_touching_three_themes_keeps_stable_order(workspace: Path) -> None:
+    """All three thematic groups may fire at once; the order must be deterministic.
+
+    Sub-agent contract, then memory docs, then the repair protocol — the three
+    injectors must not compete for the same slot or duplicate each other.
+    """
+    canned = json.dumps(
+        {
+            "reasoning": "answer directly",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "core/subagent_runner.py"},
+                    "rationale": "mechanics",
+                }
+            ],
+        }
+    )
+    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
+    out = planner.plan(
+        question=(
+            "When a subagent writes episodic memory, what is the root cause "
+            "protocol if that write regresses?"
+        ),
+        file_hint=None,
+    )
+    paths = [
+        src["arguments"]["path"]
+        for src in out.sources
+        if src["tool"] == "file_read"
+    ]
+    assert paths.index("docs/SUBAGENT_LIFECYCLE.md") < paths.index(
+        "docs/audit/MEMORY_MAP.md"
+    )
+    assert paths.index("docs/audit/MEMORY_MAP.md") < paths.index(
+        "docs/SELF_REPAIR_DOCTRINE.md"
+    )
+    assert len(paths) == len(set(paths)), paths
+
+
+@pytest.mark.parametrize(
+    ("injector", "doc_path"),
+    (
+        (_ensure_subagent_governance_docs_first, "docs/SUBAGENT_LIFECYCLE.md"),
+        (_ensure_memory_governance_docs_first, "docs/MEMORY_SYSTEM_AUDIT.md"),
+        (_ensure_self_repair_doctrine_docs_first, "docs/SELF_REPAIR_DOCTRINE.md"),
+    ),
+)
+def test_thematic_injector_collapses_repeated_doc_request(injector, doc_path) -> None:
+    """A doc the model asked for twice must be read once, not twice.
+
+    Fail-before: each thematic injector captured only the *first* occurrence
+    and let every later one fall through into the remainder, so the plan
+    carried the same `file_read` twice and burned context for nothing. The
+    second spelling uses a backslash to prove the collapse is on the
+    *normalised* path, not on raw string equality.
+    """
+    sources = [
+        {"tool": "file_read", "arguments": {"path": doc_path}},
+        {"tool": "file_read", "arguments": {"path": doc_path.replace("/", "\\")}},
+        {"tool": "file_read", "arguments": {"path": "core/loop.py"}},
+    ]
+    warnings: list[str] = []
+    ordered = injector(sources, warnings)
+    paths = [
+        _norm_source_path(src["arguments"]["path"])
+        for src in ordered
+        if src["tool"] == "file_read"
+    ]
+    assert len(paths) == len(set(paths)), paths
+    assert paths.count(_norm_source_path(doc_path)) == 1, paths
+    assert _norm_source_path("core/loop.py") in paths
+
+
+def test_thematic_injector_keeps_unrelated_duplicates_untouched() -> None:
+    """Scope check: the injector owns its docs only, not the whole source list.
+
+    De-duplicating everything would silently rewrite plans the injector has no
+    authority over, so a repeated *non-target* source must survive as-is.
+    """
+    sources = [
+        {"tool": "file_read", "arguments": {"path": "core/loop.py"}},
+        {"tool": "file_read", "arguments": {"path": "core/loop.py"}},
+    ]
+    warnings: list[str] = []
+    ordered = _ensure_self_repair_doctrine_docs_first(sources, warnings)
+    paths = [src["arguments"]["path"] for src in ordered if src["tool"] == "file_read"]
+    assert paths.count("core/loop.py") == 2, paths
+
+@pytest.mark.parametrize(
+    ("question", "directive"),
+    (
+        (
+            "Explain the corporate model, central agent governance, subagents, "
+            "self-build, night observation, and safe autonomy.",
+            "[DOCTRINE_DOCS=required",
+        ),
+        (
+            "How does delegation to a subagent work, and when is it retired?",
+            "[SUBAGENT_DOCS=required",
+        ),
+        (
+            "How does episodic memory get consolidated, and what is forgotten?",
+            "[MEMORY_DOCS=required",
+        ),
+        (
+            "How must the root cause be proven before a self-repair is applied?",
+            "[SELF_REPAIR_DOCS=required",
+        ),
+    ),
+)
+def test_docs_directive_is_suppressed_when_file_read_is_hidden(
+    workspace: Path, question: str, directive: str
+) -> None:
+    """Fail closed: never order a read the model is not allowed to perform.
+
+    Fail-before: doc *injection* was gated on `file_read` being usable, but the
+    matching prompt directive was not. On a path where `file_read` is hidden
+    the prompt therefore said "read docs/X first" while the same prompt's
+    registered-tools list and [UNAVAILABLE_TOOLS=...] block said that tool does
+    not exist -- a self-contradiction that can only end as a policy_blocked
+    step and a wasted replan. Both sides now share one gate.
+    """
+    canned = json.dumps(
+        {
+            "reasoning": "answer directly",
+            "steps": [
+                {
+                    "tool": "list_dir",
+                    "arguments": {"path": "."},
+                    "rationale": "no file_read available",
+                }
+            ],
+        }
+    )
+    llm = FakeLLM(responses=[canned])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
+    planner.hidden_tools = frozenset({"file_read"})
+
+    out = planner.plan(question=question, file_hint=None)
+
+    prompt = llm.calls[0]["user"]
+    assert directive not in prompt, prompt
+    assert not [src for src in out.sources if src["tool"] == "file_read"], out.sources
+
+
+@pytest.mark.parametrize(
+    ("question", "directive"),
+    (
+        (
+            "How does delegation to a subagent work, and when is it retired?",
+            "[SUBAGENT_DOCS=required",
+        ),
+        (
+            "How does episodic memory get consolidated, and what is forgotten?",
+            "[MEMORY_DOCS=required",
+        ),
+        (
+            "How must the root cause be proven before a self-repair is applied?",
+            "[SELF_REPAIR_DOCS=required",
+        ),
+    ),
+)
+def test_docs_directive_is_emitted_when_file_read_is_available(
+    workspace: Path, question: str, directive: str
+) -> None:
+    """Scope guard for the fail-closed gate above: it must not silence the
+    directive on the normal path, or the thematic groups stop working at all.
+    """
+    canned = json.dumps(
+        {
+            "reasoning": "answer directly",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "core/loop.py"},
+                    "rationale": "mechanics",
+                }
+            ],
+        }
+    )
+    llm = FakeLLM(responses=[canned])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
+
+    planner.plan(question=question, file_hint=None)
+
+    assert directive in llm.calls[0]["user"], llm.calls[0]["user"]
