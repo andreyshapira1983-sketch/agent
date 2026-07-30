@@ -7,12 +7,14 @@ out what the MIR-057 gates would do with the records already on disk.
 Two questions it exists to answer.
 
 **Is there anything to migrate?** An episode banked before the axis carries no
-`completion_state`, and the assembly table can only reconstruct one from
-durable facts — `replan_exhausted` is the sole such fact on a stored record.
-Everything else the table reads (`aborted_reason`, the synthesizer's
-declaration) was never persisted. So the count of episodes that could be
-classified deterministically is usually zero, and that number belongs in a
-report rather than in an assumption.
+`completion_state`, and the cycle's assembly table cannot reconstruct one: of the
+facts it reads, only `replan_exhausted` is stored, while `aborted_reason` and the
+synthesizer's declaration were never persisted. So for cycle-banked records the
+count is zero, and that number belongs in a report rather than in an assumption.
+Two *writers*, however, settle the axis from evidence they do persist, and rows
+they banked before that fix are recoverable. `scripts/completion_backfill.py` owns
+that decision; this report calls it rather than restating it, so the diagnostic
+and the migration can never disagree about which rows qualify.
 
 **What did the old rule already buy?** The gates stop new credit, they do not
 unwind old credit. A procedure whose counters were earned under the previous
@@ -36,6 +38,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from scripts.completion_backfill import writer_backfill_verdict  # noqa: E402
 from core.loop import AgentLoop  # noqa: E402
 from core.smart_memory import (  # noqa: E402
     EpisodeRecord,
@@ -92,13 +95,18 @@ def _passes_fast_path(episode: EpisodeRecord) -> bool:
 
 
 def _backfill_candidate(episode: EpisodeRecord) -> bool:
-    """Could the assembly table classify this record from durable facts alone?
+    """Would the migration settle this record's verdict?
 
-    Only `replan_exhausted` qualifies. `aborted_reason` is not a stored field
-    (its `aborted:*` tags are derived, and derived values do not decide), and
-    a declaration that was never recorded cannot be recovered.
+    Delegates to `scripts/completion_backfill.py`, the single decision point, so a
+    row this report calls a candidate is exactly a row the migration would
+    write, and nothing else. Restating the rule here is how a diagnostic starts
+    lying about a migration it no longer matches.
+
+    `replan_exhausted` alone does not qualify: the cycle's assembly table also
+    needs `aborted_reason` and a declaration, neither of which was persisted, so
+    no migration implements that path.
     """
-    return episode.completion_state is None and episode.replan_exhausted is True
+    return writer_backfill_verdict(episode.to_dict()) is not None
 
 
 def _distribution(values) -> dict:
@@ -207,10 +215,12 @@ def render(report: dict) -> str:
 
     add("\nMIGRATION INPUT")
     add(f"    safe episode backfill candidates: {len(report['backfill_candidates'])}")
-    add("    Only `replan_exhausted` can classify a stored record. "
-        "`aborted_reason` was\n    never persisted and a missing declaration "
-        "cannot be recovered, so any\n    other record is unclassifiable rather "
-        "than merely unclassified.")
+    add("    Counted by `scripts/completion_backfill.py`, the same decision the\n"
+        "    migration makes: a record qualifies only when a writer signature is\n"
+        "    proved first and that writer's own durable evidence is present.\n"
+        "    Cycle-banked records stay unclassifiable rather than merely\n"
+        "    unclassified — `aborted_reason` was never persisted and a missing\n"
+        "    declaration cannot be recovered.")
 
     touched = report["procedures_with_legacy_refs"]
     add("\nLEGACY-UNVERIFIABLE PROCEDURAL CREDIT")

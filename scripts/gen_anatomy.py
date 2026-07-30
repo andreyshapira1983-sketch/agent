@@ -74,6 +74,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "self_apply_bridge", "self_apply_lane",
         "self_build_producer", "self_build_supervisor", "self_build_memory",
         "self_build_rules", "self_task_producer", "self_task_builder",
+        "writer_completion",
         "self_improvement_issues", "incremental_splitter", "dependency_map",
         "learning_planner", "value_review", "proposal_value_gate", "release_hygiene",
     ]),

@@ -29,6 +29,7 @@ from core.self_improvement_issues import (
     DEFAULT_ISSUE_PATH,
     SelfImprovementIssueRegistry,
 )
+from core.writer_completion import COMPLETION_BY_OUTCOME
 
 # Map each command status to a coarse episodic outcome the agent already
 # understands (success / partial / failed).
@@ -56,11 +57,11 @@ _OUTCOME_BY_STATUS: dict[str, str] = {
 # invisible), and retrieval then replays it while it carries no verdict at all —
 # the one thing `test_no_legacy_episode_in_the_live_store_is_ever_admitted`
 # forbids. `outcome` already answers the question, so there is nothing to infer.
-_COMPLETION_BY_OUTCOME: dict[str, str] = {
-    "success": "achieved",
-    "partial": "partially_achieved",
-    "failed": "failed",
-}
+#
+# The table itself lives in `core/writer_completion.py`: the backfill of rows
+# banked before this fix must replay *this* rule, and a shared domain table is
+# what keeps the two from drifting into separate opinions.
+_COMPLETION_BY_OUTCOME = COMPLETION_BY_OUTCOME
 
 
 def build_self_build_episode(kind: str, result: dict[str, Any]) -> Any:
