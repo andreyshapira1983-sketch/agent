@@ -744,13 +744,31 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # DEEP tasks (architecture, full audits, from-scratch builds) get
         # the most powerful available model (opus, o1, …).
         # STANDARD tasks reuse the default role route — no change.
-        # Falls back silently to the default LLM if for_task() raises.
+        # The RoleRouter verdict computed just above is forwarded so a repair
+        # or programming task can never be downgraded to the LIGHT tier on the
+        # strength of a terse phrasing alone.
+        #
+        # Failure handling mirrors `_record_experience_memory`: a `TypeError`
+        # here is a CALL-SIGNATURE DEFECT, not a routing fault -- `for_task()`
+        # was invoked with an argument it does not accept (or without one it
+        # requires). Laundering that into a silent fallback hid the defect
+        # completely: every task would quietly answer on the default model with
+        # nothing in the log to say routing had stopped working. So `TypeError`
+        # PROPAGATES; every other failure keeps the default-LLM fallback but is
+        # now recorded instead of vanishing.
         try:
+            _task_role = getattr(self.last_role_context, "role", None)
             _task_planner_llm = self.model_router.for_task(
-                ModelRole.PLANNER, user_question, escalation=deep_escalation
+                ModelRole.PLANNER,
+                user_question,
+                escalation=deep_escalation,
+                task_role=_task_role,
             )
             _task_synth_llm = self.model_router.for_task(
-                ModelRole.SYNTHESIZER, user_question, escalation=deep_escalation
+                ModelRole.SYNTHESIZER,
+                user_question,
+                escalation=deep_escalation,
+                task_role=_task_role,
             )
             _planner_model = getattr(_task_planner_llm, "model", None)
             _synth_model = getattr(_task_synth_llm, "model", None)
@@ -761,14 +779,27 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 "adaptive_route",
                 {
                     "question_chars": len(user_question),
+                    "task_role": _task_role,
                     "planner_model": _planner_model,
                     "synth_model": _synth_model,
                     "route_reason": _route_reason,
                 },
             )
-        except Exception:
+        except TypeError:
+            # Visible on purpose -- see the comment above.
+            raise
+        except Exception as exc:  # noqa: BLE001
             _task_planner_llm = None
             _task_synth_llm = None
+            self.log.log(
+                "adaptive_route_error",
+                {
+                    "error": type(exc).__name__,
+                    "detail": str(exc)[:200],
+                    "question_chars": len(user_question),
+                    "fallback": "default_llm",
+                },
+            )
 
         # 2. Interpret -> Goal
         goal = self._interpret(observation)

@@ -26,6 +26,37 @@ from core.lang_match import any_term_matches, normalize_text, tokenize
 from tools.base import ToolRegistry
 
 
+# Output budget for a single planning call.
+#
+# The previous hard-coded 1024 was too tight for a multi-step JSON plan, and on
+# OpenAI reasoning models it was actively harmful: `max_completion_tokens`
+# covers internal reasoning first, so the entire budget could be spent thinking
+# and the API would return success with an EMPTY answer. The run log showed the
+# planner burning 1024 + 1024 tokens across an auto-continue round and parsing
+# zero characters both times.
+#
+# `core.llm` raises this further for reasoning models (see
+# `_REASONING_TOKEN_FLOOR`); the two floors compose, neither lowers the other.
+_PLAN_MAX_TOKENS_DEFAULT = 2048
+
+
+def _plan_max_tokens() -> int:
+    """Per-call planner output budget, overridable via ``AGENT_PLAN_MAX_TOKENS``.
+
+    Falls back to the default when the variable is missing, non-numeric, or
+    non-positive, so a malformed environment can never produce a zero budget
+    (which would guarantee an empty plan on every run).
+    """
+    raw = os.getenv("AGENT_PLAN_MAX_TOKENS")
+    if raw is None:
+        return _PLAN_MAX_TOKENS_DEFAULT
+    try:
+        value = int(raw.strip())
+    except (TypeError, ValueError):
+        return _PLAN_MAX_TOKENS_DEFAULT
+    return value if value > 0 else _PLAN_MAX_TOKENS_DEFAULT
+
+
 _BROAD_PROJECT_CONTEXT_TERMS = (
     "your project",
     "this project",
@@ -1676,7 +1707,7 @@ class LLMPlanner:
         raw = _active_llm.complete(
             system=effective_system,
             user=safe_prompt,
-            max_tokens=1024,
+            max_tokens=_plan_max_tokens(),
             temperature=0.0,
         )
         parsed, parse_warnings, parse_diag = self._parse_json(raw)
@@ -1992,6 +2023,25 @@ class LLMPlanner:
             "raw_preview": LLMPlanner._sanitized_preview(raw),
             "raw_length": len(raw),
         }
+
+        # Empty output is NOT a parse failure. Reporting `json_decode_error`
+        # for zero characters sends every reader — human or agent — looking for
+        # malformed JSON that was never emitted. The real event is that the
+        # model returned nothing at all (observed with OpenAI reasoning models
+        # whose whole `max_completion_tokens` budget is consumed by internal
+        # reasoning, leaving no visible content while the API still reports
+        # success). Name it precisely so the remedy — raise the budget, not fix
+        # the JSON — is obvious from the log.
+        if not text:
+            warnings.append("empty_model_output")
+            diagnostics["stage"] = "empty_output"
+            diagnostics["fallback"] = "empty_plan"
+            diagnostics["reason"] = (
+                "model returned no text at all (0 chars); nothing to parse. "
+                "Typical cause: the token budget was exhausted before any "
+                "visible output was produced."
+            )
+            return None, warnings, diagnostics
 
         # Strip a leading ```json or ``` fence if present.
         fence = re.match(r"^```(?:json)?\s*(.*?)\s*```\s*$", text, flags=re.DOTALL)
