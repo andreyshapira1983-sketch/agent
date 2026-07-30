@@ -22,8 +22,11 @@ pip install --require-hashes -r requirements.lock
 pip install fastapi "uvicorn[standard]"
 ```
 
-Copy [`.env.example`](.env.example) to `.env`. The default `AGENT_PROVIDER=mock`
-needs no keys and makes tests and local runs deterministic.
+Copy [`.env.example`](.env.example) to `.env`. It is read at **runtime** by
+`cli/app.py`, `agent_tick.py` and `api/server.py`; the default
+`AGENT_PROVIDER=mock` needs no keys and makes local runs deterministic. `.env` is
+gitignored — keys belong in your shell or in GitHub Actions secrets, never in a
+commit.
 
 ## Tests
 
@@ -35,6 +38,17 @@ coverage report --fail-under=85
 - Branch coverage must stay **≥ 85%** (CI enforces it).
 - When you fix a bug, add a regression test and confirm it **fails on the old
   code** before the fix — an unproven regression test is not trusted.
+- **The suite needs a provider credential in the environment, and `.env` does not
+  supply one.** `pytest` never loads `.env`, and `tests/conftest.py` deletes
+  `AGENT_PROVIDER` / `AGENT_ALLOW_MOCK_ROUTING` before every test on purpose, so
+  routing assertions cannot silently inherit the ambient shell. Export a key
+  first — POSIX `export ANTHROPIC_API_KEY=…`, PowerShell
+  `$env:ANTHROPIC_API_KEY="…"`. Without one, `tests/test_episode_admission_boundary.py`
+  fails two tests because the loop cannot be built, while the rest of the suite
+  passes; that failure is environmental, not a regression. Supplying the key
+  costs nothing: no test constructs a real provider client, so it is only read to
+  answer "is a credential present" (operator decision, #178). CI passes the same
+  keys from repository secrets.
 
 ## Documentation discipline
 

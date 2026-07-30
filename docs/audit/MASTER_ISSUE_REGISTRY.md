@@ -42,8 +42,8 @@ re-grounded against **current code on `main` @ `f317c4c`**.
 
 | Status | Count | IDs |
 |---|---|---|
-| fixed | 26 | MIR-001, MIR-002, MIR-003, MIR-004, MIR-005, MIR-010, MIR-017, MIR-036, MIR-037, MIR-039, MIR-040, MIR-041, MIR-043, MIR-046, MIR-047, MIR-048, MIR-049, MIR-051, MIR-054, MIR-055, MIR-056, MIR-059, MIR-062, MIR-063, MIR-065, MIR-066 |
-| open | 20 | MIR-006, MIR-008, MIR-011, MIR-015, MIR-016, MIR-020, MIR-021, MIR-023, MIR-024, MIR-026, MIR-035, MIR-044, MIR-045, MIR-050, MIR-052, MIR-053, MIR-057, MIR-058, MIR-060, MIR-064 |
+| fixed | 27 | MIR-001, MIR-002, MIR-003, MIR-004, MIR-005, MIR-010, MIR-017, MIR-036, MIR-037, MIR-039, MIR-040, MIR-041, MIR-043, MIR-046, MIR-047, MIR-048, MIR-049, MIR-051, MIR-052, MIR-054, MIR-055, MIR-056, MIR-059, MIR-062, MIR-063, MIR-065, MIR-066 |
+| open | 19 | MIR-006, MIR-008, MIR-011, MIR-015, MIR-016, MIR-020, MIR-021, MIR-023, MIR-024, MIR-026, MIR-035, MIR-044, MIR-045, MIR-050, MIR-053, MIR-057, MIR-058, MIR-060, MIR-064 |
 | planned_gap | 8 | MIR-009, MIR-018, MIR-022, MIR-029, MIR-030, MIR-031, MIR-034, MIR-038 |
 | needs_investigation | 6 | MIR-019, MIR-025, MIR-027, MIR-028, MIR-032, MIR-033 |
 | code_fixed_needs_runtime_verification | 4 | MIR-012, MIR-013, MIR-014, MIR-061 |
@@ -287,9 +287,9 @@ the table records the status, the section records the nuance.
 - **Files/functions:** `core/loop_methods2.py` `_record_experience_memory` — the whole build-and-write block sits under one `except Exception`, logged as `smart_memory_error`.
 - **Symptom:** a `TypeError` from `episode_from_agent_cycle` (a caller passing an argument the signature does not accept) was swallowed and surfaced only as "no episode was written". Observed live: the delta was zero and every test reported nothing changed, with no failure anywhere pointing at the real cause. A signature or invariant violation is indistinguishable from a corrupt state file.
 - **Why it matters:** this is the boundary that hid the previous defect. A future feedback bug will present the same way — "delta is zero" — and cost the same detour.
-- **Status:** `open` (newly_discovered).
-- **Fix direction:** keep isolating genuine storage failures (corrupt file, lock contention, disk error) — those legitimately must not abort a user-facing answer. But `TypeError` / `AttributeError` / invariant violations should propagate under test and development, so a programming error fails loudly instead of looking like memory being unavailable.
-- **Missing tests:** a caller passing a bad argument to the episode factory raises rather than logging `smart_memory_error`; a simulated storage failure still degrades quietly.
+- **Status:** `fixed` (2026-07-29, #190). ⬆ from `open`.
+- **Fix:** the build step is now guarded separately from the writes. A `TypeError` out of `episode_from_agent_cycle` propagates as the call-signature defect it is; every other failure — at the factory or downstream in the store writes — stays best-effort exactly as before, so a genuine storage fault (corrupt file, lock contention, disk error) still degrades quietly instead of aborting a user-facing answer. Removing the guard outright was the rejected option: it trades a hidden bug for a crashed answer, which is the worse failure.
+- **Existing tests:** `tests/test_episode_write_error_visibility.py` (3), fail-before: a bad call to the episode factory raises; it is not reported as `smart_memory_error`; a simulated storage failure still degrades quietly — the third pins the over-correction so the guard cannot simply be deleted later.
 
 ### MIR-053 — the test environment is not network-deny by default
 - **Aliases:** none. **Provenance:** newly_discovered (2026-07-20, during MIR-049 implementation).
@@ -754,7 +754,7 @@ for MIR-002 and MIR-041 (approved next step) · then the minimal file set for th
 - **Existing tests:** `tests/test_repair_proposal_context_window.py` (11), all fail-before.
 - **Status:** `fixed` (2026-07-28). Coverage 70% → **97%**; the remaining 4 (`loop.py`, `planner.py`, `self_build_producer.py`, `smart_memory.py`) now get an explicit refusal naming size and limit instead of a doomed paid attempt.
 - **Not fixed here:** those 4 modules still cannot be repaired single-shot. That needs a different contract (a scoped edit rather than a whole-file post-image) and is a separate decision — the repo currently vetoes diff-shaped answers on the self-build path on purpose.
-- **Related:** MIR-052 (the task that exposed this; its own fix is still open — the agent has now produced a proposal for it), and the `self_build_producer` comments at `_BUILDER_MAX_TOKENS` / `_MAX_SPLIT_TARGET_LINES`, which had recorded this lesson on the other self-modification path without it reaching this one.
+- **Related:** MIR-052 (the task that exposed this; the proposal this run produced was landed as #190 on 2026-07-29, so that entry is now `fixed`), and the `self_build_producer` comments at `_BUILDER_MAX_TOKENS` / `_MAX_SPLIT_TARGET_LINES`, which had recorded this lesson on the other self-modification path without it reaching this one.
 
 ### MIR-066 — code repair could not reach a stronger model, in four independent ways at once
 - **Aliases:** none. **Provenance:** newly_discovered (2026-07-28) — operator question: "it must switch models by itself and it does not; find the root".
