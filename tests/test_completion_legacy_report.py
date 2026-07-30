@@ -8,9 +8,9 @@ byte-identical. The rest pins the distinctions the report exists to make:
     anomaly — it is counted on its own line and never in the anomaly list;
 *   an anomaly is an unclassified record reaching a gate that requires a
     verdict, and the detector is proved to fire rather than assumed to;
-*   a "safe backfill candidate" is a record the assembly table could classify
-    from durable facts alone, which in practice means `replan_exhausted` and
-    nothing else.
+*   a "safe backfill candidate" is exactly what `scripts/completion_backfill.py`
+    would write — the report delegates that decision instead of restating it,
+    so the diagnostic cannot drift away from the migration it describes.
 """
 from __future__ import annotations
 
@@ -188,21 +188,64 @@ def test_the_anomaly_detector_actually_fires(monkeypatch) -> None:
 # ==========================================================================
 # Migration input.
 # ==========================================================================
-def test_replan_exhaustion_is_the_only_backfillable_fact() -> None:
+def test_a_proved_writer_signature_is_the_only_backfillable_fact() -> None:
+    """`replan_exhausted` is durable but not sufficient — and not implemented.
+
+    The cycle's assembly table needs `aborted_reason` and a declaration as well,
+    and neither was ever persisted, so no migration can act on `replan_exhausted`
+    alone. Counting it as a candidate would advertise a migration that does not
+    exist. What does qualify is a row carrying a writer's full signature.
+    """
+    writer_row = EpisodeRecord(
+        goal="produce self-build patch for cli/intent_bridge.py",
+        question="self-task-produce", outcome="success", summary="s",
+        tags=("self-build", "lesson", "self-task-produce", "success"),
+        id="writer-banked",
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
     report = build_report(
         [
-            _episode("recoverable", replan=True, outcome="failed"),
+            writer_row,
+            _episode("replan-only", replan=True, outcome="failed"),
             _episode("plain"),
-            _episode("tagged-abort", tags=("aborted", "aborted:TypeError")),
-            _episode("already-classified", completion="failed", replan=True),
+            _episode("aborted", tags=("aborted:budget",)),
+            _episode("settled", completion="achieved"),
         ],
         [],
     )
 
-    assert report["backfill_candidates"] == ["recoverable"], (
-        "an abort tag is derived and a missing declaration is unrecoverable; "
-        "a record that already carries a verdict is not a candidate"
+    assert report["backfill_candidates"] == ["writer-banked"], (
+        "only a proved writer signature is recoverable; an abort tag is derived, "
+        "a missing declaration is unrecoverable, `replan_exhausted` alone has no "
+        "migration behind it, and a record that already carries a verdict is not "
+        "a candidate"
     )
+
+
+def test_the_report_and_the_migration_never_disagree() -> None:
+    """One decision, called twice — not two rules that happen to match today."""
+    from scripts.completion_backfill import writer_backfill_verdict
+    from scripts.completion_legacy_report import _backfill_candidate
+
+    rows = [
+        EpisodeRecord(
+            goal="produce self-build patch for cli/intent_bridge.py",
+            question="self-task-build", outcome="partial", summary="s",
+            tags=("self-build", "lesson", "self-task-build", "partial"), id="a",
+        ),
+        EpisodeRecord(
+            goal="repair", question="fix core/loop_methods2.py", outcome="success",
+            summary="s", tags=("lesson", "bug-fix", "regression-guard"), id="b",
+        ),
+        _episode("replan-only", replan=True, outcome="failed"),
+        _episode("settled", completion="achieved"),
+        _episode("plain"),
+    ]
+
+    for row in rows:
+        assert _backfill_candidate(row) is (
+            writer_backfill_verdict(row.to_dict()) is not None
+        ), f"report and migration disagree about {row.id}"
 
 
 def test_the_live_shape_reports_zero_candidates() -> None:
