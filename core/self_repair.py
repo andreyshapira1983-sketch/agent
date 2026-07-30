@@ -512,6 +512,13 @@ class SelfRepairController:
                     summary=content,
                     tools_used=("shell_exec", "run_tests"),
                     tags=("lesson", "bug-fix", "regression-guard"),
+                    # Settled here, at banking, like every other writer (MIR-057).
+                    # `_write_repair_lesson` only runs for `status == "repaired"`,
+                    # so the verdict is not a guess. Leaving it unset was not
+                    # neutral: `admit_for_storage` grants a `lesson`-tagged record
+                    # `usage_eligible=True` (MIR-042), so an unclassified repair
+                    # lesson gets replayed into prompts carrying no verdict at all.
+                    completion_state="achieved",
                 )
                 self.agent.episodic_store.save(ep)
             self.agent.log.log(
