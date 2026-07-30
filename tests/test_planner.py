@@ -1823,17 +1823,14 @@ def test_planner_passes_the_configured_budget_to_the_llm(
     workspace: Path, monkeypatch
 ) -> None:
     monkeypatch.setenv("AGENT_PLAN_MAX_TOKENS", "3333")
-    seen: dict[str, object] = {}
 
-    class _BudgetSpyLLM(FakeLLM):
-        def complete(self, **kwargs):
-            seen.update(kwargs)
-            return super().complete(**kwargs)
-
-    planner = LLMPlanner(
-        llm=_BudgetSpyLLM(responses=[json.dumps({"reasoning": "ok", "steps": []})]),
-        registry=_registry(workspace),
-    )
+    # FakeLLM already records every argument of every `complete(...)` call,
+    # so a spy subclass would only add a second `complete` signature that can
+    # drift away from the base one. Read the recorded call instead: it stays
+    # correct whether the planner passes the budget positionally or by name.
+    llm = FakeLLM(responses=[json.dumps({"reasoning": "ok", "steps": []})])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
     planner.plan(question="something", file_hint=None)
 
-    assert seen["max_tokens"] == 3333
+    assert len(llm.calls) == 1
+    assert llm.calls[0]["max_tokens"] == 3333
