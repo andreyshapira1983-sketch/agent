@@ -38,17 +38,17 @@ coverage report --fail-under=85
 - Branch coverage must stay **≥ 85%** (CI enforces it).
 - When you fix a bug, add a regression test and confirm it **fails on the old
   code** before the fix — an unproven regression test is not trusted.
-- **The suite needs a provider credential in the environment, and `.env` does not
-  supply one.** `pytest` never loads `.env`, and `tests/conftest.py` deletes
-  `AGENT_PROVIDER` / `AGENT_ALLOW_MOCK_ROUTING` before every test on purpose, so
-  routing assertions cannot silently inherit the ambient shell. Export a key
-  first — POSIX `export ANTHROPIC_API_KEY=…`, PowerShell
-  `$env:ANTHROPIC_API_KEY="…"`. Without one, `tests/test_episode_admission_boundary.py`
-  fails two tests because the loop cannot be built, while the rest of the suite
-  passes; that failure is environmental, not a regression. Supplying the key
-  costs nothing: no test constructs a real provider client, so it is only read to
-  answer "is a credential present" (operator decision, #178). CI passes the same
-  keys from repository secrets.
+- **No credential is needed.** `pytest` never loads `.env`, and
+  `tests/conftest.py` deletes `AGENT_PROVIDER` / `AGENT_ALLOW_MOCK_ROUTING`
+  before every test on purpose, so routing assertions cannot silently inherit
+  the ambient shell. `AgentLoop` still refuses to build without *some* provider
+  credential, so `_ensure_placeholder_credential` in `tests/conftest.py` supplies
+  a fake one when the machine has none — a fresh clone is green with nothing
+  configured. Nothing is lost by faking it: no test constructs a real provider
+  client, so the value is only read to answer "is a credential present"
+  (operator decision, #178). The fixture defers to reality — if you already
+  export a real key, or CI passes one from repository secrets, that key is used
+  and the placeholder never appears.
 
 ## Documentation discipline
 
