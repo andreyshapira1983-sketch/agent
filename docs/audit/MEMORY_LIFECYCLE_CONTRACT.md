@@ -438,7 +438,7 @@ knowledge write (consistent with CENTRAL_AGENT_GOVERNANCE §3 and MEMORY_FIX_PLA
 | MIR-047 | §7.5 conflict enforcement |
 | MIR-048 | §6.4 bidirectional counters + §7.7(a) repaired channel (P6b) |
 | MIR-049 | §7.7(b) usage attribution via `used_procedure_ids` (P6b) |
-| MIR-050 | §16 D-1 open decision + defined investigation (status: needs_investigation — harm not yet demonstrated) |
+| MIR-050 | §16 D-1 open decision; its defined investigation ran 2026-07-20 (status: `open` — harm confirmed, fix deliberately deferred) |
 | MIR-038 | §15 P7 zero-delta matrix tests |
 | MIR-029/030 | acknowledged; sub-agent scope stays future (Part D), contract keeps them memoryless |
 
@@ -548,10 +548,17 @@ only then a `fixed` claim, per-phase, in the registry.
   tool sequence alone, so attributed evidence may aggregate across unrelated goals.
   Options: **(a)** composite key = tools + normalized goal-token signature; **(b)** keep
   the tool key, bucket evidence per goal-class underneath it. **Decision input (also
-  resolves MIR-050's status):** a read-only measurement over the live procedural store —
+  resolved MIR-050's status):** a read-only measurement over the live procedural store —
   how many distinct goals/questions share one `workflow_key`, and would (a) vs (b) have
-  judged them differently. Until measured, MIR-050 remains `needs_investigation` (harm
-  not demonstrated), and this contract does not prejudge the option.
+  judged them differently. **That measurement ran (2026-07-20, nothing mutated):** 8 of 48
+  keys (17%) span more than one goal-signature class and 27 of 68 tool-carrying episodes
+  (40%) have their evidence pooled across classes, so MIR-050 moved to `open` — the harm
+  is demonstrated, not hypothetical. The **decision itself remains open and the fix is
+  deliberately deferred**: mean density is 1.4 episodes per key, so applying (a) today
+  would fragment already-sparse evidence into singleton procedures. D-1 becomes decidable
+  once the store holds enough episodes to compare current vs candidate identity **offline**,
+  without migrating production data; see MIR-050 in `MASTER_ISSUE_REGISTRY.md` for the full
+  measurement and the return condition. This contract still does not prejudge (a) vs (b).
 - **D-2 — Autonomous fast-path.** Disabled in §9.1. Revisit only after P2/P3 behavior data
   exists; re-enabling would require the same §7.3 gate plus an unattended-specific risk
   review.
