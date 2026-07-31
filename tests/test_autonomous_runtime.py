@@ -1038,3 +1038,63 @@ def test_run_reflection_saves_with_default_policy_in_live_mode(workspace: Path):
     assert len(result["lessons"]) == 1
     assert result["memory_records_saved"] == 1
     assert len(agent.persistent_store.load()) == 1
+
+def test_queue_heartbeat_failure_names_its_own_task(workspace: Path, monkeypatch):
+    """A heartbeat failure must name the task it belongs to.
+
+    The heartbeat runs on a background thread and its ``__exit__`` joins with a
+    bounded timeout, so the error callback CAN still fire after the loop has
+    advanced to the next task. A closure reading the loop variable would then
+    report whichever task is current, sending a reader to the wrong task for a
+    failure that belongs to a previous one.
+
+    The fake heartbeat below captures the callbacks without running threads and
+    fires them once the whole queue is drained -- exactly the window the bounded
+    join leaves open, made deterministic.
+    """
+    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
+    agent = _agent(workspace, with_tests=False)
+    queue = TaskQueueStore(workspace / "tasks.jsonl")
+    first = queue.add(goal="first", include_tests=False, limit=2)
+    second = queue.add(goal="second", include_tests=False, limit=2)
+
+    captured: list[Any] = []
+
+    class _CapturingHeartbeat:
+        def __init__(self, _store: Any, _task_id: str, *, on_error: Any = None):
+            captured.append(on_error)
+
+        def __enter__(self) -> "_CapturingHeartbeat":
+            return self
+
+        def __exit__(self, *_exc: Any) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "core.autonomous_runtime.task_heartbeat", _CapturingHeartbeat
+    )
+
+    logged: list[tuple[str, Any]] = []
+    real_log = agent.log.log
+
+    def _spy(event: str, payload: Any) -> Any:
+        logged.append((event, payload))
+        return real_log(event, payload)
+
+    monkeypatch.setattr(agent.log, "log", _spy)
+
+    AutonomousRuntime(agent, workspace=workspace).run_task_queue(
+        queue, max_tasks=2, budgets=BudgetLimits(max_cycles=4)
+    )
+
+    assert len(captured) == 2, "one heartbeat per task"
+
+    for callback in captured:
+        callback(RuntimeError("boom"))
+
+    reported = [
+        payload["task_id"]
+        for event, payload in logged
+        if event == "task_heartbeat_failed"
+    ]
+    assert reported == [first.id, second.id]

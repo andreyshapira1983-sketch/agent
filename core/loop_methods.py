@@ -12,7 +12,7 @@ from core.memory_policy import (
     MemoryWriteDecision,
     MemoryWritePolicy,
 )
-from core.memory_echo_antibody import make_event
+from core.memory_echo_antibody import MemoryWriteEvent, make_event
 from core.models import (
     Action,
     ApprovalRequest,
@@ -47,6 +47,10 @@ class AgentLoopExtractedMethods:
     Added when a review flagged ``self.model_router`` as an unknown member; the
     honest fix was not to annotate that one attribute but to state the whole
     contract, since eight are reached the same way.
+
+    Only members this mixin does NOT define belong here. Declaring one it does
+    define replaces the real signature with the stub for every static checker,
+    which is how a loose ``**kwargs`` stub can hide a precise method.
     """
 
     if TYPE_CHECKING:  # pragma: no cover — declarations, never executed
@@ -58,7 +62,6 @@ class AgentLoopExtractedMethods:
         memory_write_registry: Any
         compensation_log: Any
 
-        def remember(self, **kwargs: Any) -> Any: ...
         def _durable_learning_suppressed(self, sink: str) -> bool: ...
 
     def _remember_from_knowledge(
