@@ -271,6 +271,18 @@ Cluster 1b — DONE on branch `fix/memory-pollution-migration` (this branch):
   10 log + 1 test_result = 11.
 - Tests: 25 migration + 4 writer-gap = 29 new. Full suite **6049 passed,
   5 skipped**.
+- Hardening (operator review round 1, fail-before proven — 7 tests failed
+  before the fix):
+  - writer provenance now requires ``owner == "self"`` (the pipeline calls
+    ``remember(..., "agent-auto", "semantic", "self")``); a user-owned row
+    wearing the tag triple + a non-asserting Source line is untouched;
+  - the archive append is recovery-idempotent: a retry after a crash
+    between append and rewrite skips rows the archive already holds
+    verbatim (still removing the active copy), and the same ID with
+    DIFFERENT content aborts before any backup or write.
+  - After hardening: 32 migration tests; full suite **6056 passed,
+    5 skipped**; live dry-run unchanged — 814 active / 778 archive /
+    36 keep, no record changed class (all live writer rows are self-owned).
 - `--apply` on the live store NOT run: mutating live memory is an
   operator-gated effect. Command, after merge:
   `python scripts/migrate_memory_pollution.py --workspace C:\Users\andre\Projects\agent --apply`

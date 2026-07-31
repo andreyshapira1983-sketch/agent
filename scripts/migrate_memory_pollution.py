@@ -21,7 +21,8 @@ script drains the pool: it ARCHIVES matching rows — moves them to the
 present-day rules, imported from ``core.knowledge_pipeline`` — the same
 functions the gate itself calls. There is no second classifier to drift out
 of sync (the report and the migration use the identical decision), and rows
-this writer never produced (no ``source-backed`` tag) are not touched at all:
+this writer never produced — no ``fact``/``knowledge``/``source-backed``
+tag triple, or any owner other than ``self`` — are not touched at all:
 lessons, user notes and anything hand-written stay where they are, fail
 closed.
 
@@ -31,6 +32,10 @@ file corrupts it. The rewrite goes through ``state_file_lock`` +
 path ``PersistentMemoryStore.archive_record`` uses — and the only mutation a
 payload receives is ``archived: true``. The lock is held across read and
 write; both stores are only written after both new contents are computed.
+The write order is archive-first, and the append is recovery-idempotent: a
+retry after a crash between the two writes skips rows the archive already
+holds verbatim, and aborts before any write when the archive holds the same
+ID with different content.
 
 Dry-run is the default. ``--apply`` writes, after taking a timestamped backup
 of BOTH files. A second run finds nothing left to archive (idempotent).
@@ -66,10 +71,13 @@ from core.state_integrity import (  # noqa: E402
     state_file_lock,
 )
 
-# The exact tag triple KnowledgeWritePolicy.memory_tags stamps on every row
-# it writes. Requiring all three IS the writer signature (MIR-057): a row
-# without them was written by someone else and is not ours to reclassify.
+# The exact writer signature KnowledgeWritePolicy leaves on every row it
+# writes: the tag triple from ``memory_tags`` AND ``owner="self"`` — the
+# pipeline calls ``remember(content, tags, "agent-auto", "semantic", "self")``.
+# Requiring all of it IS the writer signature (MIR-057): a row without them
+# was written by someone else and is not ours to reclassify.
 _WRITER_SIGNATURE = frozenset({"fact", "knowledge", "source-backed"})
+_WRITER_OWNER = "self"
 
 # memory_tags appends exactly one source-type tag after the signature.
 _SOURCE_TYPE_TAGS = _NON_ASSERTING_SOURCE_TYPES | {
@@ -120,6 +128,11 @@ def archive_reason(payload: dict[str, Any]) -> str | None:
         return None
     tag_set = frozenset(tags)
     if not _WRITER_SIGNATURE <= tag_set:
+        return None
+    if payload.get("owner") != _WRITER_OWNER:
+        # A user- or session-owned row wearing the writer's tags was written
+        # by someone else (or edited). Archiving a user's own note would be
+        # data loss; leave it alone.
         return None
     if payload.get("archived") is True:
         return None
@@ -190,7 +203,16 @@ def _backup(path: Path) -> Path:
 
 def apply_migration(store_path: Path, payloads: list[dict[str, Any]],
                     plan: list[tuple[int, str]]) -> dict[str, Any]:
-    """Move planned rows to the archive store. Caller holds the lock."""
+    """Move planned rows to the archive store. Caller holds the lock.
+
+    Recovery-idempotent: the write order is archive-first, so a crash
+    between the append and the active-store rewrite leaves the moved rows in
+    BOTH stores. A retry therefore checks the archive before appending —
+    a row already archived with identical content is not appended again
+    (only its active copy is removed); the same ID with DIFFERENT content
+    aborts before any backup or write, because silently preferring either
+    copy would be a guess.
+    """
     archive_path = store_path.with_suffix(".archive.jsonl")
     planned = {index for index, _reason in plan}
 
@@ -204,14 +226,42 @@ def apply_migration(store_path: Path, payloads: list[dict[str, Any]],
         else:
             keep.append(payload)
 
+    # Inspect the archive under the same lock BEFORE mutating anything.
+    existing_by_id: dict[str, dict[str, Any]] = {}
+    if archive_path.exists():
+        for row in read_state_jsonl_unlocked(archive_path):
+            row_id = row.get("id")
+            if isinstance(row_id, str) and row_id:
+                existing_by_id[row_id] = row
+    to_append: list[dict[str, Any]] = []
+    recovered = 0
+    for moved in move:
+        row_id = moved.get("id")
+        prior = existing_by_id.get(row_id) if isinstance(row_id, str) else None
+        if prior is None:
+            to_append.append(moved)
+        elif prior == moved:
+            # An interrupted earlier run already archived this exact row;
+            # skip the append, the rewrite below removes the active copy.
+            recovered += 1
+        else:
+            raise ValueError(
+                f"archive already holds id {row_id!r} with different content; "
+                f"refusing to touch either store — resolve the conflict "
+                f"manually before re-running"
+            )
+
     backup_active = _backup(store_path)
     backup_archive = _backup(archive_path) if archive_path.exists() else None
     # Archive first: if the append fails, the active store is untouched and a
     # re-run plans the same rows again. The reverse order could lose rows.
-    append_state_jsonl_unlocked(archive_path, move)
+    if to_append:
+        append_state_jsonl_unlocked(archive_path, to_append)
     rewrite_state_jsonl_unlocked(store_path, keep)
     return {
         "archived": len(move),
+        "appended": len(to_append),
+        "recovered_duplicates": recovered,
         "kept": len(keep),
         "backup_active": str(backup_active),
         "backup_archive": str(backup_archive) if backup_archive else None,
@@ -279,6 +329,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nbackup (active):  {result['backup_active']}")
         if result["backup_archive"]:
             print(f"backup (archive): {result['backup_archive']}")
+        if result["recovered_duplicates"]:
+            print(
+                f"recovered {result['recovered_duplicates']} row(s) an "
+                f"interrupted earlier run had already archived"
+            )
         print(
             f"archived {result['archived']} row(s) -> {result['archive_path']}; "
             f"{result['kept']} row(s) kept"

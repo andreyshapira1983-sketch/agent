@@ -173,11 +173,29 @@ def test_malformed_or_foreign_tags_fail_closed(tags):
     assert archive_reason(row) is None
 
 
-def test_user_owned_row_with_signature_tags_is_still_judged_by_source():
-    # Owner is not part of the writer signature on purpose: the gate stamps
-    # owner="self", but the signature is the tag triple + Source line. A
-    # user-owned prose row keeps its place either way.
-    row = _prose_file_row(owner="user")
+def test_user_owned_row_with_non_asserting_source_is_untouched():
+    """Writer provenance includes the owner: the gate writes owner="self".
+
+    `KnowledgePipeline.run` calls `remember(content, tags, "agent-auto",
+    "semantic", "self")` — every row this writer produced is self-owned. A
+    user-owned row wearing the same tag triple and a `log` Source line was
+    written by someone else (or edited); reclassifying it would be the guess
+    MIR-057 forbids, and archiving a user's own note is data loss from the
+    user's point of view.
+    """
+    assert archive_reason(_log_row(owner="user")) is None
+
+
+@pytest.mark.parametrize("owner", ["user", "session", "", None])
+def test_any_non_self_owner_fails_closed(owner):
+    row = _log_row()
+    row["owner"] = owner
+    assert archive_reason(row) is None
+
+
+def test_missing_owner_key_fails_closed():
+    row = _log_row()
+    del row["owner"]
     assert archive_reason(row) is None
 
 
@@ -282,3 +300,65 @@ def test_apply_migration_reports_counts(tmp_path: Path):
     assert result["archived"] == 2
     assert result["kept"] == 1
     assert Path(result["backup_active"]).exists()
+
+
+# ── crash-window recovery ────────────────────────────────────────────────────
+#
+# The apply path writes archive-first, then rewrites the active store. A
+# crash between the two leaves both junk rows in BOTH stores. The retry must
+# finish the job — remove the active copies — without appending the archive
+# copies a second time, and must refuse to touch anything when the archive
+# holds the same ID with different content.
+
+def test_interrupted_apply_recovers_without_duplicate_archive_ids(
+    tmp_path: Path, monkeypatch, capsys
+):
+    import scripts.migrate_memory_pollution as mig
+
+    store_path, store = _seed_store(tmp_path)
+    real_rewrite = mig.rewrite_state_jsonl_unlocked
+    calls = {"n": 0}
+
+    def crash_once(path, payloads):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("simulated crash after archive append")
+        return real_rewrite(path, payloads)
+
+    monkeypatch.setattr(mig, "rewrite_state_jsonl_unlocked", crash_once)
+
+    with pytest.raises(RuntimeError):
+        mig.main(["--workspace", str(tmp_path), "--apply"])
+
+    # The crash window: archive already holds the rows, active still full.
+    assert sorted(r.id for r in store.load_archive()) == ["mem_code1", "mem_log1"]
+    assert len(store.load()) == 3
+    capsys.readouterr()
+
+    rc = mig.main(["--workspace", str(tmp_path), "--apply"])
+
+    assert rc == 0
+    archived_ids = [r.id for r in store.load_archive()]
+    assert sorted(archived_ids) == ["mem_code1", "mem_log1"]  # exactly once each
+    assert len(archived_ids) == len(set(archived_ids))
+    assert [r.id for r in store.load()] == ["mem_prose1"]  # drained, nothing lost
+
+
+def test_divergent_archived_duplicate_aborts_before_any_write(tmp_path: Path):
+    from core.state_integrity import append_state_jsonl
+
+    store_path, store = _seed_store(tmp_path)
+    archive_path = store_path.with_suffix(".archive.jsonl")
+    tampered = _log_row(id="mem_log1", archived=True)
+    tampered["content"] = "different text\nSource: log:elsewhere:1\nConfidence: 0.85"
+    append_state_jsonl(archive_path, [tampered])
+    active_before = store_path.read_bytes()
+    archive_before = archive_path.read_bytes()
+
+    with pytest.raises(ValueError, match="different content"):
+        main(["--workspace", str(tmp_path), "--apply"])
+
+    # Abort happened before ANY mutation: no writes, no backups.
+    assert store_path.read_bytes() == active_before
+    assert archive_path.read_bytes() == archive_before
+    assert not list(store_path.parent.glob("*.bak"))
