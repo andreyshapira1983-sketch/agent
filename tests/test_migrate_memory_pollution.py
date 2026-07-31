@@ -347,7 +347,7 @@ def test_interrupted_apply_recovers_without_duplicate_archive_ids(
 def test_divergent_archived_duplicate_aborts_before_any_write(tmp_path: Path):
     from core.state_integrity import append_state_jsonl
 
-    store_path, store = _seed_store(tmp_path)
+    store_path, _ = _seed_store(tmp_path)
     archive_path = store_path.with_suffix(".archive.jsonl")
     tampered = _log_row(id="mem_log1", archived=True)
     tampered["content"] = "different text\nSource: log:elsewhere:1\nConfidence: 0.85"
