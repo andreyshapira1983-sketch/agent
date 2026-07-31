@@ -440,6 +440,17 @@ class KnowledgeWritePolicy:
             )
         if source.type in {"forum", "unknown"}:
             return KnowledgeWriteDecision("reject", (f"source type {source.type} is too weak",))
+        if source.type == "file" and _is_code_locator(source.locator):
+            # Same rule the conflict resolver applies (MIR-054): programs do
+            # not assert. `x = y` in a .py file is an assignment, an `assert`
+            # line is a test statement — reading either as a world-fact is how
+            # the 2026-07-25 wave banked 776 file rows, 26 of them raw asserts.
+            # Prose files (.md, .txt) stay in scope: they really state things.
+            return KnowledgeWriteDecision(
+                "reject",
+                (f"source is a code file ({source.locator}): programs do not "
+                 f"assert facts",),
+            )
         reasons.append(f"claim confidence={claim.confidence:.2f}")
         reasons.append(f"source trust={source.trust_level:.2f}")
         reasons.append(f"source type={source.type}")
@@ -573,6 +584,17 @@ _CODE_LINE_PREFIXES = (
     "async def ", "await ", "@", "#", "//", "/*", "*", '"""', "'''",
     ">>>", ">>> ", "> ", "$ ", "python ", "pip ", "uvicorn ", "pytest ",
     "git ", "cd ", "curl ", "npm ", "--", "```",
+    # Statement keywords — but ONLY the ones prose never opens with.
+    # `assert len(records) == 2` has no call-heavy shape and no code suffix,
+    # so none of the structural rules below fired — which is how 26 raw
+    # assert lines from tests/*.py entered the live store as Confidence-0.85
+    # "facts" in the 2026-07-25 ingestion wave. Deliberately NOT listed:
+    # "if ", "for ", "while ", "with ", "except ", "global ", "pass" — real
+    # prose facts open with those ("If the budget is exceeded, the run
+    # stops."), and a classifier that rejects prose is a worse defect than
+    # the one it fixes.
+    "assert ", "elif ", "else:", "try:", "finally:", "lambda ", "del ",
+    "self.",
 )
 
 # Dangling trailing tokens that reveal a mid-sentence chunk cut, not a whole fact.
