@@ -424,7 +424,21 @@ class KnowledgeWritePolicy:
                 "reject",
                 (f"source trust {source.trust_level:.2f} < {self.min_source_trust:.2f}",),
             )
-        if source.type in {"forum", "unknown", "tool_output"}:
+        if source.type in _NON_ASSERTING_SOURCE_TYPES:
+            # Same doctrine the conflict resolver applies (MIR-054): a log
+            # line, a test verdict, a tool dump or the agent's own memory is
+            # an observation of one moment, not a standing claim about the
+            # world. Trust cannot rescue it — DEFAULT_SOURCE_TRUST rates
+            # `log` 0.88 and `test_result` 0.95, which is how a diagnostic
+            # run (run_ab3f4bb672…, 2026-07-31) restated five of its own log
+            # events as durable Confidence-0.85 "facts". Reject by assertion
+            # class, before the trust ladder is even consulted for weakness.
+            return KnowledgeWriteDecision(
+                "reject",
+                (f"source type {source.type} does not assert facts "
+                 f"(observation of one moment, not a standing claim)",),
+            )
+        if source.type in {"forum", "unknown"}:
             return KnowledgeWriteDecision("reject", (f"source type {source.type} is too weak",))
         reasons.append(f"claim confidence={claim.confidence:.2f}")
         reasons.append(f"source trust={source.trust_level:.2f}")
