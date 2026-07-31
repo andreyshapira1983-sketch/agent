@@ -1,7 +1,8 @@
 # FABLE_AUDIT — forensic audit of recurring systemic defects
 
-Status: PHASE 1 complete (causal graph saved), PHASE 2 cluster 1 selected.
-Branch: `audit/fable-forensic` @ `d622d5e` (origin/main).
+Status: PHASE 1 complete. PHASE 2 cluster 1 PATCHED AND PROVEN (this branch).
+Branch: `fix/knowledge-gate-non-asserting-sources` (off `audit/fable-forensic`
+@ `fbb5fa2`, itself off origin/main `d622d5e`).
 Worktree: `copilot-worktrees/agent/andreyshapira1983-sketch-fantastic-memory`.
 Live data read (READ-ONLY) from the operator's checkout: `data/*.jsonl`, `logs/run_*.jsonl`.
 
@@ -230,11 +231,37 @@ answer path; incremental repair cycle), needs operator decisions.
 
 ## 7. Current state / next action
 
-- Worktree branch `audit/fable-forensic` @ d622d5e, clean.
-- NEXT ACTION (exact): create branch `fix/knowledge-gate-non-asserting-sources`
-  from `origin/main`; add failing tests from §5 to
-  `tests/test_knowledge_pipeline.py`; run
-  `python -m pytest tests/test_knowledge_pipeline.py -q` expecting the two
-  fail-before tests to FAIL; then patch `KnowledgeWritePolicy.decide` to
-  reject `_NON_ASSERTING_SOURCE_TYPES | {"forum","unknown"}`; rerun targeted,
-  then full `python -m pytest -q` (expect 6016+new passed, 3 skipped).
+Cluster 1 — DONE on this branch, unmerged (merge is operator-only):
+- fail-before proven: 5 new tests failed with `'save' == 'reject'` before the
+  patch (log, test_result, memory, code_repository, doctrine-sharing probe);
+  negative control (documentation) passed before AND after.
+- patch: `core/knowledge_pipeline.py` `KnowledgeWritePolicy.decide` now rejects
+  every `_NON_ASSERTING_SOURCE_TYPES` member by assertion class (same frozenset
+  the conflict resolver uses — single source of truth); `forum`/`unknown` keep
+  the "too weak" rejection; `tool_output` moved to the assertion-class branch.
+- tests: targeted `tests/test_knowledge_pipeline.py tests/test_conflict_quarantine.py`
+  → 24 passed. Full suite → **6020 passed, 5 skipped** (baseline 6016+3; +6 new
+  tests, +2 environment skips: live-store/live-registry tests skip in a clean
+  worktree with no `data/`).
+
+NEXT ACTION (exact, for any model):
+1. Operator reviews/merges cluster 1 (branch `fix/knowledge-gate-non-asserting-sources`).
+2. Cluster 1b — store migration for the polluted rows in
+   `data/persistent_memory.jsonl` (800 file-sourced rows incl. 776 from the
+   2026-07-25 pre-filter wave, 10 log-sourced rows, 2 unmarked "Bug fixed"
+   prose rows). Requirements (per docs/SELF_REPAIR_DOCTRINE.md): dry-run by
+   default, `.bak` backup, file lock, atomic write via the existing state
+   layer (never hand-edit: rows carry `_integrity` sha256), idempotent,
+   post-migration report; archive (do not delete) rows whose source type is
+   non-asserting OR whose content matches the code-fragment reject rules that
+   `ClaimExtractor._accept_sentence` now enforces.
+3. Cluster 2 — ROOT B: make memory blocks enter the same evidence budget as
+   artifacts; fresh read of path X must evict memory-about-X, never vice versa
+   (fail-before: build prompt with fresh file > memory, assert memory trimmed
+   first after fix).
+4. Cluster 3 — ROOT C: add `run_id` to `ModelUsageRecord`; make
+   `model_registry_audit` also report ACTUAL models used per run (join on
+   run_id or read `model_call_start` events); surface configured-vs-actual drift.
+5. Cluster 4 — ROOT D (design, operator decision needed): introspective answer
+   path for self-analysis turns (answer from own trace without a fresh LLM
+   round-trip), and an incremental repair cycle (test-first, chunked targets).
