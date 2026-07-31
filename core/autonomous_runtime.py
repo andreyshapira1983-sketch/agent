@@ -343,12 +343,18 @@ class AutonomousRuntime:
                 # The heartbeat is what lets startup recovery tell a killed
                 # process from a slow one (MIR-040); without it a long run and
                 # an abandoned row are the same observation.
+                # `task_id` is bound as a default, NOT read from `task`: the
+                # heartbeat runs on a background thread and `__exit__` joins it
+                # with a bounded timeout, so this callback can still fire after
+                # the loop has advanced. A closure over the loop variable would
+                # then blame whichever task is current — sending a reader to the
+                # wrong task for a failure that belongs to this one.
                 with task_heartbeat(
                     task_queue,
                     task.id,
-                    on_error=lambda exc: self._log(
+                    on_error=lambda exc, task_id=task.id: self._log(
                         "task_heartbeat_failed",
-                        {"task_id": task.id, "error": type(exc).__name__},
+                        {"task_id": task_id, "error": type(exc).__name__},
                     ),
                 ):
                     run_report = self.run(
