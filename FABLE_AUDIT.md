@@ -1,8 +1,8 @@
 # FABLE_AUDIT — forensic audit of recurring systemic defects
 
-Status: PHASE 1 complete. PHASE 2 cluster 1 PATCHED AND PROVEN (this branch).
-Branch: `fix/knowledge-gate-non-asserting-sources` (off `audit/fable-forensic`
-@ `fbb5fa2`, itself off origin/main `d622d5e`).
+Status: PHASE 1 complete. Cluster 1 MERGED (`189f9bd`). Cluster 1b patched
+and proven on branch `fix/memory-pollution-migration`; live --apply awaits
+the operator.
 Worktree: `copilot-worktrees/agent/andreyshapira1983-sketch-fantastic-memory`.
 Live data read (READ-ONLY) from the operator's checkout: `data/*.jsonl`, `logs/run_*.jsonl`.
 
@@ -231,10 +231,12 @@ answer path; incremental repair cycle), needs operator decisions.
 
 ## 7. Current state / next action
 
-Cluster 1 — DONE on this branch, unmerged (merge is operator-only):
-- fail-before proven: 5 new tests failed with `'save' == 'reject'` before the
-  patch (log, test_result, memory, code_repository, doctrine-sharing probe);
-  negative control (documentation) passed before AND after.
+Cluster 1 — MERGED: PR #200 → main `189f9bd` (squash, 2026-07-31T10:54Z).
+CI on the PR: Codacy pass, Tests + supply-chain pass, 0 unresolved threads.
+Built with fail-before proof:
+- 5 new tests failed with `'save' == 'reject'` before the patch (log,
+  test_result, memory, code_repository, doctrine-sharing probe); negative
+  control (documentation) passed before AND after.
 - patch: `core/knowledge_pipeline.py` `KnowledgeWritePolicy.decide` now rejects
   every `_NON_ASSERTING_SOURCE_TYPES` member by assertion class (same frozenset
   the conflict resolver uses — single source of truth); `forum`/`unknown` keep
@@ -244,24 +246,74 @@ Cluster 1 — DONE on this branch, unmerged (merge is operator-only):
   tests, +2 environment skips: live-store/live-registry tests skip in a clean
   worktree with no `data/`).
 
+Cluster 1b — DONE on branch `fix/memory-pollution-migration` (this branch):
+- Two further writer gaps found while building the migration, both proven
+  fail-before on live-junk fixtures:
+  - `_looks_like_code_fragment` missed statement keywords — the measured 26
+    `assert …` rows pass it → added high-precision statement prefixes
+    (deliberately NOT "if ", "for ", "pass" — prose opens with those);
+  - the write gate accepted `file` claims from CODE files while the conflict
+    resolver already excludes them via `_is_code_locator` (MIR-054) → gate
+    now rejects code-file claims; prose files (.md/.txt) stay in scope.
+- `scripts/migrate_memory_pollution.py` — archives (never deletes) rows
+  today's writer would refuse: non-asserting sources, code-file claims,
+  code-fragment/mojibake content. Writer signature proved first (tag triple
+  + Source line, tag/Source agreement required); everything else fail-closed.
+  Dry-run default, lock across read+write, timestamped backups of both
+  stores, archive-first write order, idempotent, --json report. Decisions
+  imported from the gate itself — report and migration cannot diverge.
+- Live dry-run (read-only): 814 rows → **778 would archive** (767 code-file,
+  11 non-asserting), **36 kept** — eyeballed: 29 prose (README, docs), 4
+  borderline-but-consistent (dir/gitignore locators today's gate still
+  accepts), 3 no-Source-line fail-closed incl. both "Bug fixed" lessons.
+  Cross-check vs PHASE-1 scan exact: 800 file = 767 code + 33 prose;
+  10 log + 1 test_result = 11.
+- Tests: 25 migration + 4 writer-gap = 29 new. Full suite **6049 passed,
+  5 skipped**.
+- Hardening (operator review round 1, fail-before proven — 7 tests failed
+  before the fix):
+  - writer provenance now requires ``owner == "self"`` (the pipeline calls
+    ``remember(..., "agent-auto", "semantic", "self")``); a user-owned row
+    wearing the tag triple + a non-asserting Source line is untouched;
+  - the archive append is recovery-idempotent: a retry after a crash
+    between append and rewrite skips rows the archive already holds
+    verbatim (still removing the active copy), and the same ID with
+    DIFFERENT content aborts before any backup or write.
+  - After hardening: 32 migration tests; full suite **6056 passed,
+    5 skipped**; live dry-run unchanged — 814 active / 778 archive /
+    36 keep, no record changed class (all live writer rows are self-owned).
+- Review round 2 (Codacy + CodeRabbit on the PR):
+  - dropped `"del "`, `"finally:"`, `"lambda "` from the statement prefixes —
+    prose opens with them (Del Toro / "Finally: …" / "Lambda is an AWS
+    service"), the exact false-positive class this list promises to avoid;
+    negative prose tests added;
+  - the archive append now runs under `state_file_lock(archive_path)` — the
+    active store's lock says nothing about the archive file, and
+    `PersistentMemoryStore.archive_record` appends under the archive lock;
+  - `_backup` centralised as `core.state_integrity.backup_state_file`, both
+    migration scripts now share it;
+  - unused test variable removed; FABLE_AUDIT merge-state and portable
+    apply-command wording fixed.
+- `--apply` on the live store NOT run: mutating live memory is an
+  operator-gated effect. Command, after merge:
+  `python scripts/migrate_memory_pollution.py --workspace <repo-root> --apply`
+  (run from the repo checkout whose `data/` holds the live store; the CLI
+  exits 0 with "nothing to do" when the store path does not exist, so a
+  wrong workspace looks successful while touching nothing)
+
 NEXT ACTION (exact, for any model):
-1. Operator reviews/merges cluster 1 (branch `fix/knowledge-gate-non-asserting-sources`).
-2. Cluster 1b — store migration for the polluted rows in
-   `data/persistent_memory.jsonl` (800 file-sourced rows incl. 776 from the
-   2026-07-25 pre-filter wave, 10 log-sourced rows, 2 unmarked "Bug fixed"
-   prose rows). Requirements (per docs/SELF_REPAIR_DOCTRINE.md): dry-run by
-   default, `.bak` backup, file lock, atomic write via the existing state
-   layer (never hand-edit: rows carry `_integrity` sha256), idempotent,
-   post-migration report; archive (do not delete) rows whose source type is
-   non-asserting OR whose content matches the code-fragment reject rules that
-   `ClaimExtractor._accept_sentence` now enforces.
-3. Cluster 2 — ROOT B: make memory blocks enter the same evidence budget as
+1. Operator reviews/merges cluster 1b PR; then operator (or agent with
+   explicit permission) runs the --apply command above; verify with a
+   re-run (idempotence: "would archive: 0") and `:memory` retrieval smoke.
+2. Cluster 2 — ROOT B: make memory blocks enter the same evidence budget as
    artifacts; fresh read of path X must evict memory-about-X, never vice versa
    (fail-before: build prompt with fresh file > memory, assert memory trimmed
    first after fix).
-4. Cluster 3 — ROOT C: add `run_id` to `ModelUsageRecord`; make
+3. Cluster 3 — ROOT C: add `run_id` to `ModelUsageRecord`; make
    `model_registry_audit` also report ACTUAL models used per run (join on
    run_id or read `model_call_start` events); surface configured-vs-actual drift.
-5. Cluster 4 — ROOT D (design, operator decision needed): introspective answer
+4. Cluster 4 — ROOT D (design, operator decision needed): introspective answer
    path for self-analysis turns (answer from own trace without a fresh LLM
    round-trip), and an incremental repair cycle (test-first, chunked targets).
+5. Deferred (operator's earlier list): machine-readable `status=fixed` on
+   repair-lesson memory records (the two "Bug fixed" rows).

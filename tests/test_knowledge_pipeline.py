@@ -341,6 +341,86 @@ def test_write_gate_and_conflict_resolver_share_the_non_asserting_doctrine():
         assert decision.decision == "reject", source_type
 
 
+# ── Code files do not assert; assert-statements are code ─────────────────────
+#
+# The 2026-07-25 ingestion wave put 776 file-sourced rows into
+# data/persistent_memory.jsonl; 26 of them are raw `assert …` lines from
+# tests/*.py stored as Confidence-0.85 "facts". Two writer gaps let that
+# happen, and both were still open after the non-asserting-source fix:
+#
+#   1. `_looks_like_code_fragment` has no rule for statement keywords, so
+#      `assert payload["x"] == "y"` reads as prose (no code prefix, doesn't
+#      end in `:`/`)`, fewer than 4 parens).
+#   2. The write gate accepts `file` claims from CODE files, while the
+#      conflict resolver in the same module already excludes them via
+#      `_is_code_locator` — "programs do not assert" (MIR-054).
+
+def test_code_fragment_filter_catches_assert_statements():
+    from core.knowledge_pipeline import _looks_like_code_fragment
+
+    # Verbatim rows from the live store (mem_cc44d79e…, mem_8981fdec…).
+    live_junk = (
+        'assert payload["multi_agent_state"] == "dry_run_executor_ready"',
+        "assert len(records) == 2",
+        'assert "work_session_mode" in blockers',
+        "assert first.signal_source == ARCHITECTURE_AUDIT_SOURCE",
+    )
+    for line in live_junk:
+        assert _looks_like_code_fragment(line), line
+
+
+def test_code_fragment_filter_keeps_prose_about_assertions():
+    from core.knowledge_pipeline import _looks_like_code_fragment
+
+    # The word "assertion" in prose must not be collateral damage — nor may
+    # sentences that merely OPEN like a statement keyword. Each line below
+    # documents a prefix deliberately absent from _CODE_LINE_PREFIXES.
+    prose = (
+        "The verifier rejects an assertion that cites no evidence.",
+        "Assertions about the world require at least one independent source.",
+        "Del Toro directed the film that won the award that year.",
+        "Finally: the last step is testing the whole pipeline end to end.",
+        "Lambda is an AWS compute service for event-driven workloads.",
+        "If the budget is exceeded, the run stops immediately.",
+    )
+    for line in prose:
+        assert not _looks_like_code_fragment(line), line
+
+
+def test_knowledge_write_policy_rejects_file_claim_from_code_file():
+    registry = SourceRegistry()
+    source = registry.register_source(
+        type="file",
+        title="test module",
+        locator="tests/test_architecture_audit.py",
+        trust_level=0.90,
+    )
+    claim = _sentence_claim(
+        registry, source, "The audit summary lists every priority gap by title",
+    )
+
+    decision = KnowledgeWritePolicy().decide(claim, source=source)
+
+    assert decision.decision == "reject"
+    assert "code file" in decision.reasons[0]
+
+
+def test_knowledge_write_policy_still_saves_prose_file_claim():
+    # Negative control: a prose document (.md) really does state things.
+    registry = SourceRegistry()
+    source = registry.register_source(
+        type="file", title="guide", locator="docs/guide.md", trust_level=0.90
+    )
+    claim = _sentence_claim(
+        registry, source,
+        "Agent tools require policy approval for irreversible actions.",
+    )
+
+    decision = KnowledgeWritePolicy().decide(claim, source=source)
+
+    assert decision.decision == "save"
+
+
 def test_agent_loop_persists_sources_and_writes_verified_knowledge(tmp_path: Path):
     (tmp_path / "doc.txt").write_text("Agent codename is Anya.", encoding="utf-8")
     registry = ToolRegistry()
