@@ -28,9 +28,7 @@ Dry-run is the default. `--apply` writes, after taking a timestamped backup.
 from __future__ import annotations
 
 import argparse
-import shutil
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +37,7 @@ sys.path.insert(0, str(ROOT))
 
 from scripts.completion_backfill import writer_backfill_verdict  # noqa: E402
 from core.state_integrity import (  # noqa: E402
+    backup_state_file,
     read_state_jsonl_unlocked,
     rewrite_state_jsonl_unlocked,
     state_file_lock,
@@ -82,10 +81,7 @@ def describe(payloads: list[dict[str, Any]], plan: list[tuple[int, str]]) -> str
 
 
 def _backup(path: Path) -> Path:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    target = path.with_suffix(path.suffix + f".{stamp}.bak")
-    shutil.copy2(path, target)
-    return target
+    return backup_state_file(path)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -372,10 +372,16 @@ def test_code_fragment_filter_catches_assert_statements():
 def test_code_fragment_filter_keeps_prose_about_assertions():
     from core.knowledge_pipeline import _looks_like_code_fragment
 
-    # The word "assertion" in prose must not be collateral damage.
+    # The word "assertion" in prose must not be collateral damage — nor may
+    # sentences that merely OPEN like a statement keyword. Each line below
+    # documents a prefix deliberately absent from _CODE_LINE_PREFIXES.
     prose = (
         "The verifier rejects an assertion that cites no evidence.",
         "Assertions about the world require at least one independent source.",
+        "Del Toro directed the film that won the award that year.",
+        "Finally: the last step is testing the whole pipeline end to end.",
+        "Lambda is an AWS compute service for event-driven workloads.",
+        "If the budget is exceeded, the run stops immediately.",
     )
     for line in prose:
         assert not _looks_like_code_fragment(line), line

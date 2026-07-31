@@ -49,9 +49,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +64,7 @@ from core.knowledge_pipeline import (  # noqa: E402
 )
 from core.state_integrity import (  # noqa: E402
     append_state_jsonl_unlocked,
+    backup_state_file,
     read_state_jsonl_unlocked,
     rewrite_state_jsonl_unlocked,
     state_file_lock,
@@ -194,16 +193,16 @@ def describe(payloads: list[dict[str, Any]], plan: list[tuple[int, str]]) -> str
     return "\n".join(out)
 
 
-def _backup(path: Path) -> Path:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    target = path.with_suffix(path.suffix + f".{stamp}.bak")
-    shutil.copy2(path, target)
-    return target
-
-
 def apply_migration(store_path: Path, payloads: list[dict[str, Any]],
                     plan: list[tuple[int, str]]) -> dict[str, Any]:
-    """Move planned rows to the archive store. Caller holds the lock.
+    """Move planned rows to the archive store. Caller holds the ACTIVE lock.
+
+    The archive has its own lockfile: ``state_file_lock(path)`` locks only
+    ``<path>.lock``, so holding the active store's lock says nothing about
+    the archive. `PersistentMemoryStore.archive_record` appends under
+    ``state_file_lock(archive_path)``; this function takes the same lock
+    around everything that reads or writes the archive, so the two can never
+    interleave an append.
 
     Recovery-idempotent: the write order is archive-first, so a crash
     between the append and the active-store rewrite leaves the moved rows in
@@ -226,37 +225,41 @@ def apply_migration(store_path: Path, payloads: list[dict[str, Any]],
         else:
             keep.append(payload)
 
-    # Inspect the archive under the same lock BEFORE mutating anything.
-    existing_by_id: dict[str, dict[str, Any]] = {}
-    if archive_path.exists():
-        for row in read_state_jsonl_unlocked(archive_path):
-            row_id = row.get("id")
-            if isinstance(row_id, str) and row_id:
-                existing_by_id[row_id] = row
-    to_append: list[dict[str, Any]] = []
-    recovered = 0
-    for moved in move:
-        row_id = moved.get("id")
-        prior = existing_by_id.get(row_id) if isinstance(row_id, str) else None
-        if prior is None:
-            to_append.append(moved)
-        elif prior == moved:
-            # An interrupted earlier run already archived this exact row;
-            # skip the append, the rewrite below removes the active copy.
-            recovered += 1
-        else:
-            raise ValueError(
-                f"archive already holds id {row_id!r} with different content; "
-                f"refusing to touch either store — resolve the conflict "
-                f"manually before re-running"
-            )
+    with state_file_lock(archive_path):
+        # Inspect the archive under ITS lock BEFORE mutating anything.
+        existing_by_id: dict[str, dict[str, Any]] = {}
+        if archive_path.exists():
+            for row in read_state_jsonl_unlocked(archive_path):
+                row_id = row.get("id")
+                if isinstance(row_id, str) and row_id:
+                    existing_by_id[row_id] = row
+        to_append: list[dict[str, Any]] = []
+        recovered = 0
+        for moved in move:
+            row_id = moved.get("id")
+            prior = existing_by_id.get(row_id) if isinstance(row_id, str) else None
+            if prior is None:
+                to_append.append(moved)
+            elif prior == moved:
+                # An interrupted earlier run already archived this exact row;
+                # skip the append, the rewrite below removes the active copy.
+                recovered += 1
+            else:
+                raise ValueError(
+                    f"archive already holds id {row_id!r} with different content; "
+                    f"refusing to touch either store — resolve the conflict "
+                    f"manually before re-running"
+                )
 
-    backup_active = _backup(store_path)
-    backup_archive = _backup(archive_path) if archive_path.exists() else None
-    # Archive first: if the append fails, the active store is untouched and a
-    # re-run plans the same rows again. The reverse order could lose rows.
-    if to_append:
-        append_state_jsonl_unlocked(archive_path, to_append)
+        backup_active = backup_state_file(store_path)
+        backup_archive = (
+            backup_state_file(archive_path) if archive_path.exists() else None
+        )
+        # Archive first: if the append fails, the active store is untouched
+        # and a re-run plans the same rows again. The reverse order could
+        # lose rows.
+        if to_append:
+            append_state_jsonl_unlocked(archive_path, to_append)
     rewrite_state_jsonl_unlocked(store_path, keep)
     return {
         "archived": len(move),

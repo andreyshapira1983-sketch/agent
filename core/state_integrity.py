@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -137,6 +138,20 @@ def rewrite_state_jsonl_unlocked(path: Path | str, payloads: list[dict[str, Any]
 
 def quarantine_dir_for(path: Path | str) -> Path:
     return Path(path).parent / ".quarantine"
+
+
+def backup_state_file(path: Path | str) -> Path:
+    """Copy *path* to ``<path>.<YYYYMMDDTHHMMSSZ>.bak`` and return the copy.
+
+    The shared pre-migration backup: every script that rewrites a state file
+    takes one of these first. The ``*.bak.*``/``*.bak`` names are already
+    ignored by git and swept by ``core.hygiene.cleanup_backups``.
+    """
+    p = Path(path)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target = p.with_suffix(p.suffix + f".{stamp}.bak")
+    shutil.copy2(p, target)
+    return target
 
 
 @contextmanager

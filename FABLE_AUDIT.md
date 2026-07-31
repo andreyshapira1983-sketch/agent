@@ -231,10 +231,12 @@ answer path; incremental repair cycle), needs operator decisions.
 
 ## 7. Current state / next action
 
-Cluster 1 — DONE on this branch, unmerged (merge is operator-only):
-- fail-before proven: 5 new tests failed with `'save' == 'reject'` before the
-  patch (log, test_result, memory, code_repository, doctrine-sharing probe);
-  negative control (documentation) passed before AND after.
+Cluster 1 — MERGED: PR #200 → main `189f9bd` (squash, 2026-07-31T10:54Z).
+CI on the PR: Codacy pass, Tests + supply-chain pass, 0 unresolved threads.
+Built with fail-before proof:
+- 5 new tests failed with `'save' == 'reject'` before the patch (log,
+  test_result, memory, code_repository, doctrine-sharing probe); negative
+  control (documentation) passed before AND after.
 - patch: `core/knowledge_pipeline.py` `KnowledgeWritePolicy.decide` now rejects
   every `_NON_ASSERTING_SOURCE_TYPES` member by assertion class (same frozenset
   the conflict resolver uses — single source of truth); `forum`/`unknown` keep
@@ -243,9 +245,6 @@ Cluster 1 — DONE on this branch, unmerged (merge is operator-only):
   → 24 passed. Full suite → **6020 passed, 5 skipped** (baseline 6016+3; +6 new
   tests, +2 environment skips: live-store/live-registry tests skip in a clean
   worktree with no `data/`).
-
-Cluster 1 — MERGED: PR #200 → main `189f9bd` (squash, 2026-07-31T10:54Z).
-CI on the PR: Codacy pass, Tests + supply-chain pass, 0 unresolved threads.
 
 Cluster 1b — DONE on branch `fix/memory-pollution-migration` (this branch):
 - Two further writer gaps found while building the migration, both proven
@@ -283,9 +282,24 @@ Cluster 1b — DONE on branch `fix/memory-pollution-migration` (this branch):
   - After hardening: 32 migration tests; full suite **6056 passed,
     5 skipped**; live dry-run unchanged — 814 active / 778 archive /
     36 keep, no record changed class (all live writer rows are self-owned).
+- Review round 2 (Codacy + CodeRabbit on the PR):
+  - dropped `"del "`, `"finally:"`, `"lambda "` from the statement prefixes —
+    prose opens with them (Del Toro / "Finally: …" / "Lambda is an AWS
+    service"), the exact false-positive class this list promises to avoid;
+    negative prose tests added;
+  - the archive append now runs under `state_file_lock(archive_path)` — the
+    active store's lock says nothing about the archive file, and
+    `PersistentMemoryStore.archive_record` appends under the archive lock;
+  - `_backup` centralised as `core.state_integrity.backup_state_file`, both
+    migration scripts now share it;
+  - unused test variable removed; FABLE_AUDIT merge-state and portable
+    apply-command wording fixed.
 - `--apply` on the live store NOT run: mutating live memory is an
   operator-gated effect. Command, after merge:
-  `python scripts/migrate_memory_pollution.py --workspace C:\Users\andre\Projects\agent --apply`
+  `python scripts/migrate_memory_pollution.py --workspace <repo-root> --apply`
+  (run from the repo checkout whose `data/` holds the live store; the CLI
+  exits 0 with "nothing to do" when the store path does not exist, so a
+  wrong workspace looks successful while touching nothing)
 
 NEXT ACTION (exact, for any model):
 1. Operator reviews/merges cluster 1b PR; then operator (or agent with

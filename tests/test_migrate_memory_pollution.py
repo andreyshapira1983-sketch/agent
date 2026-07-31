@@ -315,7 +315,7 @@ def test_interrupted_apply_recovers_without_duplicate_archive_ids(
 ):
     import scripts.migrate_memory_pollution as mig
 
-    store_path, store = _seed_store(tmp_path)
+    _, store = _seed_store(tmp_path)
     real_rewrite = mig.rewrite_state_jsonl_unlocked
     calls = {"n": 0}
 

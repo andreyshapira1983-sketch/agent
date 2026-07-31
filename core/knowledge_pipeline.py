@@ -591,9 +591,11 @@ _CODE_LINE_PREFIXES = (
     # "facts" in the 2026-07-25 ingestion wave. Deliberately NOT listed:
     # "if ", "for ", "while ", "with ", "except ", "global ", "pass" — real
     # prose facts open with those ("If the budget is exceeded, the run
-    # stops."), and a classifier that rejects prose is a worse defect than
-    # the one it fixes.
-    "assert ", "elif ", "else:", "try:", "finally:", "lambda ", "del ",
+    # stops."); "del " (Del Toro, Del Monte, Spanish "del"), "finally:"
+    # ("Finally: the last step is testing.") and "lambda " ("Lambda is an
+    # AWS compute service.") for the same reason — a classifier that
+    # rejects prose is a worse defect than the one it fixes.
+    "assert ", "elif ", "else:", "try:",
     "self.",
 )
 
