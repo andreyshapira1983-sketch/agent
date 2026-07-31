@@ -206,6 +206,141 @@ def test_knowledge_write_policy_rejects_promotional_hype_claim():
     assert "hype" in decision.reasons[0]
 
 
+# ── Non-asserting sources must not become long-term "knowledge" ──────────────
+#
+# MIR-054 already established (for conflict detection) that log, tool_output,
+# test_result, memory and code_repository sources do not ASSERT anything:
+# they are observations of one moment or the agent's own prior output. The
+# write gate must consult the same doctrine — otherwise a diagnostic run can
+# restate its own log lines as durable "facts", which is exactly what
+# run_ab3f4bb672… did on 2026-07-31: five records like
+# «strategy_classified: <timestamp> Source: log:log_event:…» were saved with
+# Confidence 0.85. DEFAULT_SOURCE_TRUST rates log at 0.88 and test_result at
+# 0.95, so trust alone can never stop them.
+
+def _sentence_claim(registry: SourceRegistry, source, text: str):
+    return registry.register_claim(
+        source_id=source.id,
+        text=text,
+        confidence=0.85,
+    )
+
+
+def test_knowledge_write_policy_rejects_log_sourced_claim():
+    registry = SourceRegistry()
+    source = registry.register_source(
+        type="log",
+        title="run events",
+        locator="log_event:run_ab3f4bb6724763987b4c4331fcb220a3:36",
+        trust_level=0.88,
+    )
+    claim = _sentence_claim(
+        registry, source,
+        "strategy_classified: 2026-07-31T01:04:43.135173+00:00 during planning",
+    )
+
+    decision = KnowledgeWritePolicy().decide(claim, source=source)
+
+    assert decision.decision == "reject"
+    assert "does not assert" in decision.reasons[0]
+
+
+def test_knowledge_write_policy_rejects_test_result_sourced_claim():
+    registry = SourceRegistry()
+    source = registry.register_source(
+        type="test_result",
+        title="pytest run",
+        locator="pytest:tests/test_loop.py",
+        trust_level=0.95,
+    )
+    claim = _sentence_claim(
+        registry, source, "All twelve loop tests passed in under three seconds",
+    )
+
+    decision = KnowledgeWritePolicy().decide(claim, source=source)
+
+    assert decision.decision == "reject"
+    assert "does not assert" in decision.reasons[0]
+
+
+def test_knowledge_write_policy_rejects_memory_sourced_claim():
+    # The agent citing its own prior output is not a second source (MIR-054);
+    # letting it back through the gate would let memory launder itself into
+    # ever-fresher "knowledge".
+    registry = SourceRegistry()
+    source = registry.register_source(
+        type="memory",
+        title="prior episode",
+        locator="mem_528f46c99825fb423c16396077d866fe",
+        trust_level=0.55,
+    )
+    claim = _sentence_claim(
+        registry, source, "The memory write path wraps everything in one handler",
+    )
+
+    decision = KnowledgeWritePolicy().decide(claim, source=source)
+
+    assert decision.decision == "reject"
+    assert "does not assert" in decision.reasons[0]
+
+
+def test_knowledge_write_policy_rejects_code_repository_sourced_claim():
+    registry = SourceRegistry()
+    source = registry.register_source(
+        type="code_repository",
+        title="repo",
+        locator="github.com/example/agent",
+        trust_level=0.86,
+    )
+    claim = _sentence_claim(
+        registry, source, "The loop module defines the planner retry budget",
+    )
+
+    decision = KnowledgeWritePolicy().decide(claim, source=source)
+
+    assert decision.decision == "reject"
+    assert "does not assert" in decision.reasons[0]
+
+
+def test_knowledge_write_policy_still_saves_documentation_claim():
+    # Negative control: prose sources that genuinely assert things keep
+    # flowing. Only the assertion-class rule changed, not the trust ladder.
+    registry = SourceRegistry()
+    source = registry.register_source(
+        type="documentation", title="docs", locator="docs/guide.md", trust_level=0.82
+    )
+    claim = _sentence_claim(
+        registry, source,
+        "Agent tools require policy approval for irreversible actions.",
+    )
+
+    decision = KnowledgeWritePolicy().decide(claim, source=source)
+
+    assert decision.decision == "save"
+
+
+def test_write_gate_and_conflict_resolver_share_the_non_asserting_doctrine():
+    # Single source of truth: the gate must consult the same frozenset the
+    # conflict resolver uses (MIR-054), so the two subsystems can never drift
+    # apart about what counts as an assertion.
+    from core.knowledge_pipeline import _NON_ASSERTING_SOURCE_TYPES
+
+    policy = KnowledgeWritePolicy()
+    registry = SourceRegistry()
+    for source_type in sorted(_NON_ASSERTING_SOURCE_TYPES):
+        source = registry.register_source(
+            type=source_type,  # type: ignore[arg-type]
+            title=f"{source_type} source",
+            locator=f"{source_type}:probe",
+            trust_level=0.99,
+        )
+        claim = _sentence_claim(
+            registry, source, "This sentence looks exactly like a real fact",
+        )
+        decision = policy.decide(claim, source=source)
+        assert decision.decision == "reject", source_type
+
+
 def test_agent_loop_persists_sources_and_writes_verified_knowledge(tmp_path: Path):
     (tmp_path / "doc.txt").write_text("Agent codename is Anya.", encoding="utf-8")
     registry = ToolRegistry()
