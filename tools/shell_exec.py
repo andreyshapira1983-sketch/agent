@@ -413,6 +413,10 @@ class ShellExecTool(Tool):
                 text=True,
                 timeout=10,
                 shell=False,
+                # Explicit: a non-zero exit is an ANSWER here (no repository,
+                # detached HEAD), read from `returncode` below. Raising would
+                # turn "cannot tell" into a crash on the routing path.
+                check=False,
             )
         except (OSError, subprocess.SubprocessError):
             return ""

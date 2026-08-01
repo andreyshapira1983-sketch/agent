@@ -641,14 +641,18 @@ class TestGitRecordingSubcommands:
         return ShellExecTool(workspace_root=workspace)
 
     def _repo(self, workspace: Path, branch: str) -> ShellExecTool:
-        for argv in (
-            ["git", "init", "-q"],
-            ["git", "config", "user.email", "t@example.com"],
-            ["git", "config", "user.name", "t"],
-            ["git", "commit", "--allow-empty", "-q", "-m", "root"],
-            ["git", "checkout", "-q", "-b", branch],
+        for args in (
+            ["init", "-q"],
+            ["config", "user.email", "t@example.com"],
+            ["config", "user.name", "t"],
+            ["commit", "--allow-empty", "-q", "-m", "root"],
+            ["checkout", "-q", "-b", branch],
         ):
-            subprocess.run(argv, cwd=workspace, check=True, capture_output=True)
+            # `["git", *args]` rather than a prebuilt argv: the literal head
+            # is what static analysis can see, and it matches how the rest of
+            # the suite shells out (tests/test_cli.py).
+            subprocess.run(["git", *args], cwd=workspace, check=True,
+                           capture_output=True)
         return self._tool(workspace)
 
     def test_recording_subcommands_ask_before_they_run(self, workspace: Path):
@@ -676,10 +680,10 @@ class TestGitRecordingSubcommands:
 
     def test_a_protected_branch_is_refused(self, workspace: Path):
         tool = self._repo(workspace, "agent/work")
-        subprocess.run(["git", "checkout", "-q", "master"], cwd=workspace, check=False,
-                       capture_output=True)
-        subprocess.run(["git", "checkout", "-q", "-B", "main"], cwd=workspace,
-                       check=True, capture_output=True)
+        for args, required in ((["checkout", "-q", "master"], False),
+                               (["checkout", "-q", "-B", "main"], True)):
+            subprocess.run(["git", *args], cwd=workspace, check=required,
+                           capture_output=True)
         with pytest.raises(PermissionError, match="protected branch"):
             tool._validate_argv(["git", "commit", "-m", "onto main"])
 
