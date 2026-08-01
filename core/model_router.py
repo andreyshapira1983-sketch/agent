@@ -1156,8 +1156,9 @@ class ModelRouter:
         """Return the standard role LLM but stamp a custom ``route_reason``.
 
         Used by the deep-escalation gate to record a downgrade in the usage
-        ledger (e.g. ``deep_downgraded:missing_reason``) while still serving the
-        normal standard-tier model. Not stored in the role cache so the gate's
+        ledger (e.g. ``deep_downgraded:missing_reason``) when no operator
+        standard-tier provider is configured, and by the tier paths that fall
+        back to role routing. Not stored in the role cache so the gate's
         one-off reason never poisons a later plain :meth:`for_role` call.
         """
         if self._static_llm is not None:
@@ -1436,8 +1437,33 @@ class ModelRouter:
             # is the diagnosis; a second channel would only be a second thing to
             # keep in sync.
             if decision.effective_tier == "standard":
-                return self._for_role_with_reason(role_key, decision.route_reason)
-            tier_reason = decision.route_reason
+                # Serve the STANDARD tier the way a natively-standard request
+                # would: the operator's AGENT_TIER_PROVIDERS_STANDARD applies
+                # here too. Previously this went straight to the role default,
+                # so a hard question silently abandoned the requested provider
+                # exactly when the work mattered most.
+                dg_provider, _dg_pref, dg_skipped = self._resolve_tier_provider(
+                    ComplexityTier.STANDARD, role_key
+                )
+                dg_model = ""
+                if dg_provider:
+                    dg_model = tier_model_for(
+                        ComplexityTier.STANDARD, dg_provider
+                    ) or self._declared_model_for(dg_provider)
+                if dg_provider and dg_model:
+                    provider = dg_provider
+                    tier_model = dg_model
+                    tier_reason = _append_skipped(
+                        decision.route_reason, [*skipped, *dg_skipped]
+                    )
+                else:
+                    # No operator standard preference (or nothing resolvable for
+                    # it) → unchanged behaviour: the role default.
+                    return self._for_role_with_reason(
+                        role_key, decision.route_reason
+                    )
+            else:
+                tier_reason = decision.route_reason
 
         if not tier_model:
             # No model configured/discovered for this tier → fall back to role

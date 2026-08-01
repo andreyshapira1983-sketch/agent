@@ -854,3 +854,58 @@ def test_explicit_route_still_wins_over_the_client_fallback(monkeypatch):
 
     assert tracked.route.provider == "anthropic"
     assert tracked.route.model == "claude-sonnet-4-5"
+
+
+def test_deep_downgrade_keeps_the_operator_standard_provider(monkeypatch):
+    # The deep gate downgrades an ungrounded DEEP request to the standard tier.
+    # Its docstring says it still serves "the normal standard-tier model", but
+    # it called _for_role_with_reason, which resolves the ROLE DEFAULT and never
+    # consults AGENT_TIER_PROVIDERS_STANDARD.
+    #
+    # Measured live with AGENT_TIER_PROVIDERS_STANDARD=anthropic:
+    #   ordinary question -> anthropic/claude-sonnet-5   (preference honoured)
+    #   harder question   -> openai/gpt-5.4-mini         (preference discarded)
+    # The router switched away from the requested provider exactly when the
+    # work was hardest.
+    from core.task_complexity import ComplexityTier
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("AGENT_PROVIDER", "openai")
+    monkeypatch.setenv("AGENT_MODEL", "gpt-5.4-mini")
+    monkeypatch.setenv("AGENT_TIER_PROVIDERS_STANDARD", "anthropic")
+    monkeypatch.setenv("AGENT_MODEL_TIER_STANDARD", "claude-sonnet-5")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    router.usage_ledger = ModelUsageLedger()
+    # No escalation reason -> the gate downgrades DEEP to standard.
+    tracked = router.for_task(
+        ModelRole.PLANNER, "anything", force_tier=ComplexityTier.DEEP
+    )
+
+    assert tracked.route.provider == "anthropic"
+    assert tracked.route.reason.startswith("deep_downgraded:")
+
+
+def test_deep_downgrade_falls_back_to_role_default_without_a_standard_provider(
+    monkeypatch,
+):
+    # Guard: with no operator standard preference the downgrade must behave
+    # exactly as before and land on the role default.
+    from core.task_complexity import ComplexityTier
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("AGENT_PROVIDER", "openai")
+    monkeypatch.setenv("AGENT_MODEL", "gpt-5.4-mini")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    router.usage_ledger = ModelUsageLedger()
+    tracked = router.for_task(
+        ModelRole.PLANNER, "anything", force_tier=ComplexityTier.DEEP
+    )
+
+    assert tracked.route.provider == "openai"
+    assert tracked.route.reason.startswith("deep_downgraded:")
