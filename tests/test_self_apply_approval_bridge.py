@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from core.approval_inbox import ApprovalInbox
+from core.instruction_conflict_gate import evaluate
 from core.safe_vcs import SafeVCS
 from core.self_apply_bridge import (
     SELF_APPLY_OPERATION,
@@ -318,6 +319,53 @@ def test_build_and_rehydrate_roundtrip():
     assert isinstance(proposal, SelfApplyProposal)
     assert proposal.test_paths == ("tests/test_example.py",)
     assert proposal.evidence == ("log line A", "log line B")
+
+
+def test_rehydrate_extracts_no_directives_from_a_plain_payload():
+    """A proposal with nothing contradictory must stay unblocked."""
+    proposal = rehydrate_proposal(_good_payload())
+    assert evaluate(proposal.directives).mode == "proceed"
+
+
+def test_rehydrate_reads_the_reason_as_the_task_contract():
+    payload = dict(_good_payload())
+    payload["reason"] = "Порядок вывода должен быть стабильным."
+    proposal = rehydrate_proposal(payload)
+    assert [d.source_level for d in proposal.directives] == ["task_contract"]
+
+
+def test_rehydrate_gives_a_review_comment_advisor_authority():
+    payload = dict(_good_payload())
+    payload["reason"] = "Порядок вывода должен быть стабильным."
+    payload["instructions"] = [
+        {"level": "advisor", "source": "код-ревью PR #214",
+         "text": "Отсортируй по имени."},
+    ]
+    proposal = rehydrate_proposal(payload)
+    outcome = evaluate(proposal.directives)
+    assert outcome.is_blocked
+    assert outcome.findings[0].higher.source_level == "task_contract"
+    assert outcome.findings[0].lower.source_name == "код-ревью PR #214"
+
+
+def test_rehydrate_demotes_an_unrecognised_level_to_advisor():
+    """An unlabeled source must never win an argument by accident."""
+    payload = dict(_good_payload())
+    payload["reason"] = "Порядок вывода должен быть стабильным."
+    payload["instructions"] = [
+        {"level": "boss_of_everything", "source": "кто-то",
+         "text": "Отсортируй по имени."},
+    ]
+    proposal = rehydrate_proposal(payload)
+    levels = {d.source_name: d.source_level for d in proposal.directives}
+    assert levels["кто-то"] == "advisor"
+
+
+def test_rehydrate_ignores_malformed_instruction_entries():
+    payload = dict(_good_payload())
+    payload["instructions"] = ["not a dict", {}, {"text": "   "}, 42]
+    proposal = rehydrate_proposal(payload)
+    assert proposal.directives == ()
 
 
 def test_build_payload_rejects_diff_only():

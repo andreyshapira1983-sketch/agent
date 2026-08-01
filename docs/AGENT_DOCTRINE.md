@@ -42,10 +42,26 @@ This document is the source of truth for how agents should behave in this reposi
 
 ## Priority Order
 
-1. Explicit user instructions
-2. Repository-wide doctrine and architecture guidance
-3. Local code conventions and existing implementation patterns
-4. Minimal-risk implementation choices
+1. Explicit instructions from the **operator** — the person who owns the task
+2. The **task contract** — what the task itself explicitly requires or forbids
+3. Behaviour pinned by a **passing test**
+4. Repository-wide doctrine and architecture guidance
+5. Local code conventions and existing implementation patterns
+6. **Advisors without authority** — code review (human or bot), linters, "this
+   would be more convenient" suggestions
+7. Minimal-risk implementation choices
+
+> **Revised 2026-08-01.** Levels 2, 3 and 6 were added. The previous list had a
+> single "explicit user instructions" line and no notion of an advisor, so a
+> confidently worded review comment outranked the specification it contradicted.
+
+## Conflicting Instructions
+
+When two sources demand incompatible things of the same subject, **stop** — do
+not pick a winner and continue, even when the ranking above makes the winner
+obvious. Change nothing, report the conflict with both sources quoted, and let
+the operator decide. The full rule, the authority table, and the required
+six-point report: [INSTRUCTION_AUTHORITY.md](INSTRUCTION_AUTHORITY.md).
 
 ## Maintenance
 

@@ -11,6 +11,7 @@ temporary branch, never pushes, never merges to the base branch, and rolls the
 working tree back automatically the moment any test stage fails.
 
 Hard safety gates (checked before any file is touched, first trip wins):
+  0. contradicted instructions   -> status="conflict_block"
   1. budget kill-switch active   -> status="budget_kill_switch"
   2. hour budget near-exhaustion -> status="budget_wait"
   3. pending approvals           -> status="approval_wait"
@@ -29,6 +30,11 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from core.budget_kill_switch import BudgetKillSwitch, default_path
+from core.conflict_episode import ConflictEpisodeStore
+from core.conflict_episode import default_path as episode_store_path
+from core.conflict_episode import episodes_from_outcome
+from core.instruction_conflict_gate import Directive, InstructionConflictOutcome
+from core.instruction_conflict_gate import evaluate as evaluate_instruction_conflict
 from core.safe_vcs import SafeVCS, VcsError
 from core.self_build_supervisor import (
     hour_budget_headroom,
@@ -88,11 +94,17 @@ class SelfApplyProposal:
     evidence: tuple[str, ...] = ()
     test_paths: tuple[str, ...] = ("tests",)
     test_pattern: str | None = None
+    #: The requirements this patch is answering, each tagged with the authority
+    #: of its source (see ``docs/INSTRUCTION_AUTHORITY.md``). When two of them
+    #: contradict each other the lane refuses to apply anything — an empty
+    #: tuple means "no contradiction was recorded" and the lane proceeds.
+    directives: tuple[Directive, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "files", tuple(self.files))
         object.__setattr__(self, "evidence", tuple(self.evidence))
         object.__setattr__(self, "test_paths", tuple(self.test_paths))
+        object.__setattr__(self, "directives", tuple(self.directives))
 
 
 class TestRunner(Protocol):
@@ -117,6 +129,9 @@ class SelfApplyReport:
     rejected_files: list[str] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)
     next_human_action: str = ""
+    #: Procedural-memory ids written when the lane refused on a conflict, so an
+    #: operator ruling can be attached to the exact stop it settles.
+    episode_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -130,6 +145,7 @@ class SelfApplyReport:
             "rejected_files": list(self.rejected_files),
             "risks": list(self.risks),
             "next_human_action": self.next_human_action,
+            "episode_ids": list(self.episode_ids),
         }
 
 
@@ -273,6 +289,31 @@ def _timestamp() -> str:
 # ── orchestration ───────────────────────────────────────────────────────────
 
 
+def _record_conflict_episodes(
+    conflict: InstructionConflictOutcome,
+    *,
+    workspace: Path,
+    context: str,
+    now_iso: str | None,
+) -> list[str]:
+    """Bank the stop in procedural memory. Never raises.
+
+    The refusal is the safety-critical part; losing the episode is a memory
+    loss, not a safety failure, so a broken store must not turn a clean refusal
+    into an unhandled error.
+    """
+    try:
+        episodes = episodes_from_outcome(
+            conflict, context=context, now_iso=now_iso
+        )
+        if not episodes:
+            return []
+        ConflictEpisodeStore(episode_store_path(workspace)).save_many(episodes)
+        return [episode.id for episode in episodes]
+    except Exception:  # noqa: BLE001 — see the docstring
+        return []
+
+
 def run_self_apply_lane(
     proposal: SelfApplyProposal,
     *,
@@ -291,6 +332,24 @@ def run_self_apply_lane(
     never edits the base branch directly, and rolls back automatically on any
     test failure or unexpected error.
     """
+    # 0. contradicted instructions -------------------------------------------
+    # Checked before the budget gates on purpose: a patch answering two
+    # incompatible requirements must not be applied even when there is budget,
+    # no pending approval and the diff looks low-risk. The lane changes nothing
+    # and hands the contradiction back to the operator.
+    conflict = evaluate_instruction_conflict(proposal.directives)
+    if conflict.is_blocked:
+        return SelfApplyReport(
+            status="conflict_block",
+            reason=conflict.reason,
+            risks=[finding.priority_verdict() for finding in conflict.findings],
+            next_human_action=conflict.report(),
+            episode_ids=_record_conflict_episodes(
+                conflict, workspace=workspace, context=proposal.reason,
+                now_iso=now_iso,
+            ),
+        )
+
     # 1. budget kill-switch ---------------------------------------------------
     switch = kill_switch or BudgetKillSwitch(path=default_path(workspace))
     ks_state = switch.status(budget_snapshot, now_iso=now_iso)  # read-only
