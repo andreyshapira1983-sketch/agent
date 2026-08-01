@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from core.approval import AutoApprover
@@ -244,6 +245,63 @@ def test_explicit_multi_file_mode_wins_over_the_work_order_guard(workspace: Path
     )
 
     assert planner.calls == []
+
+
+def test_the_change_guard_reads_verbs_not_substrings():
+    """The guard must not repeat, in miniature, the defect it fixes.
+
+    Every case below was named by a reviewer: a review OF an implementation is
+    still a review, `commits` is not `commit`, and a file called `commit.md`
+    is what the request is about, not an instruction to commit.
+    """
+    is_change = AgentLoop._is_change_request
+
+    assert not is_change("Compare the implementation of auth in api.py and old_api.py.")
+    assert not is_change("Compare how commits are structured in a.py and b.py.")
+    assert not is_change("Review the refactoring notes in a.md and b.md.")
+    assert not is_change("compare branch.md and commit.md")
+    assert not is_change("Прочитай a.md и b.md и сравни их.")
+
+    # Reviewer findings on the re-land: a file name must not vote whatever its
+    # extension or spelling, and the Russian infinitives are verbs too.
+    assert not is_change("Compare core/a.py and core/b.py and commit.log")
+    assert not is_change("Compare commit.ts and branch.ts")
+    # A path is usually written fenced or quoted, not bare.
+    assert not is_change("Compare `commit.log` and `branch.log`")
+    assert not is_change("Сравни «commit.md» и (branch.md).")
+    assert not is_change("Compare commit.md and Commit.md and core/x.py")
+    assert is_change("Сравни a.md и b.md, затем починить код")
+    assert is_change("Сравни a.md и b.md, затем переименовать модуль")
+
+    assert is_change("Create a new module core/x.py from core/y.py")
+    assert is_change("Refactor core/a.py and core/b.py")
+    assert is_change("Run the tests after comparing a.py and b.py")
+    assert is_change("Сравни a.md и b.md, потом напиши отчёт")
+    assert is_change(
+        "Извлеки кластер из a.md в модуль b.md, запусти тесты. Один коммит."
+    )
+
+
+def test_stripping_file_tokens_stays_cheap_on_hostile_input():
+    """The text fed to this guard is the user's question — attacker-shaped.
+
+    The first version stripped file names with a regex, and CodeQL flagged it:
+    `[\\w./\\\\-]*[\\w-]\\.` lets the leading class and the character after it
+    match the same input, so the engine re-splits a long run of dashes at every
+    position. Measured on 16 000 dashes: that pattern 2 019 ms, a segmented
+    rewrite 3 320 ms — worse — and the token loop that replaced both 0.0 ms.
+
+    The input is 32 000 dashes rather than 16 000 so the budget separates the
+    two implementations by a clear multiple: quadratic cost quadruples on a
+    doubled input, putting the flagged pattern around 8 s against a 2 s budget.
+    A 19 ms margin would have been decided by how busy the runner was.
+    """
+    BUDGET_SECONDS = 2.0
+    hostile = "-" * 32_000 + "!"
+
+    started = time.perf_counter()
+    AgentLoop._is_change_request(hostile)
+    assert time.perf_counter() - started < BUDGET_SECONDS
 
 
 def test_multi_file_review_rejects_path_traversal_without_llm(workspace: Path):
