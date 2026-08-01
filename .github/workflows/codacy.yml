@@ -40,6 +40,16 @@ jobs:
 
       # Execute Codacy Analysis CLI and generate a SARIF output with the security issues identified during the analysis
       - name: Run Codacy Analysis CLI
+        env:
+          # 509 of the 626 tracked files in this repository contain non-ASCII
+          # bytes -- the documentation and a large share of the code comments
+          # are in Russian. If the analysis container comes up with a POSIX/C
+          # locale, its default charset is US-ASCII and the first such byte
+          # aborts the run with MalformedInputException. Pin UTF-8 so the
+          # outcome does not depend on the runner image.
+          LANG: C.UTF-8
+          LC_ALL: C.UTF-8
+          JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8
         uses: codacy/codacy-analysis-cli-action@d840f886c4bd4edc059706d09c6a1586111c540b
         with:
           # Check https://github.com/codacy/codacy-analysis-cli#project-token to get your project token from your Codacy repository

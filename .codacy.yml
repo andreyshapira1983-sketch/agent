@@ -1,0 +1,49 @@
+---
+# Codacy configuration for this repository.
+#
+# Why this file exists: the Codacy Security Scan workflow was failing with
+#
+#     Exception in thread "main"
+#     java.nio.charset.MalformedInputException: Input length = 1
+#
+# and exit code 1, so no SARIF was ever uploaded. The cause is a single
+# tracked file that is not text at all -- docs/Технический_анализ_...docx,
+# 204 KB whose first bytes are "PK\x03\x04", i.e. a ZIP container. Codacy
+# read it as source and choked on byte 0xb7. That byte is not a valid UTF-8
+# start byte either, so forcing a UTF-8 locale on the job would not have
+# helped; the file has to be kept out of the analysis.
+#
+# Only one such file exists today (checked: of 625 tracked files, exactly
+# one fails to decode as UTF-8). The patterns below cover the whole class,
+# so the next document or image somebody commits does not stop the scan
+# again.
+exclude_paths:
+  - "**/*.docx"
+  - "**/*.doc"
+  - "**/*.pdf"
+  - "**/*.zip"
+  - "**/*.png"
+  - "**/*.jpg"
+  - "**/*.jpeg"
+  - "**/*.gif"
+  - "**/*.ico"
+
+# The same run also logged two analyser failures:
+#
+#     Failed analysis for pmd     -- No rules found. Maybe you misspelled
+#                                    a rule name? (null)
+#     Failed analysis for eslint  -- No ESLint configuration found
+#
+# PMD analyses Java and ESLint analyses JavaScript. This repository has
+# neither: its 625 tracked files are 558 .py, 38 .md, and a handful of
+# .ps1/.json/.yml/.toml/.txt -- not one .java, .js or .ts. The tools were
+# started for languages that are not here, found nothing to configure and
+# failed. Turning those languages off stops both failures at the source
+# and shortens a run that currently takes over twenty minutes.
+languages:
+  java:
+    enabled: false
+  javascript:
+    enabled: false
+  typescript:
+    enabled: false
