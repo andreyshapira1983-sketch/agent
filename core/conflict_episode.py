@@ -281,6 +281,15 @@ class ConflictEpisodeStore:
     # ---------- reads ----------
 
     def _load_all_unlocked(self) -> tuple[ConflictEpisode, ...]:
+        """Read without acquiring the lock.
+
+        ``*_unlocked`` follows `core/state_integrity.py`: it means "does not
+        take the lock", not "caller must hold it". Reads are lock-free by
+        design here, as in `core/assumption_registry.py` — appends are
+        line-oriented and `_parse_row` drops a partially written trailing line.
+        `resolve` calls this while holding the lock precisely because the lock
+        is not re-entrant.
+        """
         if not self.path.exists():
             return ()
         by_id: dict[str, ConflictEpisode] = {}

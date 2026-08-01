@@ -119,6 +119,16 @@ def test_negations_are_recognised(text: str):
     assert extract([SourceText(text, "advisor", "код-ревью")]) == ()
 
 
+def test_a_later_affirmative_match_survives_an_earlier_negated_one():
+    """Stopping at the first match would hide the real demand."""
+    directives = extract([
+        SourceText(
+            "Не сортируй по имени, сортируй по дате.", "advisor", "код-ревью",
+        ),
+    ])
+    assert [d.demand for d in directives] == ["сортировать"]
+
+
 def test_post_negation_does_not_cross_a_comma():
     """A negation in the next clause must not cancel this one."""
     directives = extract([

@@ -331,16 +331,18 @@ def extract(sources: Iterable[SourceText]) -> tuple[Directive, ...]:
     for source in sources:
         for sentence in _sentences(source.text):
             for axis, stance, pattern in _COMPILED:
-                match = pattern.search(sentence)
-                if match is None:
-                    continue
-                if _is_negated(sentence, match.start(), match.end()):
-                    # "Не сортируй по имени" is not a request to sort. Dropping
-                    # the match rather than flipping it to the opposite stance
-                    # is deliberate: "не сортируй по имени, сортируй по дате"
-                    # negates the wording, not the axis, and guessing which was
-                    # meant would be the same confident invention this module
-                    # exists to avoid.
+                # Every occurrence, not just the first: in "не сортируй по
+                # имени, сортируй по дате" the opening match is negated while
+                # the second is a real demand, and stopping at the first would
+                # hide it. A negated occurrence is skipped rather than flipped
+                # to the opposite stance — it negates the wording, not the
+                # axis, and guessing which was meant would be the same
+                # confident invention this module exists to avoid.
+                affirmed = any(
+                    not _is_negated(sentence, m.start(), m.end())
+                    for m in pattern.finditer(sentence)
+                )
+                if not affirmed:
                     continue
                 key = (
                     source.source_level,
