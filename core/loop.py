@@ -3107,8 +3107,10 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         re.IGNORECASE,
     )
 
-    # Punctuation a file name picks up at the end of a sentence or a list item.
-    _TOKEN_TRAILING_PUNCT = ".,;:!?)]}»\"'"
+    # Punctuation a file name picks up around it: sentence and list marks, and
+    # the quoting a path is usually written in — backticks included, since a
+    # question about `commit.log` arrives fenced far more often than bare.
+    _TOKEN_EDGE_PUNCT = ".,;:!?()[]{}<>«»\"'`"
 
     @classmethod
     def _strip_file_tokens(cls, text: str) -> str:
@@ -3130,7 +3132,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         """
         kept: list[str] = []
         for token in text.split():
-            bare = token.rstrip(cls._TOKEN_TRAILING_PUNCT)
+            bare = token.strip(cls._TOKEN_EDGE_PUNCT)
             head, dot, extension = bare.rpartition(".")
             if (
                 dot
@@ -3157,17 +3159,16 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         the defect it fixes — deciding intent from text that is not about
         intent.
 
-        Removal is case-insensitive and covers file-ish tokens beyond the ones
-        `_extract_path_mentions` recognises: it de-duplicates by casefold, so a
-        second spelling (`Commit.md` beside `commit.md`) survives an exact
-        replace, and it knows only a short extension allowlist, so `commit.log`
-        would have been left to vote as well.
+        Removal is one linear pass over the tokens. It used to also substitute
+        each path `_extract_path_mentions` returned, which meant one full scan
+        of the question per path — quadratic again, on the same
+        attacker-controlled text, and redundant: every path that extractor can
+        return carries an extension, so the token pass already removes it, in
+        any casing and without knowing the extension allowlist.
         """
-        text = question
-        for path in cls._extract_path_mentions(question):
-            text = re.sub(re.escape(path), " ", text, flags=re.IGNORECASE)
-        text = cls._strip_file_tokens(text)
-        return bool(cls._CHANGE_INTENT_RE.search(text))
+        return bool(
+            cls._CHANGE_INTENT_RE.search(cls._strip_file_tokens(question))
+        )
 
     @staticmethod
     def _is_explicit_multi_file_mode(question: str) -> bool:
