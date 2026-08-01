@@ -392,6 +392,48 @@ def test_explicit_run_id_wins_over_the_logger():
     assert ledger.run_id == "explicit"
 
 
+def test_each_run_is_billed_to_itself_not_to_the_session():
+    """One long-lived agent, several cycles — the spend must separate.
+
+    `TraceLogger.trace_id` is minted once per agent in `build_agent`, so it
+    names a SESSION: `core/run_context` says so in as many words and keeps run
+    identity apart for exactly this reason. Stamping every record with it puts
+    a whole autonomous drain — every task it runs — under one identifier, which
+    is the one thing per-run attribution exists to prevent.
+    """
+    from core.run_context import run_scope
+
+    ledger = ModelUsageLedger(logger=_TraceStub("session-1"))
+
+    with run_scope("run-A", task_id="task-1"):
+        _record_one(ledger)
+    with run_scope("run-B", task_id="task-2"):
+        _record_one(ledger)
+
+    assert [r.run_id for r in ledger.records] == ["run-A", "run-B"]
+
+
+def test_outside_any_run_the_session_id_is_still_recorded():
+    """No run scope (a REPL command, a probe) → the session id is the best id."""
+    ledger = ModelUsageLedger(logger=_TraceStub("session-1"))
+
+    _record_one(ledger)
+
+    assert ledger.records[-1].run_id == "session-1"
+
+
+def test_an_explicit_ledger_run_id_is_not_overridden_by_a_run_scope():
+    """A sub-agent ledger built for one run stays pinned to it."""
+    from core.run_context import run_scope
+
+    ledger = ModelUsageLedger(logger=_TraceStub("session-1"), run_id="explicit")
+
+    with run_scope("run-A"):
+        _record_one(ledger)
+
+    assert ledger.records[-1].run_id == "explicit"
+
+
 def test_run_id_survives_the_round_trip_through_the_ledger_file(tmp_path: Path):
     path = tmp_path / "usage.jsonl"
     _record_one(ModelUsageLedger(path=path, run_id="run-one"))
