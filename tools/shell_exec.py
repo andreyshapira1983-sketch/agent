@@ -204,6 +204,21 @@ READ_ONLY_SUBCOMMANDS: dict[str, frozenset[str]] = {
     ),
 }
 
+# `branch` and `tag` are listed as read-only, but the check only ever looked at
+# argv[1]. `git branch -f main HEAD` moves a protected ref, `git branch -D` and
+# `git tag -d` delete one — all three classified `read_only`, so the approval
+# gate never saw them. Observed on a live run: the agent created a branch with
+# `git branch <name>` while the tool believed it was reading.
+#
+# So for these two the whole argv is checked: listing flags only, and no
+# positional argument at all, since the positional IS the mutation.
+LISTING_ONLY_SUBCOMMANDS: dict[str, frozenset[str]] = {
+    "branch": frozenset({"--list", "-l", "-a", "--all", "-v", "-vv", "--verbose",
+                         "--show-current", "-r", "--remotes", "--color", "--no-color"}),
+    "tag": frozenset({"--list", "-l", "-n", "--color", "--no-color", "--sort"}),
+}
+
+
 # Subcommands that record work the agent has already done. Without them the
 # agent can write a file and run the tests but cannot commit the result, so a
 # programming task can never reach its end — measured on a live decomposition
@@ -377,6 +392,23 @@ class ShellExecTool(Tool):
                     f"(allowed: {sorted(sub_allowed | write_allowed)})"
                 )
             sub = argv[1].strip().lower()
+            listing_flags = LISTING_ONLY_SUBCOMMANDS.get(sub)
+            if listing_flags is not None:
+                for extra in argv[2:]:
+                    token = extra.strip()
+                    if not token.startswith("-"):
+                        raise PermissionError(
+                            f"shell_exec '{cmd} {sub}' takes no name: "
+                            f"'{token}' would create or move a ref. Use "
+                            f"['git','checkout','-b','{AGENT_BRANCH_PREFIX}…'] "
+                            "to make a branch."
+                        )
+                    if token.split("=", 1)[0].lower() not in listing_flags:
+                        raise PermissionError(
+                            f"shell_exec '{cmd} {sub}' allows listing flags "
+                            f"only, got '{token}' — deleting or moving a ref "
+                            "is not a read"
+                        )
             if sub in write_allowed:
                 self._validate_write_subcommand(cmd, sub, argv)
             elif sub not in sub_allowed:

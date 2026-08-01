@@ -774,6 +774,33 @@ class TestGitRecordingSubcommands:
             with pytest.raises(PermissionError, match="accepts exactly"):
                 tool._validate_argv(argv)
 
+    def test_branch_and_tag_may_only_list(self, workspace: Path):
+        """They were read-only in name only.
+
+        `_validate_argv` checked argv[1] alone, so `git branch -f main HEAD`
+        moved a protected ref, `git branch -D` and `git tag -d` deleted one —
+        and all three classified `read_only`, so the approval gate never saw
+        them. Observed live: the agent created a branch with
+        `git branch <name>` while the tool believed it was reading.
+        """
+        tool = self._repo(workspace, "agent/work")
+        for argv in (
+            ["git", "branch", "-f", "main", "HEAD"],
+            ["git", "branch", "-D", "agent/work"],
+            ["git", "branch", "-m", "renamed"],
+            ["git", "tag", "-d", "v1"],
+            ["git", "tag", "v1"],
+        ):
+            with pytest.raises(PermissionError):
+                tool._validate_argv(argv)
+        with pytest.raises(PermissionError, match="takes no name"):
+            tool._validate_argv(["git", "branch", "newbranch"])
+        # Listing still works, and still without approval.
+        for argv in (["git", "branch"], ["git", "branch", "-a"],
+                     ["git", "tag"], ["git", "tag", "-l"]):
+            tool._validate_argv(argv)
+            assert tool.risk_for({"argv": argv}) == "read_only"
+
     def test_history_and_network_stay_out(self, workspace: Path):
         tool = self._repo(workspace, "agent/work")
         for argv in (
