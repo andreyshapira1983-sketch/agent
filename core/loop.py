@@ -2950,6 +2950,17 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             return {"kind": "none"}
 
         explicit_mode = self._is_explicit_multi_file_mode(question)
+        # A request to CHANGE something is not a request to read files. The
+        # review predicates scan the whole question for a single verb, so one
+        # step inside a work order ("сравни результаты с baseline") turned a
+        # refactor into "compare these files" — and the forced plan below then
+        # removes every other tool from the cycle. Observed live: a task naming
+        # the module to create and the module never to create had both treated
+        # as documents to read, and was answered by reading one file — no
+        # tests, no branch, no commit. The operator's explicit switch still
+        # wins: it names the mode in words, which beats inferring it from verbs.
+        if not explicit_mode and self._is_change_request(question):
+            return {"kind": "none"}
         if file_hint and not explicit_mode:
             hint_norm = self._normalize_path_mention(file_hint)
             extra_paths = [
@@ -3071,6 +3082,31 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 "сравнить",
                 "проанализируй",
                 "анализ",
+            )
+        )
+
+    @staticmethod
+    def _is_change_request(question: str) -> bool:
+        """True when the request asks for work, not for a reading.
+
+        Unambiguous verbs only. A review request may perfectly well contain
+        "проверь" or "check", and claiming those would disable the reading path
+        this guard exists to protect; every term below states an intent to
+        produce, run or record something, which no read-only review needs.
+        """
+        text = " ".join(question.casefold().split())
+        return any(
+            term in text
+            for term in (
+                # produce or modify
+                "создай", "создать", "извлеки", "извлечь", "напиши", "написать",
+                "перенеси", "перенести", "переименуй", "удали", "удалить",
+                "исправь", "исправить", "почини", "реализуй", "реализовать",
+                "отрефактор", "create ", "extract ", "implement", "refactor",
+                "rewrite", "rename ", "delete ",
+                # run or record
+                "запусти", "запустить", "закоммить", "коммит", "ветку",
+                "run the test", "run tests", "commit", "branch",
             )
         )
 
