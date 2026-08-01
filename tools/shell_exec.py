@@ -204,6 +204,28 @@ READ_ONLY_SUBCOMMANDS: dict[str, frozenset[str]] = {
     ),
 }
 
+# Subcommands that record work the agent has already done. Without them the
+# agent can write a file and run the tests but cannot commit the result, so a
+# programming task can never reach its end — measured on a live decomposition
+# run, where the agent completed the inventory and the baseline and then
+# reported, correctly, that it had no way to finish.
+#
+# The line is drawn at the repository boundary: these three touch the local
+# index, the working tree and local refs only. `push`, `pull`, `fetch`,
+# `clone` (network), and `reset`, `rebase`, `merge`, `cherry-pick` (rewrite
+# existing history) stay out. Recording new work is not the same permission as
+# altering work already recorded.
+WRITE_SUBCOMMANDS: dict[str, frozenset[str]] = {
+    "git": frozenset({"add", "commit", "checkout"}),
+}
+
+# A branch the agent creates for itself. It may not commit onto a branch it did
+# not make: the operator's own branch is not a scratch pad.
+AGENT_BRANCH_PREFIX = "agent/"
+
+# Never commit here even if the operator left the checkout on one of them.
+PROTECTED_BRANCHES: frozenset[str] = frozenset({"main", "master"})
+
 # Mutating commands handled with `delete_path_if_created` compensation.
 # Both produce ONE new path and accept exactly one positional argument.
 MUTATING_COMMANDS: frozenset[str] = frozenset({"mkdir", "touch"})
@@ -275,6 +297,14 @@ class ShellExecTool(Tool):
         if not isinstance(cmd, str):
             return "external"
         cmd_norm = cmd.strip().lower()
+        write_subs = WRITE_SUBCOMMANDS.get(cmd_norm)
+        if write_subs is not None and len(argv) > 1 and isinstance(argv[1], str):
+            if argv[1].strip().lower() in write_subs:
+                # A recording subcommand rides in on a command whose other
+                # subcommands are read-only, so the verdict has to look at
+                # argv[1]. Classified `irreversible` so the policy gate asks:
+                # a commit is not undone by deleting a path.
+                return "irreversible"
         if cmd_norm in READ_ONLY_COMMANDS:
             return "read_only"
         if cmd_norm in MUTATING_COMMANDS:
@@ -326,17 +356,20 @@ class ShellExecTool(Tool):
 
         # Subcommand whitelist (e.g. git log/diff/status only).
         sub_allowed = READ_ONLY_SUBCOMMANDS.get(cmd)
+        write_allowed = WRITE_SUBCOMMANDS.get(cmd, frozenset())
         if sub_allowed is not None:
             if len(argv) < 2:
                 raise PermissionError(
                     f"shell_exec '{cmd}' requires a subcommand "
-                    f"(allowed: {sorted(sub_allowed)})"
+                    f"(allowed: {sorted(sub_allowed | write_allowed)})"
                 )
             sub = argv[1].strip().lower()
-            if sub not in sub_allowed:
+            if sub in write_allowed:
+                self._validate_write_subcommand(cmd, sub, argv)
+            elif sub not in sub_allowed:
                 raise PermissionError(
                     f"shell_exec '{cmd} {argv[1]}' — subcommand not in "
-                    f"whitelist {sorted(sub_allowed)}"
+                    f"whitelist {sorted(sub_allowed | write_allowed)}"
                 )
 
         # Mutating commands: validate path arguments now.
@@ -350,6 +383,80 @@ class ShellExecTool(Tool):
             self._validate_path_in_workspace(path_str)
 
         return cmd, argv
+
+    def _current_branch(self) -> str:
+        """The checked-out branch name, or "" when it cannot be read.
+
+        Read through git rather than by parsing `.git/HEAD`, so a worktree or a
+        detached HEAD answers the same way git itself would. An unreadable
+        answer is treated as "unknown" by the caller, which then refuses: a
+        guard that cannot see the branch must not assume a safe one.
+        """
+        try:
+            result = subprocess.run(  # noqa: S603 — fixed argv, shell=False
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=self.workspace_root,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                shell=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        if result.returncode != 0:
+            return ""
+        return result.stdout.strip()
+
+    def _validate_write_subcommand(self, cmd: str, sub: str, argv: list[str]) -> None:
+        """Shape and branch checks for the subcommands that record work.
+
+        Each one is pinned to a single argv shape. A recording command with a
+        free argument list is a different tool: `git add -A` sweeps whatever the
+        agent happened to leave behind, and `git checkout <ref>` moves the
+        operator's working tree instead of adding to it.
+        """
+        if sub == "add":
+            paths = argv[2:]
+            if not paths:
+                raise PermissionError("shell_exec 'git add' requires explicit paths")
+            for path_str in paths:
+                if path_str.startswith("-"):
+                    raise PermissionError(
+                        f"shell_exec 'git add' takes paths only, got option "
+                        f"'{path_str}' — a sweep is not a recorded intention"
+                    )
+                self._validate_path_in_workspace(path_str)
+        elif sub == "commit":
+            if len(argv) != 4 or argv[2] != "-m" or not argv[3].strip():
+                raise PermissionError(
+                    "shell_exec 'git commit' accepts exactly "
+                    "['git', 'commit', '-m', <message>]"
+                )
+        elif sub == "checkout":
+            if len(argv) != 4 or argv[2] != "-b":
+                raise PermissionError(
+                    "shell_exec 'git checkout' may only create a branch: "
+                    "['git', 'checkout', '-b', <name>]"
+                )
+            branch = argv[3]
+            if not branch.startswith(AGENT_BRANCH_PREFIX) or branch == AGENT_BRANCH_PREFIX:
+                raise PermissionError(
+                    f"shell_exec 'git checkout -b' requires a name under "
+                    f"'{AGENT_BRANCH_PREFIX}', got '{branch}'"
+                )
+            return  # creating its own branch is exactly how it leaves ours
+
+        current = self._current_branch()
+        if not current:
+            raise PermissionError(
+                f"shell_exec '{cmd} {sub}' refused: the current branch could "
+                "not be read, and an unknown branch is not a safe one"
+            )
+        if current in PROTECTED_BRANCHES:
+            raise PermissionError(
+                f"shell_exec '{cmd} {sub}' refused on protected branch "
+                f"'{current}'; create a '{AGENT_BRANCH_PREFIX}…' branch first"
+            )
 
     def _validate_path_in_workspace(self, path_str: str) -> Path:
         """Reject absolute / `..` / drive-letter paths; resolve into workspace."""
@@ -385,6 +492,27 @@ class ShellExecTool(Tool):
     def _build_compensation_plan(
         self, cmd: str, argv: list[str], target_existed_before: bool
     ) -> CompensationPlan:
+        write_subs = WRITE_SUBCOMMANDS.get(cmd, frozenset())
+        if write_subs and len(argv) > 1 and argv[1].strip().lower() in write_subs:
+            # Checked BEFORE the read-only branch: `git` lives in
+            # READ_ONLY_COMMANDS, so a commit would otherwise be filed as
+            # "nothing to undo" — true of `git log`, false here.
+            #
+            # The plan is a noop because the undo is not this tool's to
+            # perform: `reset` and `rebase` are deliberately outside the
+            # whitelist, and a compensation that rewrites history would hand
+            # back the permission the whitelist withholds. What bounds this
+            # instead is stated, not implied — the work lands on a branch the
+            # agent made, never on a protected one, and the policy gate asked
+            # before it ran.
+            return CompensationPlan.noop(
+                tool_name=self.name,
+                description=(
+                    f"'{cmd} {argv[1]}' records work on an agent branch; "
+                    "not auto-undone — history rewriting is out of scope"
+                ),
+            )
+
         if cmd in READ_ONLY_COMMANDS:
             return CompensationPlan.noop(
                 tool_name=self.name,

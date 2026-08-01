@@ -19,6 +19,7 @@ Integration-level coverage (loop, approval, JSONL, rollback) lives in
 from __future__ import annotations
 
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from unittest import mock
@@ -543,13 +544,30 @@ class TestExtendedWhitelist:
         assert argv[1] == sub
 
     @pytest.mark.parametrize("sub", [
-        "push", "pull", "fetch", "clone", "rm", "reset", "checkout",
-        "commit", "merge", "rebase", "stash", "config", "init",
-        "add", "mv", "restore", "switch", "clean", "gc",
+        "push", "pull", "fetch", "clone", "rm", "reset",
+        "merge", "rebase", "stash", "config", "init",
+        "mv", "restore", "switch", "clean", "gc",
     ])
     def test_git_dangerous_subcommands_rejected(self, workspace: Path, sub: str):
         with pytest.raises(PermissionError, match="subcommand not in"):
             self._tool(workspace).run(["git", sub])
+
+    @pytest.mark.parametrize("sub", ["add", "commit", "checkout"])
+    def test_recording_subcommands_are_shape_checked_not_blanket_denied(
+        self, workspace: Path, sub: str
+    ):
+        """`add`, `commit` and `checkout` moved out of the blanket denial.
+
+        They used to be refused with the same message as `push` and `reset`,
+        which meant a programming task could never reach its last step. They
+        are permitted now in one shape each, still gated by the policy (their
+        risk is `irreversible`) and still refused on a protected branch — see
+        `TestGitRecordingSubcommands`. What must NOT come back is the old
+        message: a bare subcommand now fails on its shape, not on the list.
+        """
+        with pytest.raises(PermissionError) as excinfo:
+            self._tool(workspace).run(["git", sub])
+        assert "subcommand not in" not in str(excinfo.value)
 
     def test_git_without_subcommand_rejected(self, workspace: Path):
         with pytest.raises(PermissionError, match="requires a subcommand"):
@@ -598,3 +616,109 @@ class TestExtendedWhitelist:
         result = self._tool(workspace).run(["git", "status", "--porcelain"])
         assert result["exit_code"] == 0
         assert result["timed_out"] is False
+
+# ===========================================================
+# 12. Recording work: git add / commit / checkout -b
+# ===========================================================
+
+class TestGitRecordingSubcommands:
+    """The agent may record its own work, and only its own.
+
+    Measured on a live decomposition run: the agent read the code, ran the
+    baseline suite and then stopped, because nothing in its tool surface could
+    commit. `git` was whitelisted for reading only, so the last step of a
+    programming task was unreachable however well it planned.
+    """
+
+    def _tool(self, workspace: Path) -> ShellExecTool:
+        return ShellExecTool(workspace_root=workspace)
+
+    def _repo(self, workspace: Path, branch: str) -> ShellExecTool:
+        for argv in (
+            ["git", "init", "-q"],
+            ["git", "config", "user.email", "t@example.com"],
+            ["git", "config", "user.name", "t"],
+            ["git", "commit", "--allow-empty", "-q", "-m", "root"],
+            ["git", "checkout", "-q", "-b", branch],
+        ):
+            subprocess.run(argv, cwd=workspace, check=True, capture_output=True)
+        return self._tool(workspace)
+
+    def test_recording_subcommands_ask_before_they_run(self, workspace: Path):
+        tool = self._tool(workspace)
+        assert tool.risk_for({"argv": ["git", "status"]}) == "read_only"
+        for argv in (
+            ["git", "add", "a.py"],
+            ["git", "commit", "-m", "msg"],
+            ["git", "checkout", "-b", "agent/x"],
+        ):
+            assert tool.risk_for({"argv": argv}) == "irreversible", argv
+
+    def test_the_agent_may_create_its_own_branch_only(self, workspace: Path):
+        tool = self._repo(workspace, "agent/work")
+        tool._validate_argv(["git", "checkout", "-b", "agent/next"])
+        with pytest.raises(PermissionError, match="under 'agent/'"):
+            tool._validate_argv(["git", "checkout", "-b", "hotfix"])
+        with pytest.raises(PermissionError, match="may only create a branch"):
+            tool._validate_argv(["git", "checkout", "main"])
+
+    def test_work_is_recorded_on_an_agent_branch(self, workspace: Path):
+        tool = self._repo(workspace, "agent/work")
+        tool._validate_argv(["git", "add", "a.py"])
+        tool._validate_argv(["git", "commit", "-m", "Record the work"])
+
+    def test_a_protected_branch_is_refused(self, workspace: Path):
+        tool = self._repo(workspace, "agent/work")
+        subprocess.run(["git", "checkout", "-q", "master"], cwd=workspace, check=False,
+                       capture_output=True)
+        subprocess.run(["git", "checkout", "-q", "-B", "main"], cwd=workspace,
+                       check=True, capture_output=True)
+        with pytest.raises(PermissionError, match="protected branch"):
+            tool._validate_argv(["git", "commit", "-m", "onto main"])
+
+    def test_an_unreadable_branch_is_refused(self, workspace: Path):
+        # No repository here at all: the guard cannot see the branch, so it
+        # must not assume a safe one.
+        tool = self._tool(workspace)
+        with pytest.raises(PermissionError, match="could not be read"):
+            tool._validate_argv(["git", "commit", "-m", "nowhere"])
+
+    def test_add_takes_paths_not_a_sweep(self, workspace: Path):
+        tool = self._repo(workspace, "agent/work")
+        with pytest.raises(PermissionError, match="paths only"):
+            tool._validate_argv(["git", "add", "-A"])
+        with pytest.raises(PermissionError, match="requires explicit paths"):
+            tool._validate_argv(["git", "add"])
+        with pytest.raises(PermissionError):
+            tool._validate_argv(["git", "add", "../outside.py"])
+
+    def test_commit_shape_is_pinned(self, workspace: Path):
+        tool = self._repo(workspace, "agent/work")
+        for argv in (
+            ["git", "commit"],
+            ["git", "commit", "-m"],
+            ["git", "commit", "-m", "   "],
+            ["git", "commit", "--amend", "-m", "x"],
+            ["git", "commit", "-m", "x", "--no-verify"],
+        ):
+            with pytest.raises(PermissionError, match="accepts exactly"):
+                tool._validate_argv(argv)
+
+    def test_history_and_network_stay_out(self, workspace: Path):
+        tool = self._repo(workspace, "agent/work")
+        for argv in (
+            ["git", "push"],
+            ["git", "pull"],
+            ["git", "fetch"],
+            ["git", "reset", "--hard"],
+            ["git", "rebase", "main"],
+            ["git", "merge", "main"],
+        ):
+            with pytest.raises(PermissionError, match="not in"):
+                tool._validate_argv(argv)
+
+    def test_a_commit_is_not_filed_as_nothing_to_undo(self, workspace: Path):
+        tool = self._repo(workspace, "agent/work")
+        plan = tool._build_compensation_plan("git", ["git", "commit", "-m", "x"], False)
+        assert "nothing to undo" not in plan.description
+        assert "not auto-undone" in plan.description
