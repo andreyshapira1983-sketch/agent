@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from core.budget_ledger import BudgetLedger
+from core.run_context import current_run
 from core.state_integrity import append_state_jsonl, read_state_jsonl
 
 
@@ -175,13 +176,37 @@ class ModelUsageLedger:
     # a sub-agent carries its own trace id and so becomes separable from its
     # parent for free.
     run_id: str | None = None
+    # Set when the caller named the run itself. A surrounding run scope must
+    # not override that: a sub-agent ledger is built for one run and stays
+    # pinned to it.
+    _run_id_pinned: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        # bootstrap already holds the run's TraceLogger when it builds the
+        # bootstrap already holds the agent's TraceLogger when it builds the
         # ledger, so taking the id from there spares every call site from
         # passing the same value twice. An explicit run_id still wins.
+        self._run_id_pinned = self.run_id is not None
         if self.run_id is None:
             self.run_id = getattr(self.logger, "trace_id", None)
+
+    def _run_id_for_record(self) -> str | None:
+        """Which run to bill this call to.
+
+        The ledger's own id comes from ``TraceLogger.trace_id``, which is minted
+        once per agent in ``build_agent`` — it names a SESSION, not a run
+        (``core/run_context`` states this and keeps run identity separate for
+        exactly this reason). Billing every record to it puts an entire
+        autonomous drain under one identifier and leaves the spend unjoinable to
+        the episode that caused it, which is what per-run attribution exists to
+        prevent. The active run scope, when there is one, is the honest answer;
+        outside any run (a REPL command, a probe) the session id still beats
+        nothing.
+        """
+        if not self._run_id_pinned:
+            active = current_run()
+            if active is not None and active.run_id:
+                return active.run_id
+        return self.run_id
 
     @classmethod
     def from_env(
@@ -386,7 +411,7 @@ class ModelUsageLedger:
             completed_at=completed_at,
             duration_ms=max(0, int(duration_ms)),
             error=error,
-            run_id=self.run_id,
+            run_id=self._run_id_for_record(),
         )
         self.records.append(record)
         if self.budget_ledger is not None:
