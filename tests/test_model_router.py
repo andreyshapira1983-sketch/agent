@@ -733,3 +733,70 @@ def test_cost_tier_stays_unknown_when_nothing_declares_the_model():
     )
 
     assert router._cost_tier_for_route(route) == "unknown"
+
+
+def test_max_cost_limit_binds_on_the_complexity_route(monkeypatch):
+    # AGENT_MODEL_MAX_COST was only ever consulted by registry selection
+    # (_within_cost_limit, reached through best_for_role). The complexity route
+    # picks its model from the catalog and never asked, so an operator ceiling
+    # was silently ignored on exactly the path that serves normal traffic.
+    #
+    # Measured live: with AGENT_MODEL_MAX_COST=free the router still routed to
+    # anthropic/claude-sonnet-5 and billed it "medium" — contradicting itself
+    # inside a single call.
+    from core.task_complexity import ComplexityTier
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("AGENT_TIER_PROVIDERS_STANDARD", "anthropic")
+    monkeypatch.setenv("AGENT_MODEL_TIER_STANDARD", "claude-sonnet-5")
+    monkeypatch.setenv("AGENT_MODEL_MAX_COST", "free")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    provider, _reason, skipped = router._resolve_tier_provider(
+        ComplexityTier.STANDARD, ModelRole.PLANNER.value
+    )
+
+    # claude-sonnet-5 classifies "standard" → cost band "medium" > "free".
+    assert provider != "anthropic"
+    assert "cost_limit:anthropic" in skipped
+
+
+def test_max_cost_limit_allows_a_model_inside_the_ceiling(monkeypatch):
+    # Guard: the ceiling must not become a blanket ban on the complexity route.
+    # A model at or below the limit still routes normally.
+    from core.task_complexity import ComplexityTier
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("AGENT_TIER_PROVIDERS_STANDARD", "anthropic")
+    monkeypatch.setenv("AGENT_MODEL_TIER_STANDARD", "claude-sonnet-5")
+    monkeypatch.setenv("AGENT_MODEL_MAX_COST", "medium")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    provider, _reason, skipped = router._resolve_tier_provider(
+        ComplexityTier.STANDARD, ModelRole.PLANNER.value
+    )
+
+    assert provider == "anthropic"
+    assert "cost_limit:anthropic" not in skipped
+
+
+def test_no_cost_limit_leaves_the_complexity_route_untouched(monkeypatch):
+    # Guard: with no ceiling configured the route is byte-for-byte the old one.
+    from core.task_complexity import ComplexityTier
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.delenv("AGENT_MODEL_MAX_COST", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("AGENT_TIER_PROVIDERS_STANDARD", "anthropic")
+    monkeypatch.setenv("AGENT_MODEL_TIER_STANDARD", "claude-sonnet-5")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    provider, _reason, skipped = router._resolve_tier_provider(
+        ComplexityTier.STANDARD, ModelRole.PLANNER.value
+    )
+
+    assert provider == "anthropic"
+    assert not any(entry.startswith("cost_limit:") for entry in skipped)
