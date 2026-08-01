@@ -349,25 +349,41 @@ _ROLE_ENV_PREFIXES: dict[ModelRole, tuple[str, ...]] = {
     ModelRole.VERIFIER: ("AGENT_VERIFIER",),
 }
 
-#: The role names this router understands. Exported alongside
+#: The role names a router built by `from_env` can serve. Exported alongside
 #: `ensure_known_model_role` so callers can name the legal values without
 #: hand-writing a second copy of this list that is free to drift from the enum.
 KNOWN_MODEL_ROLES: frozenset[str] = frozenset(role.value for role in ModelRole)
 
 
 def ensure_known_model_role(value: str | None) -> None:
-    """Reject a role name that no router could ever resolve.
+    """Reject a role name the agent's own router would not be built to serve.
 
     Contracts carry `model_role` as a free string and a planner model writes
     it, so a misspelling arrives as data. `route_for` deliberately still
     serves an unknown role from the default model — a typo must not take down
     a live answer — which means the mistake would otherwise surface only as a
-    route reason in the usage ledger, long after the plan was accepted. An
-    empty value is left alone: callers already read it as "no preference" and
-    substitute their own default.
+    route reason in the usage ledger, long after the plan was accepted.
+
+    The set is closed, matching `_KNOWN_TOOLS` beside the other checks in
+    `team_plan`. A router constructed by hand can route any role named in its
+    `routes`, but `from_env` — the only path the agent itself uses — builds
+    routes solely from `_ROLE_ENV_PREFIXES`, so no operator configuration can
+    put a custom role in front of a running agent while a planner model can
+    easily misspell one into a contract.
+
+    `None` and `""` mean "no preference": callers substitute their own
+    default. A whitespace-only string does not — it is truthy for those
+    callers yet empty for `_coerce_role`, which raises — so it is refused
+    here, where the cause is still visible.
     """
-    role = (value or "").strip()
-    if role and role not in KNOWN_MODEL_ROLES:
+    if value is None:
+        return
+    role = value.strip()
+    if not role:
+        if value:
+            raise ValueError("model_role must not be blank")
+        return
+    if role not in KNOWN_MODEL_ROLES:
         raise ValueError(
             "model_role must be one of " + ", ".join(sorted(KNOWN_MODEL_ROLES))
         )
