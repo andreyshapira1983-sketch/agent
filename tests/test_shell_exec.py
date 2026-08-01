@@ -619,7 +619,7 @@ class TestExtendedWhitelist:
             pytest.skip("git not on PATH")
         # Initialise a tiny repo so `git status` returns 0.
         import subprocess
-        subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+        subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)  # nosec B603 — literal argv, test fixture
         result = self._tool(workspace).run(["git", "status", "--porcelain"])
         assert result["exit_code"] == 0
         assert result["timed_out"] is False
@@ -655,7 +655,7 @@ class TestGitRecordingSubcommands:
             # `["git", *args]` rather than a prebuilt argv: the literal head
             # is what static analysis can see, and it matches how the rest of
             # the suite shells out (tests/test_cli.py).
-            subprocess.run(["git", *args], cwd=workspace, check=True,
+            subprocess.run(["git", *args], cwd=workspace, check=True,  # nosec B603 — literal argv, test fixture
                            capture_output=True)
         return self._tool(workspace)
 
@@ -690,7 +690,7 @@ class TestGitRecordingSubcommands:
         it staged onto the operator's own working branch.
         """
         tool = self._repo(workspace, "agent/work")
-        subprocess.run(["git", "checkout", "-q", "-b", "feature/login"],
+        subprocess.run(["git", "checkout", "-q", "-b", "feature/login"],  # nosec B603 — literal argv, test fixture
                        cwd=workspace, check=True, capture_output=True)
         for sub in ("add", "commit"):
             argv = (["git", "add", "a.py"] if sub == "add"
@@ -706,9 +706,9 @@ class TestGitRecordingSubcommands:
         next gc.
         """
         tool = self._repo(workspace, "agent/work")
-        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=workspace,
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=workspace,  # nosec B603 — literal argv, test fixture
                               check=True, capture_output=True, text=True).stdout.strip()
-        subprocess.run(["git", "checkout", "-q", "--detach", head],
+        subprocess.run(["git", "checkout", "-q", "--detach", head],  # nosec B603 — literal argv, test fixture
                        cwd=workspace, check=True, capture_output=True)
         with pytest.raises(PermissionError, match="HEAD is detached"):
             tool._validate_argv(["git", "commit", "-m", "nowhere"])
@@ -727,7 +727,7 @@ class TestGitRecordingSubcommands:
         tool = self._repo(workspace, "agent/work")
         for args, required in ((["checkout", "-q", "master"], False),
                                (["checkout", "-q", "-B", "main"], True)):
-            subprocess.run(["git", *args], cwd=workspace, check=required,
+            subprocess.run(["git", *args], cwd=workspace, check=required,  # nosec B603 — literal argv, test fixture
                            capture_output=True)
         with pytest.raises(PermissionError, match="protected branch"):
             tool._validate_argv(["git", "commit", "-m", "onto main"])
@@ -747,6 +747,20 @@ class TestGitRecordingSubcommands:
             tool._validate_argv(["git", "add"])
         with pytest.raises(PermissionError):
             tool._validate_argv(["git", "add", "../outside.py"])
+
+    def test_add_refuses_a_directory_however_it_is_spelled(self, workspace: Path):
+        """`git add .` is `-A` with one character fewer.
+
+        `git add <dir>` stages the directory recursively, so refusing the flag
+        while accepting the path forbids the spelling and permits the act.
+        """
+        tool = self._repo(workspace, "agent/work")
+        (workspace / "sub").mkdir()
+        (workspace / "sub" / "x.py").write_text("x = 1", encoding="utf-8")
+        for path in (".", "sub"):
+            with pytest.raises(PermissionError, match="refuses the directory"):
+                tool._validate_argv(["git", "add", path])
+        tool._validate_argv(["git", "add", "sub/x.py"])
 
     def test_commit_shape_is_pinned(self, workspace: Path):
         tool = self._repo(workspace, "agent/work")

@@ -446,7 +446,18 @@ class ShellExecTool(Tool):
                         f"shell_exec 'git add' takes paths only, got option "
                         f"'{path_str}' — a sweep is not a recorded intention"
                     )
-                self._validate_path_in_workspace(path_str)
+                target = self._validate_path_in_workspace(path_str)
+                # `git add <dir>` stages the directory recursively, and `.` is
+                # a directory. Refusing `-A` while accepting those forbids the
+                # spelling and permits the act: the same unreviewed sweep, one
+                # character shorter. Each file the agent means to record has to
+                # be named.
+                if target == self.workspace_root or target.is_dir():
+                    raise PermissionError(
+                        f"shell_exec 'git add' refuses the directory "
+                        f"'{path_str}': name each file to record it — adding a "
+                        "directory stages whatever it happens to contain"
+                    )
         elif sub == "commit":
             if len(argv) != 4 or argv[2] != "-m" or not argv[3].strip():
                 raise PermissionError(
