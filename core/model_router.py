@@ -1181,6 +1181,10 @@ class ModelRouter:
         applies to ``AGENT_TIER_PROVIDERS_*``: a provider named there is not
         dropped merely because catalog discovery cannot describe it, as long as
         the operator declared a model for it (``_declared_model_for``).
+
+        ``AGENT_MODEL_MAX_COST`` is enforced here too. It used to be consulted
+        only by registry selection, so the complexity route — the path that
+        serves normal traffic — ignored the operator's ceiling outright.
         """
         explicit = self._routes.get(role_key)
         if explicit is not None and _normalise_provider(explicit.provider):
@@ -1199,13 +1203,39 @@ class ModelRouter:
                 # Unsupported (e.g. `local`) or missing credentials → skip.
                 skipped.append(f"provider_unavailable:{norm}")
                 continue
-            if not tier_model_for(tier, norm) and not (
-                operator_named and self._declared_model_for(norm)
-            ):
+            tier_model = tier_model_for(tier, norm)
+            if not tier_model and operator_named:
+                tier_model = self._declared_model_for(norm)
+            if not tier_model:
                 skipped.append(f"no_model:{norm}")
+                continue
+            if not self._tier_model_within_cost_limit(norm, tier_model):
+                # The operator capped spend; this provider's model for the tier
+                # is above the cap, so try the next preference rather than
+                # quietly overspending.
+                skipped.append(f"cost_limit:{norm}")
                 continue
             return norm, f"complexity:{tier_value}:{norm}", skipped
         return None, None, skipped
+
+    def _tier_model_within_cost_limit(self, provider: str, model: str) -> bool:
+        """Whether *model* respects ``AGENT_MODEL_MAX_COST``.
+
+        Reuses ``_cost_tier_for_route`` so a hand-priced registry model is judged
+        by its declared price and a catalog model by the catalog's own weight
+        class — the same number that will later be billed to the usage ledger.
+        Judging the route by one figure and billing it by another is how the
+        ceiling came to be ignored in the first place.
+        """
+
+        limit = self.selection_policy.max_cost_tier
+        if limit is None:
+            return True
+        route = ModelRoute(role="", provider=provider, model=model, reason="")
+        cost_tier = self._cost_tier_for_route(route)
+        return _COST_RANK.get(cost_tier, _COST_RANK["unknown"]) <= _COST_RANK.get(
+            limit, _COST_RANK["unknown"]
+        )
 
     def for_task(
         self,
