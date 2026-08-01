@@ -3085,45 +3085,30 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             )
         )
 
-    # Verbs stating an intent to produce, run or record — the thing a reading
-    # never needs. Matched on word boundaries, because the defect this guard
-    # exists to fix is a substring scan: "implement" must not fire inside
-    # "implementation" and "commit" must not fire inside "commits", or a review
-    # OF how something is implemented stops being a review. Russian forms spell
-    # the endings they accept rather than trailing `\w*`, for the same reason.
-    _CHANGE_INTENT_RE = re.compile(
-        r"(?<!\w)(?:"
-        # produce or modify
-        r"созда(?:й|йте|ть)|извлек(?:и|ите)|извлечь|напиш(?:и|ите)|написать|"
-        r"перенес(?:и|ите|ти)|переименуй(?:те)?|удал(?:и|ите|ить)|"
-        r"исправ(?:ь|ьте|ить)|почини(?:те)?|реализ(?:уй|уйте|овать)|"
-        r"отрефактор(?:и|ить)|"
-        r"create|extract|implement|refactor|rewrite|rename|delete|write|"
-        # run or record
-        r"запусти(?:те)?|запустить|закоммить|коммит|запиш(?:и|ите)|записать|"
-        r"commit|run\s+(?:the\s+)?tests?"
-        r")(?!\w)",
-        re.IGNORECASE,
-    )
-
-    @classmethod
-    def _is_change_request(cls, question: str) -> bool:
+    @staticmethod
+    def _is_change_request(question: str) -> bool:
         """True when the request asks for work, not for a reading.
 
         Unambiguous verbs only. A review request may perfectly well contain
         "проверь" or "check", and claiming those would disable the reading path
-        this guard exists to protect.
-
-        Path mentions are removed before matching: they are what the request is
-        ABOUT, and a file called `commit.md` or `branch.md` must not be read as
-        an instruction to commit. Left in, the guard would repeat in miniature
-        the defect it fixes — deciding intent from text that is not about
-        intent.
+        this guard exists to protect; every term below states an intent to
+        produce, run or record something, which no read-only review needs.
         """
-        text = question
-        for path in cls._extract_path_mentions(question):
-            text = text.replace(path, " ")
-        return bool(cls._CHANGE_INTENT_RE.search(text))
+        text = " ".join(question.casefold().split())
+        return any(
+            term in text
+            for term in (
+                # produce or modify
+                "создай", "создать", "извлеки", "извлечь", "напиши", "написать",
+                "перенеси", "перенести", "переименуй", "удали", "удалить",
+                "исправь", "исправить", "почини", "реализуй", "реализовать",
+                "отрефактор", "create ", "extract ", "implement", "refactor",
+                "rewrite", "rename ", "delete ",
+                # run or record
+                "запусти", "запустить", "закоммить", "коммит", "ветку",
+                "run the test", "run tests", "commit", "branch",
+            )
+        )
 
     @staticmethod
     def _is_explicit_multi_file_mode(question: str) -> bool:
