@@ -175,7 +175,11 @@ from core.loop_helpers import (  # noqa: F401 -- re-exported
     new_trace_id,
 )
 from core.loop_methods import AgentLoopExtractedMethods
-from core.loop_methods2 import AgentLoopExtractedMethods2
+from core.loop_methods2 import (
+    MEMORY_CLOSE_TAG,
+    MEMORY_OPEN_TAG,
+    AgentLoopExtractedMethods2,
+)
 
 
 # Maps tool names to data_classifier source hints. Drives the per-tool
@@ -4075,7 +4079,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             )
             system_prompt = system_prompt + "\n" + LOCAL_CRITIQUE_SYSTEM_ADDENDUM
         elif artifacts:
-            from core.evidence_budget import apply_total_budget
+            from core.evidence_budget import MEMORY_BLOCK_LABEL, apply_total_budget
             raw_blocks: list[tuple[str, str]] = []
             for label, art in artifacts.items():
                 formatted = self._format_artifact(
@@ -4083,24 +4087,90 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 )
                 raw_blocks.append((label, formatted))
 
-            # Apply total evidence budget — trim largest artifact first
-            trimmed_blocks, was_trimmed = apply_total_budget(raw_blocks)
+            # Long-term memory competes for the SAME budget as the evidence
+            # collected this cycle. It used to be concatenated into the prompt
+            # outside `apply_total_budget` entirely, which made recollection
+            # structurally untrimmable while the freshly read file — almost
+            # always the largest block — was cut first. Observed consequence:
+            # a months-old "Bug fixed …" record survived the trim that removed
+            # the code proving it, and the agent reported a fixed bug as
+            # current. Memory is demoted (`trim_first`): it is spent before any
+            # fresh evidence is touched, whatever the relative sizes.
+            memory_label = MEMORY_BLOCK_LABEL
+            while memory_label in artifacts:      # never shadow a real artifact
+                memory_label += "_"
+            memory_payload = long_term_block.strip()
+            if memory_payload:
+                raw_blocks.append((memory_label, memory_payload))
+
+            trimmed_blocks, was_trimmed = apply_total_budget(
+                raw_blocks, trim_first_labels={memory_label}
+            )
+
+            memory_trimmed = False
+            # None = memory was not trimmed, so every retrieved record is still
+            # in the prompt and citable. A set = only these survived.
+            surviving_memory_ids: set[str] | None = None
+            evidence_pairs: list[tuple[str, str]] = []
+            for lbl, content in trimmed_blocks:
+                if lbl != memory_label:
+                    evidence_pairs.append((lbl, content))
+                    continue
+                memory_trimmed = content != memory_payload
+                if memory_trimmed:
+                    _records = getattr(self, "_last_persistent_records", [])
+                    content, surviving_memory_ids = self._rebuild_trimmed_memory(
+                        content,
+                        memory_payload,
+                        list(
+                            zip(
+                                [rec.id for rec in _records],
+                                self.memory_record_lines(_records),
+                                strict=True,
+                            )
+                        ),
+                    )
+                long_term_block = f"{content}\n\n" if content else ""
+
             if was_trimmed:
                 self.log.log(
                     "evidence_budget_trim",
                     {
                         "labels": [lbl for lbl, _ in trimmed_blocks],
+                        # NOTE: since memory joined the budget this total
+                        # includes the memory block — not comparable with
+                        # totals logged before that change.
                         "total_chars": sum(len(c) for _, c in trimmed_blocks),
+                        # Which side paid for the overflow — the whole point of
+                        # the demotion rule, and unreadable from `labels` alone.
+                        # `memory_chars` separates "memory was there and
+                        # survived" from "there was no memory at all", which a
+                        # bare `memory_trimmed: False` cannot express.
+                        "memory_trimmed": memory_trimmed,
+                        "memory_chars": len(memory_payload),
+                        # What actually reached the model. Without these two,
+                        # `persistent_memory_inject` (which fires BEFORE the
+                        # budget) is the only memory signal in the trace, and
+                        # it reports records that may have been trimmed away
+                        # entirely — a reader reconstructing the run from the
+                        # log would count memory the model never saw.
+                        "memory_chars_kept": len(long_term_block.strip()),
+                        "memory_ids_kept": sorted(surviving_memory_ids)
+                        if surviving_memory_ids is not None
+                        else None,
                     },
                 )
 
             blocks: list[str] = [
                 f'<evidence source="{lbl}">\n{content}\n</evidence>'
-                for lbl, content in trimmed_blocks
+                for lbl, content in evidence_pairs
             ]
             evidence = "\n\n".join(blocks)
+            # A record the trim removed must not stay on the citable list: the
+            # synthesizer would cite text it never saw and the verifier would
+            # book it as cited-but-unmatched.
             allowed_citations_block = self._format_allowed_citations_block(
-                self.last_provenance
+                self.last_provenance, memory_ids=surviving_memory_ids
             )
             file_scope_notice = self._file_scope_notice(question, artifacts)
             file_scope_block = (
@@ -4137,9 +4207,16 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 f"planner_reasoning: {planner_reasoning}\n\n"
                 f"Question: {safe_question}\n\n"
                 "Answer using the Output Contract from the system instructions. "
-                "Maintain continuity with any prior turns shown in conversation_history. "
-                "If long_term_memory contains a relevant record you may cite it "
-                "with source label [memory:<record_id>]."
+                "Maintain continuity with any prior turns shown in conversation_history."
+                # Only offered when the block is actually in the prompt: the
+                # budget can drop it entirely, and describing how to cite an
+                # absent block is an invitation to cite nothing.
+                + (
+                    " If long_term_memory contains a relevant record you may "
+                    "cite it with source label [memory:<record_id>]."
+                    if long_term_block.strip()
+                    else ""
+                )
             )
         else:
             # No tools were called — either the planner judged this a
@@ -4262,13 +4339,118 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             return "[user]"
         return None
 
+    # The budget's own notice, which states how much of the block it kept.
+    # Reading the cut back from the writer beats re-deriving it.
+    _TRIM_NOTICE_RE = re.compile(
+        r"\n\.\.\.\[TOTAL-BUDGET: trimmed to (\d+) of (\d+) chars "
+    )
+
     @classmethod
-    def _format_allowed_citations_block(cls, chain: ProvenanceChain) -> str:
+    def _rebuild_trimmed_memory(
+        cls,
+        trimmed: str,
+        original: str,
+        record_lines: list[tuple[str, str]],
+    ) -> tuple[str, set[str]]:
+        """Rebuild a char-sliced `<long_term_memory>` block from whole records.
+
+        Two things are taken from their writers rather than re-derived, because
+        every defect this function has had came from re-deriving them:
+
+        * the cut length, read from the budget's own notice ("trimmed to N of M
+          chars") and cross-checked against *original*. Measuring the common
+          prefix instead looked equivalent and was not — the notice opens with
+          ``\\n...[``, so when the original continued with the same characters
+          the scan ran past the cut and mangled the notice, in the worst case
+          deleting the words that say the block was shortened at all;
+        * the record boundaries, taken as *record_lines* — the ``(id, line)``
+          pairs the retrieval built the block from, in order — so offsets are
+          arithmetic. Finding boundaries by pattern cannot tell a record's real
+          header from the same shape QUOTED inside another record's content:
+          the quoting record was truncated at the quote while still advertised
+          whole, and the quoted id was offered as citable while what the model
+          actually saw was the quoter's paraphrase of it.
+
+        A record is kept only when its whole line fits inside the cut. Anything
+        less reaches the model truncated mid-content while its id is advertised
+        as citable.
+
+        Consequence worth stating: the budget always reserves ~120 chars for
+        its notice, so a block holding a single record is dropped whole
+        whenever it is trimmed at all. That is "whole records only" applied
+        honestly — a partial record is exactly what this repair prevents — not
+        an oversight.
+
+        Returns ``("", set())`` when no record survived whole, and whenever the
+        block cannot be accounted for: notice missing, notice describing a
+        different block, a cut longer than the block, or *record_lines* that do
+        not reproduce *original* exactly. Fail closed — memory we cannot
+        explain does not go to the model.
+        """
+        notice_match = None
+        for notice_match in cls._TRIM_NOTICE_RE.finditer(trimmed):
+            pass          # the notice the budget appended is the last one
+        if notice_match is None or int(notice_match.group(2)) != len(original):
+            return "", set()
+        kept_chars = int(notice_match.group(1))
+        notice = trimmed[notice_match.start():]
+        if kept_chars > len(original) or not trimmed.startswith(original[:kept_chars]):
+            return "", set()
+
+        prefix = f"{MEMORY_OPEN_TAG}\n"
+        body = "\n".join(line for _, line in record_lines)
+        if not record_lines or original != f"{prefix}{body}\n{MEMORY_CLOSE_TAG}":
+            return "", set()
+
+        survivors: list[str] = []
+        end_of_last = 0
+        offset = len(prefix)
+        for record_id, line in record_lines:
+            line_end = offset + len(line)
+            if line_end > kept_chars:
+                break
+            survivors.append(record_id)
+            end_of_last = line_end
+            offset = line_end + 1          # the newline joining the records
+        if not survivors:
+            return "", set()
+        return (
+            original[:end_of_last] + notice + f"\n{MEMORY_CLOSE_TAG}",
+            set(survivors),
+        )
+
+    @classmethod
+    def _format_allowed_citations_block(
+        cls,
+        chain: ProvenanceChain,
+        *,
+        memory_ids: set[str] | None = None,
+    ) -> str:
+        """Render the citable-source list for the synthesizer prompt.
+
+        *memory_ids*, when given, is the set of long-term record ids that
+        survived the evidence-budget trim. A record outside it is dropped: it
+        is no longer in `<long_term_memory>`, so offering it as a citation
+        invites a citation to text the model never received.
+
+        The filter keys on ``obtained_via == "memory"``, not on
+        ``kind == "memory"``: cached tool outputs from previous turns share the
+        kind but are `obtained_via="working_memory"`, live in
+        `<conversation_history>` outside this budget, and were never trimmed —
+        revoking their citation licence would push follow-up answers toward
+        [general-knowledge] for no reason. `core/verifier_core.py:53-56`
+        already draws the line on the same axis.
+        """
         if not chain.evidences:
             return ""
         lines = ["<allowed_citations>"]
         seen: set[str] = set()
         for ev in chain.evidences:
+            if memory_ids is not None and ev.obtained_via == "memory":
+                # source_id is "memory:<record id>"; compare whole ids, since a
+                # substring test lets one id vouch for another.
+                if ev.source_id.split(":", 1)[-1] not in memory_ids:
+                    continue
             token = cls._citation_for_evidence(ev)
             if token is None or token in seen:
                 continue

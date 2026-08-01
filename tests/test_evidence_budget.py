@@ -6,6 +6,8 @@ import pytest
 from core.evidence_budget import (
     EVIDENCE_FILE_CHARS,
     EVIDENCE_TOTAL_CHARS,
+    MEMORY_BLOCK_LABEL,
+    _trim_notice,
     apply_total_budget,
     budget_file_content,
     extract_relevant,
@@ -187,6 +189,135 @@ def test_default_total_budget_is_sane():
     assert 5_000 < EVIDENCE_TOTAL_CHARS < 500_000
 
 
+# ── total budget: recollection is spent before fresh evidence (ROOT B) ───────
+#
+# "Trim the largest block first" is the right rule among blocks of the SAME
+# kind, and the wrong rule across kinds: a freshly read file is almost always
+# the largest block, so memory — the one block that may be months stale —
+# survived every trim intact. `trim_first_labels` marks the blocks that must be
+# spent first regardless of size.
+
+def test_demoted_block_is_trimmed_before_a_larger_fresh_block(monkeypatch):
+    monkeypatch.setenv("AGENT_EVIDENCE_TOTAL_CHARS", "800")
+    blocks = [("file:core/loop.py", "F" * 900), (MEMORY_BLOCK_LABEL, "M" * 500)]
+
+    result, was_trimmed = apply_total_budget(
+        blocks, trim_first_labels={MEMORY_BLOCK_LABEL}
+    )
+
+    assert was_trimmed
+    by_label = dict(result)
+    memory = by_label[MEMORY_BLOCK_LABEL]
+    fresh = by_label["file:core/loop.py"]
+    # The memory block — smaller, and therefore never chosen by "largest
+    # first" — is the one that gets spent.
+    assert "TOTAL-BUDGET" in memory
+    assert memory.count("M") == 50            # trimmed down to the content floor
+    assert fresh.count("F") > memory.count("M")
+
+
+def test_fresh_block_survives_intact_when_memory_absorbs_the_overflow(monkeypatch):
+    monkeypatch.setenv("AGENT_EVIDENCE_TOTAL_CHARS", "900")
+    fresh_content = "F" * 700
+    blocks = [("file:core/loop.py", fresh_content), (MEMORY_BLOCK_LABEL, "M" * 600)]
+
+    result, _ = apply_total_budget(blocks, trim_first_labels={MEMORY_BLOCK_LABEL})
+
+    by_label = dict(result)
+    assert by_label["file:core/loop.py"] == fresh_content   # not a character lost
+    assert "TOTAL-BUDGET" in by_label[MEMORY_BLOCK_LABEL]
+
+
+def test_without_demotion_the_largest_block_still_goes_first(monkeypatch):
+    """Default behaviour is unchanged — demotion is opt-in per call."""
+    monkeypatch.setenv("AGENT_EVIDENCE_TOTAL_CHARS", "900")
+    blocks = [("file:core/loop.py", "F" * 700), (MEMORY_BLOCK_LABEL, "M" * 600)]
+
+    result, was_trimmed = apply_total_budget(blocks)
+
+    assert was_trimmed
+    by_label = dict(result)
+    assert "TOTAL-BUDGET" in by_label["file:core/loop.py"]
+    assert by_label[MEMORY_BLOCK_LABEL] == "M" * 600
+
+
+def test_demoted_block_below_the_floor_does_not_stall_the_trim(monkeypatch):
+    """A tiny memory block cannot absorb anything — fresh evidence still trims.
+
+    Without this the demotion rule would keep picking a block that can no
+    longer shrink, the no-progress guard would fire, and the budget would be
+    left violated.
+    """
+    monkeypatch.setenv("AGENT_EVIDENCE_TOTAL_CHARS", "500")
+    blocks = [(MEMORY_BLOCK_LABEL, "M" * 60), ("file:core/loop.py", "F" * 900)]
+
+    result, was_trimmed = apply_total_budget(
+        blocks, trim_first_labels={MEMORY_BLOCK_LABEL}
+    )
+
+    assert was_trimmed
+    assert sum(len(c) for _, c in result) <= 500
+    by_label = dict(result)
+    assert by_label[MEMORY_BLOCK_LABEL] == "M" * 60
+    assert "TOTAL-BUDGET" in by_label["file:core/loop.py"]
+
+
+def test_block_just_above_the_floor_is_still_trimmed(monkeypatch):
+    """A block that can still shrink must not be excluded from the pool.
+
+    The exclusion test used a padded notice-length reserve (120) while the
+    notice really renders at ~84, so a block sized inside that ~36-char window
+    was skipped: the loop broke on the first pass and returned the input
+    unchanged, over budget and with `was_trimmed=False` — no trim event either.
+    """
+    monkeypatch.setenv("AGENT_EVIDENCE_TOTAL_CHARS", "137")
+    result, was_trimmed = apply_total_budget([("a", "x" * 150)])
+
+    assert was_trimmed
+    assert sum(len(c) for _, c in result) <= 137
+
+
+def test_budget_is_met_when_a_demoted_block_sits_in_the_same_window(monkeypatch):
+    monkeypatch.setenv("AGENT_EVIDENCE_TOTAL_CHARS", "400")
+    blocks = [
+        (MEMORY_BLOCK_LABEL, "M" * 169),
+        ("file:big.py", "F" * 40_000),
+        ("t", "T" * 100),
+    ]
+
+    result, was_trimmed = apply_total_budget(
+        blocks, trim_first_labels={MEMORY_BLOCK_LABEL}
+    )
+
+    assert was_trimmed
+    assert sum(len(c) for _, c in result) <= 400
+
+
+def test_a_bare_string_is_one_label_not_a_set_of_characters(monkeypatch):
+    """`frozenset("mem")` is {"m","e","s"} — a demotion that demotes nothing."""
+    monkeypatch.setenv("AGENT_EVIDENCE_TOTAL_CHARS", "900")
+    fresh = "F" * 700
+    blocks = [("file:core/loop.py", fresh), (MEMORY_BLOCK_LABEL, "M" * 600)]
+
+    result, _ = apply_total_budget(blocks, trim_first_labels=MEMORY_BLOCK_LABEL)
+
+    by_label = dict(result)
+    assert by_label["file:core/loop.py"] == fresh
+    assert "TOTAL-BUDGET" in by_label[MEMORY_BLOCK_LABEL]
+
+
+def test_unknown_demoted_label_is_harmless(monkeypatch):
+    monkeypatch.setenv("AGENT_EVIDENCE_TOTAL_CHARS", "400")
+    blocks = [("a", "A" * 300), ("b", "B" * 200)]
+
+    result, was_trimmed = apply_total_budget(blocks, trim_first_labels={"not-here"})
+
+    assert was_trimmed
+    # The configured budget itself, not a padded bound: a trim that overshoots
+    # the limit is exactly the regression this file exists to catch.
+    assert sum(len(c) for _, c in result) <= 400
+
+
 # ── integration: _format_artifact via loop ───────────────────────────────────
 
 def test_format_artifact_small_file_unchanged():
@@ -207,6 +338,229 @@ def test_format_artifact_large_file_truncated(monkeypatch):
     )
     # budget=300; allow ~120 chars of overhead (notice string + separators)
     assert len(result) <= 420
+
+
+# ── repairing a memory block the total budget sliced ─────────────────────────
+#
+# The budget cuts characters; `<long_term_memory>` is a list of records. These
+# cover the ways record CONTENT can lie to a parser that reads the cut string
+# instead of measuring it against the original.
+
+_ID_A = "mem_" + "a" * 32
+_ID_B = "mem_" + "b" * 32
+_ID_GHOST = "mem_" + "d" * 32
+
+
+def _lines(*records: tuple[str, str]) -> list[tuple[str, str]]:
+    """(id, formatted line) pairs, exactly as the retrieval hands them over."""
+    return [(rid, f"- [{rid} | tags: fact] {text}") for rid, text in records]
+
+
+def _memory_block(lines: list[tuple[str, str]]) -> str:
+    return (
+        "<long_term_memory>\n"
+        + "\n".join(line for _, line in lines)
+        + "\n</long_term_memory>"
+    )
+
+
+def _cut(original: str, at: int) -> str:
+    """The block as the budget hands it back, sliced at *at* chars.
+
+    The notice is built by the budget's own helper, so the repair is tested
+    against the exact string production writes, not a look-alike.
+    """
+    return original[:at] + _trim_notice(at, len(original), 800)
+
+
+def _cut_at(original: str, marker: str) -> str:
+    """Same, cut just before the first occurrence of *marker*."""
+    return _cut(original, original.index(marker))
+
+
+def test_record_content_cannot_pose_as_a_record_boundary():
+    """Content is free text; boundaries come from the retrieval, not the text.
+
+    A markdown bullet, a quoted record header, an id that does not exist —
+    none of them may split a record, because the caller states where every
+    record begins and ends.
+    """
+    from core.loop import AgentLoop
+    lines = _lines(
+        (_ID_A, f"first record\n- [1] finish the migration\n"
+                f"- [{_ID_GHOST} | tags: fact] quoted from an old prompt\n"
+                "and A continues AFTER the quote"),
+        (_ID_B, "second record"),
+    )
+    original = _memory_block(lines)
+    block, ids = AgentLoop._rebuild_trimmed_memory(
+        _cut_at(original, lines[1][1][:20]), original, lines
+    )
+
+    assert ids == {_ID_A}
+    assert "and A continues AFTER the quote" in block   # not truncated at the quote
+    assert _ID_GHOST not in ids                          # no phantom record
+
+
+def test_a_quoted_header_of_a_co_retrieved_record_cannot_substitute_it():
+    """The worst shape: A quotes B's real header, and B was retrieved too.
+
+    An id-filtered pattern search cannot tell that quote from B's own header,
+    so it reports B as surviving while what the model actually sees is A's
+    paraphrase of B — a substituted record under a citable id.
+    """
+    from core.loop import AgentLoop
+    lines = _lines(
+        (_ID_A, f"record A\n- [{_ID_B} | tags: fact] ...as I recorded earlier\n"
+                "A continues after the quote"),
+        (_ID_B, "the REAL second record"),
+    )
+    original = _memory_block(lines)
+    block, ids = AgentLoop._rebuild_trimmed_memory(
+        _cut(original, original.index("\n" + lines[1][1])), original, lines
+    )
+
+    assert ids == {_ID_A}                       # B did not survive
+    assert "the REAL second record" not in block
+    assert "A continues after the quote" in block
+
+
+def test_a_budget_notice_inside_record_content_does_not_discard_the_block():
+    from core.loop import AgentLoop
+    lines = _lines(
+        (_ID_A, "trace excerpt:\n...[TOTAL-BUDGET: trimmed to 50 of 500 chars]"),
+        (_ID_B, "second record"),
+    )
+    original = _memory_block(lines)
+    block, ids = AgentLoop._rebuild_trimmed_memory(
+        _cut_at(original, lines[1][1][:20]), original, lines
+    )
+
+    assert ids == {_ID_A}
+    assert "trace excerpt" in block
+
+
+def test_a_record_cut_mid_content_is_not_reported_as_surviving():
+    """Advertising it whole while half its text is gone is the worse failure."""
+    from core.loop import AgentLoop
+    lines = _lines(
+        (_ID_A, "line one\nline two\nNEVER trust this record, it was superseded"),
+        (_ID_B, "second record"),
+    )
+    original = _memory_block(lines)
+    block, ids = AgentLoop._rebuild_trimmed_memory(
+        _cut_at(original, "NEVER trust"), original, lines
+    )
+
+    assert ids == set()
+    assert block == ""
+
+
+def test_a_record_that_survived_whole_keeps_its_text_and_the_closing_tag():
+    from core.loop import AgentLoop
+    lines = _lines((_ID_A, "first record"), (_ID_B, "second record"))
+    original = _memory_block(lines)
+    block, ids = AgentLoop._rebuild_trimmed_memory(
+        _cut_at(original, lines[1][1][:20]), original, lines
+    )
+
+    assert ids == {_ID_A}
+    assert "first record" in block
+    assert block.count("<long_term_memory>") == 1
+    assert block.endswith("</long_term_memory>")
+    assert "TOTAL-BUDGET" in block
+
+
+def test_the_trim_notice_survives_a_cut_that_lands_on_a_newline():
+    """The notice opens with "\\n...[" — the cut point may too.
+
+    Re-deriving the cut by comparing the two strings then runs past it and
+    eats the start of the notice, gluing "...[TOTAL-BUDGET" onto the record's
+    own line or, at worst, deleting the words that say the block was cut.
+    """
+    from core.loop import AgentLoop
+    lines = _lines((_ID_A, "first record"), (_ID_B, "second record"))
+    original = _memory_block(lines)
+    cut = original.index("\n" + lines[1][1])          # cut ON the newline
+    block, ids = AgentLoop._rebuild_trimmed_memory(_cut(original, cut), original, lines)
+
+    assert ids == {_ID_A}
+    assert "\n...[TOTAL-BUDGET: trimmed to" in block
+
+
+def test_a_notice_quoted_inside_a_record_does_not_replace_the_real_one():
+    """The cut can land exactly on a quoted notice inside a record.
+
+    A scan that walks the two strings keeps matching through the quote and
+    hands back a truncated notice — in the worst case one missing the words
+    TOTAL-BUDGET and "trimmed to", i.e. the prompt no longer says the block
+    was shortened at all.
+    """
+    from core.loop import AgentLoop
+    quoted = "\n...[TOTAL-BUDGET: trimmed to 1 of 2 chars to fit 3-char total evidence budget]"
+    lines = _lines((_ID_A, "first record"), (_ID_B, f"trace excerpt:{quoted}"))
+    original = _memory_block(lines)
+    block, ids = AgentLoop._rebuild_trimmed_memory(
+        _cut(original, original.index(quoted)), original, lines
+    )
+
+    assert ids == {_ID_A}
+    assert "\n...[TOTAL-BUDGET: trimmed to" in block
+    # The notice the budget actually wrote names the real block size.
+    assert f"of {len(original)} chars" in block
+
+
+def test_a_memory_block_that_cannot_be_accounted_for_is_dropped():
+    """Fail closed on every shape the repair cannot explain."""
+    from core.loop import AgentLoop
+    lines = _lines((_ID_A, "first record"), (_ID_B, "second record"))
+    original = _memory_block(lines)
+    after_a = original.index(lines[1][1][:20])
+
+    no_notice = AgentLoop._rebuild_trimmed_memory(original[:after_a], original, lines)
+    foreign_notice = AgentLoop._rebuild_trimmed_memory(
+        original[:after_a] + _trim_notice(after_a, len(original) + 999, 800),
+        original,
+        lines,
+    )
+    # A notice claiming more text than the block holds: the cut cannot be
+    # trusted, so nothing is kept — not "keep everything".
+    impossible_cut = AgentLoop._rebuild_trimmed_memory(
+        _trim_notice(len(original) + 500, len(original), 900), original, lines
+    )
+    # Records that do not reproduce the block (stale retrieval): the offsets
+    # would be someone else's.
+    stale_records = AgentLoop._rebuild_trimmed_memory(
+        _cut_at(original, lines[1][1][:20]),
+        original,
+        _lines((_ID_A, "a different text entirely")),
+    )
+    no_records = AgentLoop._rebuild_trimmed_memory(
+        _cut_at(original, lines[1][1][:20]), original, []
+    )
+
+    assert no_notice == ("", set())
+    assert foreign_notice == ("", set())
+    assert impossible_cut == ("", set())
+    assert stale_records == ("", set())
+    assert no_records == ("", set())
+
+
+def test_a_single_record_block_is_dropped_when_trimmed_at_all():
+    """Stated consequence of "whole records only", not an accident.
+
+    The budget always reserves ~120 chars for its notice, so one record can
+    never survive its own trim. Dropping it is the honest outcome — the
+    alternative is half a record with a citable id.
+    """
+    from core.loop import AgentLoop
+    lines = _lines((_ID_A, "the only record " * 20))
+    original = _memory_block(lines)
+    block, ids = AgentLoop._rebuild_trimmed_memory(
+        _cut(original, len(original) - 121), original, lines
+    )
+
+    assert (block, ids) == ("", set())
 
 
 def test_format_artifact_web_search_unchanged():

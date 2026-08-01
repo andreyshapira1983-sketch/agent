@@ -1,9 +1,13 @@
 # FABLE_AUDIT — forensic audit of recurring systemic defects
 
-Status: PHASE 1 complete. Cluster 1 MERGED (`189f9bd`). Cluster 1b patched
-and proven on branch `fix/memory-pollution-migration`; live --apply awaits
-the operator.
-Worktree: `copilot-worktrees/agent/andreyshapira1983-sketch-fantastic-memory`.
+Status: PHASE 1 complete. Cluster 1 MERGED (PR #200 → `189f9bd`). Cluster 1b
+MERGED (PR #201 → `9fd2800`); the live `--apply` still awaits the operator.
+Cluster 2 (ROOT B) patched and proven on branch
+`fix/root-b-memory-in-evidence-budget` — not reviewed, not merged.
+Worktree: clusters 1/1b were built in
+`copilot-worktrees/agent/andreyshapira1983-sketch-fantastic-memory`; cluster 2
+was built on a branch inside the operator's own checkout, which was clean at
+branch time (§6's "never commit from there" note assumed a dirty checkout).
 Live data read (READ-ONLY) from the operator's checkout: `data/*.jsonl`, `logs/run_*.jsonl`.
 
 Method: every symptom below was checked against implementation paths and real
@@ -301,14 +305,147 @@ Cluster 1b — DONE on branch `fix/memory-pollution-migration` (this branch):
   exits 0 with "nothing to do" when the store path does not exist, so a
   wrong workspace looks successful while touching nothing)
 
+Cluster 2 — DONE on branch `fix/root-b-memory-in-evidence-budget`
+(commit `d597ee7`, PR #202; suite green):
+- Defect: `_synthesize` passed only tool artifacts through
+  `apply_total_budget`; `<long_term_memory>` was concatenated into the prompt
+  outside it, so memory was structurally untrimmable and the fresh read — the
+  largest block — was always cut first.
+- Fix, two parts:
+  - `core/evidence_budget.py`: new `MEMORY_BLOCK_LABEL` and keyword-only
+    `trim_first_labels`. Demoted blocks are spent BEFORE any other block
+    regardless of size, down to a 50-char content floor; a block that can no
+    longer shrink leaves the candidate pool so the loop cannot stall.
+  - `core/loop.py::_synthesize`: the memory block enters `raw_blocks` under a
+    collision-proof label, is demoted, and is split back out afterwards.
+- Fail-before proven: 3 loop-level tests failed on `9fd2800`
+  (`TOTAL-BUDGET` absent from the memory block; "no evidence_budget_trim event
+  was logged" — the artifacts alone fit the budget, which is the defect
+  stated as a measurement).
+- Independent verification (autonomous review agent, round 1) found 4 defects
+  in that first patch; all four fixed, each with its own fail-before proof:
+  1. the candidate filter used the padded notice reserve (120) instead of the
+     real notice length (~84), so a block sized in that window was skipped:
+     the loop broke and returned OVER budget with `was_trimmed=False` — no
+     trim event either. Differential fuzz vs the old algorithm: 192/30 000
+     cases where the new code exceeded a budget the old one met. Fixed by
+     measuring against the real notice (`_trim_notice`, one definition).
+  2. `<allowed_citations>` still advertised memory records the trim had
+     removed — before this cluster memory was never trimmed, so the two could
+     not diverge. Fixed: only records still in the prompt stay citable.
+  3. a character slice cut a record id in half (`- [mem_8357646e3d93d6aa`),
+     emitting 155 chars of prompt for zero information. Fixed: whole records
+     only, and the block is dropped entirely when none survives.
+  4. `trim_first_labels: Iterable[str]` accepted a bare string and exploded it
+     into characters (latent). Fixed by type + runtime guard.
+- Round 2 of the same review found 6 more, all in the round-1 repair; all
+  fixed, four with fail-before proof (the two observability ones are new
+  fields, proven by construction):
+  1. the citation filter keyed on `kind == "memory"`, which also covers
+     WORKING-memory artifacts from prior turns (`obtained_via=
+     "working_memory"`, `memory:working_turn_*`). Trimming long-term memory
+     therefore revoked the licence to cite the previous turn's own tool
+     output — which lives in `<conversation_history>`, outside this budget,
+     and was never trimmed. Now keyed on `obtained_via == "memory"`, the axis
+     `core/verifier_core.py:53-56` already documents.
+  2. the record-id regex `^- \[([^\s|\]]+)` matched any markdown bullet inside
+     a record's own content, and the filter compared ids by SUBSTRING: a
+     record containing "- [1] …" produced the id "1", which is a substring of
+     ~87% of 32-hex ids, making the filter a near no-op. Now anchored
+     (`^- \[(mem_[0-9a-f]+) \| tags:`) and compared by equality.
+  3. `str.partition` split on the FIRST "TOTAL-BUDGET" marker, so a record
+     whose content quoted such a notice discarded the whole memory block
+     silently. The repair no longer parses the cut string at all: it measures
+     the common prefix against the original.
+  4. the repair was line-granular, not record-granular — a multi-line record
+     cut inside its third line was still reported as a surviving whole record
+     with its tail missing. Record spans are now computed from the original.
+  5. the trace still said memory was injected when none of it reached the
+     model (`persistent_memory_inject` fires before the budget). Added
+     `memory_chars_kept` / `memory_ids_kept` to `evidence_budget_trim`.
+  6. the prompt told the model how to cite `<long_term_memory>` even when the
+     budget had dropped that block. The clause is now conditional.
+- Round 3 found 5 more, two of them in the round-2 repair itself; all fixed,
+  five with fail-before proof:
+  1. the repair re-derived the cut by walking the two strings, but the notice
+     opens with `\n...[` — when the original continued with the same
+     characters the scan ran past the cut and mangled the notice, in the worst
+     case deleting the words TOTAL-BUDGET and "trimmed to", the only signal
+     telling the model its memory was shortened. Measured: ~0.35% of budgets
+     for a 5-record block land on such a cut. The cut is now READ from the
+     budget's own notice ("trimmed to N of M chars") and cross-checked against
+     the block length; a missing or foreign notice fails closed.
+  2. the anchored regex still split a record whose CONTENT quoted a
+     record-shaped line, truncating it while reporting it whole, and minting a
+     phantom id into `memory_ids_kept`. Record boundaries are now accepted
+     only for ids the retrieval actually selected.
+  3. a record containing a literal `</long_term_memory>` closed the block
+     early for the reading model — prompt-structure injection through stored
+     text, and the trim path then appended a second tag. The tag is now
+     escaped where the block is built (`core/loop_methods2.py`), which fixes
+     the untrimmed path too, and the repair no longer appends a tag the
+     original did not have.
+  4. a record whose text survived in full was still dropped when the cut
+     landed exactly on the newline separating it from the next record. Record
+     spans now end at the last text character.
+  5. STATED, not changed: a single-record block is dropped whole whenever it
+     is trimmed at all (the last record's span reaches the closing tag, and
+     the budget always reserves ~120 chars for its notice). That is "whole
+     records only" applied honestly; the alternative is half a record with a
+     citable id. Now documented and covered by a test. (Round 4 accepted this
+     call, with one caveat for the audit: with `max_records = 3` a one-record
+     retrieval is ordinary, so on those turns the demotion is all-or-nothing —
+     stronger medicine than ROOT B asked for. Stated here so it never reads as
+     a surprise in a trace.)
+- Round 4 found 4 more; all fixed, three with fail-before proof:
+  1. a record quoting the header line of ANOTHER RETRIEVED record still
+     substituted it: the pattern search cannot tell that quote from the real
+     header, so the quoted record was reported as surviving while what the
+     model saw was the quoter's paraphrase of it, under the quoted record's
+     own citable id. Fixed structurally — record boundaries are no longer
+     searched for at all. `_retrieve_persistent` and the prompt builder now
+     share one line producer (`memory_record_lines`), and the builder receives
+     the ordered `(id, line)` pairs, so offsets are arithmetic and content
+     cannot pose as a boundary. The id regex is gone.
+  2. the tag escape was one-sided — a record containing the OPENING tag gave
+     `open=2 close=1`. Both tags are escaped now, matching the
+     `</analysis_target>` precedent the defence cites.
+  3. the fail-closed guard did not check the cut length: a notice claiming
+     more text than the block holds returned the WHOLE block instead of
+     nothing. Now `kept_chars > len(original)` (and a prefix mismatch) fails
+     closed like every other unaccountable shape.
+  4. an empty `_last_persistent_records` fell back to unfiltered behaviour;
+     the fallback is gone — records that do not reproduce the block exactly
+     fail closed.
+- Tests: 25 new (17 in `tests/test_evidence_budget.py` — 8 budget-policy,
+  9 on the memory-block repair; 8 loop-level in
+  `tests/test_persistent_integration.py`). Full suite **6083 passed,
+  3 skipped** (baseline `9fd2800`: 6058 passed, 3 skipped).
+- Observability note: `evidence_budget_trim.total_chars` now COUNTS the memory
+  block, so totals either side of this change are not comparable (§1 S2 quotes
+  the pre-change field: "total 31 972 chars"). The event also gained
+  `memory_trimmed` and `memory_chars`.
+- Out of scope, deliberately: the PLANNER prompt (`core/loop.py:991-993`)
+  concatenates persistent + experience memory with no total budget at all.
+  It has no fresh-artifact competition (tools have not run yet), so ROOT B's
+  falsification test does not apply there. Registered here, not fixed.
+- REGISTERED, not fixed (needs an operator decision, and the fix lives in a
+  different subsystem): `_retrieve_persistent` bumps `access_count` /
+  `last_accessed_at` on every retrieved record
+  (`core/loop_methods2.py:235-250`), i.e. at retrieval time. Until this
+  cluster, retrieved implied
+  injected, so the counter measured "the model saw it". Now the budget can
+  drop a retrieved record, and the archive scorer's "actively useful" signal
+  counts records the model never received. Measured: at a 900-char budget all
+  three records reach `access_count=1` while zero reach the prompt. Moving the
+  bump after prompt assembly is a memory-subsystem change, deliberately not
+  bundled into this cluster.
+
 NEXT ACTION (exact, for any model):
-1. Operator reviews/merges cluster 1b PR; then operator (or agent with
-   explicit permission) runs the --apply command above; verify with a
-   re-run (idempotence: "would archive: 0") and `:memory` retrieval smoke.
-2. Cluster 2 — ROOT B: make memory blocks enter the same evidence budget as
-   artifacts; fresh read of path X must evict memory-about-X, never vice versa
-   (fail-before: build prompt with fresh file > memory, assert memory trimmed
-   first after fix).
+1. Operator (or agent with explicit permission) runs the --apply command
+   above; verify with a re-run (idempotence: "would archive: 0") and
+   `:memory` retrieval smoke.
+2. Cluster 2 — review/merge the branch above.
 3. Cluster 3 — ROOT C: add `run_id` to `ModelUsageRecord`; make
    `model_registry_audit` also report ACTUAL models used per run (join on
    run_id or read `model_call_start` events); surface configured-vs-actual drift.
