@@ -580,3 +580,77 @@ def test_tracked_llm_leaves_role_default_route_untouched():
     attribution = tracked.attribution()
     assert attribution["requested_provider"] is None
     assert attribution["actual_provider"] == "openai"
+
+
+def _tier_factory(provider: str | None, model: str | None) -> FakeLLM:
+    llm = FakeLLM()
+    llm.provider = provider or "unset"
+    llm.model = model or "unset"
+    return llm
+
+
+def _isolate_tier_env(monkeypatch) -> None:
+    """Neutralise ambient catalog/tier env so tier routing is deterministic."""
+    monkeypatch.setenv("AGENT_MODEL_CATALOG_PATH", "/nonexistent/path/catalog.json")
+    for tier in ("LIGHT", "STANDARD", "DEEP"):
+        monkeypatch.delenv(f"AGENT_MODEL_TIER_{tier}", raising=False)
+        monkeypatch.delenv(f"AGENT_TIER_PROVIDERS_{tier}", raising=False)
+    for var in ("AGENT_MODEL", "AGENT_PLANNER_PROVIDER", "AGENT_PLANNER_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_operator_tier_provider_survives_missing_catalog_entry(monkeypatch):
+    # Catalog discovery only covers providers that have a fetcher (anthropic,
+    # openai). An operator who names `local` in AGENT_TIER_PROVIDERS_LIGHT has
+    # already declared its model in LOCAL_LLM_MODEL, so "the catalog cannot
+    # describe it" must not silently hand the call to a different provider.
+    from core.task_complexity import ComplexityTier
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:1234/v1")
+    monkeypatch.setenv("LOCAL_LLM_MODEL", "qwen-local")
+    monkeypatch.setenv("AGENT_TIER_PROVIDERS_LIGHT", "local,openai")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    provider, _reason, skipped = router._resolve_tier_provider(
+        ComplexityTier.LIGHT, ModelRole.PLANNER.value
+    )
+
+    assert provider == "local"
+    assert "no_model:local" not in skipped
+
+
+def test_operator_tier_provider_reaches_for_task_with_declared_model(monkeypatch):
+    # End-to-end: the explicitly named provider must actually serve the call,
+    # using the model the operator declared for it.
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:1234/v1")
+    monkeypatch.setenv("LOCAL_LLM_MODEL", "qwen-local")
+    monkeypatch.setenv("AGENT_TIER_PROVIDERS_LIGHT", "local,openai")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    llm = router.for_task(ModelRole.PLANNER, "привет")
+
+    assert llm.provider == "local"
+    assert llm.model == "qwen-local"
+
+
+def test_builtin_tier_preference_is_unchanged_without_operator_override(monkeypatch):
+    # Guard: the fallback above is scoped to explicit operator intent. With no
+    # AGENT_TIER_PROVIDERS_* set, a provider the catalog cannot describe stays
+    # skipped exactly as before, so default routing does not silently move.
+    from core.task_complexity import ComplexityTier
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("HF_TOKEN", "hf-test-token")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    provider, _reason, skipped = router._resolve_tier_provider(
+        ComplexityTier.LIGHT, ModelRole.PLANNER.value
+    )
+
+    assert provider != "huggingface"
+    assert "no_model:huggingface" in skipped

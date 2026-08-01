@@ -187,6 +187,17 @@ def _tier_provider_prefs(tier_value: str) -> tuple[str, ...]:
     return _TIER_PROVIDER_PREF.get(tier_value, ())
 
 
+def _tier_providers_are_explicit(tier_value: str) -> bool:
+    """True when the operator named the tier's providers via AGENT_TIER_PROVIDERS_*.
+
+    The builtin table above is this repo's default; the env var is an operator
+    instruction. Only the latter overrides catalog discovery (see
+    ``ModelRouter._declared_model_for``), so defaults never move silently.
+    """
+    env_name = _TIER_PROVIDERS_ENV.get(tier_value)
+    return bool(os.getenv(env_name, "").strip()) if env_name else False
+
+
 def _provider_has_credentials(provider: str) -> bool:
     """True when every required env var for *provider* is set (non-empty).
 
@@ -1134,6 +1145,26 @@ class ModelRouter:
             llm_factory=self._llm_factory,
         )
 
+    def _declared_model_for(self, provider: str) -> str:
+        """Concrete model the operator has already declared for *provider*.
+
+        ``model_catalog`` can only describe providers it has a fetcher for
+        (anthropic, openai), so a provider the operator names explicitly can
+        have no catalog tier model while a concrete model for it is declared
+        elsewhere: in ``config/model_registry.json``, or — for ``local`` — in
+        ``LOCAL_LLM_MODEL``. Returning it keeps the operator's explicit choice
+        authoritative instead of silently routing the call somewhere else.
+
+        Returns "" when nothing was declared, which is the only honest case for
+        a ``no_model:`` skip.
+        """
+        for spec in self.registry.list():
+            if _normalise_provider(spec.provider) == provider and spec.model:
+                return spec.model
+        from core.llm import _default_model
+
+        return (_default_model(provider) or "").strip()
+
     def _resolve_tier_provider(
         self, tier: Any, role_key: str
     ) -> tuple[str | None, str | None, list[str]]:
@@ -1146,7 +1177,10 @@ class ModelRouter:
         callers still resolve the model via ``tier_model_for(tier, provider)``.
 
         An explicit per-role provider (``AGENT_<ROLE>_PROVIDER``) disables the
-        preference entirely so the operator's choice always wins.
+        preference entirely so the operator's choice always wins. The same rule
+        applies to ``AGENT_TIER_PROVIDERS_*``: a provider named there is not
+        dropped merely because catalog discovery cannot describe it, as long as
+        the operator declared a model for it (``_declared_model_for``).
         """
         explicit = self._routes.get(role_key)
         if explicit is not None and _normalise_provider(explicit.provider):
@@ -1155,6 +1189,7 @@ class ModelRouter:
         from core.model_catalog import tier_model_for
 
         tier_value = tier.value
+        operator_named = _tier_providers_are_explicit(tier_value)
         skipped: list[str] = []
         for prov in _tier_provider_prefs(tier_value):
             norm = _normalise_provider(prov)
@@ -1164,7 +1199,9 @@ class ModelRouter:
                 # Unsupported (e.g. `local`) or missing credentials → skip.
                 skipped.append(f"provider_unavailable:{norm}")
                 continue
-            if not tier_model_for(tier, norm):
+            if not tier_model_for(tier, norm) and not (
+                operator_named and self._declared_model_for(norm)
+            ):
                 skipped.append(f"no_model:{norm}")
                 continue
             return norm, f"complexity:{tier_value}:{norm}", skipped
@@ -1238,9 +1275,13 @@ class ModelRouter:
         pref_provider, pref_reason, skipped = self._resolve_tier_provider(tier, role_key)
 
         if pref_provider is not None:
-            # A preferred provider won — model still comes from the catalog.
+            # A preferred provider won — model still comes from the catalog,
+            # unless the operator named this provider explicitly and the
+            # catalog has no fetcher for it (see _declared_model_for).
             provider = pref_provider
             tier_model = tier_model_for(tier, provider)
+            if not tier_model and _tier_providers_are_explicit(tier.value):
+                tier_model = self._declared_model_for(provider)
             tier_reason = _append_skipped(pref_reason or f"complexity:{tier.value}:{provider}", skipped)
         elif tier == ComplexityTier.STANDARD:
             # STANDARD with no preferred provider → reuse normal role routing
