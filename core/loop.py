@@ -1937,6 +1937,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     realtime_required=bool(
                         getattr(self.last_source_ranking, "realtime_required", True)
                     ),
+                    answer=draft_answer,
                 )
                 _support = evaluate_evidence_support(
                     report, evidence_expected=_ev_expected
@@ -2329,6 +2330,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 role=getattr(self.last_role_context, "role", ""),
                 chain_was_empty=_chain_empty,
                 realtime_required=_realtime,
+                answer=draft.body,
             )
             # Enforcement judges the CLAIMS, so it is handed the body alone.
             # Handing it the composed text would let it measure — and delete —
@@ -4524,7 +4526,13 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
 
     @staticmethod
     def _extract_path_mentions(text: str) -> list[str]:
+        # Leading guard: see completion_obligation._PATH_RE, which carries the
+        # same shape and the same fix. It stops the engine from starting a
+        # match inside a run of `/`, `.` or `-` — a start that would always
+        # have a longer match one character to its left — and with it the
+        # quadratic rescan that made a wall of separators cost seconds.
         pattern = re.compile(
+            r"(?<![/.\-])"
             r"(?P<path>"
             r"(?:[A-Za-z]:[\\/])?"
             r"(?:/)?"

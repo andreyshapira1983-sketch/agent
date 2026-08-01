@@ -19,6 +19,8 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
+from core.model_router import ensure_known_model_role
+
 if TYPE_CHECKING:
     from core.subagent_memory_scope import SubagentProposal
     from core.team_plan import SubagentContract
@@ -141,6 +143,10 @@ class CanonicalSubagentContract:
             )
         if self.risk_level not in {"low", "medium", "high"}:
             raise ValueError("risk_level must be low, medium, or high")
+        # `model_role` is the one free string here that another subsystem
+        # resolves later. `risk_level` right beside it is already checked
+        # against a closed set; this field was not.
+        ensure_known_model_role(self.model_role)
 
     @classmethod
     def from_proposal(

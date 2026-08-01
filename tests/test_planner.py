@@ -10,6 +10,7 @@ Four minimal cases — picked to cover the failure modes a real LLM exhibits.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -1834,3 +1835,32 @@ def test_planner_passes_the_configured_budget_to_the_llm(
 
     assert len(llm.calls) == 1
     assert llm.calls[0]["max_tokens"] == 3333
+
+
+def test_unclosed_fence_padded_with_blanks_does_not_hang(workspace: Path) -> None:
+    """An unterminated fence must fail fast, not grind.
+
+    The fence pattern read `\\s*(.*?)\\s*` under DOTALL, so `.` and `\\s`
+    both matched a space: every blank could be claimed by either side, and the
+    engine tried the split at each position before giving up. Measured on the
+    text below before the fix: 2.9 s at 2000 blanks, 65.6 s at 4000 — worse
+    than quadratic, and reached by nothing more exotic than a model that opens
+    a fence, pads, and never closes it. That is a truncated response, which is
+    exactly what a budget-exhausted call produces.
+
+    The verdict must not change: no closing fence means nothing was stripped.
+    """
+    raw = "```json" + " " * 3000 + "x"
+    llm = FakeLLM(responses=[raw])
+    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
+
+    start = time.perf_counter()
+    out = planner.plan(question="something", file_hint=None)
+    elapsed = time.perf_counter() - start
+
+    assert out.sources == []
+    assert "plan_parse_failed" in out.warnings
+    assert "stripped_markdown_fence" not in out.warnings
+    assert out.diagnostics["json_block_found"] is False
+    assert out.raw_response == raw
+    assert elapsed < 2.0, f"parsing {len(raw)} chars took {elapsed:.2f}s"

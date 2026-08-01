@@ -568,4 +568,12 @@ def test_format_artifact_web_search_unchanged():
     from core.loop import AgentLoop
     hits = [{"title": "A", "url": "http://x.com", "snippet": "s", "source": "ddg"}]
     result = AgentLoop._format_artifact("web_search", hits, question="any question")
-    assert "http://x.com" in result
+    # Compare the url line as a whole rather than asking whether the url
+    # occurs somewhere in the output: a substring check also passes when the
+    # line has been cut around it, which is the one thing this test is here
+    # to rule out.
+    url_lines = [
+        line.strip() for line in result.splitlines() if line.strip().startswith("url:")
+    ]
+
+    assert url_lines == ["url: " + hits[0]["url"]]

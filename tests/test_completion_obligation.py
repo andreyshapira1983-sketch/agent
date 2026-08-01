@@ -15,6 +15,7 @@ behave like `no_requirement`.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -318,3 +319,29 @@ def test_end_to_end_an_ordinary_question_creates_no_obligation(workspace: Path):
     payload = next(p for e, p in events if e == "completion_obligation")
     assert payload["required"] is False
     assert payload["triggered"] is False
+
+
+def test_paths_mentioned_stays_cheap_on_a_wall_of_separators() -> None:
+    """A run of separators must not cost quadratic time to scan.
+
+    `paths_mentioned` reads free text written by the user *and* by the model,
+    and nothing upstream caps its length. The pattern was allowed to start a
+    match inside a run of `/`, `.` and `-`, so n separators offered n starting
+    positions and each one rescanned the rest of the string. Measured on this
+    input before the fix: 0.29 s at 4.5 KB, 1.16 s at 9 KB, 4.68 s at 18 KB —
+    a clean quadratic curve, and 15.5 s at 38 KB. That is a live hang of the
+    whole loop, not a theoretical one.
+
+    The bound below is deliberately loose: after the fix this scan takes about
+    a millisecond, so a second still leaves three orders of magnitude of slack
+    for a loaded machine.
+    """
+    text = "/" + "-/-" * 6000
+
+    start = time.perf_counter()
+    found = paths_mentioned(text)
+    elapsed = time.perf_counter() - start
+
+    # Separators alone are not a path — the answer was, and stays, empty.
+    assert found == ()
+    assert elapsed < 1.0, f"scanning {len(text)} chars took {elapsed:.2f}s"

@@ -746,9 +746,17 @@ the ruling per sensor.
    `outcome=success`. Unlike the others this one **compounds**: later runs read
    that memory as experience, so the agent is learning that unsupported
    self-praise is good work.
-3. **Should `_GENERATIVE_ROLES` exempt factual questions?** Measured: "how many
-   TODO/FIXME are in `core/`?" ran under `role=programmer`, so evidence checking
-   was skipped entirely for a counting question. Counting is not code generation.
+3. ~~**Should `_GENERATIVE_ROLES` exempt factual questions?**~~ **Answered no
+   (2026-08-01, `f32d602`).** Measured: "how many TODO/FIXME are in `core/`?"
+   ran under `role=programmer`, so evidence checking was skipped entirely for a
+   counting question. Counting is not code generation. Confirmed a second time
+   live — "what does `core/model_router.py` do?" read the file, produced 7
+   chunks of which 6 verified, and still logged `no_evidence_expected`. The
+   exemption keyed on WHO answered, not WHAT was produced. It now also requires
+   the answer to carry a generated artifact (fenced block or unified-diff
+   header), which is exactly as far as its own rationale reaches: generated text
+   can never appear verbatim in its source file. Same question after the fix:
+   `applicable=True, score=0.821, reason=measured`.
 4. **`AGENT_ENFORCE_UNSUPPORTED_CLAIMS=on`, and then the truncation floor?**
    Arming the mode is free — measured 0 of 8 answers change. Note what the
    question is *not* asking (§8.11 correction): the long-answer truncation is

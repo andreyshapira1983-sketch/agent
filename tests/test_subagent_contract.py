@@ -19,6 +19,7 @@ from core.subagent_memory_scope import (
     SubagentProposal,
     ToolScope,
 )
+from core.model_router import ModelRole
 from core.team_plan import SubagentContract
 
 
@@ -218,3 +219,73 @@ def test_canonical_payload_rejects_invalid_nested_types() -> None:
 
     with pytest.raises(ValueError, match="approval_required must be a boolean"):
         canonical_from_approval_payload(payload)
+
+
+# --- model_role validation -------------------------------------------------
+# `model_role` decides which model answers. It is the only free string on this
+# contract that another subsystem later resolves, and until now nothing checked
+# it, while `risk_level` right beside it was checked against a closed set.
+
+
+def _canonical(**overrides) -> CanonicalSubagentContract:
+    fields = dict(
+        contract_id="c_model_role",
+        source="proposal",
+        name="Auditor",
+        role="RepositoryAuditor",
+        objective="Audit the repository",
+        outputs=("report",),
+        tool_scope=CanonicalToolScope(allowed_tools=("file_read",)),
+        budget_scope=CanonicalBudgetScope(max_model_calls=1, max_iterations=1),
+        risk_level="low",
+        approval_required=False,
+    )
+    fields.update(overrides)
+    return CanonicalSubagentContract(**fields)
+
+
+def test_a_misspelled_model_role_is_refused_at_construction() -> None:
+    with pytest.raises(ValueError, match="model_role"):
+        _canonical(model_role="verifer")
+
+
+def test_every_real_model_role_is_accepted() -> None:
+    for role in ModelRole:
+        assert _canonical(model_role=role.value).model_role == role.value
+
+
+def test_an_absent_model_role_stays_legal() -> None:
+    # None means "no preference"; the runner substitutes its own default.
+    assert _canonical().model_role is None
+
+
+def test_the_enum_member_name_is_not_a_model_role() -> None:
+    # ModelRole.PLANNER.name is "PLANNER" while its value is "planner".
+    with pytest.raises(ValueError, match="model_role"):
+        _canonical(model_role="PLANNER")
+
+
+def test_a_misspelled_model_role_is_refused_when_it_arrives_as_json() -> None:
+    # This is the path a planner model actually writes.
+    payload = approval_payload_from_proposal(_proposal())
+    payload["canonical_contract"]["model_role"] = "sinthesizer"
+
+    with pytest.raises(ValueError, match="model_role"):
+        canonical_from_approval_payload(payload)
+
+
+def test_a_blank_model_role_is_refused_rather_than_read_as_absent() -> None:
+    # "" is a legal "no preference" because subagent_runner reads it with
+    # `or "synthesizer"`. "   " is not: it is truthy, so the runner forwards it
+    # and the router's _coerce_role raises "model role must be non-empty".
+    # Letting it through here would only move that crash further from its cause.
+    with pytest.raises(ValueError, match="model_role"):
+        _canonical(model_role="   ")
+
+
+def test_the_fixture_source_is_one_the_deserializer_accepts() -> None:
+    # ContractSource is a Literal the dataclass does not enforce, so a fixture
+    # is free to describe a contract from_dict would refuse. Keep them honest.
+    payload = json.loads(json.dumps(_canonical().to_dict()))
+
+    assert CanonicalSubagentContract.from_dict(payload).source == "proposal"

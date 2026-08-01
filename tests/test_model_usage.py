@@ -324,3 +324,117 @@ def test_router_complete_blocks_before_llm_call_when_estimate_exceeds_cap(tmp_pa
 
     assert exploding.completed is False
     assert ledger.snapshot()["totals"]["calls"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Spend has to be attributable to a single run.
+#
+# The ledger file is append-only and outlives the process, so every run writes
+# into the same history. Without a run identifier the records of a run can only
+# be separated by eyeballing timestamps, which stops working the moment two
+# runs overlap or a sub-agent runs inside a parent. The agent already mints a
+# per-run identifier — the trace id — so this reuses it rather than inventing a
+# second name for the same thing.
+# ---------------------------------------------------------------------------
+
+
+class _TraceStub:
+    """Stand-in for TraceLogger: the ledger only ever reads `trace_id`."""
+
+    def __init__(self, trace_id: str):
+        self.trace_id = trace_id
+        self.events: list[tuple[str, dict]] = []
+
+    def log(self, event: str, payload: dict) -> None:
+        self.events.append((event, payload))
+
+
+def _record_one(ledger: ModelUsageLedger, *, role: str = "planner"):
+    return ledger.record(
+        role=role,
+        provider="fake",
+        model="fake-1",
+        route_reason="default",
+        cost_tier="low",
+        status="success",
+        input_tokens=3,
+        output_tokens=2,
+        estimated=False,
+        started_at="2026-01-01T00:00:00+00:00",
+        completed_at="2026-01-01T00:00:01+00:00",
+        duration_ms=1000,
+    )
+
+
+def test_record_carries_the_run_id_of_its_ledger():
+    ledger = ModelUsageLedger(run_id="run-abc")
+
+    _record_one(ledger)
+
+    assert ledger.records[-1].run_id == "run-abc"
+
+
+def test_run_id_defaults_to_the_trace_id_of_the_logger():
+    # bootstrap builds the ledger with the run's TraceLogger already in hand,
+    # so the identifier should not have to be passed a second time by every
+    # caller — including sub-agents, which carry their own trace id.
+    ledger = ModelUsageLedger(logger=_TraceStub("trace-xyz"))
+
+    _record_one(ledger)
+
+    assert ledger.run_id == "trace-xyz"
+    assert ledger.records[-1].run_id == "trace-xyz"
+
+
+def test_explicit_run_id_wins_over_the_logger():
+    ledger = ModelUsageLedger(logger=_TraceStub("trace-xyz"), run_id="explicit")
+
+    assert ledger.run_id == "explicit"
+
+
+def test_run_id_survives_the_round_trip_through_the_ledger_file(tmp_path: Path):
+    path = tmp_path / "usage.jsonl"
+    _record_one(ModelUsageLedger(path=path, run_id="run-one"))
+    _record_one(ModelUsageLedger(path=path, run_id="run-two"))
+
+    replayed = ModelUsageLedger(path=path).load_records()
+
+    assert [r.run_id for r in replayed] == ["run-one", "run-two"]
+
+
+def test_a_ledger_written_before_run_ids_existed_still_loads(tmp_path: Path):
+    # load_records() drops rows it cannot construct, and it does so silently.
+    # A new required field would therefore erase spend history instead of
+    # reporting a problem, so the field has to be optional on read.
+    from core.state_integrity import append_state_jsonl
+
+    path = tmp_path / "usage.jsonl"
+    _record_one(ModelUsageLedger(path=path, run_id="run-one"))
+
+    rows = path.read_text(encoding="utf-8").splitlines()
+    assert rows, "the fixture should have written a row"
+    legacy = []
+    for row in rows:
+        payload = decode_state_row(row)
+        assert payload is not None
+        payload.pop("run_id", None)
+        legacy.append(payload)
+
+    path.unlink()
+    append_state_jsonl(path, legacy)
+
+    replayed = ModelUsageLedger(path=path).load_records()
+
+    assert len(replayed) == len(legacy), "pre-run_id history must not vanish"
+    assert replayed[0].run_id is None
+
+
+def test_run_id_is_absent_rather_than_empty_when_there_is_no_run():
+    # A ledger built without a logger or an id (tests, ad-hoc scripts) should
+    # say "unknown", not claim a run named "".
+    ledger = ModelUsageLedger()
+
+    record = _record_one(ledger)
+
+    assert record.run_id is None
+    assert "run_id" in record.to_dict()

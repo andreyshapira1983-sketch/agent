@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
+from core.model_router import ensure_known_model_role
+
 
 _KNOWN_TOOLS = {
     "file_read",
@@ -56,6 +58,9 @@ class SubagentContract:
         overlap = set(self.allowed_tools) & set(self.forbidden_tools)
         if overlap:
             raise ValueError("subagent tool cannot be both allowed and forbidden")
+        # Unknown *tools* are already refused above. The role that picks the
+        # model was the last free string here that nothing checked.
+        ensure_known_model_role(self.model_role)
 
     def to_dict(self) -> dict[str, Any]:
         return {

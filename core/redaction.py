@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.dlp import DlpFinding, pii_replacement, scan_pii
-from core.secret_scanner import SecretFinding, scan
+from core.secret_scanner import SecretFinding, is_credential_key, scan
 
 
 def _replacement(kind: str) -> str:
@@ -135,12 +135,35 @@ def redact_payload(obj: Any) -> Any:
     Works on the JSON-serialisable shape that `TraceLogger._serialize`
     produces: dict / list / tuple / scalars. Pydantic models should be
     dumped first (logger already does that), then passed in here.
+
+    Mapping keys are also read as evidence about their value. `redact_text`
+    already masks `password: hunter2`, because the scanner treats those names
+    as proof that what follows is a secret. Structured payloads are the form
+    the logger actually receives, and an opaque value there matches no regex,
+    so without the key it is indistinguishable from prose. Keys themselves are
+    never rewritten — they describe schema, and losing them loses the log.
     """
     if isinstance(obj, str):
         red, _secret_findings, _pii_findings = redact_dlp_text(obj)
         return red
     if isinstance(obj, dict):
-        return {k: redact_payload(v) for k, v in obj.items()}
+        out_map: dict[Any, Any] = {}
+        for key, value in obj.items():
+            redacted = redact_payload(value)
+            # Fallback, never a replacement. Only mask by name when the value
+            # revealed nothing on its own, so a recognisable secret keeps its
+            # precise kind (`github-pat`) instead of degrading to a generic
+            # marker. Empty values are left alone: there is nothing to hide,
+            # and a false `[REDACTED]` would misreport the recorded state.
+            if (
+                isinstance(value, str)
+                and value.strip()
+                and redacted == value
+                and is_credential_key(key)
+            ):
+                redacted = _replacement("credential-assignment")
+            out_map[key] = redacted
+        return out_map
     if isinstance(obj, (list, tuple)):
         redacted = [redact_payload(x) for x in obj]
         return tuple(redacted) if isinstance(obj, tuple) else redacted

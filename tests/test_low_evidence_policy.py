@@ -384,3 +384,88 @@ class TestProgrammerDocstringSurvivesTruncation:
             evidence_expected=evidence_expected,
         )
         assert result.triggered is True
+
+
+class TestGenerativeExemptionIsScopedToGeneratedOutput:
+    """The programmer exemption keyed on WHO answered, not on WHAT was produced.
+
+    Measured live on the operator's environment: "In one sentence: what does
+    core/model_router.py do?" read the file, produced 7 chunks of which 6 were
+    verified, and still logged
+    `evidence_support applicable=False reason=no_evidence_expected`.
+    With `chain_was_empty=False` the second branch of `is_evidence_expected`
+    can only return True, so the exemption came from `role="programmer"` alone.
+
+    Same class as the case already recorded in docs/COGNITIVE_CORE.md (open
+    question 3): "how many TODO/FIXME are in core/?" ran under role=programmer
+    and skipped evidence checking for a counting question.
+
+    The exemption exists because generated code "can never appear verbatim in
+    the source file it was derived from". That rationale reaches exactly as far
+    as answers that actually carry a generated artifact.
+    """
+
+    def test_a_factual_answer_under_the_programmer_role_still_owes_evidence(self):
+        answer = (
+            "core/model_router.py maps agent roles to provider/model pairs, "
+            "applies the cost ceiling and records usage in the ledger."
+        )
+        assert is_evidence_expected(
+            role="programmer",
+            chain_was_empty=False,
+            realtime_required=False,
+            answer=answer,
+        ) is True
+
+    def test_a_fenced_code_answer_under_the_programmer_role_owes_nothing(self):
+        # Guard: the case the exemption was written for must keep it.
+        answer = (
+            "Here is the helper you asked for:\n\n"
+            "```python\n"
+            "def add(a, b):\n"
+            "    return a + b\n"
+            "```\n"
+        )
+        assert is_evidence_expected(
+            role="programmer",
+            chain_was_empty=False,
+            realtime_required=False,
+            answer=answer,
+        ) is False
+
+    def test_a_diff_answer_under_the_programmer_role_owes_nothing(self):
+        # Guard: a unified diff is a generated artifact even without a fence.
+        answer = (
+            "Apply this patch:\n"
+            "--- a/core/x.py\n"
+            "+++ b/core/x.py\n"
+            "@@ -1,3 +1,3 @@\n"
+            "-old\n"
+            "+new\n"
+        )
+        assert is_evidence_expected(
+            role="programmer",
+            chain_was_empty=False,
+            realtime_required=False,
+            answer=answer,
+        ) is False
+
+    def test_the_exemption_is_unchanged_when_the_answer_is_not_shown(self):
+        # Back-compat: a caller that does not hand over the answer gets exactly
+        # the old behaviour, so no existing call site changes silently.
+        assert is_evidence_expected(
+            role="programmer",
+            chain_was_empty=False,
+            realtime_required=False,
+        ) is False
+
+    def test_non_generative_roles_are_untouched_by_the_answer_argument(self):
+        # Guard: showing the answer must not create a NEW exemption for roles
+        # that never had one.
+        answer = "```python\nprint(1)\n```"
+        assert is_evidence_expected(
+            role="researcher",
+            chain_was_empty=False,
+            realtime_required=False,
+            answer=answer,
+        ) is True
