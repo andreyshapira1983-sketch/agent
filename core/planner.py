@@ -1164,9 +1164,9 @@ Available tools:
     credential or API key in `content` (the tool will refuse).
 
 - shell_exec(argv: list[str]) -> {argv, exit_code, stdout, stderr, ...}
-    [read_only for whoami/hostname/where/which/git/findstr/grep;
-     irreversible for mkdir/touch — mutating commands escalate to human
-     approval and ship with a compensation plan]
+    [read_only for whoami/hostname/where/which/git-reads/findstr/grep;
+     irreversible for mkdir/touch and for git add/commit/checkout —
+     those escalate to human approval and ship with a compensation plan]
     Runs ONE whitelisted command inside the workspace sandbox.
     Whitelist (the ONLY allowed argv[0] values):
       read-only : whoami, hostname, where, which,
@@ -1176,6 +1176,19 @@ Available tools:
                   findstr (Windows) / grep (POSIX) — used as a content
                   search across many files in one call
       mutating  : mkdir, touch  (exactly one path argument, inside workspace)
+      recording : git add / git commit / git checkout — you CAN record your
+                  own work. Each has ONE allowed shape:
+                    ["git","checkout","-b","agent/<name>"]  create your own
+                        branch (you may NOT switch to an existing one)
+                    ["git","add","<path>", ...]             explicit paths
+                        only — never "-A"
+                    ["git","commit","-m","<message>"]       nothing else —
+                        no --amend, no --no-verify
+                  Committing is REFUSED on main/master, so create the
+                  agent/… branch FIRST, then add, then commit.
+                  Still forbidden: push, pull, fetch, clone, reset, rebase,
+                  merge, stash. Do not report "I cannot commit" without
+                  having tried these shapes.
     For "find/count X across N files" sweeps, prefer ONE
     `findstr`/`grep` call over N file_read calls — cheaper, faster,
     no truncation per-file.
@@ -2349,6 +2362,7 @@ class LLMPlanner:
                 ALL_WHITELIST,
                 MUTATING_COMMANDS,
                 READ_ONLY_SUBCOMMANDS,
+                WRITE_SUBCOMMANDS,
             )
 
             cmd = cleaned[0].strip().lower()
@@ -2358,9 +2372,16 @@ class LLMPlanner:
                     f"whitelist, dropped"
                 )
                 return None
-            # Subcommand whitelist (e.g. git log/diff/status only).
+            # Subcommand whitelist. Both sets, and both from the tool: this
+            # sanitizer used to consult the read-only half alone, so a planner
+            # that correctly planned `git checkout -b` / `add` / `commit` had
+            # those three steps deleted here — silently, as warnings — and the
+            # run then reported that it could not commit. The tool's own
+            # `_validate_argv` still re-checks every shape (defence in depth);
+            # what this must not do is refuse a permission the tool grants.
             sub_allowed = READ_ONLY_SUBCOMMANDS.get(cmd)
             if sub_allowed is not None:
+                sub_allowed = sub_allowed | WRITE_SUBCOMMANDS.get(cmd, frozenset())
                 if len(cleaned) < 2:
                     warnings.append(
                         f"step[{idx}]: shell_exec '{cmd}' requires a "

@@ -3275,6 +3275,30 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         _step_trigger_tls.step_trigger = None  # consume
         return step, outcome, trigger
 
+    def _step_only_reads(self, step: "PlanStep") -> bool:
+        """True when this step cannot change the workspace.
+
+        Asks the tool the same question the policy gate asks — `risk_for` on
+        the step's own arguments, not the tool's class-level risk, because
+        `shell_exec` is read-only for `git log` and irreversible for
+        `git commit`. Anything unresolvable (no tool name, tool not in the
+        registry, a tool that raises) is treated as an effect: an unknown step
+        must not buy concurrency.
+        """
+        spec = step.action_spec or {}
+        tool_name = spec.get("tool_name")
+        if not isinstance(tool_name, str) or not tool_name:
+            return False
+        try:
+            tool = self.registry.get(tool_name)
+        except Exception:
+            return False
+        arguments = spec.get("arguments")
+        try:
+            return tool.risk_for(arguments if isinstance(arguments, dict) else {}) == "read_only"
+        except Exception:
+            return False
+
     def _execute_steps_parallel(
         self, steps: list["PlanStep"]
     ) -> list[tuple["PlanStep", dict[str, Any] | None, "ReplanTrigger | None"]]:
@@ -3292,6 +3316,34 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             return []
         if len(steps) == 1:
             return [self._run_step_parallel(steps[0])]
+
+        # Concurrency is safe between steps that only READ. The moment one of
+        # them changes the workspace, plan order stops being a formality and
+        # becomes the work itself — and `preconditions`, which is what this
+        # function partitions on, is never filled by the planner (see above),
+        # so every step reads as independent.
+        #
+        # Measured on a live run: a correct six-step plan (write, write, test,
+        # branch, add, commit) executed as run_tests → checkout → write → add →
+        # commit → write. `git add` ran before the file existed
+        # ("fatal: pathspec … did not match any files") and the commit failed
+        # after it. The plan was right; the execution order threw it away.
+        #
+        # So: any effect in the batch, and the whole batch runs in plan order.
+        # Not just the effect steps — a read can depend on a write
+        # (`run_tests` after `file_write`) exactly as a write can depend on a
+        # read, and the ordering between the two kinds is the part that
+        # matters. Pure-research plans, which is what most questions produce,
+        # keep the parallel path untouched.
+        if any(not self._step_only_reads(step) for step in steps):
+            # Sorted, not merely iterated: the concurrent path below sorts its
+            # RESULTS back into plan order, so this one must not depend on the
+            # caller happening to pass a sorted slice — the guarantee is the
+            # whole point of the branch.
+            return [
+                self._run_step_parallel(step)
+                for step in sorted(steps, key=lambda s: s.order)
+            ]
 
         # Partition: parallel = no intra-batch dependencies; sequential = rest.
         step_ids = {s.id for s in steps}

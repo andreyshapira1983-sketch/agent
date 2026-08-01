@@ -6,16 +6,23 @@ structured JSONL trace log.
 """
 from __future__ import annotations
 
+import time
+from concurrent.futures import ThreadPoolExecutor
+from unittest import mock
+from tools.file_write import FileWriteTool
+from core.models import PlanStep
+
 import json
 from pathlib import Path
 
+from core.approval import AutoApprover
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
-from tests.conftest import FakeLLM
+from tests.conftest import FakeLLM, FakePlanner
 
 
 PLANNER_FILE_READ_RESPONSE = json.dumps(
@@ -301,3 +308,88 @@ def test_synthesize_lean_context_drops_long_term_memory(workspace: Path) -> None
         persistent_block=block, llm=llm, lean_context=True,
     )
     assert "SECRET_MEMO_ALPHA" not in llm.calls[-1]["user"]
+
+
+# ===========================================================
+# Step ordering: concurrency is for reads only
+# ===========================================================
+
+class TestEffectStepsRunInPlanOrder:
+    """A plan that changes the workspace is a sequence, not a set.
+
+    Measured on a live run: a correct six-step plan (write, write, test,
+    branch, add, commit) executed as run_tests -> checkout -> write -> add ->
+    commit -> write. `git add` ran before the file existed and the commit
+    failed after it. `preconditions` is what the parallel partition reads, and
+    the planner never fills it, so every step looked independent.
+    """
+
+    def _loop(self, workspace: Path) -> AgentLoop:
+        registry = ToolRegistry()
+        registry.register(FileReadTool(workspace_root=workspace))
+        registry.register(FileWriteTool(workspace_root=workspace))
+        trace_id = new_trace_id()
+        return AgentLoop(
+            registry=registry,
+            policy=PolicyGate(registry),
+            llm=FakeLLM(responses=[]),
+            logger=TraceLogger(trace_id=trace_id, log_dir=workspace / "logs", verbose=False),
+            planner=FakePlanner(sources=[]),
+            approval_provider=AutoApprover(default="approve"),
+        )
+
+    @staticmethod
+    def _step(tool_name: str, arguments: dict, order: int) -> PlanStep:
+        return PlanStep(
+            plan_id="plan_x",
+            order=order,
+            action_spec={"type": "tool_call", "tool_name": tool_name, "arguments": arguments},
+            expected_outcome="whatever",
+        )
+
+    def test_a_batch_that_writes_runs_in_plan_order(self, workspace: Path):
+        loop = self._loop(workspace)
+        steps = [
+            self._step("file_write", {"path": "a.txt", "content": "a"}, 1),
+            self._step("file_read", {"path": "a.txt"}, 2),
+            self._step("file_write", {"path": "b.txt", "content": "b"}, 3),
+        ]
+        seen: list[str] = []
+
+        def record(step: PlanStep):
+            path = step.action_spec["arguments"].get("path")
+            # The first step is slow on purpose. Run concurrently, the later
+            # steps finish first and `seen` comes back reordered; run in
+            # sequence it cannot. Three instant callables would often complete
+            # in submission order even when genuinely parallel, so the delay is
+            # what makes this test decide anything.
+            if path == "a.txt" and step.order == 1:
+                time.sleep(0.3)
+            seen.append(path)
+            return (step, None, None)
+
+        loop._run_step_parallel = record  # type: ignore[assignment]
+        loop._execute_steps_parallel(steps)
+
+        assert seen == ["a.txt", "a.txt", "b.txt"]
+
+    def test_a_pure_read_batch_still_goes_parallel(self, workspace: Path):
+        loop = self._loop(workspace)
+        steps = [
+            self._step("file_read", {"path": "a.txt"}, 1),
+            self._step("file_read", {"path": "b.txt"}, 2),
+        ]
+        loop._run_step_parallel = lambda step: (step, None, None)  # type: ignore[assignment]
+
+        with mock.patch("core.loop.ThreadPoolExecutor", wraps=ThreadPoolExecutor) as pool:
+            loop._execute_steps_parallel(steps)
+
+        assert pool.called, "reads lost their concurrency"
+
+    def test_an_unresolvable_step_counts_as_an_effect(self, workspace: Path):
+        loop = self._loop(workspace)
+        assert not loop._step_only_reads(self._step("no_such_tool", {}, 1))
+        assert not loop._step_only_reads(
+            PlanStep(plan_id="p", order=1, action_spec={}, expected_outcome="x")
+        )
+        assert loop._step_only_reads(self._step("file_read", {"path": "a.txt"}, 1))
