@@ -220,6 +220,18 @@ def episodes_from_outcome(
 # The store
 # ---------------------------------------------------------------------------
 
+def _parse_row(row: dict[str, Any]) -> ConflictEpisode | None:
+    """Decode one stored row, or None if it is unreadable.
+
+    A corrupt line must not hide the episodes around it — losing the whole
+    conflict history to one bad write would be worse than losing the one row.
+    """
+    try:
+        return ConflictEpisode.from_dict(row)
+    except Exception:  # noqa: BLE001 — see the docstring
+        return None
+
+
 class ConflictEpisodeStore:
     """Append-only JSONL store. Rows with a repeated ``id`` supersede earlier ones."""
 
@@ -249,36 +261,47 @@ class ConflictEpisodeStore:
         lesson: str = "",
         ruled_at: str | None = None,
     ) -> ConflictEpisode | None:
-        """Append the resolved version of an episode. None if the id is unknown."""
-        current = self.get(episode_id)
-        if current is None:
-            return None
-        resolved = current.resolve(
-            ruling=ruling, ruled_by=ruled_by, lesson=lesson, ruled_at=ruled_at
-        )
-        self.save(resolved)
+        """Append the resolved version of an episode. None if the id is unknown.
+
+        Read and append happen inside **one** lock. Splitting them lets two
+        operators resolving the same episode each read the ``open`` row and each
+        append a ruling; since reads collapse by id keeping the last row, one
+        of the two rulings would vanish without a trace.
+        """
+        with state_file_lock(self.path):
+            current = self._get_unlocked(episode_id)
+            if current is None:
+                return None
+            resolved = current.resolve(
+                ruling=ruling, ruled_by=ruled_by, lesson=lesson, ruled_at=ruled_at
+            )
+            append_state_jsonl_unlocked(self.path, [resolved.to_dict()])
         return resolved
 
     # ---------- reads ----------
 
-    def load_all(self) -> tuple[ConflictEpisode, ...]:
-        """Every episode, oldest first, collapsed by id keeping the last row."""
+    def _load_all_unlocked(self) -> tuple[ConflictEpisode, ...]:
         if not self.path.exists():
             return ()
         by_id: dict[str, ConflictEpisode] = {}
         for row in read_state_jsonl_unlocked(self.path):
-            try:
-                episode = ConflictEpisode.from_dict(row)
-            except Exception:  # noqa: BLE001 — a corrupt row must not hide the rest
-                continue
-            by_id[episode.id] = episode
+            episode = _parse_row(row)
+            if episode is not None:
+                by_id[episode.id] = episode
         return tuple(by_id.values())
 
-    def get(self, episode_id: str) -> ConflictEpisode | None:
-        for episode in self.load_all():
+    def _get_unlocked(self, episode_id: str) -> ConflictEpisode | None:
+        for episode in self._load_all_unlocked():
             if episode.id == episode_id:
                 return episode
         return None
+
+    def load_all(self) -> tuple[ConflictEpisode, ...]:
+        """Every episode, oldest first, collapsed by id keeping the last row."""
+        return self._load_all_unlocked()
+
+    def get(self, episode_id: str) -> ConflictEpisode | None:
+        return self._get_unlocked(episode_id)
 
     def load_open(self) -> tuple[ConflictEpisode, ...]:
         return tuple(e for e in self.load_all() if e.is_open)

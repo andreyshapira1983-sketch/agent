@@ -152,6 +152,48 @@ def test_resolution_supersedes_without_rewriting_history(tmp_path: Path):
     assert len(path.read_text(encoding="utf-8").strip().splitlines()) == 2
 
 
+def test_resolve_reads_and_appends_inside_one_lock(tmp_path: Path, monkeypatch):
+    """Two operators resolving the same episode must not lose a ruling.
+
+    Reading outside the lock lets both see the ``open`` row and both append;
+    reads collapse by id keeping the last, so one ruling would vanish.
+    """
+    import contextlib
+
+    import core.conflict_episode as mod
+
+    store = ConflictEpisodeStore(default_path(tmp_path))
+    episode = _episode()
+    store.save(episode)
+
+    events: list[str] = []
+    real_lock = mod.state_file_lock
+    real_read = mod.read_state_jsonl_unlocked
+    real_append = mod.append_state_jsonl_unlocked
+
+    @contextlib.contextmanager
+    def tracking_lock(path):
+        assert "enter" not in events, "a nested lock acquisition would deadlock"
+        events.append("enter")
+        with real_lock(path):
+            yield
+        events.append("exit")
+
+    monkeypatch.setattr(mod, "state_file_lock", tracking_lock)
+    monkeypatch.setattr(
+        mod, "read_state_jsonl_unlocked",
+        lambda path: (events.append("read"), real_read(path))[1],
+    )
+    monkeypatch.setattr(
+        mod, "append_state_jsonl_unlocked",
+        lambda path, rows: (events.append("append"), real_append(path, rows))[1],
+    )
+
+    store.resolve(episode.id, ruling="контракт выше", ruled_by="оператор")
+
+    assert events == ["enter", "read", "append", "exit"]
+
+
 def test_resolving_an_unknown_id_returns_none(tmp_path: Path):
     store = ConflictEpisodeStore(default_path(tmp_path))
     assert store.resolve("conflict_nope", ruling="x", ruled_by="y") is None
