@@ -136,7 +136,10 @@ class TestEdgeCases:
         )
         out = format_human_response(answer)
         assert "[web:" not in out
-        assert "python.org" in out or "Python 3.14" in out
+        # The whole citation goes, host included -- "python.org" in out is
+        # False here, so the old `or` left this line resting on the second
+        # operand alone. Assert the surviving content directly.
+        assert "Python 3.14 вышел в 2026." in out
         assert "Sources:" not in out
 
     def test_file_citation_stripped(self):

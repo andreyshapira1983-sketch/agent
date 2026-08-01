@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from core.model_router import ModelRole
 from core.team_plan import SubagentContract, TeamPlanner
 
 
@@ -72,3 +73,44 @@ def test_team_plan_json_shape_is_stable():
     assert {"name", "role", "objective", "allowed_tools", "max_model_calls"} <= set(
         payload["contracts"][0]
     )
+
+
+# --- model_role validation -------------------------------------------------
+# This contract already refuses unknown *tools* against a closed set. The role
+# that picks the model was the one free string left unchecked.
+
+
+def test_a_misspelled_model_role_is_refused_at_construction():
+    with pytest.raises(ValueError, match="model_role"):
+        SubagentContract(
+            name="Writer",
+            role="writer",
+            objective="write",
+            inputs=(),
+            outputs=(),
+            model_role="synthesiser",
+        )
+
+
+def test_every_real_model_role_is_accepted():
+    for role in ModelRole:
+        contract = SubagentContract(
+            name="Writer",
+            role="writer",
+            objective="write",
+            inputs=(),
+            outputs=(),
+            model_role=role.value,
+        )
+        assert contract.model_role == role.value
+
+
+def test_the_built_in_team_templates_all_name_a_real_model_role():
+    # Guards the fix against itself: the planner ships contracts of its own.
+    plan = TeamPlanner().plan(
+        "Build an AI news and business opportunity radar for agent architecture"
+    )
+
+    assert plan.contracts
+    known = {role.value for role in ModelRole}
+    assert {c.model_role for c in plan.contracts} <= known

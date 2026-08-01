@@ -40,6 +40,15 @@ jobs:
 
       # Execute Codacy Analysis CLI and generate a SARIF output with the security issues identified during the analysis
       - name: Run Codacy Analysis CLI
+        # No locale variables here on purpose. An earlier revision pinned
+        # LANG/LC_ALL/JAVA_TOOL_OPTIONS to UTF-8 to stop a
+        # MalformedInputException, which was useless twice over: the action's
+        # wrapper script forwards only CODACY_CODE, CODACY_PROJECT_TOKEN,
+        # CODACY_API_TOKEN and CODACY_API_BASE_URL into the container, so
+        # nothing set here ever reached the JVM -- and the image already runs
+        # with LANG=C.UTF-8 and file.encoding=UTF-8 anyway. The real cause was
+        # a binary file reaching the SARIF writer; see exclude_paths in
+        # .codacy.yml.
         uses: codacy/codacy-analysis-cli-action@d840f886c4bd4edc059706d09c6a1586111c540b
         with:
           # Check https://github.com/codacy/codacy-analysis-cli#project-token to get your project token from your Codacy repository

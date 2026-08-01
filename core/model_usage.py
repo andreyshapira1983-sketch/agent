@@ -97,6 +97,11 @@ class ModelUsageRecord:
     completed_at: str
     duration_ms: int
     error: str | None = None
+    # Which run spent this. Optional and last so a ledger written before this
+    # field existed still constructs — load_records() drops rows it cannot
+    # build and does so silently, so a required field here would erase spend
+    # history rather than report a problem.
+    run_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -115,6 +120,7 @@ class ModelUsageRecord:
             "completed_at": self.completed_at,
             "duration_ms": self.duration_ms,
             "error": self.error,
+            "run_id": self.run_id,
         }
 
 
@@ -162,6 +168,20 @@ class ModelUsageLedger:
     logger: Any | None = None
     budget_ledger: BudgetLedger | None = None
     records: list[ModelUsageRecord] = field(default_factory=list)
+    # The run these records belong to. The ledger file is append-only and
+    # outlives the process, so without this every run's spend lands in one
+    # undifferentiated history. This reuses the trace id the agent already
+    # mints per run rather than minting a second identifier for the same thing;
+    # a sub-agent carries its own trace id and so becomes separable from its
+    # parent for free.
+    run_id: str | None = None
+
+    def __post_init__(self) -> None:
+        # bootstrap already holds the run's TraceLogger when it builds the
+        # ledger, so taking the id from there spares every call site from
+        # passing the same value twice. An explicit run_id still wins.
+        if self.run_id is None:
+            self.run_id = getattr(self.logger, "trace_id", None)
 
     @classmethod
     def from_env(
@@ -366,6 +386,7 @@ class ModelUsageLedger:
             completed_at=completed_at,
             duration_ms=max(0, int(duration_ms)),
             error=error,
+            run_id=self.run_id,
         )
         self.records.append(record)
         if self.budget_ledger is not None:

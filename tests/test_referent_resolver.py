@@ -1,6 +1,7 @@
 """Tests for core.referent_resolver (critique plan PR1)."""
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -360,3 +361,30 @@ def test_is_local_critique_eligible_rejects_unresolved():
 
     decision = ReferentDecision(status="unresolved")
     assert is_local_critique_eligible(decision) is False
+
+
+def test_resolve_stays_cheap_on_a_wall_of_separators(tmp_path: Path) -> None:
+    """The path scan must not turn the question's length into quadratic work.
+
+    The question is whatever the user typed; nothing caps it. The path pattern
+    could start a match inside a run of `/`, `.` and `-`, so n separators gave
+    n starting positions, each rescanning the rest. Measured before the fix:
+    5.5 s for 6400 repetitions of "-/-". A question can be pasted, so this is
+    reachable from outside.
+
+    The bound is loose on purpose — the point is the shape of the curve, not
+    the wall-clock number on any one machine.
+    """
+    question = "/" + "-/-" * 6000
+
+    start = time.perf_counter()
+    decision = ReferentResolver(workspace_root=tmp_path).resolve(
+        question,
+        current_session_id="s1",
+        current_turn_id="t1",
+    )
+    elapsed = time.perf_counter() - start
+
+    # Separators alone name nothing; the verdict does not change.
+    assert decision.status == "unresolved"
+    assert elapsed < 1.0, f"resolving {len(question)} chars took {elapsed:.2f}s"

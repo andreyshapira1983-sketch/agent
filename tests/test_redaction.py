@@ -8,6 +8,8 @@ Integration with logger / LLM / loop is exercised in `test_safety_integration.py
 """
 from __future__ import annotations
 
+import pytest
+
 from core.redaction import redact_dlp_text, redact_payload, redact_text
 
 
@@ -135,6 +137,62 @@ class TestRedactPayload:
         out = redact_payload({"api_key": "ghp_aaaaaaaaaaaaaaaaaaaaXXX"})
         assert "api_key" in out
         assert "[REDACTED" in out["api_key"]
+
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "password", "passwd", "passphrase",
+            "api_key", "api-key", "apikey",
+            "secret_key", "private_key",
+            "auth_token", "access_token",
+            "openai_api_key", "db_password", "x-api-key",
+        ],
+    )
+    def test_credential_named_key_redacts_opaque_value(self, key):
+        """Parity with the text form.
+
+        `redact_text("password: hunter2")` already returns
+        `[REDACTED:credential-assignment]` — the scanner has ALREADY decided
+        that these names make a value a secret. The same pair arriving as
+        `{"password": "hunter2"}` is what the logger actually receives, and
+        it used to sail straight through: an opaque value carries no regex
+        signal, so only the key name can identify it.
+        """
+        out = redact_payload({key: "hunter2"})
+        assert out[key] == "[REDACTED:credential-assignment]"
+        assert "hunter2" not in str(out)
+
+    @pytest.mark.parametrize(
+        "key", ["max_tokens", "tokenizer", "password_hint", "key", "username", "keyword"]
+    )
+    def test_non_credential_key_is_left_alone(self, key):
+        """The name list is the existing one, not a wider one.
+
+        `max_tokens` must survive: the rule names `auth_token` /
+        `access_token`, never a bare `token`. Redacting model parameters
+        would blind the very logs this exists to keep readable.
+        """
+        assert redact_payload({key: "hunter2"}) == {key: "hunter2"}
+
+    def test_real_secret_value_keeps_its_own_kind(self):
+        """Name-based masking is a FALLBACK, never a replacement.
+
+        A value that the regex layer can identify keeps its precise kind, so
+        existing log forensics do not degrade to a generic marker.
+        """
+        out = redact_payload({"api_key": "ghp_aaaaaaaaaaaaaaaaaaaaXXX"})
+        assert out["api_key"] == "[REDACTED:github-pat]"
+
+    def test_empty_credential_value_is_not_masked(self):
+        """Nothing to hide, and a false `[REDACTED]` would misreport state.
+
+        The empty value is bound to a name rather than written inline: a bare
+        ``{"password": ""}`` reads to a secret scanner as a hardcoded
+        credential, and this test asserts the opposite -- that there is no
+        credential here at all.
+        """
+        empty_value = ""
+        assert redact_payload({"password": empty_value}) == {"password": empty_value}
 
     def test_sensitive_pii_values_are_redacted(self):
         out = redact_payload({"contact": "andre@example.com", "phone": "+1 415 555 1234"})

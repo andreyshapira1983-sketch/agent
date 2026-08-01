@@ -187,6 +187,17 @@ def _tier_provider_prefs(tier_value: str) -> tuple[str, ...]:
     return _TIER_PROVIDER_PREF.get(tier_value, ())
 
 
+def _tier_providers_are_explicit(tier_value: str) -> bool:
+    """True when the operator named the tier's providers via AGENT_TIER_PROVIDERS_*.
+
+    The builtin table above is this repo's default; the env var is an operator
+    instruction. Only the latter overrides catalog discovery (see
+    ``ModelRouter._declared_model_for``), so defaults never move silently.
+    """
+    env_name = _TIER_PROVIDERS_ENV.get(tier_value)
+    return bool(os.getenv(env_name, "").strip()) if env_name else False
+
+
 def _provider_has_credentials(provider: str) -> bool:
     """True when every required env var for *provider* is set (non-empty).
 
@@ -338,6 +349,45 @@ _ROLE_ENV_PREFIXES: dict[ModelRole, tuple[str, ...]] = {
     ModelRole.VERIFIER: ("AGENT_VERIFIER",),
 }
 
+#: The role names a router built by `from_env` can serve. Exported alongside
+#: `ensure_known_model_role` so callers can name the legal values without
+#: hand-writing a second copy of this list that is free to drift from the enum.
+KNOWN_MODEL_ROLES: frozenset[str] = frozenset(role.value for role in ModelRole)
+
+
+def ensure_known_model_role(value: str | None) -> None:
+    """Reject a role name the agent's own router would not be built to serve.
+
+    Contracts carry `model_role` as a free string and a planner model writes
+    it, so a misspelling arrives as data. `route_for` deliberately still
+    serves an unknown role from the default model — a typo must not take down
+    a live answer — which means the mistake would otherwise surface only as a
+    route reason in the usage ledger, long after the plan was accepted.
+
+    The set is closed, matching `_KNOWN_TOOLS` beside the other checks in
+    `team_plan`. A router constructed by hand can route any role named in its
+    `routes`, but `from_env` — the only path the agent itself uses — builds
+    routes solely from `_ROLE_ENV_PREFIXES`, so no operator configuration can
+    put a custom role in front of a running agent while a planner model can
+    easily misspell one into a contract.
+
+    `None` and `""` mean "no preference": callers substitute their own
+    default. A whitespace-only string does not — it is truthy for those
+    callers yet empty for `_coerce_role`, which raises — so it is refused
+    here, where the cause is still visible.
+    """
+    if value is None:
+        return
+    role = value.strip()
+    if not role:
+        if value:
+            raise ValueError("model_role must not be blank")
+        return
+    if role not in KNOWN_MODEL_ROLES:
+        raise ValueError(
+            "model_role must be one of " + ", ".join(sorted(KNOWN_MODEL_ROLES))
+        )
+
 
 class UsageTrackedLLM:
     """Small proxy that records one role-specific `complete()` call."""
@@ -351,11 +401,17 @@ class UsageTrackedLLM:
         cost_tier: str,
         ledger: ModelUsageLedger,
         llm_factory: Callable[[str | None, str | None], Any] | None = None,
+        reprice: Callable[[str, str], str] | None = None,
     ):
         self._llm = llm
         self.role = role
         self.cost_tier = cost_tier
         self.ledger = ledger
+        # Re-prices the call when failover lands on a different provider/model.
+        # Without it the substitute inherits the original route's tier, so a
+        # free local model that fails over to an expensive hosted one is both
+        # billed and budget-checked as free. ``None`` keeps the old behaviour.
+        self._reprice = reprice
         # Factory used to rebuild the client on another provider during
         # failover. When ``None`` (e.g. no ledger / static LLM paths) failover
         # is disabled and behaviour is unchanged.
@@ -515,6 +571,13 @@ class UsageTrackedLLM:
                     self._llm = replacement
                     self.provider = getattr(replacement, "provider", None) or ""
                     self.model = getattr(replacement, "model", None) or ""
+                    # The substitute is a different model on a different
+                    # provider; its price is not the original route's price.
+                    if self._reprice is not None and self.provider:
+                        try:
+                            self.cost_tier = self._reprice(self.provider, self.model)
+                        except Exception:  # pragma: no cover - defensive
+                            pass
                     route_reason = f"provider_failover:{provider}->{self.provider}"
                     continue
                 raise
@@ -1065,11 +1128,24 @@ class ModelRouter:
                 model=registry_spec.model,
                 reason=f"policy:{self.selection_policy.name}:{registry_spec.id}",
             )
+        # Nothing is configured for this role, so the default is what gets
+        # served either way. But "this role has no configuration" and "there is
+        # no such role" are different facts, and until now both were reported
+        # as a bare "default", so no caller could tell a deliberate fallback
+        # from a misspelling. `model_role` is a free string on team and
+        # sub-agent contracts and neither validates it, so a typo — possibly
+        # written by a model — arrives here as data. Serving it is still right:
+        # a misspelling must not take down a live answer. Naming it is what was
+        # missing. The signal rides the route reason rather than a log line for
+        # the reason given at `record_usage`: this router has no logger of its
+        # own, the reason already reaches the usage ledger with every call, and
+        # a second channel would only be a second thing to keep in sync.
+        known_role = role_key in KNOWN_MODEL_ROLES
         return ModelRoute(
             role=role_key,
             provider=self.default_provider,
             model=self.default_model,
-            reason="default",
+            reason="default" if known_role else "default:unknown_role",
         )
 
     def for_role(self, role: ModelRole | str) -> Any:
@@ -1083,12 +1159,23 @@ class ModelRouter:
         route = self.route_for(role_key)
         provider = route.provider or self.default_provider
         model = route.model or self.default_model
+        provider, model, capped_reason = self._cap_role_route(
+            role_key, provider, model, route.reason
+        )
+        if capped_reason != route.reason:
+            route = ModelRoute(
+                role=route.role,
+                provider=provider,
+                model=model,
+                reason=capped_reason,
+            )
         cache_key = (provider, model)
         if cache_key not in self._cache:
             self._cache[cache_key] = self._llm_factory(provider, model)
         llm = self._cache[cache_key]
         if self.usage_ledger is None:
             return llm
+        route = self._route_with_resolved_identity(route, llm, provider, model)
         tracked = UsageTrackedLLM(
             llm,
             role=role_key,
@@ -1096,16 +1183,58 @@ class ModelRouter:
             cost_tier=self._cost_tier_for_route(route),
             ledger=self.usage_ledger,
             llm_factory=self._llm_factory,
+            reprice=self._reprice_for_failover,
         )
         self._tracked_cache[role_key] = tracked
         return tracked
+
+    def _route_with_resolved_identity(
+        self,
+        route: ModelRoute,
+        llm: Any,
+        provider: str | None,
+        model: str | None,
+    ) -> ModelRoute:
+        """Return *route* with the provider/model the call will really use.
+
+        A route can reach this point naming nothing at all: when no registry
+        candidate satisfies the selection policy, ``best_for_role`` returns
+        ``None`` and both defaults are unset, so the router builds the client
+        with ``(None, None)``. That client then resolves a concrete provider and
+        model from the environment and the call succeeds — but the ledger used
+        to record ``provider=None, model=None``, pricing real spend as
+        ``unknown``.
+
+        Recording what the client resolved keeps the ledger a description of the
+        call that happened rather than of the route that could not be planned.
+        An explicitly routed provider/model always wins; the client is consulted
+        only for the blanks.
+        """
+
+        resolved_provider = (
+            (provider or "").strip() or (getattr(llm, "provider", "") or "").strip()
+        )
+        resolved_model = (
+            (model or "").strip() or (getattr(llm, "model", "") or "").strip()
+        )
+        if resolved_provider == (route.provider or "") and resolved_model == (
+            route.model or ""
+        ):
+            return route
+        return ModelRoute(
+            role=route.role,
+            provider=resolved_provider or None,
+            model=resolved_model or None,
+            reason=route.reason,
+        )
 
     def _for_role_with_reason(self, role_key: str, route_reason: str) -> Any:
         """Return the standard role LLM but stamp a custom ``route_reason``.
 
         Used by the deep-escalation gate to record a downgrade in the usage
-        ledger (e.g. ``deep_downgraded:missing_reason``) while still serving the
-        normal standard-tier model. Not stored in the role cache so the gate's
+        ledger (e.g. ``deep_downgraded:missing_reason``) when no operator
+        standard-tier provider is configured, and by the tier paths that fall
+        back to role routing. Not stored in the role cache so the gate's
         one-off reason never poisons a later plain :meth:`for_role` call.
         """
         if self._static_llm is not None:
@@ -1113,26 +1242,55 @@ class ModelRouter:
         route = self.route_for(role_key)
         provider = route.provider or self.default_provider
         model = route.model or self.default_model
+        provider, model, route_reason = self._cap_role_route(
+            role_key, provider, model, route_reason
+        )
         cache_key = (provider, model)
         if cache_key not in self._cache:
             self._cache[cache_key] = self._llm_factory(provider, model)
         llm = self._cache[cache_key]
         if self.usage_ledger is None:
             return llm
-        stamped = ModelRoute(
-            role=role_key,
-            provider=provider,
-            model=model,
-            reason=route_reason,
+        stamped = self._route_with_resolved_identity(
+            ModelRoute(
+                role=role_key,
+                provider=provider,
+                model=model,
+                reason=route_reason,
+            ),
+            llm,
+            provider,
+            model,
         )
         return UsageTrackedLLM(
             llm,
             role=role_key,
             route=stamped,
-            cost_tier=self._cost_tier_for_route(route),
+            cost_tier=self._cost_tier_for_route(stamped),
             ledger=self.usage_ledger,
             llm_factory=self._llm_factory,
+            reprice=self._reprice_for_failover,
         )
+
+    def _declared_model_for(self, provider: str) -> str:
+        """Concrete model the operator has already declared for *provider*.
+
+        ``model_catalog`` can only describe providers it has a fetcher for
+        (anthropic, openai), so a provider the operator names explicitly can
+        have no catalog tier model while a concrete model for it is declared
+        elsewhere: in ``config/model_registry.json``, or — for ``local`` — in
+        ``LOCAL_LLM_MODEL``. Returning it keeps the operator's explicit choice
+        authoritative instead of silently routing the call somewhere else.
+
+        Returns "" when nothing was declared, which is the only honest case for
+        a ``no_model:`` skip.
+        """
+        for spec in self.registry.list():
+            if _normalise_provider(spec.provider) == provider and spec.model:
+                return spec.model
+        from core.llm import _default_model
+
+        return (_default_model(provider) or "").strip()
 
     def _resolve_tier_provider(
         self, tier: Any, role_key: str
@@ -1146,7 +1304,14 @@ class ModelRouter:
         callers still resolve the model via ``tier_model_for(tier, provider)``.
 
         An explicit per-role provider (``AGENT_<ROLE>_PROVIDER``) disables the
-        preference entirely so the operator's choice always wins.
+        preference entirely so the operator's choice always wins. The same rule
+        applies to ``AGENT_TIER_PROVIDERS_*``: a provider named there is not
+        dropped merely because catalog discovery cannot describe it, as long as
+        the operator declared a model for it (``_declared_model_for``).
+
+        ``AGENT_MODEL_MAX_COST`` is enforced here too. It used to be consulted
+        only by registry selection, so the complexity route — the path that
+        serves normal traffic — ignored the operator's ceiling outright.
         """
         explicit = self._routes.get(role_key)
         if explicit is not None and _normalise_provider(explicit.provider):
@@ -1155,6 +1320,7 @@ class ModelRouter:
         from core.model_catalog import tier_model_for
 
         tier_value = tier.value
+        operator_named = _tier_providers_are_explicit(tier_value)
         skipped: list[str] = []
         for prov in _tier_provider_prefs(tier_value):
             norm = _normalise_provider(prov)
@@ -1164,11 +1330,89 @@ class ModelRouter:
                 # Unsupported (e.g. `local`) or missing credentials → skip.
                 skipped.append(f"provider_unavailable:{norm}")
                 continue
-            if not tier_model_for(tier, norm):
+            tier_model = tier_model_for(tier, norm)
+            if not tier_model and operator_named:
+                tier_model = self._declared_model_for(norm)
+            if not tier_model:
                 skipped.append(f"no_model:{norm}")
+                continue
+            if not self._tier_model_within_cost_limit(norm, tier_model):
+                # The operator capped spend; this provider's model for the tier
+                # is above the cap, so try the next preference rather than
+                # quietly overspending.
+                skipped.append(f"cost_limit:{norm}")
                 continue
             return norm, f"complexity:{tier_value}:{norm}", skipped
         return None, None, skipped
+
+    def _tier_model_within_cost_limit(self, provider: str, model: str) -> bool:
+        """Whether *model* respects ``AGENT_MODEL_MAX_COST``.
+
+        Reuses ``_cost_tier_for_route`` so a hand-priced registry model is judged
+        by its declared price and a catalog model by the catalog's own weight
+        class — the same number that will later be billed to the usage ledger.
+        Judging the route by one figure and billing it by another is how the
+        ceiling came to be ignored in the first place.
+        """
+
+        limit = self.selection_policy.max_cost_tier
+        if limit is None:
+            return True
+        route = ModelRoute(role="", provider=provider, model=model, reason="")
+        cost_tier = self._cost_tier_for_route(route)
+        return _COST_RANK.get(cost_tier, _COST_RANK["unknown"]) <= _COST_RANK.get(
+            limit, _COST_RANK["unknown"]
+        )
+
+    def _cap_role_route(
+        self, role_key: str, provider: str | None, model: str | None, reason: str
+    ) -> tuple[str | None, str | None, str]:
+        """Apply ``AGENT_MODEL_MAX_COST`` to a role route.
+
+        The ceiling used to filter only the complexity preferences inside
+        ``_resolve_tier_provider``. Every branch that fails there falls back to
+        the role route, and a plain :meth:`for_role` never went near the
+        preferences at all — so the limit was bypassed exactly when it was meant
+        to bind: after every affordable candidate had already been rejected.
+
+        Measured live on the operator's environment: ``AGENT_MODEL_MAX_COST=low``
+        together with ``AGENT_REPAIR_PROVIDER/MODEL`` still returned
+        ``anthropic/claude-opus-4-20250514`` billed ``high``, on both
+        :meth:`for_role` and :meth:`for_task`.
+
+        A route already inside the ceiling is returned untouched, so with no
+        ceiling configured behaviour is byte-for-byte the old one.
+        """
+
+        limit = self.selection_policy.max_cost_tier
+        if limit is None:
+            return provider, model, reason
+        norm = _normalise_provider(provider) or (provider or "")
+        if not model or self._tier_model_within_cost_limit(norm, model):
+            return provider, model, reason
+
+        spec = self.registry.best_for_role(
+            role_key,
+            policy=ModelSelectionPolicy(
+                name="cost",
+                max_cost_tier=limit,
+                allow_mock=self.selection_policy.allow_mock,
+                require_available=self.selection_policy.require_available,
+            ),
+        )
+        if spec is not None and self._tier_model_within_cost_limit(
+            _normalise_provider(spec.provider) or spec.provider, spec.model
+        ):
+            return (
+                spec.provider,
+                spec.model,
+                f"{reason}|cost_limit:{norm}:{model}->{spec.id}",
+            )
+
+        # Nothing affordable is configured for this role. Refusing outright
+        # would strand the agent, so the call proceeds — but the ledger records
+        # that the ceiling was exceeded instead of billing it as a normal route.
+        return provider, model, f"{reason}|cost_limit_exceeded:{norm}:{model}"
 
     def for_task(
         self,
@@ -1238,9 +1482,13 @@ class ModelRouter:
         pref_provider, pref_reason, skipped = self._resolve_tier_provider(tier, role_key)
 
         if pref_provider is not None:
-            # A preferred provider won — model still comes from the catalog.
+            # A preferred provider won — model still comes from the catalog,
+            # unless the operator named this provider explicitly and the
+            # catalog has no fetcher for it (see _declared_model_for).
             provider = pref_provider
             tier_model = tier_model_for(tier, provider)
+            if not tier_model and _tier_providers_are_explicit(tier.value):
+                tier_model = self._declared_model_for(provider)
             tier_reason = _append_skipped(pref_reason or f"complexity:{tier.value}:{provider}", skipped)
         elif tier == ComplexityTier.STANDARD:
             # STANDARD with no preferred provider → reuse normal role routing
@@ -1319,8 +1567,33 @@ class ModelRouter:
             # is the diagnosis; a second channel would only be a second thing to
             # keep in sync.
             if decision.effective_tier == "standard":
-                return self._for_role_with_reason(role_key, decision.route_reason)
-            tier_reason = decision.route_reason
+                # Serve the STANDARD tier the way a natively-standard request
+                # would: the operator's AGENT_TIER_PROVIDERS_STANDARD applies
+                # here too. Previously this went straight to the role default,
+                # so a hard question silently abandoned the requested provider
+                # exactly when the work mattered most.
+                dg_provider, _dg_pref, dg_skipped = self._resolve_tier_provider(
+                    ComplexityTier.STANDARD, role_key
+                )
+                dg_model = ""
+                if dg_provider:
+                    dg_model = tier_model_for(
+                        ComplexityTier.STANDARD, dg_provider
+                    ) or self._declared_model_for(dg_provider)
+                if dg_provider and dg_model:
+                    provider = dg_provider
+                    tier_model = dg_model
+                    tier_reason = _append_skipped(
+                        decision.route_reason, [*skipped, *dg_skipped]
+                    )
+                else:
+                    # No operator standard preference (or nothing resolvable for
+                    # it) → unchanged behaviour: the role default.
+                    return self._for_role_with_reason(
+                        role_key, decision.route_reason
+                    )
+            else:
+                tier_reason = decision.route_reason
 
         if not tier_model:
             # No model configured/discovered for this tier → fall back to role
@@ -1359,6 +1632,7 @@ class ModelRouter:
             cost_tier=self._cost_tier_for_route(tier_route),
             ledger=self.usage_ledger,
             llm_factory=self._llm_factory,
+            reprice=self._reprice_for_failover,
         )
 
     def routing_summary(
@@ -1396,4 +1670,50 @@ class ModelRouter:
         for spec in self.registry.list():
             if spec.provider == provider and spec.model == model:
                 return spec.cost_tier
-        return "unknown"
+        return self._classified_cost_tier(model)
+
+    def _reprice_for_failover(self, provider: str, model: str) -> str:
+        """Cost tier for a provider/model pair a failover landed on.
+
+        Failover substitutes a different model on a different provider, so the
+        original route's tier no longer describes what is being paid for.
+        """
+        return self._cost_tier_for_route(
+            ModelRoute(role="", provider=provider, model=model, reason="")
+        )
+
+    @staticmethod
+    def _classified_cost_tier(model: str) -> str:
+        """Cost band for a model nobody priced by hand.
+
+        Catalog-discovered models are absent from ``config/model_registry.json``,
+        so the registry scan above misses them and every such call used to be
+        priced ``unknown`` — which ``core.model_usage`` bills at 5 units/1k,
+        just under ``high``. Measured live, that over-charged the models actually
+        serving standard traffic by ~67%, corrupting budget enforcement.
+
+        The catalog is not silent about these models: it records a weight class
+        for each one (``classify_model``, persisted as the ``tier`` field). This
+        reads that existing judgement rather than inventing a price, and the
+        light/standard/deep → low/medium/high mapping is not invented either —
+        it is what the operator already wrote by hand in the registry for the
+        providers the catalog serves (``gpt-4o-mini`` and ``gpt-5.4-mini`` are
+        light and priced ``low``; ``claude-sonnet-4-5`` is standard and priced
+        ``medium``), with no counterexample.
+
+        ``unknown`` stays reachable: with no model name there is nothing to
+        classify, and guessing there would be dishonest rather than merely
+        imprecise.
+        """
+
+        name = (model or "").strip()
+        if not name:
+            return "unknown"
+
+        from core.model_catalog import ComplexityTier, classify_model
+
+        return {
+            ComplexityTier.LIGHT: "low",
+            ComplexityTier.STANDARD: "medium",
+            ComplexityTier.DEEP: "high",
+        }.get(classify_model(name), "unknown")

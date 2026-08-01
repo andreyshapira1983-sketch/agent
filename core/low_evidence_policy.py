@@ -67,19 +67,45 @@ _DEFAULT_UNVERIFIED_FLOOR = 6
 # For these roles the synthesis IS the deliverable — evidence is not expected.
 _GENERATIVE_ROLES: frozenset[str] = frozenset({"programmer"})
 
+#: Markers of an actually generated artifact in the answer text. A fenced block
+#: or a unified-diff header is newly synthesized output; ordinary prose about a
+#: repository is not, however programmer-ish the role that produced it.
+_FENCE_MARKER = "```"
+_DIFF_MARKERS: tuple[str, ...] = ("--- ", "+++ ", "@@ ")
+
+
+def _carries_generated_artifact(answer: str) -> bool:
+    """Whether *answer* actually contains generated code / a diff.
+
+    Deterministic and regex-free, matching the rest of this module. A fenced
+    block anywhere counts; diff markers count only at the start of a line, so
+    a sentence containing "---" in prose does not qualify.
+    """
+
+    if not answer:
+        return False
+    if _FENCE_MARKER in answer:
+        return True
+    return any(
+        line.startswith(_DIFF_MARKERS)
+        for line in answer.splitlines()
+    )
+
 
 def is_evidence_expected(
     *,
     role: str = "",
     chain_was_empty: bool = False,
     realtime_required: bool = True,
+    answer: str | None = None,
 ) -> bool:
     """Whether the low-evidence truncation gate should apply to this turn.
 
     Evidence is NOT expected (gate disabled) when either:
 
-      * the deliverable is generative code (``role`` in ``_GENERATIVE_ROLES``) —
-        a docstring/diff/code turn that read a file as *input* still produces new
+      * the deliverable is generative code (``role`` in ``_GENERATIVE_ROLES``)
+        **and the answer actually carries a generated artifact** — a
+        docstring/diff/code turn that read a file as *input* still produces new
         text that cannot be verbatim-verified against that file; or
       * the evidence chain is empty AND the question carries no realtime intent
         (a pure reasoning/design answer where the model's synthesis is the whole
@@ -87,9 +113,24 @@ def is_evidence_expected(
 
     Factual / realtime turns (researcher, technical_report, operator_chat, …)
     keep the full gate, so unsupported factual answers are still suppressed.
+
+    The role exemption used to key on WHO answered rather than WHAT was
+    produced. Measured live: "In one sentence: what does core/model_router.py
+    do?" read the file, produced 7 chunks of which 6 verified, and still logged
+    ``no_evidence_expected`` — because it ran under ``role=programmer``. The
+    same class was already recorded in ``docs/COGNITIVE_CORE.md`` (open
+    question 3) for "how many TODO/FIXME are in core/?". Counting and
+    describing are not code generation, and the exemption's own rationale —
+    generated text "can never appear verbatim in the source file" — reaches
+    exactly as far as answers that carry a generated artifact.
+
+    ``answer`` is optional: a caller that does not hand over the text gets the
+    previous role-only behaviour, so no existing call site changes silently.
     """
     if role in _GENERATIVE_ROLES:
-        return False
+        if answer is None:
+            return False
+        return not _carries_generated_artifact(answer)
     return not (chain_was_empty and not realtime_required)
 
 
