@@ -19,6 +19,7 @@ from core.subagent_memory_scope import (
     SubagentProposal,
     ToolScope,
 )
+from core.model_router import ModelRole
 from core.team_plan import SubagentContract
 
 
@@ -217,4 +218,57 @@ def test_canonical_payload_rejects_invalid_nested_types() -> None:
     payload["canonical_contract"]["approval_required"] = "yes"
 
     with pytest.raises(ValueError, match="approval_required must be a boolean"):
+        canonical_from_approval_payload(payload)
+
+
+# --- model_role validation -------------------------------------------------
+# `model_role` decides which model answers. It is the only free string on this
+# contract that another subsystem later resolves, and until now nothing checked
+# it, while `risk_level` right beside it was checked against a closed set.
+
+
+def _canonical(**overrides) -> CanonicalSubagentContract:
+    fields = dict(
+        contract_id="c_model_role",
+        source="planner",
+        name="Auditor",
+        role="RepositoryAuditor",
+        objective="Audit the repository",
+        outputs=("report",),
+        tool_scope=CanonicalToolScope(allowed_tools=("file_read",)),
+        budget_scope=CanonicalBudgetScope(max_model_calls=1, max_iterations=1),
+        risk_level="low",
+        approval_required=False,
+    )
+    fields.update(overrides)
+    return CanonicalSubagentContract(**fields)
+
+
+def test_a_misspelled_model_role_is_refused_at_construction() -> None:
+    with pytest.raises(ValueError, match="model_role"):
+        _canonical(model_role="verifer")
+
+
+def test_every_real_model_role_is_accepted() -> None:
+    for role in ModelRole:
+        assert _canonical(model_role=role.value).model_role == role.value
+
+
+def test_an_absent_model_role_stays_legal() -> None:
+    # None means "no preference"; the runner substitutes its own default.
+    assert _canonical().model_role is None
+
+
+def test_the_enum_member_name_is_not_a_model_role() -> None:
+    # ModelRole.PLANNER.name is "PLANNER" while its value is "planner".
+    with pytest.raises(ValueError, match="model_role"):
+        _canonical(model_role="PLANNER")
+
+
+def test_a_misspelled_model_role_is_refused_when_it_arrives_as_json() -> None:
+    # This is the path a planner model actually writes.
+    payload = approval_payload_from_proposal(_proposal())
+    payload["canonical_contract"]["model_role"] = "sinthesizer"
+
+    with pytest.raises(ValueError, match="model_role"):
         canonical_from_approval_payload(payload)
