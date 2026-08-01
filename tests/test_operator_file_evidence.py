@@ -246,6 +246,30 @@ def test_explicit_multi_file_mode_wins_over_the_work_order_guard(workspace: Path
     assert planner.calls == []
 
 
+def test_the_change_guard_reads_verbs_not_substrings():
+    """The guard must not repeat, in miniature, the defect it fixes.
+
+    Every case below was named by a reviewer: a review OF an implementation is
+    still a review, `commits` is not `commit`, and a file called `commit.md`
+    is what the request is about, not an instruction to commit.
+    """
+    is_change = AgentLoop._is_change_request
+
+    assert not is_change("Compare the implementation of auth in api.py and old_api.py.")
+    assert not is_change("Compare how commits are structured in a.py and b.py.")
+    assert not is_change("Review the refactoring notes in a.md and b.md.")
+    assert not is_change("compare branch.md and commit.md")
+    assert not is_change("Прочитай a.md и b.md и сравни их.")
+
+    assert is_change("Create a new module core/x.py from core/y.py")
+    assert is_change("Refactor core/a.py and core/b.py")
+    assert is_change("Run the tests after comparing a.py and b.py")
+    assert is_change("Сравни a.md и b.md, потом напиши отчёт")
+    assert is_change(
+        "Извлеки кластер из a.md в модуль b.md, запусти тесты. Один коммит."
+    )
+
+
 def test_multi_file_review_rejects_path_traversal_without_llm(workspace: Path):
     agent, planner, _ = _agent(
         workspace,
