@@ -4126,6 +4126,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                             zip(
                                 [rec.id for rec in _records],
                                 self.memory_record_lines(_records),
+                                strict=True,
                             )
                         ),
                     )

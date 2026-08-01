@@ -313,7 +313,9 @@ def test_unknown_demoted_label_is_harmless(monkeypatch):
     result, was_trimmed = apply_total_budget(blocks, trim_first_labels={"not-here"})
 
     assert was_trimmed
-    assert sum(len(c) for _, c in result) <= 450
+    # The configured budget itself, not a padded bound: a trim that overshoots
+    # the limit is exactly the regression this file exists to catch.
+    assert sum(len(c) for _, c in result) <= 400
 
 
 # ── integration: _format_artifact via loop ───────────────────────────────────

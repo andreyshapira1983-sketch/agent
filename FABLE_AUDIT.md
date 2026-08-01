@@ -306,7 +306,7 @@ Cluster 1b — DONE on branch `fix/memory-pollution-migration` (this branch):
   wrong workspace looks successful while touching nothing)
 
 Cluster 2 — DONE on branch `fix/root-b-memory-in-evidence-budget`
-(uncommitted at the time of writing; suite green):
+(commit `d597ee7`, PR #202; suite green):
 - Defect: `_synthesize` passed only tool artifacts through
   `apply_total_budget`; `<long_term_memory>` was concatenated into the prompt
   outside it, so memory was structurally untrimmable and the fresh read — the
@@ -352,7 +352,7 @@ Cluster 2 — DONE on branch `fix/root-b-memory-in-evidence-budget`
      a record's own content, and the filter compared ids by SUBSTRING: a
      record containing "- [1] …" produced the id "1", which is a substring of
      ~87% of 32-hex ids, making the filter a near no-op. Now anchored
-     (`^- \[(mem_[0-9a-f]+) \| tags: `) and compared by equality.
+     (`^- \[(mem_[0-9a-f]+) \| tags:`) and compared by equality.
   3. `str.partition` split on the FIRST "TOTAL-BUDGET" marker, so a record
      whose content quoted such a notice discarded the whole memory block
      silently. The repair no longer parses the cut string at all: it measures
@@ -388,7 +388,7 @@ Cluster 2 — DONE on branch `fix/root-b-memory-in-evidence-budget`
   4. a record whose text survived in full was still dropped when the cut
      landed exactly on the newline separating it from the next record. Record
      spans now end at the last text character.
-  5b. STATED, not changed: a single-record block is dropped whole whenever it
+  5. STATED, not changed: a single-record block is dropped whole whenever it
      is trimmed at all (the last record's span reaches the closing tag, and
      the budget always reserves ~120 chars for its notice). That is "whole
      records only" applied honestly; the alternative is half a record with a
@@ -431,8 +431,9 @@ Cluster 2 — DONE on branch `fix/root-b-memory-in-evidence-budget`
   falsification test does not apply there. Registered here, not fixed.
 - REGISTERED, not fixed (needs an operator decision, and the fix lives in a
   different subsystem): `_retrieve_persistent` bumps `access_count` /
-  `last_accessed_at` on every retrieved record (`core/loop_methods2.py:
-  226-238`), i.e. at retrieval time. Until this cluster, retrieved implied
+  `last_accessed_at` on every retrieved record
+  (`core/loop_methods2.py:235-250`), i.e. at retrieval time. Until this
+  cluster, retrieved implied
   injected, so the counter measured "the model saw it". Now the budget can
   drop a retrieved record, and the archive scorer's "actively useful" signal
   counts records the model never received. Measured: at a 900-char budget all

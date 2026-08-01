@@ -78,6 +78,13 @@ def _merge_rejection_reasons(*reports: dict[str, int]) -> dict[str, int]:
 
 
 class AgentLoopExtractedMethods2:
+    if TYPE_CHECKING:  # pragma: no cover — declarations, never executed
+        # Members this mixin reads from its host (`AgentLoop.__init__` sets
+        # them). Declared, not defined: a static checker otherwise reads every
+        # use as an unknown attribute, and `tests/test_loop_methods_contract`
+        # keeps this block from ever shadowing something the mixin really has.
+        retrieval_policy: Any
+
     def _durable_learning_suppressed(self, sink: str | None = None) -> bool:
         """True when a durable learning write must be skipped.
 
@@ -262,8 +269,11 @@ class AgentLoopExtractedMethods2:
         lines: list[str] = []
         for record in records:
             line = self.retrieval_policy.format_for_prompt([record])
-            line = line.replace(MEMORY_CLOSE_TAG, "&lt;/long_term_memory&gt;")
-            line = line.replace(MEMORY_OPEN_TAG, "&lt;long_term_memory&gt;")
+            # By PREFIX, not by exact tag: `<long_term_memory attr="x">` reads
+            # as a boundary to the model just as well as the bare tag. This is
+            # the rule the `<analysis_target` defence uses (`core/loop.py`).
+            line = line.replace(f"{MEMORY_CLOSE_TAG[:-1]}", "&lt;/long_term_memory")
+            line = line.replace(f"{MEMORY_OPEN_TAG[:-1]}", "&lt;long_term_memory")
             lines.append(line)
         return lines
 
