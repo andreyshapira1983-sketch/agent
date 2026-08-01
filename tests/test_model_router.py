@@ -1106,3 +1106,103 @@ def test_role_route_without_a_ceiling_is_unchanged(monkeypatch):
     llm = router.for_role(ModelRole.REPAIR_PROPOSAL)
 
     assert (llm.provider, llm.model) == ("anthropic", "claude-opus-4-20250514")
+
+
+# ---------------------------------------------------------------------------
+# A role name that does not exist must not be indistinguishable from a role
+# that exists but is simply unconfigured.
+#
+# `model_role` is a free string on both TeamContract and SubAgentContract, and
+# neither validates it — so a typo in a plan (which a model may have written)
+# reaches route_for() as data. The fallback to the default route is correct:
+# the agent should not crash mid-answer over a misspelling. What is wrong is
+# that the fallback is silent and reports the same `reason` as a deliberate
+# default, so nothing downstream can tell "you asked for a role I do not know"
+# from "that role has no configuration".
+#
+# The signal goes on the route reason rather than into a log line, following
+# the rule already stated in model_router: the router has no logger of its own,
+# and the route reason is written to the usage ledger with every call, so a
+# second channel would only be a second thing to keep in sync.
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_role_is_distinguishable_from_a_configured_default():
+    # A misspelling and a real-but-unconfigured role both fall back, but the
+    # caller must be able to tell them apart.
+    router = ModelRouter(default_provider="openai", default_model="gpt-4o-mini")
+
+    real = router.route_for(ModelRole.VERIFIER)
+    typo = router.route_for("verifer")
+
+    assert real.reason != typo.reason
+    assert "unknown_role" in typo.reason
+    assert "unknown_role" not in real.reason
+
+
+def test_known_role_without_configuration_still_reports_a_plain_default():
+    # Guard: naming a role the runtime knows is not an error, so the reason
+    # stays exactly what it was before this distinction existed.
+    router = ModelRouter(default_provider="openai", default_model="gpt-4o-mini")
+
+    for role in ModelRole:
+        assert router.route_for(role).reason == "default"
+
+
+def test_enum_member_name_is_not_mistaken_for_a_role():
+    # ModelRole.PLANNER.name is "PLANNER" but the role key is "planner".
+    # Passing the member name is a real mistake and must be reported as one.
+    router = ModelRouter(default_provider="openai", default_model="gpt-4o-mini")
+
+    route = router.route_for(ModelRole.PLANNER.name)
+
+    assert "unknown_role" in route.reason
+
+
+def test_unknown_role_still_serves_a_working_client():
+    # The point is observability, not refusal: the call must still be served,
+    # otherwise a typo in a plan would take down a live answer.
+    router = ModelRouter(
+        default_provider="openai",
+        default_model="gpt-4o-mini",
+        llm_factory=_tier_factory,
+    )
+
+    llm = router.for_role("verifer")
+
+    assert (llm.provider, llm.model) == ("openai", "gpt-4o-mini")
+
+
+def test_an_explicitly_routed_custom_role_is_not_called_unknown():
+    # An operator who names their own role in `routes` meant it. Only the
+    # combination "not a known role AND nothing configured for it" is a typo.
+    router = ModelRouter(
+        default_provider="openai",
+        default_model="gpt-4o-mini",
+        routes={"house_style": ModelRoute(role="house_style", provider="anthropic")},
+    )
+
+    route = router.route_for("house_style")
+
+    assert "unknown_role" not in route.reason
+    assert route.provider == "anthropic"
+
+
+def test_unknown_role_reason_reaches_the_usage_ledger():
+    # The ledger is the one channel this router writes to, so the signal has to
+    # survive the trip from route_for() into a recorded call.
+    from core.model_usage import ModelUsageLedger
+
+    ledger = ModelUsageLedger()
+    router = ModelRouter(
+        default_provider="openai",
+        default_model="gpt-4o-mini",
+        llm_factory=_tier_factory,
+        usage_ledger=ledger,
+    )
+
+    llm = router.for_role("verifer")
+    llm.complete(system="s", user="u")
+
+    assert ledger.records, "the call should have been recorded"
+    assert "unknown_role" in ledger.records[-1].route_reason

@@ -349,6 +349,8 @@ _ROLE_ENV_PREFIXES: dict[ModelRole, tuple[str, ...]] = {
     ModelRole.VERIFIER: ("AGENT_VERIFIER",),
 }
 
+_KNOWN_ROLE_KEYS: frozenset[str] = frozenset(role.value for role in ModelRole)
+
 
 class UsageTrackedLLM:
     """Small proxy that records one role-specific `complete()` call."""
@@ -1089,11 +1091,24 @@ class ModelRouter:
                 model=registry_spec.model,
                 reason=f"policy:{self.selection_policy.name}:{registry_spec.id}",
             )
+        # Nothing is configured for this role, so the default is what gets
+        # served either way. But "this role has no configuration" and "there is
+        # no such role" are different facts, and until now both were reported
+        # as a bare "default", so no caller could tell a deliberate fallback
+        # from a misspelling. `model_role` is a free string on team and
+        # sub-agent contracts and neither validates it, so a typo — possibly
+        # written by a model — arrives here as data. Serving it is still right:
+        # a misspelling must not take down a live answer. Naming it is what was
+        # missing. The signal rides the route reason rather than a log line for
+        # the reason given at `record_usage`: this router has no logger of its
+        # own, the reason already reaches the usage ledger with every call, and
+        # a second channel would only be a second thing to keep in sync.
+        known_role = role_key in _KNOWN_ROLE_KEYS
         return ModelRoute(
             role=role_key,
             provider=self.default_provider,
             model=self.default_model,
-            reason="default",
+            reason="default" if known_role else "default:unknown_role",
         )
 
     def for_role(self, role: ModelRole | str) -> Any:
