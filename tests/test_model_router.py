@@ -909,3 +909,96 @@ def test_deep_downgrade_falls_back_to_role_default_without_a_standard_provider(
 
     assert tracked.route.provider == "openai"
     assert tracked.route.reason.startswith("deep_downgraded:")
+
+
+def test_failover_reprices_the_call_for_the_substitute_provider():
+    # D3. provider/model are re-read on every loop iteration after a failover
+    # (model_router.py:479-480), but cost_tier is captured once at construction
+    # (:368) and reused at :488, :495, :513 and :544. So a call that starts on a
+    # free local model and fails over to an expensive hosted one is charged, and
+    # budget-checked, at the ORIGINAL tier. The ledger under-reports real spend,
+    # and assert_can_start() guards the wrong tier - a budget that would refuse
+    # the expensive model can be bypassed by failing over into it.
+    from unittest import mock
+
+    import core.model_router as mr
+
+    ledger = ModelUsageLedger()
+
+    class _DeadLocal:
+        provider = "local"
+        model = "qwen-local"
+
+        def complete(self, system, user, max_tokens=2048, temperature=0.7):
+            raise RuntimeError("invalid api key")
+
+    class _LiveHosted:
+        provider = "anthropic"
+        model = "claude-opus-5"
+
+        def complete(self, system, user, max_tokens=2048, temperature=0.7):
+            return "OK"
+
+    def factory(provider, model):
+        return _LiveHosted()
+
+    tracked = mr.UsageTrackedLLM(
+        _DeadLocal(),
+        role="planner",
+        route=ModelRoute(role="planner", provider="local", model="qwen-local", reason="t"),
+        cost_tier="free",
+        ledger=ledger,
+        llm_factory=factory,
+        reprice=lambda provider, model: "high" if provider == "anthropic" else "free",
+    )
+
+    with mock.patch.object(mr, "_provider_failover_enabled", lambda: True), \
+            mock.patch.object(mr, "_next_failover_provider", lambda tried: "anthropic"):
+        assert tracked.complete("sys", "usr") == "OK"
+
+    success = [r for r in ledger.records if r.status == "success"]
+    assert len(success) == 1
+    record = success[0]
+    assert record.provider == "anthropic"
+    assert record.model == "claude-opus-5"
+    # The expensive substitute must not be billed at the free tier it replaced.
+    assert record.cost_tier == "high"
+
+
+def test_failover_without_a_repricer_keeps_the_original_tier():
+    # Guard: callers that do not supply a repricer keep the previous behaviour.
+    from unittest import mock
+
+    import core.model_router as mr
+
+    ledger = ModelUsageLedger()
+
+    class _Dead:
+        provider = "local"
+        model = "qwen-local"
+
+        def complete(self, system, user, max_tokens=2048, temperature=0.7):
+            raise RuntimeError("invalid api key")
+
+    class _Live:
+        provider = "anthropic"
+        model = "claude-opus-5"
+
+        def complete(self, system, user, max_tokens=2048, temperature=0.7):
+            return "OK"
+
+    tracked = mr.UsageTrackedLLM(
+        _Dead(),
+        role="planner",
+        route=ModelRoute(role="planner", provider="local", model="qwen-local", reason="t"),
+        cost_tier="free",
+        ledger=ledger,
+        llm_factory=lambda provider, model: _Live(),
+    )
+
+    with mock.patch.object(mr, "_provider_failover_enabled", lambda: True), \
+            mock.patch.object(mr, "_next_failover_provider", lambda tried: "anthropic"):
+        assert tracked.complete("sys", "usr") == "OK"
+
+    success = [r for r in ledger.records if r.status == "success"]
+    assert success[0].cost_tier == "free"

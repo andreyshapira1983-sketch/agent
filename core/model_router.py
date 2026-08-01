@@ -362,11 +362,17 @@ class UsageTrackedLLM:
         cost_tier: str,
         ledger: ModelUsageLedger,
         llm_factory: Callable[[str | None, str | None], Any] | None = None,
+        reprice: Callable[[str, str], str] | None = None,
     ):
         self._llm = llm
         self.role = role
         self.cost_tier = cost_tier
         self.ledger = ledger
+        # Re-prices the call when failover lands on a different provider/model.
+        # Without it the substitute inherits the original route's tier, so a
+        # free local model that fails over to an expensive hosted one is both
+        # billed and budget-checked as free. ``None`` keeps the old behaviour.
+        self._reprice = reprice
         # Factory used to rebuild the client on another provider during
         # failover. When ``None`` (e.g. no ledger / static LLM paths) failover
         # is disabled and behaviour is unchanged.
@@ -526,6 +532,13 @@ class UsageTrackedLLM:
                     self._llm = replacement
                     self.provider = getattr(replacement, "provider", None) or ""
                     self.model = getattr(replacement, "model", None) or ""
+                    # The substitute is a different model on a different
+                    # provider; its price is not the original route's price.
+                    if self._reprice is not None and self.provider:
+                        try:
+                            self.cost_tier = self._reprice(self.provider, self.model)
+                        except Exception:  # pragma: no cover - defensive
+                            pass
                     route_reason = f"provider_failover:{provider}->{self.provider}"
                     continue
                 raise
@@ -1108,6 +1121,7 @@ class ModelRouter:
             cost_tier=self._cost_tier_for_route(route),
             ledger=self.usage_ledger,
             llm_factory=self._llm_factory,
+            reprice=self._reprice_for_failover,
         )
         self._tracked_cache[role_key] = tracked
         return tracked
@@ -1190,6 +1204,7 @@ class ModelRouter:
             cost_tier=self._cost_tier_for_route(stamped),
             ledger=self.usage_ledger,
             llm_factory=self._llm_factory,
+            reprice=self._reprice_for_failover,
         )
 
     def _declared_model_for(self, provider: str) -> str:
@@ -1502,6 +1517,7 @@ class ModelRouter:
             cost_tier=self._cost_tier_for_route(tier_route),
             ledger=self.usage_ledger,
             llm_factory=self._llm_factory,
+            reprice=self._reprice_for_failover,
         )
 
     def routing_summary(
@@ -1540,6 +1556,16 @@ class ModelRouter:
             if spec.provider == provider and spec.model == model:
                 return spec.cost_tier
         return self._classified_cost_tier(model)
+
+    def _reprice_for_failover(self, provider: str, model: str) -> str:
+        """Cost tier for a provider/model pair a failover landed on.
+
+        Failover substitutes a different model on a different provider, so the
+        original route's tier no longer describes what is being paid for.
+        """
+        return self._cost_tier_for_route(
+            ModelRoute(role="", provider=provider, model=model, reason="")
+        )
 
     @staticmethod
     def _classified_cost_tier(model: str) -> str:
