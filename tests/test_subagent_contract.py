@@ -230,7 +230,7 @@ def test_canonical_payload_rejects_invalid_nested_types() -> None:
 def _canonical(**overrides) -> CanonicalSubagentContract:
     fields = dict(
         contract_id="c_model_role",
-        source="planner",
+        source="proposal",
         name="Auditor",
         role="RepositoryAuditor",
         objective="Audit the repository",
@@ -272,3 +272,20 @@ def test_a_misspelled_model_role_is_refused_when_it_arrives_as_json() -> None:
 
     with pytest.raises(ValueError, match="model_role"):
         canonical_from_approval_payload(payload)
+
+
+def test_a_blank_model_role_is_refused_rather_than_read_as_absent() -> None:
+    # "" is a legal "no preference" because subagent_runner reads it with
+    # `or "synthesizer"`. "   " is not: it is truthy, so the runner forwards it
+    # and the router's _coerce_role raises "model role must be non-empty".
+    # Letting it through here would only move that crash further from its cause.
+    with pytest.raises(ValueError, match="model_role"):
+        _canonical(model_role="   ")
+
+
+def test_the_fixture_source_is_one_the_deserializer_accepts() -> None:
+    # ContractSource is a Literal the dataclass does not enforce, so a fixture
+    # is free to describe a contract from_dict would refuse. Keep them honest.
+    payload = json.loads(json.dumps(_canonical().to_dict()))
+
+    assert CanonicalSubagentContract.from_dict(payload).source == "proposal"

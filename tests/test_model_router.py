@@ -11,6 +11,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from core.approval import AutoApprover
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
@@ -19,6 +21,7 @@ from core.model_router import (
     ModelRoute,
     ModelRouter,
     UsageTrackedLLM,
+    ensure_known_model_role,
 )
 from core.model_usage import ModelUsageLedger
 from core.policy import PolicyGate
@@ -1202,3 +1205,33 @@ def test_unknown_role_reason_reaches_the_usage_ledger():
 
     assert ledger.records, "the call should have been recorded"
     assert "unknown_role" in ledger.records[-1].route_reason
+
+
+def test_a_blank_role_is_refused_where_the_router_would_refuse_it_too() -> None:
+    # An empty value means "no preference" and stays legal. A whitespace-only
+    # one does not: it is truthy for callers yet empty for _coerce_role, which
+    # raises. Refusing it here keeps the guard from being weaker than routing.
+    ensure_known_model_role(None)
+    ensure_known_model_role("")
+
+    with pytest.raises(ValueError, match="model_role"):
+        ensure_known_model_role("   ")
+
+
+def test_a_route_only_custom_role_is_deliberately_not_contract_legal() -> None:
+    # A hand-built router serves any role named in `routes` (see
+    # test_an_explicitly_routed_custom_role_is_not_called_unknown), so this
+    # guard is narrower than one live router. That is the intended line:
+    # from_env — the only path the agent itself uses — builds routes solely
+    # from _ROLE_ENV_PREFIXES, so an operator cannot configure a custom role
+    # into a running agent, while a planner model can misspell one into a
+    # contract. The closed set matches _KNOWN_TOOLS beside it in team_plan.
+    router = ModelRouter(
+        default_provider="openai",
+        default_model="gpt-4o-mini",
+        routes={"house_style": ModelRoute(role="house_style", provider="anthropic")},
+    )
+    assert router.route_for("house_style").provider == "anthropic"
+
+    with pytest.raises(ValueError, match="model_role"):
+        ensure_known_model_role("house_style")
