@@ -6,18 +6,29 @@
 #     Exception in thread "main"
 #     java.nio.charset.MalformedInputException: Input length = 1
 #
-# and exit code 1, so no SARIF was ever uploaded. The cause is a single
-# tracked file that is not text at all -- docs/Технический_анализ_...docx,
-# 204 KB whose first bytes are "PK\x03\x04", i.e. a ZIP container. Codacy
-# read it as source and choked on byte 0xb7. That byte is not a valid UTF-8
-# start byte either, so forcing a UTF-8 locale on the job would not have
-# helped; the file has to be kept out of the analysis.
+# and exit code 1, so no SARIF was ever uploaded. The stack trace names the
+# exact caller:
 #
-# Only one such file exists today (checked: of 625 tracked files, exactly
-# one fails to decode as UTF-8). The patterns below cover the whole class,
-# so the next document or image somebody commits does not stop the scan
-# again.
+#     com.codacy.analysis.cli.formatter.Sarif.createResults(Sarif.scala:146)
+#       -> better.files.File.lines -> java.nio.file.Files.readAllLines
+#
+# so the crash is not in any analyser: it is the SARIF writer re-reading a
+# file that already produced a result, to quote the offending line. One
+# tracked file is not text at all -- docs/Технический_анализ_...docx, 204 KB
+# whose first bytes are "PK\x03\x04", i.e. a ZIP container; byte 10 is 0xb7,
+# which cannot start a UTF-8 sequence. Of 627 tracked files that is the only
+# one that fails to decode, so keeping it out of the analysis is enough.
+#
+# Locale was ruled out by running their own image: codacy/codacy-analysis-cli
+# already ships LANG=C.UTF-8 and file.encoding=UTF-8, and the wrapper script
+# forwards only CODACY_CODE / CODACY_PROJECT_TOKEN / CODACY_API_TOKEN /
+# CODACY_API_BASE_URL into the container -- job-level LANG or
+# JAVA_TOOL_OPTIONS never reach the JVM at all.
+#
+# Both spellings are listed on purpose: "**/*.docx" only matches inside a
+# directory, "**.docx" also matches a file committed at the repository root.
 exclude_paths:
+  - "**.docx"
   - "**/*.docx"
   - "**/*.doc"
   - "**/*.pdf"
@@ -35,15 +46,33 @@ exclude_paths:
 #     Failed analysis for eslint  -- No ESLint configuration found
 #
 # PMD analyses Java and ESLint analyses JavaScript. This repository has
-# neither: its 625 tracked files are 558 .py, 38 .md, and a handful of
-# .ps1/.json/.yml/.toml/.txt -- not one .java, .js or .ts. The tools were
+# neither: its 627 tracked files are 558 .py, 38 .md, and a handful of
+# .ps1/.json/.yml/.toml/.txt -- not one .java, .js or .ts. Both tools were
 # started for languages that are not here, found nothing to configure and
-# failed. Turning those languages off stops both failures at the source
-# and shortens a run that currently takes over twenty minutes.
-languages:
-  java:
-    enabled: false
-  javascript:
-    enabled: false
-  typescript:
-    enabled: false
+# failed. Neither failure aborts the run -- it continued for another twenty
+# minutes afterwards -- so this is noise, not the cause of the red cross.
+#
+# The obvious fix does not exist. Codacy's own validator, run locally
+# against their 4.0.0 image, shows that "enabled" is not part of either
+# schema: a "languages:" entry parses to LanguageConfiguration(extensions)
+# and an "engines:" entry to EngineConfiguration(exclude_paths, baseSubDir,
+# extraValues). Feeding it "enabled: false" yields three Nones -- the key
+# is dropped without a warning, which is exactly how the previous attempt
+# to switch Java and JavaScript off did nothing at all. Verified by feeding
+# a probe value: the first slot echoed back Glob("**/probe.java"), so the
+# field really is exclude_paths and there is no on/off switch to reach.
+#
+# So the only lever the schema does offer is used instead: give each of the
+# three engines an empty file list. Tools whose language is genuinely
+# present -- SQLint and tsqllint (.sql), psscriptanalyzer (.ps1),
+# remark-lint (.md), hadolint (Dockerfile) -- are left alone.
+engines:
+  pmd:
+    exclude_paths:
+      - "**"
+  pmd-legacy:
+    exclude_paths:
+      - "**"
+  eslint:
+    exclude_paths:
+      - "**"
