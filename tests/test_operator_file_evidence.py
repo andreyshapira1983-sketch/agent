@@ -296,8 +296,6 @@ def test_stripping_file_tokens_stays_cheap_on_hostile_input():
     doubled input, putting the flagged pattern around 8 s against a 2 s budget.
     A 19 ms margin would have been decided by how busy the runner was.
     """
-    from core.loop import AgentLoop
-
     BUDGET_SECONDS = 2.0
     hostile = "-" * 32_000 + "!"
 
