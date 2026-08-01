@@ -1100,6 +1100,7 @@ class ModelRouter:
         llm = self._cache[cache_key]
         if self.usage_ledger is None:
             return llm
+        route = self._route_with_resolved_identity(route, llm, provider, model)
         tracked = UsageTrackedLLM(
             llm,
             role=role_key,
@@ -1110,6 +1111,46 @@ class ModelRouter:
         )
         self._tracked_cache[role_key] = tracked
         return tracked
+
+    def _route_with_resolved_identity(
+        self,
+        route: ModelRoute,
+        llm: Any,
+        provider: str | None,
+        model: str | None,
+    ) -> ModelRoute:
+        """Return *route* with the provider/model the call will really use.
+
+        A route can reach this point naming nothing at all: when no registry
+        candidate satisfies the selection policy, ``best_for_role`` returns
+        ``None`` and both defaults are unset, so the router builds the client
+        with ``(None, None)``. That client then resolves a concrete provider and
+        model from the environment and the call succeeds — but the ledger used
+        to record ``provider=None, model=None``, pricing real spend as
+        ``unknown``.
+
+        Recording what the client resolved keeps the ledger a description of the
+        call that happened rather than of the route that could not be planned.
+        An explicitly routed provider/model always wins; the client is consulted
+        only for the blanks.
+        """
+
+        resolved_provider = (
+            (provider or "").strip() or (getattr(llm, "provider", "") or "").strip()
+        )
+        resolved_model = (
+            (model or "").strip() or (getattr(llm, "model", "") or "").strip()
+        )
+        if resolved_provider == (route.provider or "") and resolved_model == (
+            route.model or ""
+        ):
+            return route
+        return ModelRoute(
+            role=route.role,
+            provider=resolved_provider or None,
+            model=resolved_model or None,
+            reason=route.reason,
+        )
 
     def _for_role_with_reason(self, role_key: str, route_reason: str) -> Any:
         """Return the standard role LLM but stamp a custom ``route_reason``.
@@ -1130,17 +1171,22 @@ class ModelRouter:
         llm = self._cache[cache_key]
         if self.usage_ledger is None:
             return llm
-        stamped = ModelRoute(
-            role=role_key,
-            provider=provider,
-            model=model,
-            reason=route_reason,
+        stamped = self._route_with_resolved_identity(
+            ModelRoute(
+                role=role_key,
+                provider=provider,
+                model=model,
+                reason=route_reason,
+            ),
+            llm,
+            provider,
+            model,
         )
         return UsageTrackedLLM(
             llm,
             role=role_key,
             route=stamped,
-            cost_tier=self._cost_tier_for_route(route),
+            cost_tier=self._cost_tier_for_route(stamped),
             ledger=self.usage_ledger,
             llm_factory=self._llm_factory,
         )
