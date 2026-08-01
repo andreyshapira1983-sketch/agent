@@ -169,12 +169,14 @@ class ModelUsageLedger:
     logger: Any | None = None
     budget_ledger: BudgetLedger | None = None
     records: list[ModelUsageRecord] = field(default_factory=list)
-    # The run these records belong to. The ledger file is append-only and
-    # outlives the process, so without this every run's spend lands in one
-    # undifferentiated history. This reuses the trace id the agent already
-    # mints per run rather than minting a second identifier for the same thing;
-    # a sub-agent carries its own trace id and so becomes separable from its
-    # parent for free.
+    # Fallback identity for records written outside any run, and the value an
+    # explicit caller pins. The ledger file is append-only and outlives the
+    # process, so without an id every run's spend lands in one undifferentiated
+    # history. Left unset it takes `TraceLogger.trace_id`, which names the
+    # AGENT SESSION — a sub-agent carries its own trace id and so stays
+    # separable from its parent for free. Which run a given record belongs to
+    # is decided per record in `_run_id_for_record`, because one session runs
+    # many cycles.
     run_id: str | None = None
     # Set when the caller named the run itself. A surrounding run scope must
     # not override that: a sub-agent ledger is built for one run and stays
