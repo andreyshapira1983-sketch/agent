@@ -8,7 +8,12 @@ Two complementary limits keep the synthesizer prompt lean:
 
   2. Total evidence budget (env AGENT_EVIDENCE_TOTAL_CHARS, default 32 000 chars ≈ 8 k tokens)
      Many medium-sized artifacts cannot collectively overwhelm the context window.
-     The LARGEST artifact is trimmed first, preserving smaller ones intact.
+     The LARGEST artifact is trimmed first, preserving smaller ones intact —
+     except for blocks the caller demotes via ``trim_first_labels``, which are
+     spent before any other block is touched regardless of size. Recollection
+     (long-term memory) is demoted this way: "largest first" is the right rule
+     among blocks of the same kind and the wrong one across kinds, because the
+     freshly read file is almost always the largest block.
 
 Realtime Intent extraction:
   When a file exceeds the per-artifact budget, we do NOT blindly return the first N chars.
@@ -32,11 +37,17 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Set as AbstractSet
 
 # ── configurable limits ────────────────────────────────────────────────────────
 
 EVIDENCE_FILE_CHARS:  int = 12_000   # per-artifact ceiling
 EVIDENCE_TOTAL_CHARS: int = 32_000   # total ceiling across all artifacts
+
+# Label under which the `<long_term_memory>` block enters the total budget.
+# Defined here, next to the budget it competes in, so the loop and the tests
+# name the same block instead of repeating a string literal.
+MEMORY_BLOCK_LABEL: str = "long_term_memory"
 
 
 def _file_chars() -> int:
@@ -213,17 +224,42 @@ def extract_relevant(text: str, *, question: str, budget: int) -> str:
 
 # ── total budget across all artifacts ─────────────────────────────────────────
 
+def _trim_notice(new_len: int, old_len: int, budget: int) -> str:
+    """The notice appended to a block trimmed by the total budget.
+
+    One definition, because two places need the exact same string: the trim
+    itself, and the test deciding whether a block can still shrink. When that
+    test used a constant upper bound instead, blocks that could still give
+    chars back were skipped and the budget stayed violated.
+    """
+    return (
+        f"\n...[TOTAL-BUDGET: trimmed to {new_len} of {old_len} chars "
+        f"to fit {budget}-char total evidence budget]"
+    )
+
+
 def apply_total_budget(
     blocks: list[tuple[str, str]],
+    *,
+    trim_first_labels: AbstractSet[str] | None = None,
 ) -> tuple[list[tuple[str, str]], bool]:
     """Trim evidence blocks until their total fits in AGENT_EVIDENCE_TOTAL_CHARS.
 
     Strategy: trim the **largest** block first (the one wasting the most tokens).
     This preserves all smaller blocks intact and avoids cascading truncation.
 
+    Blocks whose label appears in *trim_first_labels* are **demoted**: they are
+    spent before any other block is touched, largest demoted block first, down
+    to the content floor. Only when no demoted block can shrink further does a
+    normal block get trimmed. This is what keeps recollection from outranking
+    the file the agent just read: memory is smaller than a fresh source file, so
+    "largest first" alone would always cut the fresh evidence and never memory.
+
     Parameters
     ----------
     blocks : list of (label, formatted_content)
+    trim_first_labels : labels to spend before anything else (order within the
+        group is still largest-first). Unknown labels are ignored.
 
     Returns
     -------
@@ -242,9 +278,22 @@ def apply_total_budget(
     sizes     = [len(c) for c in originals]
     was_trimmed = False
 
-    # Upper-bound notice overhead: the longest possible notice string.
+    # Upper-bound notice overhead used when sizing the cut: over-reserving
+    # only makes a trim slightly deeper, never leaves the budget violated.
     # Notice = "\n...[TOTAL-BUDGET: trimmed to NNNNN of NNNNN chars to fit NNNNN-char total evidence budget]"
     _NOTICE_OVERHEAD = 120
+    _MIN_CONTENT     = 50          # never cut a block below this many chars
+
+    # A bare string is an iterable of characters; treating "memory" as six
+    # one-letter labels would silently demote nothing.
+    if isinstance(trim_first_labels, str):
+        trim_first_labels = {trim_first_labels}
+    demoted = frozenset(trim_first_labels or ())
+
+    def _smallest_possible(index: int) -> int:
+        """Size this block would have if trimmed as far as the floor allows."""
+        old = len(originals[index])
+        return _MIN_CONTENT + len(_trim_notice(_MIN_CONTENT, old, budget))
 
     prev_total = sum(sizes) + 1  # sentinel to detect non-progress
     while sum(sizes) > budget:
@@ -253,19 +302,28 @@ def apply_total_budget(
             break  # safety: can't make further progress, avoid infinite loop
         prev_total = current_total
 
-        excess  = current_total - budget
-        biggest = max(range(len(sizes)), key=lambda i: sizes[i])
+        excess = current_total - budget
+        # A block that is already as small as trimming can make it gives
+        # nothing back; keeping it in the pool would stall the loop on the
+        # no-progress guard and leave the budget violated. Measured against the
+        # real notice length, not the padded reserve above — the difference is
+        # ~30 chars per block, which is exactly the window where a block that
+        # could still shrink used to be skipped.
+        candidates = [
+            i for i in range(len(sizes)) if sizes[i] > _smallest_possible(i)
+        ]
+        if not candidates:
+            break
+        preferred = [i for i in candidates if result[i][0] in demoted]
+        biggest = max(preferred or candidates, key=lambda i: sizes[i])
 
         old_len   = len(originals[biggest])
         # new_len must be small enough that (new_len + notice_overhead) fits
-        # the required reduction.  Keep at least 50 chars of content.
+        # the required reduction.  Keep at least _MIN_CONTENT chars of content.
         target    = old_len - excess - _NOTICE_OVERHEAD
-        new_len   = max(50, target)
+        new_len   = max(_MIN_CONTENT, target)
         label     = result[biggest][0]
-        notice    = (
-            f"\n...[TOTAL-BUDGET: trimmed to {new_len} of {old_len} chars "
-            f"to fit {budget}-char total evidence budget]"
-        )
+        notice    = _trim_notice(new_len, old_len, budget)
         result[biggest] = (label, originals[biggest][:new_len] + notice)
         sizes[biggest]  = new_len + len(notice)
         was_trimmed = True

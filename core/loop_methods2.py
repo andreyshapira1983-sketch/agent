@@ -33,6 +33,11 @@ from core.smart_memory import (
     is_usage_eligible,
 )
 
+# The wrapper the retrieved long-term records are placed in. Named once so the
+# builder here and the prompt assembly in `core/loop.py` cannot drift.
+MEMORY_OPEN_TAG: str = "<long_term_memory>"
+MEMORY_CLOSE_TAG: str = "</long_term_memory>"
+
 # Every durable sink the loop can write. A write site names its sink; a name
 # outside this set is refused rather than waved through, so a typo or a new
 # unregistered sink fails closed.
@@ -204,7 +209,7 @@ class AgentLoopExtractedMethods2:
                 },
             )
             return ""
-        formatted = self.retrieval_policy.format_for_prompt(selected)
+        formatted = "\n".join(self.memory_record_lines(selected))
         self.log.log(
             "persistent_memory_inject",
             {
@@ -237,7 +242,30 @@ class AgentLoopExtractedMethods2:
                 })
                 self.persistent_store.update(updated)
 
-        return f"<long_term_memory>\n{formatted}\n</long_term_memory>"
+        return f"{MEMORY_OPEN_TAG}\n{formatted}\n{MEMORY_CLOSE_TAG}"
+
+    def memory_record_lines(self, records: list) -> list[str]:
+        """One formatted prompt line per record, wrapper tags neutralised.
+
+        The single place a `<long_term_memory>` line is produced. The prompt
+        builder needs the same lines to know where each record starts and ends
+        after the evidence budget cuts the block; deriving them twice, or
+        finding them again by pattern, is how a record that merely QUOTES a
+        record-shaped line ended up being treated as a record boundary.
+
+        Record content is partly agent-written and may quote the wrapper it is
+        about to be placed in. A literal tag inside a record ends (or reopens)
+        the block for the reading model, putting the rest of memory outside
+        it — the same defence the local-critique path applies to
+        `</analysis_target>` (`core/loop.py`).
+        """
+        lines: list[str] = []
+        for record in records:
+            line = self.retrieval_policy.format_for_prompt([record])
+            line = line.replace(MEMORY_CLOSE_TAG, "&lt;/long_term_memory&gt;")
+            line = line.replace(MEMORY_OPEN_TAG, "&lt;long_term_memory&gt;")
+            lines.append(line)
+        return lines
 
     def _retrieve_experience_memory(self, question: str) -> str:
         """Inject compact episodic/procedural memory into planning.
