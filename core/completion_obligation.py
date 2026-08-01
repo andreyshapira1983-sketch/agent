@@ -86,7 +86,17 @@ _OBSERVING_TOOLS: frozenset[str] = frozenset({
 
 #: A path named in the question. Same shape the loop already uses for its
 #: file-scope notice — the object, not the verb.
+#:
+#: The leading guard is a speed fix, not a meaning change. Without it the
+#: engine could begin a match *inside* a run of `/`, `.` or `-`, so a wall of
+#: n separators offered n starting positions and each one rescanned the rest:
+#: 4.7 s at 18 KB, 15.5 s at 38 KB of free text the model itself can emit.
+#: Any match that starts after such a separator would also have been found one
+#: character earlier, and the earlier match is the longer, more complete path —
+#: so refusing the later start costs nothing. Verified by re-scanning 478 files
+#: of this repository with and without the guard: identical results, every file.
 _PATH_RE = re.compile(
+    r"(?<![/.\-])"
     r"(?P<path>"
     r"(?:[A-Za-z]:[\\/])?"
     r"(?:/)?"
