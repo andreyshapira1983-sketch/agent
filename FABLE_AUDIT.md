@@ -454,3 +454,64 @@ NEXT ACTION (exact, for any model):
    round-trip), and an incremental repair cycle (test-first, chunked targets).
 5. Deferred (operator's earlier list): machine-readable `status=fixed` on
    repair-lesson memory records (the two "Bug fixed" rows).
+
+---
+
+## 8. Live repair loop (operator directive, 2026-07-31 .. 2026-08-01)
+
+Operator directive: run the real agent on real keys, find a defect, fix it,
+restart, verify, find the next one -- repeat until none is found. Reading
+documentation was explicitly ranked below empirical running, on the grounds
+that the fault may sit at the root itself.
+
+Ten defects were closed this way, each with a fail-before test observed
+failing before the patch (SELF_REPAIR_DOCTRINE section 1):
+
+| # | commit | defect |
+|---|--------|--------|
+| 1 | `045d822` | model router |
+| 2 | `70a0c75` | model router |
+| 3 | `cd28b96` | model router |
+| 4 | `2581f88` | model router |
+| 5 | `3a55f27` | model router |
+| 6 | `e09c726` | model router |
+| 7 | `2921be2` | reprice on failover swallowed exceptions |
+| 8 | `8823ea9` | `AGENT_MODEL_MAX_COST` ceiling was bypassed by role routes |
+| 9 | `f32d602` | evidence exemption keyed on the answering role, not on whether the answer carried generated output (+ `5126f08` closes open question 3 in `docs/COGNITIVE_CORE.md`) |
+
+### Operator complaint: "it does not switch to other models"
+
+The root was **double**, and fixing either half alone left the symptom alive:
+
+1. `.env` had no `AGENT_TIER_PROVIDERS_*` block, so the complexity tier could
+   not reach a second vendor. Fixed earlier; route reasons of the form
+   `complexity:standard:anthropic` come from this path.
+2. `config/model_registry.json` held **two entries pointing at the same model**
+   (`openai/gpt-5.4-mini`). `for_role` therefore returned that one model for
+   every role -- the router had nothing to choose between. Route reasons of the
+   form `policy:balanced:<id>` come from this path.
+
+The registry now holds six entries over five models and two vendors, every
+model confirmed by a live call before being written in. `openai/gpt-5.3-codex`
+was listed by `/v1/models` but returned HTTP 404 from `/v1/chat/completions`
+and was rejected: **presence in a catalog is not fitness for chat.**
+
+`config/model_registry.json` is untracked (operator-local, like `.env`), so
+this change lives only in the operator's working tree.
+
+### Command surface, run live
+
+All 92 registered commands were exercised against the running agent in five
+batches, including missing-argument invocations and an unknown command:
+**zero tracebacks, zero handler errors.**
+
+### Investigated and found correct (not defects)
+
+- `memory_saved=0, memory_rejected=3` on a code-file read is the
+  `knowledge-write-mvp` policy working as designed: programs do not assert
+  world-facts, and code changes, so it must be re-read rather than banked.
+  The rule was measured into existence (776 junk rows on 2026-07-25).
+- `session_start` telemetry appearing to show the old registry was log
+  truncation: built-in defaults are serialised first, operator entries follow.
+
+Full suite after all of the above: **6109 passed, 3 skipped**.
