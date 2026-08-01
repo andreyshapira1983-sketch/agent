@@ -99,6 +99,20 @@ _SHOW_ONLY_DIRECTIVE_RE = re.compile(
 
 _PATH_RE = re.compile(
     r"(?ix)"
+    # Leading guard: a match may not begin right after a word character, a
+    # dot, a dash or a slash. Two reasons, one change.
+    #
+    # Speed: without it the engine could start inside a run of separators, so
+    # n of them offered n starting positions and each rescanned the rest —
+    # 7.9 s on a 36 KB question, and the question is whatever the user pasted.
+    #
+    # Accuracy: it also stops `https://example.com/paper.pdf` from being read
+    # as the path `/example.com/paper.pdf`. Re-scanning 478 files of this
+    # repository, everything the guard removes is of that kind — a host cut
+    # out of a URL, or a `d:\n` sliced out of an f-string — and it removes no
+    # real path. Windows paths still match: `.\main.py`, `core\sub\mod.py` and
+    # `C:\x\y.json` are unchanged, which is why `\\` is not in the guard.
+    r"(?<![\w.\-/])"
     r"("
     r"[A-Za-z]:\\[^\s\"']+"  # Windows path
     r"|/(?:[\w.\-]+/)*[\w.\-]+\.[\w.\-]+"  # Unix-ish file path

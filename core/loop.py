@@ -4526,7 +4526,13 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
 
     @staticmethod
     def _extract_path_mentions(text: str) -> list[str]:
+        # Leading guard: see completion_obligation._PATH_RE, which carries the
+        # same shape and the same fix. It stops the engine from starting a
+        # match inside a run of `/`, `.` or `-` — a start that would always
+        # have a longer match one character to its left — and with it the
+        # quadratic rescan that made a wall of separators cost seconds.
         pattern = re.compile(
+            r"(?<![/.\-])"
             r"(?P<path>"
             r"(?:[A-Za-z]:[\\/])?"
             r"(?:/)?"
