@@ -1107,6 +1107,16 @@ class ModelRouter:
         route = self.route_for(role_key)
         provider = route.provider or self.default_provider
         model = route.model or self.default_model
+        provider, model, capped_reason = self._cap_role_route(
+            role_key, provider, model, route.reason
+        )
+        if capped_reason != route.reason:
+            route = ModelRoute(
+                role=route.role,
+                provider=provider,
+                model=model,
+                reason=capped_reason,
+            )
         cache_key = (provider, model)
         if cache_key not in self._cache:
             self._cache[cache_key] = self._llm_factory(provider, model)
@@ -1180,6 +1190,9 @@ class ModelRouter:
         route = self.route_for(role_key)
         provider = route.provider or self.default_provider
         model = route.model or self.default_model
+        provider, model, route_reason = self._cap_role_route(
+            role_key, provider, model, route_reason
+        )
         cache_key = (provider, model)
         if cache_key not in self._cache:
             self._cache[cache_key] = self._llm_factory(provider, model)
@@ -1298,6 +1311,56 @@ class ModelRouter:
         return _COST_RANK.get(cost_tier, _COST_RANK["unknown"]) <= _COST_RANK.get(
             limit, _COST_RANK["unknown"]
         )
+
+    def _cap_role_route(
+        self, role_key: str, provider: str | None, model: str | None, reason: str
+    ) -> tuple[str | None, str | None, str]:
+        """Apply ``AGENT_MODEL_MAX_COST`` to a role route.
+
+        The ceiling used to filter only the complexity preferences inside
+        ``_resolve_tier_provider``. Every branch that fails there falls back to
+        the role route, and a plain :meth:`for_role` never went near the
+        preferences at all — so the limit was bypassed exactly when it was meant
+        to bind: after every affordable candidate had already been rejected.
+
+        Measured live on the operator's environment: ``AGENT_MODEL_MAX_COST=low``
+        together with ``AGENT_REPAIR_PROVIDER/MODEL`` still returned
+        ``anthropic/claude-opus-4-20250514`` billed ``high``, on both
+        :meth:`for_role` and :meth:`for_task`.
+
+        A route already inside the ceiling is returned untouched, so with no
+        ceiling configured behaviour is byte-for-byte the old one.
+        """
+
+        limit = self.selection_policy.max_cost_tier
+        if limit is None:
+            return provider, model, reason
+        norm = _normalise_provider(provider) or (provider or "")
+        if not model or self._tier_model_within_cost_limit(norm, model):
+            return provider, model, reason
+
+        spec = self.registry.best_for_role(
+            role_key,
+            policy=ModelSelectionPolicy(
+                name="cost",
+                max_cost_tier=limit,
+                allow_mock=self.selection_policy.allow_mock,
+                require_available=self.selection_policy.require_available,
+            ),
+        )
+        if spec is not None and self._tier_model_within_cost_limit(
+            _normalise_provider(spec.provider) or spec.provider, spec.model
+        ):
+            return (
+                spec.provider,
+                spec.model,
+                f"{reason}|cost_limit:{norm}:{model}->{spec.id}",
+            )
+
+        # Nothing affordable is configured for this role. Refusing outright
+        # would strand the agent, so the call proceeds — but the ledger records
+        # that the ceiling was exceeded instead of billing it as a normal route.
+        return provider, model, f"{reason}|cost_limit_exceeded:{norm}:{model}"
 
     def for_task(
         self,
