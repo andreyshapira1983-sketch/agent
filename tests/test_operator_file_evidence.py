@@ -186,6 +186,66 @@ def test_explicit_multi_file_review_reads_two_valid_relative_files(workspace: Pa
     assert tool_names == ["file_read", "file_read"]
 
 
+def test_a_work_order_that_names_files_still_reaches_the_planner(workspace: Path):
+    """A change request is not a request to read files.
+
+    The review predicates scan the WHOLE question for one verb, so a step
+    buried inside a work order — "сравни результаты с baseline" — read as
+    "compare these files". The kernel then replaced the plan with file reads,
+    and a task that said "extract this cluster into a new module, run the
+    tests, commit" was answered by reading one file: no tests, no branch, no
+    commit. Observed on a live run (trace run_6312a311…).
+    """
+    (workspace / "a.md").write_text("Alpha file.", encoding="utf-8")
+    (workspace / "b.md").write_text("Beta file.", encoding="utf-8")
+    agent, planner, _ = _agent(
+        workspace,
+        llm_responses=["Conclusion: nothing to report. [general-knowledge]"],
+        sources=[],
+    )
+
+    agent.run(
+        "Извлеки кластер из a.md в новый модуль b.md, запусти тесты и "
+        "сравни результаты с baseline. Один коммит.",
+        file_hint=None,
+    )
+
+    assert planner.calls, "a work order was answered with a forced read-only plan"
+
+
+def test_a_plain_two_file_review_still_bypasses_the_planner(workspace: Path):
+    """Negative control: the reading path this guard must not disturb."""
+    (workspace / "a.md").write_text("Alpha file.", encoding="utf-8")
+    (workspace / "b.md").write_text("Beta file.", encoding="utf-8")
+    agent, planner, _ = _agent(
+        workspace,
+        llm_responses=["Conclusion: reviewed [file:a.md] [file:b.md]."],
+        sources=[],
+    )
+
+    agent.run("Прочитай a.md и b.md и сравни их.", file_hint=None)
+
+    assert planner.calls == []
+
+
+def test_explicit_multi_file_mode_wins_over_the_work_order_guard(workspace: Path):
+    """The operator's explicit switch stays authoritative."""
+    (workspace / "a.md").write_text("Alpha file.", encoding="utf-8")
+    (workspace / "b.md").write_text("Beta file.", encoding="utf-8")
+    agent, planner, _ = _agent(
+        workspace,
+        llm_responses=["Conclusion: reviewed [file:a.md] [file:b.md]."],
+        sources=[],
+    )
+
+    agent.run(
+        "Use explicit multi-file review mode: read a.md and b.md, then commit.",
+        file_hint=None,
+    )
+
+    assert planner.calls == []
+
+
 def test_multi_file_review_rejects_path_traversal_without_llm(workspace: Path):
     agent, planner, _ = _agent(
         workspace,
