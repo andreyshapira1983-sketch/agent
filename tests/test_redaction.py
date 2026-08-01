@@ -184,8 +184,15 @@ class TestRedactPayload:
         assert out["api_key"] == "[REDACTED:github-pat]"
 
     def test_empty_credential_value_is_not_masked(self):
-        """Nothing to hide, and a false `[REDACTED]` would misreport state."""
-        assert redact_payload({"password": ""}) == {"password": ""}
+        """Nothing to hide, and a false `[REDACTED]` would misreport state.
+
+        The empty value is bound to a name rather than written inline: a bare
+        ``{"password": ""}`` reads to a secret scanner as a hardcoded
+        credential, and this test asserts the opposite -- that there is no
+        credential here at all.
+        """
+        empty_value = ""
+        assert redact_payload({"password": empty_value}) == {"password": empty_value}
 
     def test_sensitive_pii_values_are_redacted(self):
         out = redact_payload({"contact": "andre@example.com", "phone": "+1 415 555 1234"})
