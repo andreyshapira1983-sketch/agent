@@ -654,3 +654,82 @@ def test_builtin_tier_preference_is_unchanged_without_operator_override(monkeypa
 
     assert provider != "huggingface"
     assert "no_model:huggingface" in skipped
+
+
+def test_cost_tier_uses_catalog_classification_when_model_is_not_in_registry():
+    # Catalog-discovered models are absent from config/model_registry.json, so
+    # _cost_tier_for_route fell through to "unknown" — which the usage ledger
+    # prices at 5 units/1k, just below "high". Measured live: claude-sonnet-5
+    # and gpt-5.6-terra (the models actually serving standard traffic) were both
+    # billed as unknown, over-charging a medium model by ~67%.
+    #
+    # The catalog already records a weight class per model (classify_model, and
+    # the persisted "tier" field). Reading it is not price invention: for the two
+    # providers the catalog can serve, its classification agrees with every
+    # hand-written registry cost tier (gpt-4o-mini/gpt-5.4-mini light↔low,
+    # claude-sonnet-4-5 standard↔medium).
+    router = ModelRouter(llm_factory=_tier_factory)
+
+    for model, expected in (
+        ("claude-haiku-4-5-20251001", "low"),
+        ("claude-sonnet-5", "medium"),
+        ("claude-opus-5", "high"),
+    ):
+        route = ModelRoute(
+            role=ModelRole.PLANNER.value,
+            provider="anthropic",
+            model=model,
+            reason="catalog",
+        )
+        assert router._cost_tier_for_route(route) == expected, model
+
+
+def test_registry_cost_tier_still_wins_over_catalog_classification(monkeypatch, tmp_path):
+    # Guard: the fallback is a fallback. A catalog-discovered model that the
+    # operator has since priced by hand keeps that price even when name-based
+    # classification disagrees — otherwise the fix would silently re-price
+    # declared models.
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "models": [
+                    {
+                        "id": "hand-priced",
+                        "provider": "anthropic",
+                        "model": "claude-sonnet-5",
+                        "cost_tier": "free",
+                        "roles": ["planner"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_MODEL_REGISTRY_PATH", str(registry_path))
+    monkeypatch.delenv("AGENT_MODEL_REGISTRY_JSON", raising=False)
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    route = ModelRoute(
+        role=ModelRole.PLANNER.value,
+        provider="anthropic",
+        model="claude-sonnet-5",
+        reason="registry",
+    )
+
+    # classify_model("claude-sonnet-5") is "standard" → would map to "medium".
+    assert router._cost_tier_for_route(route) == "free"
+
+
+def test_cost_tier_stays_unknown_when_nothing_declares_the_model():
+    # Honesty guard: "unknown" must remain reachable. With no model name there
+    # is nothing to classify, so the router must not invent a band.
+    router = ModelRouter(llm_factory=_tier_factory)
+    route = ModelRoute(
+        role=ModelRole.PLANNER.value,
+        provider="anthropic",
+        model="",
+        reason="empty",
+    )
+
+    assert router._cost_tier_for_route(route) == "unknown"
