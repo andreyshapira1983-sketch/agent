@@ -50,6 +50,7 @@ question, which single file is authoritative.
 | Long-horizon multi-agent org model | [future/CORPORATE_MODEL.md](future/CORPORATE_MODEL.md) | explicitly future/aspirational target | anything present-tense |
 | The coordination-layer proposal (Agent Mail, Decision Log, …) | [MULTI_AGENT_COORDINATION_LAYER.md](MULTI_AGENT_COORDINATION_LAYER.md) | a self-declared **proposal**, not implemented | current behaviour |
 | Behavioural doctrine / repo working rules | [AGENT_DOCTRINE.md](AGENT_DOCTRINE.md), [AGENTS.md](AGENTS.md) | correctness-first priority order; change discipline | technical facts |
+| **Whose instruction wins when two contradict, and what the agent must do instead of choosing** | [INSTRUCTION_AUTHORITY.md](INSTRUCTION_AUTHORITY.md) | the six-level authority ranking (operator → task contract → test → repo invariant → convention → advisor), the rule that **any** conflict blocks, and the six-point conflict report. §1–§4 NORMATIVE, §5 IMPLEMENTED, §6 PLANNED | whether the gate is enforced on every write path — it is not (§6); ambiguity handling (→ AGENT_DOCTRINE.md) |
 | Entry point + source-of-truth hierarchy | [../README.md](../README.md) | navigation only | everything else |
 | How to report a vulnerability + security controls | [../SECURITY.md](../SECURITY.md) | reporting path + secret/runtime/dependency controls | — |
 | How to set up, test, and contribute changes | [../CONTRIBUTING.md](../CONTRIBUTING.md) | dev workflow, tests, doc discipline | — |

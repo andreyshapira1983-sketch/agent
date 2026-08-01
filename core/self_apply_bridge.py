@@ -34,6 +34,8 @@ import base64
 from pathlib import Path
 from typing import Any, Callable
 
+from core.directive_extractor import SourceText, extract
+from core.instruction_conflict_gate import AUTHORITY_RANK, Directive
 from core.self_apply_lane import (
     FileChange,
     SelfApplyProposal,
@@ -162,7 +164,64 @@ def rehydrate_proposal(payload: Any) -> SelfApplyProposal:
         evidence=tuple(str(e) for e in evidence),
         test_paths=tuple(str(p) for p in test_paths_raw),
         test_pattern=test_pattern,
+        directives=_directives_from_payload(payload),
     )
+
+
+#: Authority levels a proposal payload may claim for itself. ``operator`` is
+#: excluded on purpose — only a human channel can confer operator authority,
+#: and a payload is machine-written.
+_PAYLOAD_DECLARABLE_LEVELS = frozenset(AUTHORITY_RANK) - {"operator"}
+
+
+def _directives_from_payload(payload: dict) -> tuple[Directive, ...]:
+    """Recover the requirements this patch is answering, with their authority.
+
+    Two channels, both optional:
+
+    * ``reason`` — the proposal's own statement of what it is doing, read as the
+      task contract;
+    * ``instructions`` — an explicit list of ``{level, source, text, locator}``
+      entries, which is how a review comment enters with the right (low)
+      authority rather than being mistaken for the task itself.
+
+    A payload may not claim ``operator``: it is written by the proposal
+    producer, not by the human. Without that restriction a producer could label
+    its own instruction ``operator``, and the conflict report and the stored
+    episode would then cite the operator as the source of something they never
+    said — the exact false authority claim ``docs/INSTRUCTION_AUTHORITY.md``
+    exists to prevent. Any level outside the declarable set, recognised or not,
+    is demoted to ``advisor``.
+    """
+    sources: list[SourceText] = []
+
+    reason = str(payload.get("reason") or "")
+    if reason.strip():
+        sources.append(SourceText(
+            text=reason,
+            source_level="task_contract",
+            source_name="обоснование заявки",
+        ))
+
+    raw = payload.get("instructions")
+    if isinstance(raw, (list, tuple)):
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            text = str(entry.get("text") or "")
+            if not text.strip():
+                continue
+            level = str(entry.get("level") or "")
+            if level not in _PAYLOAD_DECLARABLE_LEVELS:
+                level = "advisor"
+            sources.append(SourceText(
+                text=text,
+                source_level=level,  # type: ignore[arg-type]
+                source_name=str(entry.get("source") or level),
+                locator=str(entry.get("locator") or ""),
+            ))
+
+    return extract(sources)
 
 
 def _refusal(

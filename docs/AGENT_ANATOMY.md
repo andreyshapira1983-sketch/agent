@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 145 modules across 12 groups._
+_Total: 148 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -59,6 +59,8 @@ _Planning, verification, clarification, control loop._
 | `core/reflection` | Reflection engine — self-improvement feedback loop. |
 | `core/clarification_gate` | Clarification Gate — режим переспроса (ask, don't build). |
 | `core/clarification_policy` | Clarification Policy (§3 Cognitive Core — Clarification Policy). |
+| `core/instruction_conflict_gate` | Instruction Conflict Gate — турникет между уверенным приказом и ``git add``. |
+| `core/directive_extractor` | Turn instruction *text* into ranked ``Directive`` objects. |
 | `core/assumption_registry` | Assumption Registry — Layer 5 (Explicit Planning Assumptions). |
 | `core/referent_resolver` | Referent resolution for local critique / show-only turns (plan critique PR1). |
 | `core/evidence_support` | Evidence support — how well the gathered sources back THIS answer; telemetry, not a gate. |
@@ -101,6 +103,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/evidence_classes` | Evidence classes — *what kind* of support a claim actually needs (issue #119). |
 | `core/evidence_budget` | Evidence Budget — caps context sent to the synthesizer LLM. |
 | `core/conflict_review` | Operator-facing conflict review for the Source Registry. |
+| `core/conflict_episode` | Procedural memory for instruction conflicts: инструкция → конфликт → решение. |
 | `core/source_registry` | Source Registry and extracted claims. |
 | `core/source_registry_store` | Persistent store for SourceRegistry. |
 | `core/source_library` | Curated online source library for controlled web learning. |

@@ -13,6 +13,9 @@ from pathlib import Path
 
 import pytest
 
+from core.conflict_episode import ConflictEpisodeStore
+from core.conflict_episode import default_path as episode_store_path
+from core.instruction_conflict_gate import Directive
 from core.safe_vcs import SafeVCS
 from core.self_apply_lane import (
     FileChange,
@@ -159,6 +162,126 @@ def test_classifier_rejects_empty_patch():
 
 
 # ── gate refusals (no apply, no tests) ───────────────────────────────────────
+
+
+def _contradicted_proposal() -> SelfApplyProposal:
+    """A patch answering two incompatible requirements about one subject."""
+    return SelfApplyProposal(
+        files=(FileChange(path="core/foo.py", content="x = 2\n"),),
+        reason="tweak foo",
+        test_paths=("tests/test_foo.py",),
+        directives=(
+            Directive(
+                source_level="task_contract",
+                source_name="спецификация задачи",
+                subject="порядок элементов",
+                demand="сохранять стабильный порядок",
+            ),
+            Directive(
+                source_level="advisor",
+                source_name="код-ревью",
+                subject="порядок элементов",
+                demand="сортировать по имени",
+            ),
+        ),
+    )
+
+
+def test_instruction_conflict_refuses_before_apply(tmp_path: Path):
+    vcs = FakeVCS()
+    report = run_self_apply_lane(
+        _contradicted_proposal(), workspace=tmp_path, vcs=vcs,
+        test_runner=RaisingRunner(), budget_snapshot=_snapshot(),
+    )
+    assert report.status == "conflict_block"
+    assert "create_temp_branch" not in _verbs(vcs)
+    assert "is_clean" not in _verbs(vcs), (
+        "the lane must not even inspect the repository while instructions "
+        "contradict each other"
+    )
+
+
+def test_instruction_conflict_outranks_every_other_gate(tmp_path: Path):
+    """Budget, approvals and risk are irrelevant to a contradicted patch."""
+    vcs = FakeVCS()
+    report = run_self_apply_lane(
+        _contradicted_proposal(), workspace=tmp_path, vcs=vcs,
+        test_runner=RaisingRunner(),
+        budget_snapshot=_snapshot(day={"llm_calls": {"used": 999, "limit": 0}}),
+        approvals_pending=3,
+    )
+    assert report.status == "conflict_block"
+
+
+def test_instruction_conflict_hands_the_six_point_report_to_the_human(
+    tmp_path: Path,
+):
+    vcs = FakeVCS()
+    report = run_self_apply_lane(
+        _contradicted_proposal(), workspace=tmp_path, vcs=vcs,
+        test_runner=RaisingRunner(), budget_snapshot=_snapshot(),
+    )
+    assert "конфликт инструкций" in report.next_human_action
+    assert "сохранять стабильный порядок" in report.next_human_action
+    assert "сортировать по имени" in report.next_human_action
+    assert report.risks and "выше по полномочиям" in report.risks[0]
+
+
+def test_instruction_conflict_is_banked_in_procedural_memory(tmp_path: Path):
+    vcs = FakeVCS()
+    report = run_self_apply_lane(
+        _contradicted_proposal(), workspace=tmp_path, vcs=vcs,
+        test_runner=RaisingRunner(), budget_snapshot=_snapshot(),
+    )
+    assert report.episode_ids, "the stop must survive as an episode"
+
+    episodes = ConflictEpisodeStore(episode_store_path(tmp_path)).load_all()
+    assert [e.id for e in episodes] == report.episode_ids
+    assert episodes[0].is_open, "nobody has ruled on it yet"
+    assert episodes[0].subject == "порядок элементов"
+    assert episodes[0].context == "tweak foo"
+    assert "git_commit" in episodes[0].blocked_actions
+
+
+def test_a_broken_episode_store_still_refuses_cleanly(tmp_path: Path):
+    """Losing the memory is a memory loss; it must not break the refusal."""
+    blocker = tmp_path / "data"
+    blocker.write_text("not a directory", encoding="utf-8")
+
+    vcs = FakeVCS()
+    report = run_self_apply_lane(
+        _contradicted_proposal(), workspace=tmp_path, vcs=vcs,
+        test_runner=RaisingRunner(), budget_snapshot=_snapshot(),
+    )
+    assert report.status == "conflict_block"
+    assert report.episode_ids == []
+    assert "create_temp_branch" not in _verbs(vcs)
+    assert any("НЕ записан" in risk for risk in report.risks), (
+        "an empty episode list must not be indistinguishable from 'no episode "
+        "was needed' — the operator has to know the stop went unrecorded"
+    )
+
+
+def test_no_episode_is_written_when_nothing_conflicts(tmp_path: Path):
+    vcs = FakeVCS()
+    run_self_apply_lane(
+        _proposal(), workspace=tmp_path, vcs=vcs, test_runner=RaisingRunner(),
+        budget_snapshot=_snapshot(), approvals_pending=1,
+    )
+    assert not episode_store_path(tmp_path).exists()
+
+
+def test_no_directives_does_not_block(tmp_path: Path):
+    """The gate is a turnstile for contradictions, not a general brake."""
+    vcs = FakeVCS()
+    report = run_self_apply_lane(
+        _proposal(), workspace=tmp_path, vcs=vcs, test_runner=RaisingRunner(),
+        budget_snapshot=_snapshot(), approvals_pending=1,
+    )
+    assert report.status == "approval_wait", (
+        "with no recorded contradiction the lane must fall through to the "
+        "pre-existing gates unchanged"
+    )
 
 
 def test_kill_switch_active_refuses_before_apply(tmp_path: Path):
