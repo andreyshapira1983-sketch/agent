@@ -1437,4 +1437,40 @@ class ModelRouter:
         for spec in self.registry.list():
             if spec.provider == provider and spec.model == model:
                 return spec.cost_tier
-        return "unknown"
+        return self._classified_cost_tier(model)
+
+    @staticmethod
+    def _classified_cost_tier(model: str) -> str:
+        """Cost band for a model nobody priced by hand.
+
+        Catalog-discovered models are absent from ``config/model_registry.json``,
+        so the registry scan above misses them and every such call used to be
+        priced ``unknown`` — which ``core.model_usage`` bills at 5 units/1k,
+        just under ``high``. Measured live, that over-charged the models actually
+        serving standard traffic by ~67%, corrupting budget enforcement.
+
+        The catalog is not silent about these models: it records a weight class
+        for each one (``classify_model``, persisted as the ``tier`` field). This
+        reads that existing judgement rather than inventing a price, and the
+        light/standard/deep → low/medium/high mapping is not invented either —
+        it is what the operator already wrote by hand in the registry for the
+        providers the catalog serves (``gpt-4o-mini`` and ``gpt-5.4-mini`` are
+        light and priced ``low``; ``claude-sonnet-4-5`` is standard and priced
+        ``medium``), with no counterexample.
+
+        ``unknown`` stays reachable: with no model name there is nothing to
+        classify, and guessing there would be dishonest rather than merely
+        imprecise.
+        """
+
+        name = (model or "").strip()
+        if not name:
+            return "unknown"
+
+        from core.model_catalog import ComplexityTier, classify_model
+
+        return {
+            ComplexityTier.LIGHT: "low",
+            ComplexityTier.STANDARD: "medium",
+            ComplexityTier.DEEP: "high",
+        }.get(classify_model(name), "unknown")
