@@ -544,6 +544,9 @@ class AgentLoopExtractedMethods2:
                 run_id=run.run_id if run else "",
                 task_id=(run.task_id or "") if run else "",
                 aborted_reason=reason,
+                # An aborted run is exactly the one whose faults matter most:
+                # whatever fired before the abort is the trail to why it died.
+                defect_signals=getattr(self, "_defect_signals", None),
                 # Same quarantine as any other episode written today.
                 usage_eligible=False,
             )
@@ -651,6 +654,14 @@ class AgentLoopExtractedMethods2:
                 # that bank without synthesising would inherit the previous
                 # run's verdict. A replay or a refusal declares nothing.
                 declared_completion=declared_completion,
+                # Read off `self` deliberately, unlike `declared_completion`:
+                # these are accumulated by the sensors as the cycle runs, not
+                # produced by the synthesis this method owns. The reset in
+                # `loop.py` is what keeps a previous run's faults from leaking
+                # in. `getattr` with a default keeps a caller that never entered
+                # the loop (a direct unit-test build) distinguishable — it gets
+                # None, "never collected", rather than a false "none fired".
+                defect_signals=getattr(self, "_defect_signals", None),
                 on_audit=self.log.log,
             )
         except TypeError:
@@ -697,6 +708,13 @@ class AgentLoopExtractedMethods2:
                         "verified_chunks": episode.verified_chunks,
                         "unverified_chunks": episode.unverified_chunks,
                         "weak_chunks": episode.weak_chunks,
+                        # Surfaced in the event too: an operator reading the
+                        # journal should see the run's own faults next to its
+                        # verdict, not have to open the episode store.
+                        "defect_signals": (
+                            None if episode.defect_signals is None
+                            else list(episode.defect_signals)
+                        ),
                         # The admission verdict was not reportable before: an
                         # operator reading this event could see what was banked
                         # but not whether anything would ever be allowed to read

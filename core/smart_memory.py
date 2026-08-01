@@ -212,6 +212,19 @@ class EpisodeRecord:
     # distinguishable from an explicit verdict exactly as `usage_eligible` does.
     # Readers go through `effective_completion`, which maps None → "unknown".
     completion_state: CompletionState | None = None
+    # Defect signals this run raised about ITSELF — the sensors that fired while
+    # it worked. Recorded because the run's own faults were otherwise
+    # unrecoverable: each sensor logged its verdict and dropped it, so an agent
+    # that made the same mistake twice banked two clean episodes and had nothing
+    # to learn from. THREE states, same convention as the two fields above:
+    # None = a row written before this axis existed, nothing may be inferred;
+    # () = this version ran and no sensor fired; (names…) = these fired.
+    #
+    # DELIBERATELY inert: nothing reads this to decide anything. Promoting a
+    # sensor from observer to decider is the operator's call and needs measured
+    # numbers first (`docs/audit/SENSOR_SIGNAL_MEASUREMENT.md`, S3/S4 rulings).
+    # Recording is what produces those numbers; it grants no power.
+    defect_signals: tuple[str, ...] | None = None
     id: str = field(default_factory=lambda: new_id("ep"))
     created_at: str = field(default_factory=_now_iso)
 
@@ -245,6 +258,8 @@ class EpisodeRecord:
                else {"declared_completion": self.declared_completion}),
             **({} if self.completion_state is None
                else {"completion_state": self.completion_state}),
+            **({} if self.defect_signals is None
+               else {"defect_signals": list(self.defect_signals)}),
         }
 
     @classmethod
@@ -279,6 +294,14 @@ class EpisodeRecord:
                 data.get("completion_state")
                 if data.get("completion_state") in _COMPLETION_STATES
                 else None
+            ),
+            # Absent key stays None (legacy row), an empty list stays () — the
+            # difference between "we never looked" and "we looked and saw
+            # nothing" is the whole point of recording this.
+            defect_signals=(
+                None
+                if data.get("defect_signals") is None
+                else tuple(str(x) for x in data["defect_signals"])
             ),
             goal=str(data.get("goal") or ""),
             question=str(data.get("question") or ""),
@@ -1268,6 +1291,7 @@ def episode_from_agent_cycle(
     aborted_reason: str = "",
     used_procedure_ids: tuple[str, ...] | None = None,
     declared_completion: str | None = None,
+    defect_signals: Iterable[str] | None = None,
     on_audit: "Callable[[str, dict[str, Any]], None] | None" = None,
 ) -> EpisodeRecord:
     """Build an episode from one finished cycle.
@@ -1342,6 +1366,15 @@ def episode_from_agent_cycle(
             aborted_reason=str(aborted_reason or ""),
             replan_exhausted=bool(replan_exhausted),
             declared=declared_completion,
+        ),
+        # Order preserved, duplicates dropped: a sensor that fires on three
+        # attempts is one fault, and a stable order keeps two runs with the same
+        # faults byte-comparable. `None` passes through untouched so a caller
+        # that cannot collect signals stays distinguishable from one that
+        # collected none.
+        defect_signals=(
+            None if defect_signals is None
+            else tuple(dict.fromkeys(str(s) for s in defect_signals if str(s)))
         ),
         id=episode_id,
     )
