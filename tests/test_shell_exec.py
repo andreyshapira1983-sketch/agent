@@ -645,7 +645,11 @@ class TestGitRecordingSubcommands:
             ["init", "-q"],
             ["config", "user.email", "t@example.com"],
             ["config", "user.name", "t"],
-            ["commit", "--allow-empty", "-q", "-m", "root"],
+            # The host may sign commits or point core.hooksPath somewhere;
+            # either would fail this fixture under check=True and error every
+            # test in the class during setup.
+            ["config", "commit.gpgsign", "false"],
+            ["commit", "--allow-empty", "-q", "--no-verify", "-m", "root"],
             ["checkout", "-q", "-b", branch],
         ):
             # `["git", *args]` rather than a prebuilt argv: the literal head
@@ -677,6 +681,47 @@ class TestGitRecordingSubcommands:
         tool = self._repo(workspace, "agent/work")
         tool._validate_argv(["git", "add", "a.py"])
         tool._validate_argv(["git", "commit", "-m", "Record the work"])
+
+    def test_only_a_branch_the_agent_created_may_receive_work(self, workspace: Path):
+        """The stated rule is "a branch the agent made", not "not main".
+
+        Enumerating forbidden names let the agent record onto any operator
+        branch that simply was not called main — observed on a live run, where
+        it staged onto the operator's own working branch.
+        """
+        tool = self._repo(workspace, "agent/work")
+        subprocess.run(["git", "checkout", "-q", "-b", "feature/login"],
+                       cwd=workspace, check=True, capture_output=True)
+        for sub in ("add", "commit"):
+            argv = (["git", "add", "a.py"] if sub == "add"
+                    else ["git", "commit", "-m", "onto the operator branch"])
+            with pytest.raises(PermissionError, match="records only on a branch it created"):
+                tool._validate_argv(argv)
+
+    def test_a_detached_head_is_refused(self, workspace: Path):
+        """`git rev-parse --abbrev-ref HEAD` answers "HEAD" when detached.
+
+        Readable, so the unknown-branch guard passes; not a branch, so the
+        commit would be reachable from no ref and would survive only until the
+        next gc.
+        """
+        tool = self._repo(workspace, "agent/work")
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=workspace,
+                              check=True, capture_output=True, text=True).stdout.strip()
+        subprocess.run(["git", "checkout", "-q", "--detach", head],
+                       cwd=workspace, check=True, capture_output=True)
+        with pytest.raises(PermissionError, match="HEAD is detached"):
+            tool._validate_argv(["git", "commit", "-m", "nowhere"])
+
+    def test_reading_the_branch_uses_the_same_sandbox_env(self, workspace: Path):
+        """The internal git call must not be the one path that inherits os.environ."""
+        tool = self._repo(workspace, "agent/work")
+        with mock.patch("tools.shell_exec.subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout="agent/work")
+            tool._current_branch()
+        env = run.call_args.kwargs["env"]
+        assert set(env) <= {"PATH", "SystemRoot", "HOME", "USERPROFILE",
+                            "HOMEDRIVE", "HOMEPATH"}
 
     def test_a_protected_branch_is_refused(self, workspace: Path):
         tool = self._repo(workspace, "agent/work")
@@ -804,7 +849,8 @@ class TestGitRecordingSubcommands:
         assert "PATH" in env
         present = [n for n in ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH")
                    if os.environ.get(n)]
-        assert present, "this machine defines no home variable at all"
+        if not present:
+            pytest.skip("this runner defines no home variable to forward")
         for name in present:
             assert env.get(name) == os.environ[name], name
         # Everything else still stays out.

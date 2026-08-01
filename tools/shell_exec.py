@@ -413,6 +413,10 @@ class ShellExecTool(Tool):
                 text=True,
                 timeout=10,
                 shell=False,
+                # Same sandbox contract as the commands this tool dispatches;
+                # reading the branch must not be the one path that inherits the
+                # parent environment.
+                env=self._safe_env(),
                 # Explicit: a non-zero exit is an ANSWER here (no repository,
                 # detached HEAD), read from `returncode` below. Raising would
                 # turn "cannot tell" into a crash on the routing path.
@@ -469,10 +473,31 @@ class ShellExecTool(Tool):
                 f"shell_exec '{cmd} {sub}' refused: the current branch could "
                 "not be read, and an unknown branch is not a safe one"
             )
+        if current == "HEAD":
+            # `git rev-parse --abbrev-ref HEAD` answers the literal "HEAD" on a
+            # detached HEAD: readable, so the guard above passes, and not a
+            # branch, so a commit here is reachable from no ref at all and
+            # survives only until the next gc.
+            raise PermissionError(
+                f"shell_exec '{cmd} {sub}' refused: HEAD is detached, so the "
+                f"commit would belong to no branch; create a "
+                f"'{AGENT_BRANCH_PREFIX}…' branch first"
+            )
         if current in PROTECTED_BRANCHES:
             raise PermissionError(
                 f"shell_exec '{cmd} {sub}' refused on protected branch "
                 f"'{current}'; create a '{AGENT_BRANCH_PREFIX}…' branch first"
+            )
+        if not current.startswith(AGENT_BRANCH_PREFIX):
+            # The rule this file states is "a branch the agent created", and
+            # enumerating forbidden names does not say that: it let the agent
+            # record onto any operator branch that simply was not called main.
+            # Observed on a live run — it staged onto the operator's own
+            # working branch. Requiring the prefix is the stated rule.
+            raise PermissionError(
+                f"shell_exec '{cmd} {sub}' refused on '{current}': the agent "
+                f"records only on a branch it created under "
+                f"'{AGENT_BRANCH_PREFIX}'"
             )
 
     def _validate_path_in_workspace(self, path_str: str) -> Path:

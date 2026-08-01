@@ -3336,7 +3336,14 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # matters. Pure-research plans, which is what most questions produce,
         # keep the parallel path untouched.
         if any(not self._step_only_reads(step) for step in steps):
-            return [self._run_step_parallel(step) for step in steps]
+            # Sorted, not merely iterated: the concurrent path below sorts its
+            # RESULTS back into plan order, so this one must not depend on the
+            # caller happening to pass a sorted slice — the guarantee is the
+            # whole point of the branch.
+            return [
+                self._run_step_parallel(step)
+                for step in sorted(steps, key=lambda s: s.order)
+            ]
 
         # Partition: parallel = no intra-batch dependencies; sequential = rest.
         step_ids = {s.id for s in steps}
