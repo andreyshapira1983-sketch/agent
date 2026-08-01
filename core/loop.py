@@ -1937,6 +1937,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     realtime_required=bool(
                         getattr(self.last_source_ranking, "realtime_required", True)
                     ),
+                    answer=draft_answer,
                 )
                 _support = evaluate_evidence_support(
                     report, evidence_expected=_ev_expected
@@ -2329,6 +2330,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 role=getattr(self.last_role_context, "role", ""),
                 chain_was_empty=_chain_empty,
                 realtime_required=_realtime,
+                answer=draft.body,
             )
             # Enforcement judges the CLAIMS, so it is handed the body alone.
             # Handing it the composed text would let it measure — and delete —
