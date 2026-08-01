@@ -349,7 +349,28 @@ _ROLE_ENV_PREFIXES: dict[ModelRole, tuple[str, ...]] = {
     ModelRole.VERIFIER: ("AGENT_VERIFIER",),
 }
 
-_KNOWN_ROLE_KEYS: frozenset[str] = frozenset(role.value for role in ModelRole)
+#: The role names this router understands. Exported alongside
+#: `ensure_known_model_role` so callers can name the legal values without
+#: hand-writing a second copy of this list that is free to drift from the enum.
+KNOWN_MODEL_ROLES: frozenset[str] = frozenset(role.value for role in ModelRole)
+
+
+def ensure_known_model_role(value: str | None) -> None:
+    """Reject a role name that no router could ever resolve.
+
+    Contracts carry `model_role` as a free string and a planner model writes
+    it, so a misspelling arrives as data. `route_for` deliberately still
+    serves an unknown role from the default model — a typo must not take down
+    a live answer — which means the mistake would otherwise surface only as a
+    route reason in the usage ledger, long after the plan was accepted. An
+    empty value is left alone: callers already read it as "no preference" and
+    substitute their own default.
+    """
+    role = (value or "").strip()
+    if role and role not in KNOWN_MODEL_ROLES:
+        raise ValueError(
+            "model_role must be one of " + ", ".join(sorted(KNOWN_MODEL_ROLES))
+        )
 
 
 class UsageTrackedLLM:
@@ -1103,7 +1124,7 @@ class ModelRouter:
         # the reason given at `record_usage`: this router has no logger of its
         # own, the reason already reaches the usage ledger with every call, and
         # a second channel would only be a second thing to keep in sync.
-        known_role = role_key in _KNOWN_ROLE_KEYS
+        known_role = role_key in KNOWN_MODEL_ROLES
         return ModelRoute(
             role=role_key,
             provider=self.default_provider,
