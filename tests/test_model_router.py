@@ -800,3 +800,57 @@ def test_no_cost_limit_leaves_the_complexity_route_untouched(monkeypatch):
 
     assert provider == "anthropic"
     assert not any(entry.startswith("cost_limit:") for entry in skipped)
+
+
+def test_route_records_the_model_the_client_actually_resolved(monkeypatch):
+    # When no registry candidate satisfies the policy, best_for_role returns
+    # None, route_for yields an empty route, and default_provider/default_model
+    # are both None -- so the router builds LLM(None, None). That client quietly
+    # resolves a real provider and model from the environment and the call
+    # succeeds (verified live: it answered), but the ledger records
+    # provider=None, model=None, cost_tier="unknown".
+    #
+    # Real spend then lands in the ledger as unattributable. That is the same
+    # failure as reporting configuration instead of behaviour: the ledger has to
+    # describe the call that happened, not the one that could not be planned.
+    class _ResolvingLLM:
+        # Mirrors core.llm.LLM, which exposes the provider/model it resolved.
+        def __init__(self, provider, model):
+            self.provider = provider or "anthropic"
+            self.model = model or "claude-sonnet-4-5"
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    # Nothing in the registry is free, so every candidate is filtered out.
+    monkeypatch.setenv("AGENT_MODEL_MAX_COST", "free")
+
+    router = ModelRouter.from_env(llm_factory=_ResolvingLLM)
+    router.usage_ledger = ModelUsageLedger()
+    tracked = router.for_role(ModelRole.PLANNER)
+
+    assert tracked.route.provider == "anthropic"
+    assert tracked.route.model == "claude-sonnet-4-5"
+    # claude-sonnet-4-5 is hand-priced "medium" in the registry.
+    assert tracked.cost_tier == "medium"
+
+
+def test_explicit_route_still_wins_over_the_client_fallback(monkeypatch):
+    # Guard: the client's own resolution is a last resort only. A route that
+    # names a provider and model must be recorded exactly as routed.
+    class _ResolvingLLM:
+        def __init__(self, provider, model):
+            self.provider = "wrong-provider"
+            self.model = "wrong-model"
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.delenv("AGENT_MODEL_MAX_COST", raising=False)
+    monkeypatch.setenv("AGENT_PLANNER_PROVIDER", "anthropic")
+    monkeypatch.setenv("AGENT_PLANNER_MODEL", "claude-sonnet-4-5")
+
+    router = ModelRouter.from_env(llm_factory=_ResolvingLLM)
+    router.usage_ledger = ModelUsageLedger()
+    tracked = router.for_role(ModelRole.PLANNER)
+
+    assert tracked.route.provider == "anthropic"
+    assert tracked.route.model == "claude-sonnet-4-5"
