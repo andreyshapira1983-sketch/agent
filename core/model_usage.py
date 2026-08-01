@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from core.budget_ledger import BudgetLedger
+from core.run_context import current_run
 from core.state_integrity import append_state_jsonl, read_state_jsonl
 
 
@@ -168,20 +169,46 @@ class ModelUsageLedger:
     logger: Any | None = None
     budget_ledger: BudgetLedger | None = None
     records: list[ModelUsageRecord] = field(default_factory=list)
-    # The run these records belong to. The ledger file is append-only and
-    # outlives the process, so without this every run's spend lands in one
-    # undifferentiated history. This reuses the trace id the agent already
-    # mints per run rather than minting a second identifier for the same thing;
-    # a sub-agent carries its own trace id and so becomes separable from its
-    # parent for free.
+    # Fallback identity for records written outside any run, and the value an
+    # explicit caller pins. The ledger file is append-only and outlives the
+    # process, so without an id every run's spend lands in one undifferentiated
+    # history. Left unset it takes `TraceLogger.trace_id`, which names the
+    # AGENT SESSION — a sub-agent carries its own trace id and so stays
+    # separable from its parent for free. Which run a given record belongs to
+    # is decided per record in `_run_id_for_record`, because one session runs
+    # many cycles.
     run_id: str | None = None
+    # Set when the caller named the run itself. A surrounding run scope must
+    # not override that: a sub-agent ledger is built for one run and stays
+    # pinned to it.
+    _run_id_pinned: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        # bootstrap already holds the run's TraceLogger when it builds the
+        # bootstrap already holds the agent's TraceLogger when it builds the
         # ledger, so taking the id from there spares every call site from
         # passing the same value twice. An explicit run_id still wins.
+        self._run_id_pinned = self.run_id is not None
         if self.run_id is None:
             self.run_id = getattr(self.logger, "trace_id", None)
+
+    def _run_id_for_record(self) -> str | None:
+        """Which run to bill this call to.
+
+        The ledger's own id comes from ``TraceLogger.trace_id``, which is minted
+        once per agent in ``build_agent`` — it names a SESSION, not a run
+        (``core/run_context`` states this and keeps run identity separate for
+        exactly this reason). Billing every record to it puts an entire
+        autonomous drain under one identifier and leaves the spend unjoinable to
+        the episode that caused it, which is what per-run attribution exists to
+        prevent. The active run scope, when there is one, is the honest answer;
+        outside any run (a REPL command, a probe) the session id still beats
+        nothing.
+        """
+        if not self._run_id_pinned:
+            active = current_run()
+            if active is not None and active.run_id:
+                return active.run_id
+        return self.run_id
 
     @classmethod
     def from_env(
@@ -386,7 +413,7 @@ class ModelUsageLedger:
             completed_at=completed_at,
             duration_ms=max(0, int(duration_ms)),
             error=error,
-            run_id=self.run_id,
+            run_id=self._run_id_for_record(),
         )
         self.records.append(record)
         if self.budget_ledger is not None:
