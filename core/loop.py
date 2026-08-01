@@ -3085,29 +3085,89 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             )
         )
 
-    @staticmethod
-    def _is_change_request(question: str) -> bool:
+    # Verbs stating an intent to produce, run or record — the thing a reading
+    # never needs. Matched on word boundaries, because the defect this guard
+    # exists to fix is a substring scan: "implement" must not fire inside
+    # "implementation" and "commit" must not fire inside "commits", or a review
+    # OF how something is implemented stops being a review. Russian forms spell
+    # the endings they accept rather than trailing `\w*`, for the same reason.
+    _CHANGE_INTENT_RE = re.compile(
+        r"(?<!\w)(?:"
+        # produce or modify
+        r"созда(?:й|йте|ть)|извлек(?:и|ите)|извлечь|напиш(?:и|ите)|написать|"
+        r"перенес(?:и|ите|ти)|переименуй(?:те)?|переименовать|"
+        r"удал(?:и|ите|ить)|"
+        r"исправ(?:ь|ьте|ить)|почини(?:те)?|починить|реализ(?:уй|уйте|овать)|"
+        r"отрефактор(?:и|ить)|"
+        r"create|extract|implement|refactor|rewrite|rename|delete|write|"
+        # run or record
+        r"запусти(?:те)?|запустить|закоммить|коммит|запиш(?:и|ите)|записать|"
+        r"commit|run\s+(?:the\s+)?tests?"
+        r")(?!\w)",
+        re.IGNORECASE,
+    )
+
+    # Punctuation a file name picks up around it: sentence and list marks, and
+    # the quoting a path is usually written in — backticks included, since a
+    # question about `commit.log` arrives fenced far more often than bare.
+    _TOKEN_EDGE_PUNCT = ".,;:!?()[]{}<>«»\"'`"
+
+    @classmethod
+    def _strip_file_tokens(cls, text: str) -> str:
+        """Drop whitespace-separated tokens that name a file.
+
+        Deliberately not a regular expression. The first version was one, and
+        CodeQL was right about it: `[\\w./\\\\-]*[\\w-]\\.` lets the leading
+        class and the character after it match the same input, so the engine
+        re-splits a long run of dashes at every position — and the text here is
+        the user's question, so the input is attacker-shaped by definition.
+        Measured on 16 000 dashes: that pattern 2 019 ms, a segmented rewrite
+        3 320 ms (worse), this loop 0.0 ms.
+
+        Extension-agnostic on purpose: `_extract_path_mentions` knows seven
+        extensions, so `commit.log` and `commit.ts` would otherwise stay in the
+        text and vote for "commit". The suffix must be ASCII alphanumeric,
+        which keeps prose out — a sentence ending in "коммит." has nothing
+        after the dot, and "и т.д." is Cyrillic.
+        """
+        kept: list[str] = []
+        for token in text.split():
+            bare = token.strip(cls._TOKEN_EDGE_PUNCT)
+            head, dot, extension = bare.rpartition(".")
+            if (
+                dot
+                and head
+                and 1 <= len(extension) <= 8
+                and extension.isascii()
+                and extension.isalnum()
+            ):
+                continue
+            kept.append(token)
+        return " ".join(kept)
+
+    @classmethod
+    def _is_change_request(cls, question: str) -> bool:
         """True when the request asks for work, not for a reading.
 
         Unambiguous verbs only. A review request may perfectly well contain
         "проверь" or "check", and claiming those would disable the reading path
-        this guard exists to protect; every term below states an intent to
-        produce, run or record something, which no read-only review needs.
+        this guard exists to protect.
+
+        Path mentions are removed before matching: they are what the request is
+        ABOUT, and a file called `commit.md` or `branch.md` must not be read as
+        an instruction to commit. Left in, the guard would repeat in miniature
+        the defect it fixes — deciding intent from text that is not about
+        intent.
+
+        Removal is one linear pass over the tokens. It used to also substitute
+        each path `_extract_path_mentions` returned, which meant one full scan
+        of the question per path — quadratic again, on the same
+        attacker-controlled text, and redundant: every path that extractor can
+        return carries an extension, so the token pass already removes it, in
+        any casing and without knowing the extension allowlist.
         """
-        text = " ".join(question.casefold().split())
-        return any(
-            term in text
-            for term in (
-                # produce or modify
-                "создай", "создать", "извлеки", "извлечь", "напиши", "написать",
-                "перенеси", "перенести", "переименуй", "удали", "удалить",
-                "исправь", "исправить", "почини", "реализуй", "реализовать",
-                "отрефактор", "create ", "extract ", "implement", "refactor",
-                "rewrite", "rename ", "delete ",
-                # run or record
-                "запусти", "запустить", "закоммить", "коммит", "ветку",
-                "run the test", "run tests", "commit", "branch",
-            )
+        return bool(
+            cls._CHANGE_INTENT_RE.search(cls._strip_file_tokens(question))
         )
 
     @staticmethod
