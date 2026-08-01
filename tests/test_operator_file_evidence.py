@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from core.approval import AutoApprover
@@ -276,6 +277,28 @@ def test_the_change_guard_reads_verbs_not_substrings():
     assert is_change(
         "Извлеки кластер из a.md в модуль b.md, запусти тесты. Один коммит."
     )
+
+
+def test_stripping_file_tokens_stays_cheap_on_hostile_input():
+    """The text fed to this guard is the user's question — attacker-shaped.
+
+    The first version stripped file names with a regex, and CodeQL flagged it:
+    `[\\w./\\\\-]*[\\w-]\\.` lets the leading class and the character after it
+    match the same input, so the engine re-splits a long run of dashes at every
+    position. Measured on 16 000 dashes: that pattern 2 019 ms, a segmented
+    rewrite 3 320 ms — worse — and the token loop that replaced both 0.0 ms.
+
+    The budget is deliberately loose: catastrophic backtracking costs seconds,
+    never a fraction of one, so this cannot flake on a slow runner.
+    """
+    from core.loop import AgentLoop
+
+    BUDGET_SECONDS = 2.0
+    hostile = "-" * 16_000 + "!"
+
+    started = time.perf_counter()
+    AgentLoop._is_change_request(hostile)
+    assert time.perf_counter() - started < BUDGET_SECONDS
 
 
 def test_multi_file_review_rejects_path_traversal_without_llm(workspace: Path):

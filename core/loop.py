@@ -3107,10 +3107,41 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         re.IGNORECASE,
     )
 
-    # Anything shaped like a file name, whatever its extension. The Latin-only
-    # suffix keeps ordinary prose out: a sentence ending in "коммит." has no
-    # letter after the dot, and "и т.д." is Cyrillic.
-    _PATHISH_TOKEN_RE = re.compile(r"[\w./\\-]*[\w-]\.[A-Za-z0-9]{1,8}(?!\w)")
+    # Punctuation a file name picks up at the end of a sentence or a list item.
+    _TOKEN_TRAILING_PUNCT = ".,;:!?)]}»\"'"
+
+    @classmethod
+    def _strip_file_tokens(cls, text: str) -> str:
+        """Drop whitespace-separated tokens that name a file.
+
+        Deliberately not a regular expression. The first version was one, and
+        CodeQL was right about it: `[\\w./\\\\-]*[\\w-]\\.` lets the leading
+        class and the character after it match the same input, so the engine
+        re-splits a long run of dashes at every position — and the text here is
+        the user's question, so the input is attacker-shaped by definition.
+        Measured on 16 000 dashes: that pattern 2 019 ms, a segmented rewrite
+        3 320 ms (worse), this loop 0.0 ms.
+
+        Extension-agnostic on purpose: `_extract_path_mentions` knows seven
+        extensions, so `commit.log` and `commit.ts` would otherwise stay in the
+        text and vote for "commit". The suffix must be ASCII alphanumeric,
+        which keeps prose out — a sentence ending in "коммит." has nothing
+        after the dot, and "и т.д." is Cyrillic.
+        """
+        kept: list[str] = []
+        for token in text.split():
+            bare = token.rstrip(cls._TOKEN_TRAILING_PUNCT)
+            head, dot, extension = bare.rpartition(".")
+            if (
+                dot
+                and head
+                and 1 <= len(extension) <= 8
+                and extension.isascii()
+                and extension.isalnum()
+            ):
+                continue
+            kept.append(token)
+        return " ".join(kept)
 
     @classmethod
     def _is_change_request(cls, question: str) -> bool:
@@ -3135,7 +3166,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         text = question
         for path in cls._extract_path_mentions(question):
             text = re.sub(re.escape(path), " ", text, flags=re.IGNORECASE)
-        text = cls._PATHISH_TOKEN_RE.sub(" ", text)
+        text = cls._strip_file_tokens(text)
         return bool(cls._CHANGE_INTENT_RE.search(text))
 
     @staticmethod
