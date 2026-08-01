@@ -6,7 +6,11 @@ The model router has two different surfaces:
 * routes: one selected model per runtime role.
 
 This audit keeps that distinction visible so the operator can see why a small
-number of active models may be selected from a larger catalog.
+number of configured models may be selected from a larger catalog.
+
+A third surface matters just as much: what the agent *actually ran*. Routes are
+configuration, the usage ledger is behaviour, and the two drift apart. The audit
+therefore reads the ledger as well and reports both directions of that drift.
 """
 from __future__ import annotations
 
@@ -18,6 +22,28 @@ from core.model_router import ModelRouter
 
 def _model_key(provider: str | None, model: str | None) -> str:
     return f"{provider or '-'}:{model or '-'}"
+
+
+def _observed_model_keys(router: ModelRouter) -> tuple[str, ...]:
+    """Return the models the agent actually called, from the usage ledger.
+
+    Configuration is not behaviour. Returns an empty tuple when no ledger is
+    attached or readable, so the audit never invents usage it cannot prove.
+    """
+    ledger = getattr(router, "usage_ledger", None)
+    if ledger is None:
+        return ()
+    try:
+        by_model = (ledger.snapshot() or {}).get("by_model") or {}
+    except Exception:
+        return ()
+    keys: set[str] = set()
+    for entry in by_model:
+        provider, _, model = str(entry).partition("/")
+        if not model:
+            provider, model = "-", str(entry)
+        keys.add(_model_key(provider, model))
+    return tuple(sorted(keys))
 
 
 @dataclass(frozen=True)
@@ -33,6 +59,9 @@ class ModelRegistryAudit:
     selection_policy: dict[str, Any]
     warnings: tuple[str, ...]
     recommendations: tuple[str, ...]
+    observed_models: tuple[str, ...] = ()
+    observed_not_configured: tuple[str, ...] = ()
+    configured_not_observed: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -47,6 +76,9 @@ class ModelRegistryAudit:
             "unavailable_models": list(self.unavailable_models),
             "unsupported_models": list(self.unsupported_models),
             "selection_policy": self.selection_policy,
+            "observed_models": list(self.observed_models),
+            "observed_not_configured": list(self.observed_not_configured),
+            "configured_not_observed": list(self.configured_not_observed),
             "warnings": list(self.warnings),
             "recommendations": list(self.recommendations),
         }
@@ -57,12 +89,16 @@ class ModelRegistryAudit:
             "catalog: local config, not live provider catalog",
             (
                 f"routes: {self.route_count} roles -> "
-                f"{len(self.unique_route_models)} unique active model(s)"
+                f"{len(self.unique_route_models)} unique configured model(s)"
             ),
             (
                 f"registry: {self.registry_model_count} known, "
                 f"{self.available_model_count} available, "
                 f"{self.custom_model_count} custom"
+            ),
+            (
+                f"observed: {len(self.observed_models)} model(s) actually called "
+                "(usage ledger)"
             ),
         ]
         policy_name = self.selection_policy.get("name")
@@ -73,8 +109,17 @@ class ModelRegistryAudit:
                 f"require_available={self.selection_policy.get('require_available')}"
             )
         if self.unique_route_models:
-            lines.append("active models:")
+            lines.append("configured route models:")
             lines.extend(f"  - {model}" for model in self.unique_route_models)
+        if self.observed_models:
+            lines.append("observed in usage ledger:")
+            lines.extend(f"  - {model}" for model in self.observed_models)
+        if self.observed_not_configured:
+            lines.append("observed but not a configured route:")
+            lines.extend(f"  - {model}" for model in self.observed_not_configured)
+        if self.configured_not_observed:
+            lines.append("configured but never observed:")
+            lines.extend(f"  - {model}" for model in self.configured_not_observed)
         if self.unused_available_models:
             lines.append("available but not selected:")
             lines.extend(f"  - {model}" for model in self.unused_available_models)
@@ -129,10 +174,25 @@ def audit_model_registry(router: ModelRouter) -> ModelRegistryAudit:
         if _model_key(spec.get("provider"), spec.get("model")) not in selected_keys
     ]
 
+    observed_models = _observed_model_keys(router)
+    observed_keys = set(observed_models)
+    observed_not_configured = tuple(
+        sorted(key for key in observed_keys if key not in selected_keys)
+    )
+    configured_not_observed = tuple(
+        sorted(key for key in selected_keys if key not in observed_keys)
+    ) if observed_models else ()
+
     warnings: list[str] = [
         "Model routes select one model per role; they do not display every registry candidate.",
         "Built-in model names are defaults, not an automatically refreshed provider catalog.",
+        "Configured routes are not proof of use; 'observed' comes from the usage ledger.",
     ]
+    if observed_not_configured:
+        warnings.append(
+            "Some models were actually called that no configured route selects; "
+            "complexity-tier routing and failover can bypass the role routes shown here."
+        )
     if len(route_models) < len(available_specs):
         warnings.append(
             "Some available models are not selected because the current policy picked stronger or cheaper role-specific routes."
@@ -169,6 +229,9 @@ def audit_model_registry(router: ModelRouter) -> ModelRegistryAudit:
         unavailable_models=tuple(_format_spec(spec) for spec in unavailable_specs),
         unsupported_models=tuple(_format_spec(spec) for spec in unsupported_specs),
         selection_policy=dict(registry.get("selection_policy", {})),
+        observed_models=observed_models,
+        observed_not_configured=observed_not_configured,
+        configured_not_observed=configured_not_observed,
         warnings=tuple(warnings),
         recommendations=tuple(recommendations),
     )
