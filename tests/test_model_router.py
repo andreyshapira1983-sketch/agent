@@ -1002,3 +1002,107 @@ def test_failover_without_a_repricer_keeps_the_original_tier():
 
     success = [r for r in ledger.records if r.status == "success"]
     assert success[0].cost_tier == "free"
+
+
+def _ceiling_registry_json() -> str:
+    """Registry with one over-ceiling model and one affordable alternative."""
+    return json.dumps([
+        {
+            "id": "opus-expensive",
+            "provider": "anthropic",
+            "model": "claude-opus-4-20250514",
+            "roles": ["repair_proposal"],
+            "quality_tier": "frontier",
+            "cost_tier": "high",
+        },
+        {
+            "id": "cheap-repairer",
+            "provider": "openai",
+            "model": "gpt-cheap-repairer",
+            "roles": ["repair_proposal"],
+            "quality_tier": "standard",
+            "cost_tier": "low",
+        },
+    ])
+
+
+def test_cost_ceiling_binds_on_the_role_route(monkeypatch):
+    # AGENT_MODEL_MAX_COST filtered only the *preferences* inside
+    # _resolve_tier_provider. Every branch that fails there ends in the role
+    # route (for_role / _for_role_with_reason), and that path never asked about
+    # the ceiling — so the limit was bypassed exactly when it was supposed to
+    # bind: once all affordable candidates had been rejected.
+    #
+    # Measured live with the operator's real .env: AGENT_MODEL_MAX_COST=low
+    # plus AGENT_REPAIR_PROVIDER/MODEL still returned
+    # anthropic/claude-opus-4-20250514 priced "high", on both for_role and
+    # for_task ("...|fallback:role_default").
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("AGENT_MODEL_REGISTRY_JSON", _ceiling_registry_json())
+    monkeypatch.setenv("AGENT_MODEL_MAX_COST", "low")
+    monkeypatch.setenv("AGENT_REPAIR_PROVIDER", "anthropic")
+    monkeypatch.setenv("AGENT_REPAIR_MODEL", "claude-opus-4-20250514")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    llm = router.for_role(ModelRole.REPAIR_PROPOSAL)
+
+    # The ceiling must move the call off the over-priced model.
+    assert (llm.provider, llm.model) != ("anthropic", "claude-opus-4-20250514")
+    assert (llm.provider, llm.model) == ("openai", "gpt-cheap-repairer")
+
+
+def test_cost_ceiling_records_why_the_role_route_was_downgraded(monkeypatch):
+    # A silent substitution would trade one lie for another: the ledger has to
+    # say which model the ceiling refused.
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("AGENT_MODEL_REGISTRY_JSON", _ceiling_registry_json())
+    monkeypatch.setenv("AGENT_MODEL_MAX_COST", "low")
+    monkeypatch.setenv("AGENT_REPAIR_PROVIDER", "anthropic")
+    monkeypatch.setenv("AGENT_REPAIR_MODEL", "claude-opus-4-20250514")
+
+    from core.model_usage import ModelUsageLedger
+
+    router = ModelRouter.from_env(
+        llm_factory=_tier_factory, usage_ledger=ModelUsageLedger()
+    )
+    llm = router.for_role(ModelRole.REPAIR_PROPOSAL)
+
+    assert "cost_limit" in llm.route.reason
+    assert "claude-opus-4-20250514" in llm.route.reason
+    assert llm.cost_tier == "low"
+
+
+def test_role_route_inside_the_ceiling_is_untouched(monkeypatch):
+    # Guard: the ceiling must not become a blanket ban on explicit role routes.
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("AGENT_MODEL_REGISTRY_JSON", _ceiling_registry_json())
+    monkeypatch.setenv("AGENT_MODEL_MAX_COST", "low")
+    monkeypatch.setenv("AGENT_REPAIR_PROVIDER", "openai")
+    monkeypatch.setenv("AGENT_REPAIR_MODEL", "gpt-cheap-repairer")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    llm = router.for_role(ModelRole.REPAIR_PROPOSAL)
+
+    assert (llm.provider, llm.model) == ("openai", "gpt-cheap-repairer")
+
+
+def test_role_route_without_a_ceiling_is_unchanged(monkeypatch):
+    # Guard: with no ceiling configured the route is byte-for-byte the old one,
+    # expensive model included.
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.delenv("AGENT_MODEL_MAX_COST", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("AGENT_MODEL_REGISTRY_JSON", _ceiling_registry_json())
+    monkeypatch.setenv("AGENT_REPAIR_PROVIDER", "anthropic")
+    monkeypatch.setenv("AGENT_REPAIR_MODEL", "claude-opus-4-20250514")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    llm = router.for_role(ModelRole.REPAIR_PROPOSAL)
+
+    assert (llm.provider, llm.model) == ("anthropic", "claude-opus-4-20250514")
