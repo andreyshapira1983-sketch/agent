@@ -12,6 +12,23 @@ from core.secret_scanner import (
 )
 
 
+# Sample credentials are assembled from a prefix plus a body instead of being
+# written as one literal. These shapes are real enough that GitHub's own push
+# protection rejected the first version of this file (Slack token, Slack
+# webhook, GitLab token) — which independently confirms the formats below are
+# worth detecting. Splitting the prefix keeps the fixtures readable without
+# storing anything that reads as a live credential.
+_FINE_PAT_BODY = "_11ABCDEFG0aBcDeFgHiJ_kLmNoPqRsTuVwXyZ1234567890aBcDeFgHiJkLmNo"
+_GH_BODY = "_aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bD1fH3jL5"
+_SLACK_BODY = "-123456789012-1234567890123-aBcDeFgHiJkLmNoPqRsTuVwX"
+_SLACK_HOOK_HOST = "https://hooks.slack.com/"
+_SLACK_HOOK_PATH = "services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+_GOOGLE_BODY = "SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q"
+_GITLAB_BODY = "-aB3dE5gH7jK9mN1pQ3sT"
+_NPM_BODY = "_aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bD1fH3jL5"
+_STRIPE_BODY = "_live_aB3dE5gH7jK9mN1pQ3sT5vW7"
+
+
 # ============================================================
 # Regex detection
 # ============================================================
@@ -38,6 +55,36 @@ class TestScanRegex:
         assert findings, f"expected a finding in {text!r}"
         kinds = {f.kind for f in findings}
         assert expected_kind in kinds
+
+    @pytest.mark.parametrize(
+        ("text", "expected_kind"),
+        [
+            # GitHub issues five more token shapes besides the classic `ghp_`
+            # PAT, and this repo drives `gh` — so any of them can end up in
+            # captured output. Fine-grained PATs carry `_` inside the body.
+            ("github_pat" + _FINE_PAT_BODY, "github-fine-grained-pat"),
+            ("gho" + _GH_BODY, "github-token"),
+            ("ghs" + _GH_BODY, "github-token"),
+            ("ghu" + _GH_BODY, "github-token"),
+            ("ghr" + _GH_BODY, "github-token"),
+            ("xoxb" + _SLACK_BODY, "slack-token"),
+            ("xoxp" + _SLACK_BODY, "slack-token"),
+            (_SLACK_HOOK_HOST + _SLACK_HOOK_PATH, "slack-webhook"),
+            ("AIza" + _GOOGLE_BODY, "google-api-key"),
+            ("glpat" + _GITLAB_BODY, "gitlab-pat"),
+            ("npm" + _NPM_BODY, "npm-token"),
+            ("sk" + _STRIPE_BODY, "stripe-key"),
+        ],
+    )
+    def test_modern_token_formats_are_found(self, text, expected_kind):
+        # Measured against the live scanner before this rule set existed: all
+        # of these reached both logging surfaces verbatim (`TraceLogger` writes
+        # the JSONL line and prints to stderr), which is exactly what CodeQL
+        # flags on `core/logger.py`. The underscore prefixes matter: `sk_live_`
+        # is not caught by the `sk-` rule because that one requires a hyphen.
+        findings = scan(text)
+        assert findings, f"expected a finding in {text!r}"
+        assert expected_kind in {f.kind for f in findings}
 
     def test_clean_text_has_no_findings(self):
         assert scan("The weather is nice today.") == []

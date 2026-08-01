@@ -43,6 +43,27 @@ REGEX_RULES: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
     ("anthropic-key",      re.compile(r"(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9_\-]{20,}")),
     ("openai-key",         re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_\-]{20,}")),
     ("github-pat",         re.compile(r"ghp_[A-Za-z0-9]{20,}")),
+    # GitHub issues five more token shapes besides the classic `ghp_` PAT, and
+    # this repo drives `gh` — so any of them can surface in captured output.
+    # Fine-grained PATs carry `_` inside the body, hence the wider class.
+    ("github-fine-grained-pat", re.compile(
+        r"(?<![A-Za-z0-9_-])github_pat_[A-Za-z0-9_]{20,}"
+    )),
+    ("github-token",       re.compile(r"(?<![A-Za-z0-9_-])gh[osur]_[A-Za-z0-9]{20,}")),
+    # Slack bot/user/app tokens share the `xox<letter>-` prefix.
+    ("slack-token",        re.compile(r"(?<![A-Za-z0-9_-])xox[abeprs]-[A-Za-z0-9-]{10,}")),
+    # Incoming-webhook URLs are themselves the credential — no auth needed.
+    ("slack-webhook",      re.compile(
+        r"https://hooks\.slack\.com/services/[A-Za-z0-9/_-]{20,}"
+    )),
+    # Google/Firebase API keys: fixed 39-char shape, distinctive enough alone.
+    ("google-api-key",     re.compile(r"(?<![A-Za-z0-9_-])AIza[0-9A-Za-z_-]{35}")),
+    ("gitlab-pat",         re.compile(r"(?<![A-Za-z0-9_-])glpat-[A-Za-z0-9_-]{20,}")),
+    ("npm-token",          re.compile(r"(?<![A-Za-z0-9_-])npm_[A-Za-z0-9]{20,}")),
+    # Stripe uses `_` after the prefix, so the `sk-` rule above never sees it.
+    ("stripe-key",         re.compile(
+        r"(?<![A-Za-z0-9_-])[sprk]k_(?:live|test)_[A-Za-z0-9]{20,}"
+    )),
     ("huggingface-token",  re.compile(r"hf_[A-Za-z0-9]{20,}")),
     ("aws-access-key",     re.compile(r"AKIA[0-9A-Z]{16}")),
     ("bearer-token",       re.compile(r"Bearer\s+[A-Za-z0-9_.\-]{20,}")),
