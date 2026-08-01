@@ -18,6 +18,7 @@ Integration-level coverage (loop, approval, JSONL, rollback) lives in
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -27,6 +28,7 @@ from unittest import mock
 import pytest
 
 from tools.shell_exec import (
+    AGENT_BRANCH_PREFIX,
     DEFAULT_OUTPUT_CAP,
     DEFAULT_TIMEOUT_SECONDS,
     MUTATING_COMMANDS,
@@ -229,8 +231,13 @@ class TestReadOnlyExecution:
             assert Path(kwargs["cwd"]).resolve() == workspace.resolve()
             # shell=False is the most important contract.
             assert kwargs["shell"] is False
-            # Env was stripped down (no dotenv leaks, no PYTHONPATH overrides).
-            assert set(kwargs["env"].keys()) <= {"PATH", "SystemRoot"}
+            # Env is still stripped down — no dotenv leaks, no PYTHONPATH
+            # overrides. The home variables joined the allowed set so `git
+            # commit` can find who is committing; they name a directory and
+            # carry no credential. Nothing else may appear here.
+            assert set(kwargs["env"].keys()) <= {
+                "PATH", "SystemRoot", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+            }
 
     def test_unknown_binary_surfaces_clean_error(self, workspace: Path):
         """A whitelisted command not actually installed must FAIL CLEANLY."""
@@ -722,3 +729,80 @@ class TestGitRecordingSubcommands:
         plan = tool._build_compensation_plan("git", ["git", "commit", "-m", "x"], False)
         assert "nothing to undo" not in plan.description
         assert "not auto-undone" in plan.description
+
+    def test_the_description_states_the_permissions_it_enforces(self, workspace: Path):
+        """What the tool says is what the planner believes it may do.
+
+        Measured on a live run: the permissions grew, this text did not, and
+        the planner read the stale list, concluded it could not commit, and
+        reported a failure it had never attempted. Its own reasoning quoted the
+        old subcommand list back verbatim.
+        """
+        text = ShellExecTool(workspace_root=workspace).description.lower()
+        for allowed in ("git", "add", "commit", "checkout", AGENT_BRANCH_PREFIX):
+            assert allowed.lower() in text, allowed
+        for refused in ("push", "reset", "rebase"):
+            assert refused in text, refused
+
+    def test_the_planner_prompt_and_the_tool_agree(self, workspace: Path):
+        """One whitelist, two copies — they drifted the moment one changed.
+
+        The planner does not read `ShellExecTool.description`; the catalogue in
+        `core/planner.py` restates the whitelist. Measured on a live run: the
+        permissions grew, that copy did not, and the planner refused to even
+        attempt a commit, quoting the stale list back verbatim in its own
+        reasoning. Twice — the second time after the tool's own description had
+        already been corrected.
+        """
+        from core.planner import PLANNER_SYSTEM
+        from tools.shell_exec import WRITE_SUBCOMMANDS
+
+        prompt = PLANNER_SYSTEM.lower()
+        for sub in WRITE_SUBCOMMANDS["git"]:
+            assert f"git {sub}" in prompt or f'"{sub}"' in prompt, sub
+        assert AGENT_BRANCH_PREFIX in prompt
+        for refused in ("push", "reset", "rebase"):
+            assert refused in prompt, refused
+
+    def test_the_plan_sanitizer_keeps_the_steps_the_tool_allows(self, workspace: Path):
+        """The third copy of the whitelist, and the one that actually bit.
+
+        Measured live: the planner planned `git checkout -b agent/…`, `git add`
+        and `git commit` correctly, and this sanitizer deleted all three as
+        "subcommand not in […]" because it consulted the read-only half alone.
+        The run then reported it could not commit. A gate that refuses a
+        permission the tool grants is worse than one that never granted it: the
+        capability exists, and only the plan knows it was taken away.
+        """
+        from core.planner import LLMPlanner
+
+        warnings: list[str] = []
+        for argv in (
+            ["git", "checkout", "-b", "agent/x"],
+            ["git", "add", "core/x.py"],
+            ["git", "commit", "-m", "Record the work"],
+        ):
+            step = LLMPlanner._sanitize_step(
+                "shell_exec", {"argv": argv}, None, 1, warnings
+            )
+            assert step is not None, f"{argv} was dropped: {warnings}"
+        assert warnings == []
+
+    def test_git_can_find_who_is_committing(self, workspace: Path):
+        """The sandbox passed PATH only, so git had no identity.
+
+        Measured on a live run: the agent wrote the files, ran the tests and
+        staged them, and `git commit` then died on "Author identity unknown" —
+        the last step of the last wall, caused by an env var, not a policy.
+        These four name a directory and carry no credential.
+        """
+        env = ShellExecTool(workspace_root=workspace)._safe_env()
+        assert "PATH" in env
+        present = [n for n in ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH")
+                   if os.environ.get(n)]
+        assert present, "this machine defines no home variable at all"
+        for name in present:
+            assert env.get(name) == os.environ[name], name
+        # Everything else still stays out.
+        assert "ANTHROPIC_API_KEY" not in env
+        assert "OPENAI_API_KEY" not in env

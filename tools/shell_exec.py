@@ -246,15 +246,28 @@ DEFAULT_OUTPUT_CAP = 64 * 1024  # 64 KiB per stream
 
 class ShellExecTool(Tool):
     name = "shell_exec"
+    # What this says is what the planner believes it may do. When the
+    # permissions grew and this text did not, the planner read the stale list,
+    # concluded it could not commit, and reported a failure it had never
+    # attempted — measured on a live run. Keep this in step with
+    # READ_ONLY_SUBCOMMANDS / WRITE_SUBCOMMANDS.
     description = (
         "Execute ONE whitelisted shell command inside the workspace. "
         "Read-only commands (whoami, hostname, where/which, git "
         "log/diff/status/show/branch/tag/blame, findstr/grep) run "
         "without approval. Mutating commands (mkdir, touch) escalate "
         "to the approval gate and ship with a compensation plan that "
-        "can undo the change via :rollback. Shell metacharacters, "
-        "absolute paths, and any command outside the tiny built-in "
-        "whitelist are rejected before dispatch."
+        "can undo the change via :rollback. "
+        "You CAN record your own work with git, each in one exact shape, "
+        "all of them approval-gated: "
+        "['git','checkout','-b','agent/<name>'] to create your own branch "
+        "(existing branches cannot be switched to), "
+        "['git','add','<path>',…] with explicit paths (no -A), and "
+        "['git','commit','-m','<message>'] with nothing else — no --amend, "
+        "no --no-verify. Committing is refused on main/master, so create the "
+        "agent/ branch first. Push, pull, fetch, reset, rebase and merge stay "
+        "out. Shell metacharacters, absolute paths, and any command outside "
+        "the tiny built-in whitelist are rejected before dispatch."
     )
     # Static fallback — overridden per-argv by `risk_for`.
     risk: Risk = "irreversible"
@@ -777,14 +790,31 @@ class ShellExecTool(Tool):
             return "findstr"
         return cmd
 
+    # Git reads the committer's name and e-mail from the user's global config,
+    # which it finds through HOME (POSIX) or USERPROFILE/HOMEDRIVE+HOMEPATH
+    # (Windows). Without them `git commit` dies on "Author identity unknown"
+    # even though every other check passed — measured on a live run that had
+    # already written the files, run the tests and staged them.
+    #
+    # These name a directory. They carry no credential, unlike the rest of the
+    # environment this deliberately withholds, and git only reads its own
+    # config files there.
+    _GIT_IDENTITY_ENV: tuple[str, ...] = (
+        "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+    )
+
     def _safe_env(self) -> dict[str, str]:
-        """Minimal env: PATH + (Windows) SystemRoot. Nothing else."""
+        """Minimal env: PATH, (Windows) SystemRoot, and the home lookup."""
         env = {"PATH": os.environ.get("PATH", "")}
         if sys.platform == "win32":
             # SystemRoot is REQUIRED for many Windows .exe to even start.
             sr = os.environ.get("SystemRoot")
             if sr:
                 env["SystemRoot"] = sr
+        for name in self._GIT_IDENTITY_ENV:
+            value = os.environ.get(name)
+            if value:
+                env[name] = value
         return env
 
     def _cap_and_decode(self, raw: bytes) -> tuple[str, bool]:
