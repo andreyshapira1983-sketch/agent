@@ -307,9 +307,11 @@ class ConflictEpisodeStore:
         return tuple(e for e in self.load_all() if e.is_open)
 
     def load_recent(self, n: int = 20) -> tuple[ConflictEpisode, ...]:
-        """The last *n* episodes, most recent first."""
+        """The last *n* episodes, most recent first. ``n <= 0`` means none."""
+        if n <= 0:
+            return ()
         every = self.load_all()
-        return tuple(reversed(every[-max(1, n):])) if every else ()
+        return tuple(reversed(every[-n:])) if every else ()
 
     def training_rows(self, *, resolved_only: bool = True) -> tuple[dict[str, Any], ...]:
         """Dataset rows. Unresolved episodes are excluded by default."""

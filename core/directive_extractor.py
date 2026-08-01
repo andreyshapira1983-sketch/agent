@@ -207,9 +207,10 @@ AXES: tuple[Axis, ...] = (
             Stance(
                 demand="тесты не изменять",
                 patterns=(
-                    r"не\s+мен\w+\s+\w*\s*тест\w*",
+                    # The negation is part of the requirement here, so these
+                    # patterns consume it themselves — see ``_is_negated``.
+                    r"не\s+(?:мен\w+|измен\w+|прав\w+|трог\w+)\s+\w*\s*тест\w*",
                     r"тест\w*\s+не\s+(?:мен\w+|измен\w+|прав\w+|трог\w+)",
-                    r"не\s+прав\w+\s+\w*\s*тест\w*",
                     r"do\s+not\s+(?:change|modify|touch)\s+the\s+tests?",
                     r"tests?\s+must\s+not\s+change",
                 ),
@@ -265,6 +266,46 @@ class SourceText:
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?;])\s+|\n+")
 
 
+#: Words that invert the requirement that follows them. "Не сортируй" is not a
+#: request to sort, and reading it as one manufactures a conflict out of
+#: agreement — the most damaging kind of false positive this module can make.
+_NEGATIONS = frozenset({
+    "не", "нет", "нельзя", "никогда", "без",
+    "not", "no", "never", "don't", "dont", "avoid", "without",
+})
+
+#: How many words before a match are searched for a negation. Three covers
+#: "не надо это сортировать" without reaching back into the previous clause.
+_NEGATION_LOOKBEHIND_WORDS = 3
+
+_WORD = re.compile(r"[\w']+", re.UNICODE)
+
+#: Russian puts some negations *after* the verb — "сортировать не надо". Only a
+#: few fixed forms do this, and the window deliberately does not cross
+#: punctuation: a negation after a comma belongs to the next clause
+#: ("отсортируй по имени, не надо ничего усложнять" is still a sort request).
+_POST_NEGATION = re.compile(
+    r"^(?:\s+[\w']+){0,2}\s+(?:не\s+(?:надо|нужно|стоит|требуется|следует)|нельзя)\b",
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def _is_negated(sentence: str, match_start: int, match_end: int) -> bool:
+    """True when a negation flips the matched phrase.
+
+    Patterns that spell out their own negation ("не менять порядок") consume the
+    negation themselves, so nothing precedes the match and this correctly
+    returns False.
+    """
+    preceding = _WORD.findall(sentence[:match_start].lower())
+    if any(
+        word in _NEGATIONS
+        for word in preceding[-_NEGATION_LOOKBEHIND_WORDS:]
+    ):
+        return True
+    return _POST_NEGATION.search(sentence[match_end:]) is not None
+
+
 def _sentences(text: str) -> tuple[str, ...]:
     if not isinstance(text, str) or not text.strip():
         return ()
@@ -290,7 +331,16 @@ def extract(sources: Iterable[SourceText]) -> tuple[Directive, ...]:
     for source in sources:
         for sentence in _sentences(source.text):
             for axis, stance, pattern in _COMPILED:
-                if not pattern.search(sentence):
+                match = pattern.search(sentence)
+                if match is None:
+                    continue
+                if _is_negated(sentence, match.start(), match.end()):
+                    # "Не сортируй по имени" is not a request to sort. Dropping
+                    # the match rather than flipping it to the opposite stance
+                    # is deliberate: "не сортируй по имени, сортируй по дате"
+                    # negates the wording, not the axis, and guessing which was
+                    # meant would be the same confident invention this module
+                    # exists to avoid.
                     continue
                 key = (
                     source.source_level,

@@ -49,11 +49,16 @@ This document is the source of truth for how agents should behave in this reposi
 5. Local code conventions and existing implementation patterns
 6. **Advisors without authority** — code review (human or bot), linters, "this
    would be more convenient" suggestions
-7. Minimal-risk implementation choices
+
+When every level above is silent on a choice, prefer the minimal-risk
+implementation. That is a tie-breaker, not a seventh source of instruction —
+nothing *instructs* it, so it can never conflict with the six.
 
 > **Revised 2026-08-01.** Levels 2, 3 and 6 were added. The previous list had a
 > single "explicit user instructions" line and no notion of an advisor, so a
 > confidently worded review comment outranked the specification it contradicted.
+> Minimal-risk choice moved out of the numbered list: keeping it as a level made
+> this list seven-deep while the authority contract defines six.
 
 ## Conflicting Instructions
 

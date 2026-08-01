@@ -295,23 +295,31 @@ def _record_conflict_episodes(
     workspace: Path,
     context: str,
     now_iso: str | None,
-) -> list[str]:
+) -> tuple[list[str], str]:
     """Bank the stop in procedural memory. Never raises.
 
     The refusal is the safety-critical part; losing the episode is a memory
     loss, not a safety failure, so a broken store must not turn a clean refusal
     into an unhandled error.
+
+    Returns ``(episode_ids, risk_note)``. The note is non-empty only when the
+    write failed: an empty id list would otherwise be indistinguishable from
+    "no episode was needed", and the operator would have no way to know the
+    stop went unrecorded and needs re-banking.
     """
     try:
         episodes = episodes_from_outcome(
             conflict, context=context, now_iso=now_iso
         )
         if not episodes:
-            return []
+            return [], ""
         ConflictEpisodeStore(episode_store_path(workspace)).save_many(episodes)
-        return [episode.id for episode in episodes]
-    except Exception:  # noqa: BLE001 — see the docstring
-        return []
+        return [episode.id for episode in episodes], ""
+    except Exception as exc:  # noqa: BLE001 — see the docstring
+        return [], (
+            "конфликт НЕ записан в процедурную память "
+            f"({type(exc).__name__}); остановка в силе, но эпизод потерян"
+        )
 
 
 def run_self_apply_lane(
@@ -339,15 +347,19 @@ def run_self_apply_lane(
     # and hands the contradiction back to the operator.
     conflict = evaluate_instruction_conflict(proposal.directives)
     if conflict.is_blocked:
+        episode_ids, memory_risk = _record_conflict_episodes(
+            conflict, workspace=workspace, context=proposal.reason,
+            now_iso=now_iso,
+        )
+        risks = [finding.priority_verdict() for finding in conflict.findings]
+        if memory_risk:
+            risks.append(memory_risk)
         return SelfApplyReport(
             status="conflict_block",
             reason=conflict.reason,
-            risks=[finding.priority_verdict() for finding in conflict.findings],
+            risks=risks,
             next_human_action=conflict.report(),
-            episode_ids=_record_conflict_episodes(
-                conflict, workspace=workspace, context=proposal.reason,
-                now_iso=now_iso,
-            ),
+            episode_ids=episode_ids,
         )
 
     # 1. budget kill-switch ---------------------------------------------------

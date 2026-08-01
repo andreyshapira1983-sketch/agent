@@ -101,6 +101,58 @@ def test_repeated_stance_from_one_source_is_one_directive():
     assert len(directives) == 1
 
 
+def test_negated_demand_is_not_read_as_the_demand():
+    """«Не сортируй» is not a request to sort."""
+    directives = extract([
+        SourceText("Не сортируй по имени.", "advisor", "код-ревью"),
+    ])
+    assert directives == ()
+
+
+@pytest.mark.parametrize("text", [
+    "Не сортируй по имени.",
+    "Сортировать не надо.",
+    "Нельзя сортировать этот список.",
+    "Please do not sort by name.",
+])
+def test_negations_are_recognised(text: str):
+    assert extract([SourceText(text, "advisor", "код-ревью")]) == ()
+
+
+def test_post_negation_does_not_cross_a_comma():
+    """A negation in the next clause must not cancel this one."""
+    directives = extract([
+        SourceText(
+            "Отсортируй по имени, не надо ничего усложнять.",
+            "advisor",
+            "код-ревью",
+        ),
+    ])
+    assert [d.demand for d in directives] == ["сортировать"]
+
+
+def test_a_refusal_to_sort_does_not_conflict_with_stable_order():
+    """The damaging false positive: agreement misread as contradiction."""
+    directives = extract_from_task_and_review(
+        task_text="Порядок вывода должен быть стабильным.",
+        review_text="Не сортируй по имени, пожалуйста.",
+    )
+    assert evaluate(directives).mode == "proceed"
+
+
+def test_a_requirement_that_spells_out_its_own_negation_still_counts():
+    """Patterns that consume the negation must not be dropped by the guard."""
+    for text in (
+        "Не менять порядок элементов.",
+        "Существующие файлы не менять.",
+        "Тесты не изменять.",
+        "Не изменять тесты.",
+    ):
+        assert extract([
+            SourceText(text, "task_contract", "постановка задачи"),
+        ]), text
+
+
 # ---------------------------------------------------------------------------
 # The four exam scenarios, extracted from prose
 # ---------------------------------------------------------------------------

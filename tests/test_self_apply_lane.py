@@ -256,6 +256,10 @@ def test_a_broken_episode_store_still_refuses_cleanly(tmp_path: Path):
     assert report.status == "conflict_block"
     assert report.episode_ids == []
     assert "create_temp_branch" not in _verbs(vcs)
+    assert any("НЕ записан" in risk for risk in report.risks), (
+        "an empty episode list must not be indistinguishable from 'no episode "
+        "was needed' — the operator has to know the stop went unrecorded"
+    )
 
 
 def test_no_episode_is_written_when_nothing_conflicts(tmp_path: Path):

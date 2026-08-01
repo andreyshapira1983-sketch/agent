@@ -168,6 +168,12 @@ def rehydrate_proposal(payload: Any) -> SelfApplyProposal:
     )
 
 
+#: Authority levels a proposal payload may claim for itself. ``operator`` is
+#: excluded on purpose — only a human channel can confer operator authority,
+#: and a payload is machine-written.
+_PAYLOAD_DECLARABLE_LEVELS = frozenset(AUTHORITY_RANK) - {"operator"}
+
+
 def _directives_from_payload(payload: dict) -> tuple[Directive, ...]:
     """Recover the requirements this patch is answering, with their authority.
 
@@ -179,8 +185,13 @@ def _directives_from_payload(payload: dict) -> tuple[Directive, ...]:
       entries, which is how a review comment enters with the right (low)
       authority rather than being mistaken for the task itself.
 
-    An entry with an unrecognised ``level`` is demoted to ``advisor``: an
-    unlabeled source must never win an argument by accident.
+    A payload may not claim ``operator``: it is written by the proposal
+    producer, not by the human. Without that restriction a producer could label
+    its own instruction ``operator``, and the conflict report and the stored
+    episode would then cite the operator as the source of something they never
+    said — the exact false authority claim ``docs/INSTRUCTION_AUTHORITY.md``
+    exists to prevent. Any level outside the declarable set, recognised or not,
+    is demoted to ``advisor``.
     """
     sources: list[SourceText] = []
 
@@ -201,7 +212,7 @@ def _directives_from_payload(payload: dict) -> tuple[Directive, ...]:
             if not text.strip():
                 continue
             level = str(entry.get("level") or "")
-            if level not in AUTHORITY_RANK:
+            if level not in _PAYLOAD_DECLARABLE_LEVELS:
                 level = "advisor"
             sources.append(SourceText(
                 text=text,

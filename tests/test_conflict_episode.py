@@ -210,6 +210,14 @@ def test_load_open_excludes_resolved(tmp_path: Path):
     assert closed.id not in open_ids
 
 
+def test_load_recent_zero_returns_nothing(tmp_path: Path):
+    """A caller computing n from config and getting 0 means "none", not "one"."""
+    store = ConflictEpisodeStore(default_path(tmp_path))
+    store.save_many([_episode(), _episode()])
+    assert store.load_recent(0) == ()
+    assert store.load_recent(-5) == ()
+
+
 def test_load_recent_is_most_recent_first(tmp_path: Path):
     store = ConflictEpisodeStore(default_path(tmp_path))
     first, second = _episode(), _episode()
