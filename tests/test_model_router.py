@@ -1064,8 +1064,6 @@ def test_cost_ceiling_records_why_the_role_route_was_downgraded(monkeypatch):
     monkeypatch.setenv("AGENT_REPAIR_PROVIDER", "anthropic")
     monkeypatch.setenv("AGENT_REPAIR_MODEL", "claude-opus-4-20250514")
 
-    from core.model_usage import ModelUsageLedger
-
     router = ModelRouter.from_env(
         llm_factory=_tier_factory, usage_ledger=ModelUsageLedger()
     )
@@ -1191,8 +1189,6 @@ def test_an_explicitly_routed_custom_role_is_not_called_unknown():
 def test_unknown_role_reason_reaches_the_usage_ledger():
     # The ledger is the one channel this router writes to, so the signal has to
     # survive the trip from route_for() into a recorded call.
-    from core.model_usage import ModelUsageLedger
-
     ledger = ModelUsageLedger()
     router = ModelRouter(
         default_provider="openai",
