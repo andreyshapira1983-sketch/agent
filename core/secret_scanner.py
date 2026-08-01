@@ -34,6 +34,36 @@ from dataclasses import dataclass
 from typing import Final
 
 
+# The set of KEY NAMES that make a value a credential. Single source of truth:
+# it feeds both the flat-text rule (`credential-assignment`, below) and the
+# structured-payload check (`is_credential_key`). Two hand-written copies would
+# drift, and a drifting copy is how `{"password": ...}` leaked while
+# `password: ...` was masked.
+#
+# Deliberately NOT a bare `token`: `max_tokens` is a model parameter, and
+# redacting it would blind the logs this layer exists to keep readable.
+CREDENTIAL_KEY_NAMES: Final[str] = (
+    r"api[_-]?key|apikey|secret[_-]?key|password|passwd|passphrase|"
+    r"auth[_-]?token|private[_-]?key|access[_-]?token"
+)
+
+# A dict key counts as credential-naming when it IS one of those names or ENDS
+# with one after a separator: `openai_api_key` and `db_password` are the same
+# secret wearing a prefix. `password_hint` is not — the suffix must be last.
+_CREDENTIAL_KEY_RE: Final[re.Pattern[str]] = re.compile(
+    rf"(?i)^(?:.*[_.\-])?(?:{CREDENTIAL_KEY_NAMES})$"
+)
+
+
+def is_credential_key(name: str) -> bool:
+    """True when a mapping key names a credential, so its value is a secret.
+
+    Used for values that carry no signal of their own: an opaque password
+    matches no regex, so the key is the only evidence available.
+    """
+    return isinstance(name, str) and bool(_CREDENTIAL_KEY_RE.match(name))
+
+
 # Regex rules: (kind, compiled pattern). `kind` ends up in the redaction
 # token, e.g. `[REDACTED:openai-key]`, so keep it short, lowercase, kebab.
 REGEX_RULES: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
@@ -85,8 +115,7 @@ REGEX_RULES: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
     # `KEY=VALUE` / `KEY: VALUE` shapes where KEY names a credential.
     # Matches the WHOLE assignment so the redactor can mask the value.
     ("credential-assignment", re.compile(
-        r"(?i)\b(api[_-]?key|apikey|secret[_-]?key|password|passwd|passphrase|"
-        r"auth[_-]?token|private[_-]?key|access[_-]?token)\s*[:=]\s*\S+"
+        rf"(?i)\b({CREDENTIAL_KEY_NAMES})\s*[:=]\s*\S+"
     )),
 )
 
