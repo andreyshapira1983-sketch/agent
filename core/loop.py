@@ -3095,8 +3095,9 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         r"(?<!\w)(?:"
         # produce or modify
         r"созда(?:й|йте|ть)|извлек(?:и|ите)|извлечь|напиш(?:и|ите)|написать|"
-        r"перенес(?:и|ите|ти)|переименуй(?:те)?|удал(?:и|ите|ить)|"
-        r"исправ(?:ь|ьте|ить)|почини(?:те)?|реализ(?:уй|уйте|овать)|"
+        r"перенес(?:и|ите|ти)|переименуй(?:те)?|переименовать|"
+        r"удал(?:и|ите|ить)|"
+        r"исправ(?:ь|ьте|ить)|почини(?:те)?|починить|реализ(?:уй|уйте|овать)|"
         r"отрефактор(?:и|ить)|"
         r"create|extract|implement|refactor|rewrite|rename|delete|write|"
         # run or record
@@ -3105,6 +3106,11 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         r")(?!\w)",
         re.IGNORECASE,
     )
+
+    # Anything shaped like a file name, whatever its extension. The Latin-only
+    # suffix keeps ordinary prose out: a sentence ending in "коммит." has no
+    # letter after the dot, and "и т.д." is Cyrillic.
+    _PATHISH_TOKEN_RE = re.compile(r"[\w./\\-]*[\w-]\.[A-Za-z0-9]{1,8}(?!\w)")
 
     @classmethod
     def _is_change_request(cls, question: str) -> bool:
@@ -3119,10 +3125,17 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         an instruction to commit. Left in, the guard would repeat in miniature
         the defect it fixes — deciding intent from text that is not about
         intent.
+
+        Removal is case-insensitive and covers file-ish tokens beyond the ones
+        `_extract_path_mentions` recognises: it de-duplicates by casefold, so a
+        second spelling (`Commit.md` beside `commit.md`) survives an exact
+        replace, and it knows only a short extension allowlist, so `commit.log`
+        would have been left to vote as well.
         """
         text = question
         for path in cls._extract_path_mentions(question):
-            text = text.replace(path, " ")
+            text = re.sub(re.escape(path), " ", text, flags=re.IGNORECASE)
+        text = cls._PATHISH_TOKEN_RE.sub(" ", text)
         return bool(cls._CHANGE_INTENT_RE.search(text))
 
     @staticmethod

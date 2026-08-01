@@ -261,6 +261,13 @@ def test_the_change_guard_reads_verbs_not_substrings():
     assert not is_change("compare branch.md and commit.md")
     assert not is_change("Прочитай a.md и b.md и сравни их.")
 
+    # Reviewer findings on the re-land: a file name must not vote whatever its
+    # extension or spelling, and the Russian infinitives are verbs too.
+    assert not is_change("Compare core/a.py and core/b.py and commit.log")
+    assert not is_change("Compare commit.md and Commit.md and core/x.py")
+    assert is_change("Сравни a.md и b.md, затем починить код")
+    assert is_change("Сравни a.md и b.md, затем переименовать модуль")
+
     assert is_change("Create a new module core/x.py from core/y.py")
     assert is_change("Refactor core/a.py and core/b.py")
     assert is_change("Run the tests after comparing a.py and b.py")
