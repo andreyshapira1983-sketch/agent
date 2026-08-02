@@ -45,7 +45,13 @@ def test_the_modules_runtime_imports_stay_inside_the_boundary():
     from pathlib import Path
 
     allowed = {"re", "dataclasses", "pathlib", "typing", "tools.file_read"}
-    source = Path("core/file_request_intent.py").read_text(encoding="utf-8")
+    # Anchored to this file, not the CWD — Copilot's point about the previous
+    # subprocess probe applied equally here: a pytest run from outside the
+    # repo root (or a leaked chdir) must not turn into a false failure.
+    module_path = (
+        Path(__file__).resolve().parent.parent / "core" / "file_request_intent.py"
+    )
+    source = module_path.read_text(encoding="utf-8")
     tree = ast.parse(source)
 
     runtime_imports: set[str] = set()
