@@ -14,7 +14,7 @@ from typing import Any
 from core.lang_match import any_term_matches, normalize_text, tokenize
 
 
-_BROAD_PROJECT_CONTEXT_TERMS = (
+BROAD_PROJECT_CONTEXT_TERMS = (
     "your project",
     "this project",
     "our project",
@@ -37,7 +37,7 @@ _BROAD_PROJECT_CONTEXT_TERMS = (
     "статус проект",
     "состояние проект",
 )
-_BROAD_PROJECT_QUESTION_TERMS = (
+BROAD_PROJECT_QUESTION_TERMS = (
     "what do you know",
     "already know",
     "tell me about",
@@ -182,20 +182,20 @@ def _ru_pronoun_domain_introspection(tokens: tuple[str, ...]) -> bool:
     return False
 
 
-_DOCTRINE_CORPORATE_STRONG_TERMS = (
+DOCTRINE_CORPORATE_STRONG_TERMS = (
     "corporate model",
     "central agent governance",
     "central agent",
     "safe autonomy",
     "night observation",
 )
-_DOCTRINE_CORPORATE_CONTEXTUAL_TERMS = (
+DOCTRINE_CORPORATE_CONTEXTUAL_TERMS = (
     "doctrine",
     "корпоратив",
     "центральн",
     "доктрин",
 )
-_DOCTRINE_CORPORATE_TOPIC_TERMS = (
+DOCTRINE_CORPORATE_TOPIC_TERMS = (
     "corporate",
     "governance",
     "subagent",
@@ -215,7 +215,7 @@ _DOCTRINE_CORPORATE_TOPIC_TERMS = (
     "наблюден",
     "автоном",
 )
-_DOCTRINE_CORPORATE_CONTEXT_TERMS = (
+DOCTRINE_CORPORATE_CONTEXT_TERMS = (
     "agent",
     "project",
     "repo",
@@ -227,7 +227,7 @@ _DOCTRINE_CORPORATE_CONTEXT_TERMS = (
     "репозитор",
     "архитектур",
 )
-_DOCTRINE_CORPORATE_DOC_PATHS = (
+DOCTRINE_CORPORATE_DOC_PATHS = (
     "docs/future/CORPORATE_MODEL.md",
     "docs/CENTRAL_AGENT_GOVERNANCE.md",
     "docs/AGENT_ANATOMY.md",
@@ -306,7 +306,7 @@ _IMPLEMENTATION_DETAIL_TERMS = (
     "сломано",
     "баг",
 )
-_CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS = (
+CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS = (
     # Operator *wording*, not module names. The `confidence` / `low_confidence_gate`
     # entries are the pre-2026-07-27 vocabulary, kept so a question phrased the old
     # way still routes here. The live module is `core/evidence_support.py` and the
@@ -332,7 +332,7 @@ _CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS = (
     "цитат",
     "вериф",
 )
-_CONFIDENCE_EVIDENCE_SOURCE_PATHS = (
+CONFIDENCE_EVIDENCE_SOURCE_PATHS = (
     "core/verifier.py",
     "tests/test_verifier.py",
     "tests/test_evidence_support.py",
@@ -343,11 +343,11 @@ _CONFIDENCE_LOW_SIGNAL_DEFAULT_PATHS = (
     "tools/",
 )
 
-def _is_broad_project_self_knowledge_question(question: str) -> bool:
+def is_broad_project_self_knowledge_question(question: str) -> bool:
     lowered = (question or "").casefold()
     return (
-        any(term in lowered for term in _BROAD_PROJECT_CONTEXT_TERMS)
-        and any(term in lowered for term in _BROAD_PROJECT_QUESTION_TERMS)
+        any(term in lowered for term in BROAD_PROJECT_CONTEXT_TERMS)
+        and any(term in lowered for term in BROAD_PROJECT_QUESTION_TERMS)
     )
 
 
@@ -370,7 +370,7 @@ def _history_has_project_status_memory(history: str) -> bool:
 
 def _should_prefer_memory_over_readme(question: str, history: str) -> bool:
     return (
-        _is_broad_project_self_knowledge_question(question)
+        is_broad_project_self_knowledge_question(question)
         and _history_has_project_status_memory(history)
         and not _explicitly_requests_readme(question)
         and not _explicitly_requests_architecture_reference(question)
@@ -401,20 +401,20 @@ def _is_self_repo_introspection_question(question: str) -> bool:
     return not _wants_external_lookup(question)
 
 
-def _is_doctrine_corporate_question(question: str) -> bool:
+def is_doctrine_corporate_question(question: str) -> bool:
     lowered = (question or "").casefold()
-    if any(term in lowered for term in _DOCTRINE_CORPORATE_STRONG_TERMS):
+    if any(term in lowered for term in DOCTRINE_CORPORATE_STRONG_TERMS):
         return True
     has_context = any(
-        term in lowered for term in _DOCTRINE_CORPORATE_CONTEXT_TERMS
+        term in lowered for term in DOCTRINE_CORPORATE_CONTEXT_TERMS
     )
     if (
         has_context
-        and any(term in lowered for term in _DOCTRINE_CORPORATE_CONTEXTUAL_TERMS)
+        and any(term in lowered for term in DOCTRINE_CORPORATE_CONTEXTUAL_TERMS)
     ):
         return True
     topic_hits = {
-        term for term in _DOCTRINE_CORPORATE_TOPIC_TERMS
+        term for term in DOCTRINE_CORPORATE_TOPIC_TERMS
         if term in lowered
     }
     return len(topic_hits) >= 2 and has_context
@@ -640,9 +640,9 @@ def _is_self_repair_doctrine_question(question: str) -> bool:
     return has_context and has_action
 
 
-def _is_confidence_evidence_diagnostic_question(question: str) -> bool:
+def is_confidence_evidence_diagnostic_question(question: str) -> bool:
     lowered = (question or "").casefold()
-    return any(term in lowered for term in _CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS)
+    return any(term in lowered for term in CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS)
 
 
 def _requests_implementation_detail(question: str) -> bool:
@@ -684,7 +684,7 @@ def _ensure_confidence_evidence_sources_first(
     drop_low_signal_defaults: bool,
 ) -> list[dict[str, Any]]:
     required_by_norm = {
-        _norm_source_path(path): path for path in _CONFIDENCE_EVIDENCE_SOURCE_PATHS
+        _norm_source_path(path): path for path in CONFIDENCE_EVIDENCE_SOURCE_PATHS
     }
     existing_required: dict[str, dict[str, Any]] = {}
     remainder: list[dict[str, Any]] = []
@@ -704,7 +704,7 @@ def _ensure_confidence_evidence_sources_first(
 
     ordered: list[dict[str, Any]] = []
     injected: list[str] = []
-    for path in _CONFIDENCE_EVIDENCE_SOURCE_PATHS:
+    for path in CONFIDENCE_EVIDENCE_SOURCE_PATHS:
         norm = _norm_source_path(path)
         existing = existing_required.get(norm)
         if existing is not None:
@@ -732,7 +732,7 @@ def _ensure_doctrine_docs_first(
     *,
     drop_default_code_sources: bool,
 ) -> list[dict[str, Any]]:
-    docs_by_norm = {_norm_source_path(path): path for path in _DOCTRINE_CORPORATE_DOC_PATHS}
+    docs_by_norm = {_norm_source_path(path): path for path in DOCTRINE_CORPORATE_DOC_PATHS}
     default_drop = {
         _norm_source_path(path) for path in _DOCTRINE_LOW_SIGNAL_DEFAULT_PATHS
     }
@@ -758,7 +758,7 @@ def _ensure_doctrine_docs_first(
 
     ordered_docs: list[dict[str, Any]] = []
     injected: list[str] = []
-    for path in _DOCTRINE_CORPORATE_DOC_PATHS:
+    for path in DOCTRINE_CORPORATE_DOC_PATHS:
         norm = _norm_source_path(path)
         existing = existing_docs.get(norm)
         if existing is not None:
@@ -854,7 +854,7 @@ def _ensure_subagent_governance_docs_first(
         sources,
         warnings,
         target_paths=_SUBAGENT_GOVERNANCE_DOC_PATHS,
-        lead_paths=_DOCTRINE_CORPORATE_DOC_PATHS,
+        lead_paths=DOCTRINE_CORPORATE_DOC_PATHS,
         warning_prefix="subagent governance docs injected for a sub-agent question: ",
     )
 
@@ -874,7 +874,7 @@ def _ensure_memory_governance_docs_first(
         sources,
         warnings,
         target_paths=_MEMORY_GOVERNANCE_DOC_PATHS,
-        lead_paths=_DOCTRINE_CORPORATE_DOC_PATHS + _SUBAGENT_GOVERNANCE_DOC_PATHS,
+        lead_paths=DOCTRINE_CORPORATE_DOC_PATHS + _SUBAGENT_GOVERNANCE_DOC_PATHS,
         warning_prefix="memory governance docs injected for a memory question: ",
     )
 
@@ -895,7 +895,7 @@ def _ensure_self_repair_doctrine_docs_first(
         warnings,
         target_paths=_SELF_REPAIR_DOCTRINE_DOC_PATHS,
         lead_paths=(
-            _DOCTRINE_CORPORATE_DOC_PATHS
+            DOCTRINE_CORPORATE_DOC_PATHS
             + _SUBAGENT_GOVERNANCE_DOC_PATHS
             + _MEMORY_GOVERNANCE_DOC_PATHS
         ),

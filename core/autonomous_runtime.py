@@ -20,11 +20,11 @@ from core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from core.incident import IncidentLog
 from core.ingestion import ingest_files
 from core.injection_guard import prepare_untrusted_text_for_llm
-from core.learning_planner import (
-    LearningPlanner,
-    is_confidence_evidence_learning_goal,
-    is_doctrine_corporate_learning_goal,
+from core.doc_routing import (
+    is_confidence_evidence_diagnostic_question,
+    is_doctrine_corporate_question,
 )
+from core.learning_planner import LearningPlanner
 from core.models import ToolCall
 from core.redaction import prepare_text_for_llm_boundary
 from core.task_lifecycle import (
@@ -632,8 +632,8 @@ class AutonomousRuntime:
         source_registry = getattr(self.agent, "source_registry_store", None)
         rotated_root = _LEARN_ROOT_ROTATION[_rotation_index(len(_LEARN_ROOT_ROTATION))]
         if (
-            is_doctrine_corporate_learning_goal(config.goal)
-            or is_confidence_evidence_learning_goal(config.goal)
+            is_doctrine_corporate_question(config.goal)
+            or is_confidence_evidence_diagnostic_question(config.goal)
         ):
             rotated_root = "."
         if rotated_root != "." and not (self.workspace / rotated_root).is_dir():
