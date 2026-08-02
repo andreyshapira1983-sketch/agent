@@ -4008,7 +4008,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # (e.g. a secret or PII hiding in planner_reasoning).
         safe_user_prompt, _secret_findings, _pii_findings = redact_dlp_text(user_prompt)
         _active_llm = llm if llm is not None else self.llm
-        from core.planner import _build_host_tools_block, host_tools_relevant  # lazy — avoids circular
+        from core.host_tools_context import _build_host_tools_block, host_tools_relevant
         # Local critique must not pull host_tools context. Otherwise inject only
         # when the turn is actually about host tools (name / task word / an
         # effect tool was used) — so .env paths don't ride along on unrelated

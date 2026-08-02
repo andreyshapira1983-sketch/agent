@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 153 modules across 12 groups._
+_Total: 154 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -54,6 +54,7 @@ _Planning, verification, clarification, control loop._
 | `core/planner_prompt` | The planner's system prompt (§3 Cognitive Core: Planning). |
 | `core/plan_parsing` | Parsing of the planner LLM's raw output (§3 Cognitive Core: Planning). |
 | `core/doc_routing` | Question classification and governing-doc routing for the planner. |
+| `core/host_tools_context` | Host-tool context: which desktop tools exist and when to mention them. |
 | `core/step_sanitizer` | Admission rules for one planner step — the whitelist the model cannot argue with. |
 | `core/verifier` | MVP-14.4 — Verifier. |
 | `core/verifier_core` | The verifier's `verify()` entry point: turns a draft answer and its evidence chain into a per-claim verdict report. |
