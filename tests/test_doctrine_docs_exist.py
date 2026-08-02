@@ -114,7 +114,7 @@ def test_memory_docs_are_thematic_not_in_corporate_manifest() -> None:
 def test_memory_manifest_excludes_unapproved_and_superseded_docs() -> None:
     """The two documents deliberately kept out must stay out.
 
-    `MEMORY_LIFECYCLE_CONTRACT.md` is an unapproved v2-draft that no code
+    `MEMORY_LIFECYCLE_CONTRACT.md` is an unapproved draft (v4 at this note's last update) that no code
     implements; `MEMORY_FIX_PLAN.md` is partly superseded (its A3 prescription
     was never applied as written). Injecting either as doctrine would teach the
     agent a rule that does not hold in the code it is reading.
