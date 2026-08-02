@@ -1,6 +1,6 @@
-# Memory Lifecycle Contract — M1 (canonical design, **v3-draft**)
+# Memory Lifecycle Contract — M1 (canonical design, **v4-draft**)
 
-> **Status: v3-draft — target design only. Not a runtime specification.**
+> **Status: v4-draft — target design only. Not a runtime specification.**
 >
 > **v3 = v2 plus §17; the normative body is unchanged.** §1–§16 carry exactly the
 > rules v2-draft carried, still unapproved and still implemented by nothing. The
@@ -30,7 +30,7 @@
 >   procedural lifecycle is written as normative §6.4 + §7.7; `conflicted` is reserved for
 >   genuine contradiction (degradation demotes to `extracted`); every unresolved decision
 >   is isolated in §16 "Open decisions" and nothing unresolved is phrased as prescription.
-> - **v3-draft (this). Adds §17 — the measured contract↔code reconciliation.** No
+> - **v3-draft. Adds §17 — the measured contract↔code reconciliation.** No
 >   normative rule changed. `docs/INDEX.md` §4 warning 5 said the contract and the code
 >   describe different lifecycle models and told readers not to plan from either side
 >   until they are reconciled "in one version bump"; that reconciliation had never been
@@ -38,6 +38,12 @@
 >   read-only measurement: for each of the six dimensions, what the code actually has,
 >   under what name, with what vocabulary. Four new open decisions (D-3…D-6) are added to
 >   §16 — including the two the warning named (the completion axis, and `blocked` meaning
+> - **v4-draft (this). Adds §17.5 — dated post-measurement deltas — and pays a
+>   version-log debt.** The §16 D-6 writer/boundary addendum (operator ruling,
+>   2026-08-02, PR #227) was added without moving the number, though this log's own
+>   rule says a non-normative addendum still moves it; this bump covers that
+>   addendum and §17.5 together. No normative rule changed; §1–§16 remain the
+>   unapproved v2 body.
 >   two different things). **Nothing in §17 prescribes an outcome**; per the operator's
 >   standing rule, the measurement is mine and the classification is his.
 
@@ -692,9 +698,25 @@ contract's side, and it is why D4/D5 have no persistent-memory column above.
 - It does not resolve anything. Six dimensions were checked; four decisions came out; all
   four are in §16, unprescribed.
 
+### 17.6 Post-measurement deltas — labeled addendum, 2026-08-02
+
+> The tables in §17.2–§17.3 are provenance for `a20e0fc` (2026-07-28) and are
+> not edited. Everything below shipped AFTER that measurement; each row names
+> its source. The contract's normative body still specifies none of these —
+> they feed the open decisions in §16, they do not settle them (except D-6's
+> writer/boundary half, ruled by the operator and recorded at §16 D-6).
+
+| New in code | Where | Source | Contract's position |
+|---|---|---|---|
+| `EpisodeRecord.defect_signals` — the run's own sensor faults, banked with the episode; three states (`None` legacy / `()` clean / names) | `core/smart_memory.py` | PR #216, stage A | Absent from the normative body; a candidate input for D-2's per-record status discussion |
+| `EpisodeRecord.completion_override` — the authoritative fact that displaced the run's own claim, kept beside the untouched declaration | `core/smart_memory.py` | PR #216, stage B (operator ruling: the signal wins the outcome without erasing the self-assessment) | Absent; extends the completion axis §17.3 already lists |
+| `ProcedureRecord.lessons` — one factual line per credited episode, capped at 12, accumulated so `workflow_key` pooling (MIR-050) stays visible | `core/smart_memory.py` | PR #216 | Absent; touches §6/§7's procedural lifecycle, undecided |
+| Completion axis settled at the SAVE boundary: `admit_for_storage` resolves `None` → explicit `"unknown"` on write; absence now occurs only on true legacy reads | `core/smart_memory.py` | PR #227, operator's D-6 writer/boundary ruling; MIR-064 `fixed` | Recorded at §16 D-6 addendum; the envelope-membership half of D-6 stays open |
+| MIR-057 recorded `fixed`: the two-axis design (option b of that entry) is shipped and pinned criterion-by-criterion | registry | PR #228 | Confirms the §17.3 completion-axis row's direction; normative body still silent |
+
 ---
 
-*This contract is the single canonical M1 document (v3-draft = v2's normative body,
-unchanged, plus the §17 reconciliation). Amendments happen here,
+*This contract is the single canonical M1 document (v4-draft = v2's normative body,
+unchanged, plus the §17 reconciliation and its dated addenda). Amendments happen here,
 versioned in the header log. Upon operator approval, implementation starts at P0 on a
 clean branch from `f317c4c`. Until then: no production code, tests, or schema changes.*
