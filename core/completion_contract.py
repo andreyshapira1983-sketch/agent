@@ -33,7 +33,7 @@ Only three deliverables are recognised, each with a mechanical check:
 ===================  ==============================================
 `file_exists`        a path named for creation must exist afterwards
 `file_modified`      a path named for change must have been written
-`tests_pass`         the run must carry a passing test result
+`tests_green`         the run must carry a passing test result
 ===================  ==============================================
 
 `core/completion_obligation.py` keys its `intent` source on the OBJECT and
@@ -76,15 +76,20 @@ from typing import Any, Literal
 from core.file_request_intent import paths_mentioned
 from core.lang_match import normalize_text
 
-DeliverableKind = Literal["file_exists", "file_modified", "tests_pass"]
+DeliverableKind = Literal["file_exists", "file_modified", "tests_green"]
 
 #: How each deliverable is checked. Named, not free text: the verification
 #: method is part of the contract, so a later reader can tell what "verified"
 #: meant without re-deriving it from the code.
+# `tests_green`, not `tests_pass`: bandit reads any name ending in "pass" as a
+# credential (B105) and flagged this table as a hardcoded password. This
+# repository carries no suppressions — a false positive is answered by a name
+# that is not ambiguous, the same way `_TOKEN_EDGE_PUNCT` became
+# `_FILENAME_EDGE_PUNCT` in the secret scanner.
 VERIFICATION_METHODS: dict[DeliverableKind, str] = {
     "file_exists": "a successful write artifact targets the path",
     "file_modified": "a successful write artifact targets the path",
-    "tests_pass": "a run_tests artifact reports success",
+    "tests_green": "a run_tests artifact reports success",
 }
 
 # Verb stems, matched on normalized whole tokens by prefix. Kept deliberately
@@ -252,9 +257,9 @@ def derive_completion_contract(
 
     if _TESTS_PASS_RE.search(text):
         obligations.append(ContractObligation(
-            deliverable="tests_pass",
+            deliverable="tests_green",
             target="",
-            verification=VERIFICATION_METHODS["tests_pass"],
+            verification=VERIFICATION_METHODS["tests_green"],
             derived_from="the request requires the tests to pass",
         ))
 
@@ -323,7 +328,7 @@ def unmet_obligations(
 
     unmet: list[ContractObligation] = []
     for obligation in contract.obligations:
-        if obligation.deliverable == "tests_pass":
+        if obligation.deliverable == "tests_green":
             met = any(
                 str(meta.get("tool") or "") == "run_tests"
                 and _executed(meta)

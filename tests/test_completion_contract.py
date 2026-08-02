@@ -50,7 +50,7 @@ class TestContractShape:
         for duty in contract.obligations:
             assert duty.verification.strip(), duty
             assert duty.deliverable in {
-                "file_exists", "file_modified", "tests_pass"
+                "file_exists", "file_modified", "tests_green"
             }
 
     def test_create_request_owes_the_file(self):
@@ -65,7 +65,7 @@ class TestContractShape:
         )
         assert {(d.deliverable, d.target) for d in contract.obligations} == {
             ("file_modified", "core/loop.py"),
-            ("tests_pass", ""),
+            ("tests_green", ""),
         }
 
     def test_a_reading_request_owes_no_deliverable(self):
@@ -264,15 +264,15 @@ class TestVerificationReadsEvidence:
         )
         assert len(unmet) == 1
 
-    def test_tests_pass_needs_a_run_tests_artifact(self):
+    def test_tests_green_needs_a_run_tests_artifact(self):
         contract = derive_completion_contract("Почини core/x.py чтобы тесты проходили")
         by_kind = {d.deliverable for d in contract.obligations}
-        assert "tests_pass" in by_kind
+        assert "tests_green" in by_kind
         unmet = unmet_obligations(
             contract,
             artifacts={"file_write:core/x.py": {"tool": "file_write", "output": {"path": "core/x.py"}, "issues": []}},
         )
-        assert [d.deliverable for d in unmet] == ["tests_pass"]
+        assert [d.deliverable for d in unmet] == ["tests_green"]
 
         unmet_after = unmet_obligations(
             contract,
@@ -320,7 +320,7 @@ class TestReviewRoundOn258:
         )
         assert len(unmet) == 1, "basename matching let another file pass"
 
-    def test_a_red_test_run_does_not_satisfy_tests_pass(self):
+    def test_a_red_test_run_does_not_satisfy_tests_green(self):
         contract = derive_completion_contract("почини core/x.py чтобы тесты проходили")
         red = {
             "tool": "run_tests",
@@ -340,7 +340,7 @@ class TestReviewRoundOn258:
                 "run_tests:.": red,
             },
         )
-        assert [d.deliverable for d in unmet] == ["tests_pass"]
+        assert [d.deliverable for d in unmet] == ["tests_green"]
 
     def test_a_timed_out_run_is_not_a_pass(self):
         contract = derive_completion_contract("чтобы тесты проходили")
