@@ -24,11 +24,14 @@ from typing import Any
 
 import pytest
 
-from core.loop import AgentLoop, ReplanCode, ReplanTrigger, new_trace_id
+from core.loop import AgentLoop, ReplanCode, new_trace_id
 from core.logger import TraceLogger
 from core.policy import PolicyGate
 from core.replan import (
     ALL_FAILURE_TYPES,
+    ReplanTrigger,
+    count_failures,
+    format_replan_context,
     DEFAULT_BUDGETS,
     DEFAULT_MAX_TOTAL_REPLANS,
     FailureBudget,
@@ -667,7 +670,7 @@ class TestCountsParity:
             )
             for i, c in enumerate(codes)
         ]
-        loop_counts = AgentLoop._count_failures(triggers)
+        loop_counts = count_failures(triggers)
         decision = ReplanPolicy(max_total_replans=99).decide(
             failure_history=triggers,
             completed_attempts=max(len(triggers), 1),
@@ -685,7 +688,7 @@ class TestCountsParity:
 
 class TestFormatReplanContextEdges:
     def test_empty_everything_returns_empty_string(self):
-        ctx = AgentLoop._format_replan_context(
+        ctx = format_replan_context(
             failure_history=[], attempt=1, max_attempts=3,
         )
         assert ctx == ""
@@ -694,7 +697,7 @@ class TestFormatReplanContextEdges:
         """No history yet (first attempt), but the loop wants to inject
         advice anyway. We don't actually use this path today but the
         helper must not return empty when advice is non-empty."""
-        ctx = AgentLoop._format_replan_context(
+        ctx = format_replan_context(
             failure_history=[], attempt=2, max_attempts=3,
             advice="Use a different tool.",
         )
@@ -703,7 +706,7 @@ class TestFormatReplanContextEdges:
         assert "Use a different tool." in ctx
 
     def test_forbidden_only_still_produces_block(self):
-        ctx = AgentLoop._format_replan_context(
+        ctx = format_replan_context(
             failure_history=[], attempt=2, max_attempts=3,
             forbidden_actions=(("t", '{"a": 1}'),),
         )
@@ -712,7 +715,7 @@ class TestFormatReplanContextEdges:
         assert 'arguments={"a": 1}' in ctx
 
     def test_advice_blank_lines_filtered(self):
-        ctx = AgentLoop._format_replan_context(
+        ctx = format_replan_context(
             failure_history=[], attempt=2, max_attempts=3,
             advice="line one\n\n   \nline two",
         )
@@ -734,7 +737,7 @@ class TestFormatReplanContextEdges:
                 attempt=1,
             )
         ]
-        ctx = AgentLoop._format_replan_context(
+        ctx = format_replan_context(
             failure_history=history, attempt=2, max_attempts=3,
         )
         # Every public-contract field appears in the block.
@@ -752,7 +755,7 @@ class TestFormatReplanContextEdges:
         """Tests rely on block ordering: advice before forbidden. If
         someone reorders them, downstream tests assert that order — so
         we lock it down explicitly here."""
-        ctx = AgentLoop._format_replan_context(
+        ctx = format_replan_context(
             failure_history=[], attempt=2, max_attempts=3,
             advice="A",
             forbidden_actions=(("t", "{}"),),

@@ -26,6 +26,7 @@ hidden state. The loop owns logging; `ReplanPolicy` just decides.
 """
 from __future__ import annotations
 
+import json
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Literal, Mapping
@@ -72,6 +73,123 @@ ALL_FAILURE_TYPES: tuple[FailureType, ...] = (
     "plan_parse_failed",
     "unknown",
 )
+
+
+# ---------------------------------------------------------------------------
+# ReplanTrigger — the structured failure record the loop collects
+# ---------------------------------------------------------------------------
+
+# Moved here from core/loop.py (2026-08-02): this module's own docstring opens
+# with "the agent loop already collects ReplanTrigger records", `ReplanPolicy`
+# consumes them, and `FailureType` — the type of their `code` field — lives
+# here. The record was the one piece of the replan vocabulary still defined at
+# the collection site instead of with the rest of its language.
+
+
+@dataclass(frozen=True)
+class ReplanTrigger:
+    """Structured record of one failed PlanStep.
+
+    Lives in two places:
+      - `AgentLoop._last_step_failure` — scratch slot set by
+        `_execute_step` at every early-return; the parent loop drains it
+        right after the step returns None.
+      - `failure_history` inside `run()` — the cumulative list across
+        attempts, formatted into a `<replan_context>` block fed to the
+        planner.
+
+    `arguments` are stored verbatim from the failed step. They are
+    redacted at log time by `TraceLogger` and again before the planner
+    prompt is sent, so a credential pasted in by the LLM into a tool
+    argument cannot leak via the replan path either.
+    """
+
+    code: FailureType
+    step_id: str
+    tool_name: str | None
+    arguments: dict[str, Any]
+    reason: str
+    attempt: int
+
+
+def count_failures(history: list[ReplanTrigger]) -> dict[str, int]:
+    """Return {failure_code: count} over the cumulative history.
+
+    Used both by the audit log payload (`replan_attempt`) and the
+    synthesizer prompt, so it's worth having one place that knows
+    how to summarise the list.
+    """
+    counts: dict[str, int] = {}
+    for t in history:
+        counts[t.code] = counts.get(t.code, 0) + 1
+    return counts
+
+
+def format_replan_context(
+    failure_history: list[ReplanTrigger],
+    attempt: int,
+    max_attempts: int,
+    advice: str = "",
+    forbidden_actions: tuple[tuple[str, str], ...] = (),
+) -> str:
+    """Build the <replan_context> block fed to the planner.
+
+    Empty string when there's nothing to replan against (first attempt
+    and no prior failures). Otherwise a compact XML block listing each
+    failed step with its code, tool, arguments, and reason — exactly
+    the shape the planner's system prompt has been told to consume.
+
+    MVP-12 additions:
+      - `advice` is the `ReplanDecision.advice_for_planner` string
+        composed from per-FailureType budgets. It tells the planner
+        what KIND of correction to make.
+      - `forbidden_actions` lists (tool, args_json) pairs the planner
+        must NOT propose again. Surfaced inline so the LLM can read
+        and respect it; the sanitiser also enforces it as defence in
+        depth.
+
+    We do NOT redact secrets here because:
+      - tool arguments came from the planner's previous output, which
+        was itself redacted before going to the LLM, so they cannot
+        contain raw secrets that the planner hadn't already seen;
+      - `LLMPlanner.plan` runs `redact_text` over the assembled user
+        prompt one more time as a safety net.
+    """
+    if not failure_history and not advice and not forbidden_actions:
+        return ""
+    lines = [
+        f"<replan_context attempt=\"{attempt}\" "
+        f"max_attempts=\"{max_attempts}\">"
+    ]
+    if failure_history:
+        lines.append(
+            f"  Previous attempts produced {len(failure_history)} failed "
+            f"step(s). Pick a different approach."
+        )
+        for trig in failure_history:
+            args_compact = json.dumps(trig.arguments, ensure_ascii=False)
+            lines.append(
+                f"  - attempt={trig.attempt} "
+                f"code={trig.code} "
+                f"tool={trig.tool_name or '(none)'} "
+                f"arguments={args_compact}"
+            )
+            lines.append(f"    reason: {trig.reason}")
+    if advice:
+        lines.append("  <advice>")
+        for advice_line in advice.splitlines():
+            if advice_line.strip():
+                lines.append(f"    {advice_line}")
+        lines.append("  </advice>")
+    if forbidden_actions:
+        lines.append(
+            "  <forbidden>  # do NOT propose these exact (tool, arguments) pairs"
+        )
+        for tool, args_json in forbidden_actions:
+            lines.append(f"    - tool={tool} arguments={args_json}")
+        lines.append("  </forbidden>")
+    lines.append("</replan_context>")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
