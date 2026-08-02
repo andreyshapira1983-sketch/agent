@@ -212,6 +212,34 @@ class EpisodeRecord:
     # distinguishable from an explicit verdict exactly as `usage_eligible` does.
     # Readers go through `effective_completion`, which maps None → "unknown".
     completion_state: CompletionState | None = None
+    # Defect signals this run raised about ITSELF — the sensors that fired while
+    # it worked. Recorded because the run's own faults were otherwise
+    # unrecoverable: each sensor logged its verdict and dropped it, so an agent
+    # that made the same mistake twice banked two clean episodes and had nothing
+    # to learn from. THREE states, same convention as the two fields above:
+    # None = a row written before this axis existed, nothing may be inferred;
+    # () = this version ran and no sensor fired; (names…) = these fired.
+    #
+    # Authority here is PER SIGNAL, never blanket — do not read this list as
+    # inert, and do not read it as decisive:
+    #   * `obligation_silently_missing` IS authoritative. At banking it lowers a
+    #     claim of `achieved` to `partially_achieved` (see
+    #     `assemble_completion_verdict`) and so withholds procedure credit.
+    #     S3's ruling was "keep the requirement, replace the detector" — the
+    #     requirement is what carries the authority.
+    #   * every other member decides nothing today, `reasoning_action_mismatch`
+    #     included: S4's ruling was "keep as an observer, keep measuring", and a
+    #     test pins that it changes neither the state nor procedure credit.
+    # Adding a member does NOT grant it power; power is granted only by naming
+    # it in the verdict rule table, which is the operator's call and wants
+    # measured numbers first (`docs/audit/SENSOR_SIGNAL_MEASUREMENT.md`).
+    defect_signals: tuple[str, ...] | None = None
+    # The authoritative fact that displaced this run's own claim, when one did.
+    # None = the claim stood (or there was no claim). `declared_completion` is
+    # NEVER edited to match: the operator's rule is that the signal wins the
+    # operational outcome without erasing the self-assessment, so both survive
+    # and the disagreement between them is readable as its own fact.
+    completion_override: str | None = None
     id: str = field(default_factory=lambda: new_id("ep"))
     created_at: str = field(default_factory=_now_iso)
 
@@ -245,6 +273,10 @@ class EpisodeRecord:
                else {"declared_completion": self.declared_completion}),
             **({} if self.completion_state is None
                else {"completion_state": self.completion_state}),
+            **({} if self.defect_signals is None
+               else {"defect_signals": list(self.defect_signals)}),
+            **({} if self.completion_override is None
+               else {"completion_override": self.completion_override}),
         }
 
     @classmethod
@@ -280,6 +312,19 @@ class EpisodeRecord:
                 if data.get("completion_state") in _COMPLETION_STATES
                 else None
             ),
+            # Absent key stays None (legacy row), an empty list stays () — the
+            # difference between "we never looked" and "we looked and saw
+            # nothing" is the whole point of recording this.
+            defect_signals=(
+                None
+                if data.get("defect_signals") is None
+                else tuple(str(x) for x in data["defect_signals"])
+            ),
+            completion_override=(
+                None
+                if data.get("completion_override") is None
+                else str(data["completion_override"])
+            ),
             goal=str(data.get("goal") or ""),
             question=str(data.get("question") or ""),
             outcome=_episode_outcome(str(data.get("outcome") or "partial")),
@@ -309,6 +354,21 @@ class ProcedureRecord:
     workflow_key: str
     trigger_tags: tuple[str, ...]
     steps: tuple[str, ...]
+    # One factual line per contributing episode: what was asked, what it worked
+    # on, how the claims held. Accumulated rather than overwritten, and kept
+    # parallel to `source_episode_ids`.
+    #
+    # Accumulating is what keeps this honest under the known key-pooling defect
+    # (MIR-050): `workflow_key` is the tool sequence, so two unrelated runs that
+    # used the same tools merge into one record. A single summary line would
+    # then describe one situation and silently claim the other's successes. A
+    # list makes the pooling visible instead — the reader sees the record was
+    # earned in several unrelated situations and can judge it.
+    #
+    # Every line is assembled from what the episode actually observed. Nothing
+    # here is inferred: an empty tuple means the run left no honest material,
+    # and an empty lesson is preferable to a confident wrong one.
+    lessons: tuple[str, ...] = ()
     source_episode_ids: tuple[str, ...] = ()
     success_count: int = 0
     failure_count: int = 0
@@ -325,6 +385,7 @@ class ProcedureRecord:
             "workflow_key": self.workflow_key,
             "trigger_tags": list(self.trigger_tags),
             "steps": list(self.steps),
+            "lessons": list(self.lessons),
             "source_episode_ids": list(self.source_episode_ids),
             "success_count": self.success_count,
             "failure_count": self.failure_count,
@@ -340,8 +401,16 @@ class ProcedureRecord:
             id=str(data.get("id") or new_id("proc")),
             name=str(data.get("name") or "workflow"),
             workflow_key=str(data.get("workflow_key") or ""),
-            trigger_tags=tuple(str(x) for x in data.get("trigger_tags") or ()),
+            # Capped on the way IN as well as on the way out. A record written
+            # by an earlier version, or hand-edited, would otherwise keep its
+            # unbounded fields — and they are spent on every later run, since
+            # the record is injected into planner prompts — until some future
+            # credited episode happened to rewrite it.
+            trigger_tags=tuple(dict.fromkeys(
+                str(x) for x in data.get("trigger_tags") or ()
+            ))[:_MAX_TRIGGER_TAGS],
             steps=tuple(str(x) for x in data.get("steps") or ()),
+            lessons=_capped_lessons(str(x) for x in data.get("lessons") or ()),
             source_episode_ids=tuple(str(x) for x in data.get("source_episode_ids") or ()),
             success_count=max(0, int(data.get("success_count") or 0)),
             failure_count=max(0, int(data.get("failure_count") or 0)),
@@ -383,18 +452,27 @@ class ProcedureRecord:
         failure_count = self.failure_count + (1 if procedure_debit_allowed(episode) else 0)
         confidence = _smoothed_confidence(success_count, failure_count)
         status: ProcedureStatus = _procedure_status_for(success_count, confidence)
-        return ProcedureRecord(
-            id=self.id,
-            name=self.name,
-            workflow_key=self.workflow_key,
-            trigger_tags=self.trigger_tags,
-            steps=self.steps,
+        # Appended, never replaced, and only when this episode earned credit:
+        # a run that did not finish contributes no lesson, exactly as it
+        # contributes no success count.
+        lesson = lesson_from_episode(episode)
+        # Capped on EVERY return, not only when a lesson is appended: a
+        # debit-only fold-in must repair an oversized older record rather than
+        # carry it forward untouched.
+        lessons = _capped_lessons(self.lessons)
+        if lesson and procedure_credit_allowed(episode):
+            lessons = _capped_lessons([*self.lessons, lesson])
+        # `replace`, not a field-by-field rebuild: this method used to re-list
+        # every column, so `lessons` was silently dropped until it was added by
+        # hand, and the next field added would be dropped the same way.
+        return replace(
+            self,
+            lessons=lessons,
             source_episode_ids=episode_ids,
             success_count=success_count,
             failure_count=failure_count,
             confidence=confidence,
             status=status,
-            created_at=self.created_at,
             updated_at=_now_iso(),
         )
 
@@ -1092,6 +1170,7 @@ def assemble_completion_state(
     aborted_reason: str,
     replan_exhausted: bool,
     declared: str | None,
+    obligation_unmet: bool = False,
 ) -> CompletionState:
     """Decide whether the goal was reached. Called ONCE, at banking.
 
@@ -1099,15 +1178,21 @@ def assemble_completion_state(
     same way every time — the priority is the contract, not the order the
     branches happen to be written in:
 
-    ==  ==========================================  =============
+    ==  ==========================================  =================
     #   predicate                                   state
-    ==  ==========================================  =============
+    ==  ==========================================  =================
     1   aborted_reason == "cancelled"               cancelled
     2   aborted_reason (anything else)              failed
     3   replan_exhausted                            failed
-    4   declared is a known token                   that token
-    5   otherwise                                   unknown
-    ==  ==========================================  =============
+    4   obligation_unmet and declared == achieved   partially_achieved
+    5   declared is a known token                   that token
+    6   otherwise                                   unknown
+    ==  ==========================================  =================
+
+    Row 4 is the one authoritative *signal* in the table; rows 1-3 are facts
+    about how the run ended. It moves in one direction only — it can lower a
+    claim of `achieved`, never raise anything — so an honest `blocked` or
+    `failed` is left exactly where the run put it. Candour is not punished.
 
     Structural facts outrank the declaration absolutely. An answer claiming it
     achieved the goal is a claim about the answer; a run that was cancelled or
@@ -1125,15 +1210,77 @@ def assemble_completion_state(
     tie the verdict to a naming convention nothing enforces, to reach a result
     branch 5 already produces.
     """
+    return assemble_completion_verdict(
+        aborted_reason=aborted_reason,
+        replan_exhausted=replan_exhausted,
+        declared=declared,
+        obligation_unmet=obligation_unmet,
+    ).state
+
+
+@dataclass(frozen=True)
+class CompletionVerdict:
+    """The operational verdict plus the divergence that produced it.
+
+    Operator's rule: an authoritative signal must outrank the run's own
+    self-assessment **in the operational outcome**, and must not destroy that
+    self-assessment — the disagreement is itself a diagnostic fact and is kept.
+
+    So three things are stored, never two: what the answer claimed
+    (`EpisodeRecord.declared_completion`, untouched), what actually holds
+    (`state`), and — only when they diverge — which fact displaced the claim
+    (`overridden_by`). A reader can always reconstruct both sides and the reason.
+    """
+
+    state: CompletionState
+    overridden_by: str | None = None
+
+    @property
+    def diverged(self) -> bool:
+        return self.overridden_by is not None
+
+
+def assemble_completion_verdict(
+    *,
+    aborted_reason: str,
+    replan_exhausted: bool,
+    declared: str | None,
+    obligation_unmet: bool = False,
+) -> CompletionVerdict:
+    """The single rule table. :func:`assemble_completion_state` delegates here.
+
+    `obligation_unmet` is authoritative in one direction only: it can lower a
+    claim of `achieved` to `partially_achieved`, never raise anything. A run
+    that left a duty silently unmet did not finish the job, whatever it said —
+    but a run that already reported `blocked` or `failed` is not made worse by
+    it, because the honest report was never the problem.
+    """
     if aborted_reason == "cancelled":
-        return "cancelled"
+        return _displaced("cancelled", declared, "cancelled")
     if aborted_reason:
-        return "failed"
+        return _displaced("failed", declared, "aborted")
     if replan_exhausted:
-        return "failed"
+        return _displaced("failed", declared, "replan_exhausted")
+    if obligation_unmet and declared == "achieved":
+        return _displaced(
+            "partially_achieved", declared, "obligation_silently_missing"
+        )
     if declared in _COMPLETION_DECLARATIONS:
-        return declared  # type: ignore[return-value]
-    return "unknown"
+        return CompletionVerdict(declared)  # type: ignore[arg-type]
+    return CompletionVerdict("unknown")
+
+
+def _displaced(
+    state: CompletionState, declared: str | None, reason: str
+) -> CompletionVerdict:
+    """Name the displacing fact only when there was a claim to displace.
+
+    A run that declared nothing, or that declared exactly what holds, has no
+    divergence to record — writing a reason there would invent a disagreement.
+    """
+    if declared in _COMPLETION_DECLARATIONS and declared != state:
+        return CompletionVerdict(state, reason)
+    return CompletionVerdict(state)
 
 
 def effective_completion(episode: EpisodeRecord) -> CompletionState:
@@ -1268,6 +1415,7 @@ def episode_from_agent_cycle(
     aborted_reason: str = "",
     used_procedure_ids: tuple[str, ...] | None = None,
     declared_completion: str | None = None,
+    defect_signals: Iterable[str] | None = None,
     on_audit: "Callable[[str, dict[str, Any]], None] | None" = None,
 ) -> EpisodeRecord:
     """Build an episode from one finished cycle.
@@ -1313,6 +1461,25 @@ def episode_from_agent_cycle(
     # store can recognise "this attempt was already banked" without keeping a
     # ledger. Runs without an id keep the random default.
     episode_id = episode_id_for_run(run_id) if run_id else new_id("ep")
+    # Normalised once, here, because two things read it: the stored column and
+    # the verdict below. Deriving the authoritative flag from the same signal
+    # list the sensors filled keeps one source of truth — the fact that decides
+    # is the very fact that was recorded, not a parallel recomputation.
+    # Stripped before the blank filter, not after: a whitespace-only entry is
+    # blank in every sense that matters here, and letting one through would put
+    # an unnameable member into a list whose membership decides a verdict.
+    signals = (
+        None if defect_signals is None
+        else tuple(dict.fromkeys(
+            cleaned for s in defect_signals if (cleaned := str(s).strip())
+        ))
+    )
+    _verdict = assemble_completion_verdict(
+        aborted_reason=str(aborted_reason or ""),
+        replan_exhausted=bool(replan_exhausted),
+        declared=declared_completion,
+        obligation_unmet="obligation_silently_missing" in (signals or ()),
+    )
     return EpisodeRecord(
         goal=_clean_text(goal, max_chars=300),
         question=_clean_text(question, max_chars=400),
@@ -1338,33 +1505,129 @@ def episode_from_agent_cycle(
         # dropped rather than stored, so the declaration column can only ever
         # hold something the parser is allowed to produce.
         declared_completion=_checked_declaration(declared_completion, on_audit),
-        completion_state=assemble_completion_state(
-            aborted_reason=str(aborted_reason or ""),
-            replan_exhausted=bool(replan_exhausted),
-            declared=declared_completion,
-        ),
+        completion_state=_verdict.state,
+        completion_override=_verdict.overridden_by,
+        # Order preserved, duplicates dropped: a sensor that fires on three
+        # attempts is one fault, and a stable order keeps two runs with the same
+        # faults byte-comparable. `None` passes through untouched so a caller
+        # that cannot collect signals stays distinguishable from one that
+        # collected none.
+        defect_signals=signals,
         id=episode_id,
     )
 
 
+# Bounds on the two fields that accumulate across episodes. `workflow_key` is
+# the tool sequence, so a common one like `tools:file_read` pools every credited
+# run into a single record (MIR-050) and both fields would otherwise grow with
+# no limit. That is not only disk: the record is rewritten to JSONL on every
+# update and injected into planner prompts by `format_experience_context`, so
+# the growth is paid again on every later run. Unbounded tags also *destroy*
+# retrieval — a record carrying every token matches every query, which is the
+# opposite of what naming the subject was meant to achieve.
+#
+# The most RECENT lessons are kept: the field exists to make pooling visible,
+# and the situations a workflow was used for lately are the ones that describe
+# what it is now being used for.
+_MAX_LESSONS = 12
+_MAX_TRIGGER_TAGS = 40
+#: Evidence labels shown in one line, before a "+N more" summary. Shared by the
+#: lesson and the step so the two cannot drift apart.
+_MAX_SHOWN_LABELS = 3
+
+
+def _capped_lessons(lessons: Iterable[str]) -> tuple[str, ...]:
+    deduped = tuple(dict.fromkeys(x for x in lessons if x))
+    return deduped[-_MAX_LESSONS:]
+
+
+def _summarise_labels(labels: tuple[str, ...]) -> str:
+    """`a, b, c, +N more` — bounded, and identical wherever labels are shown."""
+    if not labels:
+        return ""
+    shown = ", ".join(labels[:_MAX_SHOWN_LABELS])
+    hidden = len(labels) - _MAX_SHOWN_LABELS
+    return f"{shown}, +{hidden} more" if hidden > 0 else shown
+
+
+def lesson_from_episode(episode: EpisodeRecord) -> str:
+    """One factual line about what this run met and how it went. Never inferred.
+
+    Measured problem this replaces: a banked procedure read
+    ``"Workflow using shell_exec, shell_exec"`` with steps ``"Run tool:
+    shell_exec"`` twice. That is the *shape* of the run and carries no
+    information — it cannot tell a later reader (or the retrieval search, which
+    scores on name/tags/steps) what the workflow was ever good for.
+
+    Everything below is read off the episode, nothing is deduced. When the run
+    left no material — no request recorded — the result is the empty string and
+    no lesson is stored: an empty memory is safer than a confident wrong one.
+    """
+    asked = _clean_text(episode.question, max_chars=160)
+    if not asked:
+        return ""
+    parts = [f'asked: "{asked}"']
+    if episode.tools_used:
+        parts.append("via " + "->".join(episode.tools_used))
+    if episode.source_labels:
+        parts.append(f"over {_summarise_labels(episode.source_labels)}")
+    claims = episode.verified_chunks + episode.unverified_chunks
+    if claims:
+        parts.append(f"{episode.verified_chunks}/{claims} claims verified")
+    # Faults are part of the causal record: a workflow that worked *despite* an
+    # observed fault is a different thing from one that ran clean, and hiding
+    # the difference is how a flawed method gets reused as a good one.
+    if episode.defect_signals:
+        parts.append("observed: " + ", ".join(episode.defect_signals))
+    return "; ".join(parts)
+
+
 def procedure_from_episode(episode: EpisodeRecord) -> ProcedureRecord | None:
     # Same predicate as the counter and the verdict: a workflow is only worth
-    # minting from a run that finished the job (MIR-057).
+    # minting from a run that finished the job (MIR-057). UNCHANGED by the
+    # lesson work: what a procedure *records* was the defect, not when one is
+    # created, and widening admission would bank better-written lessons behind
+    # the same false successes.
     if not procedure_credit_allowed(episode):
         return None
+    # Left as the tool sequence on purpose. `resolve_used_procedures` parses it
+    # back into that sequence to decide which procedures actually ran, so the
+    # key is load-bearing for attribution. Its known pooling defect (MIR-050)
+    # is why `lessons` accumulates instead of holding one summary line.
     workflow_key = "tools:" + "->".join(episode.tools_used)
+    lesson = lesson_from_episode(episode)
+    subject = _clean_text(episode.question, max_chars=60)
     readable_tools = ", ".join(episode.tools_used)
     steps = (
-        "Understand the user goal and choose the minimal tool sequence.",
+        # The situation first: a step list that starts with the tools answers
+        # "how" without ever saying "for what".
+        f"Situation: {subject}" if subject else "Situation: (not recorded)",
         *(f"Run tool: {tool}" for tool in episode.tools_used),
-        "Verify tool outputs against the requested answer.",
-        "Return cited answer and record the episode outcome.",
+        # Bounded by the same helper as the lesson: this string is stored
+        # verbatim and scored during retrieval, so an unbounded sweep over many
+        # files would otherwise put an arbitrarily long line into both.
+        (
+            "Evidence gathered: " + _summarise_labels(episode.source_labels)
+            if episode.source_labels
+            else "Evidence gathered: (none recorded)"
+        ),
+        "Verify every claim against that evidence before answering.",
     )
     return ProcedureRecord(
-        name=f"Workflow using {readable_tools}",
+        name=f"{subject} via {readable_tools}" if subject else f"Workflow using {readable_tools}",
         workflow_key=workflow_key,
-        trigger_tags=tuple(dict.fromkeys([*episode.tools_used, *episode.tags])),
+        # Question tokens join the tags so retrieval can match on what the
+        # workflow was for. Scoring reads name/tags/steps, and all three were
+        # previously tool names only — a query about the subject scored zero
+        # against every stored procedure.
+        # Tokenised from the FULL question, not from the 60-char display
+        # subject: truncation is a naming concern, and letting it reach the
+        # tags would silently drop the very words a later query arrives with.
+        trigger_tags=tuple(dict.fromkeys([
+            *episode.tools_used, *episode.tags, *sorted(_tokens(episode.question)),
+        ]))[:_MAX_TRIGGER_TAGS],
         steps=tuple(steps),
+        lessons=(lesson,) if lesson else (),
         source_episode_ids=(),
         success_count=0,
         failure_count=0,

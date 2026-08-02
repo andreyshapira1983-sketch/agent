@@ -607,6 +607,13 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # it. Accumulated as execution happens so an exception cannot discard
         # attribution already earned.
         self._executed_tools = []
+        # Sensor verdicts this run raised about ITSELF, accumulated as they
+        # fire. Each of these sensors used to log and drop its finding, so a
+        # run's own faults never reached the episode and the same mistake could
+        # be repeated indefinitely without a trace. Reset per cycle for the same
+        # reason `_executed_tools` is: instance state outlives a run, and an
+        # inherited fault would be banked against the wrong episode.
+        self._defect_signals = []
         self.last_replan_exhausted = False
         self.last_source_ranking = None
         self.last_source_registry = SourceRegistry()
@@ -1296,6 +1303,11 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                             "attempt": attempt,
                         },
                     )
+                    # Banked with the episode as well as logged. Still decides
+                    # nothing — S4's ruling keeps this an observer — but the
+                    # journal is per-run and disappears from the agent's own
+                    # memory, which is where a repeated fault has to be visible.
+                    self._defect_signals.append("reasoning_action_mismatch")
             except Exception:
                 pass  # Observational only — must never abort the loop.
 
@@ -2418,6 +2430,16 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             # something a later reader has to reconstruct.
             _payload["shadow_keyword_detector"] = bool(_premature_keyword_fired)
             self.log.log("completion_obligation", _payload)
+            # Recorded here, enforced at banking — not mid-run. This signal IS
+            # authoritative: `assemble_completion_verdict` lowers a claim of
+            # `achieved` to `partially_achieved` when it is present, which also
+            # withholds procedure credit. Nothing is stopped or replanned while
+            # the cycle is still running, so the run's own path is unchanged;
+            # what changes is the verdict it is banked under. S3's ruling was
+            # "keep the requirement, replace the detector", and the requirement
+            # is what carries that authority.
+            if _obl.triggered:
+                self._defect_signals.append("obligation_silently_missing")
         except Exception:
             pass
 

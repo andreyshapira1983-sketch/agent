@@ -525,7 +525,11 @@ def test_format_experience_context_contains_procedures_and_episodes() -> None:
     text = format_experience_context(episodes=[episode], procedures=[procedure])
 
     assert "<agent_experience_memory>" in text
-    assert "Workflow using file_read" in text
+    # Was `"Workflow using file_read"` — the tool-shaped name. A procedure is
+    # now named for what the run was FOR, with the method after it, so the
+    # injected context says what the workflow is good for rather than only how
+    # it was carried out. See tests/test_procedure_lessons.py.
+    assert "read doc via file_read" in text
     assert f"[{episode.id}]" in text
 
 
