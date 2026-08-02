@@ -25,7 +25,7 @@ WATCH: dict[str, int] = {
     "core/planner.py": 560,                # measured 516 after piece 5 (host-tools context out)
     "agent_tick.py": 1500,                 # measured 1458; aspiration 1300
     "core/autonomous_runtime.py": 1400,    # measured 1364; aspiration 1150
-    "core/smart_memory.py": 1800,          # measured 1741 — new watch, top-3 giant
+    "core/smart_memory.py": 1840,          # measured 1818 after the causal-credit split (candidate-credit ruling)
     "core/self_build_producer.py": 1800,   # measured 1755 — new watch
     "core/model_router.py": 1800,          # measured 1719 — new watch
 }

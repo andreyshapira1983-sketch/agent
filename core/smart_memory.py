@@ -443,6 +443,28 @@ class ProcedureRecord:
             updated_at=_now_iso(),
         )
 
+    def merged_from_episode(self, episode: EpisodeRecord) -> "ProcedureRecord":
+        """Fold an episode's PROVENANCE into this procedure without crediting it.
+
+        Operator ruling 2026-08-02: a procedure is promoted only for causally-
+        confirmed usefulness, and a mere `workflow_key` (tool-set) match is NOT
+        usefulness. `upsert_from_episode` used to call `with_episode` on every
+        workflow-key match, so a completely unrelated task that happened to use
+        the same tools promoted a candidate it never applied (measured: a
+        'fix the parser bug' run promoted a 'read-and-enumerate' candidate to
+        active). This method keeps the one-procedure-per-workflow consolidation
+        — source-episode ids and the lesson cap — but moves NO counter and
+        changes NO status. Credit flows only through the causal
+        `used_procedure_ids` path (`apply_episode_feedback` → `with_outcome`).
+        """
+        episode_ids = tuple(dict.fromkeys([*self.source_episode_ids, episode.id]))
+        return replace(
+            self,
+            source_episode_ids=episode_ids,
+            lessons=_capped_lessons(self.lessons),
+            updated_at=_now_iso(),
+        )
+
     def with_episode(self, episode: EpisodeRecord) -> "ProcedureRecord":
         # The counter asks the same question as creation and the verdict. It
         # is gated here as well as at the entry, because this is where the
@@ -975,13 +997,20 @@ class ProceduralMemoryStore:
         created = True
         for proc in procedures:
             if proc.workflow_key == candidate.workflow_key:
-                updated = proc.with_episode(episode)
+                # Merge provenance only — NO credit for a tool-set match
+                # (operator ruling 2026-08-02; see `merged_from_episode`).
+                # Promotion happens solely via the causal `used_procedure_ids`
+                # path in `apply_episode_feedback`.
+                updated = proc.merged_from_episode(episode)
                 out.append(updated)
                 created = False
             else:
                 out.append(proc)
         if updated is None:
-            updated = candidate.with_episode(episode)
+            # A brand-new candidate records its creating episode's PROVENANCE
+            # but earns no credit: it was not USED by the run that produced it
+            # (it did not exist yet), so its counters stay at birth (zero).
+            updated = candidate.merged_from_episode(episode)
             out.append(updated)
         self.rewrite(out)
         return updated, created

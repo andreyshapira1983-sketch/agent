@@ -137,6 +137,13 @@ def test_a_healthy_verifier_still_mints_a_procedure(tmp_path: Path) -> None:
 def test_a_healthy_verifier_still_credits(tmp_path: Path) -> None:
     agent = _agent(tmp_path)
     before = _seed_procedure(agent)
+    # The procedure must have been APPLIED for credit to be legitimate
+    # (operator ruling 2026-08-02: a tool-set match alone earns nothing). Mark
+    # it as offered to this cycle, so the banking path attributes it via
+    # `used_procedure_ids` — the causal channel the ruling requires. Attribution
+    # reads `_executed_tools` (what actually ran), not the episode's tools_used.
+    agent._last_procedure_records = [before]
+    agent._executed_tools = ["file_read"]
 
     _bank(agent, verifier_failure=False, verified=3)
 
