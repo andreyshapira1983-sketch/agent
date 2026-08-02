@@ -58,6 +58,11 @@ _HISTORICAL_ANCHOR_DOCS = {
     "self-audit-lessons.md",
     "CORE_AUDIT_2026-07-18.md",
     "daemon-progress.md",
+    # Root-level (addressed as ../<name> per the scan-loop note): a forensic
+    # audit whose anchors are provenance for its own date — loop.py alone has
+    # moved by hundreds of lines since (the guard caught anchor :4077 against a
+    # 4047-line file the moment the scan reached it).
+    "../FABLE_AUDIT.md",
 }
 
 #: Top-level code directories a documented path may start with.
@@ -240,9 +245,22 @@ def main(argv: list[str] | None = None) -> int:
     unknown_commands: list[str] = []
     checked_paths = checked_anchors = checked_commands = docs_scanned = 0
 
-    for doc in sorted(docs_root.rglob("*.md")):
+    # Root-level markdown was invisible to this guard (the scan covered
+    # docs/ only), so FABLE_AUDIT's line anchors drifted silently while the
+    # guard reported success — found by the 2026-08 documentation audit.
+    # Root files are named with a leading "../" relative to the docs root so
+    # the allowlists can address them unambiguously.
+    scan_targets = [
+        (doc, doc.relative_to(docs_root).as_posix())
+        for doc in sorted(docs_root.rglob("*.md"))
+    ]
+    if docs_root == DOCS:
+        scan_targets += [
+            (doc, f"../{doc.name}")
+            for doc in sorted(REPO.glob("*.md"))
+        ]
+    for doc, rel_doc in scan_targets:
         docs_scanned += 1
-        rel_doc = doc.relative_to(docs_root).as_posix()
         historical = rel_doc in _HISTORICAL_ANCHOR_DOCS
         for lineno, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
             # Renamed paths first, and in both spellings. Owned entirely by this
