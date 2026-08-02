@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 148 modules across 12 groups._
+_Total: 149 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -21,6 +21,7 @@ _Operator-facing I/O, intent routing, output shaping._
 | `core/operator_intent` | Conversational routing for operator-control requests. |
 | `core/operator_intent_patterns` | Trigger phrases and matchers behind the no-LLM operator-intent router, including the one-inserted-word tolerance and the suppression guards that stay strict. |
 | `core/intent_understanding` | Intent understanding — the translator between plain human language and the autonomous agent's actions. |
+| `core/file_request_intent` | What kind of file request is this question? |
 | `core/lang_match` | Language-aware term matching for question routing. |
 | `core/output_policy` | Ranker-to-output policy. |
 | `core/user_profile` | User Profile — Layer 4 (User Mental Model). |
