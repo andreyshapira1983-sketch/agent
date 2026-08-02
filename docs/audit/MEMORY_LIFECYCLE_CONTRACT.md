@@ -49,14 +49,14 @@
 >   read-only measurement: for each of the six dimensions, what the code actually has,
 >   under what name, with what vocabulary. Four new open decisions (D-3…D-6) are added to
 >   §16 — including the two the warning named (the completion axis, and `blocked` meaning
+>   two different things). **Nothing in §17 prescribes an outcome**; per the operator's
+>   standing rule, the measurement is mine and the classification is his.
 > - **v4-draft. Adds §17.5 — dated post-measurement deltas — and pays a
 >   version-log debt.** The §16 D-6 writer/boundary addendum (operator ruling,
 >   2026-08-02, PR #227) was added without moving the number, though this log's own
 >   rule says a non-normative addendum still moves it; this bump covers that
 >   addendum and §17.5 together. No normative rule changed; §1–§16 remain the
 >   unapproved v2 body.
->   two different things). **Nothing in §17 prescribes an outcome**; per the operator's
->   standing rule, the measurement is mine and the classification is his.
 > - **v5-draft (this). Path B chosen (operator, 2026-08-02): the document becomes
 >   approvable.** Adds §18 — the operational-rule ledger over §5–§15, whose last
 >   column marks four v2 prescriptions `SUPERSEDED BY RULING` (§6.4 partial-debit and
