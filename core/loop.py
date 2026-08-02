@@ -2430,11 +2430,14 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             # something a later reader has to reconstruct.
             _payload["shadow_keyword_detector"] = bool(_premature_keyword_fired)
             self.log.log("completion_obligation", _payload)
-            # Recorded, not enforced. S3's ruling was "keep the requirement,
-            # replace the detector"; the replacement is wired for three sources
-            # and still decides nothing pending measured numbers. Banking the
-            # verdict is how those numbers accumulate — a run that left a duty
-            # silently unmet stops being indistinguishable from one that met it.
+            # Recorded here, enforced at banking — not mid-run. This signal IS
+            # authoritative: `assemble_completion_verdict` lowers a claim of
+            # `achieved` to `partially_achieved` when it is present, which also
+            # withholds procedure credit. Nothing is stopped or replanned while
+            # the cycle is still running, so the run's own path is unchanged;
+            # what changes is the verdict it is banked under. S3's ruling was
+            # "keep the requirement, replace the detector", and the requirement
+            # is what carries that authority.
             if _obl.triggered:
                 self._defect_signals.append("obligation_silently_missing")
         except Exception:

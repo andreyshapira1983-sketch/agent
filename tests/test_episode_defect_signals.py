@@ -74,8 +74,24 @@ def test_order_is_preserved():
 
 
 def test_blank_signals_are_dropped():
-    episode = _episode(defect_signals=["", "  ".strip(), "real"])
+    """Whitespace-only counts as blank — membership in this list decides a verdict."""
+    episode = _episode(defect_signals=["", "   ", "\t\n", "real"])
     assert episode.defect_signals == ("real",)
+
+
+def test_signals_are_stripped_before_being_stored():
+    """`" obligation_silently_missing "` must not become an unnameable member."""
+    episode = _episode(defect_signals=["  obligation_silently_missing  "])
+    assert episode.defect_signals == ("obligation_silently_missing",)
+
+
+def test_a_padded_authoritative_signal_still_decides():
+    """Stripping is what keeps whitespace from smuggling a run past the verdict."""
+    episode = _episode(
+        defect_signals=[" obligation_silently_missing "],
+        declared_completion="achieved",
+    )
+    assert episode.completion_state == "partially_achieved"
 
 
 # ---------------------------------------------------------------------------

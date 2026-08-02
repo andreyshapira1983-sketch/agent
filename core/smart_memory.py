@@ -220,10 +220,19 @@ class EpisodeRecord:
     # None = a row written before this axis existed, nothing may be inferred;
     # () = this version ran and no sensor fired; (names…) = these fired.
     #
-    # DELIBERATELY inert: nothing reads this to decide anything. Promoting a
-    # sensor from observer to decider is the operator's call and needs measured
-    # numbers first (`docs/audit/SENSOR_SIGNAL_MEASUREMENT.md`, S3/S4 rulings).
-    # Recording is what produces those numbers; it grants no power.
+    # Authority here is PER SIGNAL, never blanket — do not read this list as
+    # inert, and do not read it as decisive:
+    #   * `obligation_silently_missing` IS authoritative. At banking it lowers a
+    #     claim of `achieved` to `partially_achieved` (see
+    #     `assemble_completion_verdict`) and so withholds procedure credit.
+    #     S3's ruling was "keep the requirement, replace the detector" — the
+    #     requirement is what carries the authority.
+    #   * every other member decides nothing today, `reasoning_action_mismatch`
+    #     included: S4's ruling was "keep as an observer, keep measuring", and a
+    #     test pins that it changes neither the state nor procedure credit.
+    # Adding a member does NOT grant it power; power is granted only by naming
+    # it in the verdict rule table, which is the operator's call and wants
+    # measured numbers first (`docs/audit/SENSOR_SIGNAL_MEASUREMENT.md`).
     defect_signals: tuple[str, ...] | None = None
     # The authoritative fact that displaced this run's own claim, when one did.
     # None = the claim stood (or there was no claim). `declared_completion` is
@@ -1442,9 +1451,14 @@ def episode_from_agent_cycle(
     # the verdict below. Deriving the authoritative flag from the same signal
     # list the sensors filled keeps one source of truth — the fact that decides
     # is the very fact that was recorded, not a parallel recomputation.
+    # Stripped before the blank filter, not after: a whitespace-only entry is
+    # blank in every sense that matters here, and letting one through would put
+    # an unnameable member into a list whose membership decides a verdict.
     signals = (
         None if defect_signals is None
-        else tuple(dict.fromkeys(str(s) for s in defect_signals if str(s)))
+        else tuple(dict.fromkeys(
+            cleaned for s in defect_signals if (cleaned := str(s).strip())
+        ))
     )
     _verdict = assemble_completion_verdict(
         aborted_reason=str(aborted_reason or ""),
