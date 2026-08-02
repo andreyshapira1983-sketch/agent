@@ -22,8 +22,9 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+from core.planner import PlannerOutput
 from tools.file_read import MAX_BYTES as FILE_READ_MAX_BYTES
 
 
@@ -401,3 +402,165 @@ def normalize_path_mention(path: str) -> str:
     while out.startswith(".\\"):
         out = out[2:]
     return out.casefold()
+
+
+def force_file_hint_read_when_explicit(
+    planner_out: PlannerOutput,
+    *,
+    question: str,
+    file_hint: str | None,
+) -> PlannerOutput:
+    if not file_hint:
+        return planner_out
+    if any(src.get("tool") == "file_read" for src in planner_out.sources):
+        return planner_out
+    if not explicitly_requests_hinted_file(question):
+        return planner_out
+    sources = list(planner_out.sources)
+    sources.append(file_hint_source(file_hint))
+    warnings = list(planner_out.warnings)
+    warnings.append(
+        "explicit file-read request used --file hint because planner selected no file_read"
+    )
+    return PlannerOutput(
+        reasoning=(
+            f"{planner_out.reasoning} "
+            "Kernel added read-only file_read for explicit hinted-file request."
+        ).strip(),
+        sources=sources,
+        raw_response=planner_out.raw_response,
+        warnings=warnings,
+    )
+
+
+def prepare_multi_file_review(
+    question: str,
+    *,
+    file_hint: str | None,
+    workspace_root: Path | None,
+    log: Callable[[str, dict[str, Any]], None],
+) -> dict[str, Any]:
+    """Decide none / refusal / forced-plan for a multi-file review request.
+
+    Moved from ``AgentLoop`` (piece 6): every predicate it orchestrates already
+    lives in this module. The two loop facts it needs arrive as arguments —
+    ``workspace_root`` (where file_read may look) and ``log`` (the trace
+    callable) — so the module still knows nothing about the loop itself.
+    """
+    requested_paths = extract_path_mentions(question)
+    if len(requested_paths) < 2 or not is_file_review_request(question):
+        return {"kind": "none"}
+
+    explicit_mode = is_explicit_multi_file_mode(question)
+    # A request to CHANGE something is not a request to read files. The
+    # review predicates scan the whole question for a single verb, so one
+    # step inside a work order ("сравни результаты с baseline") turned a
+    # refactor into "compare these files" — and the forced plan below then
+    # removes every other tool from the cycle. Observed live: a task naming
+    # the module to create and the module never to create had both treated
+    # as documents to read, and was answered by reading one file — no
+    # tests, no branch, no commit. The operator's explicit switch still
+    # wins: it names the mode in words, which beats inferring it from verbs.
+    if not explicit_mode and is_change_request(question):
+        return {"kind": "none"}
+    if file_hint and not explicit_mode:
+        hint_norm = normalize_path_mention(file_hint)
+        extra_paths = [
+            path
+            for path in requested_paths
+            if normalize_path_mention(path) != hint_norm
+        ]
+        if extra_paths:
+            available = file_hint
+            extras = ", ".join(extra_paths)
+            return {
+                "kind": "refusal",
+                "message": (
+                    "Regular --file mode only permits the hinted file. "
+                    f"Available evidence: {available}. "
+                    f"Requested additional files were not reviewed: {extras}. "
+                    "Use :ingest-source for additional files or explicit "
+                    "multi-file review mode."
+                ),
+                "requested_paths": requested_paths,
+                "file_hint": file_hint,
+                "extra_paths": extra_paths,
+            }
+        return {"kind": "none"}
+
+    if not explicit_mode and file_hint:
+        return {"kind": "none"}
+    if not explicit_mode and not looks_like_multi_file_review_without_hint(question):
+        return {"kind": "none"}
+
+    root = workspace_root
+    if root is None:
+        return {
+            "kind": "refusal",
+            "message": (
+                "Multi-file review is unavailable because file_read is not "
+                "registered in this agent session."
+            ),
+            "requested_paths": requested_paths,
+        }
+
+    valid_sources: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    seen_targets: set[str] = set()
+    rejected: list[dict[str, str]] = []
+    for raw_path in requested_paths:
+        item = validate_user_file_path(raw_path, workspace=root)
+        if item["ok"] is not True:
+            rejected.append({
+                "path": raw_path,
+                "reason": str(item["reason"]),
+            })
+            warnings.append(f"{raw_path}: {item['reason']}")
+            continue
+        target_key = str(item["target"]).casefold()
+        if target_key in seen_targets:
+            warnings.append(f"{raw_path}: duplicate path skipped")
+            continue
+        seen_targets.add(target_key)
+        rel_path = item["relative_path"].as_posix()
+        valid_sources.append({
+            "tool": "file_read",
+            "arguments": {"path": rel_path},
+            "label": f"file:{rel_path}",
+            "expected_outcome": "Non-empty UTF-8 text from the explicitly mentioned file.",
+        })
+
+    if not valid_sources:
+        details = "; ".join(
+            f"{item['path']}: {item['reason']}" for item in rejected
+        ) or "no valid files were mentioned"
+        return {
+            "kind": "refusal",
+            "message": (
+                "Multi-file review could not start because no valid "
+                f"workspace files passed preflight. {details}."
+            ),
+            "requested_paths": requested_paths,
+            "rejected": rejected,
+        }
+
+    log(
+        "multi_file_review_preflight",
+        {
+            "requested_paths": requested_paths,
+            "accepted_paths": [src["arguments"]["path"] for src in valid_sources],
+            "rejected": rejected,
+            "warnings": warnings,
+        },
+    )
+    return {
+        "kind": "forced",
+        "sources": valid_sources,
+        "warnings": warnings,
+        "rejected": rejected,
+        "reasoning": (
+            "Kernel explicit multi-file review: read only the user-mentioned "
+            "workspace files that passed strict path preflight. "
+            + ("Rejected/skipped: " + "; ".join(warnings) if warnings else "")
+        ),
+    }
