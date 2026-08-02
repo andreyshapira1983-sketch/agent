@@ -33,11 +33,13 @@ from core.replan import FailureType as ReplanCode  # single source of truth
 from core.replan import ReplanTrigger, count_failures, format_replan_context
 from core.file_request_intent import (
     explicitly_requests_hinted_file,
+    extract_path_mentions,
     file_hint_source,
     is_change_request,
     is_explicit_multi_file_mode,
     is_file_review_request,
     looks_like_multi_file_review_without_hint,
+    normalize_path_mention,
     validate_user_file_path,
 )
 
@@ -2844,7 +2846,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         *,
         file_hint: str | None,
     ) -> dict[str, Any]:
-        requested_paths = self._extract_path_mentions(question)
+        requested_paths = extract_path_mentions(question)
         if len(requested_paths) < 2 or not is_file_review_request(question):
             return {"kind": "none"}
 
@@ -2861,11 +2863,11 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         if not explicit_mode and is_change_request(question):
             return {"kind": "none"}
         if file_hint and not explicit_mode:
-            hint_norm = self._normalize_path_mention(file_hint)
+            hint_norm = normalize_path_mention(file_hint)
             extra_paths = [
                 path
                 for path in requested_paths
-                if self._normalize_path_mention(path) != hint_norm
+                if normalize_path_mention(path) != hint_norm
             ]
             if extra_paths:
                 available = file_hint
@@ -4385,12 +4387,12 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         ]
         if not actual_paths:
             return ""
-        actual_norms = {cls._normalize_path_mention(path) for path in actual_paths}
-        requested_paths = cls._extract_path_mentions(question)
+        actual_norms = {normalize_path_mention(path) for path in actual_paths}
+        requested_paths = extract_path_mentions(question)
         missing = [
             path
             for path in requested_paths
-            if cls._normalize_path_mention(path) not in actual_norms
+            if normalize_path_mention(path) not in actual_norms
         ]
         if not missing:
             return ""
@@ -4400,41 +4402,3 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             f"Evidence scope: I only have evidence for {actual}. "
             f"I did not verify {unverified}."
         )
-
-    @staticmethod
-    def _extract_path_mentions(text: str) -> list[str]:
-        # Leading guard: see completion_obligation._PATH_RE, which carries the
-        # same shape and the same fix. It stops the engine from starting a
-        # match inside a run of `/`, `.` or `-` — a start that would always
-        # have a longer match one character to its left — and with it the
-        # quadratic rescan that made a wall of separators cost seconds.
-        pattern = re.compile(
-            r"(?<![/.\-])"
-            r"(?P<path>"
-            r"(?:[A-Za-z]:[\\/])?"
-            r"(?:/)?"
-            r"(?:\.{1,2}[\\/])?"
-            r"(?:[A-Za-z0-9_.-]+[\\/])*"
-            r"[A-Za-z0-9_.-]+\."
-            r"(?:py|md|txt|json|yml|yaml|pdf)"
-            r")",
-            flags=re.IGNORECASE,
-        )
-        seen: set[str] = set()
-        paths: list[str] = []
-        for match in pattern.finditer(text):
-            path = match.group("path").rstrip(".,;:!?)\"]}'")
-            key = path.casefold()
-            if key in seen:
-                continue
-            seen.add(key)
-            paths.append(path)
-        return paths
-
-    @staticmethod
-    def _normalize_path_mention(path: str) -> str:
-        out = path.strip().strip("\"'")
-        out = out.replace("/", "\\")
-        while out.startswith(".\\"):
-            out = out[2:]
-        return out.casefold()
