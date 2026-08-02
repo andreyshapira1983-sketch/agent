@@ -12,13 +12,10 @@ from typing import TYPE_CHECKING, Any
 
 from core.ingestion import DEFAULT_PROJECT_LIMIT, SKIP_DIR_NAMES, TEXT_EXTENSIONS
 from core.doc_routing import (
-    CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS,
     CONFIDENCE_EVIDENCE_SOURCE_PATHS,
-    DOCTRINE_CORPORATE_CONTEXTUAL_TERMS,
-    DOCTRINE_CORPORATE_CONTEXT_TERMS,
     DOCTRINE_CORPORATE_DOC_PATHS,
-    DOCTRINE_CORPORATE_STRONG_TERMS,
-    DOCTRINE_CORPORATE_TOPIC_TERMS,
+    is_confidence_evidence_diagnostic_question,
+    is_doctrine_corporate_question,
 )
 
 if TYPE_CHECKING:
@@ -122,28 +119,6 @@ class LearningPlanner:
         )
 
 
-def is_doctrine_corporate_learning_goal(goal: str) -> bool:
-    lowered = (goal or "").casefold()
-    if any(term in lowered for term in DOCTRINE_CORPORATE_STRONG_TERMS):
-        return True
-    has_context = any(term in lowered for term in DOCTRINE_CORPORATE_CONTEXT_TERMS)
-    if (
-        has_context
-        and any(term in lowered for term in DOCTRINE_CORPORATE_CONTEXTUAL_TERMS)
-    ):
-        return True
-    topic_hits = {
-        term for term in DOCTRINE_CORPORATE_TOPIC_TERMS
-        if term in lowered
-    }
-    return len(topic_hits) >= 2 and has_context
-
-
-def is_confidence_evidence_learning_goal(goal: str) -> bool:
-    lowered = (goal or "").casefold()
-    return any(term in lowered for term in CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS)
-
-
 def _resolve_inside_workspace(workspace: Path, raw: str) -> Path:
     candidate = Path(raw or ".")
     target = candidate.resolve() if candidate.is_absolute() else (workspace / candidate).resolve()
@@ -167,8 +142,8 @@ def _score(path: Path, *, workspace: Path, goal: str) -> tuple[int, list[str]]:
     name = path.name.casefold()
     score = 0
     reasons: list[str] = []
-    doctrine_goal = is_doctrine_corporate_learning_goal(goal)
-    confidence_goal = is_confidence_evidence_learning_goal(goal)
+    doctrine_goal = is_doctrine_corporate_question(goal)
+    confidence_goal = is_confidence_evidence_diagnostic_question(goal)
 
     if doctrine_goal and rel in _DOCTRINE_CORPORATE_DOC_PRIORITY:
         score += 300 + _DOCTRINE_CORPORATE_DOC_PRIORITY[rel]
@@ -218,7 +193,7 @@ def _goal_terms(goal: str) -> tuple[str, ...]:
     if not goal:
         return ()
     terms: list[str] = []
-    if is_doctrine_corporate_learning_goal(goal):
+    if is_doctrine_corporate_question(goal):
         terms.extend([
             "corporate_model",
             "central_agent_governance",
@@ -237,7 +212,7 @@ def _goal_terms(goal: str) -> tuple[str, ...]:
         terms.extend(["role", "router", "knowledge_use", "learning"])
     if any(x in goal for x in ("tool", "инструмент")):
         terms.extend(["tools", "tool", "shell_exec", "file_read", "web_fetch"])
-    if is_confidence_evidence_learning_goal(goal):
+    if is_confidence_evidence_diagnostic_question(goal):
         terms.extend([
             "verifier",
             "evidence_support",

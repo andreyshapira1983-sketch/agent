@@ -34,8 +34,8 @@ from core.doc_routing import (
     _ensure_self_repair_doctrine_docs_first,
     _ensure_subagent_governance_docs_first,
     _explicitly_requests_readme,
-    _is_confidence_evidence_diagnostic_question,
-    _is_doctrine_corporate_question,
+    is_confidence_evidence_diagnostic_question,
+    is_doctrine_corporate_question,
     _is_memory_governance_question,
     _is_self_repair_doctrine_question,
     _is_self_repo_introspection_question,
@@ -215,7 +215,7 @@ class LLMPlanner:
             sources = _drop_readme_status_sources(sources, step_warnings)
         if _is_self_repo_introspection_question(question):
             sources = _drop_web_lookup_for_introspection(sources, step_warnings)
-        if _is_confidence_evidence_diagnostic_question(question):
+        if is_confidence_evidence_diagnostic_question(question):
             if "file_read" in self.hidden_tools:
                 step_warnings.append(
                     "confidence/evidence verifier sources required but file_read is hidden on this path"
@@ -235,7 +235,7 @@ class LLMPlanner:
                             not _explicitly_requests_readme(question)
                         ),
                     )
-        if _is_doctrine_corporate_question(question):
+        if is_doctrine_corporate_question(question):
             if "file_read" in self.hidden_tools:
                 step_warnings.append(
                     "doctrine/corporate docs required but file_read is hidden on this path"
@@ -374,7 +374,7 @@ class LLMPlanner:
         # being usable — an unreachable instruction only produces plans the
         # policy layer then blocks.
         docs_readable = self._file_read_available()
-        if docs_readable and _is_doctrine_corporate_question(question):
+        if docs_readable and is_doctrine_corporate_question(question):
             doctrine_docs_block = (
                 "[DOCTRINE_DOCS=required — for corporate model, central agent "
                 "governance, subagents, self-build, night observation, and "
@@ -415,7 +415,7 @@ class LLMPlanner:
                 "verdict closes) before core/*.py mechanics.]\n"
             )
         confidence_evidence_block = ""
-        if _is_confidence_evidence_diagnostic_question(question):
+        if is_confidence_evidence_diagnostic_question(question):
             confidence_evidence_block = (
                 "[CONFIDENCE_EVIDENCE_DIAGNOSTIC_SOURCES=required — for questions "
                 "about evidence support, evidence, citations, "

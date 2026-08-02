@@ -343,7 +343,7 @@ _CONFIDENCE_LOW_SIGNAL_DEFAULT_PATHS = (
     "tools/",
 )
 
-def _is_broad_project_self_knowledge_question(question: str) -> bool:
+def is_broad_project_self_knowledge_question(question: str) -> bool:
     lowered = (question or "").casefold()
     return (
         any(term in lowered for term in BROAD_PROJECT_CONTEXT_TERMS)
@@ -370,7 +370,7 @@ def _history_has_project_status_memory(history: str) -> bool:
 
 def _should_prefer_memory_over_readme(question: str, history: str) -> bool:
     return (
-        _is_broad_project_self_knowledge_question(question)
+        is_broad_project_self_knowledge_question(question)
         and _history_has_project_status_memory(history)
         and not _explicitly_requests_readme(question)
         and not _explicitly_requests_architecture_reference(question)
@@ -401,7 +401,7 @@ def _is_self_repo_introspection_question(question: str) -> bool:
     return not _wants_external_lookup(question)
 
 
-def _is_doctrine_corporate_question(question: str) -> bool:
+def is_doctrine_corporate_question(question: str) -> bool:
     lowered = (question or "").casefold()
     if any(term in lowered for term in DOCTRINE_CORPORATE_STRONG_TERMS):
         return True
@@ -640,7 +640,7 @@ def _is_self_repair_doctrine_question(question: str) -> bool:
     return has_context and has_action
 
 
-def _is_confidence_evidence_diagnostic_question(question: str) -> bool:
+def is_confidence_evidence_diagnostic_question(question: str) -> bool:
     lowered = (question or "").casefold()
     return any(term in lowered for term in CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS)
 

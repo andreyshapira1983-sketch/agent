@@ -31,10 +31,7 @@ from typing import TYPE_CHECKING, Iterable, Literal
 from core.dlp import contains_pii
 from core.models import MemoryRecord
 from core.secret_scanner import contains_secret
-from core.doc_routing import (
-    BROAD_PROJECT_CONTEXT_TERMS,
-    BROAD_PROJECT_QUESTION_TERMS,
-)
+from core.doc_routing import is_broad_project_self_knowledge_question
 
 # `core.hygiene` is imported lazily inside `decide` to avoid an import cycle
 # when `core/hygiene.py` later wants to reach into models / policies.
@@ -324,17 +321,9 @@ def _tokens(text: str) -> set[str]:
 
 def _query_tokens(text: str) -> set[str]:
     tokens = _tokens(text)
-    if _is_broad_project_question(text):
+    if is_broad_project_self_knowledge_question(text):
         tokens |= _BROAD_PROJECT_MEMORY_TOKENS
     return tokens
-
-
-def _is_broad_project_question(text: str) -> bool:
-    lowered = (text or "").casefold()
-    return (
-        any(term in lowered for term in BROAD_PROJECT_CONTEXT_TERMS)
-        and any(term in lowered for term in BROAD_PROJECT_QUESTION_TERMS)
-    )
 
 
 def _tag_tokens(tags: Iterable[str]) -> set[str]:
@@ -500,7 +489,7 @@ class MemoryRetrievalPolicy:
                             if len(rt) >= 4 and (rt.startswith(q[:4]) or q.startswith(rt[:4])):
                                 score += 1
                                 break
-            if _is_broad_project_question(question):
+            if is_broad_project_self_knowledge_question(question):
                 score += _broad_project_score_adjustment(r, score)
             if score >= self.min_score:
                 scored.append((score, r))
