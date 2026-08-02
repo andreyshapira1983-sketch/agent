@@ -240,6 +240,43 @@ def test_lessons_survive_a_round_trip():
     assert back.lessons == procedure.lessons
 
 
+def test_an_oversized_record_is_capped_when_it_is_loaded():
+    """A record written by an earlier version must not keep spending prompt budget.
+
+    Caps applied only on write leave an oversized row on disk paying its cost on
+    every run — the record is injected into planner prompts — until some future
+    credited episode happens to rewrite it.
+    """
+    row = procedure_from_episode(_episode()).to_dict()
+    row["lessons"] = [f"lesson {i}" for i in range(50)]
+    row["trigger_tags"] = [f"tag{i}" for i in range(200)]
+    loaded = ProcedureRecord.from_dict(row)
+    assert len(loaded.lessons) <= 12
+    assert len(loaded.trigger_tags) <= 40
+    assert "lesson 49" in loaded.lessons, "loading dropped the newest lessons"
+
+
+def test_loading_deduplicates_tags():
+    row = procedure_from_episode(_episode()).to_dict()
+    row["trigger_tags"] = ["same", "same", "other"]
+    assert ProcedureRecord.from_dict(row).trigger_tags == ("same", "other")
+
+
+def test_an_uncredited_fold_in_repairs_an_oversized_record():
+    """A debit-only update must shrink an old record, not carry it forward."""
+    oversized = ProcedureRecord.from_dict({
+        **procedure_from_episode(_episode()).to_dict(),
+        "lessons": [f"lesson {i}" for i in range(50)],
+    })
+    folded = oversized.with_episode(
+        _episode(
+            defect_signals=["obligation_silently_missing"],
+            declared_completion="achieved",
+        )
+    )
+    assert len(folded.lessons) <= 12
+
+
 def test_a_legacy_record_without_lessons_loads_as_empty():
     row = procedure_from_episode(_episode()).to_dict()
     row.pop("lessons")

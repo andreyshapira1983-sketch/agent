@@ -401,9 +401,16 @@ class ProcedureRecord:
             id=str(data.get("id") or new_id("proc")),
             name=str(data.get("name") or "workflow"),
             workflow_key=str(data.get("workflow_key") or ""),
-            trigger_tags=tuple(str(x) for x in data.get("trigger_tags") or ()),
+            # Capped on the way IN as well as on the way out. A record written
+            # by an earlier version, or hand-edited, would otherwise keep its
+            # unbounded fields — and they are spent on every later run, since
+            # the record is injected into planner prompts — until some future
+            # credited episode happened to rewrite it.
+            trigger_tags=tuple(dict.fromkeys(
+                str(x) for x in data.get("trigger_tags") or ()
+            ))[:_MAX_TRIGGER_TAGS],
             steps=tuple(str(x) for x in data.get("steps") or ()),
-            lessons=tuple(str(x) for x in data.get("lessons") or ()),
+            lessons=_capped_lessons(str(x) for x in data.get("lessons") or ()),
             source_episode_ids=tuple(str(x) for x in data.get("source_episode_ids") or ()),
             success_count=max(0, int(data.get("success_count") or 0)),
             failure_count=max(0, int(data.get("failure_count") or 0)),
@@ -449,7 +456,10 @@ class ProcedureRecord:
         # a run that did not finish contributes no lesson, exactly as it
         # contributes no success count.
         lesson = lesson_from_episode(episode)
-        lessons = self.lessons
+        # Capped on EVERY return, not only when a lesson is appended: a
+        # debit-only fold-in must repair an oversized older record rather than
+        # carry it forward untouched.
+        lessons = _capped_lessons(self.lessons)
         if lesson and procedure_credit_allowed(episode):
             lessons = _capped_lessons([*self.lessons, lesson])
         # `replace`, not a field-by-field rebuild: this method used to re-list
@@ -1179,7 +1189,7 @@ def assemble_completion_state(
     6   otherwise                                   unknown
     ==  ==========================================  =================
 
-    Row 4 is the one authoritative *signal* in the table; rows 1–3 are facts
+    Row 4 is the one authoritative *signal* in the table; rows 1-3 are facts
     about how the run ended. It moves in one direction only — it can lower a
     claim of `achieved`, never raise anything — so an honest `blocked` or
     `failed` is left exactly where the run put it. Candour is not punished.
