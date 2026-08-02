@@ -311,3 +311,34 @@ def test_both_spellings_of_a_renamed_path_are_extracted(guard):
         "`core/confidence_gate_v2.py` and `core/evidence_support.py`"
     )]
     assert found == ["core/confidence_gate", "core/confidence_gate.py"], found
+
+
+def test_root_level_markdown_is_scanned():
+    """Root docs were invisible to this guard until the 2026-08 audit found
+    FABLE_AUDIT's anchors rotting silently (a loop.py anchor 30 lines past the
+    end of the file, undetected). The scan must cover repo-root *.md whenever
+    it runs against the real docs tree.
+    """
+    import io
+    from contextlib import redirect_stdout
+
+    mod = _load_guard()
+    docs_count = len(list((REPO_ROOT / "docs").rglob("*.md")))
+    root_count = len(list(REPO_ROOT.glob("*.md")))
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert mod.main([]) == 0
+    out = buf.getvalue()
+    scanned = int(out.split("documents scanned")[1].split(":")[1].split()[0])
+    assert scanned == docs_count + root_count, (
+        f"scanned {scanned}, expected docs/ ({docs_count}) + root ({root_count})"
+    )
+
+
+def test_fable_audit_is_historical_not_exempt():
+    """FABLE's anchors pass ONLY through the historical declaration — if the
+    allowlist entry vanishes, the guard must fail on its stale anchors rather
+    than silently skipping the file (the pre-audit behaviour)."""
+    mod = _load_guard()
+    assert "../FABLE_AUDIT.md" in mod._HISTORICAL_ANCHOR_DOCS
