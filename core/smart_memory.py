@@ -225,6 +225,12 @@ class EpisodeRecord:
     # numbers first (`docs/audit/SENSOR_SIGNAL_MEASUREMENT.md`, S3/S4 rulings).
     # Recording is what produces those numbers; it grants no power.
     defect_signals: tuple[str, ...] | None = None
+    # The authoritative fact that displaced this run's own claim, when one did.
+    # None = the claim stood (or there was no claim). `declared_completion` is
+    # NEVER edited to match: the operator's rule is that the signal wins the
+    # operational outcome without erasing the self-assessment, so both survive
+    # and the disagreement between them is readable as its own fact.
+    completion_override: str | None = None
     id: str = field(default_factory=lambda: new_id("ep"))
     created_at: str = field(default_factory=_now_iso)
 
@@ -260,6 +266,8 @@ class EpisodeRecord:
                else {"completion_state": self.completion_state}),
             **({} if self.defect_signals is None
                else {"defect_signals": list(self.defect_signals)}),
+            **({} if self.completion_override is None
+               else {"completion_override": self.completion_override}),
         }
 
     @classmethod
@@ -302,6 +310,11 @@ class EpisodeRecord:
                 None
                 if data.get("defect_signals") is None
                 else tuple(str(x) for x in data["defect_signals"])
+            ),
+            completion_override=(
+                None
+                if data.get("completion_override") is None
+                else str(data["completion_override"])
             ),
             goal=str(data.get("goal") or ""),
             question=str(data.get("question") or ""),
@@ -1115,6 +1128,7 @@ def assemble_completion_state(
     aborted_reason: str,
     replan_exhausted: bool,
     declared: str | None,
+    obligation_unmet: bool = False,
 ) -> CompletionState:
     """Decide whether the goal was reached. Called ONCE, at banking.
 
@@ -1148,15 +1162,77 @@ def assemble_completion_state(
     tie the verdict to a naming convention nothing enforces, to reach a result
     branch 5 already produces.
     """
+    return assemble_completion_verdict(
+        aborted_reason=aborted_reason,
+        replan_exhausted=replan_exhausted,
+        declared=declared,
+        obligation_unmet=obligation_unmet,
+    ).state
+
+
+@dataclass(frozen=True)
+class CompletionVerdict:
+    """The operational verdict plus the divergence that produced it.
+
+    Operator's rule: an authoritative signal must outrank the run's own
+    self-assessment **in the operational outcome**, and must not destroy that
+    self-assessment — the disagreement is itself a diagnostic fact and is kept.
+
+    So three things are stored, never two: what the answer claimed
+    (`EpisodeRecord.declared_completion`, untouched), what actually holds
+    (`state`), and — only when they diverge — which fact displaced the claim
+    (`overridden_by`). A reader can always reconstruct both sides and the reason.
+    """
+
+    state: CompletionState
+    overridden_by: str | None = None
+
+    @property
+    def diverged(self) -> bool:
+        return self.overridden_by is not None
+
+
+def assemble_completion_verdict(
+    *,
+    aborted_reason: str,
+    replan_exhausted: bool,
+    declared: str | None,
+    obligation_unmet: bool = False,
+) -> CompletionVerdict:
+    """The single rule table. :func:`assemble_completion_state` delegates here.
+
+    `obligation_unmet` is authoritative in one direction only: it can lower a
+    claim of `achieved` to `partially_achieved`, never raise anything. A run
+    that left a duty silently unmet did not finish the job, whatever it said —
+    but a run that already reported `blocked` or `failed` is not made worse by
+    it, because the honest report was never the problem.
+    """
     if aborted_reason == "cancelled":
-        return "cancelled"
+        return _displaced("cancelled", declared, "cancelled")
     if aborted_reason:
-        return "failed"
+        return _displaced("failed", declared, "aborted")
     if replan_exhausted:
-        return "failed"
+        return _displaced("failed", declared, "replan_exhausted")
+    if obligation_unmet and declared == "achieved":
+        return _displaced(
+            "partially_achieved", declared, "obligation_silently_missing"
+        )
     if declared in _COMPLETION_DECLARATIONS:
-        return declared  # type: ignore[return-value]
-    return "unknown"
+        return CompletionVerdict(declared)  # type: ignore[arg-type]
+    return CompletionVerdict("unknown")
+
+
+def _displaced(
+    state: CompletionState, declared: str | None, reason: str
+) -> CompletionVerdict:
+    """Name the displacing fact only when there was a claim to displace.
+
+    A run that declared nothing, or that declared exactly what holds, has no
+    divergence to record — writing a reason there would invent a disagreement.
+    """
+    if declared in _COMPLETION_DECLARATIONS and declared != state:
+        return CompletionVerdict(state, reason)
+    return CompletionVerdict(state)
 
 
 def effective_completion(episode: EpisodeRecord) -> CompletionState:
@@ -1337,6 +1413,20 @@ def episode_from_agent_cycle(
     # store can recognise "this attempt was already banked" without keeping a
     # ledger. Runs without an id keep the random default.
     episode_id = episode_id_for_run(run_id) if run_id else new_id("ep")
+    # Normalised once, here, because two things read it: the stored column and
+    # the verdict below. Deriving the authoritative flag from the same signal
+    # list the sensors filled keeps one source of truth — the fact that decides
+    # is the very fact that was recorded, not a parallel recomputation.
+    signals = (
+        None if defect_signals is None
+        else tuple(dict.fromkeys(str(s) for s in defect_signals if str(s)))
+    )
+    _verdict = assemble_completion_verdict(
+        aborted_reason=str(aborted_reason or ""),
+        replan_exhausted=bool(replan_exhausted),
+        declared=declared_completion,
+        obligation_unmet="obligation_silently_missing" in (signals or ()),
+    )
     return EpisodeRecord(
         goal=_clean_text(goal, max_chars=300),
         question=_clean_text(question, max_chars=400),
@@ -1362,20 +1452,14 @@ def episode_from_agent_cycle(
         # dropped rather than stored, so the declaration column can only ever
         # hold something the parser is allowed to produce.
         declared_completion=_checked_declaration(declared_completion, on_audit),
-        completion_state=assemble_completion_state(
-            aborted_reason=str(aborted_reason or ""),
-            replan_exhausted=bool(replan_exhausted),
-            declared=declared_completion,
-        ),
+        completion_state=_verdict.state,
+        completion_override=_verdict.overridden_by,
         # Order preserved, duplicates dropped: a sensor that fires on three
         # attempts is one fault, and a stable order keeps two runs with the same
         # faults byte-comparable. `None` passes through untouched so a caller
         # that cannot collect signals stays distinguishable from one that
         # collected none.
-        defect_signals=(
-            None if defect_signals is None
-            else tuple(dict.fromkeys(str(s) for s in defect_signals if str(s)))
-        ),
+        defect_signals=signals,
         id=episode_id,
     )
 
