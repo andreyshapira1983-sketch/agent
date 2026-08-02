@@ -56,7 +56,7 @@ not updated to reflect that, so they now *over-state* the number of open defects
 | CORE-07 / OFM-010 (retry no backoff) | `core/task_queue.py:294` `mark_failed` | exponential `run_after` backoff added (comment cites OFM-010/CORE-07) | `tests/test_task_queue_retry_backoff.py` |
 | CORE-09 / MGA-06 / A1 (web_fetch classified private) | `core/loop.py:172` | `"web_fetch": "web"` added to `_TOOL_SOURCE_HINTS` | `tests/test_web_fetch_classification.py` |
 | CORE-10 (tokenizer drops short/numeric) | `core/smart_memory.py:95` | keeps any digit-bearing token (comment cites CORE-10) | `tests/test_episodic_tokenizer_numeric.py` |
-| LPF-001 (host_tools as fake evidence) | `core/loop.py:3718-3743`, `core/planner.py:350`, `core/loop_helpers.py:63` | `<host_environment>` non-citable block + `host_tools_relevant()` gate | `tests/test_host_tools_context.py` |
+| LPF-001 (host_tools as fake evidence) | `core/loop.py` (synthesis critique), `core/host_tools_context.py` (gate + block; lived in `core/planner.py` until #246), `core/loop_helpers.py:63` | `<host_environment>` non-citable block + `host_tools_relevant()` gate | `tests/test_host_tools_context.py` |
 | #9 (injection scan scope) | `core/loop_helpers.py` `untrusted_scan_view` | scans untrusted payload only | `tests/test_injection_scan_scope.py` |
 
 **Verified STILL OPEN in current code (anchor unchanged):**
