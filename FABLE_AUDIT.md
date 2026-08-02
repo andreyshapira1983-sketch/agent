@@ -2,8 +2,17 @@
 
 Status: PHASE 1 complete. Cluster 1 MERGED (PR #200 → `189f9bd`). Cluster 1b
 MERGED (PR #201 → `9fd2800`); the live `--apply` still awaits the operator.
-Cluster 2 (ROOT B) patched and proven on branch
-`fix/root-b-memory-in-evidence-budget` — not reviewed, not merged.
+Cluster 2 (ROOT B) ~~patched and proven on branch
+`fix/root-b-memory-in-evidence-budget` — not reviewed, not merged~~ —
+**corrected 2026-08-02: MERGED as PR #202**; its behaviour is pinned in
+`tests/test_evidence_budget.py` (the ROOT B section).
+
+> **Anchor provenance (added 2026-08-02).** Every `file:line` anchor below is
+> provenance for this audit's own date. `core/loop.py` alone has since moved
+> by −686 lines (the #217–#224 decomposition), so anchors into it no longer
+> land. This file lives at the repository root, OUTSIDE the
+> `docs_code_conformance` guard's scan — nothing verifies these anchors, which
+> is exactly why this note exists (guard-coverage gap registered as a task).
 Worktree: clusters 1/1b were built in
 `copilot-worktrees/agent/andreyshapira1983-sketch-fantastic-memory`; cluster 2
 was built on a branch inside the operator's own checkout, which was clean at
