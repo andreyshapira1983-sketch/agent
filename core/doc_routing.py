@@ -252,7 +252,7 @@ _SUBAGENT_GOVERNANCE_DOC_PATHS = (
 # never read changes nothing.
 #
 # Membership is deliberately small, and three obvious candidates are left OUT:
-#   * docs/audit/MEMORY_LIFECYCLE_CONTRACT.md — v2-draft, never approved, no
+#   * docs/audit/MEMORY_LIFECYCLE_CONTRACT.md — v5-draft, not yet approved, no
 #     code implements it. Injecting it as doctrine would teach the agent that
 #     unimplemented rules are current behaviour.
 #   * docs/MEMORY_FIX_PLAN.md — partly superseded; its A3 prescription was

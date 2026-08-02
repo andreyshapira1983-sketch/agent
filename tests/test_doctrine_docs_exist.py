@@ -113,10 +113,14 @@ def test_memory_docs_are_thematic_not_in_corporate_manifest() -> None:
 def test_memory_manifest_excludes_unapproved_and_superseded_docs() -> None:
     """The two documents deliberately kept out must stay out.
 
-    `MEMORY_LIFECYCLE_CONTRACT.md` is an unapproved draft (v4 at this note's last update) that no code
-    implements; `MEMORY_FIX_PLAN.md` is partly superseded (its A3 prescription
-    was never applied as written). Injecting either as doctrine would teach the
-    agent a rule that does not hold in the code it is reading.
+    `MEMORY_LIFECYCLE_CONTRACT.md` is a design/target draft (v5 at this note's last
+    update — v5 added the §18 operational-rule ledger and the §19 phase plan, but the
+    envelope taxonomy is still a target, not current behaviour, and no phase is
+    approved yet); `MEMORY_FIX_PLAN.md` is partly superseded (its A3 prescription was
+    never applied as written). Injecting either as doctrine would teach the agent a
+    rule that does not hold in the code it is reading. The contract stays OUT of the
+    manifest until an operator approves a PHASE and that phase ships — approving the
+    document as a design is not the same as its rules being current behaviour.
     """
     for path in (
         "docs/audit/MEMORY_LIFECYCLE_CONTRACT.md",
