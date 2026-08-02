@@ -52,7 +52,6 @@ All notable changes to this project are recorded here. The format follows
   (relative Markdown links resolve) and `scripts/commands_map_check.py` (every
   command dispatched in `main.py` is documented in `docs/COMMANDS_MAP.md`).
 
-### Fixed
 - `docs/AGENT_DOCTRINE.md` priority order had a single "explicit user
   instructions" line and no notion of an advisor, so a confidently worded
   review comment outranked the specification it contradicted.
