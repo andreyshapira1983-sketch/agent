@@ -35,8 +35,11 @@ from core.smart_memory import (
 
 # The wrapper the retrieved long-term records are placed in. Named once so the
 # builder here and the prompt assembly in `core/loop.py` cannot drift.
-MEMORY_OPEN_TAG: str = "<long_term_memory>"
-MEMORY_CLOSE_TAG: str = "</long_term_memory>"
+# Single source of truth moved to core/evidence_budget (piece 5): the
+# builder here, the trimmer there and the rebuilder all share one
+# definition. Re-imported so every existing `from core.loop_methods2
+# import MEMORY_*` site keeps working — this module genuinely uses them.
+from core.evidence_budget import MEMORY_CLOSE_TAG, MEMORY_OPEN_TAG
 
 # Every durable sink the loop can write. A write site names its sink; a name
 # outside this set is refused rather than waved through, so a typo or a new
