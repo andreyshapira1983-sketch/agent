@@ -207,7 +207,7 @@ class TestAmbiguityIsObservedNotGuessed:
     rules and their false-ask rates on 48 real requests.
     """
 
-    def test_no_ambiguity_is_claimed_by_this_module(self):
+    def test_the_targetless_change_rule_no_longer_claims_ambiguity(self):
         """RETIRED 2026-08-02 after measuring zero precision.
 
         This used to assert that "исправь это" (a change verb with no path)
@@ -218,7 +218,9 @@ class TestAmbiguityIsObservedNotGuessed:
         "внеси минимальное исправление".
 
         An empty contract now says only what is true — no deliverable could be
-        derived — without also claiming the operator was unclear.
+        derived — without also claiming the operator was unclear. Scope: only
+        THIS rule is retired; the mixed read+change rule still raises an
+        ambiguity (see `test_a_mixed_read_and_change_request_owes_nothing_and_asks`).
         """
         contract = derive_completion_contract("исправь это")
         assert contract.obligations == ()

@@ -239,9 +239,16 @@ def derive_completion_contract(
                 derived_from=path,
             ))
 
-    # ── no ambiguity is raised by this module (RETIRED 2026-08-02) ──────────
+    # ── the TARGETLESS-CHANGE ambiguity rule is RETIRED (2026-08-02) ────────
     #
-    # Two candidate rules were tried and BOTH measured at zero precision:
+    # Scope of this retirement, precisely: only the "a change verb names no
+    # target" rule is gone. The mixed read+change rule above still raises an
+    # ambiguity, and `ambiguities` is still a populated field — it fired 0
+    # times across the same 62 live requests, so it is unexercised rather than
+    # disproven, and there is no evidence on which to retire it.
+    #
+    # Two candidate TARGETLESS rules were tried and BOTH measured at zero
+    # precision:
     #
     # * "a path is named under an unrecognised verb" — 4 firings on 48 live
     #   requests, 2 of them ordinary discussion turns that merely cited a file.
@@ -254,12 +261,12 @@ def derive_completion_contract(
     #   in a flat bag of tokens, and the whole task was declared targetless.
     #
     # A signal that is wrong 8 times out of 8 is not a signal to tune, it is a
-    # claim to withdraw. `ambiguities` stays in the dataclass (the operator's
-    # clause 6 — ask, do not guess — is still the goal) but nothing populates
-    # it until a derivation exists that can tell a vague operator from a clear
-    # one this module fails to parse. An empty contract now says exactly what
-    # is true: no deliverable could be derived. It no longer adds a false claim
-    # about the operator's clarity on top of that.
+    # claim to withdraw. The operator's clause 6 — ask, do not guess — remains
+    # the goal, and the mixed-request rule still serves it; what is gone is the
+    # rule that could not tell a vague operator from a clear one this module
+    # fails to parse. A request whose target lives in prose now yields an empty
+    # contract that says exactly what is true — no deliverable could be
+    # derived — without adding a false claim about the operator's clarity.
     #
     # What this does NOT fix: the vocabulary still cannot express "run an
     # experiment", so a multi-step procedure still yields no obligations. That
