@@ -49,10 +49,18 @@ class TestScanRegex:
             ("password: hunter2", "credential-assignment"),
             ("auth_token = abc.def-ghi", "credential-assignment"),
         ],
+        # Explicit ids so a failing case is named by its KIND in the node id,
+        # not by its parameter value — pytest would otherwise echo the
+        # secret-shaped string into CI logs and bug reports (PR #207 review).
+        ids=[
+            "openai", "anthropic", "github-pat", "huggingface", "aws",
+            "bearer", "pem", "pem-rsa", "assign-key", "assign-password",
+            "assign-token",
+        ],
     )
     def test_known_credential_shapes_are_found(self, text, expected_kind):
         findings = scan(text)
-        assert findings, f"expected a finding in {text!r}"
+        assert findings, f"expected a {expected_kind} finding"
         kinds = {f.kind for f in findings}
         assert expected_kind in kinds
 
@@ -74,6 +82,15 @@ class TestScanRegex:
             ("glpat" + _GITLAB_BODY, "gitlab-pat"),
             ("npm" + _NPM_BODY, "npm-token"),
             ("sk" + _STRIPE_BODY, "stripe-key"),
+            ("rk" + _STRIPE_BODY, "stripe-key"),
+            # Stateless installation token: `ghs_<app id>_<JWT>` — dots and
+            # underscores are part of the credential body.
+            ("ghs_123456_eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOjF9.sig-part_x", "github-token"),
+        ],
+        ids=[
+            "fine-grained-pat", "gho", "ghs", "ghu", "ghr", "xoxb", "xoxp",
+            "slack-webhook", "google", "gitlab", "npm", "stripe-sk",
+            "stripe-rk", "ghs-stateless",
         ],
     )
     def test_modern_token_formats_are_found(self, text, expected_kind):
@@ -83,8 +100,53 @@ class TestScanRegex:
         # flags on `core/logger.py`. The underscore prefixes matter: `sk_live_`
         # is not caught by the `sk-` rule because that one requires a hyphen.
         findings = scan(text)
-        assert findings, f"expected a finding in {text!r}"
+        assert findings, f"expected a {expected_kind} finding"
         assert expected_kind in {f.kind for f in findings}
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # Publishable Stripe keys are public BY DESIGN — they live in
+            # frontend configs and build manifests. Flagging one feeds
+            # `contains_secret()` and the memory write policy, quarantining
+            # innocent content (PR #207 review, Greptile P1).
+            "pk" + _STRIPE_BODY,
+            # `kk_` was never a Stripe prefix; it fell out of the original
+            # `[sprk]k_` character class by accident.
+            "kk" + _STRIPE_BODY,
+            # Left boundaries: a match must not start inside a glued token.
+            "abchttps://hooks.slack.com/" + _SLACK_HOOK_PATH,
+            "xghp_aaaaaaaaaaaaaaaaaaaaXXX",
+            "shhf_aaaaaaaaaaaaaaaaaaaaXXX",
+            # A Google-key-shaped head on a LONGER same-class string is some
+            # other identifier, not a 39-char key.
+            "AIza" + _GOOGLE_BODY + "0extralength",
+        ],
+        ids=[
+            "stripe-publishable", "stripe-kk", "glued-slack-webhook",
+            "glued-ghp", "glued-hf", "overlong-google",
+        ],
+    )
+    def test_lookalikes_are_not_flagged(self, text):
+        """The false-positive half of the #207 review debt.
+
+        Every regex hit reaches `contains_secret()` and the memory write
+        policy, so a lookalike costs real content its place in memory — the
+        cost of a false positive here is not cosmetic.
+        """
+        assert scan(text) == [], "lookalike wrongly flagged (see the case id)"
+
+    def test_stateless_github_token_is_matched_in_full(self):
+        """The span, not just the kind: a narrower body class also produced
+        *a* github-token finding on this input by stopping at the first dot,
+        so kind-membership alone could not prove the widened class works. The
+        redaction boundary is the finding's span — a partial span leaves the
+        JWT tail readable.
+        """
+        text = "ghs_123456_eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOjF9.sig-part_x"
+        finding = next(f for f in scan(text) if f.kind == "github-token")
+        assert (finding.start, finding.end) == (0, len(text))
+        assert finding.matched == text
 
     def test_clean_text_has_no_findings(self):
         assert scan("The weather is nice today.") == []

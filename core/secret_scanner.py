@@ -72,29 +72,47 @@ REGEX_RULES: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
     # ("ta|sk-...", "ri|sk-...", "di|sk-...") + a hyphenated slug (CORE-13).
     ("anthropic-key",      re.compile(r"(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9_\-]{20,}")),
     ("openai-key",         re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_\-]{20,}")),
-    ("github-pat",         re.compile(r"ghp_[A-Za-z0-9]{20,}")),
+    ("github-pat",         re.compile(r"(?<![A-Za-z0-9_-])ghp_[A-Za-z0-9]{20,}")),
     # GitHub issues five more token shapes besides the classic `ghp_` PAT, and
     # this repo drives `gh` — so any of them can surface in captured output.
     # Fine-grained PATs carry `_` inside the body, hence the wider class.
     ("github-fine-grained-pat", re.compile(
         r"(?<![A-Za-z0-9_-])github_pat_[A-Za-z0-9_]{20,}"
     )),
-    ("github-token",       re.compile(r"(?<![A-Za-z0-9_-])gh[osur]_[A-Za-z0-9]{20,}")),
+    # Body class is wider than the other GitHub rules: stateless installation
+    # tokens are `ghs_<app id>_<JWT>`, so underscores and the JWT's dots and
+    # dashes are part of the credential. Without them the rule matched only the
+    # token's head and the redaction left the JWT tail readable (PR #207
+    # review, CodeRabbit). Over-capture of a trailing sentence dot is the safe
+    # direction for a redactor.
+    ("github-token",       re.compile(r"(?<![A-Za-z0-9_-])gh[osur]_[A-Za-z0-9_.\-]{20,}")),
     # Slack bot/user/app tokens share the `xox<letter>-` prefix.
     ("slack-token",        re.compile(r"(?<![A-Za-z0-9_-])xox[abeprs]-[A-Za-z0-9-]{10,}")),
     # Incoming-webhook URLs are themselves the credential — no auth needed.
+    # Same left boundary as every other rule: without it a match could start
+    # inside a glued token ("...abchttps://..."), the one rule that differed.
     ("slack-webhook",      re.compile(
-        r"https://hooks\.slack\.com/services/[A-Za-z0-9/_-]{20,}"
+        r"(?<![A-Za-z0-9_-])https://hooks\.slack\.com/services/[A-Za-z0-9/_-]{20,}"
     )),
     # Google/Firebase API keys: fixed 39-char shape, distinctive enough alone.
-    ("google-api-key",     re.compile(r"(?<![A-Za-z0-9_-])AIza[0-9A-Za-z_-]{35}")),
+    # Both ends anchored — the length is exact, so 40+ same-class characters
+    # are some longer identifier that merely starts like a key, not a key.
+    ("google-api-key",     re.compile(
+        r"(?<![A-Za-z0-9_-])AIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])"
+    )),
     ("gitlab-pat",         re.compile(r"(?<![A-Za-z0-9_-])glpat-[A-Za-z0-9_-]{20,}")),
     ("npm-token",          re.compile(r"(?<![A-Za-z0-9_-])npm_[A-Za-z0-9]{20,}")),
     # Stripe uses `_` after the prefix, so the `sk-` rule above never sees it.
+    # `sk` (secret) and `rk` (restricted) ONLY. `pk` (publishable) is public
+    # by design and appears in frontend configs and build manifests; every hit
+    # here feeds `contains_secret()` and the memory write policy, so flagging
+    # it quarantined innocent content (PR #207 review, Greptile P1 +
+    # CodeRabbit). `kk` was never a Stripe prefix — a leftover of the original
+    # character class.
     ("stripe-key",         re.compile(
-        r"(?<![A-Za-z0-9_-])[sprk]k_(?:live|test)_[A-Za-z0-9]{20,}"
+        r"(?<![A-Za-z0-9_-])[sr]k_(?:live|test)_[A-Za-z0-9]{20,}"
     )),
-    ("huggingface-token",  re.compile(r"hf_[A-Za-z0-9]{20,}")),
+    ("huggingface-token",  re.compile(r"(?<![A-Za-z0-9_-])hf_[A-Za-z0-9]{20,}")),
     ("aws-access-key",     re.compile(r"AKIA[0-9A-Z]{16}")),
     ("bearer-token",       re.compile(r"Bearer\s+[A-Za-z0-9_.\-]{20,}")),
     # PEM block start marker alone is enough — pasting only the header is
