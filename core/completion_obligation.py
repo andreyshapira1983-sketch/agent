@@ -63,6 +63,7 @@ RequirementKind = Literal[
     "workspace_observation",
     "tool_execution",
     "fresh_evidence",
+    "deliverable_produced",
 ]
 
 ObligationStatus = Literal[
@@ -196,6 +197,7 @@ def evaluate_completion_obligations(
     file_hint: str | None = None,
     failure_codes: Iterable[str] = (),
     denied_tools: Iterable[str] = (),
+    contract: Any | None = None,
 ) -> CompletionObligationResult:
     """Collect obligations from the wired sources and judge each one.
 
@@ -285,6 +287,37 @@ def evaluate_completion_obligations(
             )
         )
 
+    # ── acceptance_criteria (MIR-067) ────────────────────────────────────
+    # Wired since 2026-08-02. The contract is derived from the REQUEST before
+    # the work (see `core.completion_contract`), so an obligation here is not
+    # a description of what the run did — it is what the run owed. Judged
+    # against artifacts, never against the answer: a well-written answer is
+    # exactly what used to pass for completion.
+    unavailable = UNWIRED_SOURCES
+    if contract is not None:
+        from core.completion_contract import unmet_obligations
+
+        unavailable = ()
+        unmet = set(unmet_obligations(contract, artifacts=artifacts))
+        obligations.extend(
+            Obligation(
+                source="acceptance_criteria",
+                kind="deliverable_produced",
+                status=(
+                    "satisfied" if duty not in unmet
+                    else "failed_but_reported"
+                    if failure_codes
+                    and _discloses(answer, duty.target or "tests", *failure_codes)
+                    else "silently_missing"
+                ),
+                detail=(
+                    f"{duty.deliverable}:{duty.target or 'tests'}"
+                    f" — {duty.verification}"
+                ),
+            )
+            for duty in contract.obligations
+        )
+
     sources = tuple(dict.fromkeys(o.source for o in obligations))
     missing = tuple(
         dict.fromkeys(
@@ -307,7 +340,7 @@ def evaluate_completion_obligations(
         triggered=triggered,
         requirement_sources=sources,
         missing_requirements=missing,
-        unavailable_sources=UNWIRED_SOURCES,
+        unavailable_sources=unavailable,
         obligations=tuple(obligations),
         notes=tuple(notes),
     )

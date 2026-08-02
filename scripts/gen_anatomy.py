@@ -38,7 +38,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "evidence_support", "confidence_vector",
         "reasoning_action_check", "best_next_action", "task_complexity", "low_evidence_policy",
         "unsupported_claims", "subsystem_disagreement", "completion_marker",
-        "completion_obligation", "response_draft", "synth_resilience",
+        "completion_obligation", "completion_contract", "response_draft", "synth_resilience",
         "strategy_router", "role_router", "prompt_registry",
         "compactor",
     ]),

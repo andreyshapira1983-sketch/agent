@@ -288,7 +288,17 @@ def test_end_to_end_event_is_emitted_with_the_shadow_verdict(workspace: Path):
     assert payload["required"] is True
     assert payload["triggered"] is True
     assert payload["requirement_sources"] == ["intent"]
-    assert payload["unavailable_sources"] == list(UNWIRED_SOURCES)
+    # `acceptance_criteria` was reported unavailable until 2026-08-02, when the
+    # completion contract (MIR-067) wired it. The loop now always supplies a
+    # contract, so nothing is unavailable — even for a read-only request like
+    # this one, whose contract is legitimately empty. An empty contract is a
+    # source that was CONSULTED and owed nothing; that is not the same fact as
+    # a source nobody could read, which is why this assertion flipped rather
+    # than being deleted.
+    assert payload["unavailable_sources"] == []
+    assert UNWIRED_SOURCES == ("acceptance_criteria",), (
+        "the module still declares the source; only the loop's supply changed"
+    )
     # The detector it replaces is carried alongside, not deleted.
     assert "shadow_keyword_detector" in payload
 
