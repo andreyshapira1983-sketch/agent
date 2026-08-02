@@ -49,7 +49,7 @@ class FakeLLM:
 class FakePlanner:
     """A Planner stand-in that emits whatever sources the test gives it.
 
-    Bypasses `LLMPlanner._sanitize_step`, which is exactly what we want when
+    Bypasses `core.step_sanitizer.sanitize_step`, which is exactly what we want when
     we need to verify the loop's defenses (policy gate, registry lookup) on
     plans the real planner would never produce.
     """
