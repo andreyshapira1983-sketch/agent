@@ -243,6 +243,16 @@ S2 and S5 simply have not had a chance to be judged.
   is a planner-recall problem, not something this sensor should paper over with
   a keyword list.
 
+  **Update 2026-08-02 (PRs #216/#227, operator ruling):** the requirement now
+  carries authority **at banking time**. The verdict is stored with the
+  episode (`EpisodeRecord.defect_signals`), and an unmet obligation on a run
+  that declared `achieved` lowers the completion verdict to
+  `partially_achieved` (`completion_override` names the displacing fact; the
+  declaration is never edited) and withholds procedure credit. Mid-run the
+  sensor still stops and replans nothing — the promotion is to the verdict a
+  run banks under, exactly the shape this ruling asked for: the requirement
+  has the authority, not the retired keyword detector.
+
 * **S2** — the five ruled scenarios exist as tests
   (`tests/test_sensor_shadow_scenarios.py`), and the loop now emits
   `stagnation_shadow` at the END of a run: `would_stop`,
@@ -258,4 +268,8 @@ Both shadow events are emitted at the end of the cycle on purpose: *"would
 stopping there have changed anything?"* can only be answered once it is known
 what the remaining attempts produced.
 
-S4 unchanged by decision — still an observer, still measured.
+S4 unchanged by decision — still an observer, still measured. **Since
+2026-08-02 its firings are additionally *banked* with the episode
+(`EpisodeRecord.defect_signals`, PR #216), so a repeated mismatch is visible
+in the agent's own memory rather than only in the per-run journal. Recording
+grants no power — pinned by test — so the ruling above stands unchanged.**

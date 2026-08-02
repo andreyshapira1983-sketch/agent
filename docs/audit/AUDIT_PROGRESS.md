@@ -20,7 +20,9 @@ limits of each check. Operator command gates every stage transition.
 > written and are kept as the record of how the revision proceeded. They are
 > not claims about today, and must not be read as such.
 >
-> `MEMORY_LIFECYCLE_CONTRACT.md`: **v2-draft, never approved** — and now partly
+> `MEMORY_LIFECYCLE_CONTRACT.md`: **v2-draft, never approved** *(2026-08-02:
+> now v4-draft — same unapproved status, two labeled addenda; see its header
+> log)* — and now partly
 > overtaken: MIR-002/041/043/046/047/048/049/051 were closed by direct fixes on
 > branch `fix/mir-043-autonomous-experience-wiring`, not by executing that
 > contract. See its own header note before planning any work from it.
