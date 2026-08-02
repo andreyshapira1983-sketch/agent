@@ -165,6 +165,11 @@ def parse_json(
 
 _ANYWHERE_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
+# After this many unbalanced-brace restarts the scanner gives up: each restart
+# rescans the remaining text, so unbounded restarts on a wall of stray '{'
+# would be quadratic in the reply length. Real replies carry a handful.
+_SCAN_RESTART_CAP = 32
+
 
 def embedded_json_objects(text: str) -> Iterator[str]:
     """Every balanced ``{...}`` span in `text`, left to right.
@@ -181,6 +186,7 @@ def embedded_json_objects(text: str) -> Iterator[str]:
     and the matching `}` must not close one early.
     """
     index = 0
+    restarts = 0
     length = len(text)
     while index < length:
         start = text.find("{", index)
@@ -210,8 +216,18 @@ def embedded_json_objects(text: str) -> Iterator[str]:
                     closed_at = pos
                     break
         if closed_at < 0:
-            # Unbalanced from here on: nothing further can close either.
-            return
+            # Unbalanced at THIS start — but an object opened later can still
+            # be balanced ('{unclosed {"a": 1}'), so restart from the next
+            # '{'. The old "nothing further can close either" return was
+            # wrong and hid such objects (Codacy AI finding on PR #247).
+            # Each restart rescans the tail, so a wall of unclosed braces
+            # would cost O(n²); the cap keeps the worst case bounded while
+            # real replies (a handful of stray braces) are unaffected.
+            restarts += 1
+            if restarts > _SCAN_RESTART_CAP:
+                return
+            index = start + 1
+            continue
         yield text[start:closed_at + 1]
         index = closed_at + 1
 

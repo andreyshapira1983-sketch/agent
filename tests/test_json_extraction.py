@@ -135,3 +135,25 @@ def test_non_string_and_empty_inputs_return_none():
     assert extract_json_object("   ") is None
     assert extract_json_object(None) is None  # type: ignore[arg-type]
     assert extract_json_object(12) is None  # type: ignore[arg-type]
+
+
+# ── review round on PR #247: the scanner survives an unclosed brace ──────────
+
+def test_unclosed_brace_before_valid_object_no_longer_hides_it():
+    """The scanner's old "nothing further can close either" return was wrong:
+    an object opened later can be balanced. Pinned against the retired
+    subagent oracle, which also failed here (greedy span, unbalanced)."""
+    text = 'prose {unclosed {"a": 1} tail'
+    assert _oracle_subagent(text) is None  # fail-before, pinned
+    assert extract_json_object(text) == {"a": 1}
+    assert '{"a": 1}' in list(embedded_json_objects(text))
+
+
+def test_wall_of_stray_braces_is_bounded_not_quadratic():
+    """Restarts are capped: 20k unclosed braces must not cost 20k rescans."""
+    import time
+    text = "{" * 20_000
+    t0 = time.perf_counter()
+    assert list(embedded_json_objects(text)) == []
+    assert extract_json_object(text) is None
+    assert time.perf_counter() - t0 < 1.0

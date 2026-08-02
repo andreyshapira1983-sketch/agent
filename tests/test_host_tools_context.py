@@ -93,3 +93,38 @@ def test_host_tools_relevant_gate():
     assert host_tools_relevant("what is the capital of France") is False
     # No false-substring trigger ("word" inside "keyword" must not fire).
     assert host_tools_relevant("give me a keyword for SEO") is False
+
+
+def test_broken_python_path_does_not_suppress_autodetect(monkeypatch):
+    """Review round on PR #247: a configured-but-broken PYTHON_PATH used to
+    match the old '"python" in line' substring check via its "[path configured
+    but not verified]" entry, silencing exactly the fallback that would have
+    rescued it. Auto-detection must run unless a VERIFIED python was found."""
+    from core import host_tools_context as htc
+
+    autodetect_probe = r"C:\Python311\python.exe"
+    monkeypatch.setenv("PYTHON_PATH", r"C:\definitely\broken\python.exe")
+    for env_var, _tool, _desc in htc._HOST_ENV_TOOLS:
+        if env_var != "PYTHON_PATH":
+            monkeypatch.delenv(env_var, raising=False)
+    monkeypatch.setattr(htc.os.path, "exists", lambda p: p == autodetect_probe)
+
+    block = htc._build_host_tools_block()
+    assert "[path configured but not verified]" in block
+    assert autodetect_probe in block, "auto-detect was suppressed by the broken path"
+
+
+def test_verified_python_path_still_skips_autodetect(monkeypatch):
+    """Parity pin: a working PYTHON_PATH keeps auto-detection off."""
+    from core import host_tools_context as htc
+
+    good = r"C:\configured\python.exe"
+    monkeypatch.setenv("PYTHON_PATH", good)
+    for env_var, _tool, _desc in htc._HOST_ENV_TOOLS:
+        if env_var != "PYTHON_PATH":
+            monkeypatch.delenv(env_var, raising=False)
+    monkeypatch.setattr(htc.os.path, "exists", lambda p: p == good)
+
+    block = htc._build_host_tools_block()
+    assert good in block
+    assert "NOT in PATH but installed" not in block

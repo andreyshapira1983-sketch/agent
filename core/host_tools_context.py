@@ -67,18 +67,23 @@ def _build_host_tools_block() -> str:
     context block listing what is actually installed on this host.
     Only includes vars that are set and non-empty.
     """
-    # Also detect Python from common Windows locations if PYTHON_PATH not set
     found: list[str] = []
+    python_verified = False
     for env_var, tool_name, description in _HOST_ENV_TOOLS:
         path = os.environ.get(env_var, "").strip()
         if path and os.path.exists(path):
             found.append(f"  {tool_name:12s} → {path}  ({description})")
+            if tool_name == "python":
+                python_verified = True
         elif path:
             # Path configured but file not found at that location
             found.append(f"  {tool_name:12s} → {path}  ({description}) [path configured but not verified]")
 
-    # Auto-detect Python if not already found via PYTHON_PATH
-    if not any("python" in line for line in found):
+    # Auto-detect Python from common Windows locations unless a VERIFIED
+    # PYTHON_PATH was found. The old substring check ("python" in line) also
+    # matched the "[path configured but not verified]" entry, so a broken
+    # PYTHON_PATH suppressed exactly the fallback that would have rescued it.
+    if not python_verified:
         username = os.environ.get("USERNAME", "")
         common_python = [
             rf"C:\Users\{username}\AppData\Local\Programs\Python\Python311\python.exe",
