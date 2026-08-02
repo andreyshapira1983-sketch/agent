@@ -606,6 +606,18 @@ question, not an implementation question — which is why none is prescribed her
   episode-only event property that the envelope does not carry. This is the axis
   `docs/INDEX.md` §4 warning 5 named first.
 
+  > **Addendum 2026-08-02 — the writer/boundary half of D-6 is RULED (operator,
+  > closing MIR-064).** At the shared save boundary every NEW record must carry
+  > an explicit completion verdict: known mechanical-writer statuses map through
+  > the approved table (`core/writer_completion.py`), anything without an
+  > unambiguous mapping is written as explicit `"unknown"`. Absence of the field
+  > is legal only when *reading* true pre-axis legacy rows; new rows without it
+  > must not be saved, and old ambiguous rows are not reconstructed without
+  > proof (the backfill's writer-signature rule stands). Enforced in
+  > `core/smart_memory.py::admit_for_storage`. The envelope-membership half of
+  > D-6 — option (a) vs (b) above — remains open; this ruling is storage policy,
+  > not envelope taxonomy.
+
 ## 17. Contract ↔ code reconciliation — measured, not assumed
 
 > **Why this section exists.** `docs/INDEX.md` §4 warning 5 (added 2026-07-21) told

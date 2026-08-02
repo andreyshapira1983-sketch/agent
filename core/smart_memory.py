@@ -1384,9 +1384,22 @@ def admit_for_storage(episode: EpisodeRecord) -> EpisodeRecord:
     disk is a row that predates the field, and re-deciding it now would rewrite
     history with today's rule.
     """
-    if episode.usage_eligible is not None:
-        return episode
-    return replace(episode, usage_eligible=decide_usage_eligibility(episode))
+    if episode.usage_eligible is None:
+        episode = replace(
+            episode, usage_eligible=decide_usage_eligibility(episode)
+        )
+    # The completion axis, same boundary, by the operator's D-6 ruling
+    # (2026-08-02, MIR-064): every NEW record must carry an explicit verdict.
+    # A writer that knows its outcome writes it (the mechanical writers map
+    # through `core/writer_completion.py`); one that cannot classify writes —
+    # or, here, receives — the explicit ``"unknown"``. Absence of the field is
+    # legal only when READING rows that predate the axis; a new row without it
+    # would impersonate that legacy population, which is the provenance break
+    # MIR-064 measured. Write-only, like the eligibility rule above: a `None`
+    # read back off disk stays `None`.
+    if episode.completion_state is None:
+        episode = replace(episode, completion_state="unknown")
+    return episode
 
 
 def episode_id_for_run(run_id: str) -> str:
