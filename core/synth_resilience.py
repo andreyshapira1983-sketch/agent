@@ -119,7 +119,6 @@ def run_synthesizer_ladder(
             adapt_context=is_final and max_attempts > 1,
             is_final=is_final,
         )
-        blank = False
         try:
             answer = do_synthesize(attempt)
             # A blank draft is not an answer. The provider can return success
@@ -130,15 +129,16 @@ def run_synthesizer_ladder(
             # Treating it as a finished answer is how a non-answer earns
             # credit, so it enters the same ladder an exception does.
             if not answer.strip():
-                blank = True
-                raise _BlankSynthesis(
-                    "synthesizer returned no visible text"
-                )
+                raise _BlankSynthesis("synthesizer returned no visible text")
         except fatal_types:
             raise
         except Exception as exc:  # noqa: BLE001 — recovery boundary
             err = f"{type(exc).__name__}: {exc}"
-            last_class = "blank_answer" if blank else classify_model_error(exc)
+            last_class = (
+                "blank_answer"
+                if isinstance(exc, _BlankSynthesis)
+                else classify_model_error(exc)
+            )
             errors.append(err)
             on_event(
                 "synthesizer_attempt_failed",
