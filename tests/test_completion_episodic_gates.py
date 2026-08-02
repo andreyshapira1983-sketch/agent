@@ -230,6 +230,54 @@ def test_a_legacy_row_is_withheld_without_reconstruction(tmp_path: Path) -> None
     assert _fast_path_pure(episode) is False
 
 
+def test_a_new_row_cannot_land_without_the_completion_axis(tmp_path: Path) -> None:
+    """The D-6 boundary rule (operator, 2026-08-02, closing MIR-064).
+
+    Every NEW record must get an explicit completion verdict at the shared
+    save boundary; a writer that cannot classify yields the explicit
+    ``"unknown"``. On disk the key must be PRESENT — its absence is the legacy
+    signature, and a row banked today must not impersonate that population.
+    """
+    store = EpisodicMemoryStore(tmp_path / "episodes.jsonl")
+    stored = store.save(EpisodeRecord(
+        goal="g", question="hand-built", outcome="success", summary="s",
+        tags=("lesson",),
+    ))
+    assert stored.completion_state == "unknown", "boundary did not settle the axis"
+
+    raw = (tmp_path / "episodes.jsonl").read_text(encoding="utf-8")
+    assert '"completion_state": "unknown"' in raw, (
+        "the key is absent on disk — byte-identical to a pre-axis legacy row, "
+        "which is exactly the provenance break MIR-064 measured"
+    )
+
+
+def test_the_boundary_never_overwrites_a_writers_verdict(tmp_path: Path) -> None:
+    """An explicit value is a decision already taken — passed through untouched,
+    same contract as the eligibility rule beside it."""
+    store = EpisodicMemoryStore(tmp_path / "episodes.jsonl")
+    stored = store.save(EpisodeRecord(
+        goal="g", question="q", outcome="failed", summary="s",
+        completion_state="blocked",
+    ))
+    assert stored.completion_state == "blocked"
+
+
+def test_reading_legacy_stays_none_no_reconstruction(tmp_path: Path) -> None:
+    """The ruling's read half: absence is legal ONLY for true legacy rows, and
+    old ambiguous rows are not reconstructed without proof. Reading must not
+    quietly stamp them."""
+    path = tmp_path / "episodes.jsonl"
+    path.write_text(
+        '{"id": "ep-legacy", "goal": "g", "question": "q", "outcome": "success",'
+        ' "summary": "s", "usage_eligible": true}\n',
+        encoding="utf-8",
+    )
+    episode = EpisodicMemoryStore(path).load()[0]
+    assert episode.completion_state is None, "read-side reconstruction is forbidden"
+    assert effective_completion(episode) == "unknown"
+
+
 def test_no_legacy_episode_in_the_live_store_is_ever_admitted(tmp_path: Path) -> None:
     """Legacy stays withheld — the invariant, not a snapshot.
 
