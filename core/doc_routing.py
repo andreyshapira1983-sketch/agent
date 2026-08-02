@@ -338,6 +338,11 @@ CONFIDENCE_EVIDENCE_SOURCE_PATHS = (
     "tests/test_evidence_support.py",
     "tests/test_confidence_vector.py",
 )
+# The low-signal defaults a drafted plan falls back to when it has no real
+# evidence source. _is_low_signal_confidence_source reads THIS tuple — it must
+# never re-encode the values by hand (audit finding Д-2: the function carried
+# its own "readme.md"/"tools" literals while this tuple had zero readers, so
+# editing it changed nothing).
 _CONFIDENCE_LOW_SIGNAL_DEFAULT_PATHS = (
     "README.md",
     "tools/",
@@ -670,10 +675,15 @@ def _is_low_signal_confidence_source(src: dict[str, Any]) -> bool:
     args = src.get("arguments") or {}
     path = args.get("path") if isinstance(args, dict) else None
     norm = _norm_source_path(path) if isinstance(path, str) else ""
-    if src.get("tool") == "file_read" and norm == "readme.md":
-        return True
-    if src.get("tool") == "list_dir" and norm.rstrip("/") == "tools":
-        return True
+    tool = src.get("tool")
+    for default in _CONFIDENCE_LOW_SIGNAL_DEFAULT_PATHS:
+        norm_default = _norm_source_path(default)
+        target = norm_default.rstrip("/")
+        if norm_default.endswith("/"):
+            if tool == "list_dir" and norm.rstrip("/") == target:
+                return True
+        elif tool == "file_read" and norm == target:
+            return True
     return False
 
 
