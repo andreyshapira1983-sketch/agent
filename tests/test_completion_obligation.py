@@ -15,6 +15,7 @@ behave like `no_requirement`.
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -319,6 +320,83 @@ def test_end_to_end_an_ordinary_question_creates_no_obligation(workspace: Path):
     payload = next(p for e, p in events if e == "completion_obligation")
     assert payload["required"] is False
     assert payload["triggered"] is False
+
+
+# The regex `paths_mentioned` used until 2026-08-02, verbatim — kept as the
+# equivalence ORACLE for the shared linear scanner it now delegates to. The
+# pattern itself is quadratic on class-character walls (CodeQL alert #5;
+# measured 3.7 s on `"a." * 8000`), which is why it was retired — so it is
+# only ever run on short inputs here.
+_ORACLE_RE = re.compile(
+    r"(?<![/.\-])"
+    r"(?P<path>"
+    r"(?:[A-Za-z]:[\\/])?"
+    r"(?:/)?"
+    r"(?:\.{1,2}[\\/])?"
+    r"(?:[A-Za-z0-9_.-]+[\\/])*"
+    r"[A-Za-z0-9_.-]+\."
+    r"(?:py|md|txt|json|yml|yaml|pdf|jsonl|toml|ini|cfg|log)"
+    r")",
+    flags=re.IGNORECASE,
+)
+
+
+def _oracle(text: str) -> tuple[str, ...]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for match in _ORACLE_RE.finditer(text or ""):
+        path = match.group("path").rstrip(".,;:!?)\"]}'")
+        key = path.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(path)
+    return tuple(out)
+
+
+def test_paths_mentioned_matches_the_retired_regex_on_recorded_traps() -> None:
+    for text in [
+        "сколько строк в core/loop.py и tools/base.py",
+        "объясни разницу между REST и GraphQL",
+        "прочитай data/events.jsonl и config.toml, потом app.ini и run.cfg",
+        "лог в daemon.log, а данные в a.json и b.jsonl",
+        "x.jsonl",                      # alternation order: "json" wins, "l" stays out
+        "a//b.py", "C://a.py", "backslash\\style\\file.md",
+        "de.py/x", "-C:/a.py", "aC:/x.py", ".../a.md",
+    ]:
+        assert paths_mentioned(text) == _oracle(text), repr(text)
+
+
+def test_paths_mentioned_matches_the_retired_regex_under_fuzz() -> None:
+    """Hash-driven corpus, same generator discipline as the loop twin's tests."""
+    import hashlib
+    import itertools
+    import string
+
+    alphabets = [
+        string.ascii_letters + string.digits + "./\\-_ .:()'\"!?,;",
+        "a./\\-: ", "ab.jsonl/\\:-", "Cc:/\\a.tomlogcfgini ",
+    ]
+    for alphabet in alphabets:
+        for i in range(1000):
+            digest = hashlib.sha256(f"obl-{alphabet[:4]}-{i}".encode()).digest()
+            stream = itertools.cycle(digest)
+            text = "".join(
+                alphabet[next(stream) % len(alphabet)]
+                for _ in range(digest[0] % 61)
+            )
+            assert paths_mentioned(text) == _oracle(text), repr(text)
+
+
+def test_paths_mentioned_stays_cheap_on_a_class_character_wall() -> None:
+    """The half the separator-wall guard missed (CodeQL alert #5): starts
+    after LETTERS were still open, so `"a." * 8000` cost 3.7 s before this
+    delegation and the old pattern fails this bound by 7x.
+    """
+    for shape in ("a." * 8000, "a" * 16000):
+        start = time.perf_counter()
+        paths_mentioned(shape)
+        assert time.perf_counter() - start < 0.5
 
 
 def test_paths_mentioned_stays_cheap_on_a_wall_of_separators() -> None:
