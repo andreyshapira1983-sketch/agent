@@ -451,20 +451,18 @@ class ProcedureRecord:
         lesson = lesson_from_episode(episode)
         lessons = self.lessons
         if lesson and procedure_credit_allowed(episode):
-            lessons = tuple(dict.fromkeys([*self.lessons, lesson]))
-        return ProcedureRecord(
-            id=self.id,
-            name=self.name,
-            workflow_key=self.workflow_key,
-            trigger_tags=self.trigger_tags,
-            steps=self.steps,
+            lessons = _capped_lessons([*self.lessons, lesson])
+        # `replace`, not a field-by-field rebuild: this method used to re-list
+        # every column, so `lessons` was silently dropped until it was added by
+        # hand, and the next field added would be dropped the same way.
+        return replace(
+            self,
             lessons=lessons,
             source_episode_ids=episode_ids,
             success_count=success_count,
             failure_count=failure_count,
             confidence=confidence,
             status=status,
-            created_at=self.created_at,
             updated_at=_now_iso(),
         )
 
@@ -1170,15 +1168,21 @@ def assemble_completion_state(
     same way every time — the priority is the contract, not the order the
     branches happen to be written in:
 
-    ==  ==========================================  =============
+    ==  ==========================================  =================
     #   predicate                                   state
-    ==  ==========================================  =============
+    ==  ==========================================  =================
     1   aborted_reason == "cancelled"               cancelled
     2   aborted_reason (anything else)              failed
     3   replan_exhausted                            failed
-    4   declared is a known token                   that token
-    5   otherwise                                   unknown
-    ==  ==========================================  =============
+    4   obligation_unmet and declared == achieved   partially_achieved
+    5   declared is a known token                   that token
+    6   otherwise                                   unknown
+    ==  ==========================================  =================
+
+    Row 4 is the one authoritative *signal* in the table; rows 1–3 are facts
+    about how the run ended. It moves in one direction only — it can lower a
+    claim of `achieved`, never raise anything — so an honest `blocked` or
+    `failed` is left exactly where the run put it. Candour is not punished.
 
     Structural facts outrank the declaration absolutely. An answer claiming it
     achieved the goal is a claim about the answer; a run that was cancelled or
@@ -1503,6 +1507,39 @@ def episode_from_agent_cycle(
     )
 
 
+# Bounds on the two fields that accumulate across episodes. `workflow_key` is
+# the tool sequence, so a common one like `tools:file_read` pools every credited
+# run into a single record (MIR-050) and both fields would otherwise grow with
+# no limit. That is not only disk: the record is rewritten to JSONL on every
+# update and injected into planner prompts by `format_experience_context`, so
+# the growth is paid again on every later run. Unbounded tags also *destroy*
+# retrieval — a record carrying every token matches every query, which is the
+# opposite of what naming the subject was meant to achieve.
+#
+# The most RECENT lessons are kept: the field exists to make pooling visible,
+# and the situations a workflow was used for lately are the ones that describe
+# what it is now being used for.
+_MAX_LESSONS = 12
+_MAX_TRIGGER_TAGS = 40
+#: Evidence labels shown in one line, before a "+N more" summary. Shared by the
+#: lesson and the step so the two cannot drift apart.
+_MAX_SHOWN_LABELS = 3
+
+
+def _capped_lessons(lessons: Iterable[str]) -> tuple[str, ...]:
+    deduped = tuple(dict.fromkeys(x for x in lessons if x))
+    return deduped[-_MAX_LESSONS:]
+
+
+def _summarise_labels(labels: tuple[str, ...]) -> str:
+    """`a, b, c, +N more` — bounded, and identical wherever labels are shown."""
+    if not labels:
+        return ""
+    shown = ", ".join(labels[:_MAX_SHOWN_LABELS])
+    hidden = len(labels) - _MAX_SHOWN_LABELS
+    return f"{shown}, +{hidden} more" if hidden > 0 else shown
+
+
 def lesson_from_episode(episode: EpisodeRecord) -> str:
     """One factual line about what this run met and how it went. Never inferred.
 
@@ -1523,10 +1560,7 @@ def lesson_from_episode(episode: EpisodeRecord) -> str:
     if episode.tools_used:
         parts.append("via " + "->".join(episode.tools_used))
     if episode.source_labels:
-        shown = ", ".join(episode.source_labels[:3])
-        if len(episode.source_labels) > 3:
-            shown += f", +{len(episode.source_labels) - 3} more"
-        parts.append(f"over {shown}")
+        parts.append(f"over {_summarise_labels(episode.source_labels)}")
     claims = episode.verified_chunks + episode.unverified_chunks
     if claims:
         parts.append(f"{episode.verified_chunks}/{claims} claims verified")
@@ -1559,8 +1593,11 @@ def procedure_from_episode(episode: EpisodeRecord) -> ProcedureRecord | None:
         # "how" without ever saying "for what".
         f"Situation: {subject}" if subject else "Situation: (not recorded)",
         *(f"Run tool: {tool}" for tool in episode.tools_used),
+        # Bounded by the same helper as the lesson: this string is stored
+        # verbatim and scored during retrieval, so an unbounded sweep over many
+        # files would otherwise put an arbitrarily long line into both.
         (
-            "Evidence gathered: " + ", ".join(episode.source_labels)
+            "Evidence gathered: " + _summarise_labels(episode.source_labels)
             if episode.source_labels
             else "Evidence gathered: (none recorded)"
         ),
@@ -1578,7 +1615,7 @@ def procedure_from_episode(episode: EpisodeRecord) -> ProcedureRecord | None:
         # tags would silently drop the very words a later query arrives with.
         trigger_tags=tuple(dict.fromkeys([
             *episode.tools_used, *episode.tags, *sorted(_tokens(episode.question)),
-        ])),
+        ]))[:_MAX_TRIGGER_TAGS],
         steps=tuple(steps),
         lessons=(lesson,) if lesson else (),
         source_episode_ids=(),

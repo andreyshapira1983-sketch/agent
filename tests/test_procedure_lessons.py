@@ -131,7 +131,7 @@ def test_a_run_without_a_recorded_question_still_yields_a_usable_record():
 # Accumulation — the known key-pooling defect must stay visible
 # ---------------------------------------------------------------------------
 
-def test_a_second_episode_appends_its_lesson(monkeypatch):
+def test_a_second_episode_appends_its_lesson():
     first = procedure_from_episode(_episode())
     second = first.with_episode(
         _episode(question="A completely unrelated question about budgets")
@@ -186,6 +186,48 @@ def test_a_run_with_no_tools_still_mints_nothing():
 def test_a_minted_procedure_is_still_born_a_candidate():
     """The maturity gate is untouched: one success never reaches `active`."""
     assert procedure_from_episode(_episode()).status == "candidate"
+
+
+# ---------------------------------------------------------------------------
+# Bounds — both accumulating fields are written to disk and into prompts
+# ---------------------------------------------------------------------------
+
+def test_lessons_stop_growing_and_keep_the_recent_ones():
+    """`tools:file_read` pools every credited run (MIR-050); unbounded is not an option."""
+    procedure = procedure_from_episode(_episode(question="run 0"))
+    for i in range(1, 30):
+        procedure = procedure.with_episode(_episode(question=f"run {i}"))
+    assert len(procedure.lessons) <= 12
+    assert any("run 29" in x for x in procedure.lessons), "the newest was dropped"
+    assert not any("run 0" in x for x in procedure.lessons), "the oldest was kept"
+
+
+def test_trigger_tags_are_capped():
+    """A record carrying every token matches every query — that is not retrieval."""
+    procedure = procedure_from_episode(
+        _episode(question=" ".join(f"word{i}" for i in range(200)))
+    )
+    assert len(procedure.trigger_tags) <= 40
+
+
+def test_the_evidence_step_is_bounded_like_the_lesson():
+    procedure = procedure_from_episode(
+        _episode(source_labels=[f"file:f{i}.py" for i in range(40)])
+    )
+    step = next(s for s in procedure.steps if s.startswith("Evidence gathered:"))
+    assert "+37 more" in step
+    assert len(step) < 200
+
+
+def test_a_new_field_is_not_dropped_when_an_episode_is_folded_in():
+    """`with_episode` uses `replace`; a field-by-field rebuild silently drops columns."""
+    first = procedure_from_episode(_episode())
+    merged = first.with_episode(_episode(question="another"))
+    assert merged.name == first.name
+    assert merged.workflow_key == first.workflow_key
+    assert merged.steps == first.steps
+    assert merged.trigger_tags == first.trigger_tags
+    assert merged.created_at == first.created_at
 
 
 # ---------------------------------------------------------------------------
