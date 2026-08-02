@@ -39,7 +39,7 @@ from core.smart_memory import (
 # builder here, the trimmer there and the rebuilder all share one
 # definition. Re-imported so every existing `from core.loop_methods2
 # import MEMORY_*` site keeps working — this module genuinely uses them.
-from core.evidence_budget import MEMORY_CLOSE_TAG, MEMORY_OPEN_TAG  # noqa: F401
+from core.evidence_budget import MEMORY_CLOSE_TAG, MEMORY_OPEN_TAG
 
 # Every durable sink the loop can write. A write site names its sink; a name
 # outside this set is refused rather than waved through, so a typo or a new
