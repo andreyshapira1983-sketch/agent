@@ -345,6 +345,21 @@ class ProcedureRecord:
     workflow_key: str
     trigger_tags: tuple[str, ...]
     steps: tuple[str, ...]
+    # One factual line per contributing episode: what was asked, what it worked
+    # on, how the claims held. Accumulated rather than overwritten, and kept
+    # parallel to `source_episode_ids`.
+    #
+    # Accumulating is what keeps this honest under the known key-pooling defect
+    # (MIR-050): `workflow_key` is the tool sequence, so two unrelated runs that
+    # used the same tools merge into one record. A single summary line would
+    # then describe one situation and silently claim the other's successes. A
+    # list makes the pooling visible instead — the reader sees the record was
+    # earned in several unrelated situations and can judge it.
+    #
+    # Every line is assembled from what the episode actually observed. Nothing
+    # here is inferred: an empty tuple means the run left no honest material,
+    # and an empty lesson is preferable to a confident wrong one.
+    lessons: tuple[str, ...] = ()
     source_episode_ids: tuple[str, ...] = ()
     success_count: int = 0
     failure_count: int = 0
@@ -361,6 +376,7 @@ class ProcedureRecord:
             "workflow_key": self.workflow_key,
             "trigger_tags": list(self.trigger_tags),
             "steps": list(self.steps),
+            "lessons": list(self.lessons),
             "source_episode_ids": list(self.source_episode_ids),
             "success_count": self.success_count,
             "failure_count": self.failure_count,
@@ -378,6 +394,7 @@ class ProcedureRecord:
             workflow_key=str(data.get("workflow_key") or ""),
             trigger_tags=tuple(str(x) for x in data.get("trigger_tags") or ()),
             steps=tuple(str(x) for x in data.get("steps") or ()),
+            lessons=tuple(str(x) for x in data.get("lessons") or ()),
             source_episode_ids=tuple(str(x) for x in data.get("source_episode_ids") or ()),
             success_count=max(0, int(data.get("success_count") or 0)),
             failure_count=max(0, int(data.get("failure_count") or 0)),
@@ -419,12 +436,20 @@ class ProcedureRecord:
         failure_count = self.failure_count + (1 if procedure_debit_allowed(episode) else 0)
         confidence = _smoothed_confidence(success_count, failure_count)
         status: ProcedureStatus = _procedure_status_for(success_count, confidence)
+        # Appended, never replaced, and only when this episode earned credit:
+        # a run that did not finish contributes no lesson, exactly as it
+        # contributes no success count.
+        lesson = lesson_from_episode(episode)
+        lessons = self.lessons
+        if lesson and procedure_credit_allowed(episode):
+            lessons = tuple(dict.fromkeys([*self.lessons, lesson]))
         return ProcedureRecord(
             id=self.id,
             name=self.name,
             workflow_key=self.workflow_key,
             trigger_tags=self.trigger_tags,
             steps=self.steps,
+            lessons=lessons,
             source_episode_ids=episode_ids,
             success_count=success_count,
             failure_count=failure_count,
@@ -1464,24 +1489,84 @@ def episode_from_agent_cycle(
     )
 
 
+def lesson_from_episode(episode: EpisodeRecord) -> str:
+    """One factual line about what this run met and how it went. Never inferred.
+
+    Measured problem this replaces: a banked procedure read
+    ``"Workflow using shell_exec, shell_exec"`` with steps ``"Run tool:
+    shell_exec"`` twice. That is the *shape* of the run and carries no
+    information — it cannot tell a later reader (or the retrieval search, which
+    scores on name/tags/steps) what the workflow was ever good for.
+
+    Everything below is read off the episode, nothing is deduced. When the run
+    left no material — no request recorded — the result is the empty string and
+    no lesson is stored: an empty memory is safer than a confident wrong one.
+    """
+    asked = _clean_text(episode.question, max_chars=160)
+    if not asked:
+        return ""
+    parts = [f'asked: "{asked}"']
+    if episode.tools_used:
+        parts.append("via " + "->".join(episode.tools_used))
+    if episode.source_labels:
+        shown = ", ".join(episode.source_labels[:3])
+        if len(episode.source_labels) > 3:
+            shown += f", +{len(episode.source_labels) - 3} more"
+        parts.append(f"over {shown}")
+    claims = episode.verified_chunks + episode.unverified_chunks
+    if claims:
+        parts.append(f"{episode.verified_chunks}/{claims} claims verified")
+    # Faults are part of the causal record: a workflow that worked *despite* an
+    # observed fault is a different thing from one that ran clean, and hiding
+    # the difference is how a flawed method gets reused as a good one.
+    if episode.defect_signals:
+        parts.append("observed: " + ", ".join(episode.defect_signals))
+    return "; ".join(parts)
+
+
 def procedure_from_episode(episode: EpisodeRecord) -> ProcedureRecord | None:
     # Same predicate as the counter and the verdict: a workflow is only worth
-    # minting from a run that finished the job (MIR-057).
+    # minting from a run that finished the job (MIR-057). UNCHANGED by the
+    # lesson work: what a procedure *records* was the defect, not when one is
+    # created, and widening admission would bank better-written lessons behind
+    # the same false successes.
     if not procedure_credit_allowed(episode):
         return None
+    # Left as the tool sequence on purpose. `resolve_used_procedures` parses it
+    # back into that sequence to decide which procedures actually ran, so the
+    # key is load-bearing for attribution. Its known pooling defect (MIR-050)
+    # is why `lessons` accumulates instead of holding one summary line.
     workflow_key = "tools:" + "->".join(episode.tools_used)
+    lesson = lesson_from_episode(episode)
+    subject = _clean_text(episode.question, max_chars=60)
     readable_tools = ", ".join(episode.tools_used)
     steps = (
-        "Understand the user goal and choose the minimal tool sequence.",
+        # The situation first: a step list that starts with the tools answers
+        # "how" without ever saying "for what".
+        f"Situation: {subject}" if subject else "Situation: (not recorded)",
         *(f"Run tool: {tool}" for tool in episode.tools_used),
-        "Verify tool outputs against the requested answer.",
-        "Return cited answer and record the episode outcome.",
+        (
+            "Evidence gathered: " + ", ".join(episode.source_labels)
+            if episode.source_labels
+            else "Evidence gathered: (none recorded)"
+        ),
+        "Verify every claim against that evidence before answering.",
     )
     return ProcedureRecord(
-        name=f"Workflow using {readable_tools}",
+        name=f"{subject} via {readable_tools}" if subject else f"Workflow using {readable_tools}",
         workflow_key=workflow_key,
-        trigger_tags=tuple(dict.fromkeys([*episode.tools_used, *episode.tags])),
+        # Question tokens join the tags so retrieval can match on what the
+        # workflow was for. Scoring reads name/tags/steps, and all three were
+        # previously tool names only — a query about the subject scored zero
+        # against every stored procedure.
+        # Tokenised from the FULL question, not from the 60-char display
+        # subject: truncation is a naming concern, and letting it reach the
+        # tags would silently drop the very words a later query arrives with.
+        trigger_tags=tuple(dict.fromkeys([
+            *episode.tools_used, *episode.tags, *sorted(_tokens(episode.question)),
+        ])),
         steps=tuple(steps),
+        lessons=(lesson,) if lesson else (),
         source_episode_ids=(),
         success_count=0,
         failure_count=0,
