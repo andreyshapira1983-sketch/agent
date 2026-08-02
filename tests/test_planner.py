@@ -1163,7 +1163,7 @@ class TestDroppedTools:
 
 # ---------- thematic sub-agent governance doc routing (conditional) ----------
 
-from core.planner import _is_subagent_governance_question
+from core.doc_routing import _is_subagent_governance_question
 
 
 def test_subagent_governance_detector_strong_terms() -> None:
@@ -1325,7 +1325,7 @@ def test_non_memory_doctrine_question_omits_memory_docs(workspace: Path) -> None
     assert "docs/MEMORY_SYSTEM_AUDIT.md" not in paths
 
 
-from core.planner import _is_memory_governance_question
+from core.doc_routing import _is_memory_governance_question
 
 
 def test_memory_governance_detector_strong_terms() -> None:
@@ -1404,7 +1404,7 @@ def test_question_touching_both_themes_keeps_stable_order(workspace: Path) -> No
     assert len(paths) == len(set(paths)), paths
 
 
-from core.planner import (
+from core.doc_routing import (
     _ensure_memory_governance_docs_first,
     _ensure_self_repair_doctrine_docs_first,
     _ensure_subagent_governance_docs_first,
