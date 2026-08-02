@@ -22,6 +22,23 @@ All notable changes to this project are recorded here. The format follows
   to grep the window instead of guessing from the fragment.
 
 ### Changed
+- `core/planner.py` decomposed by five bounded pieces (2872 → 516 lines,
+  #241, #243–#246): step admission → `core/step_sanitizer.py`; question
+  classification and governing-doc routing → `core/doc_routing.py`; the
+  system prompt (with its registry registration) → `core/planner_prompt.py`;
+  raw-reply parsing → `core/plan_parsing.py`; the host-tools catalog and
+  relevance gate → `core/host_tools_context.py`. What remains is genuine
+  orchestration; the size ratchet banks each cut.
+- One JSON-extraction core (#247, #248, #250): three per-module copies of
+  "find the JSON object in a chatty LLM reply" collapsed into
+  `core.plan_parsing.extract_json_object` (retired implementations kept as
+  test oracles); nine duplicated routing vocabularies and three duplicated
+  classifiers now live once in `core/doc_routing.py`, public, with every
+  consumer importing the originals.
+- `core/loop.py` lint debt paid (#249): 57 of 59 ruff findings fixed — dead
+  imports, three never-imported annotation names, mid-import constants; the
+  two try/except-in-loop findings are declared semantic (per-record fault
+  isolation) and kept.
 - `core/loop.py` decomposed by six bounded pieces (4733 → 4047 lines): replan
   vocabulary → `core/replan.py`; file-request classifiers, path parsers and
   the multi-file review decision → `core/file_request_intent.py` (new);
@@ -29,6 +46,19 @@ All notable changes to this project are recorded here. The format follows
   rebuilder and the memory-block tags → `core/evidence_budget.py`.
 
 ### Fixed
+- Planner-level SSRF pre-filter judges the parsed host (#241): userinfo
+  shapes like `http://evil.com@127.0.0.1/` no longer slip past the
+  substring check; non-global IPs refused via `ipaddress` — the same rule
+  the fetch-time boundary enforces.
+- The balanced-object scanner no longer goes blind at an unclosed brace,
+  with a restart cap against quadratic cost; a broken `PYTHON_PATH` no
+  longer suppresses the Python auto-detection meant to rescue it (#247
+  review round).
+- The Codacy Security Scan workflow is removed (#242): 102 runs, 102
+  failures since birth — its SARIF writer cannot read Cyrillic content and
+  no setting reaches its container; CodeQL and Codacy's cloud analysis
+  keep guarding. The tracked `.docx` binary is replaced by its extracted
+  markdown twin (unreadable to the agent and undiffable in git).
 - Two quadratic path-mention scans on attacker-shaped input (CodeQL #11/#5):
   replaced by a linear scanner with the retired regexes kept as test oracles —
   2.8–3.7 s worst cases now under 10 ms.
