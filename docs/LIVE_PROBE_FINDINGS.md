@@ -43,7 +43,9 @@ provided data only lists installed tools `[tool:host_tools]`". Verifier:
 — yet the answer is delivered.
 
 **Root (spans 3 files, interacting):**
-- `core/planner.py:317` `_build_host_tools_block()` — reads `BLENDER_PATH`,
+- `core/planner.py:317` `_build_host_tools_block()` (since #246, 2026-08-02, the
+  function lives in `core/host_tools_context.py` — location note added post-hoc,
+  the finding itself is unchanged) — reads `BLENDER_PATH`,
   `OPENSCAD_PATH`, `ADB_PATH`, `PYTHON_PATH`, … from `.env` into a text block.
 - `core/loop.py:3674` — injects that block into the synthesizer prompt as
   `<evidence source="host_tools">` for every non-local-critique turn (comment:
@@ -159,7 +161,9 @@ for identity/meta questions.
 (`replan_exhausted` → episode would be `outcome=failed`) and returned an honest
 "could not confirm" answer rather than looping or fabricating.
 
-**Root.** Planner LLM behaviour guided by the `core/planner.py` prompt (not a
+**Root.** Planner LLM behaviour guided by the `core/planner.py` prompt (since
+#244, 2026-08-02, `PLANNER_SYSTEM` lives in `core/planner_prompt.py` — location
+note added post-hoc, the finding itself is unchanged; not a
 single code line). Overlaps with LPF-004 (a proper self-diagnostic strategy would
 route these correctly).
 
