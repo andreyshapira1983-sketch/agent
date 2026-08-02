@@ -4,10 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.learning_planner import (
-    LearningPlanner,
-    is_confidence_evidence_learning_goal,
-)
+from core.doc_routing import is_confidence_evidence_diagnostic_question
+from core.learning_planner import LearningPlanner
 
 
 def test_learning_planner_prefers_architecture_readme_and_core(workspace: Path):
@@ -157,7 +155,7 @@ def test_learning_planner_local_project_evidence_does_not_force_verifier_sources
 
     # The property under test is that this goal does NOT trigger the forced
     # confidence-diagnostic source set.
-    assert is_confidence_evidence_learning_goal(goal) is False
+    assert is_confidence_evidence_diagnostic_question(goal) is False
     assert "core/evidence.py" in plan.source_paths
     assert "core/source_ranker.py" in plan.source_paths
     assert "core/verifier.py" not in plan.source_paths

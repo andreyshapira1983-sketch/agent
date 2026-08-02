@@ -1,7 +1,7 @@
 """Guard: every doctrine doc the planner tells the agent to read must exist.
 
-The planner (`core.planner`) and the learning planner
-(`core.learning_planner`) declare a manifest of doctrine/corporate docs and
+The doc router (`core.doc_routing`) declares — and the learning planner
+re-exports — a manifest of doctrine/corporate docs and
 instruct the central agent to `file_read` them for corporate-model / governance
 / subagent / autonomy questions. If a manifest entry has no backing file, the
 agent is sent to read a non-existent path at runtime (wasted steps, failed
@@ -14,9 +14,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.learning_planner import (
-    _DOCTRINE_CORPORATE_DOC_PATHS as LEARNING_MANIFEST,
+    DOCTRINE_CORPORATE_DOC_PATHS as LEARNING_MANIFEST,
 )
-from core.doc_routing import _DOCTRINE_CORPORATE_DOC_PATHS as PLANNER_MANIFEST
+from core.doc_routing import DOCTRINE_CORPORATE_DOC_PATHS as PLANNER_MANIFEST
 from core.doc_routing import _MEMORY_GOVERNANCE_DOC_PATHS as MEMORY_MANIFEST
 from core.doc_routing import _SUBAGENT_GOVERNANCE_DOC_PATHS as SUBAGENT_MANIFEST
 from core.doc_routing import (
@@ -31,7 +31,7 @@ def test_planner_doctrine_docs_all_exist() -> None:
     assert not missing, (
         "planner doctrine manifest references files that do not exist: "
         f"{missing}. Create the doc or remove it from "
-        "core.planner._DOCTRINE_CORPORATE_DOC_PATHS."
+        "core.doc_routing.DOCTRINE_CORPORATE_DOC_PATHS."
     )
 
 
@@ -40,7 +40,7 @@ def test_learning_planner_doctrine_docs_all_exist() -> None:
     assert not missing, (
         "learning_planner doctrine manifest references files that do not "
         f"exist: {missing}. Create the doc or remove it from "
-        "core.learning_planner._DOCTRINE_CORPORATE_DOC_PATHS."
+        "core.doc_routing.DOCTRINE_CORPORATE_DOC_PATHS."
     )
 
 
@@ -63,7 +63,7 @@ def test_subagent_governance_docs_all_exist() -> None:
     assert not missing, (
         "subagent governance manifest references files that do not exist: "
         f"{missing}. Create the doc or remove it from "
-        "core.planner._SUBAGENT_GOVERNANCE_DOC_PATHS."
+        "core.doc_routing._SUBAGENT_GOVERNANCE_DOC_PATHS."
     )
 
 
@@ -95,7 +95,7 @@ def test_memory_governance_docs_all_exist() -> None:
     assert not missing, (
         "memory governance manifest references files that do not exist: "
         f"{missing}. Create the doc or remove it from "
-        "core.planner._MEMORY_GOVERNANCE_DOC_PATHS."
+        "core.doc_routing._MEMORY_GOVERNANCE_DOC_PATHS."
     )
 
 
@@ -134,7 +134,7 @@ def test_self_repair_doctrine_docs_all_exist() -> None:
     assert not missing, (
         "self-repair doctrine manifest references files that do not exist: "
         f"{missing}. Create the doc or remove it from "
-        "core.planner._SELF_REPAIR_DOCTRINE_DOC_PATHS."
+        "core.doc_routing._SELF_REPAIR_DOCTRINE_DOC_PATHS."
     )
 
 
