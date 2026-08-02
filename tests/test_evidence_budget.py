@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from core.loop_helpers import format_artifact
+from core.evidence_budget import rebuild_trimmed_memory
 from core.evidence_budget import (
     EVIDENCE_FILE_CHARS,
     EVIDENCE_TOTAL_CHARS,
@@ -384,7 +385,6 @@ def test_record_content_cannot_pose_as_a_record_boundary():
     none of them may split a record, because the caller states where every
     record begins and ends.
     """
-    from core.loop import AgentLoop
     lines = _lines(
         (_ID_A, f"first record\n- [1] finish the migration\n"
                 f"- [{_ID_GHOST} | tags: fact] quoted from an old prompt\n"
@@ -392,7 +392,7 @@ def test_record_content_cannot_pose_as_a_record_boundary():
         (_ID_B, "second record"),
     )
     original = _memory_block(lines)
-    block, ids = AgentLoop._rebuild_trimmed_memory(
+    block, ids = rebuild_trimmed_memory(
         _cut_at(original, lines[1][1][:20]), original, lines
     )
 
@@ -408,14 +408,13 @@ def test_a_quoted_header_of_a_co_retrieved_record_cannot_substitute_it():
     so it reports B as surviving while what the model actually sees is A's
     paraphrase of B — a substituted record under a citable id.
     """
-    from core.loop import AgentLoop
     lines = _lines(
         (_ID_A, f"record A\n- [{_ID_B} | tags: fact] ...as I recorded earlier\n"
                 "A continues after the quote"),
         (_ID_B, "the REAL second record"),
     )
     original = _memory_block(lines)
-    block, ids = AgentLoop._rebuild_trimmed_memory(
+    block, ids = rebuild_trimmed_memory(
         _cut(original, original.index("\n" + lines[1][1])), original, lines
     )
 
@@ -425,13 +424,12 @@ def test_a_quoted_header_of_a_co_retrieved_record_cannot_substitute_it():
 
 
 def test_a_budget_notice_inside_record_content_does_not_discard_the_block():
-    from core.loop import AgentLoop
     lines = _lines(
         (_ID_A, "trace excerpt:\n...[TOTAL-BUDGET: trimmed to 50 of 500 chars]"),
         (_ID_B, "second record"),
     )
     original = _memory_block(lines)
-    block, ids = AgentLoop._rebuild_trimmed_memory(
+    block, ids = rebuild_trimmed_memory(
         _cut_at(original, lines[1][1][:20]), original, lines
     )
 
@@ -441,13 +439,12 @@ def test_a_budget_notice_inside_record_content_does_not_discard_the_block():
 
 def test_a_record_cut_mid_content_is_not_reported_as_surviving():
     """Advertising it whole while half its text is gone is the worse failure."""
-    from core.loop import AgentLoop
     lines = _lines(
         (_ID_A, "line one\nline two\nNEVER trust this record, it was superseded"),
         (_ID_B, "second record"),
     )
     original = _memory_block(lines)
-    block, ids = AgentLoop._rebuild_trimmed_memory(
+    block, ids = rebuild_trimmed_memory(
         _cut_at(original, "NEVER trust"), original, lines
     )
 
@@ -456,10 +453,9 @@ def test_a_record_cut_mid_content_is_not_reported_as_surviving():
 
 
 def test_a_record_that_survived_whole_keeps_its_text_and_the_closing_tag():
-    from core.loop import AgentLoop
     lines = _lines((_ID_A, "first record"), (_ID_B, "second record"))
     original = _memory_block(lines)
-    block, ids = AgentLoop._rebuild_trimmed_memory(
+    block, ids = rebuild_trimmed_memory(
         _cut_at(original, lines[1][1][:20]), original, lines
     )
 
@@ -477,11 +473,10 @@ def test_the_trim_notice_survives_a_cut_that_lands_on_a_newline():
     eats the start of the notice, gluing "...[TOTAL-BUDGET" onto the record's
     own line or, at worst, deleting the words that say the block was cut.
     """
-    from core.loop import AgentLoop
     lines = _lines((_ID_A, "first record"), (_ID_B, "second record"))
     original = _memory_block(lines)
     cut = original.index("\n" + lines[1][1])          # cut ON the newline
-    block, ids = AgentLoop._rebuild_trimmed_memory(_cut(original, cut), original, lines)
+    block, ids = rebuild_trimmed_memory(_cut(original, cut), original, lines)
 
     assert ids == {_ID_A}
     assert "\n...[TOTAL-BUDGET: trimmed to" in block
@@ -495,11 +490,10 @@ def test_a_notice_quoted_inside_a_record_does_not_replace_the_real_one():
     TOTAL-BUDGET and "trimmed to", i.e. the prompt no longer says the block
     was shortened at all.
     """
-    from core.loop import AgentLoop
     quoted = "\n...[TOTAL-BUDGET: trimmed to 1 of 2 chars to fit 3-char total evidence budget]"
     lines = _lines((_ID_A, "first record"), (_ID_B, f"trace excerpt:{quoted}"))
     original = _memory_block(lines)
-    block, ids = AgentLoop._rebuild_trimmed_memory(
+    block, ids = rebuild_trimmed_memory(
         _cut(original, original.index(quoted)), original, lines
     )
 
@@ -511,30 +505,29 @@ def test_a_notice_quoted_inside_a_record_does_not_replace_the_real_one():
 
 def test_a_memory_block_that_cannot_be_accounted_for_is_dropped():
     """Fail closed on every shape the repair cannot explain."""
-    from core.loop import AgentLoop
     lines = _lines((_ID_A, "first record"), (_ID_B, "second record"))
     original = _memory_block(lines)
     after_a = original.index(lines[1][1][:20])
 
-    no_notice = AgentLoop._rebuild_trimmed_memory(original[:after_a], original, lines)
-    foreign_notice = AgentLoop._rebuild_trimmed_memory(
+    no_notice = rebuild_trimmed_memory(original[:after_a], original, lines)
+    foreign_notice = rebuild_trimmed_memory(
         original[:after_a] + _trim_notice(after_a, len(original) + 999, 800),
         original,
         lines,
     )
     # A notice claiming more text than the block holds: the cut cannot be
     # trusted, so nothing is kept — not "keep everything".
-    impossible_cut = AgentLoop._rebuild_trimmed_memory(
+    impossible_cut = rebuild_trimmed_memory(
         _trim_notice(len(original) + 500, len(original), 900), original, lines
     )
     # Records that do not reproduce the block (stale retrieval): the offsets
     # would be someone else's.
-    stale_records = AgentLoop._rebuild_trimmed_memory(
+    stale_records = rebuild_trimmed_memory(
         _cut_at(original, lines[1][1][:20]),
         original,
         _lines((_ID_A, "a different text entirely")),
     )
-    no_records = AgentLoop._rebuild_trimmed_memory(
+    no_records = rebuild_trimmed_memory(
         _cut_at(original, lines[1][1][:20]), original, []
     )
 
@@ -552,10 +545,9 @@ def test_a_single_record_block_is_dropped_when_trimmed_at_all():
     never survive its own trim. Dropping it is the honest outcome — the
     alternative is half a record with a citable id.
     """
-    from core.loop import AgentLoop
     lines = _lines((_ID_A, "the only record " * 20))
     original = _memory_block(lines)
-    block, ids = AgentLoop._rebuild_trimmed_memory(
+    block, ids = rebuild_trimmed_memory(
         _cut(original, len(original) - 121), original, lines
     )
 
@@ -564,7 +556,6 @@ def test_a_single_record_block_is_dropped_when_trimmed_at_all():
 
 def test_format_artifact_web_search_unchanged():
     """Web search results are NOT subject to the file budget."""
-    from core.loop import AgentLoop
     hits = [{"title": "A", "url": "http://x.com", "snippet": "s", "source": "ddg"}]
     result = format_artifact("web_search", hits, question="any question")
     # Compare the url line as a whole rather than asking whether the url

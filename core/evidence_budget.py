@@ -343,3 +343,90 @@ def budget_file_content(content: str, *, question: str = "") -> str:
     if len(content) <= limit:
         return content
     return extract_relevant(content, question=question, budget=limit)
+
+
+# ── The long-term-memory block: shared vocabulary with its builder ──────────
+# The tags moved here from core/loop_methods2 (piece 5 of the loop
+# decomposition) so the module that TRIMS the block, the module that BUILDS
+# it (loop_methods2 imports these back) and the rebuilder below all speak
+# one definition. This module is a leaf, so the direction is cycle-free.
+MEMORY_OPEN_TAG: str = "<long_term_memory>"
+MEMORY_CLOSE_TAG: str = "</long_term_memory>"
+
+
+_TRIM_NOTICE_RE = re.compile(
+    r"\n\.\.\.\[TOTAL-BUDGET: trimmed to (\d+) of (\d+) chars "
+)
+
+
+def rebuild_trimmed_memory(
+    trimmed: str,
+    original: str,
+    record_lines: list[tuple[str, str]],
+) -> tuple[str, set[str]]:
+    """Rebuild a char-sliced `<long_term_memory>` block from whole records.
+
+    Two things are taken from their writers rather than re-derived, because
+    every defect this function has had came from re-deriving them:
+
+    * the cut length, read from the budget's own notice ("trimmed to N of M
+      chars") and cross-checked against *original*. Measuring the common
+      prefix instead looked equivalent and was not — the notice opens with
+      ``\\n...[``, so when the original continued with the same characters
+      the scan ran past the cut and mangled the notice, in the worst case
+      deleting the words that say the block was shortened at all;
+    * the record boundaries, taken as *record_lines* — the ``(id, line)``
+      pairs the retrieval built the block from, in order — so offsets are
+      arithmetic. Finding boundaries by pattern cannot tell a record's real
+      header from the same shape QUOTED inside another record's content:
+      the quoting record was truncated at the quote while still advertised
+      whole, and the quoted id was offered as citable while what the model
+      actually saw was the quoter's paraphrase of it.
+
+    A record is kept only when its whole line fits inside the cut. Anything
+    less reaches the model truncated mid-content while its id is advertised
+    as citable.
+
+    Consequence worth stating: the budget always reserves ~120 chars for
+    its notice, so a block holding a single record is dropped whole
+    whenever it is trimmed at all. That is "whole records only" applied
+    honestly — a partial record is exactly what this repair prevents — not
+    an oversight.
+
+    Returns ``("", set())`` when no record survived whole, and whenever the
+    block cannot be accounted for: notice missing, notice describing a
+    different block, a cut longer than the block, or *record_lines* that do
+    not reproduce *original* exactly. Fail closed — memory we cannot
+    explain does not go to the model.
+    """
+    notice_match = None
+    for notice_match in _TRIM_NOTICE_RE.finditer(trimmed):
+        pass          # the notice the budget appended is the last one
+    if notice_match is None or int(notice_match.group(2)) != len(original):
+        return "", set()
+    kept_chars = int(notice_match.group(1))
+    notice = trimmed[notice_match.start():]
+    if kept_chars > len(original) or not trimmed.startswith(original[:kept_chars]):
+        return "", set()
+
+    prefix = f"{MEMORY_OPEN_TAG}\n"
+    body = "\n".join(line for _, line in record_lines)
+    if not record_lines or original != f"{prefix}{body}\n{MEMORY_CLOSE_TAG}":
+        return "", set()
+
+    survivors: list[str] = []
+    end_of_last = 0
+    offset = len(prefix)
+    for record_id, line in record_lines:
+        line_end = offset + len(line)
+        if line_end > kept_chars:
+            break
+        survivors.append(record_id)
+        end_of_last = line_end
+        offset = line_end + 1          # the newline joining the records
+    if not survivors:
+        return "", set()
+    return (
+        original[:end_of_last] + notice + f"\n{MEMORY_CLOSE_TAG}",
+        set(survivors),
+    )
