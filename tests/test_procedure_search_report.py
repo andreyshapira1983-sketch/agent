@@ -98,3 +98,18 @@ def test_empty_query_reports_no_query_tokens(tmp_path: Path):
     result = store.search_with_report("")
     assert result.procedures == []
     assert result.rejected_by == {"no_query_tokens": 1}
+
+
+def test_over_limit_counts_matches_beyond_the_cap(tmp_path: Path):
+    """More matching procedures than the limit: the surplus is reported as
+    `over_limit`, not silently dropped."""
+    store = _store(tmp_path, [
+        _proc(f"read and enumerate functions {i}", status="active", tags=("functions",))
+        for i in range(5)
+    ])
+
+    result = store.search_with_report("list the functions", limit=2)
+
+    assert len(result.procedures) == 2
+    assert result.rejected_by.get("over_limit") == 3
+    assert "no_overlap" not in result.rejected_by

@@ -87,6 +87,8 @@ class AgentLoopExtractedMethods2:
         # use as an unknown attribute, and `tests/test_loop_methods_contract`
         # keeps this block from ever shadowing something the mixin really has.
         retrieval_policy: Any
+        episodic_store: EpisodicMemoryStore | None
+        procedural_store: ProceduralMemoryStore | None
 
     def _durable_learning_suppressed(self, sink: str | None = None) -> bool:
         """True when a durable learning write must be skipped.
