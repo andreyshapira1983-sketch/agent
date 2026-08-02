@@ -49,6 +49,13 @@ CompletionDeclaration = Literal[
 
 _COMPLETION_STATES: frozenset[str] = frozenset(CompletionState.__args__)
 _COMPLETION_DECLARATIONS: frozenset[str] = frozenset(CompletionDeclaration.__args__)
+
+#: Declarations in which the run states it did NOT deliver the task. These are
+#: admissions, not evidence verdicts, so `episode_from_agent_cycle` refuses to
+#: bank them as `success` no matter how well the non-delivery was cited.
+#: `partially_achieved` is absent on purpose: partial delivery IS delivery of a
+#: part, and the chunk counts remain the right judge of its quality.
+_NON_DELIVERY_DECLARATIONS: frozenset[str] = frozenset({"blocked", "refused", "failed"})
 ProcedureStatus = Literal["candidate", "active", "needs_review", "obsolete"]
 
 # A newly distilled procedure is unproven: born `candidate`, and it stays a
@@ -1525,6 +1532,17 @@ def episode_from_agent_cycle(
         outcome = "failed"
     elif replan_exhausted:
         outcome = "failed"
+    elif declared_completion in _NON_DELIVERY_DECLARATIONS:
+        # The run SAID it did not deliver. Measured 2026-08-02: a probe answered
+        # "the experiment was not performed — blocked", banked
+        # `completion_state=blocked` and `outcome=success`, because outcome was
+        # derived from chunk counts alone and a well-cited non-delivery counts
+        # as well-cited. Three layers then told three different stories: the
+        # request asked for work, the answer said it was not done, memory
+        # recorded a success. `usage_eligible=False` does not repair that — the
+        # row still READS as a success. A self-declared non-delivery is not a
+        # verdict about evidence quality, so no chunk count may overturn it.
+        outcome = "failed" if declared_completion == "failed" else "partial"
     elif unverified > verified:
         # The answer's UNVERIFIED support outnumbers its verified support — a
         # relative-majority test (mirrors the `weak >= verified` guard below),

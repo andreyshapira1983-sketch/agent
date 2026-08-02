@@ -185,9 +185,18 @@ def test_grounded_but_incomplete_success_mints_no_procedure() -> None:
     completion axis: a blocked answer that cited every claim it made and
     credited ``tools:file_read`` to 0.857 anyway (MIR-057).
 
-    Such an episode must mint no procedure. The evidence axis alone would call
-    it a success; the completion gate (`procedure_credit_allowed`) is what
-    refuses it. This guarantee was reproduced but never regression-locked.
+    Such an episode must mint no procedure. The completion gate
+    (`procedure_credit_allowed`) refuses it. This guarantee was reproduced but
+    never regression-locked.
+
+    **Amended 2026-08-02 (operator ruling).** The premise above described the
+    axes as fully independent, and the assertion below used to read
+    `episode.outcome == "success"` for a blocked run. The operator overruled
+    that for self-declared non-delivery — a stored row saying `success` about a
+    run that delivered nothing is a false history regardless of axis purity —
+    so `blocked`/`refused` now bank `partial`. The completion gate is
+    unchanged and still the thing that refuses credit; the axes remain
+    independent for `achieved` / `partially_achieved` / undeclared runs.
     """
     for token in ("blocked", "refused"):
         episode = episode_from_agent_cycle(
@@ -201,8 +210,9 @@ def test_grounded_but_incomplete_success_mints_no_procedure() -> None:
             weak_chunks=0,
             declared_completion=token,   # ... but the goal was NOT reached
         )
-        # The evidence axis on its own would admit this as a success.
-        assert episode.outcome == "success", token
+        # Since the 2026-08-02 ruling the admission itself keeps the row off
+        # `success`; the completion axis still records WHICH admission it was.
+        assert episode.outcome == "partial", token
         assert effective_completion(episode) == token
         # Both axes must agree before a procedure may be credited (MIR-057).
         assert procedure_credit_allowed(episode) is False, token
