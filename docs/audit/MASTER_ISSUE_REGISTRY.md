@@ -670,7 +670,7 @@ for MIR-002 and MIR-041 (approved next step) · then the minimal file set for th
 ### MIR-013 — `host_tools` injected as fake `<evidence>` defeats general-knowledge path
 - **Aliases:** LPF-001. **Provenance:** previously_documented (self-marked FIXED in the doc).
 - **Sources:** LIVE_PROBE_FINDINGS.md.
-- **Files/functions:** `core/planner.py` `_build_host_tools_block`/`host_tools_relevant` (`:318,:350`); `core/loop.py` (`:3718-3743`); `core/loop_helpers.py` (`:63-66`).
+- **Files/functions:** `core/host_tools_context.py` `host_tools_relevant`/`_build_host_tools_block` (`:50,:65`; moved from `core/planner.py` by #246 on 2026-08-02 — the original `:318,:350` anchors described the pre-move file); `core/loop.py` (`:4001-4020`, synthesis critique); `core/loop_helpers.py` (`:65-68`).
 - **Symptom:** "What can you do?" answered with `.env` host paths citing non-existent `[tool:host_tools]`; "17×23" refused.
 - **Root cause:** unconditional `<evidence source="host_tools">` injection forced strict-evidence mode on every turn; verifier structurally could never match it.
 - **Related causes:** amplified by MIR-004 (+0.5 credit) and MIR-006 (universal criterion).
