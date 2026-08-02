@@ -76,18 +76,25 @@ def _shell_label(argv: list[str]) -> str:
     The command name is derived here, from ``argv[0]``, so a caller cannot
     hand in a name that disagrees with the argv the digest is taken over.
 
-    Lossless while it can be: with at most two tokens the label already
-    contains the whole command (argv[1] bounded to ``_LABEL_ARG_CHARS``).
-    Beyond that the whole argv is folded into a 24-bit digest — collisions
-    are astronomically unlikely per run, not impossible, and the cost of one
-    would be the pre-existing overwrite, never a wrong answer.
+    Lossless while it can be: with at most two tokens AND argv[1] within
+    ``_LABEL_ARG_CHARS`` the label already contains the whole command, so no
+    digest is needed. The moment anything visible is dropped — a third token
+    or a truncated argv[1] — the whole argv is folded into a 24-bit digest:
+    collisions are astronomically unlikely per run, not impossible, and the
+    cost of one would be the pre-existing overwrite, never a wrong answer.
     """
     cmd = argv[0].strip().lower() if argv else ""
     head = f"shell_exec:{cmd}"
+    truncated = False
     if len(argv) > 1:
         arg = argv[1]
-        head += f" {arg[:_LABEL_ARG_CHARS]}…" if len(arg) > _LABEL_ARG_CHARS else f" {arg}"
-    if len(argv) <= 2:
+        truncated = len(arg) > _LABEL_ARG_CHARS
+        head += f" {arg[:_LABEL_ARG_CHARS]}…" if truncated else f" {arg}"
+    if len(argv) <= 2 and not truncated:
+        # Only here is the label still the whole command; a truncated
+        # argv[1] is lossy, so it falls through to the digest below —
+        # otherwise two commands sharing the visible prefix collide, which
+        # is the exact overwrite the digest exists to prevent.
         return head
     digest = hashlib.blake2s(
         repr(argv).encode("utf-8", "replace"), digest_size=3
