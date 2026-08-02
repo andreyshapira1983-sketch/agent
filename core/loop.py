@@ -72,6 +72,7 @@ from core.models import (
     ToolResult,
 )
 from core.output_policy import apply_ranker_output_policy
+from core.completion_contract import derive_completion_contract
 from core.completion_obligation import evaluate_completion_obligations
 from core.response_draft import ResponseDraft
 from core.low_evidence_policy import (
@@ -792,6 +793,23 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # 2. Interpret -> Goal
         goal = self._interpret(observation)
         self.log.log("interpret", goal)
+
+        # 2a. Completion contract (MIR-067) — derived from the REQUEST, here,
+        # before a single tool runs. The ordering is the proof: this event
+        # precedes every `act`/`tool_call` in the journal, so the criterion
+        # cannot have been shaped by the work it judges. Recorded even when
+        # empty, because "this request owed nothing verifiable" is itself the
+        # fact a later reader needs.
+        # Deliberately a LOCAL, never an attribute: a contract that outlived
+        # its run would judge the NEXT request by this one's criterion.
+        # `tests/test_completion_marker.py` pins that invariant for the whole
+        # completion family, and it caught this exact mistake in review.
+        completion_contract = derive_completion_contract(
+            user_question, file_hint=file_hint
+        )
+        self.log.log(
+            "completion_contract", completion_contract.to_log_payload()
+        )
 
         # 2b. Operational Design Domain gate (§7 ODD / B-05).
         # Pure-heuristic check — no LLM, no I/O.  When the request falls
@@ -2405,6 +2423,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     str(getattr(t, "code", "") or "") for t in failure_history
                 ],
                 denied_tools=_denied,
+                contract=completion_contract,
             )
             _payload = _obl.to_log_payload()
             # Shadow comparison against the detector this replaces, so the

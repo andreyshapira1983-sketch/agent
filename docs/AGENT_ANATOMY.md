@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 154 modules across 12 groups._
+_Total: 155 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -79,6 +79,7 @@ _Planning, verification, clarification, control loop._
 | `core/subsystem_disagreement` | Detect disagreements between cognitive subsystems on the same turn. |
 | `core/completion_marker` | An attempt-bound channel for the synthesizer's completion declaration. |
 | `core/completion_obligation` | Did this cycle incur an obligation to observe or act, and leave it unmet? |
+| `core/completion_contract` | What must EXIST or have CHANGED when this request is done (MIR-067). |
 | `core/response_draft` | The answer under construction — an object the deciders contribute to. |
 | `core/synth_resilience` | Synthesizer resilience ladder. |
 | `core/strategy_router` | Strategy Router: deliberation kernel layer BEFORE the LLM planner. |
