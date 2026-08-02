@@ -145,7 +145,7 @@ def test_the_trim_notice_teaches_the_recovery_move(monkeypatch):
     no_match = budget_file_content("x" * 5000, question="zzz")
     assert "grep -n via shell_exec" in no_match
     # Path 2: keyword-relevant section selection
-    body = ("alpha keyword paragraph\n\n" + "filler paragraph\n\n" * 200)
+    body = "alpha keyword paragraph\n\n" + "filler paragraph\n\n" * 200
     matched = budget_file_content(body, question="alpha")
     assert "grep -n via shell_exec" in matched
     # And a file that FITS carries no notice at all — nothing to recover from.
