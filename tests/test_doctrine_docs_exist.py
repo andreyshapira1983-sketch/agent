@@ -35,19 +35,18 @@ def test_planner_doctrine_docs_all_exist() -> None:
     )
 
 
-def test_learning_planner_doctrine_docs_all_exist() -> None:
-    missing = [p for p in LEARNING_MANIFEST if not (REPO_ROOT / p).is_file()]
-    assert not missing, (
-        "learning_planner doctrine manifest references files that do not "
-        f"exist: {missing}. Create the doc or remove it from "
-        "core.doc_routing.DOCTRINE_CORPORATE_DOC_PATHS."
-    )
+def test_learning_planner_reexports_the_same_manifest_object() -> None:
+    """Successor of the old drift test (series self-audit finding Д-1).
 
-
-def test_planner_and_learning_manifests_agree() -> None:
-    assert tuple(PLANNER_MANIFEST) == tuple(LEARNING_MANIFEST), (
-        "planner and learning_planner doctrine manifests have drifted apart; "
-        "keep them identical so the agent is told to read the same docs."
+    After the #248/#250 dedup both names bind ONE tuple, so comparing their
+    contents compared an object with itself and could never fail. What CAN
+    regress is the structure: someone re-planting a local copy in
+    learning_planner would revive silent drift. Identity — not equality —
+    is what pins that: a copied tuple is equal but not identical."""
+    assert LEARNING_MANIFEST is PLANNER_MANIFEST, (
+        "learning_planner no longer re-exports core.doc_routing's manifest "
+        "object - a local copy has been re-planted, reviving the drift risk "
+        "the #248 dedup removed. Import the doc_routing original instead."
     )
 
 
