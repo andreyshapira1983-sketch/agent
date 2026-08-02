@@ -537,6 +537,20 @@ class EpisodeSearchResult:
     rejected_by: dict[str, int]
 
 
+@dataclass(frozen=True)
+class ProcedureSearchResult:
+    """What a procedure search offered, and why the rest of the store did not.
+
+    Same contract as `EpisodeSearchResult`: reasons counted by reason, never per
+    record, absent reason means zero. `excluded_candidate` is the maturity gate
+    (a candidate is never offered until a second success promotes it) — reported
+    so the candidate-vs-no-match distinction stops being invisible.
+    """
+
+    procedures: list[ProcedureRecord]
+    rejected_by: dict[str, int]
+
+
 class EpisodicMemoryStore:
     # Tags that mark episodes as too valuable to evict (e.g. repair lessons).
     PROTECTED_TAGS: frozenset[str] = frozenset({"lesson", "bug-fix", "regression-guard"})
@@ -973,23 +987,57 @@ class ProceduralMemoryStore:
         return updated, created
 
     def search(self, query: str, *, limit: int = 3) -> list[ProcedureRecord]:
+        """Procedures to offer the planner. Thin wrapper over the reporting form
+        so the one production caller can log *why* the rest were dropped."""
+        return self.search_with_report(query, limit=limit).procedures
+
+    def search_with_report(
+        self, query: str, *, limit: int = 3
+    ) -> "ProcedureSearchResult":
+        """Same as `search`, but it also reports why the store's other procedures
+        did not surface — symmetric with `EpisodicMemoryStore.search_with_report`.
+
+        Before this existed, `procedures_selected=0` was a silent black hole: a
+        candidate excluded here (the maturity gate below) and a procedure that
+        simply did not match were indistinguishable in the journal. The live
+        2026-08-02 learning probe hit exactly that — a relevant procedure was
+        present but never offered, and nothing said so. Reasons are counted by
+        reason, never per record; an absent reason means zero.
+        """
+        procedures = self.load()
         q_tokens = _tokens(query)
         if not q_tokens:
-            return []
+            return ProcedureSearchResult(
+                procedures=[],
+                rejected_by={"no_query_tokens": len(procedures)} if procedures else {},
+            )
         scored: list[tuple[int, ProcedureRecord]] = []
-        for proc in self.load():
+        excluded_candidate = 0
+        no_overlap = 0
+        for proc in procedures:
             # A `candidate` is unproven and must not steer planning until a
             # second independent success promotes it (MIR-003 A4 maturity gate).
             # This is the sole path that injects procedures into the planner
             # (`core/loop_methods2.py`), so the exclusion belongs here.
             if proc.status == "candidate":
+                excluded_candidate += 1
                 continue
             haystack = " ".join([proc.name, " ".join(proc.trigger_tags), " ".join(proc.steps)])
             score = len(q_tokens & _tokens(haystack))
             if score:
                 scored.append((score, proc))
+            else:
+                no_overlap += 1
         scored.sort(key=lambda item: (item[0], item[1].confidence, item[1].updated_at), reverse=True)
-        return [proc for _score, proc in scored[:limit]]
+        selected = [proc for _score, proc in scored[:limit]]
+        rejected_by = {
+            k: v for k, v in (
+                ("excluded_candidate", excluded_candidate),
+                ("no_overlap", no_overlap),
+                ("over_limit", len(scored) - len(selected)),
+            ) if v > 0
+        }
+        return ProcedureSearchResult(procedures=selected, rejected_by=rejected_by)
 
 
 class MemoryConsolidationStore:
