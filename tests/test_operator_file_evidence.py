@@ -6,6 +6,7 @@ from pathlib import Path
 
 from core.approval import AutoApprover
 from core.logger import TraceLogger
+from core.file_request_intent import is_change_request
 from core.loop import AgentLoop, new_trace_id
 from core.memory import WorkingMemory
 from core.policy import PolicyGate
@@ -254,7 +255,7 @@ def test_the_change_guard_reads_verbs_not_substrings():
     still a review, `commits` is not `commit`, and a file called `commit.md`
     is what the request is about, not an instruction to commit.
     """
-    is_change = AgentLoop._is_change_request
+    is_change = is_change_request
 
     assert not is_change("Compare the implementation of auth in api.py and old_api.py.")
     assert not is_change("Compare how commits are structured in a.py and b.py.")
@@ -300,7 +301,7 @@ def test_stripping_file_tokens_stays_cheap_on_hostile_input():
     hostile = "-" * 32_000 + "!"
 
     started = time.perf_counter()
-    AgentLoop._is_change_request(hostile)
+    is_change_request(hostile)
     assert time.perf_counter() - started < BUDGET_SECONDS
 
 

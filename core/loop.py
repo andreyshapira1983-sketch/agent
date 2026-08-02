@@ -31,6 +31,15 @@ from typing import TYPE_CHECKING, Any
 from typing import Literal as _Literal
 from core.replan import FailureType as ReplanCode  # single source of truth
 from core.replan import ReplanTrigger, count_failures, format_replan_context
+from core.file_request_intent import (
+    explicitly_requests_hinted_file,
+    file_hint_source,
+    is_change_request,
+    is_explicit_multi_file_mode,
+    is_file_review_request,
+    looks_like_multi_file_review_without_hint,
+    validate_user_file_path,
+)
 
 from core.approval import ApprovalProvider
 from core.data_classifier import DataClass, SourceHint, classify
@@ -161,7 +170,6 @@ from core.source_registry import SourceRegistry
 from core.source_registry_store import SourceRegistryStore
 from core.task_complexity import can_skip_planner
 from tools.base import ToolRegistry
-from tools.file_read import MAX_BYTES as FILE_READ_MAX_BYTES
 from core.loop_helpers import (  # noqa: F401 -- re-exported
     DEFAULT_MAX_REPLAN_ATTEMPTS,
     LOCAL_CRITIQUE_SYSTEM_ADDENDUM,
@@ -2812,10 +2820,10 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             return planner_out
         if any(src.get("tool") == "file_read" for src in planner_out.sources):
             return planner_out
-        if not self._explicitly_requests_hinted_file(question):
+        if not explicitly_requests_hinted_file(question):
             return planner_out
         sources = list(planner_out.sources)
-        sources.append(self._file_hint_source(file_hint))
+        sources.append(file_hint_source(file_hint))
         warnings = list(planner_out.warnings)
         warnings.append(
             "explicit file-read request used --file hint because planner selected no file_read"
@@ -2830,34 +2838,6 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             warnings=warnings,
         )
 
-    @staticmethod
-    def _explicitly_requests_hinted_file(question: str) -> bool:
-        text = " ".join(question.casefold().split())
-        return any(
-            phrase in text
-            for phrase in (
-                "прочитай файл",
-                "прочти файл",
-                "прочитать файл",
-                "проанализируй файл",
-                "анализ файла",
-                "файл задания",
-                "task file",
-                "read the file",
-                "read this file",
-                "analyze the file",
-            )
-        )
-
-    @staticmethod
-    def _file_hint_source(file_hint: str) -> dict[str, Any]:
-        return {
-            "tool": "file_read",
-            "arguments": {"path": file_hint},
-            "label": f"file:{file_hint}",
-            "expected_outcome": "Non-empty UTF-8 text from the hinted file.",
-        }
-
     def _prepare_multi_file_review(
         self,
         question: str,
@@ -2865,10 +2845,10 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         file_hint: str | None,
     ) -> dict[str, Any]:
         requested_paths = self._extract_path_mentions(question)
-        if len(requested_paths) < 2 or not self._is_file_review_request(question):
+        if len(requested_paths) < 2 or not is_file_review_request(question):
             return {"kind": "none"}
 
-        explicit_mode = self._is_explicit_multi_file_mode(question)
+        explicit_mode = is_explicit_multi_file_mode(question)
         # A request to CHANGE something is not a request to read files. The
         # review predicates scan the whole question for a single verb, so one
         # step inside a work order ("сравни результаты с baseline") turned a
@@ -2878,7 +2858,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # as documents to read, and was answered by reading one file — no
         # tests, no branch, no commit. The operator's explicit switch still
         # wins: it names the mode in words, which beats inferring it from verbs.
-        if not explicit_mode and self._is_change_request(question):
+        if not explicit_mode and is_change_request(question):
             return {"kind": "none"}
         if file_hint and not explicit_mode:
             hint_norm = self._normalize_path_mention(file_hint)
@@ -2907,7 +2887,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
 
         if not explicit_mode and file_hint:
             return {"kind": "none"}
-        if not explicit_mode and not self._looks_like_multi_file_review_without_hint(question):
+        if not explicit_mode and not looks_like_multi_file_review_without_hint(question):
             return {"kind": "none"}
 
         root = self._file_read_workspace_root()
@@ -2926,7 +2906,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         seen_targets: set[str] = set()
         rejected: list[dict[str, str]] = []
         for raw_path in requested_paths:
-            item = self._validate_user_file_path(raw_path, workspace=root)
+            item = validate_user_file_path(raw_path, workspace=root)
             if item["ok"] is not True:
                 rejected.append({
                     "path": raw_path,
@@ -2982,144 +2962,6 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             ),
         }
 
-    @staticmethod
-    def _is_file_review_request(question: str) -> bool:
-        text = " ".join(question.casefold().split())
-        return any(
-            term in text
-            for term in (
-                "review",
-                "read",
-                "compare",
-                "check",
-                "проверь",
-                "проверить",
-                "прочитай",
-                "прочти",
-                "прочитать",
-                "сравни",
-                "сравнить",
-                "проанализируй",
-                "анализ",
-            )
-        )
-
-    # Verbs stating an intent to produce, run or record — the thing a reading
-    # never needs. Matched on word boundaries, because the defect this guard
-    # exists to fix is a substring scan: "implement" must not fire inside
-    # "implementation" and "commit" must not fire inside "commits", or a review
-    # OF how something is implemented stops being a review. Russian forms spell
-    # the endings they accept rather than trailing `\w*`, for the same reason.
-    _CHANGE_INTENT_RE = re.compile(
-        r"(?<!\w)(?:"
-        # produce or modify
-        r"созда(?:й|йте|ть)|извлек(?:и|ите)|извлечь|напиш(?:и|ите)|написать|"
-        r"перенес(?:и|ите|ти)|переименуй(?:те)?|переименовать|"
-        r"удал(?:и|ите|ить)|"
-        r"исправ(?:ь|ьте|ить)|почини(?:те)?|починить|реализ(?:уй|уйте|овать)|"
-        r"отрефактор(?:и|ить)|"
-        r"create|extract|implement|refactor|rewrite|rename|delete|write|"
-        # run or record
-        r"запусти(?:те)?|запустить|закоммить|коммит|запиш(?:и|ите)|записать|"
-        r"commit|run\s+(?:the\s+)?tests?"
-        r")(?!\w)",
-        re.IGNORECASE,
-    )
-
-    # Punctuation a file name picks up around it: sentence and list marks, and
-    # the quoting a path is usually written in — backticks included, since a
-    # question about `commit.log` arrives fenced far more often than bare.
-    _TOKEN_EDGE_PUNCT = ".,;:!?()[]{}<>«»\"'`"
-
-    @classmethod
-    def _strip_file_tokens(cls, text: str) -> str:
-        """Drop whitespace-separated tokens that name a file.
-
-        Deliberately not a regular expression. The first version was one, and
-        CodeQL was right about it: `[\\w./\\\\-]*[\\w-]\\.` lets the leading
-        class and the character after it match the same input, so the engine
-        re-splits a long run of dashes at every position — and the text here is
-        the user's question, so the input is attacker-shaped by definition.
-        Measured on 16 000 dashes: that pattern 2 019 ms, a segmented rewrite
-        3 320 ms (worse), this loop 0.0 ms.
-
-        Extension-agnostic on purpose: `_extract_path_mentions` knows seven
-        extensions, so `commit.log` and `commit.ts` would otherwise stay in the
-        text and vote for "commit". The suffix must be ASCII alphanumeric,
-        which keeps prose out — a sentence ending in "коммит." has nothing
-        after the dot, and "и т.д." is Cyrillic.
-        """
-        kept: list[str] = []
-        for token in text.split():
-            bare = token.strip(cls._TOKEN_EDGE_PUNCT)
-            head, dot, extension = bare.rpartition(".")
-            if (
-                dot
-                and head
-                and 1 <= len(extension) <= 8
-                and extension.isascii()
-                and extension.isalnum()
-            ):
-                continue
-            kept.append(token)
-        return " ".join(kept)
-
-    @classmethod
-    def _is_change_request(cls, question: str) -> bool:
-        """True when the request asks for work, not for a reading.
-
-        Unambiguous verbs only. A review request may perfectly well contain
-        "проверь" or "check", and claiming those would disable the reading path
-        this guard exists to protect.
-
-        Path mentions are removed before matching: they are what the request is
-        ABOUT, and a file called `commit.md` or `branch.md` must not be read as
-        an instruction to commit. Left in, the guard would repeat in miniature
-        the defect it fixes — deciding intent from text that is not about
-        intent.
-
-        Removal is one linear pass over the tokens. It used to also substitute
-        each path `_extract_path_mentions` returned, which meant one full scan
-        of the question per path — quadratic again, on the same
-        attacker-controlled text, and redundant: every path that extractor can
-        return carries an extension, so the token pass already removes it, in
-        any casing and without knowing the extension allowlist.
-        """
-        return bool(
-            cls._CHANGE_INTENT_RE.search(cls._strip_file_tokens(question))
-        )
-
-    @staticmethod
-    def _is_explicit_multi_file_mode(question: str) -> bool:
-        text = " ".join(question.casefold().split())
-        return any(
-            term in text
-            for term in (
-                "explicit multi-file",
-                "multi-file review",
-                "multi file review",
-                "multi-file read",
-                "multi file read",
-                "режим нескольких файлов",
-                "несколько файлов",
-                "многофайлов",
-            )
-        )
-
-    @staticmethod
-    def _looks_like_multi_file_review_without_hint(question: str) -> bool:
-        text = " ".join(question.casefold().split())
-        return any(
-            term in text
-            for term in (
-                "сравни",
-                "сравнить",
-                "compare",
-                "review these files",
-                "read these files",
-            )
-        )
-
     def _file_read_workspace_root(self) -> Path | None:
         try:
             tool = self.registry.get("file_read")
@@ -3141,38 +2983,6 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         return {
             "receipt_ledger": ToolReceiptLedger(default_receipts_path(root)),
             "trace_id": trace_id or None,
-        }
-
-    def _validate_user_file_path(self, raw_path: str, *, workspace: Path) -> dict[str, Any]:
-        cleaned = raw_path.strip().strip("\"'")
-        normalized = cleaned.replace("\\", "/")
-        if re.match(r"^[A-Za-z]:/", normalized):
-            return {"ok": False, "reason": "absolute path escapes workspace"}
-        path = Path(normalized)
-        if any(part == ".." for part in path.parts):
-            return {"ok": False, "reason": "path traversal is not allowed"}
-        target = path.resolve() if path.is_absolute() else (workspace / path).resolve()
-        try:
-            target.relative_to(workspace)
-        except ValueError:
-            return {"ok": False, "reason": "absolute path escapes workspace"}
-        if not target.exists():
-            return {"ok": False, "reason": "missing file"}
-        if target.is_dir():
-            return {"ok": False, "reason": "directories require explicit ingestion command"}
-        if not target.is_file():
-            return {"ok": False, "reason": "not a regular file"}
-        size = target.stat().st_size
-        if size > FILE_READ_MAX_BYTES:
-            return {
-                "ok": False,
-                "reason": f"file too large ({size} bytes > {FILE_READ_MAX_BYTES})",
-            }
-        rel_path = target.relative_to(workspace)
-        return {
-            "ok": True,
-            "target": target,
-            "relative_path": rel_path,
         }
 
     # ------------------------------------------------------------------
