@@ -239,21 +239,32 @@ def derive_completion_contract(
                 derived_from=path,
             ))
 
-    # An ambiguity is a request that ASKS for a change and does not say of
-    # what. That is the case where guessing is dangerous and asking is cheap.
+    # ── no ambiguity is raised by this module (RETIRED 2026-08-02) ──────────
     #
-    # A path named under an unrecognised verb is deliberately NOT one.
-    # Measured against the 48 real requests in the live agent's episodic
-    # memory: flagging those raised 4 clarifications, and 2 of them were
-    # ordinary discussion turns that merely cited a file ("твоя гипотеза
-    # неверна, доказательство: core/evidence.py строка 522"). Stopping a
-    # conversation to ask what should happen to a file the operator was only
-    # quoting is not caution, it is a defect. "No deliverable could be
-    # derived" and "the request is ambiguous" are different facts.
-    if action in {"create", "modify"} and not named:
-        ambiguities.append(
-            f"the request asks to {action} something but names no target"
-        )
+    # Two candidate rules were tried and BOTH measured at zero precision:
+    #
+    # * "a path is named under an unrecognised verb" — 4 firings on 48 live
+    #   requests, 2 of them ordinary discussion turns that merely cited a file.
+    # * "a change verb with no path" — 8 firings on 62 live requests, and ALL
+    #   EIGHT were wrong. Every one named its target in prose the vocabulary
+    #   cannot parse ("сделай так, чтобы эпизод сохранял, что пошло не так",
+    #   "почини так, чтобы разные команды давали разные label"), and the eighth
+    #   was a long numbered experiment procedure whose step 7 happened to
+    #   contain "внеси минимальное исправление" — one future, conditional verb
+    #   in a flat bag of tokens, and the whole task was declared targetless.
+    #
+    # A signal that is wrong 8 times out of 8 is not a signal to tune, it is a
+    # claim to withdraw. `ambiguities` stays in the dataclass (the operator's
+    # clause 6 — ask, do not guess — is still the goal) but nothing populates
+    # it until a derivation exists that can tell a vague operator from a clear
+    # one this module fails to parse. An empty contract now says exactly what
+    # is true: no deliverable could be derived. It no longer adds a false claim
+    # about the operator's clarity on top of that.
+    #
+    # What this does NOT fix: the vocabulary still cannot express "run an
+    # experiment", so a multi-step procedure still yields no obligations. That
+    # limit is recorded in MIR-067 and is a derivation problem, not a rule to
+    # bolt on here.
 
     if _TESTS_PASS_RE.search(text):
         obligations.append(ContractObligation(
