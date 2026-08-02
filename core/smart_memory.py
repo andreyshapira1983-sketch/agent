@@ -49,6 +49,19 @@ CompletionDeclaration = Literal[
 
 _COMPLETION_STATES: frozenset[str] = frozenset(CompletionState.__args__)
 _COMPLETION_DECLARATIONS: frozenset[str] = frozenset(CompletionDeclaration.__args__)
+
+#: Declarations in which the run states it did NOT deliver the task. These are
+#: admissions, not evidence verdicts, so `episode_from_agent_cycle` refuses to
+#: bank them as `success` no matter how well the non-delivery was cited.
+#:
+#: DERIVED from the vocabulary rather than listed, so the set is fail-closed:
+#: a declaration added to `CompletionDeclaration` later is treated as
+#: non-delivery until someone deliberately names it a delivery below. The
+#: opposite default would let a new state silently bank successes.
+#: `partially_achieved` is a delivery — of a part — and the chunk counts remain
+#: the right judge of its quality.
+_DELIVERY_DECLARATIONS: frozenset[str] = frozenset({"achieved", "partially_achieved"})
+_NON_DELIVERY_DECLARATIONS: frozenset[str] = _COMPLETION_DECLARATIONS - _DELIVERY_DECLARATIONS
 ProcedureStatus = Literal["candidate", "active", "needs_review", "obsolete"]
 
 # A newly distilled procedure is unproven: born `candidate`, and it stays a
@@ -1488,6 +1501,57 @@ def episode_id_for_run(run_id: str) -> str:
     return f"ep-run-{run_id}"
 
 
+def _derive_episode_outcome(
+    *,
+    aborted_reason: str,
+    replan_exhausted: bool,
+    declared_completion: str | None,
+    verified: int,
+    unverified: int,
+    weak: int,
+) -> EpisodeOutcome:
+    """The evidence axis, decided in one place, highest precedence first.
+
+    Extracted from `episode_from_agent_cycle` so the rules can be read (and
+    unit-tested) without building an episode. The order IS the contract:
+
+    1. the run did not finish — no chunk count can express that;
+    2. replanning was exhausted — same;
+    3. the run SAID it did not deliver — an admission, not an evidence verdict;
+    4. otherwise the counters judge the support the answer actually had.
+    """
+    if aborted_reason:
+        # The run did not finish. Decided before the counters and never
+        # overridden into a success by them.
+        return "failed"
+    if replan_exhausted:
+        return "failed"
+    if declared_completion in _NON_DELIVERY_DECLARATIONS:
+        # Measured 2026-08-02: a probe answered "the experiment was not
+        # performed — blocked", banked `completion_state=blocked` and
+        # `outcome=success`, because outcome came from chunk counts alone and a
+        # well-cited non-delivery counts as well-cited. Three layers then told
+        # three different stories: the request asked for work, the answer said
+        # it was not done, memory recorded a success. `usage_eligible=False`
+        # does not repair that — the row still READS as a success.
+        return "failed" if declared_completion == "failed" else "partial"
+    if unverified > verified:
+        # A relative-majority test (mirrors the `weak >= verified` guard
+        # below), not a magic threshold. The old `and verified == 0` let a
+        # single lucky verified chunk immunise an answer with many more
+        # unverified ones, so verified=1/unverified=10 banked as a clean
+        # success (CORE-01/MGA-02). verified=0/unverified=0 is untouched — a
+        # pure general-knowledge answer stays `success`.
+        return "partial"
+    if weak > 0 and weak >= verified:
+        # The answer leans at least as much on support the verifier could not
+        # confirm (sub-agent claims, unmatched citations, missing receipts) as
+        # on verified evidence. Not a clean success — do NOT let it graduate to
+        # a reusable procedure or bank a 1.0 quality score.
+        return "partial"
+    return "success"
+
+
 def episode_from_agent_cycle(
     *,
     goal: str,
@@ -1518,30 +1582,14 @@ def episode_from_agent_cycle(
     verified = max(0, int(verified_chunks))
     unverified = max(0, int(unverified_chunks))
     weak = max(0, int(weak_chunks))
-    outcome: EpisodeOutcome
-    if aborted_reason:
-        # The run did not finish. No chunk count can express that, so it is
-        # decided before them and cannot be overridden into a success.
-        outcome = "failed"
-    elif replan_exhausted:
-        outcome = "failed"
-    elif unverified > verified:
-        # The answer's UNVERIFIED support outnumbers its verified support — a
-        # relative-majority test (mirrors the `weak >= verified` guard below),
-        # not a magic threshold. The old `and verified == 0` let a single lucky
-        # verified chunk immunise an answer with many more unverified chunks, so
-        # verified=1/unverified=10 banked as a clean `success` (CORE-01/MGA-02).
-        # (verified=0/unverified=0 is untouched — a pure general-knowledge answer
-        # stays `success`; that relevance question is a separate concern.)
-        outcome = "partial"
-    elif weak > 0 and weak >= verified:
-        # The answer leans at least as much on support the verifier could not
-        # confirm (sub-agent claims, unmatched citations, missing receipts) as
-        # on verified evidence. Not a clean success — do NOT let it graduate to
-        # a reusable procedure or bank a 1.0 quality score.
-        outcome = "partial"
-    else:
-        outcome = "success"
+    outcome = _derive_episode_outcome(
+        aborted_reason=aborted_reason,
+        replan_exhausted=replan_exhausted,
+        declared_completion=declared_completion,
+        verified=verified,
+        unverified=unverified,
+        weak=weak,
+    )
     tools = tuple(str(t) for t in tools_used if str(t).strip())
     labels = tuple(str(label) for label in source_labels if str(label).strip())
     tags = _episode_tags(tools=tools, outcome=outcome, labels=labels)

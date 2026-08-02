@@ -210,14 +210,37 @@ def test_an_explicit_null_reads_as_absent() -> None:
 
 
 # ==========================================================================
-# Behaviour is unchanged in this commit.
+# The evidence axis — unchanged when the axis landed, narrowed 2026-08-02.
+# The operator's ruling took `success` away from the three self-declared
+# non-delivery states; everything else here still reports evidence only.
 # ==========================================================================
-def test_the_evidence_axis_is_untouched() -> None:
-    """`outcome` keeps its meaning; this commit adds an axis, it moves none."""
+def test_the_evidence_axis_no_longer_calls_a_non_delivery_a_success() -> None:
+    """SUPERSEDED BY OPERATOR RULING (2026-08-02) — recorded, not deleted.
+
+    This test previously asserted `blocked.outcome == "success"`, with the
+    reasoning that the evidence axis reports only whether the CLAIMS held, and
+    a well-cited non-delivery has claims that held — "that is exactly why a
+    second axis is needed" (MIR-057, the two-axis design).
+
+    The operator overruled that for self-declared non-delivery, on evidence:
+    a live probe answered "the experiment was NOT performed", declared
+    `blocked`, and episodic memory recorded `outcome=success`. His ruling:
+    "completion_declaration=blocked не может банковаться как outcome=success…
+    Это всё равно ложная история." A stored row is read by humans and by later
+    retrieval as a precedent, and no axis-purity argument survives a row that
+    says `success` about a run that delivered nothing.
+
+    The axis separation itself STANDS everywhere else: `partially_achieved`,
+    `achieved` and undeclared runs are still judged purely by their counters
+    (see `tests/test_blocked_is_not_success.py::TestDeliveryPathsAreUnchanged`).
+    Only the three explicit admissions — blocked / refused / failed — are now
+    refused a `success`.
+    """
     blocked = _cycle(declared_completion="blocked")
 
-    assert blocked.outcome == "success", (
-        "the evidence axis still reports that the claims were well supported — "
-        "that is exactly why a second axis is needed"
+    assert blocked.outcome == "partial", (
+        "a self-declared non-delivery must not be banked as a success"
     )
+    # The quality score is unchanged: it still measures the evidence, and the
+    # ruling was about what the row CLAIMS about the run, not about scoring.
     assert blocked.answer_quality_score == pytest.approx(0.6)
