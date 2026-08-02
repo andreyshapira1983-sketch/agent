@@ -11,6 +11,7 @@ inside this function.
 """
 from __future__ import annotations
 
+import ipaddress
 from typing import Any
 
 
@@ -32,19 +33,22 @@ def _url_host(url_lower: str) -> str:
     return authority.split(":", 1)[0].strip(".")
 
 
-_LOCAL_HOST_PREFIXES = ("127.", "10.", "192.168.", "169.254.", "localhost.")
-
-
 def _is_local_network_host(host: str) -> bool:
     """True when the parsed host targets the local network.
 
     Judges the host itself, not a substring of the URL, so userinfo shapes
     like ``http://evil.com@127.0.0.1/`` cannot smuggle a local target past
-    the check.  tools/network_safety.py stays the real fetch-time boundary.
+    the check.  IP literals are refused whenever they are not public global
+    addresses — the same rule tools/network_safety.py enforces at fetch
+    time, which stays the real boundary.
     """
-    if host in ("localhost", "0.0.0.0", "::1"):
+    if host == "localhost" or host.startswith("localhost."):
         return True
-    return host.startswith(_LOCAL_HOST_PREFIXES)
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return not ip.is_global
 
 
 def _is_placeholder_url(url_lower: str) -> bool:
