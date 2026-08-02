@@ -5,106 +5,31 @@ sources are worth feeding into that tool for a learning goal.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from core.ingestion import DEFAULT_PROJECT_LIMIT, SKIP_DIR_NAMES, TEXT_EXTENSIONS
+from core.doc_routing import (
+    _CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS,
+    _CONFIDENCE_EVIDENCE_SOURCE_PATHS,
+    _DOCTRINE_CORPORATE_CONTEXTUAL_TERMS,
+    _DOCTRINE_CORPORATE_CONTEXT_TERMS,
+    _DOCTRINE_CORPORATE_DOC_PATHS,
+    _DOCTRINE_CORPORATE_STRONG_TERMS,
+    _DOCTRINE_CORPORATE_TOPIC_TERMS,
+)
 
 if TYPE_CHECKING:
     from core.source_registry import SourceRegistry
 
 # Files ingested within this window are considered fresh and get a score penalty.
 _STALE_HOURS: float = 6.0
-_DOCTRINE_CORPORATE_DOC_PATHS: tuple[str, ...] = (
-    "docs/future/CORPORATE_MODEL.md",
-    "docs/CENTRAL_AGENT_GOVERNANCE.md",
-    "docs/AGENT_ANATOMY.md",
-    "docs/ROADMAP.md",
-    "docs/COMMANDS_MAP.md",
-)
 _DOCTRINE_CORPORATE_DOC_PRIORITY: dict[str, int] = {
     path.casefold(): len(_DOCTRINE_CORPORATE_DOC_PATHS) - idx
     for idx, path in enumerate(_DOCTRINE_CORPORATE_DOC_PATHS)
 }
-_DOCTRINE_CORPORATE_STRONG_TERMS = (
-    "corporate model",
-    "central agent governance",
-    "central agent",
-    "safe autonomy",
-    "night observation",
-)
-_DOCTRINE_CORPORATE_CONTEXTUAL_TERMS = (
-    "doctrine",
-    "корпоратив",
-    "центральн",
-    "доктрин",
-)
-_DOCTRINE_CORPORATE_TOPIC_TERMS = (
-    "corporate",
-    "governance",
-    "subagent",
-    "sub-agent",
-    "self-build",
-    "self build",
-    "night",
-    "observation",
-    "safe autonomy",
-    "autonomy",
-    "корпоратив",
-    "управлен",
-    "субагент",
-    "сабагент",
-    "самосбор",
-    "ночн",
-    "наблюден",
-    "автоном",
-)
-_DOCTRINE_CORPORATE_CONTEXT_TERMS = (
-    "agent",
-    "project",
-    "repo",
-    "repository",
-    "architecture",
-    "roadmap",
-    "агент",
-    "проект",
-    "репозитор",
-    "архитектур",
-)
-_CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS = (
-    # Operator *wording*, not module names. The `confidence` / `low_confidence_gate`
-    # entries are the pre-2026-07-27 vocabulary, kept so a question phrased the old
-    # way still routes here. The live module is `core/evidence_support.py` and the
-    # live journal event is `evidence_support`.
-    "confidence",
-    "low-confidence",
-    "low confidence",
-    "low_confidence",
-    "low_confidence_gate",
-    "confidence gate",
-    "evidence_support",
-    "evidence support",
-    "evidence_support_score",
-    "evidence_score",
-    "overall_confidence",
-    "citation",
-    "citations",
-    "verifier",
-    "verified",
-    "unverified",
-    "source registry",
-    "source_registry",
-    "цитат",
-    "вериф",
-)
-_CONFIDENCE_EVIDENCE_SOURCE_PATHS: tuple[str, ...] = (
-    "core/verifier.py",
-    "tests/test_verifier.py",
-    "tests/test_evidence_support.py",
-    "tests/test_confidence_vector.py",
-)
 _CONFIDENCE_EVIDENCE_SOURCE_PRIORITY: dict[str, int] = {
     path.casefold(): len(_CONFIDENCE_EVIDENCE_SOURCE_PATHS) - idx
     for idx, path in enumerate(_CONFIDENCE_EVIDENCE_SOURCE_PATHS)

@@ -31,6 +31,10 @@ from typing import TYPE_CHECKING, Iterable, Literal
 from core.dlp import contains_pii
 from core.models import MemoryRecord
 from core.secret_scanner import contains_secret
+from core.doc_routing import (
+    _BROAD_PROJECT_CONTEXT_TERMS,
+    _BROAD_PROJECT_QUESTION_TERMS,
+)
 # Imported lazily inside `decide` to avoid an import cycle when
 # `core/hygiene.py` later wants to reach into models / policies.
 
@@ -310,49 +314,6 @@ _BROAD_PROJECT_MEMORY_TOKENS: frozenset[str] = frozenset(
         "бюджет", "тест", "тесты", "модель", "модели", "статус",
         "лог", "логи", "автономность", "автономия",
     }
-)
-
-_BROAD_PROJECT_CONTEXT_TERMS: tuple[str, ...] = (
-    "your project",
-    "this project",
-    "our project",
-    "my project",
-    "current project",
-    "project status",
-    "project state",
-    "project overview",
-    "repo",
-    "repository",
-    "codebase",
-    "своем проект",
-    "своём проект",
-    "твоем проект",
-    "твоём проект",
-    "нашем проект",
-    "этом проект",
-    "о проект",
-    "про проект",
-    "статус проект",
-    "состояние проект",
-)
-
-_BROAD_PROJECT_QUESTION_TERMS: tuple[str, ...] = (
-    "what do you know",
-    "already know",
-    "tell me about",
-    "summarize",
-    "summary",
-    "overview",
-    "status",
-    "state",
-    "что ты",
-    "что уже",
-    "знаешь",
-    "расскажи",
-    "сводка",
-    "обзор",
-    "статус",
-    "состояние",
 )
 
 
