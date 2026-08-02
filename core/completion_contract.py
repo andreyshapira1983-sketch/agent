@@ -40,14 +40,32 @@ Only three deliverables are recognised, each with a mechanical check:
 avoids verb lists, for a measured reason: wording is a weak proxy for duty. A
 deliverable cannot be read off the object alone — "прочитай core/foo.py" and
 "почини core/foo.py" name the same object and owe different things — so a
-narrow verb vocabulary is unavoidable here. The escape hatch is what keeps it
-honest: when a request names a path but no recognised action, this module
-records an **ambiguity**, never an invented obligation. Ambiguity is the
-operator's clarification case, and an empty contract is safer than a confident
-wrong one.
+narrow verb vocabulary is unavoidable here. What keeps it honest is that an
+unreadable request yields an EMPTY contract, never an invented duty.
 
-Read verbs are recognised precisely so they are NOT ambiguous: reading is
-already a duty of the `intent` source, and owes no deliverable.
+## Ambiguity is OBSERVED, not yet acted on — and here is why
+
+The operator's clause 6 says an obligation that cannot be unambiguously
+derived must be asked about. `ambiguities` records those cases and the loop
+journals them, but nothing stops the run to ask. That restraint is measured,
+not timid. Two candidate rules were tried against the 48 real requests in the
+live agent's episodic memory:
+
+* *a path is named under no recognised verb* → 4 clarifications, of which 2
+  were ordinary discussion turns that merely cited a file ("твоя гипотеза
+  неверна, доказательство: core/evidence.py строка 522"). Stopping a
+  conversation to ask what should happen to a quoted file is a defect, not
+  caution.
+* *a change verb with no path* (the rule kept here) → 7 clarifications, and
+  all 7 were genuine change requests whose target was named in PROSE rather
+  than as a path ("сделай так, чтобы эпизод сохранял, что пошло не так").
+  Asking "what should I change?" there is obtuse.
+
+So with this vocabulary the signal cannot yet tell "the operator was vague"
+from "the operator was clear in words this module does not parse". Wiring it
+to the stop-and-ask path would trade a silent wrong answer for a loud wrong
+question. It stays observational until the numbers justify power — the
+standing sensor policy for this repository.
 """
 from __future__ import annotations
 
@@ -199,11 +217,22 @@ def derive_completion_contract(
                 verification=VERIFICATION_METHODS["file_modified"],
                 derived_from=path,
             ))
-        elif action == "unknown":
-            ambiguities.append(
-                f"'{path}' is named but the request does not say what must "
-                "happen to it (read it? create it? change it?)"
-            )
+
+    # An ambiguity is a request that ASKS for a change and does not say of
+    # what. That is the case where guessing is dangerous and asking is cheap.
+    #
+    # A path named under an unrecognised verb is deliberately NOT one.
+    # Measured against the 48 real requests in the live agent's episodic
+    # memory: flagging those raised 4 clarifications, and 2 of them were
+    # ordinary discussion turns that merely cited a file ("твоя гипотеза
+    # неверна, доказательство: core/evidence.py строка 522"). Stopping a
+    # conversation to ask what should happen to a file the operator was only
+    # quoting is not caution, it is a defect. "No deliverable could be
+    # derived" and "the request is ambiguous" are different facts.
+    if action in {"create", "modify"} and not named:
+        ambiguities.append(
+            f"the request asks to {action} something but names no target"
+        )
 
     if _TESTS_PASS_RE.search(text):
         obligations.append(ContractObligation(

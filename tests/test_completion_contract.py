@@ -182,21 +182,41 @@ class TestUnmetBlocksCredit:
         assert procedure_credit_allowed(episode) is False
 
 
-class TestAmbiguityAsksInstead:
-    def test_a_named_path_without_an_action_is_an_ambiguity_not_a_guess(self):
-        """Clause 6. The request names an object but never says what must
-        happen to it. Guessing here manufactures a duty the operator never
-        gave — and an invented obligation would then block `achieved`."""
-        contract = derive_completion_contract("core/foo.py")
+class TestAmbiguityIsObservedNotGuessed:
+    """Clause 6, honestly scoped.
+
+    An ambiguity is recorded when a change is asked for and no target can be
+    read. It is never turned into an obligation, and — measured — it does not
+    yet stop the run to ask: see the module docstring for the two candidate
+    rules and their false-ask rates on 48 real requests.
+    """
+
+    def test_a_change_request_with_no_target_is_an_ambiguity(self):
+        contract = derive_completion_contract("исправь это")
         assert contract.obligations == ()
         assert contract.needs_clarification is True
-        assert "core/foo.py" in contract.ambiguities[0]
 
     def test_an_ambiguity_never_becomes_an_obligation(self):
-        contract = derive_completion_contract("core/foo.py и core/bar.py")
+        """Guessing would manufacture a duty the operator never gave — and an
+        invented obligation would then block `achieved` on its own."""
+        contract = derive_completion_contract("создай файл")
         assert contract.obligations == ()
-        assert len(contract.ambiguities) == 2
         assert unmet_obligations(contract, artifacts={}) == ()
+
+    def test_a_quoted_path_in_a_discussion_raises_nothing(self):
+        """The measured false positive that kept clause 6 observational: two of
+        the four asks under the first candidate rule were discussion turns
+        citing a file as evidence."""
+        contract = derive_completion_contract(
+            "Твоя гипотеза неверна. Доказательство: core/evidence.py строка 522"
+        )
+        assert contract.obligations == ()
+        assert contract.needs_clarification is False
+
+    def test_a_plain_question_about_a_file_raises_nothing(self):
+        contract = derive_completion_contract("сколько строк в core/loop.py")
+        assert contract.obligations == ()
+        assert contract.needs_clarification is False
 
 
 class TestVerificationReadsEvidence:
