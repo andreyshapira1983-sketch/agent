@@ -80,9 +80,10 @@ def _build_host_tools_block() -> str:
 
     # Auto-detect Python if not already found via PYTHON_PATH
     if not any("python" in line for line in found):
+        username = os.environ.get("USERNAME", "")
         common_python = [
-            r"C:\Users\{}\AppData\Local\Programs\Python\Python311\python.exe".format(os.environ.get("USERNAME", "")),
-            r"C:\Users\{}\AppData\Local\Programs\Python\Python312\python.exe".format(os.environ.get("USERNAME", "")),
+            rf"C:\Users\{username}\AppData\Local\Programs\Python\Python311\python.exe",
+            rf"C:\Users\{username}\AppData\Local\Programs\Python\Python312\python.exe",
             r"C:\Python311\python.exe",
             r"C:\Python312\python.exe",
         ]
