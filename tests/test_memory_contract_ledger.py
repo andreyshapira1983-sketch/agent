@@ -14,7 +14,7 @@ those, their absence is the point being documented.
 from __future__ import annotations
 
 import re
-import subprocess
+from functools import lru_cache
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -66,13 +66,20 @@ def _ledger_symbols() -> set[str]:
 _PROD_DIRS = ("core", "cli", "app", "api", "tools", "scripts")
 
 
+@lru_cache(maxsize=1)
+def _production_source() -> str:
+    """All production .py text, concatenated once. No subprocess, no git — the
+    check is a hermetic file read."""
+    parts = []
+    for d in _PROD_DIRS:
+        for path in (REPO / d).rglob("*.py"):
+            parts.append(path.read_text(encoding="utf-8", errors="replace"))
+    return "\n".join(parts)
+
+
 def _resolves(symbol: str) -> bool:
     """True when the symbol occurs as a whole word in production .py files."""
-    result = subprocess.run(
-        ["git", "grep", "-wq", "--", symbol, "--", *(f"{d}/*.py" for d in _PROD_DIRS)],
-        cwd=REPO, capture_output=True,
-    )
-    return result.returncode == 0
+    return re.search(rf"\b{re.escape(symbol)}\b", _production_source()) is not None
 
 
 def test_every_ledger_symbol_resolves_or_is_named_absent():
