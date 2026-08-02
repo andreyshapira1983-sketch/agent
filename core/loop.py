@@ -184,6 +184,10 @@ from core.loop_helpers import (  # noqa: F401 -- re-exported
     untrusted_scan_view,
     format_human_response,
     new_trace_id,
+    citation_for_evidence,
+    file_scope_notice,
+    format_allowed_citations_block,
+    format_artifact,
 )
 from core.loop_methods import AgentLoopExtractedMethods
 from core.loop_methods2 import (
@@ -2357,16 +2361,16 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             # original answer the user would otherwise have got.
             pass
 
-        file_scope_notice = self._file_scope_notice(user_question, artifacts)
+        scope_notice = file_scope_notice(user_question, artifacts)
         if draft.add_notice(
             author="file_scope",
             channel="prepend",
-            text=file_scope_notice,
+            text=scope_notice,
         ):
             self.log.log(
                 "file_scope_notice",
                 {
-                    "notice": file_scope_notice,
+                    "notice": scope_notice,
                     "artifact_labels": list(artifacts.keys()),
                 },
             )
@@ -3963,7 +3967,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             from core.evidence_budget import MEMORY_BLOCK_LABEL, apply_total_budget
             raw_blocks: list[tuple[str, str]] = []
             for label, art in artifacts.items():
-                formatted = self._format_artifact(
+                formatted = format_artifact(
                     art["tool"], art["output"], question=question
                 )
                 raw_blocks.append((label, formatted))
@@ -4050,16 +4054,16 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             # A record the trim removed must not stay on the citable list: the
             # synthesizer would cite text it never saw and the verifier would
             # book it as cited-but-unmatched.
-            allowed_citations_block = self._format_allowed_citations_block(
+            allowed_citations_block = format_allowed_citations_block(
                 self.last_provenance, memory_ids=surviving_memory_ids
             )
-            file_scope_notice = self._file_scope_notice(question, artifacts)
+            scope_notice = file_scope_notice(question, artifacts)
             file_scope_block = (
                 "<file_scope_notice>\n"
-                f"{file_scope_notice}\n"
+                f"{scope_notice}\n"
                 "Do not claim any unverified path exists or was read.\n"
                 "</file_scope_notice>\n\n"
-                if file_scope_notice
+                if scope_notice
                 else ""
             )
 
@@ -4184,42 +4188,6 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             system=system_prompt, user=safe_user_prompt, temperature=0.5
         )
 
-    @staticmethod
-    def _citation_for_evidence(ev: Evidence) -> str | None:
-        source_id = ev.source_id
-        if ev.kind == "file" and source_id.startswith("file:"):
-            body = source_id[len("file:"):]
-            return f"[file:{body}]"
-        if ev.kind == "web_page" and source_id.startswith("web_page:"):
-            body = source_id[len("web_page:"):]
-            return f"[web:{body}]"
-        if ev.kind == "web_search_hit" and source_id.startswith("web_search:"):
-            body = source_id[len("web_search:"):]
-            return f"[search:{body}]"
-        if ev.kind == "test_result" and source_id.startswith("test_result:"):
-            body = source_id[len("test_result:"):]
-            return f"[test:{body}]"
-        if ev.kind == "log_event" and source_id.startswith("log_event:"):
-            body = source_id[len("log_event:"):]
-            return f"[log:{body}]"
-        if ev.kind == "shell_output" and source_id.startswith("shell_output:"):
-            body = source_id[len("shell_output:"):]
-            return f"[shell:{body}]"
-        if ev.kind == "tool_output" and source_id.startswith("tool_output:"):
-            body = source_id[len("tool_output:"):]
-            return f"[tool:{body}]"
-        if ev.kind == "diff_preview" and source_id.startswith("diff_preview:"):
-            body = source_id[len("diff_preview:"):]
-            return f"[diff:{body}]"
-        if ev.kind == "memory":
-            return f"[memory:{source_id}]"
-        if ev.kind == "session_dialogue" and source_id.startswith("session_dialogue:"):
-            body = source_id[len("session_dialogue:"):]
-            return f"[dialogue:{body}]"
-        if ev.kind == "user_explicit":
-            return "[user]"
-        return None
-
     # The budget's own notice, which states how much of the block it kept.
     # Reading the cut back from the writer beats re-deriving it.
     _TRIM_NOTICE_RE = re.compile(
@@ -4298,107 +4266,4 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         return (
             original[:end_of_last] + notice + f"\n{MEMORY_CLOSE_TAG}",
             set(survivors),
-        )
-
-    @classmethod
-    def _format_allowed_citations_block(
-        cls,
-        chain: ProvenanceChain,
-        *,
-        memory_ids: set[str] | None = None,
-    ) -> str:
-        """Render the citable-source list for the synthesizer prompt.
-
-        *memory_ids*, when given, is the set of long-term record ids that
-        survived the evidence-budget trim. A record outside it is dropped: it
-        is no longer in `<long_term_memory>`, so offering it as a citation
-        invites a citation to text the model never received.
-
-        The filter keys on ``obtained_via == "memory"``, not on
-        ``kind == "memory"``: cached tool outputs from previous turns share the
-        kind but are `obtained_via="working_memory"`, live in
-        `<conversation_history>` outside this budget, and were never trimmed —
-        revoking their citation licence would push follow-up answers toward
-        [general-knowledge] for no reason. `core/verifier_core.py:53-56`
-        already draws the line on the same axis.
-        """
-        if not chain.evidences:
-            return ""
-        lines = ["<allowed_citations>"]
-        seen: set[str] = set()
-        for ev in chain.evidences:
-            if memory_ids is not None and ev.obtained_via == "memory":
-                # source_id is "memory:<record id>"; compare whole ids, since a
-                # substring test lets one id vouch for another.
-                if ev.source_id.split(":", 1)[-1] not in memory_ids:
-                    continue
-            token = cls._citation_for_evidence(ev)
-            if token is None or token in seen:
-                continue
-            seen.add(token)
-            lines.append(
-                f"- {token} kind={ev.kind} source_id={ev.source_id}"
-            )
-        lines.append("</allowed_citations>")
-        return "\n".join(lines) + "\n\n" if len(lines) > 2 else ""
-
-    @staticmethod
-    def _format_artifact(tool_name: str | None, output: Any, *, question: str = "") -> str:
-        """Render a tool output into a stable string the LLM can ground on.
-
-        File content is passed through :func:`core.evidence_budget.budget_file_content`
-        which applies the per-artifact character budget and performs intent-aware
-        extraction: instead of blindly returning the first N chars, the most
-        question-relevant paragraphs are selected (Realtime Intent Fix).
-        """
-        if tool_name == "web_search" and isinstance(output, list):
-            if not output:
-                return "(no results)"
-            lines: list[str] = []
-            for r in output:
-                title   = r.get("title") or "(no title)"
-                url     = r.get("url") or ""
-                snippet = r.get("snippet") or ""
-                source  = r.get("source") or "duckduckgo"
-                lines.append(f"- {title}")
-                lines.append(f"  url: {url}")
-                if snippet:
-                    lines.append(f"  snippet: {snippet}")
-                lines.append(f"  provider: {source}")
-            return "\n".join(lines)
-        if tool_name == "file_read" and isinstance(output, str):
-            from core.evidence_budget import budget_file_content
-            return budget_file_content(output, question=question)
-        if tool_name == "list_dir" and isinstance(output, str):
-            return output
-        # Fallback: stringify whatever came back.
-        return str(output)
-
-    @classmethod
-    def _file_scope_notice(
-        cls,
-        question: str,
-        artifacts: dict[str, dict[str, Any]],
-    ) -> str:
-        actual_paths = [
-            label[len("file:"):]
-            for label, art in artifacts.items()
-            if label.startswith("file:") and art.get("tool") == "file_read"
-        ]
-        if not actual_paths:
-            return ""
-        actual_norms = {normalize_path_mention(path) for path in actual_paths}
-        requested_paths = extract_path_mentions(question)
-        missing = [
-            path
-            for path in requested_paths
-            if normalize_path_mention(path) not in actual_norms
-        ]
-        if not missing:
-            return ""
-        actual = ", ".join(actual_paths)
-        unverified = ", ".join(missing)
-        return (
-            f"Evidence scope: I only have evidence for {actual}. "
-            f"I did not verify {unverified}."
         )
