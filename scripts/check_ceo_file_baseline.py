@@ -22,7 +22,7 @@ from pathlib import Path
 WATCH: dict[str, int] = {
     "core/loop.py": 4100,                  # was 4500; decomposition banked at 4047
     "main.py": 2000,                       # 47 today; the old extraction's win
-    "core/planner.py": 820,                # measured 770 after piece 3 (system prompt out)
+    "core/planner.py": 660,                # measured 619 after piece 4 (response parsing out)
     "agent_tick.py": 1500,                 # measured 1458; aspiration 1300
     "core/autonomous_runtime.py": 1400,    # measured 1364; aspiration 1150
     "core/smart_memory.py": 1800,          # measured 1741 — new watch, top-3 giant
