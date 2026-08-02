@@ -139,3 +139,52 @@ def test_degraded_answer_has_contract_headers_and_low_confidence():
     for header in ("## Conclusion", "## Facts", "## Unverified", "## Confidence"):
         assert header in ans
     assert "low" in ans.lower()
+
+
+class TestBlankDraftIsNotAnAnswer:
+    """Measured on the live agent 2026-08-02: the synthesizer billed 14336
+    output tokens, reported status=success, and returned the empty string.
+    The ladder accepted it on the first attempt, the run banked
+    outcome=success, and the operator received a 110-character evidence
+    notice with nothing under it. A blank draft must walk the same
+    retry -> adapt -> honest-partial path an exception does."""
+
+    def _run(self, produce):
+        calls: list[int] = []
+
+        def _synth(attempt):
+            calls.append(attempt.index)
+            return produce(attempt)
+
+        result = run_synthesizer_ladder(
+            _synth, build_degraded_answer=build_degraded_synthesis_answer
+        )
+        return calls, result
+
+    def test_empty_draft_is_retried_then_degraded(self):
+        calls, result = self._run(lambda _a: "")
+        assert len(calls) == 3, "a blank draft was accepted without retrying"
+        assert result.degraded is True
+        assert result.answer.strip(), "the honest partial must carry text"
+        assert result.final_error_class == "blank_answer"
+
+    def test_whitespace_only_draft_counts_as_blank(self):
+        calls, result = self._run(lambda _a: "   \n\t  \n")
+        assert len(calls) == 3
+        assert result.degraded is True
+
+    def test_recovery_on_the_second_attempt_is_reported(self):
+        def _flaky(attempt):
+            return "" if attempt.index == 0 else "the real answer"
+
+        calls, result = self._run(_flaky)
+        assert len(calls) == 2
+        assert result.degraded is False
+        assert result.answer == "the real answer"
+        assert result.attempts == 2
+
+    def test_normal_answer_still_lands_on_the_first_attempt(self):
+        calls, result = self._run(lambda _a: "an ordinary answer")
+        assert len(calls) == 1
+        assert result.degraded is False
+        assert result.answer == "an ordinary answer"
