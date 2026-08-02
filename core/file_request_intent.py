@@ -118,7 +118,7 @@ def strip_file_tokens(text: str) -> str:
     Measured on 16 000 dashes: that pattern 2 019 ms, a segmented rewrite
     3 320 ms (worse), this loop 0.0 ms.
 
-    Extension-agnostic on purpose: `_extract_path_mentions` knows seven
+    Extension-agnostic on purpose: `extract_path_mentions` knows seven
     extensions, so `commit.log` and `commit.ts` would otherwise stay in the
     text and vote for "commit". The suffix must be ASCII alphanumeric,
     which keeps prose out — a sentence ending in "коммит." has nothing
@@ -154,7 +154,7 @@ def is_change_request(question: str) -> bool:
     intent.
 
     Removal is one linear pass over the tokens. It used to also substitute
-    each path `_extract_path_mentions` returned, which meant one full scan
+    each path `extract_path_mentions` returned, which meant one full scan
     of the question per path — quadratic again, on the same
     attacker-controlled text, and redundant: every path that extractor can
     return carries an extension, so the token pass already removes it, in
@@ -225,3 +225,43 @@ def validate_user_file_path(raw_path: str, *, workspace: Path) -> dict[str, Any]
         "target": target,
         "relative_path": rel_path,
     }
+
+
+def extract_path_mentions(text: str) -> list[str]:
+    """File paths the question names, first-mention order, case-deduplicated.
+
+    Moved from ``AgentLoop`` (piece 3 of the loop decomposition): this module's
+    other classifiers already reasoned about the paths a question mentions, and
+    ``strip_file_tokens``'s docstring referred to this function by name while it
+    lived in another file. Body verbatim from the original.
+    """
+    pattern = re.compile(
+        r"(?<![/.\-])"
+        r"(?P<path>"
+        r"(?:[A-Za-z]:[\\/])?"
+        r"(?:/)?"
+        r"(?:\.{1,2}[\\/])?"
+        r"(?:[A-Za-z0-9_.-]+[\\/])*"
+        r"[A-Za-z0-9_.-]+\."
+        r"(?:py|md|txt|json|yml|yaml|pdf)"
+        r")",
+        flags=re.IGNORECASE,
+    )
+    seen: set[str] = set()
+    paths: list[str] = []
+    for match in pattern.finditer(text):
+        path = match.group("path").rstrip(".,;:!?)\"]}'")
+        key = path.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        paths.append(path)
+    return paths
+
+
+def normalize_path_mention(path: str) -> str:
+    out = path.strip().strip("\"'")
+    out = out.replace("/", "\\")
+    while out.startswith(".\\"):
+        out = out[2:]
+    return out.casefold()

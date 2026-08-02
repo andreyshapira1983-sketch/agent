@@ -18,6 +18,7 @@ from cli.commands_budget import (
 )
 from cli.parsers import _compact_one_line
 from core.file_request_intent import (
+    extract_path_mentions,
     is_explicit_multi_file_mode,
     validate_user_file_path,
 )
@@ -141,7 +142,7 @@ def _looks_like_operator_programming_task(text: str) -> bool:
             "исправ",
         )
     )
-    has_file_mention = bool(AgentLoop._extract_path_mentions(text))
+    has_file_mention = bool(extract_path_mentions(text))
     return has_programming_word and has_file_mention
 
 
@@ -228,7 +229,7 @@ def _operator_programming_goal(text: str) -> str:
 
 def _operator_task_file_evidence(block: str, agent: AgentLoop) -> dict:
     root = agent._file_read_workspace_root()
-    requested_paths = AgentLoop._extract_path_mentions(block)
+    requested_paths = extract_path_mentions(block)
     if root is None:
         return {
             "files": [],
