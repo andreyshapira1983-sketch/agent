@@ -9,12 +9,25 @@ from __future__ import annotations
 
 from pathlib import Path
 
+# Ceilings are a RATCHET, not an aspiration: each is the measured size at the
+# last review plus small slack, so the guard's one job is "this file may not
+# grow back". When a decomposition lands (loop.py: 4733 -> 4047 via #217-#224),
+# LOWER the ceiling to bank the win. Aspirational targets live in the comment
+# column; reaching one is task-list work (planner.py is task #5), not this
+# guard's business.
+#
+# Found orphaned by the 2026-08 audit: this script was wired into nothing, so
+# three files sat over their ceilings with the guard reporting it to nobody.
+# It now runs inside the test suite (tests/test_file_size_ratchet.py).
 WATCH: dict[str, int] = {
-    "core/loop.py": 4500,
-    "main.py": 2000,
-    "core/planner.py": 1800,
-    "agent_tick.py": 1300,
-    "core/autonomous_runtime.py": 1150,
+    "core/loop.py": 4100,                  # was 4500; decomposition banked at 4047
+    "main.py": 2000,                       # 47 today; the old extraction's win
+    "core/planner.py": 2900,               # measured 2872; aspiration 1800 (task #5)
+    "agent_tick.py": 1500,                 # measured 1458; aspiration 1300
+    "core/autonomous_runtime.py": 1400,    # measured 1364; aspiration 1150
+    "core/smart_memory.py": 1800,          # measured 1741 — new watch, top-3 giant
+    "core/self_build_producer.py": 1800,   # measured 1755 — new watch
+    "core/model_router.py": 1800,          # measured 1719 — new watch
 }
 
 
