@@ -91,7 +91,7 @@ class PlannerOutput:
     # so operators can detect hallucination without digging through raw warnings.
     dropped_tools: list[str] = field(default_factory=list)
     # Structured, human-readable JSON-parse diagnostics (TD-003). Populated by
-    # ``_parse_json`` so operators can see *why* an output failed to parse
+    # ``core.plan_parsing.parse_json`` so operators can see *why* an output failed to parse
     # (brief reason, which stage broke, whether a JSON block was found, which
     # fallback was chosen) plus a sanitised, length-limited preview of the raw
     # output — without another LLM call and without leaking full secrets.
