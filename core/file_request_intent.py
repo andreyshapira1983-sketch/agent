@@ -227,36 +227,173 @@ def validate_user_file_path(raw_path: str, *, workspace: Path) -> dict[str, Any]
     }
 
 
+# ---------------------------------------------------------------------------
+# extract_path_mentions — a linear scanner, replacing a quadratic regex
+# ---------------------------------------------------------------------------
+#
+# The regex this replaces carried the lookbehind guard from commit 113bd88,
+# which killed the separator-wall cost the team measured (4.7s -> 2ms). CodeQL
+# kept flagging it (alert #11, previously #6), and on re-measurement CodeQL was
+# right: the guard blocks starts after `/.-` but not after letters, so a wall
+# of CLASS characters still offered O(n) starts, each rescanning the rest.
+# Measured on this machine before this rewrite: "a."*8000 -> 2.79s,
+# "a"*16000 -> 2.80s, "-a"*8000 -> 1.39s. After: all under 5ms.
+#
+# The scanner walks the text once. Equivalence with the old regex is not
+# asserted by argument but by tests: the original pattern lives verbatim in
+# tests/test_file_request_intent_paths.py as the oracle, and the fuzz corpus
+# there includes the adversarial shapes above plus every .py/.md file of this
+# repository.
+
+_PATH_CLS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-"
+)
+_PATH_SLASH = frozenset("/\\")
+#: The old lookbehind `(?<![/.\-])`: a match may not start right after one of
+#: these. Backslash is deliberately absent — `.\main.py` is a path an operator
+#: on Windows writes (see commit 113bd88).
+_PATH_GUARD = frozenset("/.-")
+#: Alternation order preserved from the regex: at the same dot, `py` wins over
+#: `pdf` because it is tried first.
+_PATH_EXTS = ("py", "md", "txt", "json", "yml", "yaml", "pdf")
+
+
+def _ext_at(text: str, dot: int) -> int:
+    """Length of the extension right after ``text[dot]``, or 0."""
+    for ext in _PATH_EXTS:
+        if text[dot + 1: dot + 1 + len(ext)].lower() == ext:
+            return len(ext)
+    return 0
+
+
+def _drive_body_start(text: str, letter: int) -> int:
+    """Body start after a drive prefix at ``text[letter]``, or -1.
+
+    The grammar is ``[A-Za-z]:[\\/]`` followed by the OPTIONAL bare ``/`` —
+    so ``C://a.py`` and ``https://www.py``'s tail ``s://www.py`` both parse.
+    One helper for both the candidate branch and the failed-scan recheck,
+    because the first version fixed the double slash in one of them only and
+    the oracle fuzz caught the other within a thousand cases.
+    """
+    n = len(text)
+    ch = text[letter]
+    if not (ch.isascii() and ch.isalpha()):
+        return -1
+    if not (letter + 2 < n and text[letter + 1] == ":" and text[letter + 2] in _PATH_SLASH):
+        return -1
+    after = letter + 3
+    if after < n and text[after] == "/" and after + 1 < n and text[after + 1] in _PATH_CLS:
+        after += 1
+    if after < n and text[after] in _PATH_CLS:
+        return after
+    return -1
+
+
+def _scan_body(text: str, start: int) -> tuple[int, int]:
+    """``(match_end, scan_stop)`` for the path body beginning at ``start``.
+
+    ``match_end`` is -1 when no match exists; ``scan_stop`` is the index of
+    the terminator that ended the walk — the caller may only skip THAT far
+    on failure, because the region beyond it was never examined (a ``//``
+    or a slash-then-backslash breaks the body but not the text).
+
+    The body is class-runs joined by single slashes. Mirrors the regex's
+    greedy star + backtracking final: the star consumed whole runs (the
+    segment class excludes slashes, so partial-run splits could never
+    succeed), and the final segment settled on the RIGHTMOST dot whose
+    extension matched. So: collect the runs, then search them last-to-first
+    for the rightmost dot with a known extension and a non-empty head.
+    """
+    n = len(text)
+    runs: list[tuple[int, int]] = []
+    i = start
+    while i < n and text[i] in _PATH_CLS:
+        run_start = i
+        while i < n and text[i] in _PATH_CLS:
+            i += 1
+        runs.append((run_start, i))
+        # A single slash joins the next run; a double slash (or a slash at
+        # the end) terminates the body, exactly as `[cls]+[\/]` did.
+        if i < n and text[i] in _PATH_SLASH and i + 1 < n and text[i + 1] in _PATH_CLS:
+            i += 1
+    for run_start, run_end in reversed(runs):
+        dot = run_end - 1
+        while dot > run_start:
+            if text[dot] == ".":
+                ext_len = _ext_at(text, dot)
+                if ext_len and dot + 1 + ext_len <= n:
+                    return dot + 1 + ext_len, i
+            dot -= 1
+    return -1, i
+
+
 def extract_path_mentions(text: str) -> list[str]:
     """File paths the question names, first-mention order, case-deduplicated.
 
-    Moved from ``AgentLoop`` (piece 3 of the loop decomposition): this module's
-    other classifiers already reasoned about the paths a question mentions, and
-    ``strip_file_tokens``'s docstring referred to this function by name while it
-    lived in another file. Body verbatim from the original.
+    Moved from ``AgentLoop`` (piece 3 of the loop decomposition) and rewritten
+    from a quadratic regex into this single-pass scanner — see the block
+    comment above for the measurements and the oracle tests for equivalence.
     """
-    pattern = re.compile(
-        r"(?<![/.\-])"
-        r"(?P<path>"
-        r"(?:[A-Za-z]:[\\/])?"
-        r"(?:/)?"
-        r"(?:\.{1,2}[\\/])?"
-        r"(?:[A-Za-z0-9_.-]+[\\/])*"
-        r"[A-Za-z0-9_.-]+\."
-        r"(?:py|md|txt|json|yml|yaml|pdf)"
-        r")",
-        flags=re.IGNORECASE,
-    )
+    n = len(text)
     seen: set[str] = set()
     paths: list[str] = []
-    for match in pattern.finditer(text):
-        path = match.group("path").rstrip(".,;:!?)\"]}'")
-        key = path.casefold()
-        if key in seen:
+    pos = 0
+    while pos < n:
+        ch = text[pos]
+        is_candidate = ch in _PATH_CLS or ch == "/"
+        guarded = pos > 0 and text[pos - 1] in _PATH_GUARD
+        if not is_candidate or guarded:
+            pos += 1
             continue
-        seen.add(key)
-        paths.append(path)
+        match_start = pos
+        body_start = -1
+        if (drive := _drive_body_start(text, pos)) >= 0:
+            body_start = drive
+        elif ch == "/":
+            if pos + 1 < n and text[pos + 1] in _PATH_CLS:
+                body_start = pos + 1        # bare leading slash
+        else:
+            body_start = pos
+        if body_start < 0:
+            pos += 1
+            continue
+        end, scan_stop = _scan_body(text, body_start)
+        if end < 0:
+            # No run the walk REACHED holds a dotted extension with a
+            # non-empty head, so no later start inside the walked region can
+            # succeed either (it would see a subset of the same dots). Skip
+            # to the terminator — and only to it: the text beyond was never
+            # examined. This bounded skip is what makes the scan linear.
+            #
+            # One candidate inside the walked region is NOT subsumed: a
+            # drive prefix. The walk stops at ":", but its preceding letter
+            # can start `X:/...` — a shape the region scan cannot see
+            # because ":" is outside the body alphabet.
+            if (
+                scan_stop < n and text[scan_stop] == ":"
+                and scan_stop >= 1
+                and not (scan_stop >= 2 and text[scan_stop - 2] in _PATH_GUARD)
+                and (d_body := _drive_body_start(text, scan_stop - 1)) >= 0
+            ):
+                d_end, _ = _scan_body(text, d_body)
+                if d_end >= 0:
+                    path = text[scan_stop - 1:d_end].rstrip(".,;:!?)\"]}'")
+                    key = path.casefold()
+                    if key not in seen:
+                        seen.add(key)
+                        paths.append(path)
+                    pos = d_end
+                    continue
+            pos = max(scan_stop, pos + 1)
+            continue
+        path = text[match_start:end].rstrip(".,;:!?)\"]}'")
+        key = path.casefold()
+        if key not in seen:
+            seen.add(key)
+            paths.append(path)
+        pos = end
     return paths
+
 
 
 def normalize_path_mention(path: str) -> str:
