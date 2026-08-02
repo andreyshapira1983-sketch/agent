@@ -367,11 +367,11 @@ def test_resolve_contract_name_non_ascii_falls_back():
 
 
 def _call_sanitize(step: dict, idx: int, warnings: list, file_hint=None):
-    """Call the static _sanitize_step with the actual signature."""
-    from core.planner import LLMPlanner
+    """Call sanitize_step (formerly LLMPlanner._sanitize_step) as production does."""
+    from core.step_sanitizer import sanitize_step
     tool_name = step.get("tool", "")
     args = step.get("arguments", {})
-    return LLMPlanner._sanitize_step(
+    return sanitize_step(
         tool_name, args, file_hint, idx, warnings,
         self_documentation_paths=(),
     )
