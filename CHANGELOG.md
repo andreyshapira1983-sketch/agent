@@ -11,6 +11,18 @@ All notable changes to this project are recorded here. The format follows
 ## [Unreleased]
 
 ### Added
+- Completion contract, fixed before the work (MIR-067, #258): derived from the
+  REQUEST before any tool runs (`core/completion_contract.py`), journalled even
+  when empty, and judged at the end as the `acceptance_criteria` obligation
+  source — delivery is read only from artifacts, disclosure only from the
+  answer.
+- Procedure search explains its zero (#260): `search_with_report` counts every
+  rejection by reason (`excluded_candidate` / `no_overlap` / `over_limit` /
+  `no_query_tokens`), journalled as `procedures_rejected_by` — a present-but-
+  gated candidate and a no-match are no longer indistinguishable.
+- Memory lifecycle contract to v5 (#259): an honest per-section ledger of what
+  is implemented, a phased plan (path B), and a test pinning the ledger to the
+  document.
 - The agent's memory records what went wrong and what a procedure was for:
   `EpisodeRecord.defect_signals` banks the run's own sensor faults; an unmet
   obligation on a declared-achieved run lowers the completion verdict and
@@ -22,6 +34,17 @@ All notable changes to this project are recorded here. The format follows
   to grep the window instead of guessing from the fragment.
 
 ### Changed
+- A tool-set match is not usefulness (#261, operator ruling 2026-08-02): the
+  workflow-key merge folds provenance only; counters, confidence and status
+  move solely through causally attributed outcome feedback.
+- The targetless-change ambiguity rule is retired (#263): measured 8 of 8
+  false on 62 live requests — every "targetless" request named its target in
+  prose the vocabulary cannot parse. An unparseable request now yields an
+  empty contract without a false claim about the operator's clarity.
+- Audit fixes on the decomposition series (#251–#254): low-signal confidence
+  defaults read from their own constant; the vacuous manifest-drift test
+  became an identity pin; three documents stopped attributing host-tools to
+  its pre-#246 home; this changelog recorded the #241–#250 series.
 - `core/planner.py` decomposed by five bounded pieces (2872 → 516 lines,
   #241, #243–#246): step admission → `core/step_sanitizer.py`; question
   classification and governing-doc routing → `core/doc_routing.py`; the
@@ -46,6 +69,20 @@ All notable changes to this project are recorded here. The format follows
   rebuilder and the memory-block tags → `core/evidence_budget.py`.
 
 ### Fixed
+- Distinct shell commands get distinct artifact labels (#255, review round
+  #257): the loop keys artifacts by label, and sibling commands rendered
+  identically, so the second silently overwrote the first (measured twice
+  live 2026-08-01); labels beyond two tokens carry a digest of the whole
+  argv.
+- An empty synthesis draft is not an answer (#256): a success status with no
+  visible text (measured live: 14336 output tokens, empty string, banked
+  success) now walks the same retry → adapt → honest-partial ladder an
+  exception does, classified `blank_answer`.
+- A declared non-delivery no longer banks as success (#262): the run's own
+  completion declaration outranks chunk counts in the episode outcome —
+  "the experiment was not performed" can be perfectly cited and still is not
+  a success; the derivation lives in `_derive_episode_outcome`, fail-closed
+  for declarations added later.
 - Planner-level SSRF pre-filter judges the parsed host (#241): userinfo
   shapes like `http://evil.com@127.0.0.1/` no longer slip past the
   substring check; non-global IPs refused via `ipaddress` — the same rule
