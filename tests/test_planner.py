@@ -1864,3 +1864,26 @@ def test_unclosed_fence_padded_with_blanks_does_not_hang(workspace: Path) -> Non
     assert out.diagnostics["json_block_found"] is False
     assert out.raw_response == raw
     assert elapsed < 2.0, f"parsing {len(raw)} chars took {elapsed:.2f}s"
+
+
+def test_low_signal_defaults_are_read_from_the_constant(monkeypatch):
+    """Audit finding Д-2: _is_low_signal_confidence_source used to re-encode
+    "readme.md"/"tools" by hand while _CONFIDENCE_LOW_SIGNAL_DEFAULT_PATHS had
+    zero readers — editing the constant changed nothing. The function must
+    follow the constant. Proven failing on the old code: with the constant
+    swapped out, the hardcoded version still answered by its own literals."""
+    from core import doc_routing
+
+    src_readme = {"tool": "file_read", "arguments": {"path": "README.md"}}
+    src_tools = {"tool": "list_dir", "arguments": {"path": "tools/"}}
+    src_notes = {"tool": "file_read", "arguments": {"path": "NOTES.md"}}
+
+    assert doc_routing._is_low_signal_confidence_source(src_readme) is True
+    assert doc_routing._is_low_signal_confidence_source(src_tools) is True
+    assert doc_routing._is_low_signal_confidence_source(src_notes) is False
+
+    monkeypatch.setattr(
+        doc_routing, "_CONFIDENCE_LOW_SIGNAL_DEFAULT_PATHS", ("NOTES.md",)
+    )
+    assert doc_routing._is_low_signal_confidence_source(src_notes) is True
+    assert doc_routing._is_low_signal_confidence_source(src_readme) is False
