@@ -60,6 +60,29 @@ def _make_achieved_episode(**kwargs):
     return episode_from_agent_cycle(**kwargs)
 
 
+def _confirm_useful_application(store, proc, *, question):
+    """One CONFIRMED useful application, credited the only legitimate way.
+
+    Operator ruling 2026-08-02: a procedure is credited ONLY when it was
+    actually applied and the run succeeded — never for a mere `workflow_key`
+    (tool-set) match. So a test that wants to move a procedure's counters
+    routes an achieved episode that carries the procedure in
+    `used_procedure_ids` through the causal `apply_episode_feedback` path, not
+    through `upsert_from_episode` (which now merges provenance without credit).
+    """
+    ep = _make_achieved_episode(
+        goal="apply the workflow",
+        question=question,
+        answer="done",
+        tools_used=["file_read"],
+        source_labels=["file:doc.txt"],
+        verified_chunks=3,
+        used_procedure_ids=(proc.id,),
+    )
+    store.apply_episode_feedback(ep)
+    return {p.id: p for p in store.load()}[proc.id]
+
+
 PLAN_FILE_READ = json.dumps(
     {
         "reasoning": "Read the hinted file.",
@@ -298,6 +321,9 @@ def test_procedural_store_upserts_successful_tool_workflow(workspace: Path) -> N
         verified_chunks=1,
     )
 
+    # Two matching runs consolidate into ONE procedure (same workflow_key), but
+    # a tool-set match earns no credit (operator ruling 2026-08-02): the
+    # second upsert merges provenance, it does not promote.
     proc1, created1 = store.upsert_from_episode(episode1)
     proc2, created2 = store.upsert_from_episode(episode2)
 
@@ -305,12 +331,19 @@ def test_procedural_store_upserts_successful_tool_workflow(workspace: Path) -> N
     assert proc2 is not None
     assert created1 is True
     assert created2 is False
-    assert proc2.success_count == 2
-    # Beta(1,1)-smoothed: (2+1)/(2+2) = 0.75. Two successes are good evidence
-    # but not a certainty — confidence must not read 1.0.
-    assert proc2.confidence == 0.75
+    assert proc2.success_count == 0  # born unproven; a tool-set match credits nothing
     assert set(proc2.source_episode_ids) == {episode1.id, episode2.id}
     assert store.count() == 1
+
+    # Credit comes only from CONFIRMED useful applications. Two of them promote.
+    after_one = _confirm_useful_application(store, proc2, question="reuse once")
+    assert after_one.success_count == 1
+    assert after_one.confidence == 0.667  # Beta(1,1): (1+1)/(1+2)
+    assert after_one.status == "candidate"
+    after_two = _confirm_useful_application(store, proc2, question="reuse twice")
+    assert after_two.success_count == 2
+    assert after_two.confidence == 0.75  # (2+1)/(2+2), good evidence, never 1.0
+    assert after_two.status == "active"
 
 
 def test_single_success_procedure_is_not_certain(workspace: Path) -> None:
@@ -330,14 +363,18 @@ def test_single_success_procedure_is_not_certain(workspace: Path) -> None:
     proc, created = store.upsert_from_episode(episode)
     assert created is True
     assert proc is not None
+    # Born unproven at zero (operator ruling 2026-08-02): the creating run did
+    # not USE the procedure, so it earns no birth credit.
+    assert proc.success_count == 0
+    # After ONE confirmed useful application: modest confidence, never 1.0.
+    proc = _confirm_useful_application(store, proc, question="reuse it")
     assert proc.success_count == 1
     # Beta(1,1): (1+1)/(1+2) = 0.667 — modest, never 1.0.
     assert proc.confidence == 0.667
     assert proc.confidence < 1.0
-    # One success is unproven: born `candidate`, not `active` (MIR-003 A4
-    # maturity gate, owner decision 2026-07-22). Confidence is high enough
-    # (0.667 ≥ 0.6) that the OLD rule would have said active; the maturity
-    # gate holds it at candidate until a second independent success.
+    # One success is unproven: `candidate`, not `active` (MIR-003 A4 maturity
+    # gate). Confidence is high enough (0.667 ≥ 0.6) that the OLD rule would
+    # have said active; the maturity gate holds it until a second success.
     assert proc.status == "candidate"
 
 
@@ -361,7 +398,7 @@ def test_new_procedure_is_born_candidate_not_active(workspace: Path) -> None:
     )
     assert created is True
     assert proc is not None
-    assert proc.success_count == 1
+    assert proc.success_count == 0  # born unproven (operator ruling 2026-08-02)
     assert proc.status == "candidate"
 
 
@@ -420,14 +457,23 @@ def test_second_independent_success_promotes_candidate_to_active(
 
     p1, created1 = store.upsert_from_episode(first)
     assert created1 is True
-    assert p1.success_count == 1
+    assert p1.success_count == 0  # born unproven — creation is not a use
     assert p1.status == "candidate"
     assert store.search("read the doc file_read") == []  # not yet planned with
 
-    p2, created2 = store.upsert_from_episode(second)
+    # A second matching run consolidates but does NOT promote by tool-set match
+    # (operator ruling 2026-08-02).
+    p_merge, created2 = store.upsert_from_episode(second)
     assert created2 is False  # same workflow, updated not re-created
-    assert p2.success_count == 2  # two independent episodes credited
-    assert p2.status == "active"  # promoted
+    assert p_merge.success_count == 0  # a tool-set match credits nothing
+    assert p_merge.status == "candidate"
+
+    # Promotion requires TWO independent CONFIRMED useful applications.
+    after_one = _confirm_useful_application(store, p1, question="apply once")
+    assert after_one.status == "candidate"
+    after_two = _confirm_useful_application(store, p1, question="apply twice")
+    assert after_two.success_count == 2
+    assert after_two.status == "active"  # promoted by usefulness, not tool match
     assert len(store.search("read the doc file_read")) == 1  # now planned with
 
 
@@ -453,18 +499,18 @@ def test_procedure_confidence_grows_but_never_reaches_one(workspace: Path) -> No
     to — 1.0, so a workflow earns trust with evidence instead of by fiat.
     """
     store = ProceduralMemoryStore(workspace / "procedures.jsonl")
-    last = 0.0
-    for i in range(6):
-        episode = _make_achieved_episode(
-            goal="read file",
-            question=f"read doc {i}",
-            answer="done",
-            tools_used=["file_read"],
-            source_labels=["file:doc.txt"],
+    proc, _created = store.upsert_from_episode(
+        _make_achieved_episode(
+            goal="read file", question="read doc", answer="done",
+            tools_used=["file_read"], source_labels=["file:doc.txt"],
             verified_chunks=1,
         )
-        proc, _created = store.upsert_from_episode(episode)
-        assert proc is not None
+    )
+    assert proc is not None
+    last = 0.0
+    # Confidence grows only with CONFIRMED useful applications, not tool matches.
+    for i in range(6):
+        proc = _confirm_useful_application(store, proc, question=f"reuse {i}")
         assert proc.confidence > last  # monotonically increasing
         assert proc.confidence < 1.0   # never certain
         last = proc.confidence
@@ -498,6 +544,12 @@ def test_consolidation_links_episodes_and_procedures(workspace: Path) -> None:
     episodic.save(second)
     procedural.upsert_from_episode(episode)
     procedure, _created = procedural.upsert_from_episode(second)
+    # Two matching runs consolidate into one procedure but do not promote it
+    # (tool-set match earns no credit, operator ruling 2026-08-02). Promote it
+    # the legitimate way — two confirmed useful applications — so the report has
+    # an active procedure to link.
+    procedure = _confirm_useful_application(procedural, procedure, question="use a")
+    procedure = _confirm_useful_application(procedural, procedure, question="use b")
 
     report = consolidate_memory(episodes=episodic.load(), procedures=procedural.load())
     consolidation.save(report)
@@ -605,9 +657,16 @@ def test_experience_memory_is_injected_into_next_planner_call(workspace: Path, m
     assert "<agent_experience_memory>" in planner_calls[1]["user"]
     events = _events(log_path)
     inject = [e for e in events if e["event"] == "experience_memory_inject"]
-    # Maturity gate, both boundaries:
-    assert inject[1]["payload"]["procedures_selected"] == 0   # still a candidate
-    assert inject[2]["payload"]["procedures_selected"] == 1   # promoted → planned with
+    # Operator ruling 2026-08-02: a procedure is promoted only by confirmed
+    # useful application, never by a repeated tool-set match. Repeating the same
+    # workflow across cycles no longer promotes the candidate, so it stays
+    # unoffered — honest-empty rather than falsely-active. Restoring promotion
+    # through the loop (offering candidates so they can be causally credited) is
+    # the next piece; here the procedure correctly never surfaces.
+    assert inject[1]["payload"]["procedures_selected"] == 0   # candidate, not credited
+    assert inject[2]["payload"]["procedures_selected"] == 0   # still candidate — no tool-set promotion
+    # The candidate exclusion is now visible in the journal (PR #260):
+    assert inject[2]["payload"]["procedures_rejected_by"].get("excluded_candidate", 0) >= 1
 
 
 def test_smart_memory_cli_commands(workspace: Path, capsys) -> None:
