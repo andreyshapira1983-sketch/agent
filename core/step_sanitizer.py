@@ -63,15 +63,30 @@ def _is_placeholder_url(url_lower: str) -> bool:
 
 
 
-def _shell_label(cmd: str, argv: list[str]) -> str:
-    """Short, collision-free label for one shell_exec step.
+# How much of argv[1] may appear in a label. The digest carries uniqueness,
+# so the visible part exists only to stay readable — an unbounded token would
+# put a data blob (or a value the caller passed as the first argument) into
+# every journal line that quotes the label.
+_LABEL_ARG_CHARS = 32
+
+
+def _shell_label(argv: list[str]) -> str:
+    """Short, collision-resistant label for one shell_exec step.
+
+    The command name is derived here, from ``argv[0]``, so a caller cannot
+    hand in a name that disagrees with the argv the digest is taken over.
 
     Lossless while it can be: with at most two tokens the label already
-    contains the whole command. Beyond that the remaining tokens are folded
-    into a 6-hex digest — enough to separate sibling commands in the
-    artifact map without putting user-supplied argv into the journal.
+    contains the whole command (argv[1] bounded to ``_LABEL_ARG_CHARS``).
+    Beyond that the whole argv is folded into a 24-bit digest — collisions
+    are astronomically unlikely per run, not impossible, and the cost of one
+    would be the pre-existing overwrite, never a wrong answer.
     """
-    head = f"shell_exec:{cmd}" + (f" {argv[1]}" if len(argv) > 1 else "")
+    cmd = argv[0].strip().lower() if argv else ""
+    head = f"shell_exec:{cmd}"
+    if len(argv) > 1:
+        arg = argv[1]
+        head += f" {arg[:_LABEL_ARG_CHARS]}…" if len(arg) > _LABEL_ARG_CHARS else f" {arg}"
     if len(argv) <= 2:
         return head
     digest = hashlib.blake2s(
@@ -308,7 +323,7 @@ def sanitize_step(
             # label, so the second silently overwrote the first and the
             # synthesizer never saw the answer it had already fetched
             # (measured twice against the live agent, 2026-08-01).
-            "label": _shell_label(cmd, cleaned),
+            "label": _shell_label(cleaned),
             "expected_outcome": (
                 "Whitelisted command runs in the workspace sandbox with "
                 "a compensation plan; mutating commands escalate to "

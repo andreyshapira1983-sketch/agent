@@ -936,6 +936,20 @@ class TestShellLabelUniqueness:
         assert "SECRET_TOKEN_VALUE" not in label
         assert len(label) < 40
 
+    def test_a_long_first_argument_is_bounded_not_echoed_whole(self):
+        """argv[1] IS visible, so an unbounded one would put a data blob (or a
+        value passed as the first argument) into every journal line quoting
+        the label. The digest carries uniqueness, so the visible part can be
+        capped without losing the collision fix."""
+        from core.step_sanitizer import _LABEL_ARG_CHARS, _shell_label
+
+        blob = "LongOpaqueValue" * 10
+        label = _shell_label(["grep", blob, "core"])
+        assert blob not in label
+        assert len(label) < _LABEL_ARG_CHARS + 40
+        # Capping must not reintroduce the collision it was added around.
+        assert label != _shell_label(["grep", blob + "X", "core"])
+
     def test_same_command_is_stable_across_calls(self):
         assert self._label(["grep", "-rl", "x", "core"]) == self._label(
             ["grep", "-rl", "x", "core"]
