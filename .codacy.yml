@@ -18,12 +18,22 @@
 # whose first bytes are "PK\x03\x04", i.e. a ZIP container; byte 10 is 0xb7,
 # which cannot start a UTF-8 sequence. Of 627 tracked files that is the only
 # one that fails to decode, so keeping it out of the analysis is enough.
+#   ^^^ REFUTED 2026-08-02: run 30744074248 -- a checkout with the .docx
+#   already untracked -- crashed with the identical stack at the identical
+#   site. The .docx was never the trigger (no analyser ever flagged it, and
+#   only flagged files are re-read). The writer dies on ordinary UTF-8
+#   sources whose flagged lines carry Cyrillic, i.e. most of this
+#   repository; that is why the workflow failed 102 times out of 102 and
+#   was removed the same day. The excludes below are kept: they are valid
+#   for Codacy's cloud analysis, and binaries stay out of git regardless.
 #
 # Locale was ruled out by running their own image: codacy/codacy-analysis-cli
 # already ships LANG=C.UTF-8 and file.encoding=UTF-8, and the wrapper script
 # forwards only CODACY_CODE / CODACY_PROJECT_TOKEN / CODACY_API_TOKEN /
 # CODACY_API_BASE_URL into the container -- job-level LANG or
-# JAVA_TOOL_OPTIONS never reach the JVM at all.
+# JAVA_TOOL_OPTIONS never reach the JVM at all. (2026-08-02: that same
+# forwarding gap is what makes the crash unfixable from this side -- no
+# encoding setting we write here or in the workflow ever reaches their JVM.)
 #
 # Both spellings are listed on purpose: "**/*.docx" only matches inside a
 # directory, "**.docx" also matches a file committed at the repository root.
