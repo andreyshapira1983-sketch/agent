@@ -864,7 +864,7 @@ class TestGitRecordingSubcommands:
         permission the tool grants is worse than one that never granted it: the
         capability exists, and only the plan knows it was taken away.
         """
-        from core.planner import LLMPlanner
+        from core.step_sanitizer import sanitize_step
 
         warnings: list[str] = []
         for argv in (
@@ -872,7 +872,7 @@ class TestGitRecordingSubcommands:
             ["git", "add", "core/x.py"],
             ["git", "commit", "-m", "Record the work"],
         ):
-            step = LLMPlanner._sanitize_step(
+            step = sanitize_step(
                 "shell_exec", {"argv": argv}, None, 1, warnings
             )
             assert step is not None, f"{argv} was dropped: {warnings}"

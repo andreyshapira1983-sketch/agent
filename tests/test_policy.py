@@ -241,7 +241,7 @@ def _build_loop_with_planned_step(
 ) -> tuple[AgentLoop, Path]:
     """Wire up an AgentLoop whose planner deterministically emits one step.
 
-    The FakePlanner sidesteps LLMPlanner._sanitize_step so we can deliver a
+    The FakePlanner sidesteps core.step_sanitizer.sanitize_step so we can deliver a
     plan that the real planner would never produce — exactly what we need to
     exercise the Executor's own safety net.
 
