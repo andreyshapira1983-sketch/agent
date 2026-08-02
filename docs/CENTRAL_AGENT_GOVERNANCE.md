@@ -74,8 +74,9 @@ here that changes what the operator receives.
   observation/execution duty was incurred and left unmet without disclosure.
   *Since 2026-08-02 (operator ruling, PRs #216/#227) this verdict carries
   authority at banking time: it lowers a declared `achieved` to
-  `partially_achieved` and withholds procedure credit. Mid-run it still stops
-  and replans nothing.*
+  `partially_achieved` and withholds procedure credit. Mid-run nothing is
+  stopped or replanned — the run's path is unchanged; only the verdict it
+  banks under is.*
 - `core/reasoning_action_check` and `core/subsystem_disagreement` — the latter
   additionally accounts for what it *would* have done
   (`subsystem_disagreement_shadow`), and replans nothing.
