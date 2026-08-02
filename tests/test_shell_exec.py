@@ -960,8 +960,10 @@ class TestShellLabelUniqueness:
         is lossy, the digest must come back."""
         from core.step_sanitizer import _LABEL_ARG_CHARS, _shell_label
 
-        prefix = "docs/audit/MASTER_ISSUE_REGISTRY"
-        assert len(prefix) >= _LABEL_ARG_CHARS
+        # Derived from the cap, not hardcoded, so the test survives a cap
+        # change; the real-world shape is two long sibling paths sharing a
+        # prefix (e.g. docs/audit/MASTER_ISSUE_REGISTRY{.md,_OLD.md}).
+        prefix = "docs/audit/REGISTRY".ljust(_LABEL_ARG_CHARS, "X")
         a = _shell_label(["grep", prefix + ".md"])
         b = _shell_label(["grep", prefix + "_OLD.md"])
         assert a != b, f"both rendered as {a!r} — the artifact map loses one"

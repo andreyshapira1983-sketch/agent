@@ -76,11 +76,12 @@ def _shell_label(argv: list[str]) -> str:
     The command name is derived here, from ``argv[0]``, so a caller cannot
     hand in a name that disagrees with the argv the digest is taken over.
 
-    Lossless while it can be: with at most two tokens the label already
-    contains the whole command (argv[1] bounded to ``_LABEL_ARG_CHARS``).
-    Beyond that the whole argv is folded into a 24-bit digest — collisions
-    are astronomically unlikely per run, not impossible, and the cost of one
-    would be the pre-existing overwrite, never a wrong answer.
+    Lossless while it can be: with at most two tokens AND argv[1] within
+    ``_LABEL_ARG_CHARS`` the label already contains the whole command, so no
+    digest is needed. The moment anything visible is dropped — a third token
+    or a truncated argv[1] — the whole argv is folded into a 24-bit digest:
+    collisions are astronomically unlikely per run, not impossible, and the
+    cost of one would be the pre-existing overwrite, never a wrong answer.
     """
     cmd = argv[0].strip().lower() if argv else ""
     head = f"shell_exec:{cmd}"
