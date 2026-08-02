@@ -76,7 +76,7 @@ here that changes what the operator receives.
   authority at banking time: it lowers a declared `achieved` to
   `partially_achieved` and withholds procedure credit. Mid-run nothing is
   stopped or replanned — the run's path is unchanged; only the verdict it
-  banks under is.*
+  banks under changes.*
 - `core/reasoning_action_check` and `core/subsystem_disagreement` — the latter
   additionally accounts for what it *would* have done
   (`subsystem_disagreement_shadow`), and replans nothing.
