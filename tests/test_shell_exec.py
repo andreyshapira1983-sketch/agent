@@ -897,3 +897,46 @@ class TestGitRecordingSubcommands:
         # Everything else still stays out.
         assert "ANTHROPIC_API_KEY" not in env
         assert "OPENAI_API_KEY" not in env
+
+
+class TestShellLabelUniqueness:
+    """The artifact map is keyed by label, so two distinct commands must not
+    render as one. Measured against the live agent 2026-08-01: it ran the grep
+    that answered the question, the next grep overwrote the artifact, and it
+    reported "cannot confirm" — twice."""
+
+    def _label(self, argv):
+        from core.step_sanitizer import sanitize_step
+
+        step = sanitize_step("shell_exec", {"argv": argv}, None, 0, [])
+        assert step is not None, argv
+        return step["label"]
+
+    def test_sibling_greps_get_distinct_labels(self):
+        a = self._label(["grep", "-rl", "alpha", "core"])
+        b = self._label(["grep", "-rl", "beta", "core"])
+        assert a != b, f"both rendered as {a!r} — the artifact map loses one"
+        assert a.startswith("shell_exec:grep -rl")
+        assert b.startswith("shell_exec:grep -rl")
+
+    def test_argv_boundaries_are_not_ambiguous(self):
+        """['a b'] and ['a','b'] are different commands and must differ."""
+        assert self._label(["grep", "-rl", "a b", "core"]) != self._label(
+            ["grep", "-rl", "a", "b", "core"]
+        )
+
+    def test_short_commands_keep_their_plain_label(self):
+        """At most two tokens the label already holds the whole command —
+        no digest noise, and the existing journals stay readable."""
+        assert self._label(["whoami"]) == "shell_exec:whoami"
+        assert self._label(["git", "status"]) == "shell_exec:git status"
+
+    def test_label_never_echoes_long_argv(self):
+        label = self._label(["grep", "-rn", "SECRET_TOKEN_VALUE", "core"])
+        assert "SECRET_TOKEN_VALUE" not in label
+        assert len(label) < 40
+
+    def test_same_command_is_stable_across_calls(self):
+        assert self._label(["grep", "-rl", "x", "core"]) == self._label(
+            ["grep", "-rl", "x", "core"]
+        )

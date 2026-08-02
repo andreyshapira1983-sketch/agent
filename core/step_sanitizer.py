@@ -11,6 +11,7 @@ inside this function.
 """
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 from typing import Any
 
@@ -60,6 +61,23 @@ def _is_placeholder_url(url_lower: str) -> bool:
         return True
     return any(host.endswith(tld) for tld in _PLACEHOLDER_TLDS)
 
+
+
+def _shell_label(cmd: str, argv: list[str]) -> str:
+    """Short, collision-free label for one shell_exec step.
+
+    Lossless while it can be: with at most two tokens the label already
+    contains the whole command. Beyond that the remaining tokens are folded
+    into a 6-hex digest — enough to separate sibling commands in the
+    artifact map without putting user-supplied argv into the journal.
+    """
+    head = f"shell_exec:{cmd}" + (f" {argv[1]}" if len(argv) > 1 else "")
+    if len(argv) <= 2:
+        return head
+    digest = hashlib.blake2s(
+        repr(argv).encode("utf-8", "replace"), digest_size=3
+    ).hexdigest()
+    return f"{head} #{digest}"
 
 
 def sanitize_step(
@@ -282,12 +300,15 @@ def sanitize_step(
         return {
             "tool": "shell_exec",
             "arguments": {"argv": cleaned},
-            # Label is just the command name + first arg if any — keeps
-            # the planner JSONL short and never echoes long argv.
-            "label": (
-                f"shell_exec:{cmd}"
-                + (f" {cleaned[1]}" if len(cleaned) > 1 else "")
-            ),
+            # Label is the command name + first arg — short, and it never
+            # echoes long argv. For anything longer a 6-hex digest of the
+            # WHOLE argv is appended, because the visible part alone is not
+            # unique: `grep -rl A core` and `grep -rl B core` both rendered
+            # as "shell_exec:grep -rl", and the loop keys its artifacts by
+            # label, so the second silently overwrote the first and the
+            # synthesizer never saw the answer it had already fetched
+            # (measured twice against the live agent, 2026-08-01).
+            "label": _shell_label(cmd, cleaned),
             "expected_outcome": (
                 "Whitelisted command runs in the workspace sandbox with "
                 "a compensation plan; mutating commands escalate to "
