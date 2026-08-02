@@ -124,8 +124,32 @@ def test_budget_file_content_truncates_large(monkeypatch):
     monkeypatch.setenv("AGENT_EVIDENCE_FILE_CHARS", "500")
     large = _make_file(10_000, keyword="alpha")
     result = budget_file_content(large, question="alpha")
-    # Must be capped — allow 30% headroom for the INTENT-BUDGET notice string
-    assert len(result) <= 700
+    # Must be capped — headroom covers the INTENT-BUDGET notice, which since
+    # 2026-08-02 also teaches the recovery move (grep the window, don't guess);
+    # at real budgets (12k) the notice is noise, at this tiny test budget it is
+    # ~40% of the total. Measured: 689.
+    assert len(result) <= 750
+
+
+def test_the_trim_notice_teaches_the_recovery_move(monkeypatch):
+    """The notice must say what to DO, not only that content was cut.
+
+    Measured live (probe round 4, 2026-08-02): the model read a bare trim
+    notice, honestly reported the truncation — and then guessed a function
+    signature from the fragment, wrongly. One human hint ("don't guess,
+    grep") fixed the behaviour immediately in the next round. This pins that
+    hint into both trim paths, so the recovery move ships with every cut.
+    """
+    monkeypatch.setenv("AGENT_EVIDENCE_FILE_CHARS", "500")
+    # Path 1: no keyword match (head+tail)
+    no_match = budget_file_content("x" * 5000, question="zzz")
+    assert "grep -n via shell_exec" in no_match
+    # Path 2: keyword-relevant section selection
+    body = ("alpha keyword paragraph\n\n" + "filler paragraph\n\n" * 200)
+    matched = budget_file_content(body, question="alpha")
+    assert "grep -n via shell_exec" in matched
+    # And a file that FITS carries no notice at all — nothing to recover from.
+    assert "grep -n" not in budget_file_content("short", question="alpha")
 
 
 def test_budget_file_content_default_limit_is_sane():
@@ -336,8 +360,10 @@ def test_format_artifact_large_file_truncated(monkeypatch):
     result = format_artifact(
         "file_read", large, question="how does the governor work?"
     )
-    # budget=300; allow ~120 chars of overhead (notice string + separators)
-    assert len(result) <= 420
+    # budget=300; overhead = notice + separators. The notice grew on
+    # 2026-08-02 to teach the recovery move (grep the window, don't guess) —
+    # measured total 489 at this budget, bound with modest slack.
+    assert len(result) <= 540
 
 
 # ── repairing a memory block the total budget sliced ─────────────────────────
