@@ -60,10 +60,16 @@ def _ledger_symbols() -> set[str]:
     return {t for t in toks if _symbol_like(t)}
 
 
+# Production trees only. Searching tests/ would let a symbol "resolve" merely
+# because this very file names it in `_NAMED_AS_ABSENT` — the ledger cites
+# production code, so that is where a symbol must be found.
+_PROD_DIRS = ("core", "cli", "app", "api", "tools", "scripts")
+
+
 def _resolves(symbol: str) -> bool:
-    """True when the symbol occurs as a whole word in any tracked .py file."""
+    """True when the symbol occurs as a whole word in production .py files."""
     result = subprocess.run(
-        ["git", "grep", "-wq", "--", symbol, "--", "*.py"],
+        ["git", "grep", "-wq", "--", symbol, "--", *(f"{d}/*.py" for d in _PROD_DIRS)],
         cwd=REPO, capture_output=True,
     )
     return result.returncode == 0
@@ -86,11 +92,11 @@ def test_every_ledger_symbol_resolves_or_is_named_absent():
 def test_symbols_named_as_absent_really_are_absent():
     """The inverse guard: if a 'not built' symbol quietly gets built, the ledger
     row saying it does not exist has itself gone stale and must be revisited."""
-    still_absent = [s for s in _NAMED_AS_ABSENT if not _resolves(s)]
-    assert still_absent == sorted(_NAMED_AS_ABSENT), (
-        "a symbol the §18 ledger documents as NOT built now resolves in the "
-        f"code: {sorted(set(_NAMED_AS_ABSENT) - set(still_absent))}. Update the "
-        "ledger row — the absence it records is no longer true."
+    now_present = {s for s in _NAMED_AS_ABSENT if _resolves(s)}
+    assert not now_present, (
+        "a symbol the §18 ledger documents as NOT built now resolves in "
+        f"production code: {sorted(now_present)}. Update the ledger row — the "
+        "absence it records is no longer true."
     )
 
 
