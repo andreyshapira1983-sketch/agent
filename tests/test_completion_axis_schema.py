@@ -210,7 +210,9 @@ def test_an_explicit_null_reads_as_absent() -> None:
 
 
 # ==========================================================================
-# Behaviour is unchanged in this commit.
+# The evidence axis — unchanged when the axis landed, narrowed 2026-08-02.
+# The operator's ruling took `success` away from the three self-declared
+# non-delivery states; everything else here still reports evidence only.
 # ==========================================================================
 def test_the_evidence_axis_no_longer_calls_a_non_delivery_a_success() -> None:
     """SUPERSEDED BY OPERATOR RULING (2026-08-02) — recorded, not deleted.

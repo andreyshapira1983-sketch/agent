@@ -180,10 +180,13 @@ def test_grounded_but_incomplete_success_mints_no_procedure() -> None:
 
     The two axes answer different questions: ``outcome`` says *were the claims
     supported*, ``completion_state`` says *was the goal reached*. A blocked or
-    refused answer can be impeccably supported (``outcome == "success"``) and
-    still not have finished the task — the exact live case that motivated the
-    completion axis: a blocked answer that cited every claim it made and
-    credited ``tools:file_read`` to 0.857 anyway (MIR-057).
+    refused answer can be impeccably supported and still not have finished the
+    task — the exact live case that motivated the completion axis: a blocked
+    answer that cited every claim it made and credited ``tools:file_read`` to
+    0.857 anyway (MIR-057). (Until 2026-08-02 such a run also banked
+    ``outcome == "success"``; see the amendment below for why it no longer
+    does. The axes still answer different questions — only the three explicit
+    admissions lost their claim to ``success``.)
 
     Such an episode must mint no procedure. The completion gate
     (`procedure_credit_allowed`) refuses it. This guarantee was reproduced but

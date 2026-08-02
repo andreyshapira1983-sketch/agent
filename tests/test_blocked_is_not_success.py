@@ -19,7 +19,7 @@ overturn it.
 """
 from __future__ import annotations
 
-from core.smart_memory import episode_from_agent_cycle
+from core.smart_memory import episode_from_agent_cycle, procedure_credit_allowed
 
 
 def _episode(**over):
@@ -97,7 +97,5 @@ class TestDeliveryPathsAreUnchanged:
 class TestCreditConsequences:
     def test_a_blocked_run_earns_no_procedure_credit(self):
         """The point of the fix: a non-delivery must not become a precedent."""
-        from core.smart_memory import procedure_credit_allowed
-
         ep = _episode(declared_completion="blocked")
         assert procedure_credit_allowed(ep) is False
