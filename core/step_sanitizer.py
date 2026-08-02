@@ -25,10 +25,26 @@ _PLACEHOLDER_TLDS = (".example", ".invalid", ".test", ".localhost")
 def _url_host(url_lower: str) -> str:
     """Extract the bare host from an already http/https, ASCII, lowercased URL."""
     after_scheme = url_lower.split("://", 1)[-1]
-    host = after_scheme.split("/", 1)[0]
-    host = host.split("@", 1)[-1]   # strip any userinfo
-    host = host.split(":", 1)[0]    # strip port
-    return host.strip(".")
+    authority = after_scheme.split("/", 1)[0]
+    authority = authority.split("@", 1)[-1]   # strip any userinfo
+    if authority.startswith("["):             # bracketed IPv6 literal
+        return authority.partition("]")[0].lstrip("[")
+    return authority.split(":", 1)[0].strip(".")
+
+
+_LOCAL_HOST_PREFIXES = ("127.", "10.", "192.168.", "169.254.", "localhost.")
+
+
+def _is_local_network_host(host: str) -> bool:
+    """True when the parsed host targets the local network.
+
+    Judges the host itself, not a substring of the URL, so userinfo shapes
+    like ``http://evil.com@127.0.0.1/`` cannot smuggle a local target past
+    the check.  tools/network_safety.py stays the real fetch-time boundary.
+    """
+    if host in ("localhost", "0.0.0.0", "::1"):
+        return True
+    return host.startswith(_LOCAL_HOST_PREFIXES)
 
 
 def _is_placeholder_url(url_lower: str) -> bool:
@@ -93,7 +109,7 @@ def sanitize_step(
             "tool": "file_read",
             "arguments": {"path": path},
             "label": f"file:{path}",
-            "expected_outcome": "Non-empty UTF-8 text from the hinted file.",
+            "expected_outcome": "Non-empty UTF-8 text from the requested file.",
         }
 
     if tool_name == "web_search":
@@ -300,16 +316,11 @@ def sanitize_step(
             )
             return None
         # Block obvious SSRF shapes BEFORE the tool layer.
-        for blocked in (
-            "://localhost", "://127.", "://0.0.0.0",
-            "://10.", "://192.168.", "://169.254.",
-            "://[::1]",
-        ):
-            if blocked in url_lower:
-                warnings.append(
-                    f"step[{idx}]: web_fetch url targets local network, dropped"
-                )
-                return None
+        if _is_local_network_host(_url_host(url_lower)):
+            warnings.append(
+                f"step[{idx}]: web_fetch url targets local network, dropped"
+            )
+            return None
         if _is_placeholder_url(url_lower):
             warnings.append(
                 f"step[{idx}]: web_fetch url is a placeholder/example host, dropped"
@@ -344,16 +355,11 @@ def sanitize_step(
                 f"step[{idx}]: rss_fetch url must start with http:// or https://, dropped"
             )
             return None
-        for blocked in (
-            "://localhost", "://127.", "://0.0.0.0",
-            "://10.", "://192.168.", "://169.254.",
-            "://[::1]",
-        ):
-            if blocked in url_lower:
-                warnings.append(
-                    f"step[{idx}]: rss_fetch url targets local network, dropped"
-                )
-                return None
+        if _is_local_network_host(_url_host(url_lower)):
+            warnings.append(
+                f"step[{idx}]: rss_fetch url targets local network, dropped"
+            )
+            return None
         if _is_placeholder_url(url_lower):
             warnings.append(
                 f"step[{idx}]: rss_fetch url is a placeholder/example host, dropped"
