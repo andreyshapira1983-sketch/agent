@@ -52,9 +52,10 @@ distinguished, and why only the silent one fires.
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Literal, Sequence
+
+from core.file_request_intent import extract_path_mentions
 
 ObligationSource = Literal["intent", "plan", "freshness", "acceptance_criteria"]
 
@@ -87,40 +88,25 @@ _OBSERVING_TOOLS: frozenset[str] = frozenset({
 #: A path named in the question. Same shape the loop already uses for its
 #: file-scope notice — the object, not the verb.
 #:
-#: The leading guard is a speed fix, not a meaning change. Without it the
-#: engine could begin a match *inside* a run of `/`, `.` or `-`, so a wall of
-#: n separators offered n starting positions and each one rescanned the rest:
-#: 4.7 s at 18 KB, 15.5 s at 38 KB of free text the model itself can emit.
-#: Any match that starts after such a separator would also have been found one
-#: character earlier, and the earlier match is the longer, more complete path —
-#: so refusing the later start costs nothing. Verified by re-scanning 478 files
-#: of this repository with and without the guard: identical results, every file.
-_PATH_RE = re.compile(
-    r"(?<![/.\-])"
-    r"(?P<path>"
-    r"(?:[A-Za-z]:[\\/])?"
-    r"(?:/)?"
-    r"(?:\.{1,2}[\\/])?"
-    r"(?:[A-Za-z0-9_.-]+[\\/])*"
-    r"[A-Za-z0-9_.-]+\."
-    r"(?:py|md|txt|json|yml|yaml|pdf|jsonl|toml|ini|cfg|log)"
-    r")",
-    flags=re.IGNORECASE,
+#: The regex this used until 2026-08-02 carried a lookbehind guard measured in
+#: commit 113bd88 (4.7 s -> 2 ms on separator walls) — and CodeQL alert #5 was
+#: still right: starts after LETTERS remained open, so a wall of class
+#: characters cost 3.7 s at 16 KB of free text the model itself can emit. The
+#: same finding was fixed for the loop's twin pattern first (alert #11); this
+#: site now delegates to that shared linear scanner, with this module's wider
+#: extension list. The retired pattern lives verbatim in the test file as the
+#: equivalence oracle.
+_OBLIGATION_PATH_EXTS: tuple[str, ...] = (
+    "py", "md", "txt", "json", "yml", "yaml", "pdf",
+    "jsonl", "toml", "ini", "cfg", "log",
 )
 
 
 def paths_mentioned(text: str) -> tuple[str, ...]:
     """Workspace paths named in the text, de-duplicated, order preserved."""
-    seen: set[str] = set()
-    out: list[str] = []
-    for match in _PATH_RE.finditer(text or ""):
-        path = match.group("path").rstrip(".,;:!?)\"]}'")
-        key = path.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(path)
-    return tuple(out)
+    return tuple(
+        extract_path_mentions(text or "", exts=_OBLIGATION_PATH_EXTS)
+    )
 
 
 @dataclass(frozen=True)
