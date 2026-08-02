@@ -950,6 +950,22 @@ class TestShellLabelUniqueness:
         # Capping must not reintroduce the collision it was added around.
         assert label != _shell_label(["grep", blob + "X", "core"])
 
+    def test_two_token_commands_with_long_first_arg_stay_distinct(self):
+        """The #257 cap reopened the hole #255 closed, for exactly one shape:
+        len(argv) == 2 with argv[1] longer than the cap. Truncation makes the
+        visible part lossy, and the two-token early return skips the digest
+        that carries uniqueness everywhere else — so two different commands
+        sharing a 32-char prefix rendered identically and the artifact map
+        lost one (the very overwrite #255 was fixing). Once the visible part
+        is lossy, the digest must come back."""
+        from core.step_sanitizer import _LABEL_ARG_CHARS, _shell_label
+
+        prefix = "docs/audit/MASTER_ISSUE_REGISTRY"
+        assert len(prefix) >= _LABEL_ARG_CHARS
+        a = _shell_label(["grep", prefix + ".md"])
+        b = _shell_label(["grep", prefix + "_OLD.md"])
+        assert a != b, f"both rendered as {a!r} — the artifact map loses one"
+
     def test_same_command_is_stable_across_calls(self):
         assert self._label(["grep", "-rl", "x", "core"]) == self._label(
             ["grep", "-rl", "x", "core"]

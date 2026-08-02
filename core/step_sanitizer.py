@@ -84,10 +84,16 @@ def _shell_label(argv: list[str]) -> str:
     """
     cmd = argv[0].strip().lower() if argv else ""
     head = f"shell_exec:{cmd}"
+    truncated = False
     if len(argv) > 1:
         arg = argv[1]
-        head += f" {arg[:_LABEL_ARG_CHARS]}…" if len(arg) > _LABEL_ARG_CHARS else f" {arg}"
-    if len(argv) <= 2:
+        truncated = len(arg) > _LABEL_ARG_CHARS
+        head += f" {arg[:_LABEL_ARG_CHARS]}…" if truncated else f" {arg}"
+    if len(argv) <= 2 and not truncated:
+        # Only here is the label still the whole command; a truncated
+        # argv[1] is lossy, so it falls through to the digest below —
+        # otherwise two commands sharing the visible prefix collide, which
+        # is the exact overwrite the digest exists to prevent.
         return head
     digest = hashlib.blake2s(
         repr(argv).encode("utf-8", "replace"), digest_size=3
