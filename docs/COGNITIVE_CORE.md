@@ -63,7 +63,8 @@ Everything else in the repository does one of four other jobs: it **remembers**
 without changing how the agent thinks. The core cannot.
 
 **Why this definition and not "the loop".** `core/loop.py` is where most of the
-core executes, but it is not the core: it is 3882 lines of orchestration that
+core executes, but it is not the core: it is ~~3882~~ **4047 (2026-08-02,
+after the piece-by-piece extraction of #217–#224)** lines of orchestration that
 *calls* the deciders. The deciders are separate, pure, and testable —
 `core/policy.py`, `core/replan.py`, `core/deep_escalation.py`,
 `core/evidence_support.py` and about thirty more. The core is that set of
@@ -373,7 +374,15 @@ nothing, spend nothing, and remember nothing on its own.*
    asks whether the cycle incurred a duty to observe or run something and left
    it unmet **without saying so**, from the object the question names, the
    admitted plan steps and `realtime_required` rather than from wording. It
-   emits `completion_obligation` and remains observational (8.11).
+   emits `completion_obligation` ~~and remains observational (8.11)~~ —
+   **corrected 2026-08-02 (PRs #216/#227, operator's ruling):** observational
+   *mid-run* only. At banking the verdict now has authority: the sensor's
+   finding is stored with the episode (`EpisodeRecord.defect_signals`), and an
+   unmet obligation on a run that declared `achieved` lowers the completion
+   verdict to `partially_achieved` (`completion_override` records the
+   displacing fact; the declaration itself is never edited) and thereby
+   withholds procedure credit. Nothing stops or replans mid-run — the run's
+   path is unchanged; what changed is the verdict it is banked under.
 
 ### 8.6 State control — **ENFORCING**
 
@@ -617,22 +626,31 @@ nothing, spend nothing, and remember nothing on its own.*
    **Still true after 2026-07-27, but two of the five were rebuilt rather than
    connected** (PR #177; measurement in
    [audit/SENSOR_SIGNAL_MEASUREMENT.md](audit/SENSOR_SIGNAL_MEASUREMENT.md)).
-   None of the five enforces anything today. What changed is *what they say*:
+   ~~None of the five enforces anything today.~~ **Corrected 2026-08-02:**
+   four of the five still enforce nothing; S3 became the exception *at
+   banking time* under the operator's ruling (see the row below and §8.5).
+   What changed in #177 is *what they say*:
 
    | sensor | current module / event | current state |
    |---|---|---|
    | S1 evidence support | `core/evidence_support.py` → `evidence_support` | redefined: applicability, support score, weak-support flag, citation-integrity flag. Not a confidence gate, not connected to replan. |
    | S2 stagnation | `core/termination_guard.py` → `stagnation_detected` + `stagnation_shadow` | shadow accounting only; stops nothing. |
-   | S3 unmet obligation | `core/completion_obligation.py` → `completion_obligation` | detector replaced; the keyword detector survives only as `shadow_keyword_detector` inside the new event. |
-   | S4 reasoning ↔ action | `core/reasoning_action_check.py` → `reasoning_action_mismatch` | unchanged by decision; still an observer. |
+   | S3 unmet obligation | `core/completion_obligation.py` → `completion_obligation` | detector replaced; the keyword detector survives only as `shadow_keyword_detector` inside the new event. **2026-08-02: authoritative at banking** — lowers a declared `achieved` to `partially_achieved` and withholds procedure credit (PR #216); still decides nothing mid-run. |
+   | S4 reasoning ↔ action | `core/reasoning_action_check.py` → `reasoning_action_mismatch` | unchanged by decision; still an observer — but since 2026-08-02 its firing is *banked* with the episode (`defect_signals`), so a repeated fault is visible in memory. Recording grants no power (pinned by test). |
    | S5 subsystem disagreement | `core/subsystem_disagreement.py` → `subsystem_disagreement` + `subsystem_disagreement_shadow` | shadow accounting only; replans and escalates nothing. |
 
 4. **One budget is off by default.** `BudgetLimits.max_llm_calls = 0` means
    unlimited on the plain autonomous path.
-5. **`core/loop.py` is where the boundary blurs** — 3882 lines mixing the
-   decision sequence with orchestration and formatting. It is the natural next
-   extraction target, and it should be done the way `main.py` was: characterize
-   first, move in small proven steps.
+5. **`core/loop.py` is where the boundary blurs** — ~~3882~~ 4047 lines mixing
+   the decision sequence with orchestration and formatting. ~~It is the natural
+   next extraction target, and it should be done the way `main.py` was:
+   characterize first, move in small proven steps.~~ **Done 2026-08-02, exactly
+   that way** (#217, #218, #219, #221, #222, #224): six bounded pieces moved to
+   their real homes with AST-closure checks, byte-verbatim bodies and oracle
+   tests — −686 lines. What remains is genuine loop orchestration
+   (`_run_inner`, `_execute_step`, `_synthesize`); carving *those* is an
+   architectural change, registered as out of conveyor scope, not a pending
+   extraction.
 6. **Deep escalation covers only the `for_task` path.** Roles routed through
    `for_role` (verifier, repair, subagent) cannot reach the deep tier at all —
    which is safe, and documented, but means the gate is narrower than it looks.
