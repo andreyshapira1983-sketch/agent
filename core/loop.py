@@ -183,7 +183,6 @@ _TRUSTED_INTERNAL_TOOLS: frozenset[str] = frozenset({
 })
 
 
-
 # Maps tool names to data_classifier source hints. Drives the per-tool
 # default DataClass (file_read -> private, web_search -> public, …).
 _TOOL_SOURCE_HINTS: dict[str, SourceHint] = {
