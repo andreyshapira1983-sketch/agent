@@ -102,7 +102,9 @@ _CHANGE_INTENT_RE = re.compile(
 # Punctuation a file name picks up around it: sentence and list marks, and
 # the quoting a path is usually written in — backticks included, since a
 # question about `commit.log` arrives fenced far more often than bare.
-_TOKEN_EDGE_PUNCT = ".,;:!?()[]{}<>«»\"'`"
+# (Named for the file-name edges it strips; the earlier `_TOKEN_…` name
+# tripped secret scanners, which read "token" as a credential.)
+_FILENAME_EDGE_PUNCT = ".,;:!?()[]{}<>«»\"'`"
 
 
 def strip_file_tokens(text: str) -> str:
@@ -124,7 +126,7 @@ def strip_file_tokens(text: str) -> str:
     """
     kept: list[str] = []
     for token in text.split():
-        bare = token.strip(_TOKEN_EDGE_PUNCT)
+        bare = token.strip(_FILENAME_EDGE_PUNCT)
         head, dot, extension = bare.rpartition(".")
         if (
             dot
