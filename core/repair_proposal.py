@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -29,6 +29,7 @@ if TYPE_CHECKING:  # import-time cycle otherwise; only needed for the annotation
     from core.task_complexity import ComplexityTier
 
 from core.llm import LLM
+from core.plan_parsing import embedded_json_objects
 from core.redaction import redact_payload, redact_text
 from core.secret_scanner import contains_secret
 from core.self_repair import RepairProposal
@@ -576,56 +577,6 @@ except ImportError:  # pragma: no cover
     pass
 
 
-def _embedded_json_objects(text: str) -> Iterator[str]:
-    """Every balanced ``{...}`` span in `text`, left to right.
-
-    Yields rather than returning the first, because the first is often not the
-    answer: a model narrating "the block builds {'k': 1} before writing" leaves
-    a balanced span that parses as nothing, and an earlier illustrative object
-    ("here is the shape I will return: {...}") parses fine while being the wrong
-    object. Taking only the leftmost defeats the fix in exactly the
-    narrating-model case it exists for.
-
-    Brace counting is string-aware: a `{` inside a JSON string value — common
-    here, since `proposed_content` carries Python code — must not open a level,
-    and the matching `}` must not close one early.
-    """
-    index = 0
-    length = len(text)
-    while index < length:
-        start = text.find("{", index)
-        if start < 0:
-            return
-        depth = 0
-        in_string = False
-        escaped = False
-        closed_at = -1
-        for pos in range(start, length):
-            char = text[pos]
-            if in_string:
-                if escaped:
-                    escaped = False
-                elif char == "\\":
-                    escaped = True
-                elif char == '"':
-                    in_string = False
-                continue
-            if char == '"':
-                in_string = True
-            elif char == "{":
-                depth += 1
-            elif char == "}":
-                depth -= 1
-                if depth == 0:
-                    closed_at = pos
-                    break
-        if closed_at < 0:
-            # Unbalanced from here on: nothing further can close either.
-            return
-        yield text[start:closed_at + 1]
-        index = closed_at + 1
-
-
 def _parse_json_object(raw: str) -> dict[str, Any]:
     """Parse the model's reply, tolerating a reply that thinks out loud first.
 
@@ -649,7 +600,7 @@ def _parse_json_object(raw: str) -> dict[str, Any]:
     saw_object = False
     fallback: dict[str, Any] | None = None
 
-    for candidate in (text, *_embedded_json_objects(text)):
+    for candidate in (text, *embedded_json_objects(text)):
         try:
             data = json.loads(candidate)
         except json.JSONDecodeError as exc:

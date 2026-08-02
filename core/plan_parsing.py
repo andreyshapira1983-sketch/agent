@@ -8,6 +8,8 @@ Moved verbatim (de-static + dedent only) from core/planner.py.
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import Iterator
 from typing import Any
 
 
@@ -159,3 +161,95 @@ def parse_json(
     if not diagnostics["reason"]:
         diagnostics["reason"] = "no JSON object found in planner output"
     return None, warnings, diagnostics
+
+
+_ANYWHERE_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+
+
+def embedded_json_objects(text: str) -> Iterator[str]:
+    """Every balanced ``{...}`` span in `text`, left to right.
+
+    Yields rather than returning the first, because the first is often not the
+    answer: a model narrating "the block builds {'k': 1} before writing" leaves
+    a balanced span that parses as nothing, and an earlier illustrative object
+    ("here is the shape I will return: {...}") parses fine while being the wrong
+    object. Taking only the leftmost defeats the fix in exactly the
+    narrating-model case it exists for.
+
+    Brace counting is string-aware: a `{` inside a JSON string value — common
+    here, since `proposed_content` carries Python code — must not open a level,
+    and the matching `}` must not close one early.
+    """
+    index = 0
+    length = len(text)
+    while index < length:
+        start = text.find("{", index)
+        if start < 0:
+            return
+        depth = 0
+        in_string = False
+        escaped = False
+        closed_at = -1
+        for pos in range(start, length):
+            char = text[pos]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    closed_at = pos
+                    break
+        if closed_at < 0:
+            # Unbalanced from here on: nothing further can close either.
+            return
+        yield text[start:closed_at + 1]
+        index = closed_at + 1
+
+
+def extract_json_object(text: str) -> dict[str, Any] | None:
+    """Best-effort: the JSON object inside a raw LLM reply, or ``None``.
+
+    The one shared answer to "the model was asked for JSON and wrapped it in
+    prose/fences anyway". Tolerances, strongest last, first hit wins:
+
+      1. a reply that IS the object (after stripping a leading fence);
+      2. an object inside a fence anywhere in the text;
+      3. the first-``{`` .. last-``}`` substring;
+      4. every balanced ``{...}`` span, left to right (string-aware).
+
+    Replaces three weaker per-module copies (subagent_memory_scope,
+    self_build_producer; repair_proposal keeps its domain envelope but shares
+    ``embedded_json_objects``). No diagnostics: callers that need to explain a
+    failure (the planner) use ``parse_json`` instead.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return None
+    t = text.strip()
+    fenced = _strip_markdown_fence(t)
+    if fenced is not None:
+        t = fenced
+    candidates: list[str] = [t]
+    fence_match = _ANYWHERE_FENCE_RE.search(t)
+    if fence_match:
+        candidates.append(fence_match.group(1))
+    start, end = t.find("{"), t.rfind("}")
+    if start != -1 and end > start:
+        candidates.append(t[start : end + 1])
+    for candidate in (*candidates, *embedded_json_objects(t)):
+        try:
+            obj = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    return None
