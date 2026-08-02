@@ -330,7 +330,7 @@ def test_root_level_markdown_is_scanned():
     with redirect_stdout(buf):
         assert mod.main([]) == 0
     out = buf.getvalue()
-    scanned = int(out.split("documents scanned")[1].split(":")[1].split()[0])
+    scanned = _count(out, "documents scanned")
     assert scanned == docs_count + root_count, (
         f"scanned {scanned}, expected docs/ ({docs_count}) + root ({root_count})"
     )
