@@ -87,6 +87,8 @@ class AgentLoopExtractedMethods2:
         # use as an unknown attribute, and `tests/test_loop_methods_contract`
         # keeps this block from ever shadowing something the mixin really has.
         retrieval_policy: Any
+        episodic_store: EpisodicMemoryStore | None
+        procedural_store: ProceduralMemoryStore | None
 
     def _durable_learning_suppressed(self, sink: str | None = None) -> bool:
         """True when a durable learning write must be skipped.
@@ -391,11 +393,13 @@ class AgentLoopExtractedMethods2:
                     # reader reconciles as
                     # `selected - readmitted + sum(rejected_by) == candidates`.
                     readmitted += 1
-        procedures = (
-            self.procedural_store.search(question, limit=3)
-            if self.procedural_store is not None
-            else []
-        )
+        if self.procedural_store is not None:
+            proc_result = self.procedural_store.search_with_report(question, limit=3)
+            procedures = proc_result.procedures
+            procedures_rejected_by = proc_result.rejected_by
+        else:
+            procedures = []
+            procedures_rejected_by = {}
         block = format_experience_context(episodes=episodes, procedures=procedures)
         self.log.log(
             "experience_memory_inject",
@@ -406,6 +410,10 @@ class AgentLoopExtractedMethods2:
                 "procedure_ids": [proc.id for proc in procedures],
                 "chars": len(block),
                 "rejected_by": rejected_by,
+                # Why procedures did not surface — no longer a silent zero. Absent
+                # means zero, like every reason key.
+                **({"procedures_rejected_by": procedures_rejected_by}
+                   if procedures_rejected_by else {}),
                 # Absent means zero, like every reason key.
                 **({"readmitted": readmitted} if readmitted else {}),
             },
