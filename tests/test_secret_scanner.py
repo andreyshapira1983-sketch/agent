@@ -60,7 +60,7 @@ class TestScanRegex:
     )
     def test_known_credential_shapes_are_found(self, text, expected_kind):
         findings = scan(text)
-        assert findings, f"expected a finding in {text!r}"
+        assert findings, f"expected a {expected_kind} finding"
         kinds = {f.kind for f in findings}
         assert expected_kind in kinds
 
@@ -100,7 +100,7 @@ class TestScanRegex:
         # flags on `core/logger.py`. The underscore prefixes matter: `sk_live_`
         # is not caught by the `sk-` rule because that one requires a hyphen.
         findings = scan(text)
-        assert findings, f"expected a finding in {text!r}"
+        assert findings, f"expected a {expected_kind} finding"
         assert expected_kind in {f.kind for f in findings}
 
     @pytest.mark.parametrize(
@@ -134,7 +134,19 @@ class TestScanRegex:
         policy, so a lookalike costs real content its place in memory — the
         cost of a false positive here is not cosmetic.
         """
-        assert scan(text) == [], f"lookalike wrongly flagged: {text[:24]}..."
+        assert scan(text) == [], "lookalike wrongly flagged (see the case id)"
+
+    def test_stateless_github_token_is_matched_in_full(self):
+        """The span, not just the kind: a narrower body class also produced
+        *a* github-token finding on this input by stopping at the first dot,
+        so kind-membership alone could not prove the widened class works. The
+        redaction boundary is the finding's span — a partial span leaves the
+        JWT tail readable.
+        """
+        text = "ghs_123456_eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOjF9.sig-part_x"
+        finding = next(f for f in scan(text) if f.kind == "github-token")
+        assert (finding.start, finding.end) == (0, len(text))
+        assert finding.matched == text
 
     def test_clean_text_has_no_findings(self):
         assert scan("The weather is nice today.") == []
