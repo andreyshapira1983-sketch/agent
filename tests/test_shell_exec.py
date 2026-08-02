@@ -844,7 +844,7 @@ class TestGitRecordingSubcommands:
         reasoning. Twice — the second time after the tool's own description had
         already been corrected.
         """
-        from core.planner import PLANNER_SYSTEM
+        from core.planner_prompt import PLANNER_SYSTEM
         from tools.shell_exec import WRITE_SUBCOMMANDS
 
         prompt = PLANNER_SYSTEM.lower()
