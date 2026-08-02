@@ -41,6 +41,7 @@ from typing import Any, Callable
 
 from core.backlog_target_mapper import map_backlog_candidate
 from core.injection_guard import prepare_untrusted_text_for_llm
+from core.plan_parsing import extract_json_object
 from core.redaction import prepare_text_for_llm_boundary
 from core.self_apply_bridge import (
     DEFAULT_ROLLBACK,
@@ -210,31 +211,6 @@ class ProducerReport:
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
-
-
-def _parse_json(text: str) -> dict | None:
-    """Best-effort structured parse of an LLM answer.
-
-    Accepts clean JSON or JSON inside a ```json fenced block. Returns None when
-    nothing parseable is found — the caller then treats it as a role failure,
-    never as a silent success.
-    """
-    if not isinstance(text, str) or not text.strip():
-        return None
-    candidate = text.strip()
-    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", candidate, re.DOTALL)
-    if fence:
-        candidate = fence.group(1)
-    else:
-        first = candidate.find("{")
-        last = candidate.rfind("}")
-        if first != -1 and last != -1 and last > first:
-            candidate = candidate[first : last + 1]
-    try:
-        parsed = json.loads(candidate)
-    except (json.JSONDecodeError, ValueError):
-        return None
-    return parsed if isinstance(parsed, dict) else None
 
 
 def _looks_like_diff(content: str) -> bool:
@@ -414,7 +390,7 @@ def _llm_json(
     except TypeError:
         # Tolerate positional-only fakes.
         answer = llm.complete(system, safe_user)
-    return _parse_json(answer if isinstance(answer, str) else "")
+    return extract_json_object(answer if isinstance(answer, str) else "")
 
 
 # ── roles ───────────────────────────────────────────────────────────────────

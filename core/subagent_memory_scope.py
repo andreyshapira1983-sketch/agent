@@ -40,26 +40,13 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from core.ids import new_id
+from core.plan_parsing import extract_json_object
 
 
 # ── internal helpers ───────────────────────────────────────────────────────────
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _parse_json_object(text: str) -> dict[str, Any] | None:
-    """Extract first JSON object from *text*. Returns None on failure."""
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
-        return None
-    try:
-        data = json.loads(match.group())
-        if not isinstance(data, dict):
-            return None
-        return data
-    except json.JSONDecodeError:
-        return None
 
 
 # ── scope contracts ────────────────────────────────────────────────────────────
@@ -324,7 +311,7 @@ def propose_subagent(
         temperature=0.0,
     )
 
-    data = _parse_json_object(raw)
+    data = extract_json_object(raw)
     if data is None:
         _emit(logger, "subagent_proposal_llm_error", {
             "goal": goal,
