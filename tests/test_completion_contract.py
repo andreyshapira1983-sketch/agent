@@ -207,10 +207,38 @@ class TestAmbiguityIsObservedNotGuessed:
     rules and their false-ask rates on 48 real requests.
     """
 
-    def test_a_change_request_with_no_target_is_an_ambiguity(self):
+    def test_the_targetless_change_rule_no_longer_claims_ambiguity(self):
+        """RETIRED 2026-08-02 after measuring zero precision.
+
+        This used to assert that "исправь это" (a change verb with no path)
+        raised an ambiguity. Measured across 62 live requests the rule fired 8
+        times and was wrong ALL EIGHT: every one named its target in prose the
+        vocabulary cannot parse. The eighth was the operator's numbered
+        experiment procedure, declared targetless because step 7 contained
+        "внеси минимальное исправление".
+
+        An empty contract now says only what is true — no deliverable could be
+        derived — without also claiming the operator was unclear. Scope: only
+        THIS rule is retired; the mixed read+change rule still raises an
+        ambiguity (see `test_a_mixed_read_and_change_request_owes_nothing_and_asks`).
+        """
         contract = derive_completion_contract("исправь это")
         assert contract.obligations == ()
-        assert contract.needs_clarification is True
+        assert contract.ambiguities == ()
+        assert contract.needs_clarification is False
+
+    def test_a_multistep_procedure_is_not_declared_targetless(self):
+        """The measured case, locked: a long numbered command whose later steps
+        mention fixing something must not be reduced to "asks to modify, names
+        no target"."""
+        contract = derive_completion_contract(
+            "Начни серию контролируемых испытаний. 1. Выбери урок. "
+            "2. Создай новую задачу. 3. Запусти автономного агента. "
+            "7. Только после воспроизведения дефекта напиши падающий тест "
+            "и внеси минимальное исправление."
+        )
+        assert contract.needs_clarification is False
+        assert contract.ambiguities == ()
 
     def test_an_ambiguity_never_becomes_an_obligation(self):
         """Guessing would manufacture a duty the operator never gave — and an
