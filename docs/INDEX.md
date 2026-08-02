@@ -120,8 +120,11 @@ as a navigation aid. The registry wins in every case.
    `blocked` carries two meanings, and the code's meaning occupies **14
    modules** (value-occurrence count) — which the original warning did not know.
    Four naming/ownership decisions came out of it and are open in §16 (D-3…D-6).
+   *(2026-08-02: D-6's writer/boundary half is RULED — every new record gets an
+   explicit completion verdict at the save boundary; see the contract's §16 D-6
+   addendum and §17.6. Its envelope-membership half, and D-3…D-5, stay open.)*
    Planning may now proceed **from §17**, which states both sides; a decision
-   that touches D-3…D-6 still needs the operator first.
+   that touches the still-open halves needs the operator first.
 
 Two more traps that are *by design*, not drift:
 
