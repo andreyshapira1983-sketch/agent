@@ -162,6 +162,53 @@ def test_an_uncredited_episode_contributes_no_lesson():
     assert blocked.lessons == credited.lessons
 
 
+def test_the_production_merge_path_still_appends_lessons(tmp_path):
+    """Found by the #241–#263 series audit: #261 switched `upsert_from_episode`
+    from `with_episode` to `merged_from_episode` to remove tool-set CREDIT
+    (operator ruling 2026-08-02) — and silently dropped the lesson append
+    together with the counters. Lessons are content, not credit: no counter
+    moves, no status changes, and MIR-050's whole reason for `lessons` being
+    a LIST is that unrelated runs pool on one tool-shape key. After #261 the
+    production path kept only the first run's lesson, so the pooling defect
+    became invisible again. The `with_episode` tests above kept passing
+    because that method is no longer reachable from production."""
+    from core.smart_memory import ProceduralMemoryStore
+
+    store = ProceduralMemoryStore(tmp_path / "procedures.jsonl")
+    first, _ = store.upsert_from_episode(_episode())
+    # Creation seeds the lesson AND the immediate merge re-offers the same
+    # string; `_capped_lessons` dedupes by content, so exactly ONE copy lands.
+    assert len(first.lessons) == 1
+    merged, created = store.upsert_from_episode(
+        _episode(question="A completely unrelated question about budgets")
+    )
+    assert created is False
+    assert any("unrelated question about budgets" in x for x in merged.lessons), (
+        "the second episode's lesson was dropped on the production merge path"
+    )
+    # The ruling holds: provenance and lessons merge, credit does not.
+    assert merged.success_count == 0
+    assert merged.failure_count == 0
+    assert merged.status == "candidate"
+
+
+def test_the_production_merge_path_gives_no_lesson_without_credit(tmp_path):
+    """Same gate as `with_episode` had: no credit, no lesson — the pair moves
+    together, so a blocked run cannot write advice into a procedure either."""
+    from core.smart_memory import ProceduralMemoryStore
+
+    store = ProceduralMemoryStore(tmp_path / "procedures.jsonl")
+    first, _ = store.upsert_from_episode(_episode())
+    blocked = _episode(
+        question="A blocked run trying to leave advice",
+        defect_signals=["obligation_silently_missing"],
+        declared_completion="achieved",
+    )
+    assert not procedure_credit_allowed(blocked)
+    merged = first.merged_from_episode(blocked)
+    assert merged.lessons == first.lessons
+
+
 # ---------------------------------------------------------------------------
 # The boundary: what is stored changed, when it is stored did not
 # ---------------------------------------------------------------------------
