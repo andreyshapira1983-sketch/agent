@@ -469,12 +469,22 @@ class ProcedureRecord:
         — source-episode ids and the lesson cap — but moves NO counter and
         changes NO status. Credit flows only through the causal
         `used_procedure_ids` path (`apply_episode_feedback` → `with_outcome`).
+
+        Lessons still accumulate here, under the same gate `with_episode`
+        used: a lesson is content, not credit — MIR-050's reason for keeping
+        `lessons` a list is that unrelated runs pool on one tool-shape key,
+        and dropping the append (the #261 oversight) made the second run's
+        lesson vanish while its episode id was still merged.
         """
         episode_ids = tuple(dict.fromkeys([*self.source_episode_ids, episode.id]))
+        lesson = lesson_from_episode(episode)
+        lessons = _capped_lessons(self.lessons)
+        if lesson and procedure_credit_allowed(episode):
+            lessons = _capped_lessons([*self.lessons, lesson])
         return replace(
             self,
             source_episode_ids=episode_ids,
-            lessons=_capped_lessons(self.lessons),
+            lessons=lessons,
             updated_at=_now_iso(),
         )
 
@@ -1771,9 +1781,11 @@ def procedure_from_episode(episode: EpisodeRecord) -> ProcedureRecord | None:
         failure_count=0,
         confidence=0.5,
         # Born unproven. `upsert_from_episode` immediately folds in the first
-        # episode via `with_episode`, which recomputes the status through
-        # `_procedure_status_for` — one credited success lands on `candidate`,
-        # never `active` (MIR-003 A4 maturity gate).
+        # episode via `merged_from_episode` — provenance and lesson only, no
+        # counter and no status change (operator ruling 2026-08-02). Promotion
+        # comes solely from the causal feedback path (`apply_episode_feedback`
+        # → `with_outcome`), so a fresh procedure stays `candidate`, never
+        # `active` (MIR-003 A4 maturity gate).
         status="candidate",
     )
 
