@@ -16,7 +16,7 @@ from pathlib import Path
 
 from core.loop import AgentLoop, new_trace_id
 from core.logger import TraceLogger
-from core.planner import host_tools_relevant
+from core.host_tools_context import host_tools_relevant
 from core.policy import PolicyGate
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
