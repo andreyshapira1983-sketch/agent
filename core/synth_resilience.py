@@ -63,6 +63,15 @@ def is_transient_error(exc: BaseException) -> bool:
     return classify_model_error(exc) in {"rate_limit", "timeout", "server_error", "unknown"}
 
 
+class _BlankSynthesis(RuntimeError):
+    """Raised internally when an attempt produces no visible text.
+
+    Never escapes ``run_synthesizer_ladder``: it exists so a blank draft
+    walks the retry -> adapt -> honest-partial path instead of being
+    mistaken for a finished answer.
+    """
+
+
 @dataclass(frozen=True)
 class SynthAttempt:
     """Describes how the caller should build the synthesis for one attempt."""
@@ -112,11 +121,24 @@ def run_synthesizer_ladder(
         )
         try:
             answer = do_synthesize(attempt)
+            # A blank draft is not an answer. The provider can return success
+            # with no visible text — measured live 2026-08-02: the synthesizer
+            # billed 14336 output tokens, status=success, and handed back the
+            # empty string; the run banked outcome=success and the operator
+            # received a 110-character evidence notice with nothing under it.
+            # Treating it as a finished answer is how a non-answer earns
+            # credit, so it enters the same ladder an exception does.
+            if not answer.strip():
+                raise _BlankSynthesis("synthesizer returned no visible text")
         except fatal_types:
             raise
         except Exception as exc:  # noqa: BLE001 — recovery boundary
             err = f"{type(exc).__name__}: {exc}"
-            last_class = classify_model_error(exc)
+            last_class = (
+                "blank_answer"
+                if isinstance(exc, _BlankSynthesis)
+                else classify_model_error(exc)
+            )
             errors.append(err)
             on_event(
                 "synthesizer_attempt_failed",
