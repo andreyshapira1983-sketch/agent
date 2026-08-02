@@ -30,6 +30,26 @@ def _ws(tmp_path: Path, *names: str) -> Path:
     return tmp_path
 
 
+def test_importing_the_module_does_not_load_the_llm_stack():
+    """The module docstring promises "No LLM" — Copilot caught the runtime
+    `PlannerOutput` import pulling `core.llm` in transitively. A subprocess is
+    the only honest probe: in-process, some other test has usually imported
+    the stack already.
+    """
+    import subprocess
+    import sys
+
+    code = (
+        "import sys; import core.file_request_intent; "
+        "assert 'core.llm' not in sys.modules, 'llm stack leaked'; "
+        "assert 'core.planner' not in sys.modules, 'planner leaked'"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 # ---------------------------------------------------------------------------
 # The decision table
 # ---------------------------------------------------------------------------
