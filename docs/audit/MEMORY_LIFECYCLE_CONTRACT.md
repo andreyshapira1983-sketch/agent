@@ -1,13 +1,24 @@
-# Memory Lifecycle Contract — M1 (canonical design, **v4-draft**)
+# Memory Lifecycle Contract — M1 (canonical design, **v5-draft**)
 
-> **Status: v4-draft — target design only. Not a runtime specification.**
+> **Status: v5-draft — target design, now approvable. Not a runtime specification.**
 >
-> **v3 = v2 plus §17; the normative body is unchanged.** §1–§16 carry exactly the
-> rules v2-draft carried, still unapproved and still implemented by nothing. The
-> version was bumped because §17 is new *content in this document*, not because a
-> prescription changed — the header log requires amendments to happen here, so a
-> non-normative addendum still moves the number. Anything citing "the v2 normative
-> draft" is citing text that is present and unmodified below.
+> **What v5 is for.** Earlier versions left the normative body (§1–§16) as v2's
+> unapproved text and only *added* measurement sections beside it. That is why the
+> document could not be approved: approving it would have commanded building an
+> envelope taxonomy the code never built **and** reversing several operator decisions
+> made after v2. v5 fixes the second problem so the first becomes a phased plan, not
+> a contradiction. It adds the **§18 operational-rule ledger** (which §5–§15 rules are
+> shipped / shipped-differently / not built / **overruled by a later ruling**) and the
+> **§19 phase plan**. The chosen direction is **Path B (operator, 2026-08-02)**: keep
+> the envelope taxonomy as the long-term target, but mark honestly what is real and
+> stage the build. Path B does **not** reinstate any rule §18 marks
+> `SUPERSEDED BY RULING`; those operator decisions stand.
+>
+> **This bump does touch how the body is read.** Unlike v3/v4, v5 is not purely
+> additive: §18 records that specific §6.4/§7.7/§8 prescriptions were overruled by
+> MIR-057, MIR-050 and the consolidation-retirement schedule. The v2 text remains
+> below for provenance, but §18 is authoritative over it wherever they disagree, and
+> says so per row.
 >
 > **Do not read this document as current behavior.** Owners of *what the code
 > does today*:
@@ -38,7 +49,7 @@
 >   read-only measurement: for each of the six dimensions, what the code actually has,
 >   under what name, with what vocabulary. Four new open decisions (D-3…D-6) are added to
 >   §16 — including the two the warning named (the completion axis, and `blocked` meaning
-> - **v4-draft (this). Adds §17.5 — dated post-measurement deltas — and pays a
+> - **v4-draft. Adds §17.5 — dated post-measurement deltas — and pays a
 >   version-log debt.** The §16 D-6 writer/boundary addendum (operator ruling,
 >   2026-08-02, PR #227) was added without moving the number, though this log's own
 >   rule says a non-normative addendum still moves it; this bump covers that
@@ -46,6 +57,17 @@
 >   unapproved v2 body.
 >   two different things). **Nothing in §17 prescribes an outcome**; per the operator's
 >   standing rule, the measurement is mine and the classification is his.
+> - **v5-draft (this). Path B chosen (operator, 2026-08-02): the document becomes
+>   approvable.** Adds §18 — the operational-rule ledger over §5–§15, whose last
+>   column marks four v2 prescriptions `SUPERSEDED BY RULING` (§6.4 partial-debit and
+>   legacy-counter rules by MIR-057/051; §7.7(a) workflow-match by MIR-050; §7.7(b)
+>   used-credit by the two-axis design) — these are operator decisions, not defects,
+>   and Path B does not reverse them. Adds §19 — the phase plan the header has always
+>   required, with Phase 1 = the live retrieval repair the 2026-08-02 learning probe
+>   measured (procedures banked but never retrieved). This is the first bump that
+>   changes how §1–§16 are read: §18 is authoritative over the v2 body where they
+>   disagree. The envelope taxonomy remains the target; only its unbuilt parts are
+>   staged, and its overruled parts are marked.
 
 - Baseline: `main` @ `f317c4c`.
 - Built on: completed M0 (`docs/audit/MEMORY_MAP.md` incl. its labeled post-M0 addendum §14)
@@ -257,6 +279,13 @@ FORBIDDEN: any automatic transition INTO allowed; automatic blocked.
 
 ### 6.4 Procedure lifecycle — **closed loop (normative; replaces v1's tally-driven §6.4)**
 
+> **⚠ SUPERSEDED IN PART BY RULING — see §18.** Two rules below no longer stand:
+> (1) the `negative_count` debit for an answer that ended *partially-verified* was
+> overruled by MIR-057 (2026-07-20) — a partial answer no longer debits a procedure;
+> (2) the "verified_success_count only counts `outcome==success AND D2==verified`"
+> rule shipped without the `D2==verified` half (`procedure_credit_allowed`,
+> `smart_memory.py:1034`). The v2 text is kept for provenance; §18 is authoritative.
+
 Counters (per procedure, fed **only** by attributed episodes, §7.7):
 
 ```
@@ -342,6 +371,15 @@ MIR-002 part, P8.)
 
 ### 7.7 Attribution (procedures) — **new in v2; the input to §6.4**
 
+> **⚠ SUPERSEDED IN PART BY RULING — see §18.** Channel (a) below (workflow-match
+> feeding counters) was **removed** from the feedback path, not repaired: MIR-050
+> (2026-07-20) measured that `workflow_key` pools unrelated goals (8/48 keys span
+> goal classes), so `apply_episode_feedback` is driven **only** by `used_procedure_ids`
+> with no workflow-key fallback (`smart_memory.py:~792`). Channel (a) survives only as
+> the creation/merge key in `upsert_from_episode`. Whether to build a *better* identity
+> is open decision §16 D-1, deliberately deferred. Channel (b)'s "no positive credit
+> merely for being used" was also overruled: the two-axis design credits used-ids.
+
 Two deterministic channels; only attributed episodes may touch a procedure's counters:
 
 - **(a) Workflow-match** (the existing coincidental channel, repaired): an episode whose
@@ -358,6 +396,12 @@ Two deterministic channels; only attributed episodes may touch a procedure's cou
   positive credit requires channel-(a) verified success.
 
 ## 8. Hygiene, expiration, deduplication — and consolidation retirement
+
+> **Status vs code (see §18): NOT BUILT — staged as §19 Phase 4.** Hygiene is
+> daemon-only today (MIR-045 open, no interactive trigger, no procedure-staleness
+> step); consolidation is still persisted every cycle (MIR-044 open), the opposite
+> of the retirement prescribed here. These prescriptions **stand** — they are unbuilt,
+> not overruled — and are scheduled as Phase 4.
 
 - **Hygiene becomes lifecycle-scheduled, not operator-only (closes MIR-045):** a bounded
   hygiene pass (expire → dedup → episodic prune → archive → **procedure staleness**) runs
@@ -714,9 +758,88 @@ contract's side, and it is why D4/D5 have no persistent-memory column above.
 | Completion axis settled at the SAVE boundary: `admit_for_storage` resolves `None` → explicit `"unknown"` on write; absence now occurs only on true legacy reads | `core/smart_memory.py` | PR #227, operator's D-6 writer/boundary ruling; MIR-064 `fixed` | Recorded at §16 D-6 addendum; the envelope-membership half of D-6 stays open |
 | MIR-057 recorded `fixed`: the two-axis design (option b of that entry) is shipped and pinned criterion-by-criterion | registry | PR #228 | Confirms the §17.3 completion-axis row's direction; normative body still silent |
 
+## 18. Operational-rule conformance ledger — measured 2026-08-02 against `main` @ `1e332b9`
+
+> **What §18 adds over §17.** §17 reconciled the six *envelope dimensions* (D1–D6).
+> It did **not** check the operational rules §5–§15 — write, retrieve, replay,
+> counting, hygiene, consolidation, the procedural lifecycle. This does. Same
+> discipline: a read-only pass, symbol names (stable) with a line hint as of the
+> date, and — like §17 — it is **provenance, not a live-verified index**. This
+> file is on `docs_code_conformance.py`'s `_HISTORICAL_ANCHOR_DOCS` list, so the
+> guard checks that the *files* exist, never the line numbers; a symbol name is
+> the durable reference, the line is the 2026-08-02 hint.
+>
+> **The point of §18 is the last column.** Some rules are shipped, some shipped
+> differently, some are not built — and **some the operator has since OVERRULED**.
+> A rule marked `SUPERSEDED BY RULING` is not a defect and must not be "fixed back":
+> it is the contract's v2 text that a later, measured operator decision replaced.
+> Path B keeps the envelope taxonomy as the forward target; it does **not** reinstate
+> anything in this column.
+
+Verdicts: **SHIPPED** (built as written) · **SHIPPED-DIFFERENTLY** (same effect,
+different mechanism/vocabulary) · **NOT BUILT** · **SUPERSEDED BY RULING** (a later
+operator decision replaced the prescription).
+
+| § | Prescription (one line) | Code reality (symbol · line@2026-08-02) | Verdict |
+|---|---|---|---|
+| §6.4 credit | credit a procedure iff `outcome==success AND D2==verified` | `procedure_credit_allowed` = `effective_completion=="achieved" and outcome=="success" and tools_used` — **no** verified-chunk test (`smart_memory.py:1034`) | SHIPPED-DIFFERENTLY |
+| §6.4 debit | debit when the answer ended unverified/partially-verified | evidence-`partial` **no longer** debits; debit only on `effective_completion=="failed" and replan_exhausted` (`feedback_for_episode` docstring `smart_memory.py:~1085`) | **SUPERSEDED BY RULING** (MIR-057, 2026-07-20) |
+| §6.4 legacy counters audit-only | old `success_count/failure_count` excluded from the math | those **are** the live counters; `recompute_legacy_confidence` repairs *from* them (`smart_memory.py:~853`) | **SUPERSEDED BY RULING** (MIR-051) |
+| §7.7(a) | repair workflow-key match as a bidirectional feedback channel | deliberately **removed** from feedback: "no fallback to workflow_key … MIR-050 measured that keys pool unrelated goals" (`apply_episode_feedback` docstring `smart_memory.py:~792`) | **SUPERSEDED BY RULING** (MIR-050 / D-1, deferred) |
+| §7.7(b) | no positive credit merely for being used | used-ids **do** receive a `success` verdict via `apply_episode_feedback` (`smart_memory.py:~810,844`) | **SUPERSEDED BY RULING** (MIR-057 two-axis credit) |
+| §8 consolidation | RETIRE: stop persisting reports, tally on demand, archive | still persisted every cycle: `consolidate_memory` → `consolidation_store.save` (`loop_methods2.py:778`) | NOT BUILT (MIR-044 open; retirement awaits a phase) |
+| §7.2 retrieval consults D5 first | every retrieval checks usage-eligibility | episodic: `is_usage_eligible` at three doors (`loop_methods2.py:357,381,431`); **procedures: no eligibility check** (`ProceduralMemoryStore.search` only skips `candidate`, `smart_memory.py:975`) | PARTIAL — **the live gap** |
+| §7.2 one tokenizer | one shared tokenizer for all memory retrieval | **three**: `smart_memory._tokens` (floor>2), `memory_policy._TOKEN_RE` (>1+stopwords), `knowledge_use_policy._tokens` (third) | NOT BUILT (MIR-008 open) |
+| §7.3 fast-path gate | gate on D2==verified + origin≠replay + D5==allowed + sim≥0.85 + shape | fast path exists (`_fast_path_allows_replay` `loop.py:536`); substitutes `answer_quality_score≥0.70` + `completion_state=="achieved"` for the absent D2 | SHIPPED-DIFFERENTLY |
+| §7.3 replay banks 0-verified, links source | replay = D1 replay, D2 not_run, chunks 0, `source_episode_id` | banks `verified_chunks=0, unverified_chunks=1, source_labels=["memory:<id>"]` — link is a label (`loop.py:949`) | SHIPPED (MIR-041) |
+| §7.4 counting | new `memory_supported` verdict for agent-derived citations | no such verdict; MIR-046 demotes to **topic-only** with a `user-explicit` allowlist (`verifier_core.py:44,188`) | SHIPPED-DIFFERENTLY |
+| §7.5 conflict | auto `conflicted`+`restricted`, persisted | post-write quarantine tagging; `conflicted ∈ QUARANTINE_TAGS`, quarantine-grade not `restricted` (`loop_methods2.py:489`, `knowledge_use_policy.py:28`) | SHIPPED-DIFFERENTLY (MIR-047) |
+| §8 hygiene | lifecycle-scheduled, end of tick + every N interactive cycles, incl. procedure staleness | `run_maintenance_pass` wired **only** to the daemon (`agent_tick.py:~1114`, default `shadow`); no interactive trigger; **no** procedure-staleness step (`obsolete` never assigned) | PARTIAL (MIR-045 open) |
+| §9.1 autonomous banks procedures + working memory | unattended path banks episodes and procedure feedback, per-run working memory | episodes yes; **working memory off** (`with_memory:False`) and **procedure sink excluded** (`durable_writes={"episode","hygiene"}`) (`agent_tick.py:~104`) | SHIPPED-DIFFERENTLY |
+| §12.5 migration | never infer D2/D4 from indirect fields | honoured on read: `from_dict` keeps absent axis fields `None`; `effective_completion` maps `None→"unknown"` (`smart_memory.py:~288,1286`) | SHIPPED |
+| §16 D-6 addendum | explicit completion verdict at the save boundary | `admit_for_storage` resolves `None→"unknown"` on write; mechanical writers via `writer_completion.py` (`smart_memory.py:~1387`) | SHIPPED (MIR-064) |
+
+**The one live-broken row, restated for §19.** §7.2 procedure retrieval consulting
+no eligibility, the three tokenizers, and the pre-run-selection-vs-post-run-attribution
+signal mismatch are the same failure the 2026-08-02 learning probe measured
+(`procedures_selected=0`, `rejected_by no_overlap`, credit banked afterwards anyway).
+That is Phase 1 in §19 — a repair of an existing mechanism, not envelope work.
+
+## 19. Phased implementation plan — checked against the registry
+
+> The header requires a phase plan checked against the registry before any code.
+> This is it. **Nothing here is authorised by writing it down**: each phase is a
+> separate operator approval, flag-gated, shadow-first, integration-tested per path,
+> separate commits — the method of `docs/self-audit-lessons.md` and the memory
+> north-star. Path B: the envelope taxonomy (§4–§7 dimensions) is the target;
+> Phase 1 is the live repair that does not wait for it.
+
+- **Phase 1 — close the live retrieval break (repair, not redesign).**
+  (a) One tokenizer for all memory retrieval — decide the 2-char-acronym rule once
+  (MIR-007/008), share the module, migrate the three call-sites.
+  (b) Procedure retrieval consults usage-eligibility, like the episodic doors already do.
+  (c) Reconcile pre-run selection (question-token overlap vs `name/tags/steps`) with
+  post-run attribution (exact `workflow_key`) so a banked procedure can actually be
+  re-offered; make `ProceduralMemoryStore.search` report its drop reasons like the
+  episodic search does. Registry: closes/advances MIR-007, MIR-008; unblocks the
+  learning loop the probe found open.
+- **Phase 2 — a per-record verification status (D2).** The envelope's central
+  invariant (§3) has nowhere to be written today (only chunk counts). Candidate inputs
+  already shipped: `defect_signals`, `completion_override` (§17.6). Gated by D-decisions.
+- **Phase 3 — persistent-memory lifecycle (D4/D5 on `MemoryRecord`).** Today it carries
+  no status/supersession/validity (§17.4); MIR-009 seen from the contract side.
+- **Phase 4 — retire consolidation (MIR-044)** and **make hygiene lifecycle-scheduled on
+  all paths (MIR-045)** — both are prescribed above and currently unbuilt/daemon-only.
+- **Phase 5+ — the remaining envelope axes (D1 origin, D3 trust)** and the full
+  migration §13, each behind the open decisions in §16.
+
+Ordering rule: a phase ships only when its §16 decisions are ruled. Phase 1 needs none
+(it repairs existing mechanisms); Phases 2+ each name their blocking decision.
+
 ---
 
-*This contract is the single canonical M1 document (v4-draft = v2's normative body,
-unchanged, plus the §17 reconciliation and its dated addenda). Amendments happen here,
-versioned in the header log. Upon operator approval, implementation starts at P0 on a
-clean branch from `f317c4c`. Until then: no production code, tests, or schema changes.*
+*This contract is the single canonical M1 document (v5-draft = v2's normative body,
+unchanged, plus the §17 reconciliation, the §18 operational-rule ledger, the §19 phase
+plan, and dated addenda). Amendments happen here, versioned in the header log. Upon
+operator approval, implementation starts at Phase 1 on a clean branch from `f317c4c`.
+Until then: no production code, tests, or schema changes.*

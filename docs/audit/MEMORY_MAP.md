@@ -86,6 +86,11 @@ Two independent vectors, both now traced end-to-end:
   verify, and re-banks it with `verified_chunks=1`; the replay is itself
   fast-path-eligible → a self-reinforcing "verified success" chain. Interactive path
   only (episodic memory is off autonomously).
+  > **⚠ SUPERSEDED since this M0 census (`f317c4c`).** MIR-041 is `fixed`: replay now
+  > banks `verified_chunks=0, unverified_chunks=1` and is not re-eligible; and MIR-043
+  > is `fixed` — episodic memory DOES reach the autonomous path (banks episodes; fast-path
+  > still off there). Live status: registry + contract §18. This snapshot is kept as
+  > provenance, not corrected in place.
 - **Semantic (MIR-042) — verifier question now RESOLVED.** `core/verifier_core.py:87-116`:
   a citation that `match_citation`s **any** evidence in the chain (including
   `kind="memory"` evidence) is marked `[verified:…]` and increments `verified_chunks`
