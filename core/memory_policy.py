@@ -32,11 +32,12 @@ from core.dlp import contains_pii
 from core.models import MemoryRecord
 from core.secret_scanner import contains_secret
 from core.doc_routing import (
-    _BROAD_PROJECT_CONTEXT_TERMS,
-    _BROAD_PROJECT_QUESTION_TERMS,
+    BROAD_PROJECT_CONTEXT_TERMS,
+    BROAD_PROJECT_QUESTION_TERMS,
 )
-# Imported lazily inside `decide` to avoid an import cycle when
-# `core/hygiene.py` later wants to reach into models / policies.
+
+# `core.hygiene` is imported lazily inside `decide` to avoid an import cycle
+# when `core/hygiene.py` later wants to reach into models / policies.
 
 if TYPE_CHECKING:
     from core.memory_echo_antibody import MemoryWriteEvent
@@ -331,8 +332,8 @@ def _query_tokens(text: str) -> set[str]:
 def _is_broad_project_question(text: str) -> bool:
     lowered = (text or "").casefold()
     return (
-        any(term in lowered for term in _BROAD_PROJECT_CONTEXT_TERMS)
-        and any(term in lowered for term in _BROAD_PROJECT_QUESTION_TERMS)
+        any(term in lowered for term in BROAD_PROJECT_CONTEXT_TERMS)
+        and any(term in lowered for term in BROAD_PROJECT_QUESTION_TERMS)
     )
 
 

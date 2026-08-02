@@ -12,13 +12,13 @@ from typing import TYPE_CHECKING, Any
 
 from core.ingestion import DEFAULT_PROJECT_LIMIT, SKIP_DIR_NAMES, TEXT_EXTENSIONS
 from core.doc_routing import (
-    _CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS,
-    _CONFIDENCE_EVIDENCE_SOURCE_PATHS,
-    _DOCTRINE_CORPORATE_CONTEXTUAL_TERMS,
-    _DOCTRINE_CORPORATE_CONTEXT_TERMS,
-    _DOCTRINE_CORPORATE_DOC_PATHS,
-    _DOCTRINE_CORPORATE_STRONG_TERMS,
-    _DOCTRINE_CORPORATE_TOPIC_TERMS,
+    CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS,
+    CONFIDENCE_EVIDENCE_SOURCE_PATHS,
+    DOCTRINE_CORPORATE_CONTEXTUAL_TERMS,
+    DOCTRINE_CORPORATE_CONTEXT_TERMS,
+    DOCTRINE_CORPORATE_DOC_PATHS,
+    DOCTRINE_CORPORATE_STRONG_TERMS,
+    DOCTRINE_CORPORATE_TOPIC_TERMS,
 )
 
 if TYPE_CHECKING:
@@ -27,12 +27,12 @@ if TYPE_CHECKING:
 # Files ingested within this window are considered fresh and get a score penalty.
 _STALE_HOURS: float = 6.0
 _DOCTRINE_CORPORATE_DOC_PRIORITY: dict[str, int] = {
-    path.casefold(): len(_DOCTRINE_CORPORATE_DOC_PATHS) - idx
-    for idx, path in enumerate(_DOCTRINE_CORPORATE_DOC_PATHS)
+    path.casefold(): len(DOCTRINE_CORPORATE_DOC_PATHS) - idx
+    for idx, path in enumerate(DOCTRINE_CORPORATE_DOC_PATHS)
 }
 _CONFIDENCE_EVIDENCE_SOURCE_PRIORITY: dict[str, int] = {
-    path.casefold(): len(_CONFIDENCE_EVIDENCE_SOURCE_PATHS) - idx
-    for idx, path in enumerate(_CONFIDENCE_EVIDENCE_SOURCE_PATHS)
+    path.casefold(): len(CONFIDENCE_EVIDENCE_SOURCE_PATHS) - idx
+    for idx, path in enumerate(CONFIDENCE_EVIDENCE_SOURCE_PATHS)
 }
 
 
@@ -124,16 +124,16 @@ class LearningPlanner:
 
 def is_doctrine_corporate_learning_goal(goal: str) -> bool:
     lowered = (goal or "").casefold()
-    if any(term in lowered for term in _DOCTRINE_CORPORATE_STRONG_TERMS):
+    if any(term in lowered for term in DOCTRINE_CORPORATE_STRONG_TERMS):
         return True
-    has_context = any(term in lowered for term in _DOCTRINE_CORPORATE_CONTEXT_TERMS)
+    has_context = any(term in lowered for term in DOCTRINE_CORPORATE_CONTEXT_TERMS)
     if (
         has_context
-        and any(term in lowered for term in _DOCTRINE_CORPORATE_CONTEXTUAL_TERMS)
+        and any(term in lowered for term in DOCTRINE_CORPORATE_CONTEXTUAL_TERMS)
     ):
         return True
     topic_hits = {
-        term for term in _DOCTRINE_CORPORATE_TOPIC_TERMS
+        term for term in DOCTRINE_CORPORATE_TOPIC_TERMS
         if term in lowered
     }
     return len(topic_hits) >= 2 and has_context
@@ -141,7 +141,7 @@ def is_doctrine_corporate_learning_goal(goal: str) -> bool:
 
 def is_confidence_evidence_learning_goal(goal: str) -> bool:
     lowered = (goal or "").casefold()
-    return any(term in lowered for term in _CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS)
+    return any(term in lowered for term in CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS)
 
 
 def _resolve_inside_workspace(workspace: Path, raw: str) -> Path:
