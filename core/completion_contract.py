@@ -73,7 +73,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from core.completion_obligation import paths_mentioned
+from core.file_request_intent import paths_mentioned
 from core.lang_match import normalize_text
 
 DeliverableKind = Literal["file_exists", "file_modified", "tests_pass"]
@@ -157,6 +157,10 @@ class CompletionContract:
         }
 
 
+def _mentions_read(tokens: tuple[str, ...]) -> bool:
+    return any(tok.startswith(stem) for tok in tokens for stem in _READ_STEMS)
+
+
 def _action_for(tokens: tuple[str, ...]) -> str:
     """`create` / `modify` / `read` / `unknown` for one request's tokens.
 
@@ -195,6 +199,18 @@ def derive_completion_contract(
     ambiguities: list[str] = []
 
     named = list(paths_mentioned(text))
+
+    # A request that both reads and changes, over MORE THAN ONE path, cannot
+    # be attributed: "прочитай A.py и исправь B.py" would otherwise owe a
+    # change on A.py too, and an invented duty blocks `achieved` on its own
+    # (Copilot, PR #258). One path is safe — "прочитай core/foo.py и исправь
+    # его" names a single object and the stricter action wins.
+    if action in {"create", "modify"} and _mentions_read(tokens) and len(named) > 1:
+        ambiguities.append(
+            "the request mixes reading and changing over several paths; "
+            "which of them must change cannot be read from the wording"
+        )
+        named = []
     hint = (file_hint or "").strip()
     if hint and hint not in named:
         # A --file hint is an explicit pointer, not a request to change it.
@@ -248,7 +264,41 @@ def derive_completion_contract(
     )
 
 
-_WRITING_TOOLS: frozenset[str] = frozenset({"file_write", "shell_exec"})
+#: Only an explicit write proves a file deliverable. `shell_exec` was here in
+#: the first draft and is not: a shell receipt does not reliably encode which
+#: file it touched, so a read-only command that merely mentions the name would
+#: have satisfied the contract (Codacy, PR #258 — rated a security finding,
+#: and correctly: it is a way to claim a change that never happened).
+_WRITE_TOOL = "file_write"
+
+#: The gateway can admit an effect and not perform it. A simulated write is
+#: not a deliverable.
+_SIMULATED = "gateway simulate"
+
+
+def _executed(meta: dict[str, Any]) -> bool:
+    issues = meta.get("issues") or ()
+    return not any(_SIMULATED in str(i).casefold() for i in issues)
+
+
+def _norm(path: str) -> str:
+    return str(path or "").replace("\\", "/").strip().strip("./").casefold()
+
+
+def _tests_really_passed(output: Any) -> bool:
+    """A `run_tests` receipt that actually reports a green run.
+
+    The first draft accepted ANY run_tests artifact, so a run whose tests
+    failed satisfied "make the tests pass" (Copilot, PR #258). The tool
+    returns structured counts; they are what the contract reads.
+    """
+    if not isinstance(output, dict):
+        return False
+    if output.get("timed_out"):
+        return False
+    if output.get("exit_code") not in (0,):
+        return False
+    return int(output.get("failed") or 0) == 0 and int(output.get("errors") or 0) == 0
 
 
 def unmet_obligations(
@@ -258,33 +308,44 @@ def unmet_obligations(
 ) -> tuple[ContractObligation, ...]:
     """Which contract obligations the run's EVIDENCE does not satisfy.
 
-    Judged against artifacts — what the run actually did — never against the
-    answer text. That is the operator's "a good textual answer does not prove
-    completion", made mechanical: an answer cannot satisfy anything here
-    because it is not read.
+    Satisfaction is judged against artifacts — what the run actually did —
+    never against the answer text. That is the operator's "a good textual
+    answer does not prove completion", made mechanical: the answer is not a
+    parameter here, so it cannot satisfy anything.
+
+    Paths are compared as whole normalized paths, taken from the write
+    receipt's own ``output["path"]``. The first draft matched the BASENAME
+    inside the artifact label, which let `tests/test_auth.py` satisfy a duty
+    owed about `auth.py` (Codacy, PR #258).
     """
     artifacts = artifacts or {}
     entries = [(str(label), meta or {}) for label, meta in artifacts.items()]
-
-    def _succeeded(meta: dict[str, Any]) -> bool:
-        status = str(meta.get("status") or "").casefold()
-        return status in {"", "success", "ok"}
 
     unmet: list[ContractObligation] = []
     for obligation in contract.obligations:
         if obligation.deliverable == "tests_pass":
             met = any(
-                str(meta.get("tool") or "") == "run_tests" and _succeeded(meta)
+                str(meta.get("tool") or "") == "run_tests"
+                and _executed(meta)
+                and _tests_really_passed(meta.get("output"))
                 for _label, meta in entries
             )
         else:
-            base = obligation.target.replace("\\", "/").rsplit("/", 1)[-1]
+            target = _norm(obligation.target)
             met = any(
-                str(meta.get("tool") or "") in _WRITING_TOOLS
-                and _succeeded(meta)
-                and base.casefold() in label.casefold()
+                str(meta.get("tool") or "") == _WRITE_TOOL
+                and _executed(meta)
+                and _norm(_written_path(label, meta)) == target
                 for label, meta in entries
             )
         if not met:
             unmet.append(obligation)
     return tuple(unmet)
+
+
+def _written_path(label: str, meta: dict[str, Any]) -> str:
+    """The path a write receipt claims, preferring the receipt over the label."""
+    output = meta.get("output")
+    if isinstance(output, dict) and output.get("path"):
+        return str(output["path"])
+    return str(label).split(":", 1)[-1]

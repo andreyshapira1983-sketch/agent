@@ -410,6 +410,21 @@ def extract_path_mentions(
 
 
 
+#: Extensions the completion machinery scans for. Wider than the loop's own
+#: list: an obligation may be owed about a config or a log the loop never
+#: treats as a file hint. Lives here, with the scanner, because two modules
+#: need it and a copy in each is how vocabularies drift apart.
+OBLIGATION_PATH_EXTS: tuple[str, ...] = (
+    "py", "md", "txt", "json", "yml", "yaml", "pdf",
+    "jsonl", "toml", "ini", "cfg", "log",
+)
+
+
+def paths_mentioned(text: str) -> tuple[str, ...]:
+    """Workspace paths named in the text, de-duplicated, order preserved."""
+    return tuple(extract_path_mentions(text or "", exts=OBLIGATION_PATH_EXTS))
+
+
 def normalize_path_mention(path: str) -> str:
     out = path.strip().strip("\"'")
     out = out.replace("/", "\\")

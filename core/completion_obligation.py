@@ -55,7 +55,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Literal, Sequence
 
-from core.file_request_intent import extract_path_mentions
+from core.file_request_intent import OBLIGATION_PATH_EXTS, paths_mentioned
 
 ObligationSource = Literal["intent", "plan", "freshness", "acceptance_criteria"]
 
@@ -97,17 +97,11 @@ _OBSERVING_TOOLS: frozenset[str] = frozenset({
 #: site now delegates to that shared linear scanner, with this module's wider
 #: extension list. The retired pattern lives verbatim in the test file as the
 #: equivalence oracle.
-_OBLIGATION_PATH_EXTS: tuple[str, ...] = (
-    "py", "md", "txt", "json", "yml", "yaml", "pdf",
-    "jsonl", "toml", "ini", "cfg", "log",
-)
-
-
-def paths_mentioned(text: str) -> tuple[str, ...]:
-    """Workspace paths named in the text, de-duplicated, order preserved."""
-    return tuple(
-        extract_path_mentions(text or "", exts=_OBLIGATION_PATH_EXTS)
-    )
+#: Owned by `core/file_request_intent.py` since 2026-08-02: `completion_contract`
+#: needs the same vocabulary, and importing it from here made the two modules
+#: cyclic (Codacy, PR #258). Re-exported so existing callers and tests keep
+#: their import site.
+_OBLIGATION_PATH_EXTS = OBLIGATION_PATH_EXTS
 
 
 @dataclass(frozen=True)
@@ -290,9 +284,15 @@ def evaluate_completion_obligations(
     # ── acceptance_criteria (MIR-067) ────────────────────────────────────
     # Wired since 2026-08-02. The contract is derived from the REQUEST before
     # the work (see `core.completion_contract`), so an obligation here is not
-    # a description of what the run did — it is what the run owed. Judged
-    # against artifacts, never against the answer: a well-written answer is
-    # exactly what used to pass for completion.
+    # a description of what the run did — it is what the run owed.
+    #
+    # Two different questions, deliberately answered by two different inputs:
+    # WAS THE DUTY MET is judged only against artifacts (a well-written answer
+    # is exactly what used to pass for completion, so the answer is not even
+    # a parameter of `unmet_obligations`); WAS THE FAILURE DISCLOSED is read
+    # from the answer, because "the run failed" and "the operator was told"
+    # are different facts and only the second makes silence honest. That is
+    # this module's existing four-state contract, not an exception to it.
     unavailable = UNWIRED_SOURCES
     if contract is not None:
         from core.completion_contract import unmet_obligations

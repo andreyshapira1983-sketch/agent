@@ -18,15 +18,27 @@ nothing represented the deliverable.
 from __future__ import annotations
 
 import inspect
+import pathlib
 
 from core.completion_contract import (
     CompletionContract,
-    ContractObligation,
     derive_completion_contract,
     unmet_obligations,
 )
 from core.completion_obligation import evaluate_completion_obligations
 from core.smart_memory import EpisodeRecord, assemble_completion_verdict
+
+
+def _green_tests() -> dict:
+    """A `run_tests` receipt in the shape production actually writes."""
+    return {
+        "tool": "run_tests",
+        "output": {
+            "exit_code": 0, "failed": 0, "errors": 0,
+            "timed_out": False, "passed": 12,
+        },
+        "issues": [],
+    }
 
 
 class TestContractShape:
@@ -109,7 +121,7 @@ class TestAnswerCannotSatisfy:
         result = evaluate_completion_obligations(
             question="Исправь core/foo.py",
             answer=answer,
-            artifacts={"file:core/foo.py": {"tool": "file_read", "status": "success"}},
+            artifacts={"file:core/foo.py": {"tool": "file_read", "output": "…", "issues": []}},
             contract=contract,
         )
         assert result.triggered is True
@@ -121,7 +133,7 @@ class TestAnswerCannotSatisfy:
         result = evaluate_completion_obligations(
             question="Исправь core/foo.py",
             answer="Я прочитал файл и всё объяснил.",
-            artifacts={"file:core/foo.py": {"tool": "file_read", "status": "success"}},
+            artifacts={"file:core/foo.py": {"tool": "file_read", "output": "…", "issues": []}},
         )
         assert result.triggered is False
         assert result.satisfied is True
@@ -133,7 +145,11 @@ class TestAnswerCannotSatisfy:
             question="Создай файл docs/report.md",
             answer="Готово.",
             artifacts={
-                "file_write:docs/report.md": {"tool": "file_write", "status": "success"}
+                "file_write:docs/report.md": {
+                    "tool": "file_write",
+                    "output": {"path": "docs/report.md"},
+                    "issues": [],
+                }
             },
             contract=contract,
         )
@@ -220,12 +236,16 @@ class TestAmbiguityIsObservedNotGuessed:
 
 
 class TestVerificationReadsEvidence:
-    def test_a_failed_write_does_not_satisfy_the_deliverable(self):
+    def test_a_simulated_write_does_not_satisfy_the_deliverable(self):
         contract = derive_completion_contract("Создай файл docs/report.md")
         unmet = unmet_obligations(
             contract,
             artifacts={
-                "file_write:docs/report.md": {"tool": "file_write", "status": "error"}
+                "file_write:docs/report.md": {
+                    "tool": "file_write",
+                    "output": {"path": "docs/report.md"},
+                    "issues": ["gateway simulate — effect not executed"],
+                }
             },
         )
         assert [d.target for d in unmet] == ["docs/report.md"]
@@ -235,7 +255,11 @@ class TestVerificationReadsEvidence:
         unmet = unmet_obligations(
             contract,
             artifacts={
-                "file_write:docs/other.md": {"tool": "file_write", "status": "success"}
+                "file_write:docs/other.md": {
+                    "tool": "file_write",
+                    "output": {"path": "docs/other.md"},
+                    "issues": [],
+                }
             },
         )
         assert len(unmet) == 1
@@ -246,15 +270,114 @@ class TestVerificationReadsEvidence:
         assert "tests_pass" in by_kind
         unmet = unmet_obligations(
             contract,
-            artifacts={"file_write:core/x.py": {"tool": "file_write", "status": "success"}},
+            artifacts={"file_write:core/x.py": {"tool": "file_write", "output": {"path": "core/x.py"}, "issues": []}},
         )
         assert [d.deliverable for d in unmet] == ["tests_pass"]
 
         unmet_after = unmet_obligations(
             contract,
             artifacts={
-                "file_write:core/x.py": {"tool": "file_write", "status": "success"},
-                "run_tests:.": {"tool": "run_tests", "status": "success"},
+                "file_write:core/x.py": {"tool": "file_write", "output": {"path": "core/x.py"}, "issues": []},
+                "run_tests:.": _green_tests(),
             },
         )
         assert unmet_after == ()
+
+class TestReviewRoundOn258:
+    """Every finding of the #258 review, kept as behaviour.
+
+    They were real: the first draft could be satisfied by a read-only shell
+    command, by a same-named file in another directory, by a write the gateway
+    only simulated, and by a test run that was red.
+    """
+
+    def _contract(self):
+        return derive_completion_contract("Создай файл docs/report.md")
+
+    def test_a_shell_command_cannot_satisfy_a_file_deliverable(self):
+        unmet = unmet_obligations(
+            self._contract(),
+            artifacts={
+                "shell_exec:cat docs/report.md #a1b2c3": {
+                    "tool": "shell_exec",
+                    "output": {"stdout": "docs/report.md"},
+                    "issues": [],
+                }
+            },
+        )
+        assert len(unmet) == 1, "a read-only shell command claimed a write"
+
+    def test_a_same_named_file_elsewhere_does_not_satisfy_it(self):
+        unmet = unmet_obligations(
+            self._contract(),
+            artifacts={
+                "file_write:tests/report.md": {
+                    "tool": "file_write",
+                    "output": {"path": "tests/report.md"},
+                    "issues": [],
+                }
+            },
+        )
+        assert len(unmet) == 1, "basename matching let another file pass"
+
+    def test_a_red_test_run_does_not_satisfy_tests_pass(self):
+        contract = derive_completion_contract("почини core/x.py чтобы тесты проходили")
+        red = {
+            "tool": "run_tests",
+            "output": {
+                "exit_code": 1, "failed": 3, "errors": 0, "timed_out": False,
+            },
+            "issues": [],
+        }
+        unmet = unmet_obligations(
+            contract,
+            artifacts={
+                "file_write:core/x.py": {
+                    "tool": "file_write",
+                    "output": {"path": "core/x.py"},
+                    "issues": [],
+                },
+                "run_tests:.": red,
+            },
+        )
+        assert [d.deliverable for d in unmet] == ["tests_pass"]
+
+    def test_a_timed_out_run_is_not_a_pass(self):
+        contract = derive_completion_contract("чтобы тесты проходили")
+        stalled = {
+            "tool": "run_tests",
+            "output": {
+                "exit_code": 0, "failed": 0, "errors": 0, "timed_out": True,
+            },
+            "issues": [],
+        }
+        assert len(unmet_obligations(contract, artifacts={"run_tests:.": stalled})) == 1
+
+    def test_a_mixed_read_and_change_request_owes_nothing_and_asks(self):
+        contract = derive_completion_contract(
+            "прочитай core/a.py и исправь core/b.py"
+        )
+        assert contract.obligations == ()
+        assert contract.needs_clarification is True
+
+    def test_one_path_read_then_changed_still_owes_the_change(self):
+        contract = derive_completion_contract(
+            "Прочитай core/foo.py и исправь его"
+        )
+        assert [(d.deliverable, d.target) for d in contract.obligations] == [
+            ("file_modified", "core/foo.py")
+        ]
+        assert contract.needs_clarification is False
+
+    def test_the_two_modules_are_not_cyclic(self):
+        """`paths_mentioned` moved to the shared scanner's home so the contract
+        and the obligation sensor stopped importing each other."""
+        import ast
+
+        source = pathlib.Path("core/completion_contract.py").read_text(encoding="utf-8")
+        imported = {
+            node.module
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.ImportFrom) and node.module
+        }
+        assert "core.completion_obligation" not in imported
