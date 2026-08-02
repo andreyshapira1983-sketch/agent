@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 
+from core.loop_helpers import format_artifact
 from core.evidence_budget import (
     EVIDENCE_FILE_CHARS,
     EVIDENCE_TOTAL_CHARS,
@@ -318,22 +319,20 @@ def test_unknown_demoted_label_is_harmless(monkeypatch):
     assert sum(len(c) for _, c in result) <= 400
 
 
-# ── integration: _format_artifact via loop ───────────────────────────────────
+# ── integration: format_artifact (moved to core.loop_helpers) ───────────────────────────────────
 
 def test_format_artifact_small_file_unchanged():
     """Files smaller than the per-artifact budget pass through untouched."""
-    from core.loop import AgentLoop
     small = "# README\n\nShort file.\n"
-    result = AgentLoop._format_artifact("file_read", small, question="readme")
+    result = format_artifact("file_read", small, question="readme")
     assert result == small
 
 
 def test_format_artifact_large_file_truncated(monkeypatch):
     """Files larger than AGENT_EVIDENCE_FILE_CHARS are truncated."""
-    from core.loop import AgentLoop
     monkeypatch.setenv("AGENT_EVIDENCE_FILE_CHARS", "300")
     large = _make_file(5_000, keyword="governor")
-    result = AgentLoop._format_artifact(
+    result = format_artifact(
         "file_read", large, question="how does the governor work?"
     )
     # budget=300; allow ~120 chars of overhead (notice string + separators)
@@ -567,7 +566,7 @@ def test_format_artifact_web_search_unchanged():
     """Web search results are NOT subject to the file budget."""
     from core.loop import AgentLoop
     hits = [{"title": "A", "url": "http://x.com", "snippet": "s", "source": "ddg"}]
-    result = AgentLoop._format_artifact("web_search", hits, question="any question")
+    result = format_artifact("web_search", hits, question="any question")
     # Compare the url line as a whole rather than asking whether the url
     # occurs somewhere in the output: a substring check also passes when the
     # line has been cut around it, which is the one thing this test is here

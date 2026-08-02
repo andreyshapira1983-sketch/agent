@@ -8,6 +8,8 @@ import json
 import re
 from typing import TYPE_CHECKING, Any
 from core.ids import new_id
+from core.evidence import Evidence, ProvenanceChain
+from core.file_request_intent import extract_path_mentions, normalize_path_mention
 
 def _to_text(output: Any) -> str:
     """Stringify a tool output for classification + scanning.
@@ -364,3 +366,152 @@ def format_human_response(answer: str) -> str:
 
 def new_trace_id() -> str:
     return new_id("run")
+
+
+# ── Evidence -> synthesizer-prompt rendering ────────────────────────────────
+# Moved from AgentLoop (piece 4 of the loop decomposition, 2026-08-02). This
+# module already owns SYSTEM_ANSWER — the output contract that tells the model
+# which citation grammar to use — so the renderers that produce the citable
+# list, the artifact text and the scope notice now live beside the contract
+# they feed. All four are pure; none reads loop state.
+
+def citation_for_evidence(ev: Evidence) -> str | None:
+    source_id = ev.source_id
+    if ev.kind == "file" and source_id.startswith("file:"):
+        body = source_id[len("file:"):]
+        return f"[file:{body}]"
+    if ev.kind == "web_page" and source_id.startswith("web_page:"):
+        body = source_id[len("web_page:"):]
+        return f"[web:{body}]"
+    if ev.kind == "web_search_hit" and source_id.startswith("web_search:"):
+        body = source_id[len("web_search:"):]
+        return f"[search:{body}]"
+    if ev.kind == "test_result" and source_id.startswith("test_result:"):
+        body = source_id[len("test_result:"):]
+        return f"[test:{body}]"
+    if ev.kind == "log_event" and source_id.startswith("log_event:"):
+        body = source_id[len("log_event:"):]
+        return f"[log:{body}]"
+    if ev.kind == "shell_output" and source_id.startswith("shell_output:"):
+        body = source_id[len("shell_output:"):]
+        return f"[shell:{body}]"
+    if ev.kind == "tool_output" and source_id.startswith("tool_output:"):
+        body = source_id[len("tool_output:"):]
+        return f"[tool:{body}]"
+    if ev.kind == "diff_preview" and source_id.startswith("diff_preview:"):
+        body = source_id[len("diff_preview:"):]
+        return f"[diff:{body}]"
+    if ev.kind == "memory":
+        return f"[memory:{source_id}]"
+    if ev.kind == "session_dialogue" and source_id.startswith("session_dialogue:"):
+        body = source_id[len("session_dialogue:"):]
+        return f"[dialogue:{body}]"
+    if ev.kind == "user_explicit":
+        return "[user]"
+    return None
+
+
+
+def format_allowed_citations_block(
+    chain: ProvenanceChain,
+    *,
+    memory_ids: set[str] | None = None,
+) -> str:
+    """Render the citable-source list for the synthesizer prompt.
+
+    *memory_ids*, when given, is the set of long-term record ids that
+    survived the evidence-budget trim. A record outside it is dropped: it
+    is no longer in `<long_term_memory>`, so offering it as a citation
+    invites a citation to text the model never received.
+
+    The filter keys on ``obtained_via == "memory"``, not on
+    ``kind == "memory"``: cached tool outputs from previous turns share the
+    kind but are `obtained_via="working_memory"`, live in
+    `<conversation_history>` outside this budget, and were never trimmed —
+    revoking their citation licence would push follow-up answers toward
+    [general-knowledge] for no reason. `core/verifier_core.py:53-56`
+    already draws the line on the same axis.
+    """
+    if not chain.evidences:
+        return ""
+    lines = ["<allowed_citations>"]
+    seen: set[str] = set()
+    for ev in chain.evidences:
+        if memory_ids is not None and ev.obtained_via == "memory":
+            # source_id is "memory:<record id>"; compare whole ids, since a
+            # substring test lets one id vouch for another.
+            if ev.source_id.split(":", 1)[-1] not in memory_ids:
+                continue
+        token = citation_for_evidence(ev)
+        if token is None or token in seen:
+            continue
+        seen.add(token)
+        lines.append(
+            f"- {token} kind={ev.kind} source_id={ev.source_id}"
+        )
+    lines.append("</allowed_citations>")
+    return "\n".join(lines) + "\n\n" if len(lines) > 2 else ""
+
+
+
+def format_artifact(tool_name: str | None, output: Any, *, question: str = "") -> str:
+    """Render a tool output into a stable string the LLM can ground on.
+
+    File content is passed through :func:`core.evidence_budget.budget_file_content`
+    which applies the per-artifact character budget and performs intent-aware
+    extraction: instead of blindly returning the first N chars, the most
+    question-relevant paragraphs are selected (Realtime Intent Fix).
+    """
+    if tool_name == "web_search" and isinstance(output, list):
+        if not output:
+            return "(no results)"
+        lines: list[str] = []
+        for r in output:
+            title   = r.get("title") or "(no title)"
+            url     = r.get("url") or ""
+            snippet = r.get("snippet") or ""
+            source  = r.get("source") or "duckduckgo"
+            lines.append(f"- {title}")
+            lines.append(f"  url: {url}")
+            if snippet:
+                lines.append(f"  snippet: {snippet}")
+            lines.append(f"  provider: {source}")
+        return "\n".join(lines)
+    if tool_name == "file_read" and isinstance(output, str):
+        from core.evidence_budget import budget_file_content
+        return budget_file_content(output, question=question)
+    if tool_name == "list_dir" and isinstance(output, str):
+        return output
+    # Fallback: stringify whatever came back.
+    return str(output)
+
+
+
+def file_scope_notice(
+    question: str,
+    artifacts: dict[str, dict[str, Any]],
+) -> str:
+    actual_paths = [
+        label[len("file:"):]
+        for label, art in artifacts.items()
+        if label.startswith("file:") and art.get("tool") == "file_read"
+    ]
+    if not actual_paths:
+        return ""
+    actual_norms = {normalize_path_mention(path) for path in actual_paths}
+    requested_paths = extract_path_mentions(question)
+    missing = [
+        path
+        for path in requested_paths
+        if normalize_path_mention(path) not in actual_norms
+    ]
+    if not missing:
+        return ""
+    actual = ", ".join(actual_paths)
+    unverified = ", ".join(missing)
+    return (
+        f"Evidence scope: I only have evidence for {actual}. "
+        f"I did not verify {unverified}."
+    )
+
+
