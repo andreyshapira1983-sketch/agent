@@ -42,7 +42,6 @@ def test_the_modules_runtime_imports_stay_inside_the_boundary():
     other tests have usually imported the stack before this one runs.
     """
     import ast
-    from pathlib import Path
 
     allowed = {"re", "dataclasses", "pathlib", "typing", "tools.file_read"}
     # Anchored to this file, not the CWD — Copilot's point about the previous
