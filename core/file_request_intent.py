@@ -21,11 +21,16 @@ deliberately knows nothing about the loop.
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
-from core.planner import PlannerOutput
 from tools.file_read import MAX_BYTES as FILE_READ_MAX_BYTES
+
+if TYPE_CHECKING:  # pragma: no cover — annotation only
+    # Runtime-importing core.planner would pull core.llm transitively and
+    # break this module's documented boundary: deterministic, no LLM stack.
+    from core.planner import PlannerOutput
 
 
 def explicitly_requests_hinted_file(question: str) -> bool:
@@ -422,13 +427,16 @@ def force_file_hint_read_when_explicit(
     warnings.append(
         "explicit file-read request used --file hint because planner selected no file_read"
     )
-    return PlannerOutput(
+    # dataclasses.replace, not PlannerOutput(...): constructing the class
+    # would need the runtime import the boundary forbids, and replace also
+    # preserves fields this function has no business rewriting.
+    return replace(
+        planner_out,
         reasoning=(
             f"{planner_out.reasoning} "
             "Kernel added read-only file_read for explicit hinted-file request."
         ).strip(),
         sources=sources,
-        raw_response=planner_out.raw_response,
         warnings=warnings,
     )
 
