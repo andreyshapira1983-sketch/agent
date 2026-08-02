@@ -124,6 +124,19 @@ def _split_paragraphs(text: str) -> list[str]:
 
 # ── intent-aware extraction ───────────────────────────────────────────────────
 
+#: Appended to every trim notice. The notice used to state THAT content was
+#: cut and stop there; measured live (probe round 4, 2026-08-02), the model
+#: read the notice, said honestly it was truncated — and then reasoned from
+#: the fragment and guessed a function signature wrong. One round later a
+#: single human hint ("don't guess, grep") produced the correct behaviour
+#: immediately. This line is that hint, delivered where the model is
+#: guaranteed to read it, every time it matters.
+_TEACH_RECOVERY = (
+    "; NOT the whole file — to find what is missing, run grep -n via "
+    "shell_exec, then read that exact window"
+)
+
+
 def extract_relevant(text: str, *, question: str, budget: int) -> str:
     """Return a question-relevant excerpt of *text* within *budget* chars.
 
@@ -179,7 +192,10 @@ def extract_relevant(text: str, *, question: str, budget: int) -> str:
         omitted = original_len - head_budget - tail_budget
         gap     = f"\n...[{omitted} chars omitted]...\n" if omitted > 0 and tail not in head else ""
         result  = head + gap + (tail if tail not in head else "")
-        notice  = f"\n...[INTENT-BUDGET: {len(result)} of {original_len} chars; no keyword match, head+tail]"
+        notice  = (
+            f"\n...[INTENT-BUDGET: {len(result)} of {original_len} chars; "
+            f"no keyword match, head+tail{_TEACH_RECOVERY}]"
+        )
         return result + notice
 
     # Greedy selection: always keep para[0], then fill by descending score
@@ -217,7 +233,7 @@ def extract_relevant(text: str, *, question: str, budget: int) -> str:
         body = body[:budget]
     notice = (
         f"\n...[INTENT-BUDGET: {len(body)} of {original_len} chars; "
-        f"top sections by keyword relevance to question]"
+        f"top sections by keyword relevance to question{_TEACH_RECOVERY}]"
     )
     return body + notice
 
