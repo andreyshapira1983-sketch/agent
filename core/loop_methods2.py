@@ -743,19 +743,24 @@ class AgentLoopExtractedMethods2:
                 # mint a procedure and raise its confidence on evidence that
                 # was never taken. `usage_eligible` cannot help: the procedural
                 # path does not read it.
-                if not verifier_failure:
-                    procedure, created = self.procedural_store.upsert_from_episode(episode)
-                # Outcome feedback (MIR-048), driven only by the attribution
-                # MIR-049 recorded. Runs AFTER upsert on purpose: a fresh
-                # success already journalled this episode id, so idempotence
-                # makes this a no-op there and it only adds what upsert cannot
-                # express -- a `partial`/`failed` debit against the procedures
-                # the run actually used.
-                # Only the positive direction is withheld on a crash: a debit
-                # comes from a structural failure the verifier had no part in.
+                # Credit/debit the procedures this run actually USED — the SOLE
+                # credit path (operator ruling 2026-08-02). Positive credit no
+                # longer comes from upsert's tool-set match; it comes from here,
+                # causally attributed (MIR-049), or not at all. Runs BEFORE
+                # upsert on purpose: upsert now merges provenance without credit,
+                # and the merge records this episode id — so it must not run
+                # first, or the credit idempotency (episode id already in the
+                # procedure's provenance) would skip the very credit this run
+                # earned. Only the positive direction is withheld on a crash.
                 feedback = self.procedural_store.apply_episode_feedback(
                     episode, allow_credit=not verifier_failure
                 )
+                # Create or merge the procedure distilled from this run. Merge is
+                # provenance-only: a fresh candidate is born unproven and earns
+                # standing only through the causal feedback above, never by a
+                # repeated tool-set match.
+                if not verifier_failure:
+                    procedure, created = self.procedural_store.upsert_from_episode(episode)
                 # `offered` closes the counterfactual: applied=0 alone cannot
                 # distinguish "no procedure was suggested" from "two were
                 # suggested and neither was actually applied" — the second is
