@@ -399,9 +399,14 @@ def rebuild_trimmed_memory(
     not reproduce *original* exactly. Fail closed — memory we cannot
     explain does not go to the model.
     """
+    # The notice the budget appended is the LAST match: a record's own text
+    # can quote an older notice, and the budget writes its cut at the end.
+    # Assigned inside the body (not an empty `for x in ...: pass`) so the
+    # intent is visible to linters, without materialising every match the
+    # way a list would.
     notice_match = None
-    for notice_match in _TRIM_NOTICE_RE.finditer(trimmed):
-        pass          # the notice the budget appended is the last one
+    for match in _TRIM_NOTICE_RE.finditer(trimmed):
+        notice_match = match
     if notice_match is None or int(notice_match.group(2)) != len(original):
         return "", set()
     kept_chars = int(notice_match.group(1))
