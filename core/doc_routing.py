@@ -9,7 +9,6 @@ family was ~940 lines between the module header and the system prompt.
 """
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from core.lang_match import any_term_matches, normalize_text, tokenize

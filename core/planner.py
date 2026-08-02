@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -110,7 +111,7 @@ _HOST_RELEVANCE_RE = re.compile(
 )
 
 
-def host_tools_relevant(text: str, tools_used: "Iterable[str]" = ()) -> bool:
+def host_tools_relevant(text: str, tools_used: Iterable[str] = ()) -> bool:
     """Deterministic gate: is this turn actually about host tools?
 
     True when the text (question + planner reasoning) mentions a host-tool name
@@ -748,18 +749,16 @@ class LLMPlanner:
         if self_documentation_paths is None:
             self.self_documentation_paths = self.DEFAULT_SELF_DOCUMENTATION_PATHS
         else:
-            clean: list[str] = []
-            for p in self_documentation_paths:
-                if (
-                    isinstance(p, str)
-                    and p.strip()
-                    and p.isascii()
-                    and ".." not in p
-                    and not p.startswith(("/", "\\"))
-                    and ":" not in p
-                ):
-                    clean.append(p.strip())
-            self.self_documentation_paths = tuple(clean)
+            self.self_documentation_paths = tuple(
+                p.strip()
+                for p in self_documentation_paths
+                if isinstance(p, str)
+                and p.strip()
+                and p.isascii()
+                and ".." not in p
+                and not p.startswith(("/", "\\"))
+                and ":" not in p
+            )
 
     def plan(
         self,
