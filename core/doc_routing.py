@@ -677,8 +677,9 @@ def _is_low_signal_confidence_source(src: dict[str, Any]) -> bool:
     norm = _norm_source_path(path) if isinstance(path, str) else ""
     tool = src.get("tool")
     for default in _CONFIDENCE_LOW_SIGNAL_DEFAULT_PATHS:
-        target = _norm_source_path(default).rstrip("/")
-        if default.endswith("/"):
+        norm_default = _norm_source_path(default)
+        target = norm_default.rstrip("/")
+        if norm_default.endswith("/"):
             if tool == "list_dir" and norm.rstrip("/") == target:
                 return True
         elif tool == "file_read" and norm == target:

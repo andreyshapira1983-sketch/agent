@@ -1866,7 +1866,7 @@ def test_unclosed_fence_padded_with_blanks_does_not_hang(workspace: Path) -> Non
     assert elapsed < 2.0, f"parsing {len(raw)} chars took {elapsed:.2f}s"
 
 
-def test_low_signal_defaults_are_read_from_the_constant(monkeypatch):
+def test_low_signal_defaults_are_read_from_the_constant(monkeypatch) -> None:
     """Audit finding Д-2: _is_low_signal_confidence_source used to re-encode
     "readme.md"/"tools" by hand while _CONFIDENCE_LOW_SIGNAL_DEFAULT_PATHS had
     zero readers — editing the constant changed nothing. The function must
