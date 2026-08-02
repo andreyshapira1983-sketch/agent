@@ -370,8 +370,7 @@ def extract_path_mentions(text: str) -> list[str]:
             # can start `X:/...` — a shape the region scan cannot see
             # because ":" is outside the body alphabet.
             if (
-                scan_stop < n and text[scan_stop] == ":"
-                and scan_stop >= 1
+                0 < scan_stop < n and text[scan_stop] == ":"
                 and not (scan_stop >= 2 and text[scan_stop - 2] in _PATH_GUARD)
                 and (d_body := _drive_body_start(text, scan_stop - 1)) >= 0
             ):

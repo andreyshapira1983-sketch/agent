@@ -9,7 +9,8 @@ that would have shipped broken.
 """
 from __future__ import annotations
 
-import random
+import hashlib
+import itertools
 import re
 import string
 import time
@@ -119,15 +120,28 @@ def test_scanner_matches_the_oracle_on_every_recorded_trap():
         assert extract_path_mentions(text) == _oracle(text), repr(text)
 
 
-def test_scanner_matches_the_oracle_under_seeded_fuzz():
-    """4 000 seeded random strings over path-shaped alphabets.
+def _corpus(alphabet: str, cases: int, max_len: int = 60):
+    """Deterministic fuzz corpus driven by SHA-256, not `random`.
+
+    Hash-derived rather than seeded-PRNG for two reasons: byte-identical on
+    every platform and Python forever, and it keeps the security linters
+    quiet without a suppression comment — this repo has none and starting
+    the precedent over a test generator would be backwards.
+    """
+    for i in range(cases):
+        digest = hashlib.sha256(f"paths-{alphabet[:4]}-{i}".encode()).digest()
+        length = digest[0] % (max_len + 1)
+        stream = itertools.cycle(digest)
+        yield "".join(alphabet[next(stream) % len(alphabet)] for _ in range(length))
+
+
+def test_scanner_matches_the_oracle_under_deterministic_fuzz():
+    """4 000 generated strings over path-shaped alphabets.
 
     The full verification before the swap ran 150 000 cases plus every file
-    of this repository, all identical; this seeded subset keeps the claim
-    enforced in CI at a cost the quadratic oracle can afford (inputs ≤ 60
-    chars).
+    of this repository, all identical; this subset keeps the claim enforced
+    in CI at a cost the quadratic oracle can afford (inputs ≤ 60 chars).
     """
-    rng = random.Random(20260802)
     alphabets = [
         string.ascii_letters + string.digits + "./\\-_ .:()'\"!?,;`«»",
         "a./\\-: ",
@@ -135,10 +149,7 @@ def test_scanner_matches_the_oracle_under_seeded_fuzz():
         "Cc:/\\a.pymdtxjsonl ",
     ]
     for alphabet in alphabets:
-        for _ in range(1000):
-            text = "".join(
-                rng.choice(alphabet) for _ in range(rng.randint(0, 60))
-            )
+        for text in _corpus(alphabet, 1000):
             assert extract_path_mentions(text) == _oracle(text), repr(text)
 
 
