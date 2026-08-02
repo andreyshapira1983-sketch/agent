@@ -72,6 +72,10 @@ here that changes what the operator receives.
   `docs/audit/SENSOR_SIGNAL_MEASUREMENT.md`).
 - `core/completion_obligation` (event `completion_obligation`) — whether an
   observation/execution duty was incurred and left unmet without disclosure.
+  *Since 2026-08-02 (operator ruling, PRs #216/#227) this verdict carries
+  authority at banking time: it lowers a declared `achieved` to
+  `partially_achieved` and withholds procedure credit. Mid-run it still stops
+  and replans nothing.*
 - `core/reasoning_action_check` and `core/subsystem_disagreement` — the latter
   additionally accounts for what it *would* have done
   (`subsystem_disagreement_shadow`), and replans nothing.

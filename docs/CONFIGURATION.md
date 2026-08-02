@@ -110,6 +110,7 @@ survive image rebuilds and container replacement.
 |---|---|
 | `episodic_memory.jsonl` | Episodic memory (observations of past runs). |
 | `procedural_memory.jsonl` | Learned procedures. |
+| `conflict_episodes.jsonl` | Instruction-conflict episodes (инструкция → конфликт → решение), append-only. |
 | `memory_consolidation.jsonl` | Consolidated/summarised memory. |
 | `source_registry.jsonl` | Ingested sources + extracted claims. |
 | `daemon_heartbeat.json` | Last-tick heartbeat the Docker healthcheck reads. |
