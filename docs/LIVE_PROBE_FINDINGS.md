@@ -79,7 +79,7 @@ plus one line in `SYSTEM_ANSWER` (`core/loop_helpers.py`) stating a
 `<host_environment>` block is reference-only, must not be cited, and does not
 count as evidence — so the general-knowledge path stays enabled; (2) `25e030b` —
 the block is injected **only** on host-tool-relevant turns
-(`host_tools_relevant()` in `core/planner.py`), not on every synthesizer prompt.
+(`host_tools_relevant()` in `core/planner.py`; since #246, 2026-08-02, the gate lives in `core/host_tools_context.py` — location note added post-hoc, the finding itself is unchanged), not on every synthesizer prompt.
 Verified live: "17 × 23" → 391, no host noise; "What can you do?" → real tools,
 `cited_but_unmatched=0` (was 6); a real "Write a Blender script…" task still gets
 the exact run command. Regression: `tests/test_host_tools_context.py`.
