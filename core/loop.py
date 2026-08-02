@@ -19,11 +19,8 @@ trace.
 """
 from __future__ import annotations
 
-import json
-import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -32,15 +29,6 @@ from typing import Literal as _Literal
 from core.replan import FailureType as ReplanCode  # single source of truth
 from core.replan import ReplanTrigger, count_failures, format_replan_context
 from core.file_request_intent import (
-    explicitly_requests_hinted_file,
-    extract_path_mentions,
-    file_hint_source,
-    is_change_request,
-    is_explicit_multi_file_mode,
-    is_file_review_request,
-    looks_like_multi_file_review_without_hint,
-    normalize_path_mention,
-    validate_user_file_path,
     force_file_hint_read_when_explicit,
     prepare_multi_file_review,
 )
@@ -48,7 +36,6 @@ from core.file_request_intent import (
 from core.approval import ApprovalProvider
 from core.data_classifier import DataClass, SourceHint, classify
 from core.evidence import (
-    Evidence,
     ProvenanceChain,
     evidence_from_memory_record,
     evidence_from_prior_turn,
@@ -64,19 +51,19 @@ from core.logger import TraceLogger
 from core.memory import WorkingMemory
 from core.memory_policy import (
     MemoryRetrievalPolicy,
-    MemoryWriteDecision,
     MemoryWritePolicy,
 )
-from core.memory_echo_antibody import make_event
 
 if TYPE_CHECKING:
-    from core.memory_echo_antibody import MemoryWriteEvent, MemoryWriteRegistry
+    from core.clarification_policy import ClarificationResult
+    from core.memory_echo_antibody import MemoryWriteRegistry
+    from core.operational_domain import DomainResult
+    from core.replan import ReplanPolicy
 from core.models import (
     Action,
     ApprovalRequest,
     ErrorObject,
     Goal,
-    MemoryRecord,
     Observation,
     Plan,
     PlanStep,
@@ -112,21 +99,7 @@ from core.policy import PolicyGate
 from core.actuation_gateway import GatewayPath
 from core.injection_guard import annotate_suspicious, scan_for_injection
 
-# Thread-local storage for per-step replan triggers.
-# _execute_step writes here instead of self._last_step_failure so that
-# parallel worker threads each own an isolated slot — no shared-state race.
-_step_trigger_tls: threading.local = threading.local()
 
-# Tools that read only from the local workspace (trusted boundary).
-# Injection guard is skipped for these — their output cannot be injected
-# by an external adversary and false-positives degrade signal quality.
-_TRUSTED_INTERNAL_TOOLS: frozenset[str] = frozenset({
-    "file_read",
-    "list_dir",
-    "diff_file",
-    "run_tests",
-    "read_logs",
-})
 from core.redaction import (
     collect_pii_findings,
     redact_dlp_text,
@@ -140,7 +113,7 @@ from core.synth_resilience import (
     build_degraded_synthesis_answer,
     run_synthesizer_ladder,
 )
-from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult, RememberFn
+from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult
 from core.user_profile import UserProfile, UserProfileStore, profile_to_prompt_block
 from core.assumption_registry import (  # Layer 5
     AssumptionRegistry,
@@ -159,10 +132,7 @@ from core.smart_memory import (
     MemoryConsolidationStore,
     ProceduralMemoryStore,
     _COMPLETION_DECLARATIONS,
-    consolidate_memory,
     effective_completion,
-    episode_from_agent_cycle,
-    format_experience_context,
 )
 from core.completion_marker import (
     marker_instruction as completion_marker_instruction,
@@ -193,10 +163,24 @@ from core.loop_helpers import (  # noqa: F401 -- re-exported
 )
 from core.loop_methods import AgentLoopExtractedMethods
 from core.loop_methods2 import (
-    MEMORY_CLOSE_TAG,
-    MEMORY_OPEN_TAG,
     AgentLoopExtractedMethods2,
 )
+
+# Thread-local storage for per-step replan triggers.
+# _execute_step writes here instead of self._last_step_failure so that
+# parallel worker threads each own an isolated slot — no shared-state race.
+_step_trigger_tls: threading.local = threading.local()
+
+# Tools that read only from the local workspace (trusted boundary).
+# Injection guard is skipped for these — their output cannot be injected
+# by an external adversary and false-positives degrade signal quality.
+_TRUSTED_INTERNAL_TOOLS: frozenset[str] = frozenset({
+    "file_read",
+    "list_dir",
+    "diff_file",
+    "run_tests",
+    "read_logs",
+})
 
 
 # Maps tool names to data_classifier source hints. Drives the per-tool
@@ -2663,12 +2647,12 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
 
     def _check_clarification(self, user_question: str) -> "ClarificationResult":
         """Run the Clarification Policy (§3) — pure heuristic, no LLM."""
-        from core.clarification_policy import ClarificationResult, check_clarification
+        from core.clarification_policy import check_clarification
         return check_clarification(user_question)
 
     def _check_operational_domain(self, user_question: str) -> "DomainResult":
         """Run the Operational Design Domain gate (§7 ODD) — pure, no LLM."""
-        from core.operational_domain import DomainResult, check_operational_domain
+        from core.operational_domain import check_operational_domain
         return check_operational_domain(user_question)
 
     def _maybe_resolve_referent(
@@ -2690,16 +2674,16 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             prior_turns: list[PriorTurnRef] = []
             artifacts = []
             if self.memory is not None:
-                for turn in self.memory.recent_turns(5):
-                    prior_turns.append(
-                        PriorTurnRef(
-                            turn_id=turn.id,
-                            session_id=session_id,
-                            question=turn.question,
-                            answer=turn.answer,
-                            timestamp=turn.timestamp,
-                        )
+                prior_turns = [
+                    PriorTurnRef(
+                        turn_id=turn.id,
+                        session_id=session_id,
+                        question=turn.question,
+                        answer=turn.answer,
+                        timestamp=turn.timestamp,
                     )
+                    for turn in self.memory.recent_turns(5)
+                ]
                 artifacts = artifacts_from_working_memory(
                     self.memory.artifacts,
                     session_id=session_id,
@@ -2948,15 +2932,14 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     executor.submit(self._run_step_parallel, step): step
                     for step in parallel
                 }
-                for future in as_completed(futures):
-                    results.append(future.result())
+                results.extend(
+                    future.result() for future in as_completed(futures)
+                )
         else:
-            for step in parallel:
-                results.append(self._run_step_parallel(step))
+            results.extend(self._run_step_parallel(step) for step in parallel)
 
         # Sequential steps follow in plan order.
-        for step in sequential:
-            results.append(self._run_step_parallel(step))
+        results.extend(self._run_step_parallel(step) for step in sequential)
 
         # Re-sort to plan order so callers process artifacts in a stable sequence.
         order_map = {s.id: i for i, s in enumerate(steps)}
@@ -3728,11 +3711,11 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         safety_block = ""
         if cycle_findings:
             lines = ["<safety_notes>"]
-            for f in cycle_findings:
-                lines.append(
-                    f"- label={f['label']} kinds={f['kinds']} "
-                    f"count={f['count']} (kernel-redacted)"
-                )
+            lines.extend(
+                f"- label={f['label']} kinds={f['kinds']} "
+                f"count={f['count']} (kernel-redacted)"
+                for f in cycle_findings
+            )
             lines.append("</safety_notes>")
             safety_block = "\n".join(lines) + "\n\n"
 
@@ -3860,9 +3843,10 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     evidence_pairs.append((lbl, content))
                     continue
                 memory_trimmed = content != memory_payload
+                memory_block = content
                 if memory_trimmed:
                     _records = getattr(self, "_last_persistent_records", [])
-                    content, surviving_memory_ids = rebuild_trimmed_memory(
+                    memory_block, surviving_memory_ids = rebuild_trimmed_memory(
                         content,
                         memory_payload,
                         list(
@@ -3873,7 +3857,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                             )
                         ),
                     )
-                long_term_block = f"{content}\n\n" if content else ""
+                long_term_block = f"{memory_block}\n\n" if memory_block else ""
 
             if was_trimmed:
                 self.log.log(
