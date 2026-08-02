@@ -16,10 +16,10 @@ from pathlib import Path
 from core.learning_planner import (
     _DOCTRINE_CORPORATE_DOC_PATHS as LEARNING_MANIFEST,
 )
-from core.planner import _DOCTRINE_CORPORATE_DOC_PATHS as PLANNER_MANIFEST
-from core.planner import _MEMORY_GOVERNANCE_DOC_PATHS as MEMORY_MANIFEST
-from core.planner import _SUBAGENT_GOVERNANCE_DOC_PATHS as SUBAGENT_MANIFEST
-from core.planner import (
+from core.doc_routing import _DOCTRINE_CORPORATE_DOC_PATHS as PLANNER_MANIFEST
+from core.doc_routing import _MEMORY_GOVERNANCE_DOC_PATHS as MEMORY_MANIFEST
+from core.doc_routing import _SUBAGENT_GOVERNANCE_DOC_PATHS as SUBAGENT_MANIFEST
+from core.doc_routing import (
     _SELF_REPAIR_DOCTRINE_DOC_PATHS as SELF_REPAIR_MANIFEST,
 )
 
