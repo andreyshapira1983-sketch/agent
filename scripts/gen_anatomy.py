@@ -22,6 +22,7 @@ CORE = os.path.join(ROOT, "core")
 GROUPS: list[tuple[str, str, list[str]]] = [
     ("Interface & Interaction (§1)", "Operator-facing I/O, intent routing, output shaping.", [
         "operator_intent", "operator_intent_patterns", "intent_understanding",
+        "file_request_intent",
         "lang_match", "output_policy", "user_profile", "truth_hype_filter",
         "alert_ack",
     ]),

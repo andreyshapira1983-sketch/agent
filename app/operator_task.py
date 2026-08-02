@@ -17,6 +17,10 @@ from cli.commands_budget import (
     _persistent_budget_limits_configured,
 )
 from cli.parsers import _compact_one_line
+from core.file_request_intent import (
+    is_explicit_multi_file_mode,
+    validate_user_file_path,
+)
 from core.loop import AgentLoop
 
 
@@ -151,7 +155,7 @@ def _operator_programming_task_payload(
     goal = _operator_programming_goal(text)
     mode = (
         "explicit_multi_file_review"
-        if AgentLoop._is_explicit_multi_file_mode(block)
+        if is_explicit_multi_file_mode(block)
         else "source_review"
     )
     constraints = _extract_operator_task_constraints(text)
@@ -237,7 +241,7 @@ def _operator_task_file_evidence(block: str, agent: AgentLoop) -> dict:
     rejected: list[dict] = []
     seen: set[str] = set()
     for raw_path in requested_paths:
-        item = agent._validate_user_file_path(raw_path, workspace=root)
+        item = validate_user_file_path(raw_path, workspace=root)
         if item["ok"] is not True:
             rejected.append({"path": raw_path, "reason": str(item["reason"])})
             continue
