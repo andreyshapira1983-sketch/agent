@@ -264,9 +264,14 @@ _PATH_GUARD = frozenset("/.-")
 _PATH_EXTS = ("py", "md", "txt", "json", "yml", "yaml", "pdf")
 
 
-def _ext_at(text: str, dot: int) -> int:
-    """Length of the extension right after ``text[dot]``, or 0."""
-    for ext in _PATH_EXTS:
+def _ext_at(text: str, dot: int, exts: tuple[str, ...]) -> int:
+    """Length of the extension right after ``text[dot]``, or 0.
+
+    ``exts`` is tried IN ORDER, replicating regex alternation: with
+    ``("json", "jsonl")`` a ``.jsonl`` suffix matches ``json`` and leaves the
+    ``l`` outside — exactly what the pattern this scanner replaced did.
+    """
+    for ext in exts:
         if text[dot + 1: dot + 1 + len(ext)].lower() == ext:
             return len(ext)
     return 0
@@ -295,7 +300,9 @@ def _drive_body_start(text: str, letter: int) -> int:
     return -1
 
 
-def _scan_body(text: str, start: int) -> tuple[int, int]:
+def _scan_body(
+    text: str, start: int, exts: tuple[str, ...] = _PATH_EXTS
+) -> tuple[int, int]:
     """``(match_end, scan_stop)`` for the path body beginning at ``start``.
 
     ``match_end`` is -1 when no match exists; ``scan_stop`` is the index of
@@ -326,14 +333,16 @@ def _scan_body(text: str, start: int) -> tuple[int, int]:
         dot = run_end - 1
         while dot > run_start:
             if text[dot] == ".":
-                ext_len = _ext_at(text, dot)
+                ext_len = _ext_at(text, dot, exts)
                 if ext_len and dot + 1 + ext_len <= n:
                     return dot + 1 + ext_len, i
             dot -= 1
     return -1, i
 
 
-def extract_path_mentions(text: str) -> list[str]:
+def extract_path_mentions(
+    text: str, *, exts: tuple[str, ...] = _PATH_EXTS
+) -> list[str]:
     """File paths the question names, first-mention order, case-deduplicated.
 
     Moved from ``AgentLoop`` (piece 3 of the loop decomposition) and rewritten
@@ -363,7 +372,7 @@ def extract_path_mentions(text: str) -> list[str]:
         if body_start < 0:
             pos += 1
             continue
-        end, scan_stop = _scan_body(text, body_start)
+        end, scan_stop = _scan_body(text, body_start, exts)
         if end < 0:
             # No run the walk REACHED holds a dotted extension with a
             # non-empty head, so no later start inside the walked region can
@@ -380,7 +389,7 @@ def extract_path_mentions(text: str) -> list[str]:
                 and not (scan_stop >= 2 and text[scan_stop - 2] in _PATH_GUARD)
                 and (d_body := _drive_body_start(text, scan_stop - 1)) >= 0
             ):
-                d_end, _ = _scan_body(text, d_body)
+                d_end, _ = _scan_body(text, d_body, exts)
                 if d_end >= 0:
                     path = text[scan_stop - 1:d_end].rstrip(".,;:!?)\"]}'")
                     key = path.casefold()
