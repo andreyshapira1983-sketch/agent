@@ -41,6 +41,8 @@ from core.file_request_intent import (
     looks_like_multi_file_review_without_hint,
     normalize_path_mention,
     validate_user_file_path,
+    force_file_hint_read_when_explicit,
+    prepare_multi_file_review,
 )
 
 from core.approval import ApprovalProvider
@@ -993,7 +995,12 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         planner_history = "\n\n".join(
             part for part in (persistent_block, experience_block, history) if part.strip()
         )
-        multi_file = self._prepare_multi_file_review(user_question, file_hint=file_hint)
+        multi_file = prepare_multi_file_review(
+            user_question,
+            file_hint=file_hint,
+            workspace_root=self._file_read_workspace_root(),
+            log=self.log.log,
+        )
         if multi_file["kind"] == "refusal":
             answer = str(multi_file["message"])
             self.log.log("multi_file_review_refused", multi_file)
@@ -1247,7 +1254,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                             and "plan_parse_failed" not in planner_out.warnings
                         ):
                             self._planner_cache[_pc_key] = planner_out
-                planner_out = self._force_file_hint_read_when_explicit(
+                planner_out = force_file_hint_read_when_explicit(
                     planner_out,
                     question=user_question,
                     file_hint=file_hint,
@@ -2092,7 +2099,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                         blocked=exc,
                     )
                     raise
-                planner_out = self._force_file_hint_read_when_explicit(
+                planner_out = force_file_hint_read_when_explicit(
                     planner_out,
                     question=user_question,
                     file_hint=file_hint,
@@ -2814,159 +2821,6 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             )
         except Exception:
             pass
-
-    def _force_file_hint_read_when_explicit(
-        self,
-        planner_out: PlannerOutput,
-        *,
-        question: str,
-        file_hint: str | None,
-    ) -> PlannerOutput:
-        if not file_hint:
-            return planner_out
-        if any(src.get("tool") == "file_read" for src in planner_out.sources):
-            return planner_out
-        if not explicitly_requests_hinted_file(question):
-            return planner_out
-        sources = list(planner_out.sources)
-        sources.append(file_hint_source(file_hint))
-        warnings = list(planner_out.warnings)
-        warnings.append(
-            "explicit file-read request used --file hint because planner selected no file_read"
-        )
-        return PlannerOutput(
-            reasoning=(
-                f"{planner_out.reasoning} "
-                "Kernel added read-only file_read for explicit hinted-file request."
-            ).strip(),
-            sources=sources,
-            raw_response=planner_out.raw_response,
-            warnings=warnings,
-        )
-
-    def _prepare_multi_file_review(
-        self,
-        question: str,
-        *,
-        file_hint: str | None,
-    ) -> dict[str, Any]:
-        requested_paths = extract_path_mentions(question)
-        if len(requested_paths) < 2 or not is_file_review_request(question):
-            return {"kind": "none"}
-
-        explicit_mode = is_explicit_multi_file_mode(question)
-        # A request to CHANGE something is not a request to read files. The
-        # review predicates scan the whole question for a single verb, so one
-        # step inside a work order ("сравни результаты с baseline") turned a
-        # refactor into "compare these files" — and the forced plan below then
-        # removes every other tool from the cycle. Observed live: a task naming
-        # the module to create and the module never to create had both treated
-        # as documents to read, and was answered by reading one file — no
-        # tests, no branch, no commit. The operator's explicit switch still
-        # wins: it names the mode in words, which beats inferring it from verbs.
-        if not explicit_mode and is_change_request(question):
-            return {"kind": "none"}
-        if file_hint and not explicit_mode:
-            hint_norm = normalize_path_mention(file_hint)
-            extra_paths = [
-                path
-                for path in requested_paths
-                if normalize_path_mention(path) != hint_norm
-            ]
-            if extra_paths:
-                available = file_hint
-                extras = ", ".join(extra_paths)
-                return {
-                    "kind": "refusal",
-                    "message": (
-                        "Regular --file mode only permits the hinted file. "
-                        f"Available evidence: {available}. "
-                        f"Requested additional files were not reviewed: {extras}. "
-                        "Use :ingest-source for additional files or explicit "
-                        "multi-file review mode."
-                    ),
-                    "requested_paths": requested_paths,
-                    "file_hint": file_hint,
-                    "extra_paths": extra_paths,
-                }
-            return {"kind": "none"}
-
-        if not explicit_mode and file_hint:
-            return {"kind": "none"}
-        if not explicit_mode and not looks_like_multi_file_review_without_hint(question):
-            return {"kind": "none"}
-
-        root = self._file_read_workspace_root()
-        if root is None:
-            return {
-                "kind": "refusal",
-                "message": (
-                    "Multi-file review is unavailable because file_read is not "
-                    "registered in this agent session."
-                ),
-                "requested_paths": requested_paths,
-            }
-
-        valid_sources: list[dict[str, Any]] = []
-        warnings: list[str] = []
-        seen_targets: set[str] = set()
-        rejected: list[dict[str, str]] = []
-        for raw_path in requested_paths:
-            item = validate_user_file_path(raw_path, workspace=root)
-            if item["ok"] is not True:
-                rejected.append({
-                    "path": raw_path,
-                    "reason": str(item["reason"]),
-                })
-                warnings.append(f"{raw_path}: {item['reason']}")
-                continue
-            target_key = str(item["target"]).casefold()
-            if target_key in seen_targets:
-                warnings.append(f"{raw_path}: duplicate path skipped")
-                continue
-            seen_targets.add(target_key)
-            rel_path = item["relative_path"].as_posix()
-            valid_sources.append({
-                "tool": "file_read",
-                "arguments": {"path": rel_path},
-                "label": f"file:{rel_path}",
-                "expected_outcome": "Non-empty UTF-8 text from the explicitly mentioned file.",
-            })
-
-        if not valid_sources:
-            details = "; ".join(
-                f"{item['path']}: {item['reason']}" for item in rejected
-            ) or "no valid files were mentioned"
-            return {
-                "kind": "refusal",
-                "message": (
-                    "Multi-file review could not start because no valid "
-                    f"workspace files passed preflight. {details}."
-                ),
-                "requested_paths": requested_paths,
-                "rejected": rejected,
-            }
-
-        self.log.log(
-            "multi_file_review_preflight",
-            {
-                "requested_paths": requested_paths,
-                "accepted_paths": [src["arguments"]["path"] for src in valid_sources],
-                "rejected": rejected,
-                "warnings": warnings,
-            },
-        )
-        return {
-            "kind": "forced",
-            "sources": valid_sources,
-            "warnings": warnings,
-            "rejected": rejected,
-            "reasoning": (
-                "Kernel explicit multi-file review: read only the user-mentioned "
-                "workspace files that passed strict path preflight. "
-                + ("Rejected/skipped: " + "; ".join(warnings) if warnings else "")
-            ),
-        }
 
     def _file_read_workspace_root(self) -> Path | None:
         try:
