@@ -175,7 +175,10 @@ def test_the_production_merge_path_still_appends_lessons(tmp_path):
     from core.smart_memory import ProceduralMemoryStore
 
     store = ProceduralMemoryStore(tmp_path / "procedures.jsonl")
-    store.upsert_from_episode(_episode())
+    first, _ = store.upsert_from_episode(_episode())
+    # Creation seeds the lesson AND the immediate merge re-offers the same
+    # string; `_capped_lessons` dedupes by content, so exactly ONE copy lands.
+    assert len(first.lessons) == 1
     merged, created = store.upsert_from_episode(
         _episode(question="A completely unrelated question about budgets")
     )
