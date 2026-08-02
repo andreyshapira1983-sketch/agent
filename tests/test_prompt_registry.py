@@ -261,7 +261,7 @@ class TestRegisteredPrompts:
 
     _EXPECTED = {
         "synthesizer.system": "core.loop",
-        "planner.system": "core.planner",
+        "planner.system": "core.planner_prompt",
         "repair_proposal.system": "core.repair_proposal",
         "subagent_scope.system": "core.subagent_memory_scope",
         "reflection.system": "core.reflection",
@@ -270,7 +270,7 @@ class TestRegisteredPrompts:
     def setup_class(self):
         # Trigger self-registration by importing the owning modules.
         import core.loop  # noqa: F401
-        import core.planner  # noqa: F401
+        import core.planner_prompt  # noqa: F401
         import core.repair_proposal  # noqa: F401
         import core.subagent_memory_scope  # noqa: F401
         import core.reflection  # noqa: F401
