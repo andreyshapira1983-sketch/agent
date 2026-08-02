@@ -14,12 +14,12 @@ from pathlib import Path
 
 import pytest
 
-from core.planner import (
-    LLMPlanner,
+from core.doc_routing import (
     _drop_web_lookup_for_introspection,
     _is_self_repo_introspection_question,
     _wants_external_lookup,
 )
+from core.planner import LLMPlanner
 from tests.conftest import FakeLLM
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool

@@ -13,7 +13,7 @@ from core.lang_match import (
     term_matches,
     tokenize,
 )
-from core.planner import (
+from core.doc_routing import (
     _is_self_repo_introspection_question,
     _wants_external_lookup,
 )
