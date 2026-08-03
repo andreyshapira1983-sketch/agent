@@ -551,8 +551,8 @@ class AgentLoopExtractedMethods:
                         "error": str(_hx_exc)[:300],
                     },
                 )
-            except Exception:  # noqa: BLE001 — страховка вокруг самого журналирования
-                pass  # noqa: S110 — последний рубеж вокруг журналирования, глушить осознанно
+            except Exception:  # noqa: BLE001, S110 — страховка вокруг самого журналирования: последний рубеж, глушить осознанно
+                pass
 
         return report
 
