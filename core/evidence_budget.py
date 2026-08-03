@@ -300,49 +300,78 @@ def apply_total_budget(
     _NOTICE_OVERHEAD = 120
     _MIN_CONTENT     = 50          # never cut a block below this many chars
 
+    # MIR-073 (measured live 2026-08-03): `target = old_len - excess` dumps the
+    # ENTIRE overflow into one block, so the largest block — almost always the
+    # file the planner just chose to read — sank to the 50-char floor while its
+    # siblings stayed pristine, and the self-analysis task became structurally
+    # unwinnable. First pass: no NON-demoted block goes below a fair share of
+    # the budget; the surplus still comes off largest-first, it just cascades.
+    # Demoted blocks (memory) keep the absolute floor in both passes — they pay
+    # first BY DESIGN (their own measured incident). Second pass repeats with
+    # the absolute floor for everyone, so the hard budget is never violated.
+    _fair_min = max(_MIN_CONTENT, budget // (2 * max(1, len(blocks))))
+
     # A bare string is an iterable of characters; treating "memory" as six
     # one-letter labels would silently demote nothing.
     if isinstance(trim_first_labels, str):
         trim_first_labels = {trim_first_labels}
     demoted = frozenset(trim_first_labels or ())
 
-    def _smallest_possible(index: int) -> int:
+    # Content chars each block currently keeps (before its notice). The cut
+    # target must be computed from THIS, not from the original length: with
+    # cascading trims a block can be picked twice, and an original-length
+    # basis would let the second pick re-grow it past its first trim.
+    kepts = list(sizes)
+
+    def _floor_for(index: int, relaxed: bool) -> int:
+        if relaxed or result[index][0] in demoted:
+            return _MIN_CONTENT
+        return _fair_min
+
+    def _smallest_possible(index: int, relaxed: bool) -> int:
         """Size this block would have if trimmed as far as the floor allows."""
         old = len(originals[index])
-        return _MIN_CONTENT + len(_trim_notice(_MIN_CONTENT, old, budget))
+        floor = _floor_for(index, relaxed)
+        return floor + len(_trim_notice(floor, old, budget))
 
-    prev_total = sum(sizes) + 1  # sentinel to detect non-progress
-    while sum(sizes) > budget:
-        current_total = sum(sizes)
-        if current_total >= prev_total:
-            break  # safety: can't make further progress, avoid infinite loop
-        prev_total = current_total
+    for relaxed in (False, True):
+        prev_total = sum(sizes) + 1  # sentinel to detect non-progress
+        while sum(sizes) > budget:
+            current_total = sum(sizes)
+            if current_total >= prev_total:
+                break  # safety: can't make further progress, avoid infinite loop
+            prev_total = current_total
 
-        excess = current_total - budget
-        # A block that is already as small as trimming can make it gives
-        # nothing back; keeping it in the pool would stall the loop on the
-        # no-progress guard and leave the budget violated. Measured against the
-        # real notice length, not the padded reserve above — the difference is
-        # ~30 chars per block, which is exactly the window where a block that
-        # could still shrink used to be skipped.
-        candidates = [
-            i for i in range(len(sizes)) if sizes[i] > _smallest_possible(i)
-        ]
-        if not candidates:
+            excess = current_total - budget
+            # A block that is already as small as trimming can make it gives
+            # nothing back; keeping it in the pool would stall the loop on the
+            # no-progress guard and leave the budget violated. Measured against
+            # the real notice length, not the padded reserve above — the
+            # difference is ~30 chars per block, which is exactly the window
+            # where a block that could still shrink used to be skipped.
+            candidates = [
+                i for i in range(len(sizes))
+                if sizes[i] > _smallest_possible(i, relaxed)
+            ]
+            if not candidates:
+                break
+            preferred = [i for i in candidates if result[i][0] in demoted]
+            biggest = max(preferred or candidates, key=lambda i: sizes[i])
+
+            old_len   = len(originals[biggest])
+            # new_len must be small enough that (new_len + notice_overhead)
+            # fits the required reduction, but never below this pass's floor.
+            # The basis is the CURRENT kept length (see `kepts` above).
+            target    = kepts[biggest] - excess - _NOTICE_OVERHEAD
+            new_len   = max(_floor_for(biggest, relaxed), target)
+            label     = result[biggest][0]
+            notice    = _trim_notice(new_len, old_len, budget)
+            result[biggest] = (label, originals[biggest][:new_len] + notice)
+            sizes[biggest]  = new_len + len(notice)
+            kepts[biggest]  = new_len
+            was_trimmed = True
+        if sum(sizes) <= budget:
             break
-        preferred = [i for i in candidates if result[i][0] in demoted]
-        biggest = max(preferred or candidates, key=lambda i: sizes[i])
-
-        old_len   = len(originals[biggest])
-        # new_len must be small enough that (new_len + notice_overhead) fits
-        # the required reduction.  Keep at least _MIN_CONTENT chars of content.
-        target    = old_len - excess - _NOTICE_OVERHEAD
-        new_len   = max(_MIN_CONTENT, target)
-        label     = result[biggest][0]
-        notice    = _trim_notice(new_len, old_len, budget)
-        result[biggest] = (label, originals[biggest][:new_len] + notice)
-        sizes[biggest]  = new_len + len(notice)
-        was_trimmed = True
 
     return result, was_trimmed
 
@@ -373,6 +402,21 @@ MEMORY_CLOSE_TAG: str = "</long_term_memory>"
 _TRIM_NOTICE_RE = re.compile(
     r"\n\.\.\.\[TOTAL-BUDGET: trimmed to (\d+) of (\d+) chars "
 )
+
+
+def total_trims(blocks: list[tuple[str, str]]) -> list[tuple[str, int, int]]:
+    """(label, kept_chars, original_chars) for every total-budget-trimmed block.
+
+    The pure reader the orchestrator uses to SEE the cut (MIR-073): the trim
+    notices already carry both numbers, this just parses them back out of the
+    blocks `apply_total_budget` returned — one regex, owned by this module.
+    """
+    out: list[tuple[str, int, int]] = []
+    for label, content in blocks:
+        m = _TRIM_NOTICE_RE.search(content)
+        if m:
+            out.append((label, int(m.group(1)), int(m.group(2))))
+    return out
 
 
 def rebuild_trimmed_memory(
