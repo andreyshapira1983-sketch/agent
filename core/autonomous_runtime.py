@@ -461,6 +461,12 @@ class AutonomousRuntime:
                     "include_tests": config.include_tests,
                     "learning_limit": config.learning_limit,
                 },
+                # MIR-072 (measured live 2026-08-03): sixteen `:work-session`
+                # retries piled up sixteen identical pending items because this
+                # call site never consulted the inbox's own duplicate guard.
+                # Same goal → same pending request; a decided item stops
+                # deduping, so a new run may ask again.
+                dedup_key=f"autonomous_runtime.allow_effects:{config.goal}",
             )
             budget.reserve("approval_requests", reason="non-dry-run runtime approval")
             report = AutonomousRunReport(
