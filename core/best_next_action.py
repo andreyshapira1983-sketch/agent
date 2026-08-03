@@ -29,7 +29,6 @@ from core.self_improvement_issues import (
     suppress_generic_issue_duplicates,
 )
 
-
 Severity = Literal["critical", "high", "medium", "low", "none"]
 
 

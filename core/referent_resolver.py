@@ -26,10 +26,11 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, Literal
 
 # Shadow / rollout flag — loop wiring (PR2+) must default this to False.
 FEATURE_FLAG = "referent_resolver_v1"

@@ -40,7 +40,6 @@ from typing import Any, Literal
 from core.ids import new_id
 from core.plan_parsing import extract_json_object
 
-
 # ── internal helpers ───────────────────────────────────────────────────────────
 
 def _now_iso() -> str:

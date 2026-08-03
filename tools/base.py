@@ -11,7 +11,6 @@ from typing import Any, Literal
 
 from core.models import ToolCall, ToolResult
 
-
 Risk = Literal["read_only", "reversible", "irreversible", "external"]
 
 

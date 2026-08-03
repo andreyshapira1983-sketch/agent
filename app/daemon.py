@@ -40,7 +40,8 @@ import asyncio
 import inspect
 import logging
 import signal
-from typing import Any, Awaitable, Callable, Coroutine, Optional
+from collections.abc import Awaitable, Callable, Coroutine
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 

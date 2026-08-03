@@ -20,13 +20,12 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from cli.commands_approval import _approval_inbox_for
+from cli.parsers import _split_meta_args
 from core.capability_request import propose_capability_request
 from core.model_router import ModelRole
 from core.subagent_contract import approval_payload_from_proposal
 from core.subagent_memory_scope import needs_delegation, propose_subagent
-
-from cli.commands_approval import _approval_inbox_for
-from cli.parsers import _split_meta_args
 
 if TYPE_CHECKING:  # heavy import, only needed for annotations
     from core.loop import AgentLoop

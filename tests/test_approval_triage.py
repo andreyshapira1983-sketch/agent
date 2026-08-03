@@ -9,7 +9,6 @@ from core.approval_triage import (
     triage_inbox,
 )
 
-
 _NOW = datetime(2026, 6, 4, 12, 0, 0, tzinfo=timezone.utc)
 
 

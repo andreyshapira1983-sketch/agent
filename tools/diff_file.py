@@ -26,7 +26,6 @@ from typing import Any
 
 from tools.base import Risk, Tool, require_ascii_identifier
 
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------

@@ -14,35 +14,34 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from core.actuation_gateway import GatewayPath, gateway_path_from_receipt
 from core.approval_inbox import ApprovalInbox
-from core.budget_governor import BudgetGovernor, BudgetLimits, BudgetCounter
+from core.budget_governor import BudgetCounter, BudgetGovernor, BudgetLimits
+from core.budget_kill_switch import BudgetKillSwitch, default_path
 from core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
-from core.incident import IncidentLog
-from core.ingestion import ingest_files
-from core.injection_guard import prepare_untrusted_text_for_llm
+from core.clarification_gate import clarification_for_replan_exhausted
 from core.doc_routing import (
     is_confidence_evidence_diagnostic_question,
     is_doctrine_corporate_question,
 )
+from core.gateway_consult import budget_ledger_snapshot, readiness_blockers
+from core.incident import IncidentLog
+from core.ingestion import ingest_files
+from core.injection_guard import prepare_untrusted_text_for_llm
 from core.learning_planner import LearningPlanner
 from core.models import ToolCall
 from core.redaction import prepare_text_for_llm_boundary
+from core.reflection import ReflectionConfig, ReflectionEngine
+from core.safe_vcs import SafeVCS
+from core.self_build_memory import recent_self_build_lessons, record_self_build_episode
+from core.self_build_producer import produce_self_apply_proposal
 from core.task_lifecycle import (
     apply_run_exception,
     apply_run_outcome,
     task_heartbeat,
 )
 from core.task_queue import RuntimeTask, TaskQueueStore
-from core.reflection import ReflectionConfig, ReflectionEngine
 from core.tool_receipts import ReceiptPath, receipt_context
-from core.actuation_gateway import GatewayPath, gateway_path_from_receipt
-from core.budget_kill_switch import BudgetKillSwitch, default_path
-from core.safe_vcs import SafeVCS
-from core.self_build_producer import produce_self_apply_proposal
-from core.self_build_memory import record_self_build_episode, recent_self_build_lessons
-from core.clarification_gate import clarification_for_replan_exhausted
-from core.gateway_consult import budget_ledger_snapshot, readiness_blockers
-
 
 AutonomousTaskKind = Literal["status", "learn", "tests", "goal", "propose"]
 AutonomousTaskStatus = Literal["pending", "done", "failed", "skipped", "inconclusive", "clarify"]

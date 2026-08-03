@@ -35,9 +35,9 @@ Design principles
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, Literal, Optional
-
+from typing import Literal, Optional
 
 # ---------------------------------------------------------------------------
 # Authority ranking (docs/INSTRUCTION_AUTHORITY.md §2)

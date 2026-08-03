@@ -96,7 +96,8 @@ def resolve_resume(
             file=sys.stderr,
         )
         return ResumeDecision(exit_code=2)
-    from core.checkpoint import CheckpointLoader as _CPLoader, PHASE_PAUSED as _PHASE_PAUSED
+    from core.checkpoint import PHASE_PAUSED as _PHASE_PAUSED
+    from core.checkpoint import CheckpointLoader as _CPLoader
     _log_dir = workspace / "logs"
     _loader = _CPLoader(_log_dir)
     _ctx = _loader.load(trace_id)

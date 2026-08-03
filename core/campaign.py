@@ -51,14 +51,19 @@ inject deterministic fakes and assert on the real record shapes.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Literal, Optional
 
 from core.best_next_action import BestNextAction
 from core.campaign_io import (
-    _action_focused_goal as _action_focused_goal,   # re-exported patch seam (tests/test_campaign.py)
-    _cost_totals as _cost_totals,                   # re-exported patch seam (tests/test_campaign.py)
+    _action_focused_goal as _action_focused_goal,  # re-exported patch seam (tests/test_campaign.py)
+)
+from core.campaign_io import (
+    _cost_totals as _cost_totals,  # re-exported patch seam (tests/test_campaign.py)
+)
+from core.campaign_io import (
     _default_execute_action,
     _default_gather_signals,
     _log,
@@ -66,11 +71,14 @@ from core.campaign_io import (
 from core.campaign_ledger import (
     CampaignCycleRecord,
     CampaignLedger,
-    load_ledger_rows as load_ledger_rows,           # re-exported (app/runtime_cli.py imports it from here)
-    summarise_ledger as summarise_ledger,           # re-exported (app/runtime_cli.py imports it from here)
+)
+from core.campaign_ledger import (
+    load_ledger_rows as load_ledger_rows,  # re-exported (app/runtime_cli.py imports it from here)
+)
+from core.campaign_ledger import (
+    summarise_ledger as summarise_ledger,  # re-exported (app/runtime_cli.py imports it from here)
 )
 from core.campaign_types import CampaignActionOutcome, CampaignConfig, CampaignResult
-
 
 CampaignStatus = Literal["completed", "stopped"]
 

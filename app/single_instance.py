@@ -47,7 +47,7 @@ import socket
 import time
 from pathlib import Path
 from types import TracebackType
-from typing import IO, Optional, Type
+from typing import IO, Optional
 
 if os.name == "nt":  # pragma: no cover - platform-specific import
     import msvcrt
@@ -135,7 +135,7 @@ class SingleInstanceLock:
 
     # ── acquire / release ────────────────────────────────────────────────
 
-    def acquire(self) -> "SingleInstanceLock":
+    def acquire(self) -> SingleInstanceLock:
         """Acquire the lock, or raise :class:`AlreadyRunningError` if busy.
 
         Idempotent: acquiring an already-held lock is a no-op. A stale lock from
@@ -190,12 +190,12 @@ class SingleInstanceLock:
 
     # ── context manager ──────────────────────────────────────────────────
 
-    def __enter__(self) -> "SingleInstanceLock":
+    def __enter__(self) -> SingleInstanceLock:
         return self.acquire()
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc: Optional[BaseException],
         tb: Optional[TracebackType],
     ) -> None:

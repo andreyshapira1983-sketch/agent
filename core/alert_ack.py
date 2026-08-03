@@ -37,7 +37,6 @@ from typing import Optional
 from core.ids import new_id
 from core.state_integrity import read_state_jsonl, rewrite_state_jsonl
 
-
 # Severities that an operator is allowed to acknowledge. Objective breakages
 # (critical/high) are deliberately EXCLUDED — they must never be suppressible.
 _SUPPRESSIBLE_SEVERITIES = frozenset({"medium", "low"})
@@ -104,7 +103,7 @@ class AlertAck:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "AlertAck":
+    def from_dict(cls, data: dict) -> AlertAck:
         return cls(
             id=str(data.get("id") or new_id("ack")),
             action=str(data.get("action") or ""),

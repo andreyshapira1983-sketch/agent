@@ -14,12 +14,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from agent_tick import (
-    _print_status,
-    _write_heartbeat,
     APPROVAL_INBOX_PATH,
     EXPECTED_TICK_INTERVAL_SECONDS,
     HEARTBEAT_PATH,
     STALENESS_FACTOR,
+    _print_status,
+    _write_heartbeat,
 )
 from core.approval_inbox import ApprovalInbox
 

@@ -74,7 +74,6 @@ from core.compensation import CompensationAction, CompensationPlan
 from core.redaction import redact_text
 from tools.base import Risk, Tool, require_ascii_identifier
 
-
 # Commands whose output is informational only. Calling them does not
 # mutate filesystem or environment.
 # Exit-code semantics, per command FAMILY (MIR-010).

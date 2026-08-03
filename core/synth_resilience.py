@@ -21,8 +21,9 @@ retried — it must propagate so the budget-pause checkpoint fires.
 """
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Sequence
+from typing import Any
 
 
 def classify_model_error(exc: BaseException) -> str:

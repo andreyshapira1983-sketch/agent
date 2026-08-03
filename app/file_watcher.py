@@ -36,10 +36,11 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Awaitable, Callable, Iterable, Literal, Optional
+from typing import Literal, Optional
 
 logger = logging.getLogger(__name__)
 

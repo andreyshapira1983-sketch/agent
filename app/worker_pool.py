@@ -28,9 +28,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Awaitable, Callable, Optional
+from typing import Optional
 
 from app.priority_event_queue import (
     DaemonEvent,

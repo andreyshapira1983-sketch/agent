@@ -11,7 +11,6 @@ from typing import Any, Literal
 
 from core.subagent_contract import CanonicalSubagentContract
 
-
 AuditVerdict = Literal["pass", "fail", "unknown"]
 AuditIssueKind = Literal["violation", "unknown"]
 VerifierStatus = Literal["passed", "failed", "not_run"]

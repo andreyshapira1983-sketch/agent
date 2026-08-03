@@ -20,9 +20,9 @@ from typing import Any, Literal
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.models import Action, PolicyDecision
-from core.policy import PolicyGate, POLICY_ID
-from tools.base import Tool, ToolRegistry
+from core.policy import POLICY_ID, PolicyGate
 from tests.conftest import FakeLLM, FakePlanner
+from tools.base import Tool, ToolRegistry
 
 
 class StubTool(Tool):

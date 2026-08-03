@@ -13,7 +13,6 @@ Tests pin:
 """
 from __future__ import annotations
 
-
 from core.evidence import ProvenanceChain, make_evidence
 from core.verifier import extract_unresolved_web_urls, verify
 

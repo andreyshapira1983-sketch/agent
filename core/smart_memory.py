@@ -7,10 +7,11 @@ to procedures and surface stale knowledge risks.
 """
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Literal
+from typing import Any, Literal
 
 from core.completion_marker import sanitize_token
 from core.ids import new_id
@@ -21,7 +22,6 @@ from core.state_integrity import (
     rewrite_state_jsonl_unlocked,
     state_file_lock,
 )
-
 
 EpisodeOutcome = Literal["success", "partial", "failed"]
 
@@ -293,7 +293,7 @@ class EpisodeRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "EpisodeRecord":
+    def from_dict(cls, data: dict[str, Any]) -> EpisodeRecord:
         return cls(
             id=str(data.get("id") or new_id("ep")),
             task_id=str(data.get("task_id") or ""),
@@ -409,7 +409,7 @@ class ProcedureRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ProcedureRecord":
+    def from_dict(cls, data: dict[str, Any]) -> ProcedureRecord:
         return cls(
             id=str(data.get("id") or new_id("proc")),
             name=str(data.get("name") or "workflow"),
@@ -433,7 +433,7 @@ class ProcedureRecord:
             updated_at=str(data.get("updated_at") or _now_iso()),
         )
 
-    def with_outcome(self, episode: EpisodeRecord, verdict: str) -> "ProcedureRecord":
+    def with_outcome(self, episode: EpisodeRecord, verdict: str) -> ProcedureRecord:
         """Apply one observation, recomputing every derived value together.
 
         Counter, confidence and status move in a single new record, so no
@@ -456,7 +456,7 @@ class ProcedureRecord:
             updated_at=_now_iso(),
         )
 
-    def merged_from_episode(self, episode: EpisodeRecord) -> "ProcedureRecord":
+    def merged_from_episode(self, episode: EpisodeRecord) -> ProcedureRecord:
         """Fold an episode's PROVENANCE into this procedure without crediting it.
 
         Operator ruling 2026-08-02: a procedure is promoted only for causally-
@@ -535,7 +535,7 @@ class ConsolidationReport:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ConsolidationReport":
+    def from_dict(cls, data: dict[str, Any]) -> ConsolidationReport:
         return cls(
             id=str(data.get("id") or new_id("consol")),
             episode_count=max(0, int(data.get("episode_count") or 0)),
@@ -719,7 +719,7 @@ class EpisodicMemoryStore:
 
     def find_most_similar(
         self, query: str, *, threshold: float = 0.35
-    ) -> tuple["EpisodeRecord | None", float]:
+    ) -> tuple[EpisodeRecord | None, float]:
         """Return the episode whose *question* has the highest Jaccard similarity
         to *query* and the similarity score.  Returns ``(None, 0.0)`` when no
         episode reaches *threshold*.
@@ -737,7 +737,7 @@ class EpisodicMemoryStore:
         q_tokens = _tokens(query)
         if not q_tokens:
             return None, 0.0
-        best_ep: "EpisodeRecord | None" = None
+        best_ep: EpisodeRecord | None = None
         best_score: float = 0.0
         for ep in self.load():
             ep_tokens = _tokens(ep.question)
@@ -1026,7 +1026,7 @@ class ProceduralMemoryStore:
 
     def search_with_report(
         self, query: str, *, limit: int = 3
-    ) -> "ProcedureSearchResult":
+    ) -> ProcedureSearchResult:
         """Same as `search`, but it also reports why the store's other procedures
         did not surface — symmetric with `EpisodicMemoryStore.search_with_report`.
 
@@ -1182,7 +1182,7 @@ def feedback_for_episode(episode: EpisodeRecord) -> str:
 
 
 def resolve_used_procedures(
-    *, selected: "list[ProcedureRecord]", executed_tools: "list[str]"
+    *, selected: list[ProcedureRecord], executed_tools: list[str]
 ) -> tuple[str, ...]:
     """Which of the SELECTED procedures this run actually applied.
 
@@ -1222,8 +1222,8 @@ def resolve_used_procedures(
 
 def _checked_declaration(
     raw: str | None,
-    on_audit: "Callable[[str, dict[str, Any]], None] | None" = None,
-) -> "CompletionDeclaration | None":
+    on_audit: Callable[[str, dict[str, Any]], None] | None = None,
+) -> CompletionDeclaration | None:
     """Last line of defence for a token that bypassed the marker parser.
 
     Deliberately coerces rather than raises. Banking runs inside a broad
@@ -1561,7 +1561,7 @@ def episode_from_agent_cycle(
     used_procedure_ids: tuple[str, ...] | None = None,
     declared_completion: str | None = None,
     defect_signals: Iterable[str] | None = None,
-    on_audit: "Callable[[str, dict[str, Any]], None] | None" = None,
+    on_audit: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> EpisodeRecord:
     """Build an episode from one finished cycle.
 

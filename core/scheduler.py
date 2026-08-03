@@ -9,10 +9,11 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Awaitable, Callable, Literal, Optional
+from typing import Literal, Optional
 
 from core.file_lock import exclusive_file_lock
 from core.ids import new_id
@@ -87,7 +88,7 @@ class RuntimeSchedule:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "RuntimeSchedule":
+    def from_dict(cls, data: dict) -> RuntimeSchedule:
         return cls(
             id=str(data.get("id") or new_id("sched")),
             name=str(data.get("name") or "schedule"),
@@ -104,7 +105,7 @@ class RuntimeSchedule:
             updated_at=str(data.get("updated_at") or _iso()),
         )
 
-    def with_updates(self, **updates) -> "RuntimeSchedule":
+    def with_updates(self, **updates) -> RuntimeSchedule:
         data = self.to_dict()
         data.update(updates)
         data["updated_at"] = _iso()

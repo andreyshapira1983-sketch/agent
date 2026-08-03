@@ -14,7 +14,6 @@ from tools.read_logs import (
     ReadLogsTool,
 )
 
-
 # ============================================================
 # Helpers
 # ============================================================
@@ -136,7 +135,8 @@ class TestReadingHappyPath:
         log_a = _seed_log(workspace, "run_aaa", [_event("planner")])
         log_b = _seed_log(workspace, "run_bbb", [_event("respond"), _event("planner")])
         # Bump mtime so log_b is newer.
-        import os, time
+        import os
+        import time
         now = time.time()
         os.utime(log_a, (now - 100, now - 100))
         os.utime(log_b, (now, now))

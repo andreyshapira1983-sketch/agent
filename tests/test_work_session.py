@@ -25,7 +25,6 @@ from core.work_session import (
 from tests.conftest import FakeLLM
 from tools.base import ToolRegistry
 
-
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 class _FakeClock:

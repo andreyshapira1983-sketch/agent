@@ -10,7 +10,6 @@ from typing import Any
 
 from tools.base import Tool
 
-
 MAX_ENTRIES = 500  # safety cap to avoid enormous output
 
 

@@ -41,7 +41,6 @@ from core.compensation import CompensationAction, CompensationPlan
 from core.secret_scanner import contains_secret
 from tools.base import Risk, Tool, require_ascii_identifier
 
-
 MAX_BYTES = 1 * 1024 * 1024  # 1 MiB
 
 

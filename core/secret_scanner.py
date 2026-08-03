@@ -33,7 +33,6 @@ import re
 from dataclasses import dataclass
 from typing import Final
 
-
 # The set of KEY NAMES that make a value a credential. Single source of truth:
 # it feeds both the flat-text rule (`credential-assignment`, below) and the
 # structured-payload check (`is_credential_key`). Two hand-written copies would

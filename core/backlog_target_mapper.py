@@ -13,12 +13,12 @@ module is the narrow translation layer:
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from core.self_apply_lane import FileChange, classify_patch_risk
-
 
 MODEL_DISCOVERY_TARGET = "core/model_discovery.py"
 MODEL_DISCOVERY_TEST_TARGET = "tests/test_model_discovery.py"

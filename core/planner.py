@@ -20,11 +20,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from core.llm import LLM
-from core.step_sanitizer import sanitize_step
-from core.planner_prompt import PLANNER_SYSTEM
-from core.plan_parsing import parse_json
-from core.host_tools_context import _build_host_tools_block
 from core.doc_routing import (
     _drop_readme_status_sources,
     _drop_web_lookup_for_introspection,
@@ -34,17 +29,21 @@ from core.doc_routing import (
     _ensure_self_repair_doctrine_docs_first,
     _ensure_subagent_governance_docs_first,
     _explicitly_requests_readme,
-    is_confidence_evidence_diagnostic_question,
-    is_doctrine_corporate_question,
     _is_memory_governance_question,
     _is_self_repair_doctrine_question,
     _is_self_repo_introspection_question,
     _is_subagent_governance_question,
     _requests_implementation_detail,
     _should_prefer_memory_over_readme,
+    is_confidence_evidence_diagnostic_question,
+    is_doctrine_corporate_question,
 )
+from core.host_tools_context import _build_host_tools_block
+from core.llm import LLM
+from core.plan_parsing import parse_json
+from core.planner_prompt import PLANNER_SYSTEM
+from core.step_sanitizer import sanitize_step
 from tools.base import ToolRegistry
-
 
 # Output budget for a single planning call.
 #
@@ -344,7 +343,9 @@ class LLMPlanner:
         else:
             unavailable_block = ""
 
-        from core.task_complexity import needs_live_grounding  # local import: avoid cycles
+        from core.task_complexity import (
+            needs_live_grounding,  # local import: avoid cycles
+        )
         if needs_live_grounding(question):
             grounding_block = (
                 "\n[LIVE_GROUNDING=required — this question asks about current, "

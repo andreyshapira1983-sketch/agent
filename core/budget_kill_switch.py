@@ -24,10 +24,11 @@ a read-only status view.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 # Default location of the latched kill-switch state, relative to a workspace.
 KILL_SWITCH_PATH = "data/budget_kill_switch.json"
@@ -93,11 +94,11 @@ class KillSwitchState:
         }
 
     @classmethod
-    def inactive(cls) -> "KillSwitchState":
+    def inactive(cls) -> KillSwitchState:
         return cls(active=False)
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any] | None) -> "KillSwitchState":
+    def from_dict(cls, data: Mapping[str, Any] | None) -> KillSwitchState:
         if not isinstance(data, Mapping):
             return cls.inactive()
         return cls(

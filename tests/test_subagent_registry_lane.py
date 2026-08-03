@@ -5,7 +5,7 @@ The self-apply lane is injected as a fake; the registry writes to a tmp path.
 """
 from __future__ import annotations
 
-
+from cli.commands_approval import _record_producer_approval
 from core.approval_inbox import ApprovalInbox
 from core.self_apply_bridge import (
     SELF_APPLY_OPERATION,
@@ -15,8 +15,6 @@ from core.self_apply_bridge import (
 from core.self_apply_lane import SelfApplyReport
 from core.self_build_producer import PRODUCER_ORIGIN
 from core.subagent_registry import LANE_OUTCOME_ROLE, SubagentRegistry
-from cli.commands_approval import _record_producer_approval
-
 
 # ── fakes ──────────────────────────────────────────────────────────────────────
 

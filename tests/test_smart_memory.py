@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from cli.command_dispatch import handle_meta_command
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.memory import WorkingMemory
@@ -24,7 +25,6 @@ from core.smart_memory import (
     procedure_credit_allowed,
     procedure_from_episode,
 )
-from cli.command_dispatch import handle_meta_command
 from tests.conftest import FakeLLM
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool

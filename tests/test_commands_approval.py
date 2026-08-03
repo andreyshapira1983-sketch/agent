@@ -419,7 +419,10 @@ def test_acknowledged_alerts_are_named_in_the_report(agent, workspace, capsys):
 # ── :self-issue-verify ───────────────────────────────────────────────────────
 
 def _registry(workspace: Path):
-    from core.self_improvement_issues import DEFAULT_ISSUE_PATH, SelfImprovementIssueRegistry
+    from core.self_improvement_issues import (
+        DEFAULT_ISSUE_PATH,
+        SelfImprovementIssueRegistry,
+    )
 
     return SelfImprovementIssueRegistry(workspace / DEFAULT_ISSUE_PATH)
 
@@ -774,8 +777,8 @@ def test_verification_accepted_but_resolution_refused_is_reported(
 # ── remaining best-effort branches ───────────────────────────────────────────
 
 def test_producer_ledger_records_an_approved_producer_item(agent, workspace, monkeypatch):
-    from core.self_build_producer import PRODUCER_ORIGIN
     import core.subagent_registry as reg_mod
+    from core.self_build_producer import PRODUCER_ORIGIN
 
     calls: list[tuple] = []
     fake_registry = SimpleNamespace(

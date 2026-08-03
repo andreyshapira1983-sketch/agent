@@ -34,10 +34,11 @@ from __future__ import annotations
 import asyncio
 import heapq
 import logging
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import IntEnum
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Optional
 
 from core.ids import new_id
 

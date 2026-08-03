@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import sys
 from abc import ABC, abstractmethod
-from typing import Callable, Literal, Optional, TextIO
+from collections.abc import Callable
+from typing import Literal, Optional, TextIO
 
 from core.models import ApprovalDecision, ApprovalRequest
-
 
 # Strings accepted from the user (case-insensitive). Anything else => abort.
 _YES_TOKENS: frozenset[str] = frozenset({"y", "yes", "д", "да", "approve", "ok", "okay"})

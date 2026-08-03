@@ -7,13 +7,11 @@ locale (en + ru) and word boundaries.
 """
 from __future__ import annotations
 
-
 from core.structured_facts import (
     StructuredFacts,
     claim_supported_by,
     extract_facts,
 )
-
 
 # ---------------------------------------------------------------------------
 # Parsing

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from core.memory import Turn, WorkingMemory
 
-
 # ---------- conversation log ----------
 
 def test_record_turn_assigns_monotonic_indexes() -> None:

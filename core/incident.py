@@ -30,7 +30,6 @@ from typing import Literal, Optional
 from core.ids import new_id
 from core.state_integrity import read_state_jsonl, rewrite_state_jsonl
 
-
 IncidentSeverity = Literal["critical", "high", "medium", "low"]
 IncidentStatus = Literal["open", "contained", "escalated", "resolved"]
 
@@ -104,7 +103,7 @@ class Incident:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Incident":
+    def from_dict(cls, data: dict) -> Incident:
         severity = str(data.get("severity") or "")
         status = str(data.get("status") or "open")
         if severity not in _VALID_SEVERITIES:

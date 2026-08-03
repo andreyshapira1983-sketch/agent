@@ -25,8 +25,9 @@ parsed. Anything ambiguous is skipped rather than guessed at.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any
 
 # Verdicts that mark a target as weak. ``rejected_wrong_target`` fully suppresses
 # a repeat; the others reduce its rank.
@@ -82,7 +83,7 @@ class ValuePenalties:
     penalized: frozenset[str]
 
     @classmethod
-    def empty(cls) -> "ValuePenalties":
+    def empty(cls) -> ValuePenalties:
         return cls(frozenset(), frozenset())
 
 
@@ -232,7 +233,7 @@ ARCHITECTURE_AUDIT_SOURCE = "architecture_audit"
 
 def _select_audit_target(
     evidence_files: list[str],
-    exists: "Callable[[str], bool] | None",
+    exists: Callable[[str], bool] | None,
 ) -> str:
     """Pick the concrete target for an audit gap.
 
@@ -259,7 +260,7 @@ def _select_audit_target(
 def architecture_audit_candidates(
     priority_gaps: Iterable[Mapping[str, Any]],
     *,
-    exists: "Callable[[str], bool] | None" = None,
+    exists: Callable[[str], bool] | None = None,
 ) -> tuple[list[SignalRecord], str]:
     """Turn an architecture audit's priority gaps into grounded backlog signals.
 

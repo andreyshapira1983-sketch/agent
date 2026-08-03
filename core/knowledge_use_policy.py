@@ -15,7 +15,6 @@ from core.memory_policy import _tag_tokens as _retrieval_tag_tokens
 from core.models import MemoryRecord
 from core.role_router import RoleContext
 
-
 QUARANTINE_TAGS = frozenset({
     "quarantine",
     "do-not-use",

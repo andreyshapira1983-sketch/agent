@@ -47,6 +47,18 @@ All notable changes to this project are recorded here. The format follows
   to grep the window instead of guessing from the fragment.
 
 ### Changed
+- Codacy sweep, one PR (operator's order «исправь всё досконально, одним
+  PR»): the `loop_methods2` mixin declares its FULL host contract (28
+  "no member" HIGHs -> 0, file rating 0.46 -> 10.00); the four self-build
+  digests are marked `usedforsecurity=False`; 184 annotation/deprecated-
+  import findings (PEP 585/604, quoted annotations, typing.List/Optional/
+  Type) modernised; 361 import blocks sorted repo-wide; two dead imports
+  dropped. Verified: the secrets/AWS/password findings are test fixtures
+  of the secret scanner (zero in production code), the four `exec()` calls
+  live only in the splitter's own test, and every production
+  `subprocess.run` already carries explicit `shell=False`/`check=False`.
+  The 158 broad-except sites are NOT touched here — a behavioural audit
+  slice, not a style sweep.
 - A tool-set match is not usefulness (#261, operator ruling 2026-08-02): the
   workflow-key merge folds provenance only; counters, confidence and status
   move solely through causally attributed outcome feedback.

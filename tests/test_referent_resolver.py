@@ -5,7 +5,6 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-
 from core.referent_resolver import (
     FEATURE_FLAG,
     FEATURE_FLAG_DEFAULT,
@@ -16,7 +15,6 @@ from core.referent_resolver import (
     ReferentResolver,
     artifacts_from_working_memory,
 )
-
 
 SESSION = "sess_test"
 TURN = "turn_current"

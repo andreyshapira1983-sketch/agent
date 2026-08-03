@@ -256,6 +256,7 @@ def test_tick_marks_timed_out_run_inconclusive_not_healthy(workspace: Path, monk
     keeping run_status=completed as a separate signal.
     """
     import json
+
     import agent_tick
 
     (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
@@ -455,6 +456,7 @@ def test_tick_dry_run_streak_grows_then_resets_on_live(workspace: Path, monkeypa
     A following live tick resets the streak to 0 and never implies effects ran.
     """
     import json
+
     import agent_tick
 
     (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
@@ -858,8 +860,8 @@ def test_goal_path_blocks_subagent_and_network(workspace: Path):
     """The unattended goal path must block spawn_subagent + network egress
     (Stage-0 posture), regardless of dry-run, and restore afterwards."""
     from core.autonomous_runtime import (
-        AutonomousTask,
         _AUTONOMOUS_GOAL_BLOCKED_TOOLS,
+        AutonomousTask,
     )
 
     agent = _agent(workspace, with_tests=False)
@@ -1064,7 +1066,7 @@ def test_queue_heartbeat_failure_names_its_own_task(workspace: Path, monkeypatch
         def __init__(self, _store: Any, _task_id: str, *, on_error: Any = None):
             captured.append(on_error)
 
-        def __enter__(self) -> "_CapturingHeartbeat":
+        def __enter__(self) -> _CapturingHeartbeat:
             return self
 
         def __exit__(self, *_exc: Any) -> None:

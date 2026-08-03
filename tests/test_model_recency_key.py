@@ -1,7 +1,7 @@
 """Tests for _model_recency_key — date/version-aware model ranking."""
 import pytest
-from core.model_catalog import _model_recency_key
 
+from core.model_catalog import _model_recency_key
 
 # ── parametrized: newer model must have a larger key than older ───────────────
 

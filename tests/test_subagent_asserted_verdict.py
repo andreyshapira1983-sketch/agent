@@ -8,11 +8,11 @@ LLM that trusted another LLM.
 from __future__ import annotations
 
 from core.evidence import Evidence, ProvenanceChain, make_evidence
+from core.low_evidence_policy import evaluate_low_evidence_policy
 from core.verifier import (
     _is_derivative_subagent_evidence,
     verify,
 )
-from core.low_evidence_policy import evaluate_low_evidence_policy
 
 
 def _subagent_evidence(

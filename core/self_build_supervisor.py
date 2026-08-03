@@ -19,7 +19,8 @@ runs the heavier candidate analysis.
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 # Counters in the persistent hour window that gate a new self-build cycle.
 _GATED_WINDOW = "hour"

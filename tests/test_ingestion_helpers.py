@@ -24,13 +24,12 @@ import pytest
 from core import ingestion
 from core.ingestion import (
     CHUNK_CHARS,
-    ingest_files,
     _chunk_text,
     _ensure_inside_workspace,
     _iter_project_files,
     _resolve_inside_workspace,
+    ingest_files,
 )
-
 
 # ── _ensure_inside_workspace ─────────────────────────────────────────────────
 

@@ -5,6 +5,14 @@ public surface are unchanged."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+
+# The wrapper the retrieved long-term records are placed in. Named once so the
+# builder here and the prompt assembly in `core/loop.py` cannot drift.
+# Single source of truth moved to core/evidence_budget (piece 5): the
+# builder here, the trimmer there and the rebuilder all share one
+# definition. Re-imported so every existing `from core.loop_methods2
+# import MEMORY_*` site keeps working — this module genuinely uses them.
+from core.evidence_budget import MEMORY_CLOSE_TAG, MEMORY_OPEN_TAG
 from core.models import (
     Goal,
     Observation,
@@ -17,19 +25,11 @@ from core.smart_memory import (
     admit_for_storage,
     consolidate_memory,
     effective_completion,
-    resolve_used_procedures,
     episode_from_agent_cycle,
     format_experience_context,
     is_usage_eligible,
+    resolve_used_procedures,
 )
-
-# The wrapper the retrieved long-term records are placed in. Named once so the
-# builder here and the prompt assembly in `core/loop.py` cannot drift.
-# Single source of truth moved to core/evidence_budget (piece 5): the
-# builder here, the trimmer there and the rebuilder all share one
-# definition. Re-imported so every existing `from core.loop_methods2
-# import MEMORY_*` site keeps working — this module genuinely uses them.
-from core.evidence_budget import MEMORY_CLOSE_TAG, MEMORY_OPEN_TAG
 
 # Every durable sink the loop can write. A write site names its sink; a name
 # outside this set is refused rather than waved through, so a typo or a new
@@ -244,7 +244,8 @@ class AgentLoopExtractedMethods2:
             and self.persistent_store is not None
             and selected
         ):
-            from datetime import datetime, timezone as _tz
+            from datetime import datetime
+            from datetime import timezone as _tz
             _now_dt = datetime.now(_tz.utc)
             for rec in selected:
                 updated = rec.model_copy(update={

@@ -18,7 +18,6 @@ from core.subagent_memory_scope import (
     propose_subagent,
 )
 
-
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 class _FakeLLM:

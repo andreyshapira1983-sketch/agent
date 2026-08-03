@@ -32,10 +32,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Literal, Optional, Sequence
+from typing import Literal, Optional
 
 # Reuse the proven Jaccard+containment scorer so the echo guard stays in lock
 # step with the on-disk dedup gate (`core.hygiene`). Importing the internal
@@ -120,7 +121,7 @@ class MemoryWriteEvent:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "MemoryWriteEvent":
+    def from_dict(cls, data: dict) -> MemoryWriteEvent:
         return cls(
             content=str(data.get("content", "")),
             content_hash=str(data.get("content_hash", "")),

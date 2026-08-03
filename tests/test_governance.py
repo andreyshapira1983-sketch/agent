@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.governance import AgentMode, GovernedOperation, GovernancePolicy
+from core.governance import AgentMode, GovernancePolicy, GovernedOperation
 
 
 def test_diagnostic_mode_allows_read_only_surfaces():
