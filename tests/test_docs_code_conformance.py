@@ -50,13 +50,17 @@ RENAMED_OLD = "core/confidence_gate.py"
 
 
 def _run(*extra: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    # check=False: скрипт по замыслу выходит и нулём, и единицей —
+    # каждый тест сам судит returncode/stdout.
+    # argv фиксирован: sys.executable + наш скрипт; check=False — тесты судят сами.
+    return subprocess.run(  # nosemgrep  # noqa: S603  # nosec B603
         [sys.executable, str(SCRIPT), *extra],
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
         encoding="utf-8",
         errors="replace",
+        check=False,
     )
 
 

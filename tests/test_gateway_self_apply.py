@@ -125,8 +125,10 @@ def test_deny_block_escalate_do_not_mutate() -> None:
         inbox = ApprovalInbox()
         item_id = _approved(inbox)
 
-        def _raising_lane(proposal, **kwargs):
-            raise AssertionError(f"lane must not run on gateway {outcome}")
+        # B023: значение цикла привязано на месте определения — иначе поздний
+        # вызов подписал бы отказ чужим исходом.
+        def _raising_lane(proposal, *, _outcome=outcome, **kwargs):
+            raise AssertionError(f"lane must not run on gateway {_outcome}")
 
         result = _run(inbox, item_id, _raising_lane, gateway=_FakeGateway(outcome))
         assert result["status"] == "gateway_blocked"
