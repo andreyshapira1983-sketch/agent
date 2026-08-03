@@ -49,9 +49,9 @@ re-grounded against **current code on `main` @ `f317c4c`**.
 | Status | Count | IDs |
 |---|---|---|
 | fixed | 29 | MIR-001, MIR-002, MIR-003, MIR-004, MIR-005, MIR-010, MIR-017, MIR-036, MIR-037, MIR-039, MIR-040, MIR-041, MIR-043, MIR-046, MIR-047, MIR-048, MIR-049, MIR-051, MIR-052, MIR-054, MIR-055, MIR-056, MIR-057, MIR-059, MIR-062, MIR-063, MIR-064, MIR-065, MIR-066 |
-| open | 15 | MIR-008, MIR-011, MIR-015, MIR-016, MIR-020, MIR-021, MIR-023, MIR-024, MIR-026, MIR-035, MIR-044, MIR-045, MIR-050, MIR-058, MIR-060 |
+| open | 16 | MIR-008, MIR-011, MIR-015, MIR-016, MIR-020, MIR-021, MIR-023, MIR-024, MIR-026, MIR-028, MIR-035, MIR-044, MIR-045, MIR-050, MIR-058, MIR-060 |
 | planned_gap | 8 | MIR-009, MIR-018, MIR-022, MIR-029, MIR-030, MIR-031, MIR-034, MIR-038 |
-| needs_investigation | 6 | MIR-019, MIR-025, MIR-027, MIR-028, MIR-032, MIR-033 |
+| needs_investigation | 5 | MIR-019, MIR-025, MIR-027, MIR-032, MIR-033 |
 | code_fixed_needs_runtime_verification | 4 | MIR-012, MIR-013, MIR-014, MIR-061 |
 | partially_fixed | 4 | MIR-007, MIR-042, MIR-053, MIR-067 |
 | diagnosis_corrected | 1 | MIR-006 |
@@ -997,10 +997,10 @@ for MIR-002 and MIR-041 (approved next step) · then the minimal file set for th
 ### MIR-028 — verifier reported `verified_chunks > 0` with an empty provenance chain
 - **Aliases:** LPF-006. **Provenance:** previously_documented (to-verify).
 - **Sources:** LIVE_PROBE_FINDINGS.md.
-- **Files/functions:** `core/verifier*` (relationship between `verified_chunks` and `chain_was_empty`).
-- **Symptom:** `verified_chunks=4` logged while `chain_was_empty=True` (possibly file-not-found tool errors counted, or counter computed before the chain check).
-- **Root cause:** not yet pinned.
-- **Status:** `needs_investigation`.
+- **Files/functions:** `core/verifier_core.py` `verify()` — `chain_empty = len(chain) == 0` is recorded FIRST; the synthetic `user_explicit` evidence (`source_id="user:current_turn"`, built from the operator's question) is injected AFTER.
+- **Symptom:** `verified_chunks=4` logged while `chain_was_empty=True`.
+- **Root cause (pinned 2026-08-03, reproduced deterministically):** the two fields answer different questions. A chunk citing `[user:current_turn]` verifies against the *injected* user-turn evidence, while `chain_was_empty` honestly reports the *gathered* chain was empty — so the pair is not a counter-ordering bug. Both prior hypotheses disproven: tool-error chunks are not counted, and the counter is not computed before the chain check (a plain echo without the citation stays `unverified`; with `user_question=None` the pair is impossible). Mechanism locked executable in `tests/test_verifier_chain_empty_semantics.py` (3 characterization tests).
+- **Status:** `open` (root pinned; awaiting operator classification) ⬆ from `needs_investigation`. What remains is not investigation but a **policy call that belongs to the operator** (the analogue of issue #119, where `dialogue_supported` is never `verified`): may a chunk supported ONLY by the operator's own words count `verified`? Today it does — an answer built entirely of `[user:current_turn]` citations reads as fully verified with an empty gathered chain, scores `evidence_support=1.0`, and can bank a clean-success episode. No downstream consumer breaks logically (`fully_unverified` stays False on merit; the disagreement suppressor keys on `fully_unverified`), so the harm is confidence inflation, not a crash. If the ruling is "user-echo is its own class, never `verified`", the characterization tests are the spec of what must change.
 
 ---
 
