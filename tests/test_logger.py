@@ -11,11 +11,9 @@ the JSONL file matches what the loop emitted. These tests pin the contract:
 """
 from __future__ import annotations
 
-import io
 import json
 from pathlib import Path
 
-import pytest
 from pydantic import BaseModel
 
 from core.logger import TraceLogger

@@ -27,7 +27,6 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 
 import cli.command_dispatch as dispatch_module
 import cli.repl as repl_module

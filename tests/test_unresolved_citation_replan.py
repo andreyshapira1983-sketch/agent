@@ -24,7 +24,6 @@ from pathlib import Path
 from typing import Any
 from urllib.error import URLError
 
-import pytest
 
 from core.approval import AutoApprover
 from core.logger import TraceLogger
@@ -271,7 +270,7 @@ class TestUnresolvedCitationHappyPath:
             llm_responses=[llm_answer],
             url_routes={url: page_html},
         )
-        answer = agent.run("define agent")
+        agent.run("define agent")
 
         # After replan + re-verify the [web:URL] becomes [verified:web:URL].
         annotated = agent.last_verification.annotated_answer
@@ -403,7 +402,7 @@ class TestNoWebCitationsNoReplan:
             planner=planner,
             approval_provider=AutoApprover(default="approve"),
         )
-        answer = agent.run("q", file_hint="doc.txt")
+        agent.run("q", file_hint="doc.txt")
 
         # The [file:doc.txt] resolves normally and the loop runs once.
         assert "[verified:file:doc.txt]" in agent.last_verification.annotated_answer

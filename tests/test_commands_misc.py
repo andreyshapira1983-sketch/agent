@@ -34,8 +34,6 @@ from cli.commands_misc import (
     _handle_connectors,
     _handle_learn,
     _handle_release_audit,
-    _handle_state_store_drill,
-    _handle_supply_chain_audit,
     _handle_team_plan,
     _handle_team_run,
 )

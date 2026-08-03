@@ -490,7 +490,6 @@ def test_live_grounding_case_insensitive():
 
 def test_live_grounding_planner_prompt_injection(monkeypatch):
     """When needs_live_grounding=True the planner prompt must contain the LIVE_GROUNDING block."""
-    from core.llm import LLM
     from core.planner import LLMPlanner
     from tools.base import ToolRegistry
 

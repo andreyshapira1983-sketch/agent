@@ -811,7 +811,7 @@ class TestGlobalCapBoundary:
 
         # 3 fresh triggers, completed_attempts=3 → exactly at cap.
         h = [FakeTrigger(code="tool_error") for _ in range(3)]
-        d = p.decide(h, completed_attempts=3)
+        p.decide(h, completed_attempts=3)
         # tool_error budget is 2 so per-type bites first; but even if
         # we use a generous budget the global cap fires.
         custom = dict(DEFAULT_BUDGETS)

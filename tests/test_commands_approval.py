@@ -47,7 +47,6 @@ from cli.commands_approval import (
     _record_producer_approval,
     _record_subagent_contract_outcome,
 )
-from core.approval_inbox import ApprovalInbox
 
 
 class FakeLog:
