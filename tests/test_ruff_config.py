@@ -58,7 +58,7 @@ def test_every_ignore_carries_a_written_reason():
     body = body[: body.index("]")]
     for line in body.splitlines():
         code = line.strip().strip('",')
-        if not code or code.startswith("#") or code.startswith("ignore"):
+        if not code or code.startswith(("#", "ignore")):
             continue
         # у каждого кода должен быть комментарий выше в том же блоке
         assert "#" in body[: body.index(code)], f"правило {code} отключено без причины"
@@ -66,8 +66,10 @@ def test_every_ignore_carries_a_written_reason():
 
 @pytest.mark.skipif(shutil.which("ruff") is None, reason="ruff не установлен")
 def test_lint_debt_does_not_grow():
-    result = subprocess.run(  # nosec B603, B607 — фиксированный argv, без shell
-        ["ruff", "check", "--quiet", "--output-format", "concise", "."],
+    ruff = shutil.which("ruff")
+    assert ruff, "ruff пропал между проверкой и запуском"
+    result = subprocess.run(  # noqa: S603  # nosec B603 — фиксированный argv, полный путь, без shell
+        [ruff, "check", "--quiet", "--output-format", "concise", "."],
         cwd=_REPO, capture_output=True, text=True, check=False,
     )
     found = len([ln for ln in result.stdout.splitlines() if ln.strip()])
