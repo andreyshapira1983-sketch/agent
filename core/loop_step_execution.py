@@ -80,7 +80,8 @@ class AgentLoopStepExecution:
         gateway_dry_run: Any
         gateway_path: Any
         _current_attempt: int
-        _cycle_findings: list[Any]
+        # Как в `AgentLoop.__init__`: список или None до начала цикла.
+        _cycle_findings: list[dict[str, Any]] | None
 
         # Объявляем ВЫЗЫВАЕМЫМ атрибутом: заглушка-функция с пустым телом
         # читается анализаторами как «функция без return», и каждый вызов
@@ -105,6 +106,7 @@ class AgentLoopStepExecution:
         trigger = getattr(_step_trigger_tls, "step_trigger", None)
         _step_trigger_tls.step_trigger = None  # consume
         return step, outcome, trigger
+
     def _step_only_reads(self, step: PlanStep) -> bool:
         """True when this step cannot change the workspace.
 
@@ -128,6 +130,7 @@ class AgentLoopStepExecution:
             return tool.risk_for(arguments if isinstance(arguments, dict) else {}) == "read_only"
         except Exception:  # noqa: BLE001 — инструмент не умеет оценить риск: считаем НЕ read_only (безопасная сторона)
             return False
+
     def _execute_steps_parallel(
         self, steps: list[PlanStep]
     ) -> list[tuple[PlanStep, dict[str, Any] | None, ReplanTrigger | None]]:
@@ -201,6 +204,7 @@ class AgentLoopStepExecution:
         order_map = {s.id: i for i, s in enumerate(steps)}
         results.sort(key=lambda r: order_map.get(r[0].id, 9999))
         return results
+
     def _execute_step(self, step: PlanStep) -> dict[str, Any] | None:
         """Run a single PlanStep through Act -> Policy -> Tool -> Verify.
 
@@ -759,6 +763,7 @@ class AgentLoopStepExecution:
                 attempt=self._current_attempt,
             )
             return None
+
     def _call_tool(self, action: Action) -> ToolResult:
         assert action.tool_name is not None
         tool = self.registry.get(action.tool_name)
@@ -785,6 +790,7 @@ class AgentLoopStepExecution:
         # workspace root sandbox.
         self._capture_compensation_plan(result)
         return result
+
     def _capture_compensation_plan(self, result: ToolResult) -> None:
         """Extract + register a `compensation_plan` from tool output, if any.
 
