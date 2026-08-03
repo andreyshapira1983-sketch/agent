@@ -2126,8 +2126,9 @@ Produce a patch proposal for the routing bug.
 
     def test_operator_control_plane_approval_list_approve_and_deny(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
-        inbox = getattr(agent, "approval_inbox", None)
-        assert inbox is None
+        # Атрибут объявлен в классе со значением None — строковый getattr
+        # больше не нужен, контракт «ящика ещё нет» читается напрямую.
+        assert agent.approval_inbox is None
 
         assert _handle_auto_run("--allow-effects", agent, workspace) is True
         inbox = agent.approval_inbox
