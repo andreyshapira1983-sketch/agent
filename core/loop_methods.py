@@ -510,29 +510,39 @@ class AgentLoopExtractedMethods:
             )
             mode = "сухой прогон (только счёт)" if dry_run else "боевой проход"
             full_text = "\n".join((
-                f"Проверял: {scanned} записей постоянной памяти, "
-                f"{report.get('episodes_pruned', 0)} эпизодов на прунинг, "
-                "архив посылок на дубли и потолок",
-                "Способ: балл важности = вес тегов + причинный кредит "
-                "(цитата в подтверждённом ответе, ×4 против простой вставки) "
-                "− штраф простоя; автозапись-«факт» без причинного кредита "
-                "больше не бессмертна",
-                f"Доказательство: {mode}; истекло {report.get('expired', 0)}, "
-                f"дублей {report.get('deduped', 0)}, в спячку "
-                f"{report.get('archived', 0)}, эпизодов срезано "
-                f"{report.get('episodes_pruned', 0)}, дублей посылок "
-                f"{report.get('assumptions_duplicates_removed', 0)}",
-                "Непроверенным осталось: полезность неarchived записей не "
-                "доказана и не опровергнута — спячка обратима, ничего не "
-                "уничтожено",
-                f"Уверенность: высокая в счёте, {mode}; классификация "
-                "«вредно/опровергнуто» — фаза 2, здесь не выносится",
+                (
+                    f"Проверял: {scanned} записей постоянной памяти, "
+                    f"{report.get('episodes_pruned', 0)} эпизодов на прунинг, "
+                    "архив посылок на дубли и потолок"
+                ),
+                (
+                    "Способ: балл важности = вес тегов + причинный кредит "
+                    "(цитата в подтверждённом ответе, вчетверо против простой "
+                    "вставки) минус штраф простоя; автозапись-«факт» без "
+                    "причинного кредита больше не бессмертна"
+                ),
+                (
+                    f"Доказательство: {mode}; истекло {report.get('expired', 0)}, "
+                    f"дублей {report.get('deduped', 0)}, в спячку "
+                    f"{report.get('archived', 0)}, эпизодов срезано "
+                    f"{report.get('episodes_pruned', 0)}, дублей посылок "
+                    f"{report.get('assumptions_duplicates_removed', 0)}"
+                ),
+                (
+                    "Непроверенным осталось: полезность оставшихся записей не "
+                    "доказана и не опровергнута — спячка обратима, ничего не "
+                    "уничтожено"
+                ),
+                (
+                    f"Уверенность: высокая в счёте, {mode}; классификация "
+                    "«вредно/опровергнуто» — фаза 2, здесь не выносится"
+                ),
             ))
             self.log.log(
                 "hygiene_explained",
                 {"full_text": full_text, "moved": moved, "dry_run": dry_run},
             )
-        except Exception as _hx_exc:
+        except Exception as _hx_exc:  # noqa: BLE001 — вердикт не должен ронять проход
             try:
                 self.log.log(
                     "hygiene_explained_failed",
@@ -541,8 +551,8 @@ class AgentLoopExtractedMethods:
                         "error": str(_hx_exc)[:300],
                     },
                 )
-            except Exception:  # noqa: S110 — last-resort guard around logging
-                pass
+            except Exception:  # noqa: BLE001 — страховка вокруг самого журналирования
+                pass  # nosec B110 — последний рубеж, глушить осознанно
 
         return report
 

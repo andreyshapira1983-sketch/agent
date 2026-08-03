@@ -121,16 +121,16 @@ def test_verified_memory_citation_earns_causal_credit(workspace: Path):
     assert loaded.causal_use == 1, (
         "подтверждённая цитата [memory:id] — сильный причинный кредит"
     )
-    credits = [
+    credit_events = [
         e for e in _events(log_path) if e.get("event") == "memory_causal_credit"
     ]
-    assert len(credits) == 1
-    assert credits[0]["payload"]["record_ids"] == [rec_id]
+    assert len(credit_events) == 1
+    assert credit_events[0]["payload"]["record_ids"] == [rec_id]
 
 
 def test_uncited_turn_earns_no_causal_credit(workspace: Path):
     path = workspace / "data" / "mem.jsonl"
-    agent_a, store, _ = _build_agent(workspace, FakeLLM(), path)
+    agent_a, _store, _ = _build_agent(workspace, FakeLLM(), path)
     agent_a.remember(
         content="User prefers Python over JavaScript for backend services.",
         tags=["preference"],
