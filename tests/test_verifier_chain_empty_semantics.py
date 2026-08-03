@@ -72,3 +72,4 @@ def test_without_a_user_question_nothing_verifies_against_an_empty_chain():
     )
     assert report.chain_was_empty is True
     assert report.verified_chunks == 0
+    assert report.fully_unverified is True
