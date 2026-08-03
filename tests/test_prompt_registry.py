@@ -267,11 +267,7 @@ class TestRegisteredPrompts:
 
     def setup_class(self):
         # Trigger self-registration by importing the owning modules.
-        import core.loop
-        import core.planner_prompt
-        import core.reflection
-        import core.repair_proposal
-        import core.subagent_memory_scope
+        pass
 
     @pytest.mark.parametrize("key", list(_EXPECTED))
     def test_key_present(self, key):
