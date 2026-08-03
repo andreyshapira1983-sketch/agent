@@ -26,9 +26,9 @@ from core.memory_policy import MemoryRetrievalPolicy, MemoryWritePolicy
 from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
-from tests.conftest import FakeLLM
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
+from tests.conftest import FakeLLM
 
 
 def _events(log_path: Path) -> list[dict]:

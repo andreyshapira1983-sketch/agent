@@ -3,13 +3,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+
 from core.backlog_selector import (
-    _finalize,
     build_backlog,
     load_backlog,
     select_top,
 )
 from core.backlog_signals import SignalRecord, ValuePenalties
+from core.backlog_selector import _finalize
+
 
 _TECH_DEBT = """\
 TD-060 — Open A

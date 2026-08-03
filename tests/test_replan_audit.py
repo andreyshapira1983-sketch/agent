@@ -24,22 +24,23 @@ from typing import Any
 
 import pytest
 
-from core.logger import TraceLogger
 from core.loop import AgentLoop, ReplanCode, new_trace_id
+from core.logger import TraceLogger
 from core.policy import PolicyGate
 from core.replan import (
     ALL_FAILURE_TYPES,
+    ReplanTrigger,
+    count_failures,
+    format_replan_context,
     DEFAULT_BUDGETS,
     DEFAULT_MAX_TOTAL_REPLANS,
     FailureBudget,
     FailureType,
     ReplanPolicy,
-    ReplanTrigger,
-    count_failures,
-    format_replan_context,
 )
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import Tool, ToolRegistry
+
 
 # ============================================================
 # Shared minimal stubs
@@ -493,8 +494,8 @@ class TestForbiddenCanonicalisation:
         keys in a different order → sanitiser must STILL drop it."""
         target = _GenericTool("danger", lambda n, k: {}, risk="irreversible")
         # First plan: deny path. Second plan: same args, keys reordered.
-        from core.approval import AutoApprover
         from tests.test_replan import SequencedPlanner
+        from core.approval import AutoApprover
 
         plans = [
             [{"tool": "danger", "arguments": {"a": 1, "b": 2},

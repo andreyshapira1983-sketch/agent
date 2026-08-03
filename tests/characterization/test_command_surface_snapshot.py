@@ -27,9 +27,10 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import cli.app as app_module
+
 import cli.command_dispatch as dispatch_module
 import cli.repl as repl_module
+import cli.app as app_module
 import main as main_module
 
 REPO_ROOT = Path(main_module.__file__).resolve().parent

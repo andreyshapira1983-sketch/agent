@@ -18,11 +18,25 @@ from types import SimpleNamespace
 import pytest
 
 import cli.app as app_module
-
+import main as main_module
 # the intent bridge resolves handler names in its own module (cli/intent_bridge.py)
 import cli.command_dispatch as dispatch_module
 import cli.intent_bridge as bridge_module
-import main as main_module
+from core.approval import AutoApprover
+from core.budget_ledger import BudgetLedger, BudgetWindow
+from core.logger import TraceLogger
+from core.loop import AgentLoop, new_trace_id
+from core.memory import WorkingMemory
+from core.memory_policy import MemoryRetrievalPolicy, MemoryWritePolicy
+from core.model_usage import ModelBudgetExceeded, ModelUsageLedger
+from core.models import MemoryRecord
+from core.operator_intent import route_operator_intent
+from core.persistent_memory import PersistentMemoryStore
+from core.planner import LLMPlanner
+from core.policy import PolicyGate
+from core.scheduler import SchedulerStore
+from core.source_registry import SourceRegistry
+from core.source_registry_store import SourceRegistryStore
 from app.budget_guard import _run_agent_with_budget_guard
 from app.io import _force_utf8_io
 from app.operator_status import _format_next_actions
@@ -42,25 +56,11 @@ from cli.intent_bridge import (
 )
 from cli.parsers import _parse_remember
 from cli.repl import _collect_instruction_buffer
-from core.approval import AutoApprover
-from core.budget_ledger import BudgetLedger, BudgetWindow
-from core.logger import TraceLogger
-from core.loop import AgentLoop, new_trace_id
-from core.memory import WorkingMemory
-from core.memory_policy import MemoryRetrievalPolicy, MemoryWritePolicy
-from core.model_usage import ModelBudgetExceeded, ModelUsageLedger
-from core.models import MemoryRecord
-from core.operator_intent import route_operator_intent
-from core.persistent_memory import PersistentMemoryStore
-from core.planner import LLMPlanner
-from core.policy import PolicyGate
-from core.scheduler import SchedulerStore
-from core.source_registry import SourceRegistry
-from core.source_registry_store import SourceRegistryStore
 from tests.conftest import FakeLLM
 from tools.base import Tool, ToolRegistry
 from tools.file_read import FileReadTool
 from tools.file_write import FileWriteTool
+
 
 # ============================================================
 # Helpers

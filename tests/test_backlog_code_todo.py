@@ -11,6 +11,7 @@ from pathlib import Path
 from core.backlog_selector import build_backlog, load_backlog
 from core.backlog_signals import CODE_TODO_SOURCE, code_todo_candidates
 
+
 # ── code_todo_candidates (pure scanner) ───────────────────────────────────────
 
 _SAMPLE = """\

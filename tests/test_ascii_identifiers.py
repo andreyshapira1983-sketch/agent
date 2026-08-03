@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from cli.parsers import _parse_remember
 from core.planner import LLMPlanner
+from cli.parsers import _parse_remember
 from tests.conftest import FakeLLM
 from tools.base import ToolRegistry, require_ascii_identifier
 from tools.file_read import FileReadTool

@@ -9,6 +9,7 @@ from core.supply_chain import (
     parse_requirements_lock,
 )
 
+
 HASH_A = "a" * 64
 HASH_B = "b" * 64
 

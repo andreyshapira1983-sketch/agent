@@ -23,8 +23,8 @@ import pytest
 from core.smart_memory import (
     EpisodeRecord,
     EpisodicMemoryStore,
-    ProceduralMemoryStore,
     ProcedureRecord,
+    ProceduralMemoryStore,
 )
 from scripts.completion_legacy_report import build_report, main, render
 

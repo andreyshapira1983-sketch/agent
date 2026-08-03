@@ -22,6 +22,7 @@ from core.hygiene import archive_low_value_memory
 from core.models import MemoryRecord
 from core.persistent_memory import PersistentMemoryStore
 
+
 # ── E. archived records never participate in active retrieval ─────────────────
 
 def test_archived_records_excluded_from_active_store(tmp_path: Path):

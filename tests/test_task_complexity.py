@@ -7,16 +7,17 @@ from unittest.mock import patch
 import pytest
 
 from core.task_complexity import (
+    ComplexityTier,
     _ALWAYS_LIGHT_ROLES,
     _NEVER_LIGHT_TASK_ROLES,
     _SHORT_TEXT_THRESHOLD,
-    ComplexityTier,
     assess_complexity,
     can_skip_planner,
     matched_light_signals,
     needs_live_grounding,
     tier_label,
 )
+
 
 # ── ComplexityTier enum ───────────────────────────────────────────────────────
 
@@ -325,7 +326,6 @@ def test_tier_label_contains_tier_name():
 def test_model_router_for_task_mock_static():
     """with static_llm (mock mode), for_task always returns the static LLM."""
     from unittest.mock import MagicMock
-
     from core.model_router import ModelRole, ModelRouter
 
     fake_llm = MagicMock()
@@ -401,9 +401,8 @@ def test_model_router_for_task_deep_task_different_from_standard(
     monkeypatch.delenv("AGENT_MODEL_TIER_DEEP", raising=False)
 
     from unittest.mock import MagicMock
-
-    from core.deep_escalation import OperatorEscalation
     from core.model_router import ModelRole, ModelRouter
+    from core.deep_escalation import OperatorEscalation
 
     instances: list[object] = []
 

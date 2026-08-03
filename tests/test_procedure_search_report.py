@@ -16,8 +16,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.smart_memory import (
-    ProceduralMemoryStore,
     ProcedureRecord,
+    ProceduralMemoryStore,
     ProcedureSearchResult,
 )
 

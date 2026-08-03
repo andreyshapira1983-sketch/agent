@@ -13,6 +13,7 @@ import pytest
 from core.models import ToolCall
 from tools.base import Tool, ToolRegistry
 
+
 # ============================================================
 # Fixtures: minimal Tool subclasses for unit testing
 # ============================================================

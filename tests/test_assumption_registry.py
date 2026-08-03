@@ -26,6 +26,7 @@ from core.assumption_registry import (
     extract_from_question,
 )
 
+
 # ============================================================
 # Helpers
 # ============================================================
@@ -817,7 +818,6 @@ class TestLayerConnections:
         """AgentLoop passes user_profile.language to extract_from_question
         so a known language produces a profile-sourced assumption."""
         from unittest.mock import patch
-
         from core.planner import PlannerOutput
 
         agent = _make_agent_for_connections(tmp_path)

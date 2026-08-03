@@ -9,6 +9,7 @@ from core.backlog_target_mapper import (
     map_backlog_candidate,
 )
 
+
 _TITLE = (
     "TD-011 / TD-012 \u2014 Live Model Discovery + Provider Catalog Refresh "
     "(read-only)"

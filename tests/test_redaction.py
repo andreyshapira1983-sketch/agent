@@ -12,6 +12,7 @@ import pytest
 
 from core.redaction import redact_dlp_text, redact_payload, redact_text
 
+
 # ============================================================
 # redact_text
 # ============================================================

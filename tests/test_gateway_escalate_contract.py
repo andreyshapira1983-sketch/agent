@@ -12,11 +12,7 @@ from typing import Any
 import pytest
 
 from core.approval import AutoApprover
-from core.autonomous_runtime import (
-    AutonomousRuntime,
-    AutonomousRuntimeConfig,
-    AutonomousTask,
-)
+from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig, AutonomousTask
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.policy import PolicyGate

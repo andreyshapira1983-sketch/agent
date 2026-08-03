@@ -14,9 +14,9 @@ from core.subagent_contract import (
     CanonicalToolScope,
 )
 from core.subagent_runner import (
-    SubagentContractRefused,
-    SubAgentRunner,
     SubAgentRunResult,
+    SubAgentRunner,
+    SubagentContractRefused,
 )
 from tools.base import ToolRegistry
 

@@ -32,6 +32,7 @@ from core.user_profile import (
     update_profile,
 )
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -504,8 +505,8 @@ class TestAgentLoopUserProfileIntegration:
         """Build a minimal AgentLoop with a real UserProfileStore and a mock LLM."""
         from unittest.mock import MagicMock
 
-        from core.logger import TraceLogger
         from core.loop import AgentLoop
+        from core.logger import TraceLogger
         from core.policy import PolicyGate
         from tools.base import ToolRegistry
 
@@ -599,8 +600,8 @@ class TestAgentLoopUserProfileIntegration:
         """AgentLoop without user_profile_store should work as before."""
         from unittest.mock import MagicMock
 
-        from core.logger import TraceLogger
         from core.loop import AgentLoop
+        from core.logger import TraceLogger
         from core.policy import PolicyGate
         from tools.base import ToolRegistry
 
@@ -654,21 +655,18 @@ class TestUserProfileLanguageValidation:
 
     def test_path_traversal_language_raises(self):
         from pydantic import ValidationError
-
         from core.user_profile import UserProfile
         with pytest.raises(ValidationError, match="BCP-47"):
             UserProfile(language="../etc/passwd")
 
     def test_script_tag_language_raises(self):
         from pydantic import ValidationError
-
         from core.user_profile import UserProfile
         with pytest.raises(ValidationError, match="BCP-47"):
             UserProfile(language="<script>alert(1)</script>")
 
     def test_empty_language_raises(self):
         from pydantic import ValidationError
-
         from core.user_profile import UserProfile
         with pytest.raises(ValidationError, match="BCP-47"):
             UserProfile(language="")
@@ -680,7 +678,6 @@ class TestUserProfileLanguageValidation:
 
     def test_negative_counter_raises(self):
         from pydantic import ValidationError
-
         from core.user_profile import UserProfile
         with pytest.raises(ValidationError, match="non-negative"):
             UserProfile(interaction_count=-1)

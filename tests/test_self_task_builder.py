@@ -17,6 +17,7 @@ from core.self_apply_bridge import SELF_APPLY_OPERATION, rehydrate_proposal
 from core.self_task_builder import TASK_BUILD_ORIGIN, build_coding_task
 from core.self_task_producer import SELF_TASK_OPERATION, decode_frozen_test
 
+
 # ── fakes ────────────────────────────────────────────────────────────────────
 
 

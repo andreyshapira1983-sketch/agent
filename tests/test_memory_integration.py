@@ -18,9 +18,10 @@ from core.loop import AgentLoop, new_trace_id
 from core.memory import WorkingMemory
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
-from tests.conftest import FakeLLM
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
+from tests.conftest import FakeLLM
+
 
 PLAN_FILE_READ = json.dumps(
     {

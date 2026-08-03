@@ -13,8 +13,8 @@ from pathlib import Path
 
 from core.smart_memory import (
     EpisodeRecord,
-    ProceduralMemoryStore,
     ProcedureRecord,
+    ProceduralMemoryStore,
 )
 
 

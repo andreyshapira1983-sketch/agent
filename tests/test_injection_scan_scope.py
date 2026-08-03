@@ -17,6 +17,7 @@ from __future__ import annotations
 from core.injection_guard import scan_for_injection
 from core.loop_helpers import _to_text, untrusted_scan_view
 
+
 # The exact shell_exec output envelope from the live trace (stderr shortened;
 # the real value was mojibake-decoded Cyrillic, which is itself clean).
 _WHERE_FFMPEG_OUTPUT = {

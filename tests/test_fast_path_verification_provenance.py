@@ -29,16 +29,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
+from core.logger import TraceLogger
 from core.policy import PolicyGate
 from core.smart_memory import (
-    EpisodeRecord,
     EpisodicMemoryStore,
+    EpisodeRecord,
     episode_from_agent_cycle,
 )
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
+
 
 _Q = "what is the capital of Australia"
 

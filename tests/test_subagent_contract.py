@@ -5,7 +5,6 @@ import json
 
 import pytest
 
-from core.model_router import ModelRole
 from core.subagent_contract import (
     CONTRACT_SCHEMA_VERSION,
     CanonicalBudgetScope,
@@ -20,6 +19,7 @@ from core.subagent_memory_scope import (
     SubagentProposal,
     ToolScope,
 )
+from core.model_router import ModelRole
 from core.team_plan import SubagentContract
 
 

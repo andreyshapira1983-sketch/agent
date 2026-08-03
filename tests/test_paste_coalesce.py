@@ -14,7 +14,8 @@ import time
 
 import pytest
 
-from cli.repl import _coalesce_burst, _StdinLineReader
+from cli.repl import _StdinLineReader, _coalesce_burst
+
 
 # ---------- pure burst-coalescing policy ----------
 

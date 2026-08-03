@@ -24,6 +24,7 @@ layers:
 """
 from __future__ import annotations
 
+
 from core.evidence import (
     Evidence,
     ProvenanceChain,
@@ -39,6 +40,7 @@ from core.verifier import (
     match_citation,
     verify,
 )
+
 
 # ===========================================================================
 # Tokeniser

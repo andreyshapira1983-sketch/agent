@@ -20,10 +20,9 @@ import pytest
 from core.approval import AutoApprover
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
-from core.models import MemoryRecord
 from core.persistent_memory import PersistentMemoryStore
 from core.policy import PolicyGate
-from tests.conftest import FakeLLM, FakePlanner
+from core.models import MemoryRecord
 from tools.base import ToolRegistry
 from tools.diff_file import DiffFileTool
 from tools.file_read import FileReadTool
@@ -32,6 +31,7 @@ from tools.read_logs import ReadLogsTool
 from tools.run_tests import RunTestsTool
 from tools.shell_exec import ShellExecTool
 from tools.web_search import WebSearchTool
+from tests.conftest import FakeLLM, FakePlanner
 
 
 def _events(path: Path) -> list[dict]:

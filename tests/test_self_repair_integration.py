@@ -11,12 +11,12 @@ import json
 import subprocess
 from pathlib import Path
 
+
 from core.approval import AutoApprover
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.policy import PolicyGate
 from core.self_repair import RepairProposal
-from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
 from tools.diff_file import DiffFileTool
 from tools.file_read import FileReadTool
@@ -25,6 +25,8 @@ from tools.read_logs import ReadLogsTool
 from tools.run_tests import RunTestsTool
 from tools.shell_exec import ShellExecTool
 from tools.web_search import WebSearchTool
+from tests.conftest import FakeLLM, FakePlanner
+
 
 # ============================================================
 # Helpers

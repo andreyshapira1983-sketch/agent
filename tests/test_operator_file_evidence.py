@@ -5,8 +5,8 @@ import time
 from pathlib import Path
 
 from core.approval import AutoApprover
-from core.file_request_intent import is_change_request
 from core.logger import TraceLogger
+from core.file_request_intent import is_change_request
 from core.loop import AgentLoop, new_trace_id
 from core.memory import WorkingMemory
 from core.policy import PolicyGate

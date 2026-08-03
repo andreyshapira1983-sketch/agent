@@ -31,12 +31,12 @@ from core.approval import AutoApprover
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.policy import PolicyGate
-from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
 from tools.file_write import FileWriteTool
 from tools.shell_exec import ShellExecTool
 from tools.web_search import WebSearchTool
+from tests.conftest import FakeLLM, FakePlanner
 
 
 def _events(log_path: Path) -> list[dict]:

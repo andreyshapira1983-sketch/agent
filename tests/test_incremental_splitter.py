@@ -403,9 +403,9 @@ def test_cli_self_split_usage_on_bad_args(workspace: Path, capsys):
 def test_cli_self_split_caps_targeted_test_paths(workspace: Path, monkeypatch):
     """A heavily-imported target must fall back to tests/ instead of blowing
     past the test runner MAX_PATHS argv cap (live regression: core/loop.py)."""
-    import core.dependency_map as dm
     from cli.commands_self_split import _handle_self_split
     from tools.run_tests import MAX_PATHS
+    import core.dependency_map as dm
 
     _write(workspace, "core/funcs.py", FUNC_SRC)
     many = [f"tests/test_imp_{i}.py" for i in range(MAX_PATHS + 5)]

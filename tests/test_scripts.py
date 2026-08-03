@@ -10,10 +10,13 @@ import importlib
 import json
 from pathlib import Path
 
+
 # ============================================================
 # scripts/generate_sbom.py
 # ============================================================
+
 import scripts.generate_sbom as gs
+
 
 _LOCK = (
     "# locked deps\n"

@@ -24,6 +24,7 @@ from agent_tick import (
     _write_producer_state,
 )
 
+
 # ── fakes ─────────────────────────────────────────────────────────────────────
 
 

@@ -8,6 +8,7 @@ import pytest
 
 from core.budget_ledger import BudgetLedger, BudgetWindow
 
+
 NOW = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
 
 

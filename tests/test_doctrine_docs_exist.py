@@ -13,14 +13,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.doc_routing import _MEMORY_GOVERNANCE_DOC_PATHS as MEMORY_MANIFEST
-from core.doc_routing import (
-    _SELF_REPAIR_DOCTRINE_DOC_PATHS as SELF_REPAIR_MANIFEST,
-)
-from core.doc_routing import _SUBAGENT_GOVERNANCE_DOC_PATHS as SUBAGENT_MANIFEST
-from core.doc_routing import DOCTRINE_CORPORATE_DOC_PATHS as PLANNER_MANIFEST
 from core.learning_planner import (
     DOCTRINE_CORPORATE_DOC_PATHS as LEARNING_MANIFEST,
+)
+from core.doc_routing import DOCTRINE_CORPORATE_DOC_PATHS as PLANNER_MANIFEST
+from core.doc_routing import _MEMORY_GOVERNANCE_DOC_PATHS as MEMORY_MANIFEST
+from core.doc_routing import _SUBAGENT_GOVERNANCE_DOC_PATHS as SUBAGENT_MANIFEST
+from core.doc_routing import (
+    _SELF_REPAIR_DOCTRINE_DOC_PATHS as SELF_REPAIR_MANIFEST,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

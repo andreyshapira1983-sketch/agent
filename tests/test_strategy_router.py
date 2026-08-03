@@ -23,6 +23,7 @@ from core.strategy_router import (
     is_local_strategy,
 )
 
+
 # ---------------------------------------------------------------------------
 # Acceptance tests — Russian natural phrases from the roadmap
 # ---------------------------------------------------------------------------

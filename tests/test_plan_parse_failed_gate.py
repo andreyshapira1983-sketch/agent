@@ -21,8 +21,8 @@ from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.planner import PlannerOutput
 from core.policy import PolicyGate
-from tests.conftest import FakeLLM
 from tools.base import Tool, ToolRegistry
+from tests.conftest import FakeLLM
 
 
 class _ScriptedPlannerWithWarnings:

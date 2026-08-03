@@ -12,6 +12,7 @@ import pytest
 
 from tools.web_search import MAX_RESULTS_CAP, WebSearchTool
 
+
 # ============================================================
 # Hard-fail cases
 # ============================================================

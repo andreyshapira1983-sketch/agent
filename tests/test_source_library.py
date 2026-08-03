@@ -4,11 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.source_library import (
-    list_source_library,
-    resolve_source_library,
-    source_library_payload,
-)
+from core.source_library import list_source_library, resolve_source_library, source_library_payload
 
 
 def test_source_library_default_includes_open_knowledge_sources():

@@ -1,6 +1,9 @@
 """Tests for core/evidence_budget.py — per-artifact + total evidence budget."""
 from __future__ import annotations
 
+
+from core.loop_helpers import format_artifact
+from core.evidence_budget import rebuild_trimmed_memory
 from core.evidence_budget import (
     EVIDENCE_FILE_CHARS,
     EVIDENCE_TOTAL_CHARS,
@@ -9,9 +12,8 @@ from core.evidence_budget import (
     apply_total_budget,
     budget_file_content,
     extract_relevant,
-    rebuild_trimmed_memory,
 )
-from core.loop_helpers import format_artifact
+
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 

@@ -17,6 +17,7 @@ from core.clarification_policy import (
     check_clarification,
 )
 
+
 # ---------------------------------------------------------------------------
 # Unit: check_clarification
 # ---------------------------------------------------------------------------
@@ -152,11 +153,11 @@ class TestLoopClarificationIntegration:
     def _make_loop(self):
         """Build a minimal AgentLoop backed by a mock LLM."""
         import json
-        from pathlib import Path
         from unittest.mock import MagicMock
+        from pathlib import Path
 
-        from core.logger import TraceLogger
         from core.loop import AgentLoop
+        from core.logger import TraceLogger
         from core.policy import PolicyGate
         from tools.base import ToolRegistry
 

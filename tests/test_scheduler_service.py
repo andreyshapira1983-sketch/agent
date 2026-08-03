@@ -16,9 +16,9 @@ import pytest
 from core.scheduler import (
     DEFAULT_IDLE_INTERVAL,
     RuntimeSchedule,
+    ScheduleTickReport,
     SchedulerService,
     SchedulerStore,
-    ScheduleTickReport,
 )
 from core.task_queue import TaskQueueStore
 

@@ -8,6 +8,7 @@ from core.backlog_signals import (
     value_review_penalties,
 )
 
+
 # ── TECH_DEBT parsing ─────────────────────────────────────────────────────────
 
 _TECH_DEBT = """\

@@ -14,8 +14,8 @@ from unittest.mock import patch
 
 import pytest
 
-from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
+from core.logger import TraceLogger
 from core.model_router import ModelRole, ModelRouter
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
@@ -23,6 +23,7 @@ from core.task_complexity import ComplexityTier, assess_complexity
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
+
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -374,7 +375,7 @@ class TestForTaskCostTier:
         Passing "light"/"standard"/"deep" to the usage ledger silently priced
         every for_task() call as "unknown" (5 units/1k) because the ledger's
         cost table only knows "free/low/medium/high/unknown"."""
-        from core.model_router import ModelRegistry, ModelSelectionPolicy, ModelSpec
+        from core.model_router import ModelRegistry, ModelSpec, ModelSelectionPolicy
         from core.model_usage import ModelUsageLedger
 
         registry = ModelRegistry([

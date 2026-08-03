@@ -14,13 +14,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.host_tools_context import host_tools_relevant
-from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
+from core.logger import TraceLogger
+from core.host_tools_context import host_tools_relevant
 from core.policy import PolicyGate
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
+
 
 _CONTRACT_ANSWER = (
     "Conclusion:\nHere is the answer. [general-knowledge]\n"

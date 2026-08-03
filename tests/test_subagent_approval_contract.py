@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+
 import cli.commands_proposals as proposals_module
 from cli.commands_approval import _handle_approval_run
 from core.approval_inbox import ApprovalInbox

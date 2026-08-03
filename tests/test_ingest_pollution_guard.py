@@ -24,6 +24,7 @@ from core.knowledge_pipeline import (
 )
 from tests.test_cli import _build_agent
 
+
 # ── A. repo tree is never mass-ingested into memory as facts ──────────────────
 
 def test_ingest_project_never_persists_repo_tree_as_facts(workspace: Path):

@@ -18,6 +18,7 @@ from core.subagent_registry import (
     SubagentRegistry,
 )
 
+
 # ── report helpers (mirror ProducerReport.to_dict shape) ──────────────────────
 
 

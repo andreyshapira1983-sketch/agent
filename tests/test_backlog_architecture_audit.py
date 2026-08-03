@@ -16,6 +16,7 @@ from core.backlog_signals import (
     architecture_audit_candidates,
 )
 
+
 _GAPS = [
     {
         "id": "doctrine_and_architecture_docs",

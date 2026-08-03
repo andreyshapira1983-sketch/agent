@@ -16,10 +16,10 @@ from types import SimpleNamespace
 
 import pytest
 
-import app.budget_guard as budget_guard_module
-import cli.app as app_module
-import cli.intent_bridge as bridge_module
 import cli.repl as repl_module
+import cli.app as app_module
+import app.budget_guard as budget_guard_module
+import cli.intent_bridge as bridge_module
 import main as main_module
 
 REPO_ROOT = Path(main_module.__file__).resolve().parent

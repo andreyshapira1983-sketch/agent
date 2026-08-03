@@ -1,7 +1,5 @@
 import pytest
-
 from tools.current_time import format_duration_seconds
-
 
 def test_format_duration_seconds_formats_common_ranges():
     assert format_duration_seconds(59) == '59s'

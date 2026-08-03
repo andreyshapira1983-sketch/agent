@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from core.proposal_value_gate import ValueGateResult, evaluate_proposal_value
 
+
 # ── hard veto: no code effect (Python) ───────────────────────────────────────
 
 

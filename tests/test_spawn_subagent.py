@@ -36,7 +36,7 @@ def _make_mock_model_router() -> MagicMock:
     return mr
 
 
-def _make_parent_registry() -> ToolRegistry:
+def _make_parent_registry() -> "ToolRegistry":
     from tools.base import Tool, ToolRegistry
 
     class _DummyTool(Tool):
@@ -950,7 +950,7 @@ class TestSubagentInjectionScan:
         assert result.answer == "The answer is 42."
 
     def test_blocked_answer_becomes_error(self, tmp_path: Path):
-        from core.injection_guard import InjectionFinding, InjectionScanResult
+        from core.injection_guard import InjectionScanResult, InjectionFinding
 
         blocked_finding = InjectionFinding(
             category="override",
@@ -973,7 +973,7 @@ class TestSubagentInjectionScan:
         assert result.answer == ""
 
     def test_suspicious_answer_is_annotated(self, tmp_path: Path):
-        from core.injection_guard import InjectionFinding, InjectionScanResult
+        from core.injection_guard import InjectionScanResult, InjectionFinding
 
         suspicious_finding = InjectionFinding(
             category="jailbreak",
@@ -1001,7 +1001,7 @@ class TestSubagentInjectionScan:
         assert "[WARNING" in result.answer
 
     def test_blocked_answer_logs_event(self, tmp_path: Path):
-        from core.injection_guard import InjectionFinding, InjectionScanResult
+        from core.injection_guard import InjectionScanResult, InjectionFinding
 
         blocked_result = InjectionScanResult(
             verdict="blocked",

@@ -23,6 +23,7 @@ from core.self_apply_bridge import (
 )
 from core.self_apply_lane import SelfApplyProposal, SelfApplyReport
 
+
 # ── fakes ────────────────────────────────────────────────────────────────────
 
 

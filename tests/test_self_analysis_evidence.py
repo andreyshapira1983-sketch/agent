@@ -40,6 +40,7 @@ from core.verifier import verify
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
 
+
 #: The interactive prompt recorded in issue #119, verbatim.
 ISSUE_119_PROMPT = (
     "плохо справился Ты не правильно ответила некорректно тебе надо тебя "

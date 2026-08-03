@@ -35,8 +35,9 @@ from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.models import ApprovalDecision, ApprovalRequest
 from core.policy import PolicyGate
-from tests.conftest import FakeLLM, FakePlanner
 from tools.base import Tool, ToolRegistry
+from tests.conftest import FakeLLM, FakePlanner
+
 
 # ============================================================
 # Safe tool with a side-effect counter

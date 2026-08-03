@@ -30,7 +30,7 @@ import pathlib
 import pytest
 
 from core.knowledge_pipeline import ConflictResolver
-from core.source_registry import ClaimRecord, SourceRecord, SourceRegistry
+from core.source_registry import ClaimRecord, SourceRegistry, SourceRecord
 from core.state_integrity import read_state_jsonl_unlocked
 
 _LIVE = pathlib.Path(__file__).resolve().parents[1] / "data" / "source_registry.jsonl"

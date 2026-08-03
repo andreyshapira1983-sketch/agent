@@ -12,6 +12,7 @@ import pytest
 from core.model_router import _DEFAULT_PROVIDER_ENV, _provider_has_credentials
 from core.planner import PlannerOutput
 
+
 # ── MIR-053: the suite denies outbound network by default ────────────────────
 #
 # Before this boundary existed, correctness depended on every author

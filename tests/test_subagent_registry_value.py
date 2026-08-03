@@ -12,8 +12,6 @@ from pathlib import Path
 
 from core.subagent_registry import (
     _MIN_JUDGED_FOR_RECOMMENDATION as _MIN_JUDGED,
-)
-from core.subagent_registry import (
     VERDICT_ROLE,
     SubagentRegistry,
 )

@@ -19,6 +19,7 @@ from core.operational_domain import (
     check_operational_domain,
 )
 
+
 # ---------------------------------------------------------------------------
 # In-domain — normal assistant work must always proceed
 # ---------------------------------------------------------------------------
@@ -157,8 +158,8 @@ class TestLoopOddIntegration:
         from pathlib import Path
         from unittest.mock import MagicMock
 
-        from core.logger import TraceLogger
         from core.loop import AgentLoop
+        from core.logger import TraceLogger
         from core.policy import PolicyGate
         from tools.base import ToolRegistry
 
@@ -212,8 +213,8 @@ class TestLoopOddIntegration:
         from pathlib import Path
         from unittest.mock import MagicMock
 
-        from core.logger import TraceLogger
         from core.loop import AgentLoop
+        from core.logger import TraceLogger
         from core.policy import PolicyGate
         from tools.base import ToolRegistry
 

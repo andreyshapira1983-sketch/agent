@@ -22,6 +22,7 @@ import pytest
 from agent_tick import _maybe_propose_repair, _repair_target_from_failures
 from core.self_repair import RepairProposal
 
+
 # --------------------------------------------------------------------------- #
 # Fakes                                                                        #
 # --------------------------------------------------------------------------- #

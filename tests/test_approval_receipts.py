@@ -8,11 +8,7 @@ import pytest
 
 import core.tool_receipts as tool_receipts
 from core.approval_inbox import ApprovalInbox
-from core.tool_receipts import (
-    ToolReceiptLedger,
-    default_receipts_path,
-    record_approval_receipt,
-)
+from core.tool_receipts import ToolReceiptLedger, default_receipts_path, record_approval_receipt
 
 
 def _inbox(workspace: Path) -> ApprovalInbox:

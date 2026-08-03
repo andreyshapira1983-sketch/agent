@@ -93,8 +93,8 @@ def test_audit_reports_models_the_agent_actually_used(monkeypatch, tmp_path):
     #   :model-usage          -> 8 distinct models across anthropic/openai/local
     # The audit reported one active model while the agent had demonstrably run
     # eight. Configuration was being presented as behaviour.
-    import json
     from pathlib import Path
+    import json
 
     from core.model_usage import ModelUsageLedger
 

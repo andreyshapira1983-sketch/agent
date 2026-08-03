@@ -6,16 +6,16 @@ falls apart.
 """
 import pytest
 
-from core.doc_routing import (
-    _is_self_repo_introspection_question,
-    _wants_external_lookup,
-)
 from core.lang_match import (
     STEM_MIN,
     any_term_matches,
     normalize_text,
     term_matches,
     tokenize,
+)
+from core.doc_routing import (
+    _is_self_repo_introspection_question,
+    _wants_external_lookup,
 )
 
 
