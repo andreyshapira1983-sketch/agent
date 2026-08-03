@@ -631,7 +631,7 @@ class TestActionFocusedGoal:
         assert "Verify agent state" in captured["goal"]
         assert "investigate_tick_error" in captured["goal"]
         assert outcome.result == "completed"
-        assert outcome.artifact == "reasoning: Re-run agent_tick.py --status to confirm liveness."
+        assert outcome.artifact == "reasoning: Inspect the last failed tick error and report the cause."
 
 
 class TestCostTotals:
