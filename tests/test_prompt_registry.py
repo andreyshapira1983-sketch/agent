@@ -30,7 +30,7 @@ from core.prompt_registry import (
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-_SHA = lambda text: hashlib.sha256(text.encode()).hexdigest()
+_SHA = lambda text: hashlib.sha256(text.encode()).hexdigest()  # noqa: E731
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -267,7 +267,11 @@ class TestRegisteredPrompts:
 
     def setup_class(self):
         # Trigger self-registration by importing the owning modules.
-        pass
+        import core.loop  # noqa: F401
+        import core.planner_prompt  # noqa: F401
+        import core.reflection
+        import core.repair_proposal  # noqa: F401
+        import core.subagent_memory_scope  # noqa: F401
 
     @pytest.mark.parametrize("key", list(_EXPECTED))
     def test_key_present(self, key):
