@@ -34,6 +34,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import re
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -378,9 +379,15 @@ def _default_file_reader(workspace: str | Path) -> Callable[[str], str | None]:
     return read
 
 
-def _llm_json(
+def _llm_json_with_raw(
     llm: Any, *, system: str, user: str, max_tokens: int = 2000
-) -> dict | None:
+) -> tuple[dict | None, str]:
+    """Like :func:`_llm_json`, but also returns the RAW reply.
+
+    MIR-071: a builder reply that fails (or fragment-parses) used to be
+    discarded with no trace — 84 cost units for a 15948-token reply left
+    nothing to diagnose. The raw travels back so the head can preserve it.
+    """
     safe_user, _redact_meta = prepare_text_for_llm_boundary(user)
     try:
         answer = llm.complete(
@@ -389,7 +396,51 @@ def _llm_json(
     except TypeError:
         # Tolerate positional-only fakes.
         answer = llm.complete(system, safe_user)
-    return extract_json_object(answer if isinstance(answer, str) else "")
+    raw = answer if isinstance(answer, str) else ""
+    return extract_json_object(raw), raw
+
+
+def _llm_json(
+    llm: Any, *, system: str, user: str, max_tokens: int = 2000
+) -> dict | None:
+    parsed, _raw = _llm_json_with_raw(
+        llm, system=system, user=user, max_tokens=max_tokens
+    )
+    return parsed
+
+
+def _preserve_rejected_raw(workspace: Path, roles: list["RoleOutput"]) -> str | None:
+    """Persist a discarded builder reply to disk; return its repo-relative path.
+
+    MIR-071 (operator-approved retention-first): a vetoed/unparseable builder
+    reply used to vanish — 84 cost units left one `critic_veto` line and no
+    text anywhere (the run journal keeps only token counters). The raw is
+    redacted, written under ``logs/self_build_rejects/``, and STRIPPED from
+    the role data so reports and journals never balloon. Best-effort: a
+    preservation failure must never break the producer.
+    """
+    raw = ""
+    holder = None
+    for role in roles:
+        if role.role == "builder" and role.data.get("raw_reply"):
+            raw = str(role.data.get("raw_reply") or "")
+            holder = role
+    if holder is not None:
+        holder.data.pop("raw_reply", None)
+    if not raw.strip():
+        return None
+    try:
+        from core.redaction import redact_dlp_text  # noqa: PLC0415 — avoid cycles
+
+        safe_raw, _s, _p = redact_dlp_text(raw)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        rel = Path("logs") / "self_build_rejects" / f"reject_{stamp}.txt"
+        out = workspace / rel
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(safe_raw, encoding="utf-8", newline="")
+        return rel.as_posix()
+    except Exception:  # noqa: BLE001 — retention is diagnostics, never a blocker
+        return None
 
 
 # ── roles ───────────────────────────────────────────────────────────────────
@@ -847,10 +898,17 @@ def _builder_generate(
                 "pointing to a name that no module actually defines. Past failures:\n"
                 f"{lesson_block}\n\n"
             ) + user
-    parsed = _llm_json(llm, system=system, user=user, max_tokens=_BUILDER_MAX_TOKENS)
+    parsed, raw_reply = _llm_json_with_raw(
+        llm, system=system, user=user, max_tokens=_BUILDER_MAX_TOKENS
+    )
     if not parsed:
         return RoleOutput(
-            "builder", "failed", "builder returned no parseable JSON"
+            "builder",
+            "failed",
+            "builder returned no parseable JSON",
+            # MIR-071: the head preserves this to disk and strips it from the
+            # report, so the misfire is diagnosable without ballooning logs.
+            {"raw_reply": raw_reply, "raw_chars": len(raw_reply)},
         )
     files, content = _normalize_builder_files(parsed, target)
     test_paths = parsed.get("test_paths") or ["tests"]
@@ -871,18 +929,27 @@ def _builder_generate(
             f"generated {len(content)} chars for target + {extra} new file(s) "
             f"(confidence {confidence:.2f})"
         )
+    data: dict[str, Any] = {
+        "content": content,
+        "files": files,
+        "test_paths": [str(p) for p in test_paths],
+        "test_pattern": test_pattern,
+        "reason": reason,
+        "confidence": confidence,
+    }
+    if not content.strip():
+        # MIR-071's live shape: a truncated reply fragment-parses into a dict
+        # WITHOUT the content field (measured: 15948 tokens ≈ the 16000-token
+        # builder cap → outer JSON unbalanced → an inner balanced fragment
+        # "wins" extraction). The reply is not empty — say so, and carry the
+        # raw so the head can preserve it.
+        data["raw_reply"] = raw_reply
+        data["raw_chars"] = len(raw_reply)
     return RoleOutput(
         "builder",
         "built" if content else "failed",
         detail,
-        {
-            "content": content,
-            "files": files,
-            "test_paths": [str(p) for p in test_paths],
-            "test_pattern": test_pattern,
-            "reason": reason,
-            "confidence": confidence,
-        },
+        data,
     )
 
 
@@ -901,7 +968,17 @@ def _critic_review(
     confidence = float(build.get("confidence") or 0.0)
 
     if not isinstance(content, str) or not content.strip():
-        veto.append("empty generated content")
+        raw_chars = int(build.get("raw_chars") or 0)
+        if raw_chars > 0:
+            # MIR-071: the model DID reply (often a truncated JSON whose inner
+            # fragment "won" extraction) — saying "empty" hid that for a
+            # 15948-token, 84-cost-unit reply. Name the real failure.
+            veto.append(
+                f"builder reply did not parse into usable content "
+                f"(raw_chars={raw_chars})"
+            )
+        else:
+            veto.append("empty generated content")
     if _is_critical(target):
         veto.append(f"target {target} is a critical file")
     if content and _looks_like_diff(content):
@@ -1661,6 +1738,12 @@ def produce_self_apply_proposal(
             break
 
         veto_now = list(critic.data.get("veto_reasons", []))
+        # MIR-071: before this veto is finalized (or retried), pull the raw
+        # builder reply out of the role data and preserve it to disk — the
+        # only diagnosable evidence of an expensive misfire.
+        raw_path = _preserve_rejected_raw(Path(workspace), roles)
+        if raw_path is not None:
+            veto_now.append(f"raw builder reply preserved: {raw_path}")
         if attempt < max_attempts:
             # Feed the exact veto reasons back so the retry targets them directly
             # instead of blindly regenerating the same defective candidate.
