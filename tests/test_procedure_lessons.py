@@ -133,7 +133,7 @@ def test_a_run_without_a_recorded_question_still_yields_a_usable_record():
 
 def test_a_second_episode_appends_its_lesson():
     first = procedure_from_episode(_episode())
-    second = first.with_episode(
+    second = first.merged_from_episode(
         _episode(question="A completely unrelated question about budgets")
     )
     assert len(second.lessons) == 2, (
@@ -145,15 +145,15 @@ def test_a_second_episode_appends_its_lesson():
 
 def test_the_same_episode_twice_adds_one_lesson():
     episode = _episode()
-    once = procedure_from_episode(episode).with_episode(episode)
-    twice = once.with_episode(episode)
+    once = procedure_from_episode(episode).merged_from_episode(episode)
+    twice = once.merged_from_episode(episode)
     assert once.lessons == twice.lessons
 
 
 def test_an_uncredited_episode_contributes_no_lesson():
     """No credit, no lesson — the two move together."""
     credited = procedure_from_episode(_episode())
-    blocked = credited.with_episode(
+    blocked = credited.merged_from_episode(
         _episode(
             defect_signals=["obligation_silently_missing"],
             declared_completion="achieved",
@@ -170,8 +170,10 @@ def test_the_production_merge_path_still_appends_lessons(tmp_path):
     moves, no status changes, and MIR-050's whole reason for `lessons` being
     a LIST is that unrelated runs pool on one tool-shape key. After #261 the
     production path kept only the first run's lesson, so the pooling defect
-    became invisible again. The `with_episode` tests above kept passing
-    because that method is no longer reachable from production."""
+    became invisible again. The record-level tests above kept passing at the
+    time because they called the retired counter-moving fold-in
+    (`with_episode`, removed 2026-08-03) directly — production could no
+    longer reach it."""
     from core.smart_memory import ProceduralMemoryStore
 
     store = ProceduralMemoryStore(tmp_path / "procedures.jsonl")
@@ -193,8 +195,8 @@ def test_the_production_merge_path_still_appends_lessons(tmp_path):
 
 
 def test_the_production_merge_path_gives_no_lesson_without_credit(tmp_path):
-    """Same gate as `with_episode` had: no credit, no lesson — the pair moves
-    together, so a blocked run cannot write advice into a procedure either."""
+    """No credit, no lesson — the pair moves together, so a blocked run
+    cannot write advice into a procedure either."""
     from core.smart_memory import ProceduralMemoryStore
 
     store = ProceduralMemoryStore(tmp_path / "procedures.jsonl")
@@ -243,7 +245,7 @@ def test_lessons_stop_growing_and_keep_the_recent_ones():
     """`tools:file_read` pools every credited run (MIR-050); unbounded is not an option."""
     procedure = procedure_from_episode(_episode(question="run 0"))
     for i in range(1, 30):
-        procedure = procedure.with_episode(_episode(question=f"run {i}"))
+        procedure = procedure.merged_from_episode(_episode(question=f"run {i}"))
     assert len(procedure.lessons) <= 12
     assert any("run 29" in x for x in procedure.lessons), "the newest was dropped"
     assert not any("run 0" in x for x in procedure.lessons), "the oldest was kept"
@@ -267,9 +269,10 @@ def test_the_evidence_step_is_bounded_like_the_lesson():
 
 
 def test_a_new_field_is_not_dropped_when_an_episode_is_folded_in():
-    """`with_episode` uses `replace`; a field-by-field rebuild silently drops columns."""
+    """`merged_from_episode` uses `replace`; a field-by-field rebuild silently
+    drops columns (the retired fold-in lost `lessons` exactly that way once)."""
     first = procedure_from_episode(_episode())
-    merged = first.with_episode(_episode(question="another"))
+    merged = first.merged_from_episode(_episode(question="another"))
     assert merged.name == first.name
     assert merged.workflow_key == first.workflow_key
     assert merged.steps == first.steps
@@ -310,12 +313,21 @@ def test_loading_deduplicates_tags():
 
 
 def test_an_uncredited_fold_in_repairs_an_oversized_record():
-    """A debit-only update must shrink an old record, not carry it forward."""
-    oversized = ProcedureRecord.from_dict({
-        **procedure_from_episode(_episode()).to_dict(),
-        "lessons": [f"lesson {i}" for i in range(50)],
-    })
-    folded = oversized.with_episode(
+    """An uncredited update must shrink an old record, not carry it forward.
+
+    Built via `replace`, NOT `from_dict`: the loader caps lessons itself, so a
+    record round-tripped through `from_dict` is never oversized in memory and
+    the old version of this test passed even with the fold-in cap deleted
+    (proven by mutation during the 2026-08-03 rewrite). Bypassing the loader
+    is the only way to hand the fold-in a genuinely oversized record."""
+    from dataclasses import replace
+
+    oversized = replace(
+        procedure_from_episode(_episode()),
+        lessons=tuple(f"lesson {i}" for i in range(50)),
+    )
+    assert len(oversized.lessons) == 50, "the setup must bypass the load-time cap"
+    folded = oversized.merged_from_episode(
         _episode(
             defect_signals=["obligation_silently_missing"],
             declared_completion="achieved",
