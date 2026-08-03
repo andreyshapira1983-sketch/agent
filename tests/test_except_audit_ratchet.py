@@ -27,8 +27,10 @@ _BASELINE_UNJUSTIFIED_SILENT = 61
 
 
 def _load_audit():
-    spec = importlib.util.spec_from_file_location(
-        "except_audit", _REPO / "scripts" / "except_audit.py"
+    path = _REPO / "scripts" / "except_audit.py"
+    spec = importlib.util.spec_from_file_location("except_audit", path)
+    assert spec is not None and spec.loader is not None, (
+        f"сканер не найден или не загружаем: {path}"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -100,3 +102,27 @@ def test_narrow_exception_is_not_counted():
         "try:\n    x = 1\nexcept ValueError:\n    pass\n", "f.py"
     )
     assert rows == []
+
+
+def test_tuple_containing_exception_is_broad():
+    audit = _load_audit()
+    rows = audit.classify_source(
+        "try:\n    x = 1\nexcept (ValueError, Exception):\n    pass\n", "f.py"
+    )
+    assert len(rows) == 1 and rows[0]["kind"] == "silent_noop"
+
+
+def test_except_star_is_scanned():
+    audit = _load_audit()
+    rows = audit.classify_source(
+        "try:\n    x = 1\nexcept* Exception:\n    pass\n", "f.py"
+    )
+    assert len(rows) == 1
+
+
+def test_hash_inside_a_string_is_not_a_justification():
+    audit = _load_audit()
+    rows = audit.classify_source(
+        'try:\n    x = 1\nexcept Exception:\n    y = "#not a comment"\n', "f.py"
+    )
+    assert rows[0]["commented"] is False

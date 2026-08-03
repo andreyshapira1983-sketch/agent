@@ -21,6 +21,8 @@ the baseline so the class can only shrink.
 from __future__ import annotations
 
 import ast
+import io
+import tokenize
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -51,21 +53,45 @@ def _has_log_call(node: ast.AST) -> bool:
     return any(_is_log_call(n) for n in ast.walk(node))
 
 
+def _broad(handler_type: ast.expr | None) -> bool:
+    """Bare, Exception/BaseException by name, or a tuple containing one
+    (review round #292: `except (ValueError, Exception):` is just as broad)."""
+    if handler_type is None:
+        return True
+    if isinstance(handler_type, ast.Name):
+        return handler_type.id in ("Exception", "BaseException")
+    if isinstance(handler_type, ast.Tuple):
+        return any(_broad(el) for el in handler_type.elts)
+    return False
+
+
+def _comment_lines(src: str) -> set[int]:
+    """1-based line numbers that carry a REAL comment token — a '#' inside a
+    string literal is not a comment (review round #292)."""
+    out: set[int] = set()
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+            if tok.type == tokenize.COMMENT:
+                out.add(tok.start[0])
+    except tokenize.TokenizeError:  # pragma: no cover — unparseable snippets
+        pass
+    return out
+
+
 def classify_source(src: str, rel_file: str) -> list[dict]:
-    lines = src.splitlines()
+    comment_lines = _comment_lines(src)
     out: list[dict] = []
+    # ast.TryStar (except*) handlers are as capable of swallowing as ast.Try
+    # (review round #292).
+    try_types = (ast.Try, ast.TryStar) if hasattr(ast, "TryStar") else (ast.Try,)
     for node in ast.walk(ast.parse(src)):
-        if not isinstance(node, ast.Try):
+        if not isinstance(node, try_types):
             continue
         try_only_logs = len(node.body) >= 1 and all(
             isinstance(s, ast.Expr) and _is_log_call(s.value) for s in node.body
         )
         for h in node.handlers:
-            t = h.type
-            broad = t is None or (
-                isinstance(t, ast.Name) and t.id in ("Exception", "BaseException")
-            )
-            if not broad:
+            if not _broad(h.type):
                 continue
             if _has_log_call(h):
                 kind = "journaled"
@@ -80,11 +106,13 @@ def classify_source(src: str, rel_file: str) -> list[dict]:
             else:
                 kind = "silent_other"
             # The justification may sit on the line ABOVE the except, on
-            # the except line, or anywhere in the handler body (review
-            # round #292).
+            # the except line, or anywhere in the handler body — but only a
+            # REAL comment token counts, never a '#' inside a string
+            # (review round #292).
             end = h.end_lineno or h.body[-1].lineno
-            span = lines[max(0, h.lineno - 2) : min(end, len(lines))]
-            commented = any("#" in line for line in span)
+            commented = any(
+                ln in comment_lines for ln in range(max(1, h.lineno - 1), end + 1)
+            )
             out.append({
                 "file": rel_file,
                 "line": h.lineno,
