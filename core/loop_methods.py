@@ -552,7 +552,7 @@ class AgentLoopExtractedMethods:
                     },
                 )
             except Exception:  # noqa: BLE001 — страховка вокруг самого журналирования
-                pass  # nosec B110 — последний рубеж, глушить осознанно
+                pass  # noqa: S110 — последний рубеж вокруг журналирования, глушить осознанно
 
         return report
 
