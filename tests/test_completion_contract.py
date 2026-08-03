@@ -103,7 +103,10 @@ class TestDerivedBeforeWork:
             __import__("core.loop", fromlist=["loop"])
         )
         contract_at = source.index('self.log.log(\n            "completion_contract"')
-        execute_at = source.index("def _execute_step")
+        # Исполнение шага уехало в `core/loop_step_execution` (разбор
+        # больших файлов на модули); в цикле остался его ВЫЗОВ — по нему
+        # и меряем порядок, проверяемое свойство то же.
+        execute_at = source.index("self._execute_steps_parallel(")
         plan_at = source.index('self.log.log("plan"')
         assert contract_at < plan_at, "contract must be fixed before planning"
         assert contract_at < execute_at

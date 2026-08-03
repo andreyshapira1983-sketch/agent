@@ -379,7 +379,11 @@ class TestEffectStepsRunInPlanOrder:
         ]
         loop._run_step_parallel = lambda step: (step, None, None)  # type: ignore[assignment]
 
-        with mock.patch("core.loop.ThreadPoolExecutor", wraps=ThreadPoolExecutor) as pool:
+        # Цель патча уехала вместе с кодом в core.loop_step_execution
+        # (разбор больших файлов на модули); проверяемое свойство то же.
+        with mock.patch(
+            "core.loop_step_execution.ThreadPoolExecutor", wraps=ThreadPoolExecutor
+        ) as pool:
             loop._execute_steps_parallel(steps)
 
         assert pool.called, "reads lost their concurrency"
