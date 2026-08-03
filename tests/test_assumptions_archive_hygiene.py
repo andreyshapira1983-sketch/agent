@@ -51,6 +51,32 @@ def test_the_cap_bounds_the_dormant_archive(tmp_path):
     assert "assumption number 0 is unique" not in texts
 
 
+def test_negative_keep_last_is_refused(tmp_path):
+    """Review round #282: a negative cap is a caller error — failing fast
+    beats silently emptying the archive."""
+    import pytest
+
+    store = _store_with(tmp_path, [("r1", "language", "text")])
+    with pytest.raises(ValueError):
+        store.compact(keep_last=-1)
+
+
+def test_rows_without_a_usable_key_are_never_merged(tmp_path):
+    """Review round #282: two DISTINCT schema-poor rows (both lacking `text`)
+    must not collide on the empty-string fallback key and silently lose one."""
+    from core.state_integrity import append_state_jsonl_unlocked
+
+    path = tmp_path / "assumptions.jsonl"
+    store = AssumptionStore(path)
+    append_state_jsonl_unlocked(path, [
+        {"category": "orphan", "note": "первая строка без text"},
+        {"category": "orphan", "note": "вторая, другая по содержанию"},
+    ])
+    report = store.compact()
+    assert report["duplicates_removed"] == 0
+    assert report["kept"] == 2
+
+
 def test_dry_run_counts_without_touching_the_file(tmp_path):
     store = _store_with(tmp_path, [
         ("r1", "language", "same text"),

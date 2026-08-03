@@ -486,8 +486,18 @@ class AssumptionStore:
         * at most ``keep_last`` newest rows survive — dormant is bounded.
 
         ``dry_run=True`` counts and reports without rewriting, exactly like
-        its siblings in ``run_maintenance_pass``.
+        its siblings in ``run_maintenance_pass``. (Like every read in the
+        state-integrity layer — including plain status loads — it still lets
+        the reader quarantine malformed rows; dry-run disables compaction,
+        not the integrity invariant.)
+
+        Rows are always dicts (`decode_state_row` quarantines anything else),
+        but a row may lack usable `category`/`text` strings; such rows carry
+        no identity to dedupe on, so they are kept as unique rather than
+        silently merged over an empty-string fallback key (review round #282).
         """
+        if keep_last < 0:
+            raise ValueError(f"keep_last must be >= 0, got {keep_last}")
         with state_file_lock(self.path):
             if not self.path.exists():
                 return {
@@ -499,7 +509,12 @@ class AssumptionStore:
             deduped: list[dict] = []
             seen: set[tuple[str, str]] = set()
             for row in reversed(rows):        # newest first, newest wins
-                key = (str(row.get("category", "")), str(row.get("text", "")))
+                category = row.get("category")
+                text = row.get("text")
+                if not (isinstance(category, str) and isinstance(text, str) and text):
+                    deduped.append(row)       # no usable identity — keep as unique
+                    continue
+                key = (category, text)
                 if key in seen:
                     continue
                 seen.add(key)
