@@ -9,7 +9,6 @@ Specifically tests:
 """
 from __future__ import annotations
 
-import pytest
 
 from core.self_repair import (
     _DEFAULT_MIN_REPAIR_CONFIDENCE as MIN_REPAIR_CONFIDENCE,

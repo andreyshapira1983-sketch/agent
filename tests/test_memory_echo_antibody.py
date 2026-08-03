@@ -13,13 +13,11 @@ detector) and the rolling-log registry behaviour.
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
 
 from core.memory_echo_antibody import (
     DEFAULT_ECHO_THRESHOLD,
     ECHO_REASON,
     GUARDED_SOURCE,
-    MemoryEchoOutcome,
     MemoryWriteEvent,
     MemoryWriteRegistry,
     content_hash,

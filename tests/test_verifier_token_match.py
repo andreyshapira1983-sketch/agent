@@ -24,7 +24,6 @@ layers:
 """
 from __future__ import annotations
 
-import pytest
 
 from core.evidence import (
     Evidence,
@@ -372,7 +371,6 @@ class TestRunTestsSourceId:
         assert ev.source_id == "test_result:run_tests:pytest:tests/foo"
 
     def test_paths_truncated_at_60_chars(self):
-        long_target = ",".join(f"tests/dir_{i}" for i in range(20))
         ev = evidence_from_tool_result(
             tool_name="run_tests",
             arguments={"paths": [f"tests/dir_{i}" for i in range(20)]},

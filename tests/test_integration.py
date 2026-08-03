@@ -165,7 +165,7 @@ def test_full_cycle_no_tools_general_knowledge(workspace: Path) -> None:
     llm = FakeLLM(responses=[empty_plan, gk_answer])
     agent, log_path = _build_agent(workspace, llm, cheap_path_enabled=False)
 
-    answer = agent.run(user_question="What is 2+2?", file_hint=None)
+    agent.run(user_question="What is 2+2?", file_hint=None)
 
     # MVP-14.4.x: `[general-knowledge]` is rewritten to
     # `[declared:general-knowledge]` (the new self_declared verdict).

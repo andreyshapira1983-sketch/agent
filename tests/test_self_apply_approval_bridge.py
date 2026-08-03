@@ -21,7 +21,7 @@ from core.self_apply_bridge import (
     rehydrate_proposal,
     run_approved_self_apply,
 )
-from core.self_apply_lane import FileChange, SelfApplyProposal, SelfApplyReport
+from core.self_apply_lane import SelfApplyProposal, SelfApplyReport
 
 
 # ── fakes ────────────────────────────────────────────────────────────────────

@@ -63,7 +63,7 @@ def test_explicit_read_task_file_forces_hinted_file_evidence(workspace: Path):
         sources=[],
     )
 
-    answer = agent.run(
+    agent.run(
         "Прочитай файл задания. Ничего не меняй. Составь план.",
         file_hint="task.md",
     )
@@ -91,10 +91,10 @@ def test_explicit_read_uses_cached_file_artifact_as_evidence(workspace: Path):
         memory=memory,
     )
 
-    first = agent.run("Read task.md", file_hint="task.md")
+    agent.run("Read task.md", file_hint="task.md")
     first_annotated = agent.last_verification.annotated_answer
     planner.sources = []
-    second = agent.run("Прочитай файл задания ещё раз.", file_hint="task.md")
+    agent.run("Прочитай файл задания ещё раз.", file_hint="task.md")
     second_annotated = agent.last_verification.annotated_answer
 
     events = _events(log_path)
@@ -166,7 +166,7 @@ def test_explicit_multi_file_review_reads_two_valid_relative_files(workspace: Pa
         sources=[],
     )
 
-    answer = agent.run(
+    agent.run(
         r"Use explicit multi-file review mode: read .\a.md and .\b.md.",
         file_hint=None,
     )
@@ -370,7 +370,7 @@ def test_multi_file_review_dedupes_duplicate_paths(workspace: Path):
         sources=[],
     )
 
-    answer = agent.run(
+    agent.run(
         r"Use explicit multi-file review mode: read .\a.md and a.md.",
         file_hint=None,
     )

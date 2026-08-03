@@ -23,7 +23,6 @@ import ast
 import re
 from pathlib import Path
 
-import pytest
 
 import main as main_module
 

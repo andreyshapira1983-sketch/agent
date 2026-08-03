@@ -5,7 +5,6 @@ The self-apply lane is injected as a fake; the registry writes to a tmp path.
 """
 from __future__ import annotations
 
-from pathlib import Path
 
 from core.approval_inbox import ApprovalInbox
 from core.self_apply_bridge import (

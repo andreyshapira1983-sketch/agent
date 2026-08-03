@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.architecture_audit import audit_architecture
-from core.backlog_selector import build_backlog, load_backlog, select_top
+from core.backlog_selector import build_backlog, load_backlog
 from core.backlog_signals import (
     ARCHITECTURE_AUDIT_SOURCE,
     architecture_audit_candidates,

@@ -11,7 +11,6 @@ Tests pin three invariants for every cleanup policy:
 """
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -19,8 +18,6 @@ import pytest
 
 from core.hygiene import (
     DEFAULT_DEDUP_THRESHOLD,
-    DEFAULT_KEEP_LAST,
-    DEFAULT_MAX_AGE_DAYS,
     SUMMARY_TAG,
     BackupCleanupReport,
     DedupReport,
@@ -34,7 +31,6 @@ from core.hygiene import (
     _similarity,
 )
 from core.models import MemoryRecord
-from core.persistent_memory import PersistentMemoryStore
 
 
 # ===========================================================

@@ -104,7 +104,6 @@ def test_path_traversal_is_rejected(workspace: Path, tmp_path_factory: pytest.Te
         tool.run(path=str(secret))
 
     # Relative traversal
-    traversal = f"..{Path('/').name or '/'}..{Path('/').name or '/'}etc{Path('/').name or '/'}passwd"
     # Use a plain '../../' regardless of OS sep — pathlib normalises
     with pytest.raises(PermissionError):
         tool.run(path="../../etc/passwd")

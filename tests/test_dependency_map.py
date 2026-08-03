@@ -6,8 +6,6 @@ from pathlib import Path
 import pytest
 
 from core.dependency_map import (
-    DependencyMap,
-    ImporterInfo,
     _module_name_for,
     build_dependency_map,
 )

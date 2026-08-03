@@ -41,7 +41,7 @@ class _PolicyRefusingRunner:
 
 class _ErrorResultRunner:
     def run_contract(self, contract: CanonicalSubagentContract):
-        receipt = SubagentExecutionReceipt(
+        SubagentExecutionReceipt(
             contract.contract_id,
             contract.schema_version,
             used_tools=("file_read",),

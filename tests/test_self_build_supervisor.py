@@ -6,9 +6,7 @@ supervisor must never invoke file_write/shell_exec/run_tests.
 """
 from __future__ import annotations
 
-from pathlib import Path
 
-import pytest
 
 from core.self_build_supervisor import (
     evaluate_self_build_supervisor,
@@ -193,7 +191,6 @@ def test_non_budget_context_is_serialisable_and_log_safe():
 def test_cli_command_registered_and_no_effects(monkeypatch, tmp_path):
     """The :self-build-supervisor command is registered, runs read-only, and
     never invokes file_write/shell_exec/run_tests or any LLM/provider call."""
-    import main as main_module
     from cli.command_dispatch import handle_meta_command
 
     # Reuse the real local agent builder from the CLI test suite.

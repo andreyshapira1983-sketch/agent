@@ -16,7 +16,6 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import pytest
 
 from core.approval import AutoApprover
 from core.hygiene import SUMMARY_TAG

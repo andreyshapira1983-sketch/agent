@@ -16,7 +16,6 @@ import pytest
 
 from core.operational_domain import (
     DomainFinding,
-    DomainResult,
     check_operational_domain,
 )
 
