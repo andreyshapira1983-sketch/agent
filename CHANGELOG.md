@@ -52,8 +52,10 @@ All notable changes to this project are recorded here. The format follows
   "no member" HIGHs -> 0, file rating 0.46 -> 10.00); the four self-build
   digests are marked `usedforsecurity=False`; 184 annotation/deprecated-
   import findings (PEP 585/604, quoted annotations, typing.List/Optional/
-  Type) modernised; 361 import blocks sorted repo-wide; two dead imports
-  dropped. Verified: the secrets/AWS/password findings are test fixtures
+  Type) modernised; import blocks sorted across all production code (core/cli/app/
+  tools/scripts); the tests/ half of the sorting was carved out to fit
+  the reviewers' 300-file ceiling and follows in a companion PR; three
+  dead imports dropped. Verified: the secrets/AWS/password findings are test fixtures
   of the secret scanner (zero in production code), the four `exec()` calls
   live only in the splitter's own test, and every production
   `subprocess.run` already carries explicit `shell=False`/`check=False`.
