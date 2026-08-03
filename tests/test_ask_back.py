@@ -29,10 +29,9 @@ from core.logger import TraceLogger
 from core.loop import AgentLoop, format_human_response, new_trace_id
 from core.memory import WorkingMemory
 from core.policy import PolicyGate
+from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
-from tests.conftest import FakeLLM, FakePlanner
-
 
 # ── the pure builder ─────────────────────────────────────────────────────────
 
@@ -99,8 +98,10 @@ def test_unsupported_self_analysis_answer_asks_back(workspace: Path):
         workspace,
         responses=[
             "Conclusion: первый ответ [general-knowledge].",
-            "Conclusion: у меня нет мнений, я рассуждаю без источников.\n"
-            "Facts:\n- это самоописание без опоры.",
+            (
+                "Conclusion: у меня нет мнений, я рассуждаю без источников.\n"
+                "Facts:\n- это самоописание без опоры."
+            ),
         ],
         sources=[],
     )
@@ -117,8 +118,10 @@ def test_supported_self_analysis_answer_does_not_ask_back(workspace: Path):
         workspace,
         responses=[
             "Conclusion: первый ответ [general-knowledge].",
-            "Conclusion: отвечаю по файлу [file:doc.txt].\n"
-            "Facts:\n- факт из файла [file:doc.txt].",
+            (
+                "Conclusion: отвечаю по файлу [file:doc.txt].\n"
+                "Facts:\n- факт из файла [file:doc.txt]."
+            ),
         ],
         sources=[{
             "tool": "file_read", "arguments": {"path": "doc.txt"},

@@ -7,11 +7,13 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
-from core.ids import new_id
+
+from core.clarification_gate import ASK_BACK_PREFIX as _ASK_BACK_PREFIX
 from core.evidence import Evidence, ProvenanceChain
 from core.file_request_intent import extract_path_mentions, normalize_path_mention
+from core.ids import new_id
 from core.verification_summary import TAIL_PREFIX as _VERIFICATION_TAIL_PREFIX
-from core.clarification_gate import ASK_BACK_PREFIX as _ASK_BACK_PREFIX
+
 
 def _to_text(output: Any) -> str:
     """Stringify a tool output for classification + scanning.
