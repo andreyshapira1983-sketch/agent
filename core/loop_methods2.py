@@ -6,23 +6,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 from core.models import (
-    Action,
-    ApprovalRequest,
-    ErrorObject,
     Goal,
-    MemoryRecord,
     Observation,
-    Plan,
-    PlanStep,
-    PolicyDecision,
-    ToolCall,
-    ToolResult,
 )
 from core.run_context import current_run
 from core.smart_memory import (
     PROCEDURE_STATUSES,
     EpisodicMemoryStore,
-    MemoryConsolidationStore,
     ProceduralMemoryStore,
     admit_for_storage,
     consolidate_memory,

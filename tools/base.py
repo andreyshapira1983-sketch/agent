@@ -9,7 +9,6 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Literal
 
-from core.ids import new_id
 from core.models import ToolCall, ToolResult
 
 

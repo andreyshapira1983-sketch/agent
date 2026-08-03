@@ -125,7 +125,7 @@ class ConnectorPlan:
     def user_summary(self) -> str:
         if not self.recommendations:
             return "=== connector plan ===\n(no connector recommendation)"
-        lines = [f"=== connector plan ===", f"goal={self.goal!r}"]
+        lines = ["=== connector plan ===", f"goal={self.goal!r}"]
         for item in self.recommendations:
             connector = item.connector
             cost = item.estimated_cost

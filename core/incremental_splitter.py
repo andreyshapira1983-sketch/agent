@@ -295,7 +295,6 @@ def _trim_to_budget(
 
     kept = list(group)
     while kept and total(kept) > max_lines:
-        names = {name_of(n) for n in kept}
         removable = []
         for node in kept:
             others = [o for o in kept if o is not node]

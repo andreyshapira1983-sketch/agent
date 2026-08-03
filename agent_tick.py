@@ -41,10 +41,13 @@ import sys
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from core import heartbeat_io as _hb
 from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH
+
+if TYPE_CHECKING:
+    from core.approval_inbox import ApprovalInbox
 
 
 # ── paths ─────────────────────────────────────────────────────────────────────

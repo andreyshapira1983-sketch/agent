@@ -8,32 +8,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from core.memory_policy import (
-    MemoryRetrievalPolicy,
     MemoryWriteDecision,
-    MemoryWritePolicy,
 )
 from core.memory_echo_antibody import MemoryWriteEvent, make_event
 from core.models import (
-    Action,
-    ApprovalRequest,
-    ErrorObject,
-    Goal,
     MemoryRecord,
-    Observation,
-    Plan,
-    PlanStep,
-    PolicyDecision,
-    ToolCall,
-    ToolResult,
 )
 from core.redaction import (
-    collect_pii_findings,
     redact_dlp_text,
-    redact_payload,
-    scan,
 )
 from core.model_router import ModelRole, ModelRouter
-from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult, RememberFn
+from core.knowledge_pipeline import RememberFn
 
 class AgentLoopExtractedMethods:
     """Methods extracted from ``AgentLoop``, mixed back into it.
