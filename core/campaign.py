@@ -51,15 +51,14 @@ inject deterministic fakes and assert on the real record shapes.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional
 
 from core.best_next_action import BestNextAction
 from core.campaign_io import (
-    _action_focused_goal,
-    _cost_totals,
+    _action_focused_goal,   # noqa: F401 -- re-exported patch seam (tests/test_campaign.py)
+    _cost_totals,           # noqa: F401 -- re-exported patch seam (tests/test_campaign.py)
     _default_execute_action,
     _default_gather_signals,
     _log,
@@ -67,9 +66,8 @@ from core.campaign_io import (
 from core.campaign_ledger import (
     CampaignCycleRecord,
     CampaignLedger,
-    _format_ledger_row,
-    load_ledger_rows,
-    summarise_ledger,
+    load_ledger_rows,       # noqa: F401 -- re-exported (app/runtime_cli.py imports it from here)
+    summarise_ledger,       # noqa: F401 -- re-exported (app/runtime_cli.py imports it from here)
 )
 from core.campaign_types import CampaignActionOutcome, CampaignConfig, CampaignResult
 

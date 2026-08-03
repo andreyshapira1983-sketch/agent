@@ -35,7 +35,7 @@ import json
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from core.subagent_contract import CanonicalSubagentContract
 from core.subagent_contract_audit import (
@@ -46,8 +46,6 @@ from core.subagent_contract_audit import (
 from tools.base import ToolRegistry
 
 if TYPE_CHECKING:
-    from core.llm import LLM
-    from core.logger import TraceLogger
     from core.policy import PolicyGate
     from core.model_router import ModelRouter
 

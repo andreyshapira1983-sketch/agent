@@ -17,7 +17,7 @@ from typing import Awaitable, Callable, Literal, Optional
 from core.file_lock import exclusive_file_lock
 from core.ids import new_id
 from core.state_integrity import read_state_jsonl_unlocked, rewrite_state_jsonl_unlocked
-from core.task_queue import RuntimeTask, TaskQueueStore
+from core.task_queue import TaskQueueStore
 
 logger = logging.getLogger(__name__)
 
