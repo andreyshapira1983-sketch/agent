@@ -22,6 +22,7 @@ behaviour, these tests are the spec of what must change.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from core.assumption_registry import AssumptionStore
 from core.logger import TraceLogger
@@ -55,7 +56,9 @@ def _session_agent(tmp_path: Path, trace_id: str = "trace_repl_session"):
     llm = _FixedLLM()
     registry = ToolRegistry()
     logger = TraceLogger(trace_id=trace_id, log_dir=tmp_path, verbose=False)
-    events: list[tuple[str, dict | None]] = []
+    # Payloads are whatever the loop logs (dicts, Pydantic models, None) —
+    # the spy records, it does not constrain.
+    events: list[tuple[str, Any]] = []
     original_log = logger.log
 
     def spy(event, payload=None, **kw):
