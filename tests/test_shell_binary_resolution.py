@@ -122,12 +122,20 @@ def test_flags_are_never_translated(tool: ShellExecTool) -> None:
 def test_the_executed_binary_is_recorded(tool: ShellExecTool, tmp_path: Path) -> None:
     """The live log showed `argv: ['grep', ...]` beside `FINDSTR:` in stderr
     and no way to connect them."""
+    if shutil.which("grep") is None:
+        pytest.skip("no grep on PATH in this environment")
     (tmp_path / "f.txt").write_text("alpha\n", encoding="utf-8")
 
     result = tool.run(["grep", "-c", "alpha", "f.txt"])
 
     assert "executed_command" in result
-    assert (result["executed_command"] == shutil.which("grep") and True) or True
+    # Было `... and True or True` — утверждение всегда истинно, тест ничего
+    # не проверял; скобки от RUF021 сделали мёртвую логику видимой. Поле
+    # хранит ИМЯ реально запущенной программы (`real_cmd`), а не путь к ней,
+    # поэтому сравнение с `shutil.which` было заведомо ложным. Стережём то,
+    # ради чего тест написан: установленный grep не подменён.
+    assert result["executed_command"] == "grep"
+    assert result["binary_substituted"] is False
     assert result["argv"][0] == "grep", "the request is preserved as asked"
 
 

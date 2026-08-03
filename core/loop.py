@@ -49,6 +49,7 @@ from core.replan import ReplanTrigger, count_failures, format_replan_context
 from core.run_context import run_scope
 
 if TYPE_CHECKING:
+    from core.approval_inbox import ApprovalInbox
     from core.clarification_policy import ClarificationResult
     from core.memory_echo_antibody import MemoryWriteRegistry
     from core.operational_domain import DomainResult
@@ -222,6 +223,11 @@ class AgentLoop(
     optional file hint. The planner picks which tools (if any) to call; the
     Executor runs the plan and the Synthesizer produces the Output Contract.
     """
+
+    #: Навешивается снаружи и лениво: `cli/commands_approval.py` создаёт ящик
+    #: при первом обращении. Контракт держался на `getattr` со строкой и был
+    #: невидим; объявляем явно, значение по умолчанию прежнее.
+    approval_inbox: ApprovalInbox | None = None
 
     def __init__(
         self,
