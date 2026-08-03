@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Iterable, Literal
 
 from core.evidence import Evidence, ProvenanceChain
 from core.memory_policy import MemoryWriteDecision
@@ -684,7 +684,7 @@ def _subject_value(text: str) -> tuple[str, str] | None:
 #: Deictic determiners open a context-bound subject; articles (the/a/an) do
 #: not and stay strippable in `_normalise_subject`.
 _DEICTIC_SUBJECT_RE = re.compile(
-    r"^(this|that|these|those|этот|эта|это|эти|тот|та|то|данный|данная|данное|данные)\b",
+    r"^(this|that|these|those|этот|эта|это|эти|тот|та|то|те|данный|данная|данное|данные)\b",
     re.IGNORECASE,
 )
 
@@ -725,7 +725,7 @@ def _values_equivalent(a: str, b: str) -> bool:
     return len(short) >= 3 and long_[: len(short)] == short
 
 
-def _distinct_values(values) -> list[str]:
+def _distinct_values(values: Iterable[str]) -> list[str]:
     """Cluster values by equivalence; one representative per cluster."""
     reps: list[str] = []
     for value in sorted(set(values)):
