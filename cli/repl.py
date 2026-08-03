@@ -120,14 +120,14 @@ class _StdinLineReader:
         *,
         interactive: bool,
         readline: Callable[[], str] | None = None,
-        out: "TextIOBase | None" = None,
+        out: TextIOBase | None = None,
         gap_seconds: float = PASTE_COALESCE_GAP_SECONDS,
     ) -> None:
         self._readline = readline or sys.stdin.readline
         self._interactive = interactive
         self._out = out or sys.stdout
         self._gap = gap_seconds
-        self._q: "queue.Queue[object]" = queue.Queue()
+        self._q: queue.Queue[object] = queue.Queue()
         self._started = False
         self._lock = threading.Lock()
 

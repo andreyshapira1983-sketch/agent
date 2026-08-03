@@ -23,9 +23,9 @@ from typing import Any
 
 from core.subagent_contract import CanonicalSubagentContract
 from core.subagent_runner import (
-    SubAgentRunResult,
-    SubAgentRunner,
     _SAFE_SUBAGENT_TOOLS,
+    SubAgentRunner,
+    SubAgentRunResult,
 )
 from tools.base import Tool, ToolRegistry
 

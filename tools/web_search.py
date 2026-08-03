@@ -20,7 +20,6 @@ from typing import Any
 
 from tools.base import Tool
 
-
 MAX_RESULTS_CAP = 10
 DEFAULT_MAX_RESULTS = 5
 

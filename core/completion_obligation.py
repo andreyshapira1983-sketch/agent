@@ -52,8 +52,9 @@ distinguished, and why only the silent one fires.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Literal, Sequence
+from typing import Any, Literal
 
 from core.file_request_intent import OBLIGATION_PATH_EXTS, paths_mentioned
 

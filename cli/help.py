@@ -23,7 +23,6 @@ from __future__ import annotations
 
 from cli.command_registry import lookup
 
-
 # ── layout entry kinds ───────────────────────────────────────────────────────
 #
 # ("cmd", canonical, left, column)

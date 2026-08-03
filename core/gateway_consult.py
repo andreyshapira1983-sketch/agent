@@ -5,8 +5,9 @@ readiness blockers. Keeps gateway wiring out of CLI modules.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 
 def _budget_int(value: object) -> int:

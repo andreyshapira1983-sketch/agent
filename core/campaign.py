@@ -51,14 +51,13 @@ inject deterministic fakes and assert on the real record shapes.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Literal
 
 from core.best_next_action import BestNextAction
 from core.campaign_io import (
-    _action_focused_goal as _action_focused_goal,   # re-exported patch seam (tests/test_campaign.py)
-    _cost_totals as _cost_totals,                   # re-exported patch seam (tests/test_campaign.py)
     _default_execute_action,
     _default_gather_signals,
     _log,
@@ -66,11 +65,8 @@ from core.campaign_io import (
 from core.campaign_ledger import (
     CampaignCycleRecord,
     CampaignLedger,
-    load_ledger_rows as load_ledger_rows,           # re-exported (app/runtime_cli.py imports it from here)
-    summarise_ledger as summarise_ledger,           # re-exported (app/runtime_cli.py imports it from here)
 )
 from core.campaign_types import CampaignActionOutcome, CampaignConfig, CampaignResult
-
 
 CampaignStatus = Literal["completed", "stopped"]
 
@@ -91,12 +87,12 @@ def run_campaign(
     agent: Any,
     workspace: Any,
     approval_inbox: Any = None,
-    ledger: Optional[CampaignLedger] = None,
-    gather_signals: Optional[GatherSignals] = None,
-    execute_action: Optional[ExecuteAction] = None,
+    ledger: CampaignLedger | None = None,
+    gather_signals: GatherSignals | None = None,
+    execute_action: ExecuteAction | None = None,
     now_fn: Callable[[], datetime] = _utc_now,
     sleep_fn: Callable[[float], None] = time.sleep,
-    on_cycle: Optional[Callable[[dict], None]] = None,
+    on_cycle: Callable[[dict], None] | None = None,
 ) -> CampaignResult:
     """Run a bounded autonomous campaign and return a full ledgered report.
 
@@ -134,9 +130,9 @@ def run_campaign(
     consecutive_errors = 0
     unproductive_streak = 0
     unproductive_cycles = 0
-    prev_exec_result: Optional[str] = None
+    prev_exec_result: str | None = None
     recent_actions: list[str] = []
-    clarification: Optional[dict[str, Any]] = None
+    clarification: dict[str, Any] | None = None
     stop_reason = ""
     status: CampaignStatus = "completed"
     started_at = now_fn()

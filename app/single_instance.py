@@ -47,7 +47,7 @@ import socket
 import time
 from pathlib import Path
 from types import TracebackType
-from typing import IO, Optional, Type
+from typing import IO, Self
 
 if os.name == "nt":  # pragma: no cover - platform-specific import
     import msvcrt
@@ -76,7 +76,7 @@ class AlreadyRunningError(RuntimeError):
     empty if the file was unreadable or being rewritten concurrently.
     """
 
-    def __init__(self, path: Path, details: Optional[dict] = None) -> None:
+    def __init__(self, path: Path, details: dict | None = None) -> None:
         self.path = path
         self.details = details or {}
         pid = self.details.get("pid")
@@ -119,7 +119,7 @@ class SingleInstanceLock:
 
     def __init__(self, path: Path | str = DEFAULT_LOCK_PATH) -> None:
         self._path = Path(path)
-        self._fh: Optional[IO[str]] = None
+        self._fh: IO[str] | None = None
 
     # ── observability ────────────────────────────────────────────────────
 
@@ -135,7 +135,7 @@ class SingleInstanceLock:
 
     # ── acquire / release ────────────────────────────────────────────────
 
-    def acquire(self) -> "SingleInstanceLock":
+    def acquire(self) -> SingleInstanceLock:
         """Acquire the lock, or raise :class:`AlreadyRunningError` if busy.
 
         Idempotent: acquiring an already-held lock is a no-op. A stale lock from
@@ -190,14 +190,14 @@ class SingleInstanceLock:
 
     # ── context manager ──────────────────────────────────────────────────
 
-    def __enter__(self) -> "SingleInstanceLock":
+    def __enter__(self) -> Self:
         return self.acquire()
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
     ) -> None:
         self.release()
 

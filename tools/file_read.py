@@ -9,7 +9,6 @@ from typing import Any
 
 from tools.base import Tool
 
-
 MAX_BYTES = 1_000_000  # 1 MB hard cap for MVP
 _MAX_HINT_ENTRIES = 40  # cap the "did you mean" listing so error stays compact
 

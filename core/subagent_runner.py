@@ -46,8 +46,8 @@ from core.subagent_contract_audit import (
 from tools.base import ToolRegistry
 
 if TYPE_CHECKING:
-    from core.policy import PolicyGate
     from core.model_router import ModelRouter
+    from core.policy import PolicyGate
 
 # Tools that sub-agents may use — all read-only or low-risk.
 # ``spawn_subagent`` and ``shell_exec`` are intentionally absent.
@@ -286,8 +286,8 @@ class SubAgentRunner:
     def __init__(
         self,
         workspace_root: Path | str,
-        policy: "PolicyGate",
-        model_router: "ModelRouter",
+        policy: PolicyGate,
+        model_router: ModelRouter,
         parent_registry: ToolRegistry,
         log_dir: Path | str,
     ) -> None:
@@ -389,8 +389,8 @@ class SubAgentRunner:
         afterwards.  There is no shared mutable state between runs.
         """
         # Lazy import — breaks the circular dependency with core/loop.py.
+        from core.logger import TraceLogger  # noqa: PLC0415
         from core.loop import AgentLoop, new_trace_id  # noqa: PLC0415
-        from core.logger import TraceLogger             # noqa: PLC0415
 
         # Level 3: classify complexity BEFORE spinning up a child loop so
         # the parent can see the tier even on error paths.
@@ -456,7 +456,10 @@ class SubAgentRunner:
         # annotation.  When the sub-agent's answer propagates to the parent as
         # evidence text the malicious payload would reach the parent LLM's
         # context unchanged.  We do a second scan here to catch that.
-        from core.injection_guard import annotate_suspicious, scan_for_injection  # noqa: PLC0415
+        from core.injection_guard import (  # noqa: PLC0415
+            annotate_suspicious,
+            scan_for_injection,
+        )
         _injection_scan = scan_for_injection(answer)
         if _injection_scan.verdict == "blocked":
             child_logger.log(

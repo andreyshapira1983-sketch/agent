@@ -43,7 +43,6 @@ from __future__ import annotations
 import os
 import re
 import sys
-from typing import List, Set
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _MAP = os.path.join(_ROOT, "docs", "COMMANDS_MAP.md")
@@ -60,22 +59,22 @@ _TOKEN_IN_SET_RE = re.compile(r'"(' + _CMD + r')"')
 _ROW_TOKEN_RE = re.compile(r"^(" + _CMD + r")(?:\s|$)")
 
 
-def dispatched_commands(source: str) -> Set[str]:
+def dispatched_commands(source: str) -> set[str]:
     """Command tokens dispatched via the ``head`` chain in ``source``.
 
     Kept as the shared parser for the code-to-registry link that
     ``tests/test_command_registry.py`` and the characterization snapshot assert.
     This script's verdict does not use it.
     """
-    cmds: Set[str] = set(_EQ_RE.findall(source))
+    cmds: set[str] = set(_EQ_RE.findall(source))
     for block in _IN_RE.findall(source):
         cmds.update(_TOKEN_IN_SET_RE.findall(block))
     return cmds
 
 
-def documented_commands(doc: str) -> Set[str]:
+def documented_commands(doc: str) -> set[str]:
     """Tokens declared in the signature cell of a ``COMMANDS_MAP`` table row."""
-    documented: Set[str] = set()
+    documented: set[str] = set()
     for raw in doc.splitlines():
         if not raw.startswith("| `:"):
             continue
@@ -94,17 +93,17 @@ def _read(path: str) -> str:
         return handle.read()
 
 
-def registry_commands() -> Set[str]:
+def registry_commands() -> set[str]:
     """Every token the registry accepts, canonical and alias alike."""
     return set(all_tokens())
 
 
-def undocumented_commands() -> List[str]:
+def undocumented_commands() -> list[str]:
     """Registry commands missing from ``COMMANDS_MAP.md``."""
     return sorted(registry_commands() - documented_commands(_read(_MAP)))
 
 
-def unknown_documented_commands() -> List[str]:
+def unknown_documented_commands() -> list[str]:
     """Commands the document lists that the registry does not have."""
     return sorted(documented_commands(_read(_MAP)) - registry_commands())
 

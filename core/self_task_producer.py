@@ -29,19 +29,19 @@ import ast
 import base64
 import hashlib
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from core.self_apply_bridge import build_self_apply_payload  # noqa: F401  (kept for parity/tests)
 from core.self_build_producer import (
+    _DEFAULT_CONFIDENCE_THRESHOLD,
+    _MAX_CONTENT_BYTES,
     ProducerReport,
     RoleOutput,
     _default_file_reader,
     _is_self_build_target_allowed,
     _llm_json,
     _looks_like_diff,
-    _MAX_CONTENT_BYTES,
-    _DEFAULT_CONFIDENCE_THRESHOLD,
 )
 from core.self_build_supervisor import (
     hour_budget_headroom,
@@ -331,7 +331,7 @@ def _task_reporter_publish(
         "confidence": float(build.get("confidence") or 0.0),
         "origin": TASK_PRODUCER_ORIGIN,
     }
-    digest = hashlib.sha1(
+    digest = hashlib.sha256(
         (impl_path + "\n" + test_content).encode("utf-8")
     ).hexdigest()[:12]
     dedup_key = f"self_task:{impl_path}:{digest}"

@@ -9,12 +9,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Literal
+from typing import Any, Literal
 
 from core.ids import new_id
 from core.models import ToolCall, ToolResult
@@ -231,7 +232,7 @@ class ToolReceipt:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ToolReceipt":
+    def from_dict(cls, data: dict[str, Any]) -> ToolReceipt:
         refs = data.get("refs") if isinstance(data.get("refs"), dict) else {}
         return cls(
             receipt_id=str(data.get("receipt_id") or new_id("trc")),

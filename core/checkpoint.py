@@ -42,7 +42,6 @@ from typing import Any
 
 from core.ids import new_id
 
-
 # ── public phase constants ──────────────────────────────────────────────────
 
 PHASE_OBSERVE = "observe"
@@ -76,7 +75,7 @@ class CheckpointRecord:
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "CheckpointRecord":
+    def from_dict(cls, d: dict[str, Any]) -> CheckpointRecord:
         return cls(
             phase=d["phase"],
             trace_id=d["trace_id"],

@@ -13,7 +13,6 @@ import os
 import re
 from collections.abc import Iterable
 
-
 # Single source of truth for host-tool names (env var, tool name, description).
 # Reused by `_build_host_tools_block` and `host_tools_relevant` so the two never
 # drift apart.

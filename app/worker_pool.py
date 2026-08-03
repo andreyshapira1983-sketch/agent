@@ -28,9 +28,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Awaitable, Callable, Optional
 
 from app.priority_event_queue import (
     DaemonEvent,
@@ -154,7 +154,7 @@ class WorkerPool:
         *,
         max_workers: int = DEFAULT_MAX_WORKERS,
         drain_timeout: float = DEFAULT_DRAIN_TIMEOUT,
-        task_timeout: Optional[float] = DEFAULT_TASK_TIMEOUT,
+        task_timeout: float | None = DEFAULT_TASK_TIMEOUT,
         checkpoint_store: InFlightCheckpointStore | None = None,
     ) -> None:
         if max_workers < 1:
@@ -184,7 +184,7 @@ class WorkerPool:
         return self._max_workers
 
     @property
-    def task_timeout(self) -> Optional[float]:
+    def task_timeout(self) -> float | None:
         return self._task_timeout
 
     @property
@@ -260,7 +260,7 @@ class WorkerPool:
             await self.shutdown()
             raise
 
-    async def shutdown(self, *, drain_timeout: Optional[float] = None) -> None:
+    async def shutdown(self, *, drain_timeout: float | None = None) -> None:
         """Stop accepting work, drain or cancel in-flight handlers.
 
         Closes the shared :class:`PriorityEventQueue` so :meth:`get` waiters

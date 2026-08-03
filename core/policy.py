@@ -12,7 +12,6 @@ from __future__ import annotations
 from core.models import Action, PolicyDecision
 from tools.base import ToolRegistry
 
-
 POLICY_ID = "mvp-default-policy"
 
 

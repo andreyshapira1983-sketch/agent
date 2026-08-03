@@ -52,7 +52,6 @@ from core.state_integrity import (
     state_file_lock,
 )
 
-
 # ---------------------------------------------------------------------------
 # Types
 # ---------------------------------------------------------------------------
@@ -113,7 +112,7 @@ class Assumption(BaseModel):
         return self.model_dump(mode="json")
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Assumption":
+    def from_dict(cls, d: dict) -> Assumption:
         return cls.model_validate(d)
 
 

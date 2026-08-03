@@ -40,7 +40,8 @@ import asyncio
 import inspect
 import logging
 import signal
-from typing import Any, Awaitable, Callable, Coroutine, Optional
+from collections.abc import Awaitable, Callable, Coroutine
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ class DaemonLoop:
         self,
         on_wake: WakeHandler,
         *,
-        idle_timeout: Optional[float] = None,
+        idle_timeout: float | None = None,
         drain_timeout: float = 10.0,
     ) -> None:
         if idle_timeout is not None and idle_timeout <= 0:
@@ -102,7 +103,7 @@ class DaemonLoop:
         self._stop_requested = False
         self._running = False
         self._finished = False
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._iterations = 0
         self._tasks: set[asyncio.Task] = set()
         self._close_callbacks: list[CloseCallback] = []
@@ -139,7 +140,7 @@ class DaemonLoop:
     # ── task tracking / resources ────────────────────────────────────────
 
     def spawn(
-        self, coro: Coroutine[Any, Any, Any], *, name: Optional[str] = None
+        self, coro: Coroutine[Any, Any, Any], *, name: str | None = None
     ) -> asyncio.Task:
         """Start and track a task so shutdown can drain or cancel it.
 
@@ -246,7 +247,7 @@ class DaemonLoop:
 
     # ── graceful shutdown (plan item 1.2) ────────────────────────────────
 
-    async def shutdown(self, *, drain_timeout: Optional[float] = None) -> None:
+    async def shutdown(self, *, drain_timeout: float | None = None) -> None:
         """Request a graceful stop and wait until shutdown has completed.
 
         Safe to call multiple times and from multiple tasks: the first call

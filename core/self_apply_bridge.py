@@ -31,8 +31,9 @@ inbox item executed; transient refusals (``budget_kill_switch`` /
 from __future__ import annotations
 
 import base64
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from core.directive_extractor import SourceText, extract
 from core.instruction_conflict_gate import AUTHORITY_RANK, Directive

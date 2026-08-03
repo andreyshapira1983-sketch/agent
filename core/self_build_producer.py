@@ -35,14 +35,16 @@ import ast
 import hashlib
 import re
 import sys
-from datetime import datetime, timezone
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from core.backlog_target_mapper import map_backlog_candidate
 from core.injection_guard import prepare_untrusted_text_for_llm
 from core.plan_parsing import extract_json_object
+from core.proposal_value_gate import evaluate_proposal_value
 from core.redaction import prepare_text_for_llm_boundary
 from core.self_apply_bridge import (
     DEFAULT_ROLLBACK,
@@ -50,7 +52,6 @@ from core.self_apply_bridge import (
     build_self_apply_payload,
 )
 from core.self_apply_lane import FileChange, _normalize_rel, classify_patch_risk
-from core.proposal_value_gate import evaluate_proposal_value
 from core.self_build_supervisor import (
     hour_budget_headroom,
     is_budget_near_exhaustion,
@@ -410,7 +411,7 @@ def _llm_json(
     return parsed
 
 
-def _preserve_rejected_raw(workspace: Path, roles: list["RoleOutput"]) -> str | None:
+def _preserve_rejected_raw(workspace: Path, roles: list[RoleOutput]) -> str | None:
     """Persist a discarded builder reply to disk; return its repo-relative path.
 
     MIR-071 (operator-approved retention-first): a vetoed/unparseable builder
@@ -1223,7 +1224,7 @@ def _reporter_publish(
         origin=PRODUCER_ORIGIN,
         rollback=DEFAULT_ROLLBACK,
     )
-    digest = hashlib.sha1(content.encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
     dedup_key = f"self_apply:{target}:{digest}"
     extra = len(files) - 1
     summary = f"self-apply proposal for {target}"
@@ -1306,7 +1307,7 @@ def publish_incremental_split_step(
         test_paths=test_paths,
         origin=INCREMENTAL_SPLIT_ORIGIN,
     )
-    digest = hashlib.sha1(step.target_content.encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha256(step.target_content.encode("utf-8")).hexdigest()[:12]
     item = inbox.add(
         operation=SELF_APPLY_OPERATION,
         summary=(

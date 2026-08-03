@@ -25,7 +25,6 @@ from urllib.parse import urlparse
 
 from core.evidence import Evidence, ProvenanceChain
 
-
 SourceTier = Literal[
     "authoritative",
     "primary",

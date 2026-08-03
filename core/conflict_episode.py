@@ -32,10 +32,11 @@ Design principles
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from core.ids import new_id
 from core.instruction_conflict_gate import (
@@ -97,7 +98,7 @@ class ConflictEpisode:
         ruled_by: str,
         lesson: str = "",
         ruled_at: str | None = None,
-    ) -> "ConflictEpisode":
+    ) -> ConflictEpisode:
         """Return the resolved copy. Never mutates — the store appends it."""
         return replace(
             self,
@@ -157,7 +158,7 @@ class ConflictEpisode:
         }
 
     @classmethod
-    def from_dict(cls, row: dict[str, Any]) -> "ConflictEpisode":
+    def from_dict(cls, row: dict[str, Any]) -> ConflictEpisode:
         return cls(
             id=str(row["id"]),
             created_at=str(row.get("created_at") or ""),

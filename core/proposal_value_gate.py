@@ -31,8 +31,9 @@ from __future__ import annotations
 
 import io
 import tokenize
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 ValueVerdict = Literal["ok", "value_veto"]
 

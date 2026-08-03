@@ -4,13 +4,13 @@ Extracted from `core/ingestion` by autonomous self-build module split.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from urllib.parse import urlparse
 
 from core.ingestion_reports import IngestReport
 from core.source_library import SourceLibraryEntry
-
 
 TEXT_EXTENSIONS = frozenset({
     ".cfg",

@@ -6,14 +6,15 @@ and memory summarisation can move independently as better models appear.
 """
 from __future__ import annotations
 
-import json
 import errno
+import json
 import os
 import time
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any
 
 from core.llm import LLM
 from core.model_usage import (
@@ -232,7 +233,7 @@ class ModelSelectionPolicy:
     require_available: bool = True
 
     @classmethod
-    def from_env(cls) -> "ModelSelectionPolicy":
+    def from_env(cls) -> ModelSelectionPolicy:
         raw_name = (
             _clean_env("AGENT_MODEL_POLICY")
             or _clean_env("AGENT_MODEL_SELECTION_POLICY")
@@ -288,7 +289,7 @@ class ModelRegistry:
         self._specs = tuple(specs or ())
 
     @classmethod
-    def from_env(cls) -> "ModelRegistry":
+    def from_env(cls) -> ModelRegistry:
         specs = list(_builtin_model_specs())
         specs.extend(_custom_model_specs_from_path())
         specs.extend(_custom_model_specs_from_env())
@@ -1058,7 +1059,7 @@ class ModelRouter:
         self.usage_ledger = usage_ledger
 
     @classmethod
-    def single(cls, llm: Any) -> "ModelRouter":
+    def single(cls, llm: Any) -> ModelRouter:
         """Compatibility mode: every role returns the same LLM object."""
 
         return cls(static_llm=llm)
@@ -1069,7 +1070,7 @@ class ModelRouter:
         *,
         llm_factory: LLMFactory | None = None,
         usage_ledger: ModelUsageLedger | None = None,
-    ) -> "ModelRouter":
+    ) -> ModelRouter:
         """Build a router from default and role-specific environment vars.
 
         Defaults:
@@ -1460,8 +1461,8 @@ class ModelRouter:
         request was phrased. It never opens a *stronger* tier on its own, so it
         cannot bypass the escalation gate.
         """
-        from core.task_complexity import ComplexityTier, assess_complexity
         from core.model_catalog import tier_model_for
+        from core.task_complexity import ComplexityTier, assess_complexity
 
         if self._static_llm is not None:
             return self._static_llm

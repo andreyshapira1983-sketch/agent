@@ -9,10 +9,11 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Awaitable, Callable, Literal, Optional
+from typing import Literal
 
 from core.file_lock import exclusive_file_lock
 from core.ids import new_id
@@ -87,7 +88,7 @@ class RuntimeSchedule:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "RuntimeSchedule":
+    def from_dict(cls, data: dict) -> RuntimeSchedule:
         return cls(
             id=str(data.get("id") or new_id("sched")),
             name=str(data.get("name") or "schedule"),
@@ -104,7 +105,7 @@ class RuntimeSchedule:
             updated_at=str(data.get("updated_at") or _iso()),
         )
 
-    def with_updates(self, **updates) -> "RuntimeSchedule":
+    def with_updates(self, **updates) -> RuntimeSchedule:
         data = self.to_dict()
         data.update(updates)
         data["updated_at"] = _iso()
@@ -301,7 +302,7 @@ class SchedulerStore:
 
 NowFn = Callable[[], datetime]
 SleepFn = Callable[[float], Awaitable[None]]
-TickCallback = Callable[[ScheduleTickReport], "Optional[Awaitable[None]]"]
+TickCallback = Callable[[ScheduleTickReport], "Awaitable[None] | None"]
 
 # Fallback wait (seconds) used when no active schedule has a next-run time yet.
 # The service still re-evaluates after this bound, so a schedule added by an
@@ -357,9 +358,9 @@ class SchedulerService:
         task_queue: TaskQueueStore,
         *,
         now: NowFn = _now,
-        sleep: Optional[SleepFn] = None,
-        on_tick: Optional[TickCallback] = None,
-        limit: Optional[int] = None,
+        sleep: SleepFn | None = None,
+        on_tick: TickCallback | None = None,
+        limit: int | None = None,
         idle_interval: float = DEFAULT_IDLE_INTERVAL,
     ) -> None:
         if idle_interval <= 0:
@@ -413,7 +414,7 @@ class SchedulerService:
 
     # ── scheduling maths ─────────────────────────────────────────────────
 
-    def seconds_until_next(self, now: Optional[datetime] = None) -> Optional[float]:
+    def seconds_until_next(self, now: datetime | None = None) -> float | None:
         """Seconds until the earliest active schedule is due.
 
         Returns ``None`` when there is no active schedule (the caller should
@@ -428,7 +429,7 @@ class SchedulerService:
             return None
         return (min(upcoming) - moment).total_seconds()
 
-    def _clamp_wait(self, delay: Optional[float]) -> float:
+    def _clamp_wait(self, delay: float | None) -> float:
         if delay is None:
             return self._idle_interval
         if delay <= 0:

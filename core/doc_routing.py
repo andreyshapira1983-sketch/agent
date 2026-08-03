@@ -13,7 +13,6 @@ from typing import Any
 
 from core.lang_match import any_term_matches, normalize_text, tokenize
 
-
 BROAD_PROJECT_CONTEXT_TERMS = (
     "your project",
     "this project",

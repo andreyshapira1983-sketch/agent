@@ -5,6 +5,14 @@ public surface are unchanged."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+
+# The wrapper the retrieved long-term records are placed in. Named once so the
+# builder here and the prompt assembly in `core/loop.py` cannot drift.
+# Single source of truth moved to core/evidence_budget (piece 5): the
+# builder here, the trimmer there and the rebuilder all share one
+# definition. Re-imported so every existing `from core.loop_methods2
+# import MEMORY_*` site keeps working — this module genuinely uses them.
+from core.evidence_budget import MEMORY_CLOSE_TAG, MEMORY_OPEN_TAG
 from core.models import (
     Goal,
     Observation,
@@ -17,19 +25,11 @@ from core.smart_memory import (
     admit_for_storage,
     consolidate_memory,
     effective_completion,
-    resolve_used_procedures,
     episode_from_agent_cycle,
     format_experience_context,
     is_usage_eligible,
+    resolve_used_procedures,
 )
-
-# The wrapper the retrieved long-term records are placed in. Named once so the
-# builder here and the prompt assembly in `core/loop.py` cannot drift.
-# Single source of truth moved to core/evidence_budget (piece 5): the
-# builder here, the trimmer there and the rebuilder all share one
-# definition. Re-imported so every existing `from core.loop_methods2
-# import MEMORY_*` site keeps working — this module genuinely uses them.
-from core.evidence_budget import MEMORY_CLOSE_TAG, MEMORY_OPEN_TAG
 
 # Every durable sink the loop can write. A write site names its sink; a name
 # outside this set is refused rather than waved through, so a typo or a new
@@ -76,9 +76,18 @@ class AgentLoopExtractedMethods2:
         # them). Declared, not defined: a static checker otherwise reads every
         # use as an unknown attribute, and `tests/test_loop_methods_contract`
         # keeps this block from ever shadowing something the mixin really has.
+        # Completed to the FULL contract in the Codacy sweep — the partial
+        # block left 28 "no member" HIGHs (log/write_policy/… ) drowning the
+        # dashboard, the same lesson `loop_methods` already banked.
         retrieval_policy: Any
         episodic_store: EpisodicMemoryStore | None
         procedural_store: ProceduralMemoryStore | None
+        log: Any
+        consolidation_store: Any
+        persistent_store: Any
+        write_policy: Any
+        last_role_context: Any
+        knowledge_use_policy: Any
 
     def _durable_learning_suppressed(self, sink: str | None = None) -> bool:
         """True when a durable learning write must be skipped.
@@ -235,7 +244,8 @@ class AgentLoopExtractedMethods2:
             and self.persistent_store is not None
             and selected
         ):
-            from datetime import datetime, timezone as _tz
+            from datetime import datetime
+            from datetime import timezone as _tz
             _now_dt = datetime.now(_tz.utc)
             for rec in selected:
                 updated = rec.model_copy(update={

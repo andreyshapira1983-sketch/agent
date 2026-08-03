@@ -39,7 +39,6 @@ from typing import Literal
 
 from core.ids import new_id
 
-
 ActionKind = Literal["delete_path_if_created", "restore_from_backup", "noop"]
 
 
@@ -82,7 +81,7 @@ class CompensationPlan:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     @classmethod
-    def noop(cls, tool_name: str, description: str = "no state change") -> "CompensationPlan":
+    def noop(cls, tool_name: str, description: str = "no state change") -> CompensationPlan:
         return cls(
             tool_name=tool_name,
             description=description,
@@ -108,7 +107,7 @@ class CompensationPlan:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "CompensationPlan":
+    def from_dict(cls, data: dict) -> CompensationPlan:
         """Reverse of `to_dict` for replay / cross-process use."""
         created = data.get("created_at")
         if isinstance(created, str):

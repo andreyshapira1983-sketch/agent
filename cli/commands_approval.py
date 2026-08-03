@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from core.approval_inbox import ApprovalInbox, DEFAULT_APPROVAL_INBOX_PATH
+from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH, ApprovalInbox
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
 from core.subagent_contract import canonical_from_approval_payload
 from core.subagent_runner import SubagentContractRefused

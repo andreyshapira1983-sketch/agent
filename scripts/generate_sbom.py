@@ -10,7 +10,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.supply_chain import build_cyclonedx_sbom, parse_requirements_lock  # noqa: E402
+from core.supply_chain import (  # noqa: E402
+    build_cyclonedx_sbom,
+    parse_requirements_lock,
+)
 
 
 def main(argv: list[str] | None = None) -> int:

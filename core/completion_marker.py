@@ -43,8 +43,8 @@ from __future__ import annotations
 
 import re
 import secrets
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 # Anchored to the END of the text, and matched against the ORIGINAL string so
 # the body can be recovered by offset rather than rebuilt.

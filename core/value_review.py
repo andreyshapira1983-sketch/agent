@@ -93,7 +93,7 @@ class ValueReview:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "ValueReview":
+    def from_dict(cls, data: dict) -> ValueReview:
         item_id = str(data.get("item_id") or "").strip()
         verdict = str(data.get("verdict") or "").strip()
         if not item_id or verdict not in VALID_VERDICTS:
@@ -116,7 +116,7 @@ class ValueReviewLog:
         self.path = Path(path) if path is not None else None
 
     @classmethod
-    def for_workspace(cls, workspace: Path | str) -> "ValueReviewLog":
+    def for_workspace(cls, workspace: Path | str) -> ValueReviewLog:
         return cls(Path(workspace) / DEFAULT_LEDGER_PATH)
 
     # ── read ────────────────────────────────────────────────────────────────

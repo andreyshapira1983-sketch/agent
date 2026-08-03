@@ -38,7 +38,6 @@ from typing import Any, Literal
 
 from core.ids import new_id
 
-
 # ---------------------------------------------------------------------------
 # Taxonomy
 # ---------------------------------------------------------------------------
@@ -144,7 +143,7 @@ class Evidence:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Evidence":
+    def from_dict(cls, data: dict[str, Any]) -> Evidence:
         return cls(
             id=data["id"],
             kind=data["kind"],

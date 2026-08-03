@@ -10,13 +10,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from core.ingestion import DEFAULT_PROJECT_LIMIT, SKIP_DIR_NAMES, TEXT_EXTENSIONS
 from core.doc_routing import (
     CONFIDENCE_EVIDENCE_SOURCE_PATHS,
     DOCTRINE_CORPORATE_DOC_PATHS,
     is_confidence_evidence_diagnostic_question,
     is_doctrine_corporate_question,
 )
+from core.ingestion import DEFAULT_PROJECT_LIMIT, SKIP_DIR_NAMES, TEXT_EXTENSIONS
 
 if TYPE_CHECKING:
     from core.source_registry import SourceRegistry
@@ -69,7 +69,7 @@ class LearningPlanner:
         goal: str = "",
         root: str = ".",
         limit: int = DEFAULT_PROJECT_LIMIT,
-        source_registry: "SourceRegistry | None" = None,
+        source_registry: SourceRegistry | None = None,
         stale_hours: float = _STALE_HOURS,
     ) -> LearningPlan:
         if limit < 1:
@@ -234,7 +234,7 @@ def _apply_staleness(
     score: int,
     rel_path: str,
     *,
-    source_registry: "SourceRegistry | None",
+    source_registry: SourceRegistry | None,
     stale_hours: float,
 ) -> int:
     """Reduce score for files ingested recently; leave score unchanged if no registry."""

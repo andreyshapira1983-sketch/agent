@@ -17,17 +17,17 @@ from __future__ import annotations
 
 import sys
 from abc import ABC, abstractmethod
-from typing import Callable, Literal, Optional, TextIO
+from collections.abc import Callable
+from typing import Literal, TextIO
 
 from core.models import ApprovalDecision, ApprovalRequest
-
 
 # Strings accepted from the user (case-insensitive). Anything else => abort.
 _YES_TOKENS: frozenset[str] = frozenset({"y", "yes", "д", "да", "approve", "ok", "okay"})
 _NO_TOKENS: frozenset[str] = frozenset({"n", "no", "н", "нет", "deny", "cancel"})
 
 
-def _classify(raw: Optional[str]) -> tuple[Literal["approve", "deny", "abort"], str]:
+def _classify(raw: str | None) -> tuple[Literal["approve", "deny", "abort"], str]:
     """Map raw human input to a typed decision + a one-line reason."""
     if raw is None:
         return "abort", "no input (EOF / timeout)"

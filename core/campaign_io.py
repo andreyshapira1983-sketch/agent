@@ -51,15 +51,15 @@ def _action_focused_goal(goal: str, action: BestNextAction) -> str:
 
 
 def _default_gather_signals(agent: Any, workspace: Any, approval_inbox: Any) -> dict[str, Any]:
+    from core.alert_ack import AlertAckStore
+    from core.approval_inbox import ApprovalInbox
+    from core.approval_triage import triage_inbox
+    from core.best_next_action import select_best_next_action
     from core.heartbeat_io import (
         heartbeat_age_seconds,
         is_stale,
         read_heartbeat,
     )
-    from core.alert_ack import AlertAckStore
-    from core.approval_inbox import ApprovalInbox
-    from core.approval_triage import triage_inbox
-    from core.best_next_action import select_best_next_action
 
     ws = Path(workspace)
     heartbeat = read_heartbeat(ws)

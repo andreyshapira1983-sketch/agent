@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import List, Optional, Sequence, Tuple
+from collections.abc import Sequence
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -33,9 +33,9 @@ _LINK_RE = re.compile(r"\]\(([^)]+)\)")
 _LINE_ANCHOR_RE = re.compile(r":\d+(?:-\d+)?$")
 
 
-def _doc_files() -> List[str]:
+def _doc_files() -> list[str]:
     """Human-facing Markdown set: root README + everything under ``docs/``."""
-    files: List[str] = []
+    files: list[str] = []
     readme = os.path.join(_ROOT, "README.md")
     if os.path.isfile(readme):
         files.append(readme)
@@ -66,9 +66,9 @@ def _looks_like_path(target: str) -> bool:
     return "/" in target or "." in os.path.basename(target)
 
 
-def find_broken_links(files: Optional[Sequence[str]] = None) -> List[Tuple[str, str]]:
+def find_broken_links(files: Sequence[str] | None = None) -> list[tuple[str, str]]:
     """Return ``(source_relpath, raw_target)`` for every unresolved link."""
-    broken: List[Tuple[str, str]] = []
+    broken: list[tuple[str, str]] = []
     for path in (files if files is not None else _doc_files()):
         with open(path, "r", encoding="utf-8", errors="replace") as handle:
             text = handle.read()
