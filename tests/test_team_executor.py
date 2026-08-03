@@ -41,12 +41,10 @@ class _PolicyRefusingRunner:
 
 class _ErrorResultRunner:
     def run_contract(self, contract: CanonicalSubagentContract):
-        SubagentExecutionReceipt(
-            contract.contract_id,
-            contract.schema_version,
-            used_tools=("file_read",),
-            iterations=1,
-        )
+        # Deliberately NO execution receipt: a crashed child never produced
+        # one, and TeamExecutor reads it via getattr(..., None). A dangling
+        # receipt constructor used to sit here bound to an unused variable —
+        # dead since birth, removed with the F841 cleanup.
         return SimpleNamespace(
             status="error",
             error="child crashed",
