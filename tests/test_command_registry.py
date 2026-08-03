@@ -160,12 +160,14 @@ def _commands_map_usage() -> dict[str, str]:
 # ── purity ───────────────────────────────────────────────────────────────────
 
 def test_registry_is_pure_data():
-    """The registry and BOTH of its spec volumes are pure data.
+    """The registry and BOTH of its spec volumes keep the purity contract.
 
-    Since the #278 split (authored by the self-build producer) the command
-    table lives in two sibling data modules that the registry combines; the
-    purity contract now covers all three files — the split must never become
-    a door for behaviour."""
+    "Pure" here means what the assertions below enforce: no runtime-layer
+    imports and no side effects at import time — a frozen dataclass with a
+    trivial `tokens` property is fine, dispatch logic is not. Since the #278
+    split (authored by the self-build producer) the command table lives in
+    two sibling volumes that the registry combines; the contract covers all
+    three files so the split never becomes a door for behaviour."""
     spec_siblings = {".command_specs", ".command_specs_ops"}
     for name, allowed in (
         ("command_registry.py", {"__future__", "dataclasses"} | spec_siblings),

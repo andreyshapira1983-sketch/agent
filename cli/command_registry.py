@@ -46,15 +46,31 @@ Not modelled here on purpose (see CLI_BASELINE.md sections 3.1-3.2):
 from __future__ import annotations
 
 from .command_specs import (
-    BOTH_MODES as BOTH_MODES,               # re-exported (tests/callers read them
-    ONE_SHOT as ONE_SHOT,                   # as module attributes of the registry,
-    PHASE_POST_AGENT as PHASE_POST_AGENT,   # the pre-split public surface)
-    PHASE_PRE_DOTENV as PHASE_PRE_DOTENV,
-    REPL as REPL,
-    CommandSpec,
+    BOTH_MODES,
     COMMANDS_CORE,
+    ONE_SHOT,
+    PHASE_POST_AGENT,
+    PHASE_PRE_DOTENV,
+    REPL,
+    CommandSpec,
 )
 from .command_specs_ops import COMMANDS_OPS
+
+# The registry stays the single public surface it was before the split:
+# the mode/phase constants and CommandSpec are re-exported here because
+# tests and callers read them as attributes of THIS module.
+__all__ = [
+    "BOTH_MODES",
+    "BY_TOKEN",
+    "COMMANDS",
+    "CommandSpec",
+    "ONE_SHOT",
+    "PHASE_POST_AGENT",
+    "PHASE_PRE_DOTENV",
+    "REPL",
+    "all_tokens",
+    "lookup",
+]
 
 
 COMMANDS: tuple[CommandSpec, ...] = COMMANDS_CORE + COMMANDS_OPS

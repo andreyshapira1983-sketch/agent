@@ -4,7 +4,8 @@ This module holds the ``CommandSpec`` dataclass, the shared mode/phase
 constants, and the command specs for the *Memory*, *Sources, ingestion &
 knowledge*, *Self-improvement* and *Models & budget* categories.
 
-It is a pure data module (no behaviour, no imports from ``core``/``app``)
+Its contract: no runtime-layer imports (``core``/``app``/...) and no side
+effects at import time — declarations only (a frozen dataclass and specs)
 and is combined with :mod:`cli.command_specs_ops` by
 :mod:`cli.command_registry`, which remains the single public entry point --
 see that module's docstring for the full purity contract and field
