@@ -261,8 +261,11 @@ def apply_total_budget(
 ) -> tuple[list[tuple[str, str]], bool]:
     """Trim evidence blocks until their total fits in AGENT_EVIDENCE_TOTAL_CHARS.
 
-    Strategy: trim the **largest** block first (the one wasting the most tokens).
-    This preserves all smaller blocks intact and avoids cascading truncation.
+    Strategy: trim the **largest** block first (the one wasting the most
+    tokens), but never below its pass's floor — the surplus then CASCADES to
+    the next-largest block (MIR-073). The pre-cascade behaviour dumped the
+    entire overflow into one block, which starved the very file the plan was
+    built around while its siblings stayed pristine.
 
     Blocks whose label appears in *trim_first_labels* are **demoted**: they are
     spent before any other block is touched, largest demoted block first, down
@@ -308,7 +311,9 @@ def apply_total_budget(
     # the budget; the surplus still comes off largest-first, it just cascades.
     # Demoted blocks (memory) keep the absolute floor in both passes — they pay
     # first BY DESIGN (their own measured incident). Second pass repeats with
-    # the absolute floor for everyone, so the hard budget is never violated.
+    # the absolute floor for everyone. A budget smaller than the sum of floors
+    # plus notices is mathematically unsatisfiable — then, exactly as before
+    # this change, the loop runs out of candidates and returns the best fit.
     _fair_min = max(_MIN_CONTENT, budget // (2 * max(1, len(blocks))))
 
     # A bare string is an iterable of characters; treating "memory" as six
