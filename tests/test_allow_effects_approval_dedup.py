@@ -80,6 +80,7 @@ def test_secret_bearing_goal_still_dedups(tmp_path):
     rt = _runtime(tmp_path)
     secret_goal = "проверь ключ " + "AKIA" + "IOSFODNN" + "7EXAMPLE" + " в конфиге"
     first = _run_blocked(rt, secret_goal)
+    first_item_id = rt.approval_inbox.pending()[0].id
     # Reopen the PERSISTED inbox (post-merge review round #284): the failure
     # mode lives in what is stored on disk, so the second run must dedup
     # against the reloaded item, not an in-memory leftover.
@@ -88,6 +89,9 @@ def test_secret_bearing_goal_still_dedups(tmp_path):
     assert again.stop_reason == first.stop_reason
     pending = rt.approval_inbox.pending()
     assert len(pending) == 1
+    assert pending[0].id == first_item_id, (
+        "вторая попытка обязана переиспользовать СОХРАНЁННУЮ заявку первой"
+    )
     stored_key = (pending[0].payload or {}).get("dedup_key", "")
     expected = (
         "autonomous_runtime.allow_effects:"
