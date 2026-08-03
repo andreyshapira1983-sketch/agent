@@ -108,6 +108,13 @@ All notable changes to this project are recorded here. The format follows
   rebuilder and the memory-block tags → `core/evidence_budget.py`.
 
 ### Fixed
+- Сбой наблюдательного сенсора больше не исчезает молча (MIR-077, класс
+  `core/loop.py`): одиннадцать мест, где широкий `except` глотал ошибку
+  вектора уверенности, поддержки доказательствами, разногласий подсистем и
+  прочих наблюдателей, теперь пишут единое событие `sensor_failed` через
+  новый компактный модуль `core/sensor_journal.py`; четыре законных
+  значения по умолчанию назвали причину. Храповик немотивированных
+  молчунов опущен 61 → 46, а сам `core/loop.py` стал короче.
 - The conflict detector no longer manufactures conflicts out of deixis or
   agreement-in-other-words (MIR-076, both classes measured live): a subject
   opening with this/этот/данный is context-bound and never grouped across

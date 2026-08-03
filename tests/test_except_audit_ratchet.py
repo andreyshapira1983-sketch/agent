@@ -21,9 +21,11 @@ _REPO = Path(__file__).resolve().parents[1]
 # Measured 2026-08-03, RE-measured after the #292 review round fixed the
 # scanner (substring 'log' matched login/logic — 10 handlers were falsely
 # journaled): 157 broad handlers = 21 journaled + 5 log-guards + 2 re-raise
-# + 129 silent, of which 61 name no reason. Lower as classes get fixed;
-# never raise.
-_BASELINE_UNJUSTIFIED_SILENT = 61
+# + 129 silent, of which 61 named no reason. Класс `core/loop.py` закрыт
+# целиком (15 мест: 11 сенсоров журналируют сбой через
+# `core/sensor_journal`, 4 значения по умолчанию назвали причину) —
+# база опущена 61 → 46. Опускать дальше по мере починки; не поднимать.
+_BASELINE_UNJUSTIFIED_SILENT = 46
 
 
 def _load_audit():

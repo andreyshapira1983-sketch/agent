@@ -1433,8 +1433,8 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                         "repeat_count": _stag.repeat_count,
                         "failure_codes": list(_stag.failure_codes),
                     }
-            except Exception:
-                pass
+            except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+                self._sensor_failed("stagnation_shadow", exc)
 
             decision = self.replan_policy.decide(
                 failure_history=failure_history,
@@ -1579,8 +1579,8 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                         excerpt=str(_output)[:500],
                         confidence=0.85,
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+                    self._sensor_failed("working_memory_evidence", exc)
 
         # Issue #119 — session-dialogue evidence. Admitted ONLY on a
         # conversational-correction turn: the operator is asking about the
@@ -1642,8 +1642,8 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 self.log.log(
                     "premature_completion_risk", _pc.to_log_payload()
                 )
-        except Exception:
-            pass
+        except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+            self._sensor_failed("premature_completion_risk", exc)
 
         self.log.log(
             "evidence_collected",
@@ -1705,7 +1705,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     "cheap_path_synth_model",
                     {"model": getattr(_synth_llm, "model", None)},
                 )
-            except Exception:
+            except Exception:  # выбор дешёвой модели не удался — работаем на обычной, это не сбой хода
                 _synth_llm = _task_synth_llm
         _saved_on_token = getattr(self, "_stream_on_token", None)
 
@@ -1893,8 +1893,8 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                             else "replan"
                         ),
                     })
-            except Exception:
-                pass
+            except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+                self._sensor_failed("subsystem_disagreement", exc)
 
             # P1/P2 — confidence vector. Decompose the scalar gate into
             # three axes (evidence / coherence / relevance) so triage
@@ -1909,8 +1909,8 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     answer=draft_answer,
                 )
                 self.log.log("confidence_vector", _cv.to_log_payload())
-            except Exception:
-                pass
+            except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+                self._sensor_failed("confidence_vector", exc)
             if report.malformed_output:
                 self.log.log(
                     "output_contract_violation",
@@ -1947,8 +1947,8 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     report, evidence_expected=_ev_expected
                 )
                 self.log.log("evidence_support", _support.to_log_payload())
-            except Exception:
-                pass
+            except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+                self._sensor_failed("evidence_support", exc)
 
             verify_replan_attempt = 0
             VERIFY_REPLAN_HARD_CAP = 2  # belt + braces over ReplanPolicy
@@ -2456,8 +2456,8 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     text=_clarify.prompt(),
                 ):
                     self.log.log("clarification_gate", _clarify.to_dict())
-            except Exception:
-                pass
+            except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+                self._sensor_failed("clarification_gate", exc)
 
         # Answer enforcement (PR3): low-evidence truncation, local-critique
         # empty-rewrite skip, verifier soft-fail, claim-level short path.
@@ -2576,8 +2576,8 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             # is what carries that authority.
             if _obl.triggered:
                 self._defect_signals.append("obligation_silently_missing")
-        except Exception:
-            pass
+        except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+            self._sensor_failed("completion_obligation", exc)
 
         # Defence-in-depth: redact once more on the way out so even an
         # LLM hallucinating a credential or PII cannot bypass the kernel.
@@ -2625,8 +2625,8 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     "artifacts_gained_after_detection": _new_after,
                     "replan_exhausted": replan_exhausted,
                 })
-            except Exception:
-                pass
+            except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+                self._sensor_failed("stagnation_shadow_outcome", exc)
         if _disagreement_shadow:
             try:
                 self.log.log("subsystem_disagreement_shadow", {
@@ -2688,8 +2688,8 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                             "turns_after": len(self.memory.turns),
                         },
                     )
-            except Exception:
-                pass
+            except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+                self._sensor_failed("memory_compaction", exc)
 
         verification = self.last_verification
         weak_chunks = 0
@@ -2962,8 +2962,8 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     "blocked_model": payload["blocked_model"],
                 },
             )
-        except Exception:
-            pass
+        except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+            self._sensor_failed("budget_exhaustion_log", exc)
 
     def _file_read_workspace_root(self) -> Path | None:
         try:
@@ -3023,12 +3023,12 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             return False
         try:
             tool = self.registry.get(tool_name)
-        except Exception:
+        except Exception:  # инструмента нет в реестре — считаем НЕ read_only (безопасная сторона)
             return False
         arguments = spec.get("arguments")
         try:
             return tool.risk_for(arguments if isinstance(arguments, dict) else {}) == "read_only"
-        except Exception:
+        except Exception:  # инструмент не умеет оценить риск — считаем НЕ read_only (безопасная сторона)
             return False
 
     def _execute_steps_parallel(
@@ -3908,7 +3908,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         try:
             from core.prompt_registry import get_prompt as _get_prompt
             system_prompt = _get_prompt("synthesizer.system")
-        except Exception:
+        except Exception:  # реестр промптов недоступен — берём встроенный контракт синтеза
             system_prompt = SYSTEM_ANSWER
         if completion_nonce:
             # Appended to the system prompt rather than to one of the three
