@@ -26,7 +26,7 @@ WATCH: dict[str, int] = {
     "agent_tick.py": 1500,                 # measured 1458; aspiration 1300
     "core/autonomous_runtime.py": 1400,    # measured 1364; aspiration 1150
     "core/smart_memory.py": 1900,          # measured 1861 after the causal-credit split + outcome extraction
-    "core/self_build_producer.py": 1800,   # measured 1755 — new watch
+    "core/self_build_producer.py": 1860,   # measured 1813 after MIR-071 raw-retention (reviewed growth: preservation helper + honest critic wording)
     "core/model_router.py": 1800,          # measured 1719 — new watch
 }
 
