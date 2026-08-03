@@ -20,7 +20,7 @@ from pathlib import Path
 # three files sat over their ceilings with the guard reporting it to nobody.
 # It now runs inside the test suite (tests/test_file_size_ratchet.py).
 WATCH: dict[str, int] = {
-    "core/loop.py": 4230,                  # was 4500; decomposition banked 4047; +MIR-069/073/075 wirings, +MIR-074 phase 1 (causal memory credit writer, ~60 lines) — all reviewed
+    "core/loop.py": 4235,                  # was 4500; decomposition banked 4047; +MIR-069/073/075 wirings, +MIR-074 phase 1 causal credit writer incl. the #294 review round's batch rewrite — all reviewed
     "main.py": 2000,                       # 47 today; the old extraction's win
     "core/planner.py": 560,                # measured 516 after piece 5 (host-tools context out)
     "agent_tick.py": 1500,                 # measured 1458; aspiration 1300
