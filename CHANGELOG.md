@@ -11,6 +11,13 @@ All notable changes to this project are recorded here. The format follows
 ## [Unreleased]
 
 ### Added
+- Every verified answer explains itself in five human points (MIR-069 phase 1):
+  `core/verification_summary.py` composes «Проверял / Способ / Доказательство /
+  Непроверенным осталось / Уверенность» from the verifier's own numbers, the
+  full text is journalled as `verification_explained`, and a compact
+  «Проверка: подтверждено X из N…» tail reaches the operator via a new
+  rewrite-proof `append` notice channel — with `format_human_response` taught
+  not to drop it (found by live run).
 - Completion contract, fixed before the work (MIR-067, #258): derived from the
   REQUEST before any tool runs (`core/completion_contract.py`), journalled even
   when empty, and judged at the end as the `acceptance_criteria` obligation
