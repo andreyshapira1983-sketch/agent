@@ -48,12 +48,13 @@ class _FixedLLM:
         yield _ANSWER
 
 
-def _session_agent(tmp_path: Path):
+def _session_agent(tmp_path: Path, trace_id: str = "trace_repl_session"):
     """One agent = one REPL session: a single TraceLogger for its lifetime,
-    exactly how `app.bootstrap.build_agent` wires it."""
+    exactly how `app.bootstrap.build_agent` wires it. A different `trace_id`
+    models a separate one-shot turn over the same store."""
     llm = _FixedLLM()
     registry = ToolRegistry()
-    logger = TraceLogger(trace_id="trace_repl_session", log_dir=tmp_path, verbose=False)
+    logger = TraceLogger(trace_id=trace_id, log_dir=tmp_path, verbose=False)
     events: list[tuple[str, dict | None]] = []
     original_log = logger.log
 
@@ -115,18 +116,7 @@ def test_a_fresh_trace_id_does_not_inherit(tmp_path):
     agent1, _ = _session_agent(tmp_path)
     agent1.run("Сколько строк в файле журнала?")
 
-    llm = _FixedLLM()
-    registry = ToolRegistry()
-    logger = TraceLogger(trace_id="trace_one_shot_turn", log_dir=tmp_path, verbose=False)
-    agent2 = AgentLoop(
-        registry=registry,
-        policy=PolicyGate(registry),
-        llm=llm,
-        logger=logger,
-        planner=LLMPlanner(llm=llm, registry=registry),
-        memory=WorkingMemory(),
-        assumption_store=AssumptionStore(tmp_path / "assumptions.jsonl"),
-    )
+    agent2, _ = _session_agent(tmp_path, trace_id="trace_one_shot_turn")
     agent2.run("What is 2 plus 2?")
     texts = [a.text for a in agent2.last_assumptions.assumptions]
     assert not any("Russian-language" in t for t in texts)
