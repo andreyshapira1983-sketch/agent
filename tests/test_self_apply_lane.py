@@ -374,15 +374,20 @@ def _init_repo(ws: Path) -> None:
 
 
 def _head(ws: Path, ref: str = "HEAD") -> str:
+    # check=True: сбой git раньше молча давал пустую строку, и сравнения
+    # HEAD-ов вырождались в сверку пустоты с пустотой.
     return subprocess.run(
         ["git", "rev-parse", ref], cwd=str(ws), capture_output=True, text=True,
+        check=True,
     ).stdout.strip()
 
 
 def _show(ws: Path, ref: str, path: str) -> str:
+    # check=True: все вызовы ждут существующий объект — молчаливая пустота
+    # вместо содержимого прятала бы настоящий сбой.
     return subprocess.run(
         ["git", "show", f"{ref}:{path}"], cwd=str(ws), capture_output=True,
-        text=True,
+        text=True, check=True,
     ).stdout
 
 
@@ -431,8 +436,11 @@ def test_failing_targeted_tests_trigger_rollback(repo: Path):
     assert len(runner.calls) == 1  # full suite skipped
     assert vcs.current_branch() == "main"
     assert (repo / "core" / "foo.py").read_text(encoding="utf-8") == "x = 1\n"
+    # check=True: измерено — в сломанном репо git branch падает (код 128),
+    # а «self-apply/ not in ''» проходил впустую.
     branches = subprocess.run(
-        ["git", "branch"], cwd=str(repo), capture_output=True, text=True
+        ["git", "branch"], cwd=str(repo), capture_output=True, text=True,
+        check=True,
     ).stdout
     assert "self-apply/" not in branches
 

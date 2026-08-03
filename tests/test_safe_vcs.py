@@ -83,8 +83,10 @@ def test_delete_branch(repo: Path):
     vcs.create_temp_branch("self-apply/t3")
     vcs.checkout("main")
     vcs.delete_branch("self-apply/t3")
+    # check=True: при сбое git утверждение «ветки нет» проходило по пустоте.
     branches = subprocess.run(
-        ["git", "branch"], cwd=str(repo), capture_output=True, text=True
+        ["git", "branch"], cwd=str(repo), capture_output=True, text=True,
+        check=True,
     ).stdout
     assert "self-apply/t3" not in branches
 
