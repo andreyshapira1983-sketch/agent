@@ -50,6 +50,12 @@ class VerificationReport:
     #: recording of the exchange does support it), so collapsing it into either
     #: bucket is what produced the original defect.
     dialogue_supported_chunks: int = 0
+    #: Claims supported ONLY by the operator's words this turn (the injected
+    #: `user_explicit` evidence). Operator ruling 2026-08-03 (MIR-028): user
+    #: words confirm that the user said it — never the content's objective
+    #: truth — so this is its own counter, never folded into `verified`, and
+    #: it neither grants full evidence score nor banks a clean success alone.
+    user_asserted_chunks: int = 0
 
     def to_log_payload(self) -> dict[str, Any]:
         return {
@@ -63,6 +69,7 @@ class VerificationReport:
             "subagent_asserted_chunks": self.subagent_asserted_chunks,
             "receipt_missing_chunks": self.receipt_missing_chunks,
             "dialogue_supported_chunks": self.dialogue_supported_chunks,
+            "user_asserted_chunks": self.user_asserted_chunks,
             "fully_unverified": self.fully_unverified,
             "chain_was_empty": self.chain_was_empty,
             "malformed_output": self.malformed_output,

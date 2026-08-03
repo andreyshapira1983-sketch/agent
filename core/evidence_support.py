@@ -74,6 +74,11 @@ def compute_evidence_support(report: Any) -> float:
     dialogue = int(getattr(report, "dialogue_supported_chunks", 0) or 0)
     cited = int(getattr(report, "cited_but_unmatched_chunks", 0) or 0)
     unverified = int(getattr(report, "unverified_chunks", 0) or 0)
+    # `user_asserted` earns NO credit here (operator ruling 2026-08-03,
+    # MIR-028): the user's words confirm what was said, not that it is true,
+    # so an answer built of user-echo citations must not measure as backed.
+    # No penalty either — nothing was fabricated; the chunk simply does not
+    # count toward the numerator, so an all-echo answer scores 0.0.
     raw = ((verified + dialogue) * 1.0) + (cited * -0.25) + (unverified * -0.25)
     return max(0.0, min(1.0, raw / total))
 

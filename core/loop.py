@@ -2560,6 +2560,11 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 # (MIR-002) and promote "explaining my own mistake" into
                 # procedural memory.
                 + verification.dialogue_supported_chunks
+                # Operator ruling 2026-08-03 (MIR-028): support that is only
+                # the operator's own words must not bank a clean success —
+                # counted weak, so the episode lands `partial` when user-echo
+                # is all (or most of) what the answer leans on.
+                + verification.user_asserted_chunks
             )
         # Layer 4 — update user profile from this interaction.
         if may_profile and self.user_profile_store is not None:
