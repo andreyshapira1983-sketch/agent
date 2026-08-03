@@ -50,13 +50,37 @@ class _FixedLLM:
         yield _ANSWER
 
 
+def _build_agent(
+    tmp_path: Path,
+    *,
+    trace_id: str,
+    llm=None,
+    durable_writes: frozenset[str] | None = None,
+):
+    """The one factory every test here uses — the review found the AgentLoop
+    construction cloned three times, and the loop's signature changes often
+    enough that one seam is worth having."""
+    llm = llm or _FixedLLM()
+    registry = ToolRegistry()
+    logger = TraceLogger(trace_id=trace_id, log_dir=tmp_path, verbose=False)
+    agent = AgentLoop(
+        registry=registry,
+        policy=PolicyGate(registry),
+        llm=llm,
+        logger=logger,
+        planner=LLMPlanner(llm=llm, registry=registry),
+        memory=WorkingMemory(),
+        assumption_store=AssumptionStore(tmp_path / "assumptions.jsonl"),
+        durable_writes=durable_writes,
+    )
+    return agent, logger
+
+
 def _session_agent(tmp_path: Path, trace_id: str = "trace_repl_session"):
     """One agent = one REPL session: a single TraceLogger for its lifetime,
     exactly how `app.bootstrap.build_agent` wires it. A different `trace_id`
     models a separate one-shot turn over the same store."""
-    llm = _FixedLLM()
-    registry = ToolRegistry()
-    logger = TraceLogger(trace_id=trace_id, log_dir=tmp_path, verbose=False)
+    agent, logger = _build_agent(tmp_path, trace_id=trace_id)
     # Payloads are whatever the loop logs (dicts, Pydantic models, None) —
     # the spy records, it does not constrain.
     events: list[tuple[str, Any]] = []
@@ -67,15 +91,6 @@ def _session_agent(tmp_path: Path, trace_id: str = "trace_repl_session"):
         return original_log(event, payload, **kw)
 
     logger.log = spy  # type: ignore[method-assign]
-    agent = AgentLoop(
-        registry=registry,
-        policy=PolicyGate(registry),
-        llm=llm,
-        logger=logger,
-        planner=LLMPlanner(llm=llm, registry=registry),
-        memory=WorkingMemory(),
-        assumption_store=AssumptionStore(tmp_path / "assumptions.jsonl"),
-    )
     return agent, events
 
 
@@ -151,19 +166,12 @@ def test_a_fresh_trace_id_does_not_inherit(tmp_path):
 def _daemon_shaped_agent(tmp_path: Path):
     """An AgentLoop with the unattended profile's durable-writes allowlist,
     a live assumption store handle, and one trace id — the daemon-tick shape."""
-    llm = _FixedLLM()
-    registry = ToolRegistry()
-    logger = TraceLogger(trace_id="trace_daemon_tick", log_dir=tmp_path, verbose=False)
-    return AgentLoop(
-        registry=registry,
-        policy=PolicyGate(registry),
-        llm=llm,
-        logger=logger,
-        planner=LLMPlanner(llm=llm, registry=registry),
-        memory=WorkingMemory(),
-        assumption_store=AssumptionStore(tmp_path / "assumptions.jsonl"),
+    agent, _ = _build_agent(
+        tmp_path,
+        trace_id="trace_daemon_tick",
         durable_writes=frozenset({"episode", "hygiene"}),
     )
+    return agent
 
 
 def test_the_unattended_profile_never_saves_assumptions(tmp_path):
@@ -200,17 +208,7 @@ def test_the_current_goals_assumptions_do_reach_the_llm_prompt(tmp_path):
         return original_complete(system, user, **kw)
 
     llm.complete = recording_complete  # type: ignore[method-assign]
-    registry = ToolRegistry()
-    logger = TraceLogger(trace_id="trace_prompt_check", log_dir=tmp_path, verbose=False)
-    agent = AgentLoop(
-        registry=registry,
-        policy=PolicyGate(registry),
-        llm=llm,
-        logger=logger,
-        planner=LLMPlanner(llm=llm, registry=registry),
-        memory=WorkingMemory(),
-        assumption_store=AssumptionStore(tmp_path / "assumptions.jsonl"),
-    )
+    agent, _ = _build_agent(tmp_path, trace_id="trace_prompt_check", llm=llm)
     agent.run("Сколько строк в файле журнала?")
     assert any(
         "<assumptions>" in p and "Russian-language" in p for p in seen_prompts

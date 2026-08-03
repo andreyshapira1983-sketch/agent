@@ -624,18 +624,11 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         _run_assumptions = AssumptionRegistry(
             run_id=getattr(self.log, "trace_id", ""),
         )
-        # The store is an ARCHIVE, not an active input (MIR-027, operator
-        # ruling 2026-08-03: «сохранить — не значит постоянно помнить»). A
-        # cross-turn auto-restore used to sit here, keyed by the session-
-        # lifetime trace id — so in the REPL every turn inherited every
-        # earlier turn's assumptions and fed them to the synthesizer of a
-        # goal they were never extracted from (measured: a 90%-confidence
-        # Russian-language claim steering an unrelated English question).
-        # It served nothing else: one-shot mints a fresh trace id, --resume
-        # builds a fresh agent and carries the QUESTION, and failed replan
-        # attempts share this in-memory registry within the run. Archived
-        # rows may return only through an explicit, applicability-checked
-        # retrieval (memory-lifecycle contract), never by default.
+        # MIR-027: the store is an ARCHIVE, not an active input. The cross-
+        # turn auto-restore that sat here leaked assumptions between unrelated
+        # goals (session-lifetime trace id) and served no other caller;
+        # archived rows return only via explicit retrieval. Measurements and
+        # the operator's ruling live in the MIR-027 registry entry.
         try:
             _known_lang: str | None = None
             if self.last_user_profile is not None:
