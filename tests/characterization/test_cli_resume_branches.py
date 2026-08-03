@@ -98,7 +98,9 @@ def test_invalid_trace_id_exit_code_is_two_in_a_real_process(tmp_path):
     agent construction, so no network path is reachable.
     """
     env = {**os.environ, "AGENT_PROVIDER": "mock", "PYTHONIOENCODING": "utf-8"}
-    proc = subprocess.run(
+    # argv фиксирован: sys.executable + наш main.py (S603 подавлен по месту —
+    # remote-режим Codacy не читает per-file-ignores, #300).
+    proc = subprocess.run(  # nosemgrep  # noqa: S603  # nosec B603
         [
             sys.executable,
             str(REPO_ROOT / "main.py"),
@@ -107,6 +109,7 @@ def test_invalid_trace_id_exit_code_is_two_in_a_real_process(tmp_path):
             "--workspace",
             str(tmp_path),
         ],
+        check=False,
         cwd=str(tmp_path),
         capture_output=True,
         text=True,
