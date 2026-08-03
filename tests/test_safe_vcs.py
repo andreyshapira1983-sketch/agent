@@ -10,8 +10,11 @@ from core.safe_vcs import SafeVCS, VcsError, _validate_branch
 
 
 def _git(ws: Path, *args: str) -> None:
-    subprocess.run(
-        ["git", "-c", "user.name=Test", "-c", "user.email=test@localhost", *args],
+    # Подавления S603/S607 в этом файле: команды фиксированы — git с
+    # argv из литералов; Codacy применяет их построчно (per-file-ignores
+    # по путям его remote-режим не читает, измерено на #300).
+    subprocess.run(  # noqa: S603
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@localhost", *args],  # noqa: S607
         cwd=str(ws),
         check=True,
         capture_output=True,
@@ -20,9 +23,9 @@ def _git(ws: Path, *args: str) -> None:
 
 
 def _init_repo(ws: Path) -> None:
-    subprocess.run(["git", "init"], cwd=str(ws), check=True, capture_output=True)
+    subprocess.run(["git", "init"], cwd=str(ws), check=True, capture_output=True)  # noqa: S607
     subprocess.run(
-        ["git", "symbolic-ref", "HEAD", "refs/heads/main"],
+        ["git", "symbolic-ref", "HEAD", "refs/heads/main"],  # noqa: S607
         cwd=str(ws), check=True, capture_output=True,
     )
     (ws / "core").mkdir(parents=True, exist_ok=True)
@@ -85,7 +88,7 @@ def test_delete_branch(repo: Path):
     vcs.delete_branch("self-apply/t3")
     # check=True: при сбое git утверждение «ветки нет» проходило по пустоте.
     branches = subprocess.run(
-        ["git", "branch"], cwd=str(repo), capture_output=True, text=True,
+        ["git", "branch"], cwd=str(repo), capture_output=True, text=True,  # noqa: S607
         check=True,
     ).stdout
     assert "self-apply/t3" not in branches

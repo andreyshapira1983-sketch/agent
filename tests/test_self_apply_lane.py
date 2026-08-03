@@ -349,16 +349,18 @@ def test_no_push_method_anywhere():
 
 
 def _git(ws: Path, *args: str) -> None:
-    subprocess.run(
-        ["git", "-c", "user.name=Test", "-c", "user.email=test@localhost", *args],
+    # Подавления S603/S607 в этом файле: git с argv из литералов; Codacy
+    # применяет их построчно (remote-режим не читает per-file-ignores, #300).
+    subprocess.run(  # noqa: S603
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@localhost", *args],  # noqa: S607
         cwd=str(ws), check=True, capture_output=True, text=True,
     )
 
 
 def _init_repo(ws: Path) -> None:
-    subprocess.run(["git", "init"], cwd=str(ws), check=True, capture_output=True)
+    subprocess.run(["git", "init"], cwd=str(ws), check=True, capture_output=True)  # noqa: S607
     subprocess.run(
-        ["git", "symbolic-ref", "HEAD", "refs/heads/main"],
+        ["git", "symbolic-ref", "HEAD", "refs/heads/main"],  # noqa: S607
         cwd=str(ws), check=True, capture_output=True,
     )
     (ws / "core").mkdir(parents=True, exist_ok=True)
@@ -376,8 +378,8 @@ def _init_repo(ws: Path) -> None:
 def _head(ws: Path, ref: str = "HEAD") -> str:
     # check=True: сбой git раньше молча давал пустую строку, и сравнения
     # HEAD-ов вырождались в сверку пустоты с пустотой.
-    return subprocess.run(
-        ["git", "rev-parse", ref], cwd=str(ws), capture_output=True, text=True,
+    return subprocess.run(  # noqa: S603
+        ["git", "rev-parse", ref], cwd=str(ws), capture_output=True, text=True,  # noqa: S607
         check=True,
     ).stdout.strip()
 
@@ -385,8 +387,8 @@ def _head(ws: Path, ref: str = "HEAD") -> str:
 def _show(ws: Path, ref: str, path: str) -> str:
     # check=True: все вызовы ждут существующий объект — молчаливая пустота
     # вместо содержимого прятала бы настоящий сбой.
-    return subprocess.run(
-        ["git", "show", f"{ref}:{path}"], cwd=str(ws), capture_output=True,
+    return subprocess.run(  # noqa: S603
+        ["git", "show", f"{ref}:{path}"], cwd=str(ws), capture_output=True,  # noqa: S607
         text=True, check=True,
     ).stdout
 
@@ -439,7 +441,7 @@ def test_failing_targeted_tests_trigger_rollback(repo: Path):
     # check=True: измерено — в сломанном репо git branch падает (код 128),
     # а «self-apply/ not in ''» проходил впустую.
     branches = subprocess.run(
-        ["git", "branch"], cwd=str(repo), capture_output=True, text=True,
+        ["git", "branch"], cwd=str(repo), capture_output=True, text=True,  # noqa: S607
         check=True,
     ).stdout
     assert "self-apply/" not in branches
