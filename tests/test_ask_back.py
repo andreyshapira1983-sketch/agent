@@ -113,7 +113,7 @@ def test_unsupported_self_analysis_answer_asks_back(workspace: Path):
 
 def test_supported_self_analysis_answer_does_not_ask_back(workspace: Path):
     (workspace / "doc.txt").write_text("agent facts", encoding="utf-8")
-    agent, log_path = _agent(
+    agent, _ = _agent(
         workspace,
         responses=[
             "Conclusion: первый ответ [general-knowledge].",

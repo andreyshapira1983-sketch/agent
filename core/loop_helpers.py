@@ -360,7 +360,9 @@ def format_human_response(answer: str) -> str:
         cleaned = _ANSWER_CITATION_RE.sub("", text).strip()
         return "" if _EMPTY_QUOTE_LINE_RE.match(cleaned) else cleaned
 
-    conclusion = " ".join(_clean(l) for l in conclusion_lines if l.strip()).strip()
+    conclusion = " ".join(
+        _clean(line) for line in conclusion_lines if line.strip()
+    ).strip()
     # Collapse accidental double-spaces from dropped empty quote fragments.
     conclusion = re.sub(r"\s{2,}", " ", conclusion).strip()
     facts_block = "\n".join(facts_lines).strip()
