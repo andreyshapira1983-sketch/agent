@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parents[1].parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from project_intelligence.db.connection import connect  # noqa: E402
-from project_intelligence.db.migrate import apply_migrations  # noqa: E402
+from project_intelligence.db.connection import connect
+from project_intelligence.db.migrate import apply_migrations
 
 
 @pytest.fixture

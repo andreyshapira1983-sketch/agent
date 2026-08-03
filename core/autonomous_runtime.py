@@ -513,9 +513,7 @@ class AutonomousRuntime:
                 self._log("autonomous_task_result", report.to_dict())
                 if report.status == "failed":
                     circuit.record_failure(report.summary)
-                elif report.status == "done":
-                    circuit.record_success()
-                elif report.status == "clarify":
+                elif report.status == "done" or report.status == "clarify":
                     circuit.record_success()
 
         circuit_decision = circuit.check()
@@ -1029,8 +1027,7 @@ class AutonomousRuntime:
                 if prev_kind != kind:
                     continue
                 overlap = _proposal_jaccard(tokens, prev_tokens)
-                if overlap > best_overlap:
-                    best_overlap = overlap
+                best_overlap = max(best_overlap, overlap)
             if best_overlap >= _PROPOSAL_JACCARD_THRESHOLD:
                 skipped_semantic += 1
                 self._log(

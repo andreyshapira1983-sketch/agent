@@ -19,16 +19,13 @@ trace.
 """
 from __future__ import annotations
 
-import threading
 from asyncio import CancelledError
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from typing import Literal as _Literal
 
 from core.approval import ApprovalProvider
-from core.data_classifier import DataClass, SourceHint, classify
+from core.data_classifier import DataClass, classify
 from core.evidence import (
     ProvenanceChain,
     evidence_from_memory_record,
@@ -48,7 +45,6 @@ from core.memory_policy import (
     MemoryRetrievalPolicy,
     MemoryWritePolicy,
 )
-from core.replan import FailureType as ReplanCode  # single source of truth
 from core.replan import ReplanTrigger, count_failures, format_replan_context
 from core.run_context import run_scope
 
@@ -80,17 +76,8 @@ from core.evidence_classes import (
     is_self_analysis_turn,
 )
 from core.evidence_support import evaluate_evidence_support
-from core.injection_guard import annotate_suspicious, scan_for_injection
 from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult
 from core.knowledge_use_policy import KnowledgeUsePolicy
-# Шаг плана уехал в свой модуль (правило «компактные модули»); имена
-# ре-экспортируются, чтобы существующие импорт-пути не порвались.
-from core.loop_step_execution import (
-    _TOOL_SOURCE_HINTS as _TOOL_SOURCE_HINTS,
-    _TRUSTED_INTERNAL_TOOLS as _TRUSTED_INTERNAL_TOOLS,
-    _step_trigger_tls as _step_trigger_tls,
-    AgentLoopStepExecution,
-)
 from core.loop_helpers import (  # noqa: F401 -- re-exported
     _ANSWER_CITATION_RE,
     _VERIF_MARKER_RE,
@@ -112,22 +99,36 @@ from core.loop_methods import AgentLoopExtractedMethods
 from core.loop_methods2 import (
     AgentLoopExtractedMethods2,
 )
+
+# Шаг плана уехал в свой модуль (правило «компактные модули»); имена
+# ре-экспортируются, чтобы существующие импорт-пути не порвались.
+# `ReplanCode` (алиас FailureType) жил здесь и импортируется снаружи
+# (tests/test_replan_audit.py). Исполнение шага уехало и унесло его
+# использование — сохраняем шов явным ре-экспортом.
+from core.replan import FailureType as ReplanCode  # noqa: F401 — шов импорта
+from core.loop_step_execution import (
+    _TOOL_SOURCE_HINTS as _TOOL_SOURCE_HINTS,
+)
+from core.loop_step_execution import (
+    _TRUSTED_INTERNAL_TOOLS as _TRUSTED_INTERNAL_TOOLS,
+)
+from core.loop_step_execution import (
+    AgentLoopStepExecution,
+)
+from core.loop_step_execution import (
+    _step_trigger_tls as _step_trigger_tls,
+)
 from core.low_evidence_policy import (
     is_evidence_expected,
 )
 from core.model_router import ModelRole, ModelRouter
 from core.model_usage import ModelBudgetExceeded
 from core.models import (
-    Action,
-    ApprovalRequest,
     ErrorObject,
     Goal,
     Observation,
     Plan,
     PlanStep,
-    PolicyDecision,
-    ToolCall,
-    ToolResult,
 )
 from core.output_policy import apply_ranker_output_policy
 from core.persistent_memory import PersistentMemoryStore
@@ -137,7 +138,6 @@ from core.reasoning_action_check import check_reasoning_actions
 from core.redaction import (
     collect_pii_findings,
     redact_dlp_text,
-    redact_payload,
     scan,
 )
 from core.referent_resolver import (
@@ -175,7 +175,6 @@ from core.unsupported_claims import apply_answer_enforcement
 from core.user_profile import UserProfile, UserProfileStore, profile_to_prompt_block
 from core.verification_summary import build_verification_summary
 from tools.base import ToolRegistry
-
 
 # Default attempt budget for re-planning. Two replans (3 attempts total)
 # is the tradeoff: enough room to recover from a typo or a flaky source,
@@ -506,7 +505,7 @@ class AgentLoop(
                 # unrelated exits (SystemExit, MemoryError) are not reinterpreted.
                 self._record_aborted_episode(user_question, reason="cancelled")
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 self._record_aborted_episode(
                     user_question, reason=type(exc).__name__
                 )
@@ -634,7 +633,7 @@ class AgentLoop(
             from core.checkpoint import CheckpointWriter as _CPWriter
             _cp: Any = _CPWriter(trace_id=self.log.trace_id, log_dir=self.log.log_dir)
         except (AttributeError, ValueError):
-            class _NoOpCP:  # noqa: N801
+            class _NoOpCP:
                 """Silently drops all checkpoint calls."""
                 def save_observe(self, **_kw: Any) -> None: pass
                 def save_plan(self, **_kw: Any) -> None: pass

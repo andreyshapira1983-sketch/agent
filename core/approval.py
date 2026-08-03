@@ -81,7 +81,7 @@ class CLIApprovalProvider(ApprovalProvider):
         )
 
     def _render(self, req: ApprovalRequest) -> None:
-        print("", file=self._out)
+        print(file=self._out)
         print("=== APPROVAL REQUIRED ===", file=self._out)
         print(f"  request_id : {req.id}", file=self._out)
         print(f"  tool       : {req.tool_name}", file=self._out)

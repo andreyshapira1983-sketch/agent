@@ -13,8 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.release_hygiene import build_release_manifest  # noqa: E402
-from core.supply_chain import audit_supply_chain  # noqa: E402
+from core.release_hygiene import build_release_manifest
+from core.supply_chain import audit_supply_chain
 
 
 def main() -> int:

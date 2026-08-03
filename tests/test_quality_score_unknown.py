@@ -128,7 +128,7 @@ def test_reask_hint_is_not_less_likely_for_a_groundless_answer(tmp_path) -> None
 # ==========================================================================
 def test_unmeasured_episode_is_not_fast_path_eligible() -> None:
     """The gate compares against 0.70; None must fail it, not crash on it."""
-    from core.loop import AgentLoop  # noqa: PLC0415 — import cost only if run
+    from core.loop import AgentLoop
 
     groundless = _ep("groundless", 0, 0)
     assert groundless.answer_quality_score is None
@@ -139,6 +139,6 @@ def test_unmeasured_episode_is_not_fast_path_eligible() -> None:
 
 def test_measured_high_quality_episode_stays_fast_path_eligible() -> None:
     """GUARD: the legitimate optimisation must survive."""
-    from core.loop import AgentLoop  # noqa: PLC0415
+    from core.loop import AgentLoop
 
     assert AgentLoop._quality_allows_replay(_ep("good", 9, 1))

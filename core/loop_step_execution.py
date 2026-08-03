@@ -15,8 +15,7 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import TYPE_CHECKING, Any
-from typing import Literal as _Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from core.data_classifier import DataClass, SourceHint, classify
 from core.injection_guard import annotate_suspicious, scan_for_injection
@@ -827,9 +826,7 @@ class AgentLoopStepExecution:
         source_label: str,
         policy_decision: PolicyDecision,
         arguments: dict[str, Any],
-    ) -> _Literal[  # noqa: F821 — pyflakes не разбирает алиас Literal; перенос дословный
-        "approve", "deny", "abort", "unavailable"
-    ]:
+    ) -> Literal["approve", "deny", "abort", "unavailable"]:
         """Bridge between the PolicyGate's `escalate` verdict and the human.
 
         Emits two trace events — `approval_request` then `approval_decision`

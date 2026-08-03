@@ -286,7 +286,7 @@ def test_a_skipped_rollback_says_why_and_prints_no_counts(tmp_path, capsys):
 # ── _print_persistent ────────────────────────────────────────────────────────
 
 def test_persistent_listing_when_empty(capsys):
-    _print_persistent(SimpleNamespace(list_persistent=lambda: []))
+    _print_persistent(SimpleNamespace(list_persistent=list))
     assert "(no persistent records)" in capsys.readouterr().err
 
 

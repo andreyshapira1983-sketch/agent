@@ -50,7 +50,7 @@ _MAP = os.path.join(_ROOT, "docs", "COMMANDS_MAP.md")
 if _ROOT not in sys.path:  # allow `python scripts/commands_map_check.py`
     sys.path.insert(0, _ROOT)
 
-from cli.command_registry import all_tokens  # noqa: E402  (needs sys.path above)
+from cli.command_registry import all_tokens
 
 _CMD = r":[a-z0-9][a-z0-9-]*"
 _EQ_RE = re.compile(r'head\s*==\s*"(' + _CMD + r')"')

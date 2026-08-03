@@ -284,7 +284,7 @@ class WorkerPool:
                     timeout=timeout,
                     return_when=asyncio.ALL_COMPLETED,
                 )
-            except Exception:  # noqa: BLE001 - shutdown must proceed
+            except Exception:
                 logger.exception("worker pool wait for workers failed")
 
         # Drain remaining in-flight handler tasks, then cancel stragglers.
@@ -349,7 +349,7 @@ class WorkerPool:
             try:
                 self._checkpoint_store.checkpoint(event, worker_id=worker_id)
                 checkpointed = True
-            except Exception:  # noqa: BLE001 - never run work without durability
+            except Exception:
                 self._errors += 1
                 logger.exception(
                     "worker pool checkpoint failed for event %s kind=%s; "
@@ -379,7 +379,7 @@ class WorkerPool:
         except asyncio.CancelledError:
             # Propagate; caller records cancelled_count. Never count as success.
             raise
-        except Exception:  # noqa: BLE001 - one bad event must not kill the pool
+        except Exception:
             self._errors += 1
             logger.exception(
                 "worker pool handler failed for event %s kind=%s",
@@ -390,7 +390,7 @@ class WorkerPool:
             if checkpointed and self._checkpoint_store is not None:
                 try:
                     self._checkpoint_store.remove(event.event_id)
-                except Exception:  # noqa: BLE001 - preserve crash evidence
+                except Exception:
                     logger.exception(
                         "worker pool checkpoint cleanup failed for event %s kind=%s",
                         event.event_id,

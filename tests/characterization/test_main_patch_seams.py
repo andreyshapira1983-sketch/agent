@@ -94,8 +94,8 @@ def _patch_sites(module: str = "main") -> list[tuple[str, int, str]]:
     sites: list[tuple[str, int, str]] = []
     for path in sorted(TESTS_ROOT.rglob("test_*.py")):
         text = path.read_text(encoding="utf-8")
-        aliases = set(re.findall(rf"^\s*import {re.escape(module)} as (\w+)", text, re.M))
-        if re.search(rf"^\s*import {re.escape(module)}\s*$", text, re.M):
+        aliases = set(re.findall(rf"^\s*import {re.escape(module)} as (\w+)", text, re.MULTILINE))
+        if re.search(rf"^\s*import {re.escape(module)}\s*$", text, re.MULTILINE):
             aliases.add(module)
         rel = path.relative_to(TESTS_ROOT).as_posix()
         for alias in aliases:

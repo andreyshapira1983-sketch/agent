@@ -56,13 +56,13 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from core.knowledge_pipeline import (  # noqa: E402
+from core.knowledge_pipeline import (
     _NON_ASSERTING_SOURCE_TYPES,
     _is_broken_encoding,
     _is_code_locator,
     _looks_like_code_fragment,
 )
-from core.state_integrity import (  # noqa: E402
+from core.state_integrity import (
     append_state_jsonl_unlocked,
     backup_state_file,
     read_state_jsonl_unlocked,

@@ -228,7 +228,7 @@ def _find_semantic_support(claim: str, chain: ProvenanceChain, llm: Any) -> Evid
 
 
 def _find_structured_support(claim: str, chain: ProvenanceChain) -> Evidence | None:
-    from core.structured_facts import claim_supported_by, extract_facts  # noqa: PLC0415
+    from core.structured_facts import claim_supported_by, extract_facts
     candidates = [ev for ev in chain.evidences if ev.kind == "tool_output"]
     candidates.sort(key=lambda e: e.confidence, reverse=True)
     for ev in candidates:

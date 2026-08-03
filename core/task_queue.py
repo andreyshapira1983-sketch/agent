@@ -272,7 +272,7 @@ class TaskQueueStore:
             return
         try:
             self._on_task_added(task)
-        except Exception:  # noqa: BLE001 - a wake failure must not lose durable work
+        except Exception:
             logger.exception("runtime task wake callback failed for %s", task.id)
 
     def load(self) -> list[RuntimeTask]:
