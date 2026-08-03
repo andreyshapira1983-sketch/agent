@@ -25,7 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
 from core.ids import new_id
 from core.state_integrity import read_state_jsonl, rewrite_state_jsonl
@@ -197,10 +197,10 @@ class IncidentLog:
         self,
         incident_id: str,
         *,
-        status: Optional[IncidentStatus] = None,
-        containment_action: Optional[str] = None,
-        postmortem_note: Optional[str] = None,
-        human_escalation: Optional[bool] = None,
+        status: IncidentStatus | None = None,
+        containment_action: str | None = None,
+        postmortem_note: str | None = None,
+        human_escalation: bool | None = None,
     ) -> Incident | None:
         """Update an incident in place. Returns the new record, or None if absent.
 

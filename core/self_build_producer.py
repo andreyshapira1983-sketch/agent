@@ -1224,7 +1224,7 @@ def _reporter_publish(
         origin=PRODUCER_ORIGIN,
         rollback=DEFAULT_ROLLBACK,
     )
-    digest = hashlib.sha1(content.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
     dedup_key = f"self_apply:{target}:{digest}"
     extra = len(files) - 1
     summary = f"self-apply proposal for {target}"
@@ -1307,7 +1307,7 @@ def publish_incremental_split_step(
         test_paths=test_paths,
         origin=INCREMENTAL_SPLIT_ORIGIN,
     )
-    digest = hashlib.sha1(step.target_content.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+    digest = hashlib.sha256(step.target_content.encode("utf-8")).hexdigest()[:12]
     item = inbox.add(
         operation=SELF_APPLY_OPERATION,
         summary=(

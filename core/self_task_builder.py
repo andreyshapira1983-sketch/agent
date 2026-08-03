@@ -209,9 +209,8 @@ def _impl_reporter_publish(
         test_pattern=None,
         origin=TASK_BUILD_ORIGIN,
     )
-    digest = hashlib.sha1(
-        (impl_path + "\n" + content + "\n" + frozen_test).encode("utf-8"),
-        usedforsecurity=False,
+    digest = hashlib.sha256(
+        (impl_path + "\n" + content + "\n" + frozen_test).encode("utf-8")
     ).hexdigest()[:12]
     dedup_key = f"self_task_build:{impl_path}:{digest}"
     summary = f"coding-task implementation for {impl_path} (+ frozen test {test_path})"

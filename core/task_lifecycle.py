@@ -39,7 +39,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 from core.task_queue import RuntimeTask, TaskQueueStore
 
@@ -171,7 +171,7 @@ class task_heartbeat:  # noqa: N801 - used as a context manager, reads as a verb
                     except Exception:  # noqa: BLE001
                         pass
 
-    def __enter__(self) -> task_heartbeat:
+    def __enter__(self) -> Self:
         self._thread = threading.Thread(
             target=self._run,
             name=f"task-heartbeat-{self._task_id}",

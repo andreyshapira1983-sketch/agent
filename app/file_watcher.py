@@ -40,14 +40,14 @@ from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
 logger = logging.getLogger(__name__)
 
 NowFn = Callable[[], datetime]
 SleepFn = Callable[[float], Awaitable[None]]
 ChangeKind = Literal["created", "modified", "deleted"]
-ChangeCallback = Callable[["list[FileChange]"], "Optional[Awaitable[None]]"]
+ChangeCallback = Callable[["list[FileChange]"], "Awaitable[None] | None"]
 
 # Default cadence between snapshot scans. Small enough to feel responsive,
 # large enough that the periodic ``stat`` of a handful of paths is negligible.
@@ -112,10 +112,10 @@ class FileWatcher:
         self,
         paths: Iterable[Path | str],
         *,
-        on_change: Optional[ChangeCallback] = None,
-        patterns: Optional[Iterable[str]] = None,
+        on_change: ChangeCallback | None = None,
+        patterns: Iterable[str] | None = None,
         now: NowFn = _now,
-        sleep: Optional[SleepFn] = None,
+        sleep: SleepFn | None = None,
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         debounce: float = DEFAULT_DEBOUNCE,
         recursive: bool = False,
@@ -138,7 +138,7 @@ class FileWatcher:
         self._recursive = recursive
         self._snapshot: dict[Path, tuple[int, int]] = {}
         self._pending: dict[Path, ChangeKind] = {}
-        self._pending_since: Optional[datetime] = None
+        self._pending_since: datetime | None = None
         self._wake_event = asyncio.Event()
         self._stopped = False
         self._running = False
@@ -194,7 +194,7 @@ class FileWatcher:
 
         return any(fnmatch(path.name, pattern) for pattern in self._patterns)
 
-    def _signature(self, path: Path) -> Optional[tuple[int, int]]:
+    def _signature(self, path: Path) -> tuple[int, int] | None:
         try:
             st = path.stat()
         except OSError:

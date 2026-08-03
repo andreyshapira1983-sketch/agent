@@ -24,7 +24,6 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Sequence
-from typing import Optional
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -67,7 +66,7 @@ def _looks_like_path(target: str) -> bool:
     return "/" in target or "." in os.path.basename(target)
 
 
-def find_broken_links(files: Optional[Sequence[str]] = None) -> list[tuple[str, str]]:
+def find_broken_links(files: Sequence[str] | None = None) -> list[tuple[str, str]]:
     """Return ``(source_relpath, raw_target)`` for every unresolved link."""
     broken: list[tuple[str, str]] = []
     for path in (files if files is not None else _doc_files()):

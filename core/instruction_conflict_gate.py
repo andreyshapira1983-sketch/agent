@@ -37,7 +37,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal
 
 # ---------------------------------------------------------------------------
 # Authority ranking (docs/INSTRUCTION_AUTHORITY.md §2)
@@ -217,7 +217,7 @@ RESOLUTION_STEPS: tuple[str, ...] = (
 class InstructionConflictOutcome:
     mode: GateMode
     findings: tuple[ConflictFinding, ...]
-    allowed_action: Optional[AllowedAction]
+    allowed_action: AllowedAction | None
     forbidden_actions: tuple[str, ...]
     resolution_steps: tuple[str, ...]
     reason: str

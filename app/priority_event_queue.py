@@ -38,7 +38,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import IntEnum
-from typing import Any, Optional
+from typing import Any
 
 from core.ids import new_id
 
@@ -157,7 +157,7 @@ class PriorityEventQueue:
         self,
         *,
         aging_after: int = DEFAULT_AGING_AFTER,
-        on_put: Optional[PutCallback] = None,
+        on_put: PutCallback | None = None,
     ) -> None:
         if aging_after < 0:
             raise ValueError("aging_after must be >= 0")

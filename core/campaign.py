@@ -54,7 +54,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from core.best_next_action import BestNextAction
 from core.campaign_io import (
@@ -99,12 +99,12 @@ def run_campaign(
     agent: Any,
     workspace: Any,
     approval_inbox: Any = None,
-    ledger: Optional[CampaignLedger] = None,
-    gather_signals: Optional[GatherSignals] = None,
-    execute_action: Optional[ExecuteAction] = None,
+    ledger: CampaignLedger | None = None,
+    gather_signals: GatherSignals | None = None,
+    execute_action: ExecuteAction | None = None,
     now_fn: Callable[[], datetime] = _utc_now,
     sleep_fn: Callable[[float], None] = time.sleep,
-    on_cycle: Optional[Callable[[dict], None]] = None,
+    on_cycle: Callable[[dict], None] | None = None,
 ) -> CampaignResult:
     """Run a bounded autonomous campaign and return a full ledgered report.
 
@@ -142,9 +142,9 @@ def run_campaign(
     consecutive_errors = 0
     unproductive_streak = 0
     unproductive_cycles = 0
-    prev_exec_result: Optional[str] = None
+    prev_exec_result: str | None = None
     recent_actions: list[str] = []
-    clarification: Optional[dict[str, Any]] = None
+    clarification: dict[str, Any] | None = None
     stop_reason = ""
     status: CampaignStatus = "completed"
     started_at = now_fn()

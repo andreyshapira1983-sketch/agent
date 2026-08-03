@@ -31,7 +31,7 @@ Design principles
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
-from typing import Literal, Optional
+from typing import Literal
 
 # ---------------------------------------------------------------------------
 # Action vocabulary
@@ -97,7 +97,7 @@ class ClarificationSignals:
 class ClarificationOutcome:
     mode: ClarificationMode
     triggered_by: tuple[str, ...]
-    allowed_action: Optional[AllowedAction]
+    allowed_action: AllowedAction | None
     forbidden_actions: tuple[str, ...]
     questions: tuple[str, ...]
     reason: str

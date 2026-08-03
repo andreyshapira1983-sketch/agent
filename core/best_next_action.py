@@ -21,7 +21,7 @@ same signals always yield the same advice.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal
 
 from core.approval_triage import TriageReport
 from core.self_improvement_issues import (
@@ -81,7 +81,7 @@ class BestNextAction:
     evidence: tuple[str, ...] = ()
     unknowns: tuple[str, ...] = ()
     risk: str = "read_only"
-    recommended_command: Optional[str] = None
+    recommended_command: str | None = None
     confidence: float = 0.0
 
     def to_dict(self) -> dict:
@@ -106,11 +106,11 @@ def select_best_next_action(
     dry_run_streak: int = 0,
     heartbeat_missing: bool = False,
     heartbeat_stale: bool = False,
-    heartbeat_age_seconds: Optional[float] = None,
+    heartbeat_age_seconds: float | None = None,
     last_event: str = "",
-    tick_error: Optional[str] = None,
+    tick_error: str | None = None,
     failed_tests: tuple[str, ...] = (),
-    triage: Optional[TriageReport] = None,
+    triage: TriageReport | None = None,
     inbox_pending: int = 0,
     acknowledged: frozenset[str] = frozenset(),
     self_improvement_registry_available: bool = False,
@@ -200,9 +200,9 @@ def _is_suppressed(
 def _candidate_daemon(
     missing: bool,
     stale: bool,
-    age_seconds: Optional[float],
+    age_seconds: float | None,
     last_event: str,
-) -> Optional[BestNextAction]:
+) -> BestNextAction | None:
     if not (missing or stale):
         return None
     if missing:
@@ -232,7 +232,7 @@ def _candidate_daemon(
     )
 
 
-def _candidate_tick_error(tick_error: Optional[str]) -> Optional[BestNextAction]:
+def _candidate_tick_error(tick_error: str | None) -> BestNextAction | None:
     if not tick_error:
         return None
     return BestNextAction(
@@ -256,7 +256,7 @@ def _candidate_tests(
     tests_health: str,
     result_status: str,
     failed_tests: tuple[str, ...],
-) -> Optional[BestNextAction]:
+) -> BestNextAction | None:
     if tests_health == "fail" or result_status == "failed":
         sample = ", ".join(failed_tests[:5]) if failed_tests else "see tick log"
         evidence = (
@@ -300,7 +300,7 @@ def _candidate_tests(
     return None
 
 
-def _candidate_inbox_debt(triage: Optional[TriageReport]) -> Optional[BestNextAction]:
+def _candidate_inbox_debt(triage: TriageReport | None) -> BestNextAction | None:
     if triage is None:
         return None
     dupes = len(triage.duplicates)
@@ -329,7 +329,7 @@ def _candidate_inbox_debt(triage: Optional[TriageReport]) -> Optional[BestNextAc
 
 def _candidate_self_improvement_failure(
     failures: tuple[str, ...],
-) -> Optional[BestNextAction]:
+) -> BestNextAction | None:
     evidence = tuple(str(item).strip()[:300] for item in failures if str(item).strip())
     if not evidence:
         return None
@@ -377,7 +377,7 @@ def _candidate_self_improvement_failure(
 
 def _candidate_open_self_improvement_issue(
     issues: tuple[dict, ...],
-) -> Optional[BestNextAction]:
+) -> BestNextAction | None:
     dominant = suppress_generic_issue_duplicates(
         SelfImprovementIssue.from_dict(issue) for issue in issues
     )
@@ -413,7 +413,7 @@ def _candidate_open_self_improvement_issue(
     return None
 
 
-def _candidate_dry_run_stuck(dry_run_streak: int) -> Optional[BestNextAction]:
+def _candidate_dry_run_stuck(dry_run_streak: int) -> BestNextAction | None:
     try:
         streak = int(dry_run_streak)
     except (TypeError, ValueError):
@@ -441,9 +441,9 @@ def _candidate_dry_run_stuck(dry_run_streak: int) -> Optional[BestNextAction]:
 
 
 def _candidate_inbox_backlog(
-    triage: Optional[TriageReport],
+    triage: TriageReport | None,
     inbox_pending: int,
-) -> Optional[BestNextAction]:
+) -> BestNextAction | None:
     pending = triage.total_pending if triage is not None else int(inbox_pending or 0)
     if pending < _INBOX_BACKLOG_PENDING:
         return None
@@ -466,7 +466,7 @@ def _candidate_observe(
     result_status: str,
     inbox_pending: int,
     *,
-    suppressed: Optional[list[BestNextAction]] = None,
+    suppressed: list[BestNextAction] | None = None,
 ) -> BestNextAction:
     suppressed = suppressed or []
     evidence = [
