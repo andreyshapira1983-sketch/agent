@@ -1571,51 +1571,40 @@ class AgentLoop(
                 except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
                     self._sensor_failed("working_memory_evidence", exc)
 
-        # Issue #119 — session-dialogue evidence. Дословно, не в пересказе:
-        # смысл в том, что это запись. Верификатор сам ограничивает, что она
-        # может подпереть (`dialogue_supported`, никогда `verified`), поэтому
-        # допуск здесь не может выдать внешнее утверждение за подтверждённое.
-        #
-        # Раньше здесь стоял гейт «только ход самокоррекции». Живой прогон
-        # 2026-08-03 показал его цену: на обычном вопросе с историей агент
-        # честно сослался на собственную прошлую реплику, а проверка объявила
-        # ссылку выдуманной (fabricated_citations=2). Читать разговор ему
-        # давали, ссылаться — нет. Условие теперь одно: история существует.
-        if self.memory is not None and self.memory.recent_turns(1):
+        # Issue #119 — дословная запись обмена. Гейт «только самокоррекция»
+        # снят (прогон 2026-08-03: честная ссылка звалась выдумкой); держит
+        # verifier_core — `dialogue_supported` лишь чанку про сам обмен.
+        _recent_turns = self.memory.recent_turns(3) if self.memory is not None else []
+        if _recent_turns:
             _dialogue_added = 0
-            if self.memory is not None:
-                for _turn in self.memory.recent_turns(3):
-                    try:
-                        chain.add(
-                            evidence_from_prior_turn(
-                                turn_id=_turn.id,
-                                turn_index=_turn.index,
-                                question=_turn.question,
-                                answer=_turn.answer,
-                            )
+            for _turn in _recent_turns:
+                try:
+                    chain.add(
+                        evidence_from_prior_turn(
+                            turn_id=_turn.id,
+                            turn_index=_turn.index,
+                            question=_turn.question,
+                            answer=_turn.answer,
                         )
-                        _dialogue_added += 1
-                    except Exception as exc:  # noqa: BLE001
-                        self.log.log(
-                            "dialogue_evidence_skipped",
-                            {
-                                "turn_id": getattr(_turn, "id", None),
-                                "error": type(exc).__name__,
-                                "message": str(exc)[:200],
-                            },
-                        )
+                    )
+                    _dialogue_added += 1
+                except Exception as exc:  # noqa: BLE001
+                    self.log.log(
+                        "dialogue_evidence_skipped",
+                        {
+                            "turn_id": getattr(_turn, "id", None),
+                            "error": type(exc).__name__,
+                            "message": str(exc)[:200],
+                        },
+                    )
             self.log.log(
                 "dialogue_evidence_admitted",
                 {
                     "turns": _dialogue_added,
-                    # Причина теперь всегда «история есть»; отметка самоанализа
-                    # остаётся видимой отдельным полем, чтобы разбор прогонов
-                    # по-прежнему отличал ход-упрёк от обычного вопроса.
+                    # Причина всегда «история есть»; отметку самоанализа держим
+                    # отдельным полем — разбор прогонов различает ход-упрёк.
                     "reason": "session_history_present",
-                    "self_analysis": bool(
-                        self.last_self_analysis is not None
-                        and self.last_self_analysis.is_self_analysis
-                    ),
+                    "self_analysis": getattr(self.last_self_analysis, "is_self_analysis", False),
                 },
             )
 

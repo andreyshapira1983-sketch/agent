@@ -366,11 +366,12 @@ def test_end_to_end_ordinary_question_is_not_propped_up_by_the_dialogue(workspac
     # Фикстура по умолчанию отвечает ПРО ДИАЛОГ; здесь нужен ответ про мир,
     # иначе тест померил бы не то (первая редакция этой проверки на том и
     # споткнулась: 7 законных «про обмен» чанков выглядели подменой).
-    llm.responses = [
+    _world_answer = (
         "Conclusion: биткоин стоит 100000 долларов.\n"
         "Facts:\n  - цена сегодня 100000 [general-knowledge]\n"
         "Confidence: 0.9\nUnverified: нет"
-    ]
+    )
+    llm.responses = [_world_answer]
 
     loop.run("расскажи, сколько сейчас стоит биткоин")
 

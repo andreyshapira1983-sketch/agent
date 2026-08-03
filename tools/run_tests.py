@@ -35,6 +35,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from core.code_state import describe_code_state
 from tools.base import Risk, Tool, require_ascii_identifier
 
 # ---------------------------------------------------------------------------
@@ -197,6 +198,11 @@ class RunTestsTool(Tool):
 
         return {
             "command": argv,
+            # Какой именно код проверяли. Без этого «тест упал» неотличимо от
+            # «упал в моей устаревшей копии» — живой прогон 2026-08-03, где
+            # красная строка из отставшей копии была доложена как дефект
+            # проекта и прошла проверку (core/code_state.py).
+            "code_state": describe_code_state(self.workspace_root),
             "exit_code": exit_code,
             "timed_out": timed_out,
             "duration_ms": duration_ms,
