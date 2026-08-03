@@ -5,14 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
+from core.persistent_memory import PersistentMemoryStore
 from core.reflection import (
     ReflectionConfig,
     ReflectionEngine,
 )
-from core.persistent_memory import PersistentMemoryStore
 from tests.conftest import FakeLLM
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

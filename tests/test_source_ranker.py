@@ -11,7 +11,6 @@ from core.source_ranker import (
     rank_evidence,
 )
 
-
 NOW = datetime(2026, 5, 28, 12, 0, tzinfo=timezone.utc)
 
 

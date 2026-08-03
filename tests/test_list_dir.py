@@ -1,11 +1,11 @@
 """Unit tests for ListDirTool."""
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
 
-from tools.list_dir import ListDirTool, MAX_ENTRIES
+import pytest
 
+from tools.list_dir import MAX_ENTRIES, ListDirTool
 
 # ---------------------------------------------------------------------------
 # Helpers

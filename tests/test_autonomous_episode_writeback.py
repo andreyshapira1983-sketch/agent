@@ -31,12 +31,12 @@ from agent_tick import UNATTENDED_MEMORY_PROFILE
 from app.bootstrap import DEFAULT_EPISODIC_MEMORY_PATH, build_agent
 from core.loop import AgentLoop
 from core.smart_memory import EpisodicMemoryStore
+from tests.conftest import FakeLLM
 from tests.test_memory_core_wiring import (
     SYNTH_GENERAL,
-    _durable_snapshot,
     _drive_one_cycle,
+    _durable_snapshot,
 )
-from tests.conftest import FakeLLM
 
 QUESTION = "how much is two plus two"
 

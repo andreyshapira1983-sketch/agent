@@ -29,7 +29,6 @@ from tools.rss_fetch import RssFetchTool
 from tools.web_fetch import WebFetchTool
 from tools.web_search import WebSearchTool
 
-
 TRACE_QUESTION = (
     "Изучи последние изменения в своём репозитории и объясни, какие три свойства "
     "твоего поведения изменились. Найди в своей архитектуре потенциальный баг. "

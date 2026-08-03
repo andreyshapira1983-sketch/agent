@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from cli.commands_value_review import _handle_value_review, _handle_value_review_list
 from core.approval_inbox import ApprovalInbox
 from core.self_apply_bridge import SELF_APPLY_OPERATION
 from core.self_build_producer import PRODUCER_ORIGIN
@@ -19,8 +20,6 @@ from core.value_review import (
     ValueReview,
     ValueReviewLog,
 )
-from cli.commands_value_review import _handle_value_review, _handle_value_review_list
-
 
 _ALL_VERDICTS = [
     "accepted",

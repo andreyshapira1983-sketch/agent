@@ -29,7 +29,6 @@ from core.self_build_producer import (
     produce_self_apply_proposal,
 )
 
-
 _ANATOMY_DOC = (
     "# Agent anatomy\n\n"
     "## Module index\n\n"

@@ -28,8 +28,8 @@ from core.models import MemoryRecord
 from core.persistent_memory import PersistentMemoryStore
 from core.state_integrity import read_state_jsonl_unlocked
 from scripts.migrate_memory_pollution import (
-    archive_reason,
     apply_migration,
+    archive_reason,
     main,
     plan_migration,
 )

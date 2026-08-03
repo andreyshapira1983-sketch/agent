@@ -668,8 +668,10 @@ def test_estimate_complexity_returns_valid_tier():
     samples = [
         "hi",
         "find the bug",
-        "Analyze and compare the performance of all registered LLM models "
-        "and produce a detailed benchmark report with accuracy and cost metrics",
+        (
+            "Analyze and compare the performance of all registered LLM models "
+            "and produce a detailed benchmark report with accuracy and cost metrics"
+        ),
     ]
     for s in samples:
         assert _estimate_complexity(s) in valid
@@ -950,7 +952,7 @@ class TestSubagentInjectionScan:
         assert result.answer == "The answer is 42."
 
     def test_blocked_answer_becomes_error(self, tmp_path: Path):
-        from core.injection_guard import InjectionScanResult, InjectionFinding
+        from core.injection_guard import InjectionFinding, InjectionScanResult
 
         blocked_finding = InjectionFinding(
             category="override",
@@ -973,7 +975,7 @@ class TestSubagentInjectionScan:
         assert result.answer == ""
 
     def test_suspicious_answer_is_annotated(self, tmp_path: Path):
-        from core.injection_guard import InjectionScanResult, InjectionFinding
+        from core.injection_guard import InjectionFinding, InjectionScanResult
 
         suspicious_finding = InjectionFinding(
             category="jailbreak",
@@ -1001,7 +1003,7 @@ class TestSubagentInjectionScan:
         assert "[WARNING" in result.answer
 
     def test_blocked_answer_logs_event(self, tmp_path: Path):
-        from core.injection_guard import InjectionScanResult, InjectionFinding
+        from core.injection_guard import InjectionFinding, InjectionScanResult
 
         blocked_result = InjectionScanResult(
             verdict="blocked",

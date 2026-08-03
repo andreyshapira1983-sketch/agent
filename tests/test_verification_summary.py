@@ -41,9 +41,9 @@ from core.verification_summary import (
     build_verification_summary,
 )
 from core.verifier_models import ClaimChunk, VerificationReport
+from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
-from tests.conftest import FakeLLM, FakePlanner
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 

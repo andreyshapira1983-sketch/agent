@@ -24,16 +24,14 @@ from pathlib import Path
 from typing import Any
 from urllib.error import URLError
 
-
 from core.approval import AutoApprover
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.planner import PlannerOutput
 from core.policy import PolicyGate
+from tests.conftest import FakeLLM
 from tools.base import Tool, ToolRegistry
 from tools.web_fetch import WebFetchTool
-from tests.conftest import FakeLLM
-
 
 # ---------------------------------------------------------------------------
 # Test doubles
@@ -124,7 +122,7 @@ class _StubResponse:
     def geturl(self) -> str:
         return self._url
 
-    def __enter__(self) -> "_StubResponse":
+    def __enter__(self):
         return self
 
     def __exit__(self, *a: Any) -> None:

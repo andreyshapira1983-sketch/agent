@@ -23,7 +23,7 @@ from pathlib import Path
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.policy import PolicyGate
-from core.self_build_memory import record_self_build_episode, recent_self_build_lessons
+from core.self_build_memory import recent_self_build_lessons, record_self_build_episode
 from core.smart_memory import (
     EpisodeRecord,
     EpisodicMemoryStore,

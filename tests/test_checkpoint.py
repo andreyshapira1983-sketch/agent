@@ -27,7 +27,6 @@ from core.checkpoint import (
     ResumeContext,
 )
 
-
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _writer(tmp: Path, trace_id: str = "trace-001") -> CheckpointWriter:
