@@ -2328,6 +2328,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                     ev.id: ev for ev in self.last_provenance.evidences
                 }
                 _credited: list[str] = []
+                _seen_rids: set[str] = set()
                 for _chunk in self.last_verification.chunks:
                     if _chunk.verdict != "verified":
                         continue
@@ -2338,25 +2339,33 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                             and _ev.obtained_via == "memory"
                             and _ev.source_id.startswith("memory:mem")
                         ):
-                            _rid = _ev.source_id[len("memory:"):]
-                            if _rid not in _credited:
+                            _rid = _ev.source_id.removeprefix("memory:")
+                            if _rid not in _seen_rids:
+                                _seen_rids.add(_rid)
                                 _credited.append(_rid)
                 if _credited:
-                    _by_rid = {
-                        rec.id: rec for rec in self.persistent_store.load()
-                    }
-                    for _rid in _credited:
-                        _rec = _by_rid.get(_rid)
-                        if _rec is not None:
-                            self.persistent_store.update(
+                    # One load, all increments in memory, ONE rewrite — an
+                    # answer crediting N records must not trigger N full-file
+                    # rewrites (review round #294).
+                    _records = self.persistent_store.load()
+                    _updated: list[str] = []
+                    _new_records = []
+                    for _rec in _records:
+                        if _rec.id in _seen_rids:
+                            _new_records.append(
                                 _rec.model_copy(
                                     update={"causal_use": _rec.causal_use + 1}
                                 )
                             )
-                    self.log.log(
-                        "memory_causal_credit",
-                        {"record_ids": _credited, "count": len(_credited)},
-                    )
+                            _updated.append(_rec.id)
+                        else:
+                            _new_records.append(_rec)
+                    if _updated:
+                        self.persistent_store._rewrite(_new_records)
+                        self.log.log(
+                            "memory_causal_credit",
+                            {"record_ids": _updated, "count": len(_updated)},
+                        )
             except Exception as _cc_exc:
                 # Credit must never break the answer — and its failure must
                 # not be invisible (the MIR-077 rule).
