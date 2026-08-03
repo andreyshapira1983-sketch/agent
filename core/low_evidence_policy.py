@@ -149,6 +149,9 @@ class LowEvidencePolicyResult:
     suppressed_chars: int = 0
     notes: tuple[str, ...] = field(default_factory=tuple)
     dialogue_supported_chunks: int = 0
+    #: Never part of `supported_chunks` (operator ruling 2026-08-03, MIR-028):
+    #: the user's words prove the words, not the world.
+    user_asserted_chunks: int = 0
 
     @property
     def supported_chunks(self) -> int:
@@ -160,6 +163,7 @@ class LowEvidencePolicyResult:
             "triggered": self.triggered,
             "verified_chunks": self.verified_chunks,
             "dialogue_supported_chunks": self.dialogue_supported_chunks,
+            "user_asserted_chunks": self.user_asserted_chunks,
             "supported_chunks": self.supported_chunks,
             "total_chunks": self.total_chunks,
             # `verified_ratio` is kept for existing log consumers, but the value
@@ -351,6 +355,14 @@ def evaluate_low_evidence_policy(
     subagent_asserted = int(
         getattr(report, "subagent_asserted_chunks", 0) or 0
     )
+    # `user_asserted` (operator ruling 2026-08-03, MIR-028) deliberately joins
+    # NEITHER side: it is not support (the user's words never verify their own
+    # content, so an all-echo answer must not score supported_ratio=1.0 and
+    # slip past this gate), and it is not a false citation either (nothing was
+    # fabricated), so it does not push the unverified floor. Neutral here;
+    # its weight lands in the episode banking (`weak_chunks`) and the
+    # evidence-support score instead.
+    user_asserted = int(getattr(report, "user_asserted_chunks", 0) or 0)
     unverified_total = (
         unverified + cited_unmatched + topic_supported + subagent_asserted
     )
@@ -366,6 +378,7 @@ def evaluate_low_evidence_policy(
             verified_ratio=supported_ratio,
             unverified_total=unverified_total,
             dialogue_supported_chunks=dialogue,
+            user_asserted_chunks=user_asserted,
             reason=reason, locale=locale,
             suppressed_chars=suppressed_chars,
         )

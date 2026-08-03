@@ -25,9 +25,11 @@ from core.evidence import ProvenanceChain
 from core.verifier import verify
 
 
-def test_a_user_turn_citation_verifies_while_the_gathered_chain_is_empty():
-    """The MIR-028 pair, reproduced deterministically: no tool evidence was
-    gathered, yet chunks citing the injected user turn count as verified."""
+def test_a_user_turn_citation_is_user_asserted_never_verified():
+    """The operator's ruling (2026-08-03): user words confirm only that the
+    user SAID it — they never confirm the content's objective truth. A chunk
+    supported solely by `[user:current_turn]` is `user_asserted`, and the
+    report says honestly that nothing was verified."""
     report = verify(
         answer=(
             "**Facts:**\n"
@@ -38,8 +40,9 @@ def test_a_user_turn_citation_verifies_while_the_gathered_chain_is_empty():
         user_question="Compute seventeen times twenty-three and give a numeric result.",
     )
     assert report.chain_was_empty is True
-    assert report.verified_chunks == 2
-    assert report.fully_unverified is False
+    assert report.verified_chunks == 0
+    assert report.user_asserted_chunks == 2
+    assert report.fully_unverified is True
 
 
 def test_a_plain_echo_without_citation_does_not_verify():

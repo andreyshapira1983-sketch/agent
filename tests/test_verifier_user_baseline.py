@@ -5,6 +5,11 @@ resolve to `cited_but_unmatched [user]` because the chain has no record
 of kind `user_explicit`. The baseline must live ONLY inside the
 verifier — peripheral systems (source_registry, evidence_collected,
 knowledge_pipeline) keep their existing contracts.
+
+Since the operator's evidence-class ruling (2026-08-03, MIR-028) the
+baseline resolves to `user_asserted`, never `verified`: the user's words
+confirm what was said, not that it is true. What this file pins is the
+RESOLUTION — a [user] citation must not read as a fabricated source.
 """
 from __future__ import annotations
 
@@ -23,8 +28,9 @@ class TestUserBaselineMaterialised:
             ),
         )
         assert report.cited_but_unmatched_chunks == 0
-        assert report.verified_chunks >= 1
-        assert "[verified:user]" in report.annotated_answer
+        assert report.verified_chunks == 0
+        assert report.user_asserted_chunks >= 1
+        assert "[user-asserted:user]" in report.annotated_answer
 
     def test_no_baseline_without_user_question_kwarg(self):
         # Default behaviour preserved: a [user] citation against an
