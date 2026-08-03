@@ -44,9 +44,12 @@ def _grounded(target: str):
     return select
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
 def _produce(tmp_path: Path, reply: str):
     target = "core/release_hygiene.py"
-    src = Path(target).read_text(encoding="utf-8")
+    src = (_REPO_ROOT / target).read_text(encoding="utf-8")
     ws = tmp_path
     (ws / target).parent.mkdir(parents=True, exist_ok=True)
     (ws / target).write_text(src, encoding="utf-8")
@@ -92,11 +95,11 @@ def test_a_fragment_parsed_reply_is_preserved_and_named(tmp_path):
     assert "I will produce the split now." in saved
     assert fake_key not in saved, "the preserved raw must be redacted"
 
-    # The blob never rides in the report/journal payload — only the pointer.
-    payload = json.dumps(report.to_log_payload() if hasattr(report, "to_log_payload") else {
-        "roles": [r.to_dict() for r in report.role_outputs]
-    }, ensure_ascii=False)
+    # The FULL report payload (what reaches journals/episodes) carries the
+    # pointer but never the blob.
+    payload = json.dumps(report.to_dict(), ensure_ascii=False)
     assert "I will produce the split now." not in payload
+    assert "raw builder reply preserved:" in payload
     assert "raw_chars" in payload
 
 
