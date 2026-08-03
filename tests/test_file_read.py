@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.file_read import FileReadTool, MAX_BYTES
+from tools.file_read import MAX_BYTES, FileReadTool
 
 
 def _tool(workspace: Path) -> FileReadTool:

@@ -17,15 +17,14 @@ import hashlib
 import pytest
 
 from core.prompt_registry import (
+    _REGISTRY,
     PromptRecord,
     PromptRegistry,
     get_prompt,
     get_prompt_version,
     list_prompt_keys,
     register_prompt,
-    _REGISTRY,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -270,9 +269,9 @@ class TestRegisteredPrompts:
         # Trigger self-registration by importing the owning modules.
         import core.loop  # noqa: F401
         import core.planner_prompt  # noqa: F401
+        import core.reflection  # noqa: F401
         import core.repair_proposal  # noqa: F401
         import core.subagent_memory_scope  # noqa: F401
-        import core.reflection  # noqa: F401
 
     @pytest.mark.parametrize("key", list(_EXPECTED))
     def test_key_present(self, key):

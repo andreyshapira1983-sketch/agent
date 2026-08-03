@@ -34,10 +34,9 @@ from core.approval import AutoApprover
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.policy import PolicyGate
+from tests.conftest import FakeLLM, FakePlanner
 from tools.base import Tool, ToolRegistry
 from tools.file_read import FileReadTool
-from tests.conftest import FakeLLM, FakePlanner
-
 
 # ============================================================
 # Helpers

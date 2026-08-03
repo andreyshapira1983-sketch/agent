@@ -24,10 +24,9 @@ from core.memory import WorkingMemory
 from core.memory_policy import MemoryWritePolicy
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
+from tests.conftest import FakeLLM
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
-from tests.conftest import FakeLLM
-
 
 # A single fake-OpenAI key that we will look for everywhere afterwards.
 # Length and shape match the scanner's `openai-key` regex.

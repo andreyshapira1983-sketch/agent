@@ -40,16 +40,18 @@ def test_active_file_integrity_ok_returns_false_for_invalid_json(tmp_path: Path)
 
 
 def test_active_file_integrity_ok_returns_false_when_integrity_field_missing(tmp_path: Path):
-    from core.state_store_drill import _active_file_integrity_ok
     import json
+
+    from core.state_store_drill import _active_file_integrity_ok
     p = tmp_path / "no_envelope.jsonl"
     p.write_text(json.dumps({"foo": "bar"}) + "\n", encoding="utf-8")
     assert _active_file_integrity_ok(p) is False
 
 
 def test_active_file_integrity_ok_returns_false_when_envelope_hash_corrupt(tmp_path: Path):
-    from core.state_store_drill import _active_file_integrity_ok
     import json
+
+    from core.state_store_drill import _active_file_integrity_ok
     p = tmp_path / "bad_hash.jsonl"
     row = {
         "_integrity": {"format": "agent-state-v1", "alg": "sha256", "hash": "deadbeef"},

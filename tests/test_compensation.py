@@ -10,14 +10,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 from core.compensation import (
     CompensationAction,
     CompensationPlan,
     CompensationReport,
     apply_compensation_plan,
 )
-
 
 # ===========================================================
 # Plan / Action / serialisation
