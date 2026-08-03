@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import shutil
-import subprocess  # nosec B404 — зовём ruff с фиксированными аргументами
+import subprocess  # nosec B404
 import tomllib
 from pathlib import Path
 
@@ -77,10 +77,12 @@ def test_every_ignore_carries_a_written_reason():
 
 @pytest.mark.skipif(shutil.which("ruff") is None, reason="ruff не установлен")
 def test_lint_debt_does_not_grow():
-    ruff = shutil.which("ruff")
-    assert ruff, "ruff пропал между проверкой и запуском"
-    result = subprocess.run(  # noqa: S603  # nosec B603 — фиксированный argv, полный путь, без shell
-        [ruff, "check", "--quiet", "--output-format", "concise", "."],
+    # argv — только литералы. Подстановка сюда пути из `shutil.which` роняет
+    # гейт Codacy (semgrep: «subprocess без статической строки»), а его
+    # директивой `nosec` не отключить. Имя в PATH здесь безопасно: строка
+    # фиксирована, внешнего ввода нет, оболочка не участвует.
+    result = subprocess.run(  # nosec B603 B607
+        ["ruff", "check", "--quiet", "--output-format", "concise", "."],  # noqa: S607
         cwd=_REPO, capture_output=True, text=True, check=False,
     )
     # 0 — чисто, 1 — есть замечания; всё остальное значит, что ruff не
