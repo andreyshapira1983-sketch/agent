@@ -73,7 +73,7 @@ def _comment_lines(src: str) -> set[int]:
         for tok in tokenize.generate_tokens(io.StringIO(src).readline):
             if tok.type == tokenize.COMMENT:
                 out.add(tok.start[0])
-    except tokenize.TokenizeError:  # pragma: no cover — unparseable snippets
+    except (tokenize.TokenError, IndentationError):  # pragma: no cover — unparseable snippets
         pass
     return out
 
