@@ -297,6 +297,33 @@ def workspace(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def run_git(root: Path, *args: str) -> None:
+    """Одна команда git в ``root``. Argv из литералов, без оболочки."""
+    import subprocess  # nosec B404
+
+    subprocess.run(  # noqa: S603  # nosec B603 B607
+        ["git", "-c", "user.name=T", "-c", "user.email=t@localhost", *args],  # noqa: S607
+        cwd=str(root), check=True, capture_output=True, text=True,
+    )
+
+
+@pytest.fixture
+def git_repo(tmp_path: Path) -> Path:
+    """Пустой git-репозиторий с одним коммитом на ветке main.
+
+    Живёт здесь, а не в файле теста: локальная фикстура затеняет собственное
+    имя в каждом тесте-потребителе, и pylint внутри Codacy справедливо зовёт
+    это `redefined-outer-name` (8 замечаний на PR #301). Общая фикстура из
+    conftest этой тени не создаёт.
+    """
+    run_git(tmp_path, "init")
+    run_git(tmp_path, "symbolic-ref", "HEAD", "refs/heads/main")
+    (tmp_path / "a.txt").write_text("one\n", encoding="utf-8")
+    run_git(tmp_path, "add", "-A")
+    run_git(tmp_path, "commit", "-m", "init")
+    return tmp_path
+
+
 def write_legacy_episode(path: Path, episode) -> None:
     """Append an episode row the way it looked BEFORE `usage_eligible` existed.
 

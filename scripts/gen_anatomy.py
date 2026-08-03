@@ -69,7 +69,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "deep_escalation", "operational_domain", "incident", "capability_request",
     ]),
     ("Evaluation & Monitoring (§8)", "Logging, identifiers, architecture auditing.", [
-        "logger", "ids", "architecture_audit",
+        "logger", "ids", "architecture_audit", "code_state",
     ]),
     ("Learning & Self-Improvement (§9)", "Reflection-driven repair, self-build, value gating.", [
         "self_repair", "self_repair_models", "self_repair_utils", "repair_proposal",

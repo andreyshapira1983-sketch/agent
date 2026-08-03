@@ -116,7 +116,13 @@ class TestConvergenceStop:
 
         assert result.stop_reason == "converged"
         assert result.status == "completed"
-        assert result.cycles_run == config.convergence_window
+        # Первый цикл «холодный»: истории сессии ещё нет, поэтому он не похож
+        # на последующие, и окно одинаковых начинается со второго. Раньше окно
+        # начиналось с первого — до того, как диалог стал допускаться в улики
+        # всегда, а не только на ходе самокоррекции (прогон 2026-08-03).
+        # Измерено: остановка наступает на цикле 4 и при max_cycles=8, и при
+        # 20 — дрейфа нет, механизм сходимости цел.
+        assert result.cycles_run == config.convergence_window + 1
         assert result.cycles_run < config.max_cycles
 
     def test_disabled_runs_all_cycles(self, workspace: Path):

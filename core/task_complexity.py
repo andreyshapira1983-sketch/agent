@@ -144,6 +144,32 @@ _LIGHT_SIGNAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (signal, _compile_light_signal(signal)) for signal in sorted(_LIGHT_SIGNALS)
 )
 
+# ── вопрос о самом агенте ─────────────────────────────────────────────────────
+# Два условия, оба обязательны: агента назвали — обращением (ты / тебя /
+# твой / you / your) или возвратным местоимением (себя / свои / yourself) —
+# И спрашивают именно про НЕГО: природа, желания, устройство, ошибки.
+# Одного обращения мало: «покажи, что ты нашёл в файле» — про файл, не про него.
+_AGENT_NAMED_RE = re.compile(
+    r"\b(?:ты|тебе|тебя|тобой|твой|твоя|твои|твоё|твое|своих|свои|себе|себя|"
+    r"you|your|yourself)\b"
+)
+_AGENT_SUBJECT_RE = re.compile(
+    r"(?:о себе|про себя|себя|собой|что ты такое|кто ты|твоя природа|"
+    r"твои желания|хотел бы|стремил|развива|цифров|сознан|личност|идентич|"
+    r"ошибк|слаб|ограничен|недостат|баг|устроен|устройств|"
+    r"about yourself|who are you|what are you|your own|your limitation|"
+    r"your weakness|your flaw|your desire)"
+)
+
+
+def asks_about_the_agent(normalized: str) -> bool:
+    """Спрашивают ли у агента про него самого?
+
+    Диагностический помощник: делает решение читаемым в тестах и журналах.
+    Вход — уже приведённый к нижнему регистру текст.
+    """
+    return bool(_AGENT_NAMED_RE.search(normalized) and _AGENT_SUBJECT_RE.search(normalized))
+
 
 def matched_light_signals(text: str) -> list[str]:
     """Return every LIGHT signal that matches ``text`` under boundary rules.
@@ -215,6 +241,13 @@ def assess_complexity(
     # LIGHT check — only when the text is short enough AND the task role
     # tolerates a cheap model at all.
     if isinstance(task_role, str) and task_role in _NEVER_LIGHT_TASK_ROLES:
+        return ComplexityTier.STANDARD
+
+    # Вопрос о самом агенте не бывает лёгким, даже если он короткий и несёт
+    # бытовой сигнал. Измерено на живом прогоне (см.
+    # tests/test_introspection_never_light.py): «скажи что ты думаешь о себе»
+    # уходило на нано-модель только потому, что уложилось в лимит длины.
+    if asks_about_the_agent(normalized):
         return ComplexityTier.STANDARD
 
     is_short = len(stripped) < _SHORT_TEXT_THRESHOLD * 4  # ~180 chars
