@@ -84,6 +84,42 @@ def _events(p: Path) -> list[dict]:
     return out
 
 
+def test_a_broken_detector_is_journaled_not_swallowed(workspace: Path, monkeypatch):
+    """Review round #286: a failure inside the starvation detector must not
+    break the turn — and must not vanish silently either."""
+    import core.subsystem_disagreement as sd
+
+    def _boom(*a, **k):
+        raise RuntimeError("детектор сломан")
+
+    monkeypatch.setattr(sd, "detect_budget_starvation", _boom)
+    monkeypatch.setenv("AGENT_EVIDENCE_TOTAL_CHARS", "400")
+    (workspace / "a.txt").write_text("а" * 2900, encoding="utf-8")
+    reg = ToolRegistry()
+    reg.register(FileReadTool(workspace_root=workspace))
+    trace_id = new_trace_id()
+    logger = TraceLogger(trace_id=trace_id, log_dir=workspace / "logs", verbose=False)
+    agent = AgentLoop(
+        registry=reg,
+        policy=PolicyGate(reg),
+        llm=FakeLLM(responses=["ответ [file:a.txt]."]),
+        logger=logger,
+        planner=FakePlanner([
+            {"tool": "file_read", "arguments": {"path": "a.txt"},
+             "label": "file:a.txt", "expected_outcome": "reads the file"},
+        ]),
+        approval_provider=AutoApprover(default="approve"),
+        max_replan_attempts=1,
+        verifier_enabled=True,
+    )
+    answer = agent.run("что в файле a.txt?", file_hint="a.txt")
+    assert answer  # the turn still completes
+    events = _events(workspace / "logs" / f"{trace_id}.jsonl")
+    errors = [e for e in events if e.get("event") == "subsystem_disagreement_error"]
+    assert len(errors) == 1
+    assert errors[0]["payload"]["error_type"] == "RuntimeError"
+
+
 def test_the_loop_journals_the_contradiction(workspace: Path, monkeypatch):
     """Budget forced so tight that even fair shares collapse to the absolute
     floor: the journal must carry `planner_vs_evidence_budget` for the starved

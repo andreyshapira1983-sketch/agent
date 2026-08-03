@@ -3909,6 +3909,9 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 long_term_block = f"{memory_block}\n\n" if memory_block else ""
 
             if was_trimmed:
+                # Parsed once; feeds both the trim event and the starvation
+                # detector below (review round #286).
+                _trims = total_trims(trimmed_blocks)
                 self.log.log(
                     "evidence_budget_trim",
                     {
@@ -3939,7 +3942,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                         # in the trace (MIR-073).
                         "trims": [
                             {"label": lbl, "kept": kept, "original": orig}
-                            for lbl, kept, orig in total_trims(trimmed_blocks)
+                            for lbl, kept, orig in _trims
                         ],
                     },
                 )
@@ -3953,13 +3956,25 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                         detect_budget_starvation,
                     )
                     for _ev in detect_budget_starvation(
-                        total_trims(trimmed_blocks),
+                        _trims,
                         planned_labels=set(artifacts.keys()),
                         memory_label=memory_label,
                     ):
                         self.log.log("subsystem_disagreement", _ev)
-                except Exception:
-                    pass
+                except Exception as _sd_exc:
+                    # A broken detector must not break the turn — but its
+                    # failure must not be invisible either (review round
+                    # #286, same rule as verification_explained_failed).
+                    try:
+                        self.log.log(
+                            "subsystem_disagreement_error",
+                            {
+                                "error_type": type(_sd_exc).__name__,
+                                "error": str(_sd_exc)[:300],
+                            },
+                        )
+                    except Exception:
+                        pass
 
             blocks: list[str] = [
                 f'<evidence source="{lbl}">\n{content}\n</evidence>'
