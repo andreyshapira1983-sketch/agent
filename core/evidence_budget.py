@@ -415,11 +415,15 @@ def total_trims(blocks: list[tuple[str, str]]) -> list[tuple[str, int, int]]:
     The pure reader the orchestrator uses to SEE the cut (MIR-073): the trim
     notices already carry both numbers, this just parses them back out of the
     blocks `apply_total_budget` returned — one regex, owned by this module.
+    The LAST match wins, same rule as `rebuild_trimmed_memory` below: content
+    can QUOTE an older notice, and the budget writes its cut at the end.
     """
     out: list[tuple[str, int, int]] = []
     for label, content in blocks:
-        m = _TRIM_NOTICE_RE.search(content)
-        if m:
+        m = None
+        for m in _TRIM_NOTICE_RE.finditer(content):
+            pass
+        if m is not None:
             out.append((label, int(m.group(1)), int(m.group(2))))
     return out
 

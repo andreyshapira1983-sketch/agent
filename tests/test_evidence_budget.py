@@ -651,6 +651,19 @@ def test_budget_below_fair_share_still_fits_via_absolute_floor(monkeypatch):
     assert sum(len(c) for _, c in result) <= 800
 
 
+def test_total_trims_reads_the_last_notice_not_a_quoted_stale_one():
+    """Review round #286 (CodeRabbit): a block's content can QUOTE an older
+    trim notice (e.g. a memory record built from a previously trimmed reply);
+    the budget writes its own cut at the END — same rule
+    `rebuild_trimmed_memory` already enforces in this module."""
+    from core.evidence_budget import total_trims
+
+    stale = "\n...[TOTAL-BUDGET: trimmed to 50 of 12204 chars to fit 32000-char total evidence budget]"
+    current = "\n...[TOTAL-BUDGET: trimmed to 3200 of 9000 chars to fit 32000-char total evidence budget]"
+    block = ("file:x.py", "цитата старой метки:" + stale + "\nсвежий текст" + current)
+    assert total_trims([block]) == [("file:x.py", 3200, 9000)]
+
+
 def test_total_trims_reports_every_cut_block(monkeypatch):
     """`total_trims` is the pure reader the orchestrator uses to SEE the cut:
     (label, kept, original) for every block carrying a TOTAL-BUDGET notice."""
