@@ -6,8 +6,8 @@ processes/sessions by writing JSONL records and checking time windows such as
 """
 from __future__ import annotations
 
-import os
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,7 +15,6 @@ from typing import Any
 
 from core.budget_governor import budget_limit_label as _budget_limit_label
 from core.state_integrity import append_state_jsonl, read_state_jsonl
-
 
 BudgetLedgerCounter = str
 
@@ -108,7 +107,7 @@ class BudgetLedgerRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "BudgetLedgerRecord":
+    def from_dict(cls, data: dict[str, Any]) -> BudgetLedgerRecord:
         return cls(
             counter=str(data["counter"]),
             amount=max(1, int(data["amount"])),
@@ -158,7 +157,7 @@ class BudgetLedger:
         path: Path | None = None,
         logger: Any | None = None,
         config_path: Path | None = None,
-    ) -> "BudgetLedger":
+    ) -> BudgetLedger:
         resolved_config = _budget_config_path(config_path)
         return cls(
             path=path,

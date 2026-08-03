@@ -15,20 +15,19 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from cli.commands_approval import _approval_inbox_for
+from cli.commands_budget import _budget_ledger_snapshot
+from cli.self_build_memory import record_self_build_episode
 from core.budget_kill_switch import BudgetKillSwitch, default_path
 from core.safe_vcs import SafeVCS
 from core.self_apply_bridge import run_approved_self_apply
 from tools.run_tests import RunTestsTool
 
-from cli.commands_approval import _approval_inbox_for
-from cli.commands_budget import _budget_ledger_snapshot
-from cli.self_build_memory import record_self_build_episode
-
 if TYPE_CHECKING:
     from core.loop import AgentLoop
 
 
-def _handle_self_apply_run(rest: str, agent: "AgentLoop", workspace: Path) -> bool:
+def _handle_self_apply_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     # Exactly one bare approval id; reject free text / extra args / patch bodies.
     parts = rest.split()
     if len(parts) != 1:

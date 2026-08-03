@@ -11,8 +11,9 @@ extractor later, but the safety contract stays here.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Iterable, Literal
+from typing import Any, Literal
 
 from core.evidence import Evidence, ProvenanceChain
 from core.memory_policy import MemoryWriteDecision
@@ -27,7 +28,6 @@ from core.source_registry import (
 )
 from core.source_registry_store import SourceRegistryStore
 from core.truth_hype_filter import evaluate as evaluate_truth_hype
-
 
 KnowledgeDecision = Literal["save", "reject"]
 
@@ -201,8 +201,8 @@ def claim_provenance_tag(claim_id: str) -> str:
 
 
 def quarantine_conflicted_records(
-    records: "list[MemoryRecord]", *, conflicted_claim_ids: "set[str]"
-) -> "tuple[list[MemoryRecord], dict]":
+    records: list[MemoryRecord], *, conflicted_claim_ids: set[str]
+) -> tuple[list[MemoryRecord], dict]:
     """Tag records whose originating claim is now contradicted.
 
     Marks strictly by provenance tag. A record with no claim link is reported

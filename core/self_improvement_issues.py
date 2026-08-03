@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Literal
+from typing import Literal
 
 from core.state_integrity import read_state_jsonl, rewrite_state_jsonl
-
 
 IssueStatus = Literal["open", "verified", "resolved"]
 DEFAULT_ISSUE_PATH = Path("data") / "self_improvement_issues.jsonl"
@@ -71,7 +71,7 @@ class SelfImprovementIssue:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict) -> "SelfImprovementIssue":
+    def from_dict(cls, data: dict) -> SelfImprovementIssue:
         status = str(data.get("status") or "open")
         if status not in {"open", "verified", "resolved"}:
             status = "open"

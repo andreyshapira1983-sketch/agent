@@ -20,18 +20,12 @@ trace.
 from __future__ import annotations
 
 import threading
+from asyncio import CancelledError
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
 from typing import Literal as _Literal
-from core.replan import FailureType as ReplanCode  # single source of truth
-from core.replan import ReplanTrigger, count_failures, format_replan_context
-from core.file_request_intent import (
-    force_file_hint_read_when_explicit,
-    prepare_multi_file_review,
-)
 
 from core.approval import ApprovalProvider
 from core.data_classifier import DataClass, SourceHint, classify
@@ -42,10 +36,11 @@ from core.evidence import (
     evidence_from_tool_result,
     make_evidence,
 )
-from asyncio import CancelledError
-
+from core.file_request_intent import (
+    force_file_hint_read_when_explicit,
+    prepare_multi_file_review,
+)
 from core.ids import new_id
-from core.run_context import run_scope
 from core.llm import LLM
 from core.logger import TraceLogger
 from core.memory import WorkingMemory
@@ -53,12 +48,67 @@ from core.memory_policy import (
     MemoryRetrievalPolicy,
     MemoryWritePolicy,
 )
+from core.replan import FailureType as ReplanCode  # single source of truth
+from core.replan import ReplanTrigger, count_failures, format_replan_context
+from core.run_context import run_scope
 
 if TYPE_CHECKING:
     from core.clarification_policy import ClarificationResult
     from core.memory_echo_antibody import MemoryWriteRegistry
     from core.operational_domain import DomainResult
     from core.replan import ReplanPolicy
+from core.actuation_gateway import GatewayPath
+from core.assumption_registry import (  # Layer 5
+    AssumptionRegistry,
+    AssumptionStore,
+    extract_from_plan,
+    extract_from_question,
+)
+from core.completion_contract import derive_completion_contract
+from core.completion_marker import (
+    marker_instruction as completion_marker_instruction,
+)
+from core.completion_marker import (
+    new_nonce as new_completion_nonce,
+)
+from core.completion_marker import (
+    parse_completion_marker,
+)
+from core.completion_obligation import evaluate_completion_obligations
+from core.evidence_classes import (
+    SelfAnalysisDecision,
+    is_self_analysis_turn,
+)
+from core.evidence_support import evaluate_evidence_support
+from core.injection_guard import annotate_suspicious, scan_for_injection
+from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult
+from core.knowledge_use_policy import KnowledgeUsePolicy
+from core.loop_helpers import (  # noqa: F401 -- re-exported
+    _ANSWER_CITATION_RE,
+    _VERIF_MARKER_RE,
+    DEFAULT_MAX_REPLAN_ATTEMPTS,
+    LOCAL_CRITIQUE_SYSTEM_ADDENDUM,
+    SYSTEM_ANSWER,
+    _strip_verification_markers,
+    _to_text,
+    citation_for_evidence,
+    file_scope_notice,
+    format_allowed_citations_block,
+    format_artifact,
+    format_human_response,
+    new_trace_id,
+    output_contract_requires_headers,
+    untrusted_scan_view,
+)
+from core.loop_methods import AgentLoopExtractedMethods
+from core.loop_methods2 import (
+    AgentLoopExtractedMethods2,
+)
+from core.low_evidence_policy import (
+    is_evidence_expected,
+)
+from core.model_router import ModelRole, ModelRouter
+from core.model_usage import ModelBudgetExceeded
 from core.models import (
     Action,
     ApprovalRequest,
@@ -72,17 +122,15 @@ from core.models import (
     ToolResult,
 )
 from core.output_policy import apply_ranker_output_policy
-from core.completion_contract import derive_completion_contract
-from core.completion_obligation import evaluate_completion_obligations
-from core.response_draft import ResponseDraft
-from core.verification_summary import build_verification_summary
-from core.low_evidence_policy import (
-    is_evidence_expected,
-)
-from core.unsupported_claims import apply_answer_enforcement
-from core.evidence_classes import (
-    SelfAnalysisDecision,
-    is_self_analysis_turn,
+from core.persistent_memory import PersistentMemoryStore
+from core.planner import LLMPlanner, PlannerOutput
+from core.policy import PolicyGate
+from core.reasoning_action_check import check_reasoning_actions
+from core.redaction import (
+    collect_pii_findings,
+    redact_dlp_text,
+    redact_payload,
+    scan,
 )
 from core.referent_resolver import (
     FileHintRef,
@@ -95,78 +143,30 @@ from core.referent_resolver import (
     is_show_only_directive,
     referent_resolver_mode,
 )
-from core.persistent_memory import PersistentMemoryStore
-from core.planner import LLMPlanner, PlannerOutput
-from core.policy import PolicyGate
-from core.actuation_gateway import GatewayPath
-from core.injection_guard import annotate_suspicious, scan_for_injection
-
-
-from core.redaction import (
-    collect_pii_findings,
-    redact_dlp_text,
-    redact_payload,
-    scan,
+from core.response_draft import ResponseDraft
+from core.role_router import RoleContext, RoleRouter
+from core.smart_memory import (
+    _COMPLETION_DECLARATIONS,
+    EpisodicMemoryStore,
+    MemoryConsolidationStore,
+    ProceduralMemoryStore,
+    effective_completion,
 )
-from core.model_router import ModelRole, ModelRouter
-from core.model_usage import ModelBudgetExceeded
+from core.source_ranker import SourceRankingReport, rank_chain
+from core.source_registry import SourceRegistry
+from core.source_registry_store import SourceRegistryStore
+from core.step_repetition import StepRepetitionTracker
 from core.synth_resilience import (
     SynthAttempt,
     build_degraded_synthesis_answer,
     run_synthesizer_ladder,
 )
-from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult
-from core.user_profile import UserProfile, UserProfileStore, profile_to_prompt_block
-from core.assumption_registry import (  # Layer 5
-    AssumptionRegistry,
-    AssumptionStore,
-    extract_from_plan,
-    extract_from_question,
-)
-from core.knowledge_use_policy import KnowledgeUsePolicy
-from core.evidence_support import evaluate_evidence_support
-from core.reasoning_action_check import check_reasoning_actions
-from core.role_router import RoleContext, RoleRouter
-from core.step_repetition import StepRepetitionTracker
-from core.termination_guard import TerminationGuard
-from core.smart_memory import (
-    EpisodicMemoryStore,
-    MemoryConsolidationStore,
-    ProceduralMemoryStore,
-    _COMPLETION_DECLARATIONS,
-    effective_completion,
-)
-from core.completion_marker import (
-    marker_instruction as completion_marker_instruction,
-    new_nonce as new_completion_nonce,
-    parse_completion_marker,
-)
-from core.source_ranker import SourceRankingReport, rank_chain
-from core.source_registry import SourceRegistry
-from core.source_registry_store import SourceRegistryStore
 from core.task_complexity import can_skip_planner
+from core.termination_guard import TerminationGuard
+from core.unsupported_claims import apply_answer_enforcement
+from core.user_profile import UserProfile, UserProfileStore, profile_to_prompt_block
+from core.verification_summary import build_verification_summary
 from tools.base import ToolRegistry
-from core.loop_helpers import (  # noqa: F401 -- re-exported
-    DEFAULT_MAX_REPLAN_ATTEMPTS,
-    LOCAL_CRITIQUE_SYSTEM_ADDENDUM,
-    SYSTEM_ANSWER,
-    output_contract_requires_headers,
-    _ANSWER_CITATION_RE,
-    _VERIF_MARKER_RE,
-    _strip_verification_markers,
-    _to_text,
-    untrusted_scan_view,
-    format_human_response,
-    new_trace_id,
-    citation_for_evidence,
-    file_scope_notice,
-    format_allowed_citations_block,
-    format_artifact,
-)
-from core.loop_methods import AgentLoopExtractedMethods
-from core.loop_methods2 import (
-    AgentLoopExtractedMethods2,
-)
 
 # Thread-local storage for per-step replan triggers.
 # _execute_step writes here instead of self._last_step_failure so that
@@ -252,7 +252,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         persistent_store: PersistentMemoryStore | None = None,
         retrieval_policy: MemoryRetrievalPolicy | None = None,
         write_policy: MemoryWritePolicy | None = None,
-        memory_write_registry: "MemoryWriteRegistry | None" = None,
+        memory_write_registry: MemoryWriteRegistry | None = None,
         role_router: RoleRouter | None = None,
         knowledge_use_policy: KnowledgeUsePolicy | None = None,
         source_registry_store: SourceRegistryStore | None = None,
@@ -263,7 +263,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         knowledge_auto_write: bool = False,
         approval_provider: ApprovalProvider | None = None,
         max_replan_attempts: int = DEFAULT_MAX_REPLAN_ATTEMPTS,
-        replan_policy: "ReplanPolicy | None" = None,
+        replan_policy: ReplanPolicy | None = None,
         verifier_enabled: bool = True,
         clarification_enabled: bool = True,
         clarification_gate_enabled: bool = True,
@@ -1716,7 +1716,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # episode. Nothing here outlives the closure.
         _declared: dict[str, str | None] = {"value": None}
 
-        def _do_synthesize(_attempt: "SynthAttempt") -> str:
+        def _do_synthesize(_attempt: SynthAttempt) -> str:
             # Retries must not double-stream tokens: only the first attempt may
             # stream to the console; adapted/retry attempts render silently and
             # the final answer is returned normally.
@@ -1819,6 +1819,8 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         if self.verifier_enabled:
             from core.verifier import (
                 extract_unresolved_web_urls,
+            )
+            from core.verifier import (
                 verify as _verify,
             )
             from core.verifier_models import VerificationReport as _VRSoft
@@ -2734,12 +2736,12 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
     # ---------- phase implementations ----------
 
 
-    def _check_clarification(self, user_question: str) -> "ClarificationResult":
+    def _check_clarification(self, user_question: str) -> ClarificationResult:
         """Run the Clarification Policy (§3) — pure heuristic, no LLM."""
         from core.clarification_policy import check_clarification
         return check_clarification(user_question)
 
-    def _check_operational_domain(self, user_question: str) -> "DomainResult":
+    def _check_operational_domain(self, user_question: str) -> DomainResult:
         """Run the Operational Design Domain gate (§7 ODD) — pure, no LLM."""
         from core.operational_domain import check_operational_domain
         return check_operational_domain(user_question)
@@ -2924,7 +2926,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
 
     def _run_step_parallel(
         self, step: PlanStep
-    ) -> tuple[PlanStep, dict[str, Any] | None, "ReplanTrigger | None"]:
+    ) -> tuple[PlanStep, dict[str, Any] | None, ReplanTrigger | None]:
         """Thread-safe wrapper: runs _execute_step and returns (step, outcome, trigger).
 
         Clears the thread-local trigger slot before calling _execute_step so that
@@ -2937,7 +2939,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         _step_trigger_tls.step_trigger = None  # consume
         return step, outcome, trigger
 
-    def _step_only_reads(self, step: "PlanStep") -> bool:
+    def _step_only_reads(self, step: PlanStep) -> bool:
         """True when this step cannot change the workspace.
 
         Asks the tool the same question the policy gate asks — `risk_for` on
@@ -2962,8 +2964,8 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             return False
 
     def _execute_steps_parallel(
-        self, steps: list["PlanStep"]
-    ) -> list[tuple["PlanStep", dict[str, Any] | None, "ReplanTrigger | None"]]:
+        self, steps: list[PlanStep]
+    ) -> list[tuple[PlanStep, dict[str, Any] | None, ReplanTrigger | None]]:
         """Execute a list of plan steps, running independent steps in parallel.
 
         Steps whose ``preconditions`` list is empty (the common case — the
@@ -3123,6 +3125,8 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
             # observation only — does not change the verdict handling below.
             from core.tool_receipts import (  # local import: avoid cycles
                 receipt_context as _gw_receipt_context,
+            )
+            from core.tool_receipts import (
                 record_gateway_receipt as _record_gateway_receipt,
             )
 

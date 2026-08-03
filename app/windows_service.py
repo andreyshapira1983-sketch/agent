@@ -14,9 +14,9 @@ import importlib.util
 import json
 import os
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 SERVICE_NAME = "AgentDaemon"
 DISPLAY_NAME = "Agent Daemon"
@@ -67,7 +67,7 @@ class WindowsServiceContract:
     stop_timeout_seconds: float = DEFAULT_STOP_TIMEOUT_SECONDS
 
     @classmethod
-    def from_environment(cls) -> "WindowsServiceContract":
+    def from_environment(cls) -> WindowsServiceContract:
         """Build the contract from optional non-secret environment overrides."""
 
         workspace_raw = os.getenv("AGENT_SERVICE_WORKSPACE")

@@ -25,11 +25,10 @@ Public API:
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta, timezone
-from typing import Iterable, Sequence
 
 from core.smart_memory import EpisodeRecord, EpisodicMemoryStore
-
 
 _DEFAULT_MAX_AGE_DAYS = 30
 _DEFAULT_MIN_QUALITY = 0.4  # below this, the episode is a distractor risk

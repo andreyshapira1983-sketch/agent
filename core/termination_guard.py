@@ -21,9 +21,8 @@ terminal state but might not:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
-
 
 # Question keywords (EN + RU) that strongly suggest the answer needs a
 # fresh tool call rather than general-knowledge synthesis.  Keep tight

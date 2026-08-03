@@ -10,15 +10,15 @@ claims here without changing the agent loop.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Iterable, Literal
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from core.evidence import Evidence, ProvenanceChain
 from core.ids import new_id
 from core.source_ranker import SourceRank, SourceRankingReport
-
 
 SourceType = Literal[
     "book",
@@ -99,7 +99,7 @@ class SourceRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "SourceRecord":
+    def from_dict(cls, data: dict[str, Any]) -> SourceRecord:
         source_type = data.get("type", "unknown")
         if source_type not in DEFAULT_SOURCE_TRUST:
             source_type = "unknown"
@@ -155,7 +155,7 @@ class ClaimRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ClaimRecord":
+    def from_dict(cls, data: dict[str, Any]) -> ClaimRecord:
         status = data.get("status", "extracted")
         if status not in {"extracted", "verified", "conflicted", "unverified"}:
             status = "extracted"
@@ -191,7 +191,7 @@ class SourceRegistry:
         *,
         ranking: SourceRankingReport | None = None,
         claim_extractor: Any | None = None,
-    ) -> "SourceRegistry":
+    ) -> SourceRegistry:
         registry = cls()
         ranks_by_evidence = {
             rank.evidence_id: rank
@@ -216,7 +216,7 @@ class SourceRegistry:
         cls,
         sources: Iterable[SourceRecord] = (),
         claims: Iterable[ClaimRecord] = (),
-    ) -> "SourceRegistry":
+    ) -> SourceRegistry:
         registry = cls()
         for source in sources:
             registry.add_source(source)

@@ -35,13 +35,13 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts.completion_backfill import writer_backfill_verdict  # noqa: E402
 from core.state_integrity import (  # noqa: E402
     backup_state_file,
     read_state_jsonl_unlocked,
     rewrite_state_jsonl_unlocked,
     state_file_lock,
 )
+from scripts.completion_backfill import writer_backfill_verdict  # noqa: E402
 
 
 def plan_backfill(payloads: list[dict[str, Any]]) -> list[tuple[int, str]]:

@@ -8,15 +8,17 @@ import re
 from typing import Any
 
 from core.evidence import Evidence, ProvenanceChain
+
 from .verifier_models import Citation, VerificationReport
 from .verifier_patterns import (
     _BARE_LIST_MARKER_RE,
     _CITATION_BODY_TOKEN_RE,
     _CITATION_RE,
-    _MD_HEADING_RE,
     _MAX_EXCERPT_FOR_NLI,
+    _MD_HEADING_RE,
     _MIN_TOKEN_LEN,
     _NLI_SYSTEM,
+    _NO_TOKEN_FALLBACK_PREFIXES,
     _OUTPUT_CONTRACT_HEADER_RE,
     _SENTENCE_SPLIT_RE,
     _STAT_FIGURE_MIN_LEN,
@@ -24,7 +26,6 @@ from .verifier_patterns import (
     _STAT_TRIGGER_RE,
     _SUBAGENT_META_RE,
     _TOKEN_STOPWORDS,
-    _NO_TOKEN_FALLBACK_PREFIXES,
     CITATION_PREFIXES,
 )
 

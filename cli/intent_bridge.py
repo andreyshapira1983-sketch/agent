@@ -25,12 +25,18 @@ import re
 import sys
 from typing import TYPE_CHECKING
 
-from core.intent_understanding import understand_intent
-from core.loop import format_human_response
-from core.model_router import ModelRole
-from core.operator_intent import route_operator_intent
-from core.strategy_router import classify_operator_strategy
-
+from app.operator_status import (
+    _handle_autonomy_readiness,
+    _handle_next_actions,
+    _handle_next_safe_test,
+    _handle_operator_budget,
+    _handle_operator_capability_check,
+    _handle_operator_check,
+    _handle_operator_gaps_check,
+    _handle_operator_weakness_finder,
+    _handle_programming_readiness,
+    _handle_urgent_status,
+)
 from cli.commands_approval import (
     _handle_approval_list,
     _handle_best_next_action,
@@ -49,19 +55,11 @@ from cli.commands_proposals import (
 )
 from cli.commands_self_build import _handle_self_build_produce
 from cli.commands_self_task import _handle_self_task_propose
-
-from app.operator_status import (
-    _handle_autonomy_readiness,
-    _handle_next_actions,
-    _handle_next_safe_test,
-    _handle_operator_budget,
-    _handle_operator_capability_check,
-    _handle_operator_check,
-    _handle_operator_gaps_check,
-    _handle_operator_weakness_finder,
-    _handle_programming_readiness,
-    _handle_urgent_status,
-)
+from core.intent_understanding import understand_intent
+from core.loop import format_human_response
+from core.model_router import ModelRole
+from core.operator_intent import route_operator_intent
+from core.strategy_router import classify_operator_strategy
 
 if TYPE_CHECKING:  # annotations only
     from pathlib import Path

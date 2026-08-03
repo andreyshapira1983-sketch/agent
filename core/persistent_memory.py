@@ -11,8 +11,8 @@ Minimal contract:
 from __future__ import annotations
 
 import datetime as _dt
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from core.models import MemoryRecord
 from core.state_integrity import (

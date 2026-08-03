@@ -18,7 +18,6 @@ from typing import Any, Literal
 
 from core.ids import new_id
 
-
 CapabilityType = Literal[
     "telegram",
     "email",

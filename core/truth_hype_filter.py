@@ -28,7 +28,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
-
 TruthHypeVerdict = Literal["substantive", "hype"]
 
 

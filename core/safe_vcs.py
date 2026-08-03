@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 # Branch names are generated internally, but validate anyway: no shell
 # metacharacters, no leading dash, no ``..`` path tricks.

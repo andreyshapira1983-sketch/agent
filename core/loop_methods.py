@@ -7,18 +7,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from core.knowledge_pipeline import RememberFn
+from core.memory_echo_antibody import MemoryWriteEvent, make_event
 from core.memory_policy import (
     MemoryWriteDecision,
 )
-from core.memory_echo_antibody import MemoryWriteEvent, make_event
+from core.model_router import ModelRole, ModelRouter
 from core.models import (
     MemoryRecord,
 )
 from core.redaction import (
     redact_dlp_text,
 )
-from core.model_router import ModelRole, ModelRouter
-from core.knowledge_pipeline import RememberFn
+
 
 class AgentLoopExtractedMethods:
     """Methods extracted from ``AgentLoop``, mixed back into it.
@@ -248,7 +249,7 @@ class AgentLoopExtractedMethods:
         self,
         *,
         target_path: str,
-        workspace_root: "Path",
+        workspace_root: Path,
         test_paths: tuple[str, ...] = ("tests",),
         test_pattern: str | None = None,
         trace_id: str | None = None,
@@ -329,9 +330,9 @@ class AgentLoopExtractedMethods:
 
     def repair(
         self,
-        proposal: "Any",
+        proposal: Any,
         *,
-        workspace_root: "Path",
+        workspace_root: Path,
     ):
         """Run one self-repair proposal through the MVP-13.2 controller."""
         from core.self_repair import SelfRepairController
@@ -345,7 +346,7 @@ class AgentLoopExtractedMethods:
         self,
         plan_id: str | None = None,
         *,
-        workspace_root: "Path | None" = None,
+        workspace_root: Path | None = None,
     ):
         """Apply the most recent compensation plan (or one by id).
 

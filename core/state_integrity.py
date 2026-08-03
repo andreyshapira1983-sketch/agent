@@ -9,15 +9,15 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from core.file_lock import exclusive_file_lock
 from core.redaction import redact_dlp_text
-
 
 INTEGRITY_MARKER = "agent-state-jsonl-v1"
 

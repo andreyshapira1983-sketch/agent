@@ -98,7 +98,12 @@ class RepairReport:
         return self.status == "repaired"
 
     def summary(self) -> dict[str, Any]:
-        from .self_repair_utils import _approval_summary, _diff_summary, _first_output, _test_summary
+        from .self_repair_utils import (
+            _approval_summary,
+            _diff_summary,
+            _first_output,
+            _test_summary,
+        )
 
         diff = _first_output(self.steps, "diff")
         baseline = _first_output(self.steps, "baseline_tests")

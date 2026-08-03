@@ -16,8 +16,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from core.governance import AgentMode, GovernedOperation, GovernancePolicy
-from core.models import Action, ApprovalDecision, ApprovalRequest, ErrorObject, PlanStep, PolicyDecision
+from core.governance import AgentMode, GovernancePolicy, GovernedOperation
+from core.models import (
+    Action,
+    ApprovalDecision,
+    ApprovalRequest,
+    ErrorObject,
+    PlanStep,
+    PolicyDecision,
+)
 from core.redaction import redact_payload
 from core.smart_memory import EpisodeRecord
 
@@ -30,7 +37,6 @@ from .self_repair_utils import (
     _new_compensation_plan_id,
     _tests_passed,
 )
-
 
 _DEFAULT_MIN_REPAIR_CONFIDENCE = 0.60
 

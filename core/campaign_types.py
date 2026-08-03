@@ -5,7 +5,7 @@ Extracted from `core/campaign` by autonomous self-build module split.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -51,8 +51,8 @@ class CampaignActionOutcome:
     result: str
     llm_calls_spent: int = 0
     cost_units_spent: int = 0
-    proposal: Optional[str] = None
-    artifact: Optional[str] = None
+    proposal: str | None = None
+    artifact: str | None = None
 
 
 @dataclass
@@ -63,7 +63,7 @@ class CampaignResult:
     cycles_run: int
     records: list[Any] = field(default_factory=list)
     totals: dict[str, int] = field(default_factory=dict)
-    clarification: Optional[dict[str, Any]] = None
+    clarification: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {

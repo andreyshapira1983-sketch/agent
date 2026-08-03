@@ -35,15 +35,14 @@ from .operator_intent_patterns import (
     _matches_programming_readiness,
     _matches_project_health,
     _matches_safe_self_check,
-    _matches_self_task_propose,
     _matches_self_build_request,
+    _matches_self_task_propose,
     _matches_smart_memory_status,
     _matches_source_review,
     _matches_subagent_proposal,
     _matches_urgent_status,
     _matches_weakness_finder,
 )
-
 
 OperatorIntentKind = Literal[
     "shell_command_hint",

@@ -72,9 +72,9 @@ class SemanticScholarSearchTool(Tool):
         if not isinstance(query, str) or not query.strip():
             raise ValueError("query must be a non-empty string")
 
-        import urllib.request
-        import urllib.parse
         import json as _json
+        import urllib.parse
+        import urllib.request
 
         n = max(1, min(int(max_results or self.default_max_results), MAX_RESULTS_CAP))
         api_key = os.environ.get("SEMANTIC_SCHOLAR_API_KEY", "").strip()

@@ -23,13 +23,15 @@ from __future__ import annotations
 import re
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from tools.file_read import MAX_BYTES as FILE_READ_MAX_BYTES
 
 if TYPE_CHECKING:  # pragma: no cover — annotation only
     # Runtime-importing core.planner would pull core.llm transitively and
     # break this module's documented boundary: deterministic, no LLM stack.
+    from collections.abc import Callable
+
     from core.planner import PlannerOutput
 
 

@@ -17,7 +17,6 @@ from core.budget_ledger import BudgetLedger
 from core.run_context import current_run
 from core.state_integrity import append_state_jsonl, read_state_jsonl
 
-
 _COST_UNITS_PER_1K_TOKENS = {
     "free": 0,
     "low": 1,
@@ -60,7 +59,7 @@ class ModelUsageLimits:
     max_cost_units: int = 0
 
     @classmethod
-    def from_env(cls) -> "ModelUsageLimits":
+    def from_env(cls) -> ModelUsageLimits:
         return cls(
             max_calls=_env_int("AGENT_MODEL_MAX_CALLS_PER_SESSION"),
             max_tokens=_env_int("AGENT_MODEL_MAX_TOKENS_PER_SESSION"),
@@ -217,7 +216,7 @@ class ModelUsageLedger:
         path: Path | None = None,
         logger: Any | None = None,
         budget_ledger: BudgetLedger | None = None,
-    ) -> "ModelUsageLedger":
+    ) -> ModelUsageLedger:
         return cls(
             path=path,
             limits=ModelUsageLimits.from_env(),

@@ -16,20 +16,19 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from cli.commands_approval import _approval_inbox_for
+from cli.commands_budget import _budget_ledger_snapshot
+from cli.self_build_memory import record_self_build_episode
 from core.budget_kill_switch import BudgetKillSwitch, default_path
 from core.safe_vcs import SafeVCS
 from core.self_task_builder import build_coding_task
 from core.self_task_producer import decode_frozen_test, produce_coding_task
 
-from cli.commands_approval import _approval_inbox_for
-from cli.commands_budget import _budget_ledger_snapshot
-from cli.self_build_memory import record_self_build_episode
-
 if TYPE_CHECKING:
     from core.loop import AgentLoop
 
 
-def _handle_self_task_propose(rest: str, agent: "AgentLoop", workspace: Path) -> bool:
+def _handle_self_task_propose(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     # Narrow trigger: no arguments. Anything extra is a misuse.
     if rest.strip():
         print(
@@ -105,7 +104,7 @@ def _handle_self_task_propose(rest: str, agent: "AgentLoop", workspace: Path) ->
     return True
 
 
-def _handle_self_task_build(rest: str, agent: "AgentLoop", workspace: Path) -> bool:
+def _handle_self_task_build(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     # Requires exactly one argument: the approved coding-task approval id.
     approval_id = rest.strip()
     if not approval_id or len(approval_id.split()) != 1:

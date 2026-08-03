@@ -24,7 +24,35 @@ import json
 import sys
 from typing import TYPE_CHECKING
 
-
+from app.operator_status import (
+    _handle_autonomy_readiness,
+    _handle_next_actions,
+    _handle_operator_budget,
+    _handle_operator_check,
+    _handle_programming_readiness,
+    _handle_urgent_status,
+)
+from app.operator_task import _handle_operator_task
+from app.runtime_cli import (
+    _handle_auto_run,
+    _handle_auto_status,
+    _handle_campaign_start,
+    _handle_campaign_status,
+    _handle_work_session,
+)
+from app.task_scheduler_cli import (
+    _handle_queue_status,
+    _handle_schedule_add,
+    _handle_schedule_disable,
+    _handle_schedule_list,
+    _handle_schedule_tick,
+    _handle_scheduler_status,
+    _handle_task_add,
+    _handle_task_cancel,
+    _handle_task_list,
+    _handle_task_run,
+    _handle_task_unblock,
+)
 from cli.commands_approval import (
     _handle_alert_ack,
     _handle_alert_ack_clear,
@@ -108,36 +136,6 @@ from cli.commands_value_review import (
 )
 from cli.help import render_help
 from cli.parsers import _parse_remember
-
-from app.operator_status import (
-    _handle_autonomy_readiness,
-    _handle_next_actions,
-    _handle_operator_budget,
-    _handle_operator_check,
-    _handle_programming_readiness,
-    _handle_urgent_status,
-)
-from app.operator_task import _handle_operator_task
-from app.runtime_cli import (
-    _handle_auto_run,
-    _handle_auto_status,
-    _handle_campaign_start,
-    _handle_campaign_status,
-    _handle_work_session,
-)
-from app.task_scheduler_cli import (
-    _handle_queue_status,
-    _handle_schedule_add,
-    _handle_schedule_disable,
-    _handle_schedule_list,
-    _handle_schedule_tick,
-    _handle_scheduler_status,
-    _handle_task_add,
-    _handle_task_cancel,
-    _handle_task_list,
-    _handle_task_run,
-    _handle_task_unblock,
-)
 
 if TYPE_CHECKING:  # annotations only
     from pathlib import Path

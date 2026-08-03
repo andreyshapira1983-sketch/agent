@@ -12,13 +12,16 @@ the existing KnowledgePipeline + MemoryWritePolicy.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from core.evidence import ProvenanceChain, evidence_from_tool_result, make_evidence
 from core.ingestion_reports import IngestReport, RssIngestReport, WebIngestReport
 from core.ingestion_utils import (
-    SKIP_DIR_NAMES as SKIP_DIR_NAMES,   # re-exported (core/learning_planner.py imports it from here)
+    SKIP_DIR_NAMES as SKIP_DIR_NAMES,  # re-exported (core/learning_planner.py imports it from here)
+)
+from core.ingestion_utils import (
     TEXT_EXTENSIONS,
     _candidate_urls,
     _chunk_text,
@@ -32,7 +35,6 @@ from core.knowledge_pipeline import KnowledgePipelineResult
 from core.source_library import resolve_source_library
 from core.source_ranker import rank_chain
 from core.source_registry import SourceRegistry
-
 
 MAX_FILE_BYTES = 1_000_000
 DEFAULT_PROJECT_LIMIT = 80

@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -25,9 +25,9 @@ class CampaignCycleRecord:
     cost_units_spent: int
     result: str
     reason: str
-    proposal: Optional[str] = None
-    artifact: Optional[str] = None
-    next_check_at: Optional[str] = None
+    proposal: str | None = None
+    artifact: str | None = None
+    next_check_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -65,7 +65,7 @@ class CampaignCycleRecord:
 
 
 class CampaignLedger:
-    def __init__(self, path: Optional[Path] = None):
+    def __init__(self, path: Path | None = None):
         self.path = path
         self.records: list[CampaignCycleRecord] = []
 

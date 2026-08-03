@@ -32,10 +32,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Literal, Optional, Sequence
+from typing import Literal
 
 # Reuse the proven Jaccard+containment scorer so the echo guard stays in lock
 # step with the on-disk dedup gate (`core.hygiene`). Importing the internal
@@ -74,7 +75,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _parse_ts(raw: str) -> Optional[datetime]:
+def _parse_ts(raw: str) -> datetime | None:
     """Best-effort ISO-8601 → aware datetime; None when unparseable."""
     if not raw:
         return None
@@ -120,7 +121,7 @@ class MemoryWriteEvent:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "MemoryWriteEvent":
+    def from_dict(cls, data: dict) -> MemoryWriteEvent:
         return cls(
             content=str(data.get("content", "")),
             content_hash=str(data.get("content_hash", "")),
@@ -139,7 +140,7 @@ def make_event(
     record_type: str = "semantic",
     source: str = GUARDED_SOURCE,
     cycle_id: str = "",
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> MemoryWriteEvent:
     """Build a normalised :class:`MemoryWriteEvent` for the candidate write."""
     ts = (now or _utcnow()).astimezone(timezone.utc).isoformat()
@@ -166,7 +167,7 @@ class MemoryEchoOutcome:
     decision: Literal["allow", "reject"]
     reason: str
     echo_within_window: bool
-    matched_hash: Optional[str]
+    matched_hash: str | None
     similarity: float
 
     @property
@@ -224,7 +225,7 @@ def detect_memory_echo(
 
     cand_hash = content_hash(text)
     best_sim = 0.0
-    best_hash: Optional[str] = None
+    best_hash: str | None = None
 
     for event in recent_writes:
         if event.content_hash and event.content_hash == cand_hash:
@@ -272,7 +273,7 @@ class MemoryWriteRegistry:
     recent ones. It makes no decisions — that is the detector's job.
     """
 
-    def __init__(self, path: Optional[Path | str] = None) -> None:
+    def __init__(self, path: Path | str | None = None) -> None:
         self.path = Path(path) if path is not None else DEFAULT_REGISTRY_PATH
 
     def append(self, event: MemoryWriteEvent) -> None:
@@ -300,7 +301,7 @@ class MemoryWriteRegistry:
         self,
         *,
         window_hours: float = DEFAULT_WINDOW_HOURS,
-        now: Optional[datetime] = None,
+        now: datetime | None = None,
         source: str = GUARDED_SOURCE,
     ) -> list[MemoryWriteEvent]:
         """Events newer than ``window_hours`` ago, restricted to ``source``.
@@ -331,7 +332,7 @@ def recent_within_window(
     events: Sequence[MemoryWriteEvent],
     *,
     window_hours: float = DEFAULT_WINDOW_HOURS,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
     source: str = GUARDED_SOURCE,
 ) -> list[MemoryWriteEvent]:
     """Pure window filter over an in-memory sequence (no disk).

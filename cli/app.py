@@ -44,7 +44,7 @@ from cli.args import build_parser
 from cli.commands_ingest import _handle_self_build_propose
 from cli.help import render_startup_commands
 from cli.one_shot import run_one_shot
-from cli.repl import _StdinLineReader, _stdin_is_interactive, run_repl
+from cli.repl import _stdin_is_interactive, _StdinLineReader, run_repl
 from cli.resume import resolve_resume
 from core.approval import ApprovalProvider, AutoApprover, CLIApprovalProvider
 

@@ -27,10 +27,9 @@ from core.campaign import (
     CampaignConfig,
     CampaignCycleRecord,
     CampaignLedger,
-    _cost_totals,
     run_campaign,
 )
-
+from core.campaign_io import _cost_totals
 
 # ============================================================
 # Helpers
@@ -407,12 +406,12 @@ class TestCampaignLedger:
 
 class TestLedgerReader:
     def test_load_rows_missing_file_is_empty(self, tmp_path: Path):
-        from core.campaign import load_ledger_rows
+        from core.campaign_ledger import load_ledger_rows
 
         assert load_ledger_rows(tmp_path / "nope.jsonl") == []
 
     def test_load_rows_skips_blank_and_malformed_lines(self, tmp_path: Path):
-        from core.campaign import load_ledger_rows
+        from core.campaign_ledger import load_ledger_rows
 
         path = tmp_path / "ledger.jsonl"
         path.write_text(
@@ -427,14 +426,14 @@ class TestLedgerReader:
         assert [r["cycle"] for r in rows] == [1, 2]
 
     def test_summarise_empty_rows(self):
-        from core.campaign import summarise_ledger
+        from core.campaign_ledger import summarise_ledger
 
         text = summarise_ledger([])
         assert "campaign ledger" in text
         assert "empty" in text
 
     def test_summarise_aggregates_and_shows_recent(self):
-        from core.campaign import summarise_ledger
+        from core.campaign_ledger import summarise_ledger
 
         rows = [
             {"cycle": 1, "goal": "G1", "action": "restore_daemon_liveness",
@@ -468,7 +467,7 @@ class TestLedgerReader:
         assert "[cycle 1]" not in text
 
     def test_summarise_recent_zero_shows_all(self):
-        from core.campaign import summarise_ledger
+        from core.campaign_ledger import summarise_ledger
 
         rows = [
             {"cycle": i, "goal": "G", "action": "observe", "idle": True,
@@ -552,7 +551,7 @@ class TestDefaultGatherSignals:
 
 class TestActionFocusedGoal:
     def test_goal_is_coupled_to_the_picked_action(self):
-        from core.campaign import _action_focused_goal
+        from core.campaign_io import _action_focused_goal
 
         action = _useful(action="restore_daemon_liveness")
         text = _action_focused_goal("Check agent health", action)
@@ -565,7 +564,7 @@ class TestActionFocusedGoal:
         assert "read-only" in text.lower()
 
     def test_evidence_is_included_when_present(self):
-        from core.campaign import _action_focused_goal
+        from core.campaign_io import _action_focused_goal
 
         action = BestNextAction(
             action="investigate_tick_error",

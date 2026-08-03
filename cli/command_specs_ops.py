@@ -6,8 +6,7 @@ the full purity contract these tables share.
 """
 from __future__ import annotations
 
-from .command_specs import CommandSpec, PHASE_PRE_DOTENV
-
+from .command_specs import PHASE_PRE_DOTENV, CommandSpec
 
 COMMANDS_OPS: tuple[CommandSpec, ...] = (
     # ── Operator status, audits & readiness ──────────────────

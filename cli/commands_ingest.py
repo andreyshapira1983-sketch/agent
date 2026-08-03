@@ -9,8 +9,8 @@ extract helpers stay internal to this module.
 """
 from __future__ import annotations
 
-import json
 import difflib
+import json
 import re
 import sys
 from typing import TYPE_CHECKING

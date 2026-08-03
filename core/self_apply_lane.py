@@ -30,9 +30,8 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from core.budget_kill_switch import BudgetKillSwitch, default_path
-from core.conflict_episode import ConflictEpisodeStore
+from core.conflict_episode import ConflictEpisodeStore, episodes_from_outcome
 from core.conflict_episode import default_path as episode_store_path
-from core.conflict_episode import episodes_from_outcome
 from core.instruction_conflict_gate import Directive, InstructionConflictOutcome
 from core.instruction_conflict_gate import evaluate as evaluate_instruction_conflict
 from core.safe_vcs import SafeVCS, VcsError

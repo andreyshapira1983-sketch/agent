@@ -32,11 +32,11 @@ mean, so a near-zero score on any axis collapses the overall — a
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any
 
 from core.evidence_support import compute_evidence_support
-
 
 # Severity weight applied to disagreement events when computing
 # coherence. High-severity events (planner_vs_verifier_full) hurt much

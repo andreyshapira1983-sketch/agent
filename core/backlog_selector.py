@@ -13,9 +13,10 @@ performs read-only file IO only.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from core.backlog_signals import (
     ARCHITECTURE_AUDIT_SOURCE,

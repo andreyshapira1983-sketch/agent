@@ -6,7 +6,7 @@ This keeps the loop, tools, and policy layer talking the same language.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -23,19 +23,19 @@ class Goal(BaseModel):
     id: str = Field(default_factory=lambda: new_id("goal"))
     description: str
     success_criteria: str
-    parent_goal_id: Optional[str] = None
+    parent_goal_id: str | None = None
     status: Literal["pending", "in_progress", "done", "failed"] = "pending"
     priority: int = 5
-    deadline: Optional[datetime] = None
+    deadline: datetime | None = None
 
 
 class Task(BaseModel):
     id: str = Field(default_factory=lambda: new_id("task"))
-    parent_goal_id: Optional[str] = None
+    parent_goal_id: str | None = None
     description: str
     status: Literal["pending", "in_progress", "done", "failed"] = "pending"
     priority: int = 5
-    deadline: Optional[datetime] = None
+    deadline: datetime | None = None
     dependencies: list[str] = Field(default_factory=list)
     owner_agent: str = "main"
     created_at: datetime = Field(default_factory=_now)
@@ -78,7 +78,7 @@ class Action(BaseModel):
     id: str = Field(default_factory=lambda: new_id("act"))
     step_id: str
     type: Literal["tool_call", "llm_synthesize", "output"]
-    tool_name: Optional[str] = None
+    tool_name: str | None = None
     parameters: dict[str, Any] = Field(default_factory=dict)
     side_effects: Literal["none", "read", "write", "external"] = "none"
     timestamp: datetime = Field(default_factory=_now)
@@ -98,8 +98,8 @@ class ToolResult(BaseModel):
     id: str = Field(default_factory=lambda: new_id("tr"))
     tool_call_id: str
     status: Literal["success", "error", "timeout"]
-    output: Optional[Any] = None
-    error: Optional[str] = None
+    output: Any | None = None
+    error: str | None = None
     latency_ms: int = 0
     cost: float = 0.0
     completed_at: datetime = Field(default_factory=_now)
@@ -126,12 +126,12 @@ class ApprovalRequest(BaseModel):
     id: str = Field(default_factory=lambda: new_id("appr"))
     action_id: str
     step_id: str
-    tool_name: Optional[str] = None
+    tool_name: str | None = None
     arguments: dict[str, Any] = Field(default_factory=dict)
     risk: Literal["read_only", "reversible", "irreversible", "external"]
     reasons: list[str] = Field(default_factory=list)
     summary: str = ""
-    policy_decision_id: Optional[str] = None
+    policy_decision_id: str | None = None
     requested_at: datetime = Field(default_factory=_now)
 
 
@@ -141,7 +141,7 @@ class ApprovalDecision(BaseModel):
     decision: Literal["approve", "deny", "abort"]
     responder: str = "user"  # "user" | "auto" | "timeout"
     reasons: list[str] = Field(default_factory=list)
-    raw_input: Optional[str] = None
+    raw_input: str | None = None
     decided_at: datetime = Field(default_factory=_now)
 
 
@@ -155,14 +155,14 @@ class MemoryRecord(BaseModel):
     content: Any
     tags: list[str] = Field(default_factory=list)
     owner: str = "session"
-    ttl_seconds: Optional[int] = None
+    ttl_seconds: int | None = None
     created_at: datetime = Field(default_factory=_now)
 
     # --- importance tracking (for archive scoring) ---
     # How many times this record was retrieved and injected into a prompt.
     access_count: int = 0
     # Last time this record was retrieved (None = never used after creation).
-    last_accessed_at: Optional[datetime] = None
+    last_accessed_at: datetime | None = None
     # Computed importance score 0.0-1.0. Updated by archive_low_value_memory().
     importance: float = 0.5
     # True = record has been moved to the archive store; active store never
@@ -180,5 +180,5 @@ class ErrorObject(BaseModel):
     severity: Literal["info", "warning", "error", "fatal"] = "error"
     recoverable: bool = False
     context: dict[str, Any] = Field(default_factory=dict)
-    stack_trace: Optional[str] = None
+    stack_trace: str | None = None
     timestamp: datetime = Field(default_factory=_now)

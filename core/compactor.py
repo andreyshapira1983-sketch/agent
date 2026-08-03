@@ -28,12 +28,11 @@ followed by the kept recent turns in original order.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
-from typing import Callable, Sequence
 
 from core.ids import new_id
 from core.memory import Turn
-
 
 _DEFAULT_KEEP_RECENT = 3
 _SUMMARY_QUESTION_PREFIX = "[compacted history]"

@@ -7,11 +7,11 @@ the result.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 from core.model_router import ensure_known_model_role
-
 
 _KNOWN_TOOLS = {
     "file_read",

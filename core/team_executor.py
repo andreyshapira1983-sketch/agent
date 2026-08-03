@@ -16,8 +16,8 @@ from core.subagent_runner import SubagentContractRefused
 from core.team_plan import SubagentContract, TeamPlan
 
 if TYPE_CHECKING:
-    from core.subagent_runner import SubAgentRunner
     from core.subagent_registry import SubagentRegistry
+    from core.subagent_runner import SubAgentRunner
 
 
 TeamExecutionStatus = Literal[
@@ -194,8 +194,8 @@ class TeamExecutor:
 
     def __init__(
         self,
-        runner: "SubAgentRunner | None" = None,
-        registry: "SubagentRegistry | None" = None,
+        runner: SubAgentRunner | None = None,
+        registry: SubagentRegistry | None = None,
     ) -> None:
         self._runner = runner
         self._registry = registry

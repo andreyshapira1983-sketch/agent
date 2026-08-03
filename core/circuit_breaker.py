@@ -19,7 +19,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-
 CircuitState = Literal["closed", "open", "half-open"]
 
 

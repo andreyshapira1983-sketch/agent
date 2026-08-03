@@ -21,7 +21,6 @@ from typing import Any
 
 from tools.base import require_ascii_identifier
 
-
 DEFAULT_MAX_URL_LEN = 2048
 DEFAULT_ALLOWED_SCHEMES: frozenset[str] = frozenset({"http", "https"})
 

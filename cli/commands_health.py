@@ -10,19 +10,20 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from cli.parsers import _split_meta_args
 from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH as APPROVAL_INBOX_PATH
 from core.backlog_target_mapper import map_backlog_candidate
-from core.budget_ledger import BudgetLedger, DEFAULT_COUNTERS
-from core.budget_kill_switch import BudgetKillSwitch, default_path as kill_switch_path
+from core.budget_kill_switch import BudgetKillSwitch
+from core.budget_kill_switch import default_path as kill_switch_path
+from core.budget_ledger import DEFAULT_COUNTERS, BudgetLedger
 from core.self_build_producer import DEFAULT_CANDIDATE_TARGETS
 from core.state_integrity import StateIntegrityError, decode_state_row
 from core.value_review import VALID_VERDICTS
-
 
 RUNTIME_TASKS_PATH = Path("data") / "runtime_tasks.jsonl"
 RUNTIME_SCHEDULES_PATH = Path("data") / "runtime_schedules.jsonl"

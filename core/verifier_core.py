@@ -12,15 +12,16 @@ from core.evidence_classes import (
     dialogue_evidence_present,
     is_dialogue_scoped_claim,
 )
+
 from .verifier_models import ClaimChunk, VerificationReport
 from .verifier_patterns import (
+    _NON_CLAIM_SECTIONS,
     DISCLAIMER_ALL_SELF_DECLARED,
     DISCLAIMER_FULLY_UNVERIFIED,
     DISCLAIMER_NO_CHAIN,
     DISCLAIMER_SESSION_MEMORY,
     DISCLAIMER_USER_ASSERTED,
     SELF_DECLARED_PREFIXES,
-    _NON_CLAIM_SECTIONS,
 )
 from .verifier_utils import (
     _find_semantic_support,
@@ -36,7 +37,6 @@ from .verifier_utils import (
     parse_citations,
     split_into_chunks,
 )
-
 
 # Memory records whose provenance makes a citation to them independent
 # evidence. Only an explicit human write qualifies: the operator asserting a

@@ -13,9 +13,9 @@ execution remains in controlled ingestion commands and tools.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Literal
-
+from typing import Any, Literal
 
 ConnectorStatus = Literal["wired", "partial", "planned"]
 CostClass = Literal["free_local", "low", "medium", "high"]

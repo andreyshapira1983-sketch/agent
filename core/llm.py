@@ -21,7 +21,7 @@ guess.
 from __future__ import annotations
 
 import os
-from typing import Any, Optional
+from typing import Any
 
 
 def _provider() -> str:
@@ -129,7 +129,7 @@ _CONTINUE_INSTRUCTION = (
 class LLM:
     """Minimal synchronous LLM wrapper with pluggable provider."""
 
-    def __init__(self, provider: Optional[str] = None, model: Optional[str] = None):
+    def __init__(self, provider: str | None = None, model: str | None = None):
         self.provider = (provider or _provider()).lower().strip()
         self.model = model or _default_model(self.provider)
         self._client = self._build_client()
@@ -318,7 +318,7 @@ class LLM:
         max_tokens: int,
         temperature: float,
         *,
-        prior: Optional[str],
+        prior: str | None,
     ) -> tuple[str, str]:
         """One provider call. Returns ``(text, stop_reason)``.
 
@@ -339,7 +339,7 @@ class LLM:
         user: str,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = 0.7,
-        on_token: Optional[Any] = None,
+        on_token: Any | None = None,
     ) -> str:
         """Stream a single-turn prompt, invoking *on_token(text)* for each token chunk.
 
@@ -368,7 +368,7 @@ class LLM:
         user: str,
         max_tokens: int,
         temperature: float,
-        on_token: Optional[Any],
+        on_token: Any | None,
     ) -> str:
         kwargs: dict = dict(
             model=self.model,
@@ -402,7 +402,7 @@ class LLM:
         max_tokens: int,
         temperature: float,
         model: str,
-        on_token: Optional[Any],
+        on_token: Any | None,
     ) -> str:
         kwargs: dict = dict(
             model=model,
@@ -439,7 +439,7 @@ class LLM:
         return "".join(accumulated).strip()
 
     @staticmethod
-    def _anthropic_generation(model: str) -> Optional[int]:
+    def _anthropic_generation(model: str) -> int | None:
         """The Claude generation in *model*, or None when the name predates it.
 
         Read as a NUMBER and compared, the way `_is_o_series` below reads the
@@ -500,7 +500,7 @@ class LLM:
         user: str,
         max_tokens: int,
         temperature: float,
-        prior: Optional[str] = None,
+        prior: str | None = None,
     ) -> tuple[str, str]:
         messages: list[dict] = [{"role": "user", "content": user}]
         if prior:
@@ -598,7 +598,7 @@ class LLM:
         max_tokens: int,
         temperature: float,
         model: str,
-        prior: Optional[str] = None,
+        prior: str | None = None,
     ) -> tuple[str, str]:
         messages: list[dict] = [
             {"role": "system", "content": system},

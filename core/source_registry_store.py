@@ -6,8 +6,8 @@ audit/catalog trail: which sources were seen and which claims were extracted.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from core.source_registry import ClaimRecord, SourceRecord, SourceRegistry
 from core.state_integrity import (

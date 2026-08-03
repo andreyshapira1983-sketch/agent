@@ -19,13 +19,12 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from cli.commands_approval import _approval_inbox_for
 from core.incremental_splitter import plan_incremental_split
 from core.self_build_producer import (
     INCREMENTAL_SPLIT_ORIGIN,
     publish_incremental_split_step,
 )
-
-from cli.commands_approval import _approval_inbox_for
 
 if TYPE_CHECKING:
     from core.loop import AgentLoop
@@ -33,7 +32,7 @@ if TYPE_CHECKING:
 SELF_SPLIT_ORIGIN = INCREMENTAL_SPLIT_ORIGIN
 
 
-def _handle_self_split(rest: str, agent: "AgentLoop", workspace: Path) -> bool:
+def _handle_self_split(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     parts = rest.split()
     if len(parts) != 1:
         print(

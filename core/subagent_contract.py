@@ -150,8 +150,8 @@ class CanonicalSubagentContract:
 
     @classmethod
     def from_proposal(
-        cls, proposal: "SubagentProposal"
-    ) -> "CanonicalSubagentContract":
+        cls, proposal: SubagentProposal
+    ) -> CanonicalSubagentContract:
         """Adapt a proposal without inventing team-planner-only policy."""
         return cls(
             contract_id=proposal.proposal_id,
@@ -184,8 +184,8 @@ class CanonicalSubagentContract:
 
     @classmethod
     def from_team_contract(
-        cls, contract: "SubagentContract"
-    ) -> "CanonicalSubagentContract":
+        cls, contract: SubagentContract
+    ) -> CanonicalSubagentContract:
         """Adapt a team-plan contract without fabricating memory policy."""
         source_payload = contract.to_dict()
         return cls(
@@ -215,7 +215,7 @@ class CanonicalSubagentContract:
         )
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CanonicalSubagentContract":
+    def from_dict(cls, data: dict[str, Any]) -> CanonicalSubagentContract:
         """Parse a persisted canonical contract with strict type checks."""
         if not isinstance(data, dict):
             raise ValueError("canonical contract must be an object")
@@ -323,7 +323,7 @@ def _deterministic_contract_id(payload: dict[str, Any]) -> str:
     return f"subc_{digest}"
 
 
-def approval_payload_from_proposal(proposal: "SubagentProposal") -> dict[str, Any]:
+def approval_payload_from_proposal(proposal: SubagentProposal) -> dict[str, Any]:
     """Build the versioned approval payload while retaining legacy detail."""
     canonical = CanonicalSubagentContract.from_proposal(proposal)
     return {

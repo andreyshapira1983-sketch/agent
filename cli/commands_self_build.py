@@ -29,27 +29,26 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from core.budget_kill_switch import BudgetKillSwitch, default_path
-from core.safe_vcs import SafeVCS
-from core.self_build_producer import produce_self_apply_proposal
-from core.self_build_supervisor import evaluate_self_build_supervisor
-
+from app.task_scheduler_cli import _scheduler_for, _task_queue_for
 from cli.commands_approval import _approval_inbox_for
 from cli.commands_budget import _budget_ledger_snapshot
 from cli.commands_ingest import _self_build_propose_payload
 from cli.parsers import _split_meta_args
-from app.task_scheduler_cli import _scheduler_for, _task_queue_for
 from cli.self_build_memory import (
     recent_self_build_lessons,
     recently_vetoed_self_build_targets,
     record_self_build_episode,
 )
+from core.budget_kill_switch import BudgetKillSwitch, default_path
+from core.safe_vcs import SafeVCS
+from core.self_build_producer import produce_self_apply_proposal
+from core.self_build_supervisor import evaluate_self_build_supervisor
 
 if TYPE_CHECKING:
     from core.loop import AgentLoop
 
 
-def _handle_self_build_produce(rest: str, agent: "AgentLoop", workspace: Path) -> bool:
+def _handle_self_build_produce(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     # Narrow trigger: no arguments, no free-text patch. Anything extra is a
     # misuse and is rejected outright.
     if rest.strip():

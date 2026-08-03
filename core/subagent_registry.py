@@ -32,10 +32,11 @@ watch/pause/retire — but, again, only the recommendation, never the status.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from core.subagent_contract import CanonicalSubagentContract
 from core.subagent_contract_audit import ContractAuditReport, SubagentExecutionReceipt
@@ -179,7 +180,7 @@ class RoleRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RoleRecord":
+    def from_dict(cls, data: dict[str, Any]) -> RoleRecord:
         """Rebuild a record defensively; unknown/garbled fields fall back."""
         status = str(data.get("status") or "active")
         if status not in VALID_STATUSES:
@@ -256,7 +257,7 @@ class ContractRunRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ContractRunRecord | None":
+    def from_dict(cls, data: dict[str, Any]) -> ContractRunRecord | None:
         contract_id = str(data.get("contract_id") or "").strip()
         role_id = str(data.get("role_id") or "").strip()
         schema_version = _as_int(data.get("schema_version"), default=0)
@@ -443,7 +444,7 @@ class SubagentRegistry:
                 self.roles[role_id] = rec
 
     @classmethod
-    def load(cls, workspace: str | Path) -> "SubagentRegistry":
+    def load(cls, workspace: str | Path) -> SubagentRegistry:
         """Read the ledger; a missing/corrupt file degrades to default roles."""
         path = Path(workspace) / REGISTRY_PATH
         roles: dict[str, RoleRecord] = {}

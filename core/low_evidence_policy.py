@@ -54,7 +54,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-
 _DEFAULT_MIN_TOTAL = 8
 _DEFAULT_MAX_VERIFIED_RATIO = 0.20
 _DEFAULT_UNVERIFIED_FLOOR = 6

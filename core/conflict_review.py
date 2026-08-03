@@ -13,7 +13,6 @@ from typing import Any, Literal
 from core.knowledge_pipeline import ConflictRecord, ConflictResolver
 from core.source_registry import ClaimRecord, SourceRecord, SourceRegistry
 
-
 ConflictDecision = Literal["suggested", "needs_review"]
 
 

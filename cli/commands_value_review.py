@@ -18,9 +18,8 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from core.value_review import VALID_VERDICTS, InvalidVerdictError, ValueReviewLog
-
 from cli.commands_approval import _approval_inbox_for
+from core.value_review import VALID_VERDICTS, InvalidVerdictError, ValueReviewLog
 
 if TYPE_CHECKING:
     from core.loop import AgentLoop
@@ -54,7 +53,7 @@ def _eligibility_error(item, item_id: str) -> str | None:
     return None
 
 
-def _handle_value_review(rest: str, agent: "AgentLoop", workspace: Path) -> bool:
+def _handle_value_review(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     parts = rest.split(maxsplit=2)
     if len(parts) < 2:
         print(
@@ -113,7 +112,7 @@ def _handle_value_review(rest: str, agent: "AgentLoop", workspace: Path) -> bool
     return True
 
 
-def _handle_value_review_list(rest: str, agent: "AgentLoop", workspace: Path) -> bool:
+def _handle_value_review_list(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     """Read-only: eligible applied producer proposals and their effective verdict."""
     from core.self_apply_bridge import SELF_APPLY_OPERATION
     from core.self_build_producer import PRODUCER_ORIGIN

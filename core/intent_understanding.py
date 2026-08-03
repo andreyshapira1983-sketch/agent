@@ -45,7 +45,7 @@ class IntentDecision:
     source: Literal["model", "fallback"] = "model"
 
     @classmethod
-    def conversation(cls, reasoning: str = "") -> "IntentDecision":
+    def conversation(cls, reasoning: str = "") -> IntentDecision:
         return cls(kind="conversation", action=None, confidence=1.0,
                    reasoning=reasoning, source="fallback")
 

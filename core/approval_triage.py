@@ -15,12 +15,12 @@ The operator decides. ``recommended_action`` is advice, not an action.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable, Literal
+from typing import Literal
 
 from core.approval_inbox import ApprovalInboxItem
-
 
 # The three recommendations the operator sees. Deliberately small: anything
 # that is not a clear structural duplicate either stays (``keep``) or is

@@ -7,10 +7,10 @@ in an archive handed to another person or machine.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
-
+from typing import Any
 
 FORBIDDEN_RELEASE_NAMES = {
     ".env",

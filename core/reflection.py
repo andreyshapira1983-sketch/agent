@@ -29,7 +29,6 @@ from core.llm import LLM
 from core.models import MemoryRecord
 from core.persistent_memory import PersistentMemoryStore
 
-
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)

@@ -7,7 +7,6 @@ the only code here is the Prompt Registry registration that travels with it.
 """
 from __future__ import annotations
 
-
 PLANNER_SYSTEM = """You are the planner of an autonomous agent. PLANNER_MODE.
 
 You DO NOT execute tools. You only return a JSON plan that the Executor will run.

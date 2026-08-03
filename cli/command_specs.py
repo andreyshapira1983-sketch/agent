@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 ONE_SHOT = "one_shot"
 REPL = "repl"
 BOTH_MODES = (ONE_SHOT, REPL)

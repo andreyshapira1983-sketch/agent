@@ -24,8 +24,8 @@ events back into ReplanPolicy or the confidence vector.
 """
 from __future__ import annotations
 
-from typing import Any, Sequence
-
+from collections.abc import Sequence
+from typing import Any
 
 # Threshold for "partial" planner/verifier disagreement: when more than
 # this fraction of claim chunks carry citations the verifier could not

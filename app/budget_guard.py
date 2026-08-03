@@ -129,7 +129,7 @@ def _existing_paused_checkpoint(agent: AgentLoop) -> dict | None:
     if not trace_id or log_dir is None:
         return None
     try:
-        from core.checkpoint import CheckpointLoader, PHASE_PAUSED
+        from core.checkpoint import PHASE_PAUSED, CheckpointLoader
 
         ctx = CheckpointLoader(Path(log_dir)).load(trace_id)
         if ctx is not None and ctx.last_phase == PHASE_PAUSED and ctx.paused:

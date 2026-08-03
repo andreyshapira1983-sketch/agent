@@ -25,9 +25,9 @@ from __future__ import annotations
 import ast
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Locale tables — kept small on purpose; we cover the calendar surface
@@ -111,7 +111,7 @@ class StructuredFacts:
         )
 
     @classmethod
-    def empty(cls) -> "StructuredFacts":
+    def empty(cls) -> StructuredFacts:
         return cls(
             dates=frozenset(),
             weekdays=frozenset(),

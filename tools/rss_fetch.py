@@ -26,7 +26,6 @@ from tools.network_safety import (
     host_patterns_from_env,
 )
 
-
 DEFAULT_TIMEOUT_SECONDS = 10.0
 DEFAULT_MAX_BYTES = 1 * 1024 * 1024
 DEFAULT_MAX_ENTRIES = 20

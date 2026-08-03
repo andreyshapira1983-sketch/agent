@@ -15,7 +15,6 @@ from core.ids import new_id
 from core.redaction import redact_payload
 from core.state_integrity import read_state_jsonl, rewrite_state_jsonl
 
-
 ApprovalInboxStatus = Literal["pending", "approved", "denied", "aborted", "executed"]
 ApprovalInboxRisk = Literal["read_only", "reversible", "irreversible", "external"]
 _VALID_STATUSES = {"pending", "approved", "denied", "aborted", "executed"}
@@ -95,7 +94,7 @@ class ApprovalInboxItem:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "ApprovalInboxItem":
+    def from_dict(cls, data: dict) -> ApprovalInboxItem:
         status = str(data.get("status") or "pending")
         risk = str(data.get("risk") or "reversible")
         if status not in _VALID_STATUSES:
@@ -275,7 +274,7 @@ class ApprovalInbox:
             return p.parent.parent
         return p.parent
 
-    def _emit_receipt(self, operation: str, item: "ApprovalInboxItem") -> None:
+    def _emit_receipt(self, operation: str, item: ApprovalInboxItem) -> None:
         """Append an approval transition receipt (slice 1b-a). Never raises."""
         try:
             from core.tool_receipts import record_approval_receipt

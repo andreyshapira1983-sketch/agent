@@ -29,7 +29,6 @@ from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
 from core.budget_governor import BudgetLimits
 from core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 
-
 WorkSessionStatus = Literal["completed", "stopped", "interrupted"]
 WorkSessionStopReason = Literal[
     "max_cycles", "time_budget", "circuit_open", "converged", "budget_exhausted",

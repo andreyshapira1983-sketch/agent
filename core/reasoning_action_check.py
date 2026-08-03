@@ -17,9 +17,8 @@ plan. Down the line a stricter mode could replan or demote confidence.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
-
 
 # Tool → recognisable keywords (English + Russian) that count as a
 # reasoning-side mention. Keep the lists short and high-precision: false

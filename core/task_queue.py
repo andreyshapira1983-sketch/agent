@@ -10,15 +10,15 @@ from __future__ import annotations
 import logging
 import os
 import socket
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Literal
 
 from core.file_lock import exclusive_file_lock
 from core.ids import new_id
 from core.state_integrity import read_state_jsonl_unlocked, rewrite_state_jsonl_unlocked
-
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,7 @@ class RuntimeTask:
         return self.heartbeat_at or self.updated_at
 
     @classmethod
-    def from_dict(cls, data: dict) -> "RuntimeTask":
+    def from_dict(cls, data: dict) -> RuntimeTask:
         return cls(
             id=str(data.get("id") or new_id("rtask")),
             kind=_choice(data.get("kind"), default="auto_run", allowed=_VALID_KINDS, field_name="kind"),  # type: ignore[arg-type]
@@ -149,7 +149,7 @@ class RuntimeTask:
             owner_host=str(data.get("owner_host") or ""),
         )
 
-    def with_updates(self, **updates) -> "RuntimeTask":
+    def with_updates(self, **updates) -> RuntimeTask:
         data = self.to_dict()
         data.update(updates)
         data["updated_at"] = _iso()

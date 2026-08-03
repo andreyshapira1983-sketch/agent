@@ -24,14 +24,15 @@ fully testable on their own.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Iterable, Literal
+from typing import TYPE_CHECKING, Literal
 
 from core.dlp import contains_pii
+from core.doc_routing import is_broad_project_self_knowledge_question
 from core.models import MemoryRecord
 from core.secret_scanner import contains_secret
-from core.doc_routing import is_broad_project_self_knowledge_question
 
 # `core.hygiene` is imported lazily inside `decide` to avoid an import cycle
 # when `core/hygiene.py` later wants to reach into models / policies.
@@ -120,7 +121,7 @@ class MemoryWritePolicy:
         source: str = "agent-auto",
         owner: str = "self",
         existing: Iterable[MemoryRecord] = (),
-        recent_writes: "Iterable[MemoryWriteEvent]" = (),
+        recent_writes: Iterable[MemoryWriteEvent] = (),
     ) -> MemoryWriteDecision:
         """Decide whether `content` may reach persistent storage.
 
@@ -250,7 +251,7 @@ class MemoryWritePolicy:
         if existing_list:
             # Local import keeps memory_policy import-free of hygiene at
             # module load time (and breaks the otherwise-tempting cycle).
-            from core.hygiene import find_duplicate, DEFAULT_DEDUP_THRESHOLD
+            from core.hygiene import DEFAULT_DEDUP_THRESHOLD, find_duplicate
 
             match = find_duplicate(
                 text, existing_list, threshold=DEFAULT_DEDUP_THRESHOLD

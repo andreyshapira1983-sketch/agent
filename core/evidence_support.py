@@ -43,7 +43,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-
 #: Below this, an *applicable* support score is reported as weak. Retained from
 #: the previous module so historical log comparisons stay meaningful; it gates
 #: a boolean in telemetry, never behaviour.

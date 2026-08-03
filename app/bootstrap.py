@@ -38,7 +38,6 @@ from tools.shell_exec import ShellExecTool
 from tools.web_fetch import WebFetchTool
 from tools.web_search import WebSearchTool
 
-
 DEFAULT_PERSISTENT_PATH = Path("data") / "persistent_memory.jsonl"
 DEFAULT_SOURCE_REGISTRY_PATH = Path("data") / "source_registry.jsonl"
 DEFAULT_RUNTIME_TASKS_PATH = Path("data") / "runtime_tasks.jsonl"

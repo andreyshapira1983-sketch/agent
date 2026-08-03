@@ -32,17 +32,18 @@ from __future__ import annotations
 
 import ast
 import hashlib
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from core.injection_guard import prepare_untrusted_text_for_llm
 from core.self_apply_bridge import SELF_APPLY_OPERATION, build_self_apply_payload
 from core.self_build_producer import (
-    ProducerReport,
-    RoleOutput,
     _BUILDER_MAX_TOKENS,
     _DEFAULT_CONFIDENCE_THRESHOLD,
     _MAX_CONTENT_BYTES,
+    ProducerReport,
+    RoleOutput,
     _default_file_reader,
     _is_self_build_target_allowed,
     _llm_json,
@@ -208,7 +209,7 @@ def _impl_reporter_publish(
         test_pattern=None,
         origin=TASK_BUILD_ORIGIN,
     )
-    digest = hashlib.sha1(
+    digest = hashlib.sha256(
         (impl_path + "\n" + content + "\n" + frozen_test).encode("utf-8")
     ).hexdigest()[:12]
     dedup_key = f"self_task_build:{impl_path}:{digest}"

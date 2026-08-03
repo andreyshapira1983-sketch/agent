@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 _REQ_NAME_RE = r"[A-Za-z0-9_.-]+(?:\[[A-Za-z0-9_,.-]+\])?"
 _PINNED_RE = re.compile(rf"^\s*{_REQ_NAME_RE}==[A-Za-z0-9_.!+\-]+(?:\s*#.*)?$")
 _UNPINNED_OPERATOR_RE = re.compile(r"(>=|<=|~=|!=|>|<)")

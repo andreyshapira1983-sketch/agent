@@ -14,13 +14,13 @@ emits its own audit event. Tests can call them individually.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol, Sequence
+from typing import Protocol
 
 from core.models import MemoryRecord
-
 
 # ============================================================
 # 1. Backup cleanup
