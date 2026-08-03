@@ -58,12 +58,6 @@ from typing import Any, Literal
 
 from core.best_next_action import BestNextAction
 from core.campaign_io import (
-    _action_focused_goal as _action_focused_goal,  # re-exported patch seam (tests/test_campaign.py)
-)
-from core.campaign_io import (
-    _cost_totals as _cost_totals,  # re-exported patch seam (tests/test_campaign.py)
-)
-from core.campaign_io import (
     _default_execute_action,
     _default_gather_signals,
     _log,
@@ -71,12 +65,6 @@ from core.campaign_io import (
 from core.campaign_ledger import (
     CampaignCycleRecord,
     CampaignLedger,
-)
-from core.campaign_ledger import (
-    load_ledger_rows as load_ledger_rows,  # re-exported (app/runtime_cli.py imports it from here)
-)
-from core.campaign_ledger import (
-    summarise_ledger as summarise_ledger,  # re-exported (app/runtime_cli.py imports it from here)
 )
 from core.campaign_types import CampaignActionOutcome, CampaignConfig, CampaignResult
 
