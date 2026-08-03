@@ -34,6 +34,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import re
+import sys
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -420,13 +421,12 @@ def _preserve_rejected_raw(workspace: Path, roles: list["RoleOutput"]) -> str | 
     preservation failure must never break the producer.
     """
     raw = ""
-    holder = None
     for role in roles:
-        if role.role == "builder" and role.data.get("raw_reply"):
-            raw = str(role.data.get("raw_reply") or "")
-            holder = role
-    if holder is not None:
-        holder.data.pop("raw_reply", None)
+        if role.role != "builder":
+            continue
+        candidate = role.data.pop("raw_reply", None)
+        if candidate:
+            raw = str(candidate)   # last non-empty wins; ALL roles are stripped
     if not raw.strip():
         return None
     try:
@@ -439,7 +439,8 @@ def _preserve_rejected_raw(workspace: Path, roles: list["RoleOutput"]) -> str | 
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(safe_raw, encoding="utf-8", newline="")
         return rel.as_posix()
-    except Exception:  # noqa: BLE001 — retention is diagnostics, never a blocker
+    except Exception as exc:  # noqa: BLE001 — retention is diagnostics, never a blocker
+        print(f"[self-build] raw-reply preservation failed: {exc}", file=sys.stderr)
         return None
 
 
@@ -937,7 +938,7 @@ def _builder_generate(
         "reason": reason,
         "confidence": confidence,
     }
-    if not content.strip():
+    if not (isinstance(content, str) and content.strip()):
         # MIR-071's live shape: a truncated reply fragment-parses into a dict
         # WITHOUT the content field (measured: 15948 tokens ≈ the 16000-token
         # builder cap → outer JSON unbalanced → an inner balanced fragment
