@@ -1571,13 +1571,17 @@ class AgentLoop(
                 except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
                     self._sensor_failed("working_memory_evidence", exc)
 
-        # Issue #119 — session-dialogue evidence. Admitted ONLY on a
-        # conversational-correction turn: the operator is asking about the
-        # exchange, so the exchange is the material. Verbatim, not summarised —
-        # the point is that this is a recording. The verifier scopes what it can
-        # support (`dialogue_supported`, never `verified`), so admitting it here
-        # cannot make an external claim look confirmed.
-        if self.last_self_analysis is not None and self.last_self_analysis.is_self_analysis:
+        # Issue #119 — session-dialogue evidence. Дословно, не в пересказе:
+        # смысл в том, что это запись. Верификатор сам ограничивает, что она
+        # может подпереть (`dialogue_supported`, никогда `verified`), поэтому
+        # допуск здесь не может выдать внешнее утверждение за подтверждённое.
+        #
+        # Раньше здесь стоял гейт «только ход самокоррекции». Живой прогон
+        # 2026-08-03 показал его цену: на обычном вопросе с историей агент
+        # честно сослался на собственную прошлую реплику, а проверка объявила
+        # ссылку выдуманной (fabricated_citations=2). Читать разговор ему
+        # давали, ссылаться — нет. Условие теперь одно: история существует.
+        if self.memory is not None and self.memory.recent_turns(1):
             _dialogue_added = 0
             if self.memory is not None:
                 for _turn in self.memory.recent_turns(3):
@@ -1604,7 +1608,14 @@ class AgentLoop(
                 "dialogue_evidence_admitted",
                 {
                     "turns": _dialogue_added,
-                    "reason": self.last_self_analysis.reason,
+                    # Причина теперь всегда «история есть»; отметка самоанализа
+                    # остаётся видимой отдельным полем, чтобы разбор прогонов
+                    # по-прежнему отличал ход-упрёк от обычного вопроса.
+                    "reason": "session_history_present",
+                    "self_analysis": bool(
+                        self.last_self_analysis is not None
+                        and self.last_self_analysis.is_self_analysis
+                    ),
                 },
             )
 

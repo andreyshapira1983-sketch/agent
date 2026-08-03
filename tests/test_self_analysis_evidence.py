@@ -347,14 +347,36 @@ def test_end_to_end_planner_stays_tool_free(workspace: Path):
     assert not (dialogue_kinds - {"session_dialogue", "user_explicit"}), dialogue_kinds
 
 
-def test_end_to_end_ordinary_question_admits_no_dialogue_evidence(workspace: Path):
-    """Protective: dialogue evidence is admitted only on a correction turn."""
-    loop, events, _llm = _loop_with_history(workspace)
+def test_end_to_end_ordinary_question_is_not_propped_up_by_the_dialogue(workspace: Path):
+    """Защита по существу: разговор не подпирает утверждение о мире.
+
+    Раньше этот тест требовал, чтобы на обычном вопросе диалоговой улики не
+    возникало ВООБЩЕ. Живой прогон 2026-08-03 показал цену такого гейта:
+    честная ссылка агента на собственную прошлую реплику объявлялась
+    выдумкой (`fabricated_citations=2`). Гейт снят, но охраняемая ценность
+    осталась прежней и здесь закреплена явно.
+
+    Измерено до и после снятия гейта на этом же ходе — цифры совпали:
+    `verified=0, dialogue_supported=0, unverified=3`. Разговор не может
+    подпереть цену биткоина, потому что классификатор привязывает его только
+    к утверждениям о самом обмене (issue #119), а не потому, что улику
+    прятали от цепочки.
+    """
+    loop, _events, llm = _loop_with_history(workspace)
+    # Фикстура по умолчанию отвечает ПРО ДИАЛОГ; здесь нужен ответ про мир,
+    # иначе тест померил бы не то (первая редакция этой проверки на том и
+    # споткнулась: 7 законных «про обмен» чанков выглядели подменой).
+    llm.responses = [
+        "Conclusion: биткоин стоит 100000 долларов.\n"
+        "Facts:\n  - цена сегодня 100000 [general-knowledge]\n"
+        "Confidence: 0.9\nUnverified: нет"
+    ]
 
     loop.run("расскажи, сколько сейчас стоит биткоин")
 
-    assert "dialogue_evidence_admitted" not in events
-    kinds = {
-        ev.kind for ev in (loop.last_provenance.evidences if loop.last_provenance else [])
-    }
-    assert "session_dialogue" not in kinds
+    report = loop.last_verification
+    assert report is not None
+    assert report.verified_chunks == 0, "утверждение о мире выдано за подтверждённое"
+    assert report.dialogue_supported_chunks == 0, (
+        "цену биткоина подпёрли разговором — это подмена источника"
+    )
