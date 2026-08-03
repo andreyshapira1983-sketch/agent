@@ -145,7 +145,7 @@ def build_agent(
     # model_router are built, because it holds references to both.
     # It is intentionally absent from _SAFE_SUBAGENT_TOOLS so sub-agents
     # cannot recursively spawn further sub-agents.
-    from tools.spawn_subagent import SpawnSubagentTool  # noqa: PLC0415 (local import)
+    from tools.spawn_subagent import SpawnSubagentTool
 
     registry.register(SpawnSubagentTool(
         workspace_root=workspace,

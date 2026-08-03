@@ -100,7 +100,7 @@ def test_slice_1a_tool_set_matches_proposal() -> None:
 
 
 def test_slice_g5b_effect_receipt_tools() -> None:
-    assert SLICE_G5B_EFFECT_RECEIPT_TOOLS == frozenset({"file_write"})
+    assert frozenset({"file_write"}) == SLICE_G5B_EFFECT_RECEIPT_TOOLS
 
 
 def test_append_receipt_persists_and_loads(workspace: Path) -> None:

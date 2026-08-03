@@ -130,7 +130,7 @@ def test_local_strategies_covers_all_non_general_members() -> None:
     expected = frozenset(
         s for s in OperatorStrategy if s is not OperatorStrategy.general_question
     )
-    assert LOCAL_STRATEGIES == expected
+    assert expected == LOCAL_STRATEGIES
 
 
 # ---------------------------------------------------------------------------

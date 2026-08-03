@@ -325,7 +325,7 @@ class DaemonLoop:
                 result = callback()
                 if inspect.isawaitable(result):
                     await result
-            except Exception:  # noqa: BLE001 — logged; other resources must still close
+            except Exception:
                 logger.exception("shutdown: close callback %r failed", callback)
 
     # ── signal handling ──────────────────────────────────────────────────
@@ -398,7 +398,7 @@ class DaemonLoop:
                     await asyncio.wait_for(
                         self._wake_event.wait(), timeout=self._idle_timeout
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     self._pending_reasons.append(IDLE_TIMEOUT_REASON)
         self._wake_event.clear()
         reasons = self._pending_reasons
@@ -415,5 +415,5 @@ class DaemonLoop:
             # Cancellation must propagate: it is how shutdown (1.2) will
             # eventually interrupt in-flight work.
             raise
-        except Exception:  # noqa: BLE001 — logged, loop must survive handler bugs
+        except Exception:
             logger.exception("daemon wake handler failed for reasons=%s", reasons)

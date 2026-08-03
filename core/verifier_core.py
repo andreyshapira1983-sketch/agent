@@ -224,9 +224,8 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                         from .verifier_utils import _excerpt_supports_figures
                         if not _excerpt_supports_figures(excerpt, stat_figures):
                             strict_ok = False
-                    else:
-                        if ev.kind == "web_search_hit":
-                            strict_ok = False
+                    elif ev.kind == "web_search_hit":
+                        strict_ok = False
                 body_part = f":{c.body}" if c.body else ""
                 if strict_ok:
                     matched_ids.append(ev.id)

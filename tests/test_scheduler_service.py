@@ -132,7 +132,7 @@ def test_ticks_due_schedule_and_advances_next_run(workspace: Path):
             reports.append(report)
             service.stop()
 
-        service._on_tick = on_tick  # noqa: SLF001 — direct wiring keeps the test small
+        service._on_tick = on_tick
         await service.run()
 
     run_async(scenario())
@@ -166,7 +166,7 @@ def test_simulated_clock_fires_each_period(workspace: Path):
             if len(reports) >= 3:
                 service.stop()
 
-        service._on_tick = on_tick  # noqa: SLF001
+        service._on_tick = on_tick
         await service.run()
 
     run_async(scenario())
@@ -192,7 +192,7 @@ def test_on_tick_async_callback_is_awaited(workspace: Path):
             seen.append(report.enqueued_count)
             service.stop()
 
-        service._on_tick = on_tick  # noqa: SLF001
+        service._on_tick = on_tick
         await service.run()
 
     run_async(scenario())
@@ -221,7 +221,7 @@ def test_on_tick_error_does_not_kill_loop(workspace: Path):
                 raise RuntimeError("boom")  # must be logged, loop survives
             service.stop()
 
-        service._on_tick = on_tick  # noqa: SLF001
+        service._on_tick = on_tick
         await service.run()
 
     run_async(scenario())
@@ -247,7 +247,7 @@ def test_limit_is_forwarded_to_tick(workspace: Path):
             if len(reports) >= 2:
                 service.stop()
 
-        service._on_tick = on_tick  # noqa: SLF001
+        service._on_tick = on_tick
         await service.run()
 
     run_async(scenario())
@@ -273,7 +273,7 @@ def test_notify_wakes_before_long_sleep_elapses(workspace: Path):
             service.notify()
 
         asyncio.create_task(poke())
-        return await service._sleep_or_wake(30)  # noqa: SLF001
+        return await service._sleep_or_wake(30)
 
     assert run_async(scenario()) is True
 
@@ -283,7 +283,7 @@ def test_sleep_elapsing_returns_false(workspace: Path):
 
     async def scenario():
         service = SchedulerService(store, queue, sleep=asyncio.sleep)
-        return await service._sleep_or_wake(0)  # noqa: SLF001
+        return await service._sleep_or_wake(0)
 
     assert run_async(scenario()) is False
 
@@ -294,7 +294,7 @@ def test_pre_set_stop_returns_immediately(workspace: Path):
     async def scenario():
         service = SchedulerService(store, queue, sleep=lambda _d: asyncio.sleep(30))
         service.stop()
-        return await service._sleep_or_wake(30)  # noqa: SLF001
+        return await service._sleep_or_wake(30)
 
     assert run_async(scenario()) is True
 
@@ -367,7 +367,7 @@ def test_observability_properties(workspace: Path):
         def on_tick(_report: ScheduleTickReport) -> None:
             service.stop()
 
-        service._on_tick = on_tick  # noqa: SLF001
+        service._on_tick = on_tick
         await service.run()
         return service
 
@@ -391,7 +391,7 @@ def test_runs_without_on_tick_callback(workspace: Path):
             service.stop()
             await asyncio.sleep(0)
 
-        service._sleep = sleeper  # noqa: SLF001
+        service._sleep = sleeper
         await service.run()
 
     run_async(scenario())
@@ -410,7 +410,7 @@ def test_cancelled_error_in_callback_propagates(workspace: Path):
         def on_tick(_report: ScheduleTickReport) -> None:
             raise asyncio.CancelledError
 
-        service._on_tick = on_tick  # noqa: SLF001
+        service._on_tick = on_tick
         with pytest.raises(asyncio.CancelledError):
             await service.run()
         return service
@@ -437,7 +437,7 @@ class _VanishingStore:
             next_run_at=(START - timedelta(minutes=1)).isoformat(),
         )
 
-    def list(self, *, status=None):  # noqa: A003 - mirrors SchedulerStore.list
+    def list(self, *, status=None):
         return [] if self.tick_calls else [self._due]
 
     def tick(self, *, task_queue, now, limit=None):
@@ -460,7 +460,7 @@ def test_zero_enqueue_tick_recovers_without_hot_spin(workspace: Path):
             service.stop()
             await asyncio.sleep(0)
 
-        service._sleep = sleeper  # noqa: SLF001
+        service._sleep = sleeper
         await service.run()
         return service
 

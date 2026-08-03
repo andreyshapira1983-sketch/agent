@@ -72,10 +72,9 @@ def test_context_is_restored_after_normal_exit() -> None:
 
 
 def test_context_is_restored_after_an_exception() -> None:
-    with pytest.raises(RuntimeError):
-        with run_scope("run-a", task_id="T-1"):
-            assert current_run() is not None
-            raise RuntimeError("boom")
+    with pytest.raises(RuntimeError), run_scope("run-a", task_id="T-1"):
+        assert current_run() is not None
+        raise RuntimeError("boom")
     assert current_run() is None, "the scope must unwind on the error path too"
 
 

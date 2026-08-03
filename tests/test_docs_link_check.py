@@ -65,7 +65,7 @@ def test_broken_link_is_detectable(tmp_path):
 
 
 def test_script_is_read_only():
-    with open(_SCRIPT, "r", encoding="utf-8") as handle:
+    with open(_SCRIPT, encoding="utf-8") as handle:
         src = handle.read()
     assert "import core" not in src
     assert "from core" not in src

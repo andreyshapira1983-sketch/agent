@@ -188,7 +188,7 @@ class SpawnSubagentTool(Tool):
         # Filter silently to the safe set — the LLM cannot escalate privileges
         # by naming an unsafe tool; unknown / unsafe names are dropped quietly.
         safe = [t for t in allowed_tools if isinstance(t, str) and t in _SAFE_SUBAGENT_TOOLS]
-        return safe if safe else None   # None → runner uses all safe defaults
+        return safe or None   # None → runner uses all safe defaults
 
     @staticmethod
     def _resolve_contract_name(contract_name: str | None, role: str) -> str:

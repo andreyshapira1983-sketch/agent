@@ -120,7 +120,7 @@ class _FakeAgent:
         # `outputs` (a list) lets a tool return different results on successive
         # calls — needed because baseline_tests and post_tests both call
         # run_tests but must report different pass counts.
-        if "outputs" in spec and spec["outputs"]:
+        if spec.get("outputs"):
             current = spec["outputs"].pop(0)
         else:
             current = spec

@@ -39,7 +39,7 @@ def _router(tmp_path: Path, routes=None) -> ModelRouter:
 def _stub_tier_models(monkeypatch, mapping: dict[tuple[str, str], str]) -> None:
     """Stub tier_model_for so (tier_value, provider) → model is deterministic."""
 
-    def fake_tier_model_for(tier, provider):  # noqa: ANN001
+    def fake_tier_model_for(tier, provider):
         return mapping.get((tier.value, provider), "")
 
     monkeypatch.setattr("core.model_catalog.tier_model_for", fake_tier_model_for)

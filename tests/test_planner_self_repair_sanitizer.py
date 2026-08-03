@@ -38,7 +38,7 @@ def _planner(workspace: Path) -> LLMPlanner:
     reg.register(DiffFileTool(workspace_root=workspace))
 
     class _StubLLM:
-        def complete(self, **_kw):  # noqa: D401
+        def complete(self, **_kw):
             raise AssertionError("LLM must not be called in sanitiser tests")
 
     return LLMPlanner(llm=_StubLLM(), registry=reg)

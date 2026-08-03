@@ -209,15 +209,14 @@ def test_failed_import_preserves_scan_run(conn):
         extractor_version="0.0.0",
         resolver_version="1",
     )
-    with pytest.raises(RuntimeError, match="boom"):
-        with import_transaction(conn, run_id):
-            conn.execute(
-                """
+    with pytest.raises(RuntimeError, match="boom"), import_transaction(conn, run_id):
+        conn.execute(
+            """
                 INSERT INTO logical_sources (id, type, path)
                 VALUES ('doc:tmp.md', 'document', 'tmp.md')
                 """
-            )
-            raise RuntimeError("boom")
+        )
+        raise RuntimeError("boom")
     row = conn.execute(
         "SELECT status, error_summary FROM scan_runs WHERE id = ?", (run_id,)
     ).fetchone()
@@ -271,11 +270,10 @@ def test_post_commit_error_does_not_rollback_import(conn, monkeypatch):
     monkeypatch.setattr(
         "project_intelligence.db.access.finish_scan_run", flaky_finish
     )
-    with pytest.raises(RuntimeError, match="finish failed"):
-        with import_transaction(conn, run_id):
-            upsert_logical_source(
-                conn, source_id="doc:post.md", type_="document", path="post.md"
-            )
+    with pytest.raises(RuntimeError, match="finish failed"), import_transaction(conn, run_id):
+        upsert_logical_source(
+            conn, source_id="doc:post.md", type_="document", path="post.md"
+        )
     # import data must remain
     n = conn.execute(
         "SELECT COUNT(*) AS c FROM logical_sources WHERE id = 'doc:post.md'"

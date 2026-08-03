@@ -43,7 +43,7 @@ def test_concurrent_ask_calls_do_not_interleave_agent_run(server, monkeypatch):
     class _RecordingAgent:
         def __init__(self) -> None:
             self.log = type("L", (), {"trace_id": "trace-x"})()
-            self.llm = type("M", (), {"usage_summary": staticmethod(lambda: {})})()
+            self.llm = type("M", (), {"usage_summary": staticmethod(dict)})()
 
         def run(self, *, user_question, file_hint=None):
             nonlocal max_concurrent, current

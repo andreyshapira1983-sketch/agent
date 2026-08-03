@@ -207,7 +207,7 @@ def ask(body: AskRequest) -> AskResponse:
                 user_question=body.question,
                 file_hint=body.file_hint,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # Surface unexpected errors as 500 with a safe message (no stack
             # trace in the response body — full trace is in the JSONL log).
             agent.log.log("api_error", {"error": type(exc).__name__, "message": str(exc)})

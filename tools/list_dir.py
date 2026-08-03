@@ -69,7 +69,7 @@ class ListDirTool(Tool):
         result = "\n".join(lines)
         if truncated:
             result += f"\n... (truncated at {MAX_ENTRIES} entries)"
-        return result if result else "(empty directory)"
+        return result or "(empty directory)"
 
     def validate_output(self, output: Any) -> tuple[bool, list[str]]:
         if not isinstance(output, str):

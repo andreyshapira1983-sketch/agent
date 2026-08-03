@@ -266,12 +266,11 @@ def update_profile(
         elif _DETAILED_PATTERNS.search(question):
             data["verbosity"] = "detailed"
             data["verbosity_locked"] = True
-    else:
-        # Allow re-lock with opposing signal.
-        if _BRIEF_PATTERNS.search(question):
-            data["verbosity"] = "brief"
-        elif _DETAILED_PATTERNS.search(question):
-            data["verbosity"] = "detailed"
+    # Allow re-lock with opposing signal.
+    elif _BRIEF_PATTERNS.search(question):
+        data["verbosity"] = "brief"
+    elif _DETAILED_PATTERNS.search(question):
+        data["verbosity"] = "detailed"
 
     # --- Language (sticky if locked) ---
     if not data["language_locked"]:

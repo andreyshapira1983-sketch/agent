@@ -101,7 +101,7 @@ def test_candidate_carries_all_required_fields():
         "proposed_change", "proof_of_value", "expected_effect", "confidence",
         "score",
     ):
-        assert key in d and d[key] != "" or key in ("score",)
+        assert (key in d and d[key] != "") or key in ("score",)
 
 
 # ── determinism & ranking ─────────────────────────────────────────────────────

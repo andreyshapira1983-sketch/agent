@@ -10,9 +10,9 @@ from project_intelligence.db.access import (
     add_source_revision_occurrence,
     finish_scan_run,
     insert_entity,
+    insert_source_revision,
     start_scan_run,
     upsert_logical_source,
-    insert_source_revision,
 )
 from project_intelligence.db.normalize import normalized_value_hash
 

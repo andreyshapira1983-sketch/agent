@@ -324,7 +324,7 @@ class LLMPlanner:
         failure_context: str = "",
     ) -> str:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        hint = file_hint if file_hint else "(none)"
+        hint = file_hint or "(none)"
         hidden = getattr(self, "hidden_tools", frozenset()) or frozenset()
         tool_names = ", ".join(
             t.name for t in self.registry.list() if t.name not in hidden

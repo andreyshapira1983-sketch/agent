@@ -380,7 +380,7 @@ def test_dry_run_without_a_provider_flag_asks_for_all(agent, capsys, monkeypatch
 
     def _report(*, providers):
         seen["providers"] = providers
-        return SimpleNamespace(to_dict=lambda: {}, user_summary=lambda: "DIFF-TEXT")
+        return SimpleNamespace(to_dict=dict, user_summary=lambda: "DIFF-TEXT")
 
     monkeypatch.setattr(discovery_mod, "build_discovery_report", _report)
 

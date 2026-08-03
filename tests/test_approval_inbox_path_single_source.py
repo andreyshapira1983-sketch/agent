@@ -16,7 +16,7 @@ from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH
 
 
 def test_canonical_constant_is_expected_path() -> None:
-    assert DEFAULT_APPROVAL_INBOX_PATH == Path("data") / "approval_inbox.jsonl"
+    assert Path("data") / "approval_inbox.jsonl" == DEFAULT_APPROVAL_INBOX_PATH
 
 
 def test_all_callers_reference_the_same_object() -> None:

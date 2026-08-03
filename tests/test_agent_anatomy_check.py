@@ -88,7 +88,7 @@ def test_the_committed_map_is_exactly_what_the_generator_emits():
     `build_document()` writes nothing, so this compares without side effects.
     """
     gen = _load_generator()
-    with open(_DOC, "r", encoding="utf-8") as handle:
+    with open(_DOC, encoding="utf-8") as handle:
         committed = handle.read()
     assert gen.build_document() == committed, (
         "docs/AGENT_ANATOMY.md differs from `python scripts/gen_anatomy.py`. "
@@ -196,7 +196,7 @@ def test_first_doc_line_is_empty_for_a_module_without_one(tmp_path, monkeypatch)
 
 def test_script_does_not_import_core_or_git():
     # Guard the read-only contract at the source level.
-    with open(_SCRIPT, "r", encoding="utf-8") as handle:
+    with open(_SCRIPT, encoding="utf-8") as handle:
         src = handle.read()
     assert "import core" not in src
     assert "from core" not in src

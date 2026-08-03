@@ -134,7 +134,7 @@ def test_dispatch_parser_still_matches_the_live_registry():
 
 
 def test_script_is_read_only():
-    with open(_SCRIPT, "r", encoding="utf-8") as handle:
+    with open(_SCRIPT, encoding="utf-8") as handle:
         src = handle.read()
     assert "import core" not in src
     assert "from core" not in src

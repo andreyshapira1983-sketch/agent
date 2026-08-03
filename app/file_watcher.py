@@ -361,5 +361,5 @@ class FileWatcher:
                 await result
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 — callback bugs must not kill the watcher
+        except Exception:
             logger.exception("file watcher on_change callback failed")

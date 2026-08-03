@@ -464,7 +464,6 @@ class TestAcceptanceNoInfiniteLoop:
             if exception_factory is not None:
                 raise exception_factory()
             # verify_failed scenario: return falsy output.
-            return None
 
         bad = _RecordingTool("bad", behaviour, risk="read_only")
         step = {"tool": "bad", "arguments": {}, "label": "stub", "expected_outcome": "x"}

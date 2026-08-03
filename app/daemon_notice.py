@@ -37,7 +37,7 @@ def _print_daemon_inbox_notice(workspace: Path) -> None:
 
         if total <= 5:
             # Small backlog: show each item on a single trimmed line.
-            print("", file=sys.stderr)
+            print(file=sys.stderr)
             for item in pending:
                 first_line = item.summary.splitlines()[0] if item.summary else ""
                 summary = _truncate_text(first_line, 90)
