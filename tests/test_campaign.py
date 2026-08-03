@@ -617,7 +617,10 @@ class TestActionFocusedGoal:
             )
         )
         config = CampaignConfig(goal="Verify agent state", dry_run=True)
-        action = _useful(action="restore_daemon_liveness")
+        # MIR-070: restore_daemon_liveness is now answered deterministically
+        # from the heartbeat (no LLM run), so THIS test — whose point is the
+        # goal-coupling of the generic LLM path — uses a non-intercepted action.
+        action = _useful(action="investigate_tick_error")
 
         outcome = _default_execute_action(
             agent=agent, workspace="/ws", action=action, config=config
@@ -626,7 +629,7 @@ class TestActionFocusedGoal:
         assert captured["include_goal"] is True
         assert captured["dry_run"] is True
         assert "Verify agent state" in captured["goal"]
-        assert "restore_daemon_liveness" in captured["goal"]
+        assert "investigate_tick_error" in captured["goal"]
         assert outcome.result == "completed"
         assert outcome.artifact == "reasoning: Re-run agent_tick.py --status to confirm liveness."
 
