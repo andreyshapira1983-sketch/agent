@@ -34,8 +34,6 @@ from core.redaction import collect_pii_findings, redact_payload, scan
 from core.replan import FailureType as ReplanCode
 from core.replan import ReplanTrigger
 
-
-
 # Thread-local storage for per-step replan triggers.
 # _execute_step writes here instead of self._last_step_failure so that
 # parallel worker threads each own an isolated slot — no shared-state race.
@@ -85,7 +83,10 @@ class AgentLoopStepExecution:
         _current_attempt: int
         _cycle_findings: list[Any]
 
-        def _file_read_workspace_root(self) -> Any: ...
+        # Объявляем ВЫЗЫВАЕМЫМ атрибутом: заглушка-функция с пустым телом
+        # читается анализаторами как «функция без return», и каждый вызов
+        # ложно помечается E1111.
+        _file_read_workspace_root: Any
 
     # ------------------------------------------------------------------
     # Parallel step execution helpers
@@ -121,12 +122,12 @@ class AgentLoopStepExecution:
             return False
         try:
             tool = self.registry.get(tool_name)
-        except Exception:  # инструмента нет в реестре — считаем НЕ read_only (безопасная сторона)
+        except Exception:  # noqa: BLE001 — инструмента нет в реестре: считаем НЕ read_only (безопасная сторона)
             return False
         arguments = spec.get("arguments")
         try:
             return tool.risk_for(arguments if isinstance(arguments, dict) else {}) == "read_only"
-        except Exception:  # инструмент не умеет оценить риск — считаем НЕ read_only (безопасная сторона)
+        except Exception:  # noqa: BLE001 — инструмент не умеет оценить риск: считаем НЕ read_only (безопасная сторона)
             return False
     def _execute_steps_parallel(
         self, steps: list[PlanStep]
@@ -826,7 +827,9 @@ class AgentLoopStepExecution:
         source_label: str,
         policy_decision: PolicyDecision,
         arguments: dict[str, Any],
-    ) -> _Literal["approve", "deny", "abort", "unavailable"]:
+    ) -> _Literal[  # noqa: F821 — pyflakes не разбирает алиас Literal; перенос дословный
+        "approve", "deny", "abort", "unavailable"
+    ]:
         """Bridge between the PolicyGate's `escalate` verdict and the human.
 
         Emits two trace events — `approval_request` then `approval_decision`

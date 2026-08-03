@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import ast
 import inspect
-import subprocess
+import subprocess  # noqa: S404 — читаем историю через git show, вход фиксирован
 from pathlib import Path
 
 import core.loop as loop_mod
@@ -94,8 +94,11 @@ def test_the_agent_still_has_every_moved_method():
 
 def test_import_seams_survive():
     """Имена, которые импортируют тесты и соседи, доступны по прежнему пути."""
-    from core.loop import _step_trigger_tls  # noqa: F401 — шов, проверяем сам импорт
-    from core.loop import _TOOL_SOURCE_HINTS, _TRUSTED_INTERNAL_TOOLS
+    from core.loop import (
+        _TOOL_SOURCE_HINTS,
+        _TRUSTED_INTERNAL_TOOLS,
+        _step_trigger_tls,  # noqa: F401 — шов, проверяем сам импорт
+    )
 
     assert isinstance(_TRUSTED_INTERNAL_TOOLS, frozenset)
     assert _TOOL_SOURCE_HINTS["web_fetch"] == "web"
