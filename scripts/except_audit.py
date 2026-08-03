@@ -25,7 +25,10 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 
-_LOGGY = ("log", "print", "warn", "stderr")
+_LOGGY = (
+    "log", "print", "warn", "warning", "info", "error", "debug",
+    "critical", "exception", "stderr",
+)
 
 
 def _is_log_call(n: ast.AST) -> bool:
@@ -38,16 +41,17 @@ def _is_log_call(n: ast.AST) -> bool:
         f = f.value
     if isinstance(f, ast.Name):
         name = f.id + "." + name if name else f.id
-    low = name.lower()
-    return any(k in low for k in _LOGGY)
+    parts = name.lower().split(".")
+    # Token match, not substring: `login()`/`logic()` must not count as
+    # journaling (review round #292).
+    return any(k in parts for k in _LOGGY)
 
 
 def _has_log_call(node: ast.AST) -> bool:
     return any(_is_log_call(n) for n in ast.walk(node))
 
 
-def classify_file(path: Path) -> list[dict]:
-    src = path.read_text(encoding="utf-8")
+def classify_source(src: str, rel_file: str) -> list[dict]:
     lines = src.splitlines()
     out: list[dict] = []
     for node in ast.walk(ast.parse(src)):
@@ -75,10 +79,14 @@ def classify_file(path: Path) -> list[dict]:
                 kind = "silent_default_return"
             else:
                 kind = "silent_other"
-            span = lines[h.lineno - 1 : min(h.body[0].lineno + 1, len(lines))]
+            # The justification may sit on the line ABOVE the except, on
+            # the except line, or anywhere in the handler body (review
+            # round #292).
+            end = h.end_lineno or h.body[-1].lineno
+            span = lines[max(0, h.lineno - 2) : min(end, len(lines))]
             commented = any("#" in line for line in span)
             out.append({
-                "file": path.relative_to(REPO).as_posix(),
+                "file": rel_file,
                 "line": h.lineno,
                 "kind": kind,
                 "commented": commented,
@@ -86,9 +94,17 @@ def classify_file(path: Path) -> list[dict]:
     return out
 
 
+def classify_file(path: Path) -> list[dict]:
+    return classify_source(
+        path.read_text(encoding="utf-8"), path.relative_to(REPO).as_posix()
+    )
+
+
 def audit() -> list[dict]:
     rows: list[dict] = []
-    for path in sorted((REPO / "core").glob("*.py")):
+    # rglob: subdirectories under core/ (none today, but the ratchet must not
+    # go blind the day one appears — review round #292).
+    for path in sorted((REPO / "core").rglob("*.py")):
         rows.extend(classify_file(path))
     return rows
 

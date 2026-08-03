@@ -18,10 +18,12 @@ from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[1]
 
-# Measured 2026-08-03 (map in MIR-077): 157 broad handlers total — 31
-# journaled, 6 log-guards, 2 re-raise, 118 silent, of which 52 name no
-# reason. Lower this number as classes get fixed; never raise it.
-_BASELINE_UNJUSTIFIED_SILENT = 52
+# Measured 2026-08-03, RE-measured after the #292 review round fixed the
+# scanner (substring 'log' matched login/logic — 10 handlers were falsely
+# journaled): 157 broad handlers = 21 journaled + 5 log-guards + 2 re-raise
+# + 129 silent, of which 61 name no reason. Lower as classes get fixed;
+# never raise.
+_BASELINE_UNJUSTIFIED_SILENT = 61
 
 
 def _load_audit():
@@ -54,3 +56,47 @@ def test_the_scanner_sees_the_known_landscape():
     assert "journaled" in kinds
     assert "log_guard" in kinds, "страховка вокруг журналирования — легитимный класс"
     assert len(rows) >= 100, "карта внезапно опустела — сканер сломан, а не код чист"
+
+
+# ── the scanner's own spec (review round #292: the ratchet's foundation
+#    must not be an untested script) ─────────────────────────────────────────
+
+def test_login_is_not_journaling():
+    audit = _load_audit()
+    rows = audit.classify_source(
+        "try:\n    x = 1\nexcept Exception:\n    login()\n", "f.py"
+    )
+    assert rows[0]["kind"] == "silent_other", "подстрочное 'log' в login — не журнал"
+
+
+def test_error_level_counts_as_journaling():
+    audit = _load_audit()
+    rows = audit.classify_source(
+        "try:\n    x = 1\nexcept Exception as exc:\n    logger.error(exc)\n", "f.py"
+    )
+    assert rows[0]["kind"] == "journaled"
+
+
+def test_comment_above_the_except_counts_as_a_reason():
+    audit = _load_audit()
+    rows = audit.classify_source(
+        "try:\n    x = 1\n# намеренно глушим: изоляция по-записно\nexcept Exception:\n    pass\n",
+        "f.py",
+    )
+    assert rows[0]["commented"] is True
+
+
+def test_log_guard_is_recognised():
+    audit = _load_audit()
+    rows = audit.classify_source(
+        "try:\n    self.log.log('e', {})\nexcept Exception:\n    pass\n", "f.py"
+    )
+    assert rows[0]["kind"] == "log_guard"
+
+
+def test_narrow_exception_is_not_counted():
+    audit = _load_audit()
+    rows = audit.classify_source(
+        "try:\n    x = 1\nexcept ValueError:\n    pass\n", "f.py"
+    )
+    assert rows == []
