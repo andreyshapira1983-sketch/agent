@@ -117,7 +117,7 @@ def test_except_star_is_scanned():
     rows = audit.classify_source(
         "try:\n    x = 1\nexcept* Exception:\n    pass\n", "f.py"
     )
-    assert len(rows) == 1
+    assert len(rows) == 1 and rows[0]["kind"] == "silent_noop"
 
 
 def test_hash_inside_a_string_is_not_a_justification():
