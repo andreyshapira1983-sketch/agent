@@ -316,7 +316,7 @@ class ConflictResolver:
         # than one independent source attests it.
         corroborated: dict[str, tuple[str, ...]] = {}
         for subject, pairs in grouped.items():
-            values = sorted({value for _claim, value in pairs})
+            values = _distinct_values(value for _claim, value in pairs)
             source_ids = sorted({claim.source_id for claim, _value in pairs})
             if len(source_ids) < 2:
                 continue
@@ -663,7 +663,16 @@ def _subject_value(text: str) -> tuple[str, str] | None:
         match = re.match(pattern, compact, flags=re.IGNORECASE)
         if not match:
             continue
-        subject = _normalise_subject(match.group(1))
+        raw_subject = match.group(1).strip()
+        # MIR-076 (measured live): a DEICTIC noun phrase — «this document»,
+        # «этот документ» — names a different referent in every source, so
+        # grouping it across sources manufactures conflicts out of unrelated
+        # self-descriptions. The bare-pronoun deny-list below cannot catch
+        # the phrase form, and the old subject normaliser even STRIPPED
+        # «этот», collapsing Russian deixis into a groupable common noun.
+        if _DEICTIC_SUBJECT_RE.match(raw_subject):
+            continue
+        subject = _normalise_subject(raw_subject)
         value = _normalise_value(match.group(2))
         if subject in _GENERIC_CONFLICT_SUBJECTS:
             continue
@@ -672,13 +681,57 @@ def _subject_value(text: str) -> tuple[str, str] | None:
     return None
 
 
+#: Deictic determiners open a context-bound subject; articles (the/a/an) do
+#: not and stay strippable in `_normalise_subject`.
+_DEICTIC_SUBJECT_RE = re.compile(
+    r"^(this|that|these|those|этот|эта|это|эти|тот|та|то|данный|данная|данное|данные)\b",
+    re.IGNORECASE,
+)
+
+
 def _normalise_subject(text: str) -> str:
-    text = re.sub(r"^(the|a|an|этот|эта|это)\s+", "", text.strip().casefold())
+    text = re.sub(r"^(the|a|an)\s+", "", text.strip().casefold())
     return re.sub(r"[^0-9a-zа-яё _-]+", "", text).strip()
 
 
 def _normalise_value(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip().casefold())
+
+
+def _value_tokens(value: str) -> list[str]:
+    """Word tokens for equivalence comparison, negation canonicalised.
+
+    «never proof of implementation» and «not proof of implementation» assert
+    the same thing in a copular claim — measured live (MIR-076): two doctrine
+    files agreeing on this exact rule were booked as a contradiction because
+    the values were compared byte-for-byte.
+    """
+    tokens = re.sub(r"[^\w\s-]", " ", value, flags=re.UNICODE).casefold().split()
+    return ["not" if t in ("never", "никогда") else t for t in tokens]
+
+
+def _values_equivalent(a: str, b: str) -> bool:
+    """Two claim values that agree, possibly in different words.
+
+    Equivalent when their token forms match, or when the SHORTER one is a
+    token-prefix of the longer AND is at least three tokens long — long
+    enough that «good» never glues to «good for nothing», while a clipped
+    quotation of the same sentence still counts as the same statement.
+    """
+    ta, tb = _value_tokens(a), _value_tokens(b)
+    if ta == tb:
+        return True
+    short, long_ = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    return len(short) >= 3 and long_[: len(short)] == short
+
+
+def _distinct_values(values) -> list[str]:
+    """Cluster values by equivalence; one representative per cluster."""
+    reps: list[str] = []
+    for value in sorted(set(values)):
+        if not any(_values_equivalent(value, rep) for rep in reps):
+            reps.append(value)
+    return reps
 
 
 def _bounded(value: float) -> float:
