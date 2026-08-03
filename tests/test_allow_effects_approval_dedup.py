@@ -76,12 +76,27 @@ def test_secret_bearing_goal_still_dedups(tmp_path):
     carrying raw goal text stops matching once the goal contains a secret —
     spam would return exactly for sensitive goals. The key must therefore be
     derived from a stable non-sensitive form (hash), not the raw text."""
+    import hashlib
+
     rt = _runtime(tmp_path)
     secret_goal = "проверь ключ " + "AKIA" + "IOSFODNN" + "7EXAMPLE" + " в конфиге"
     first = _run_blocked(rt, secret_goal)
+    # Reopen the PERSISTED inbox (post-merge review round #284): the failure
+    # mode lives in what is stored on disk, so the second run must dedup
+    # against the reloaded item, not an in-memory leftover.
+    rt = _runtime(tmp_path)
     again = _run_blocked(rt, secret_goal)
     assert again.stop_reason == first.stop_reason
-    assert rt.approval_inbox.snapshot()["pending"] == 1
+    pending = rt.approval_inbox.pending()
+    assert len(pending) == 1
+    stored_key = (pending[0].payload or {}).get("dedup_key", "")
+    expected = (
+        "autonomous_runtime.allow_effects:"
+        + hashlib.sha256(secret_goal.encode("utf-8")).hexdigest()[:16]
+    )
+    assert stored_key == expected, "хранимый ключ обязан быть хэшем цели"
+    assert secret_goal not in stored_key
+    assert "IOSFODNN" not in stored_key, "текст секрета не должен жить в ключе"
 
 
 def test_dedup_hit_does_not_burn_approval_budget(tmp_path):
