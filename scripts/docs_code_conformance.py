@@ -213,10 +213,18 @@ def classify_renamed_reference(
 
 
 def _registry_commands() -> set[str]:
-    src = (REPO / "cli" / "command_registry.py").read_text(encoding="utf-8")
-    return set(re.findall(r'canonical="(:[a-z0-9-]+)"', src)) | set(
-        re.findall(r'"(:[a-z0-9-]+)"', src)
-    )
+    # Since the #278 split the command table lives in two spec volumes that
+    # `cli/command_registry.py` combines; scan all three so a token defined in
+    # a volume is not reported as an unknown command.
+    tokens: set[str] = set()
+    for name in ("command_registry.py", "command_specs.py", "command_specs_ops.py"):
+        path = REPO / "cli" / name
+        if not path.is_file():
+            continue
+        src = path.read_text(encoding="utf-8")
+        tokens |= set(re.findall(r'canonical="(:[a-z0-9-]+)"', src))
+        tokens |= set(re.findall(r'"(:[a-z0-9-]+)"', src))
+    return tokens
 
 
 def main(argv: list[str] | None = None) -> int:
