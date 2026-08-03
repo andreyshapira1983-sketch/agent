@@ -14,6 +14,7 @@ new run can ask again.
 """
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from core.approval_inbox import ApprovalInbox
@@ -76,8 +77,6 @@ def test_secret_bearing_goal_still_dedups(tmp_path):
     carrying raw goal text stops matching once the goal contains a secret —
     spam would return exactly for sensitive goals. The key must therefore be
     derived from a stable non-sensitive form (hash), not the raw text."""
-    import hashlib
-
     rt = _runtime(tmp_path)
     secret_goal = "проверь ключ " + "AKIA" + "IOSFODNN" + "7EXAMPLE" + " в конфиге"
     first = _run_blocked(rt, secret_goal)
