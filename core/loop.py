@@ -624,22 +624,11 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         _run_assumptions = AssumptionRegistry(
             run_id=getattr(self.log, "trace_id", ""),
         )
-        # Layer 2→5 bridge: if the store already has assumptions for this run_id
-        # (e.g. a previous failed attempt in the same session), restore them so
-        # they are not duplicated and the prompt block stays accurate.
-        try:
-            if self.assumption_store is not None:
-                _existing = self.assumption_store.load_by_run(
-                    getattr(self.log, "trace_id", "")
-                )
-                if _existing:
-                    _run_assumptions.restore_from_store(_existing)
-                    self.log.log("assumptions_restored", {
-                        "run_id": getattr(self.log, "trace_id", ""),
-                        "count": len(_existing),
-                    })
-        except Exception:
-            pass  # Restore must never abort the run.
+        # MIR-027: the store is an ARCHIVE, not an active input. The cross-
+        # turn auto-restore that sat here leaked assumptions between unrelated
+        # goals (session-lifetime trace id) and served no other caller;
+        # archived rows return only via explicit retrieval. Measurements and
+        # the operator's ruling live in the MIR-027 registry entry.
         try:
             _known_lang: str | None = None
             if self.last_user_profile is not None:
