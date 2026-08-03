@@ -2295,8 +2295,20 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                         channel="append",
                         text=_vsummary.tail,
                     )
-            except Exception:
-                pass
+            except Exception as _vs_exc:
+                # The explanation must never break the answer — but its
+                # failure must not be invisible either (review round #283):
+                # the journal says why this turn carries no explanation.
+                try:
+                    self.log.log(
+                        "verification_explained_failed",
+                        {
+                            "error_type": type(_vs_exc).__name__,
+                            "error": str(_vs_exc)[:300],
+                        },
+                    )
+                except Exception:
+                    pass
 
         policy_result = apply_ranker_output_policy(
             answer=draft.body,

@@ -328,6 +328,38 @@ class TestLoopWiring:
         for marker in FIVE_POINT_MARKERS:
             assert marker in full_text
 
+    def test_a_composer_failure_is_journaled_not_swallowed(
+        self, workspace: Path, monkeypatch
+    ):
+        """Review round #283: a broken summary must not vanish silently —
+        the loop keeps answering, and the journal says WHY there is no
+        explanation this turn."""
+        import core.loop as loop_mod
+
+        def _boom(report, chain=None):
+            raise RuntimeError("схема вердиктов изменилась")
+
+        monkeypatch.setattr(loop_mod, "build_verification_summary", _boom)
+        (workspace / "doc.txt").write_text("hello", encoding="utf-8")
+        agent, log_path = _agent(
+            workspace,
+            llm_response="Conclusion: hello [file:doc.txt].\nFacts: hi [file:doc.txt].",
+            canned_sources=[{
+                "tool": "file_read",
+                "arguments": {"path": "doc.txt"},
+                "label": "file:doc.txt",
+            }],
+        )
+        answer = agent.run("read", file_hint="doc.txt")
+        assert answer  # the turn still completes
+        events = _events(log_path)
+        assert not [e for e in events if e.get("event") == "verification_explained"]
+        failed = [
+            e for e in events if e.get("event") == "verification_explained_failed"
+        ]
+        assert len(failed) == 1
+        assert failed[0]["payload"]["error_type"] == "RuntimeError"
+
     def test_disabled_verifier_adds_neither_tail_nor_event(self, workspace: Path):
         agent, log_path = _agent(
             workspace,
