@@ -202,7 +202,7 @@ def sanitize_step(
         # without burning a re-plan slot.
         looks_unsafe = (
             path.startswith(("/", "\\"))
-            or len(path) >= 2 and path[1] == ":"  # Windows "C:\..."
+            or (len(path) >= 2 and path[1] == ":")  # Windows "C:\..."
             or any(part == ".." for part in path.replace("\\", "/").split("/"))
         )
         if looks_unsafe:
@@ -310,7 +310,7 @@ def sanitize_step(
             path = cleaned[1]
             looks_unsafe = (
                 path.startswith(("/", "\\"))
-                or len(path) >= 2 and path[1] == ":"
+                or (len(path) >= 2 and path[1] == ":")
                 or any(p == ".." for p in path.replace("\\", "/").split("/"))
             )
             if looks_unsafe:
@@ -652,7 +652,7 @@ def sanitize_step(
 
     # ----- spawn_subagent: agent-as-tool pattern -----
     if tool_name == "spawn_subagent":
-        from core.subagent_runner import _SAFE_SUBAGENT_TOOLS  # noqa: PLC0415
+        from core.subagent_runner import _SAFE_SUBAGENT_TOOLS
         from tools.spawn_subagent import (  # local import: avoid cycles
             _MAX_CONTEXT_LEN,
             _MAX_OBJECTIVE_LEN,

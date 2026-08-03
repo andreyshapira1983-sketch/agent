@@ -37,7 +37,7 @@ def _symbol_like(token: str) -> bool:
     """A backticked token that looks like a code symbol, not English/JSON prose."""
     if token in _LITERALS or token.endswith((".md", ".py")):
         return False
-    base = token.split(".")[0]
+    base = token.split(".", maxsplit=1)[0]
     return "_" in token or "." in token or (base[:1].isupper() and base.lower() != base)
 
 

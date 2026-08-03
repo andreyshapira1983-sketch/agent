@@ -93,8 +93,8 @@ def test_reingesting_same_document_does_not_duplicate(workspace: Path):
         "The knowledge pipeline rejects conflicted or weak claims before saving.",
         encoding="utf-8",
     )
-    from cli.commands_ingest import _handle_ingest_source  # noqa: PLC0415
-    _handle_ingest_source(":ingest-source k.txt --write-memory".split(" ", 1)[1], agent, workspace)
-    _handle_ingest_source(":ingest-source k.txt --write-memory".split(" ", 1)[1], agent, workspace)
+    from cli.commands_ingest import _handle_ingest_source
+    _handle_ingest_source("k.txt --write-memory", agent, workspace)
+    _handle_ingest_source("k.txt --write-memory", agent, workspace)
     contents = [str(r.content) for r in agent.list_persistent()]
     assert len(contents) == len(set(contents)), "duplicate persistent records created"

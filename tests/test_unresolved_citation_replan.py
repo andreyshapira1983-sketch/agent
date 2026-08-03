@@ -125,7 +125,7 @@ class _StubResponse:
     def __enter__(self):
         return self
 
-    def __exit__(self, *a: Any) -> None:
+    def __exit__(self, *a: object) -> None:
         return None
 
 

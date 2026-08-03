@@ -152,7 +152,7 @@ def _result_fingerprint(result: ToolResult) -> str:
 def _build_summary(tool_name: str, arguments: dict[str, Any], result: ToolResult) -> str:
     parts = [f"{tool_name} {result.status}"]
     for key in ("path", "command", "url", "query", "pattern"):
-        if key in arguments and arguments[key]:
+        if arguments.get(key):
             parts.append(f"{key}={arguments[key]}")
     summary = " ".join(parts)
     redacted = redact_payload(summary)

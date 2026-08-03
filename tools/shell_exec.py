@@ -437,7 +437,7 @@ class ShellExecTool(Tool):
         guard that cannot see the branch must not assume a safe one.
         """
         try:
-            result = subprocess.run(  # noqa: S603 — fixed argv, shell=False
+            result = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
                 cwd=self.workspace_root,
                 capture_output=True,

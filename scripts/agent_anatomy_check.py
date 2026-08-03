@@ -53,7 +53,7 @@ def main() -> int:
         return 2
 
     actual = _core_modules()
-    with open(DOC_PATH, "r", encoding="utf-8") as handle:
+    with open(DOC_PATH, encoding="utf-8") as handle:
         text = handle.read()
     documented = _documented_modules(text)
 

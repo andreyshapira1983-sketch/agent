@@ -49,6 +49,7 @@ from core.replan import ReplanTrigger, count_failures, format_replan_context
 from core.run_context import run_scope
 
 if TYPE_CHECKING:
+    from core.approval_inbox import ApprovalInbox
     from core.clarification_policy import ClarificationResult
     from core.memory_echo_antibody import MemoryWriteRegistry
     from core.operational_domain import DomainResult
@@ -99,13 +100,6 @@ from core.loop_methods import AgentLoopExtractedMethods
 from core.loop_methods2 import (
     AgentLoopExtractedMethods2,
 )
-
-# Шаг плана уехал в свой модуль (правило «компактные модули»); имена
-# ре-экспортируются, чтобы существующие импорт-пути не порвались.
-# `ReplanCode` (алиас FailureType) жил здесь и импортируется снаружи
-# (tests/test_replan_audit.py). Исполнение шага уехало и унесло его
-# использование — сохраняем шов явным ре-экспортом.
-from core.replan import FailureType as ReplanCode  # noqa: F401 — шов импорта
 from core.loop_step_execution import (
     _TOOL_SOURCE_HINTS as _TOOL_SOURCE_HINTS,
 )
@@ -151,6 +145,13 @@ from core.referent_resolver import (
     is_show_only_directive,
     referent_resolver_mode,
 )
+
+# Шаг плана уехал в свой модуль (правило «компактные модули»); имена
+# ре-экспортируются, чтобы существующие импорт-пути не порвались.
+# `ReplanCode` (алиас FailureType) жил здесь и импортируется снаружи
+# (tests/test_replan_audit.py). Исполнение шага уехало и унесло его
+# использование — сохраняем шов явным ре-экспортом.
+from core.replan import FailureType as ReplanCode  # noqa: F401 — шов импорта
 from core.response_draft import ResponseDraft
 from core.role_router import RoleContext, RoleRouter
 from core.smart_memory import (
@@ -222,6 +223,11 @@ class AgentLoop(
     optional file hint. The planner picks which tools (if any) to call; the
     Executor runs the plan and the Synthesizer produces the Output Contract.
     """
+
+    #: Навешивается снаружи и лениво: `cli/commands_approval.py` создаёт ящик
+    #: при первом обращении. Контракт держался на `getattr` со строкой и был
+    #: невидим; объявляем явно, значение по умолчанию прежнее.
+    approval_inbox: ApprovalInbox | None = None
 
     def __init__(
         self,

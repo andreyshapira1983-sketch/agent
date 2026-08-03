@@ -89,7 +89,7 @@ def documented_commands(doc: str) -> set[str]:
 
 
 def _read(path: str) -> str:
-    with open(path, "r", encoding="utf-8", errors="replace") as handle:
+    with open(path, encoding="utf-8", errors="replace") as handle:
         return handle.read()
 
 

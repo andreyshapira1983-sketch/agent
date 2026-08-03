@@ -70,7 +70,7 @@ def find_broken_links(files: Sequence[str] | None = None) -> list[tuple[str, str
     """Return ``(source_relpath, raw_target)`` for every unresolved link."""
     broken: list[tuple[str, str]] = []
     for path in (files if files is not None else _doc_files()):
-        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+        with open(path, encoding="utf-8", errors="replace") as handle:
             text = handle.read()
         for raw in _LINK_RE.findall(text):
             if _is_external(raw):

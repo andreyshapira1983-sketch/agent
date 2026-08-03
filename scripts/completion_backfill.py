@@ -112,7 +112,7 @@ def _is_self_repair_row(payload: dict[str, Any]) -> bool:
     return (
         payload.get("goal") == "repair"
         and payload.get("outcome") == _REPAIR_OUTCOME
-        and _REPAIR_TAGS <= _tags(payload)
+        and _tags(payload) >= _REPAIR_TAGS
     )
 
 

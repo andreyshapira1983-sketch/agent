@@ -520,5 +520,5 @@ class SchedulerService:
                 await result
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 — callback bugs must not kill the loop
+        except Exception:
             logger.exception("scheduler on_tick callback failed for %s", report)

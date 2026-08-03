@@ -160,7 +160,7 @@ def _renamed_ref_pattern(renames: Mapping[str, str] | None = None) -> re.Pattern
     """
     renames = _RENAMED_PATHS if renames is None else renames
     stems = sorted(
-        {p[:-3] if p.endswith(".py") else p for p in renames},
+        {p.removesuffix(".py") for p in renames},
         key=len,
         reverse=True,
     )

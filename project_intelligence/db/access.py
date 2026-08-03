@@ -14,9 +14,10 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Generator, NamedTuple, Optional
+from typing import Any, NamedTuple
 
 from project_intelligence.db.normalize import deterministic_id, normalized_value_hash
 
@@ -50,12 +51,12 @@ def start_scan_run(
     conn: sqlite3.Connection,
     *,
     repository_commit_sha: str,
-    repository_ref: Optional[str],
+    repository_ref: str | None,
     worktree_state: str,
     schema_version: str,
     extractor_version: str,
     resolver_version: str,
-    dirty_paths_hash: Optional[str] = None,
+    dirty_paths_hash: str | None = None,
 ) -> str:
     """Insert running scan_run and commit. Rejects if conn already in a txn."""
     _require_not_in_transaction(conn, "start_scan_run")
@@ -89,8 +90,8 @@ def finish_scan_run(
     run_id: str,
     *,
     status: str,
-    stats: Optional[dict] = None,
-    error_summary: Optional[str] = None,
+    stats: dict | None = None,
+    error_summary: str | None = None,
 ) -> None:
     """Update terminal status and commit. Rejects if conn already in a txn."""
     _require_not_in_transaction(conn, "finish_scan_run")
@@ -191,9 +192,9 @@ def upsert_logical_source(
     source_id: str,
     type_: str,
     path: str,
-    classification: Optional[str] = None,
-    authority_scope: Optional[str] = None,
-    title_hint: Optional[str] = None,
+    classification: str | None = None,
+    authority_scope: str | None = None,
+    title_hint: str | None = None,
 ) -> InsertResult:
     cur = conn.execute(
         """
@@ -239,8 +240,8 @@ def insert_source_revision(
     content_hash: str,
     first_seen_run_id: str,
     temporal_scope: str = "current",
-    size_bytes: Optional[int] = None,
-    revision_id: Optional[str] = None,
+    size_bytes: int | None = None,
+    revision_id: str | None = None,
 ) -> InsertResult:
     """Idempotent on UNIQUE(logical_source_id, blob_sha).
 
@@ -333,10 +334,10 @@ def insert_extraction_candidate(
     line_start: int,
     line_end: int,
     confidence: float = 1.0,
-    raw_payload: Optional[dict] = None,
-    heading_path: Optional[list] = None,
-    excerpt: Optional[str] = None,
-    candidate_id: Optional[str] = None,
+    raw_payload: dict | None = None,
+    heading_path: list | None = None,
+    excerpt: str | None = None,
+    candidate_id: str | None = None,
 ) -> InsertResult:
     nvh = normalized_value_hash(value_for_hash)
     cid = candidate_id or deterministic_id(
@@ -450,11 +451,11 @@ def insert_entity_claim(
     line_end: int,
     subsystem: str = "",
     temporal_scope: str = "current",
-    observation_id: Optional[str] = None,
+    observation_id: str | None = None,
     confidence: float = 1.0,
-    heading_path: Optional[list] = None,
-    excerpt: Optional[str] = None,
-    claim_id: Optional[str] = None,
+    heading_path: list | None = None,
+    excerpt: str | None = None,
+    claim_id: str | None = None,
 ) -> InsertResult:
     nvh = normalized_value_hash(claim_value)
     cid = claim_id or deterministic_id(
@@ -544,11 +545,11 @@ def insert_observation(
     line_start: int,
     line_end: int,
     confidence: float = 1.0,
-    role: Optional[str] = None,
-    from_candidate_id: Optional[str] = None,
-    heading_path: Optional[list] = None,
-    excerpt: Optional[str] = None,
-    observation_id: Optional[str] = None,
+    role: str | None = None,
+    from_candidate_id: str | None = None,
+    heading_path: list | None = None,
+    excerpt: str | None = None,
+    observation_id: str | None = None,
 ) -> InsertResult:
     nvh = normalized_value_hash(value_for_hash)
     oid = observation_id or deterministic_id(
