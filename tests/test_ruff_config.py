@@ -51,18 +51,17 @@ def test_the_disciplinary_families_stay_selected():
         )
 
 
-def test_every_ignore_carries_a_written_reason():
-    """Отключённое правило без объяснения — это тихое сужение совести.
+def _rules_missing_local_reason(text: str) -> list[str]:
+    """Коды из блока `ignore`, у которых нет причины прямо над ними.
 
-    Причина обязана стоять В НЕПОСРЕДСТВЕННО предшествующем блоке
-    комментариев: иначе новое правило проезжает под чужим объяснением
-    (замечание ревью #298).
+    Комментарий действует ровно на ОДНУ следующую строку правил. Иначе
+    дописанное снизу правило проезжает под чужим объяснением (замечания
+    ревью #298). Группу правил с общей причиной пишем в одну строку.
     """
-    text = _CONFIG.read_text(encoding="utf-8")
     body = text[text.index("ignore = [") : text.index("]", text.index("ignore = ["))]
-    lines = body.splitlines()[1:]          # первая строка — сам `ignore = [`
+    missing: list[str] = []
     reason_above = False
-    for line in lines:
+    for line in body.splitlines()[1:]:     # первая строка — сам `ignore = [`
         stripped = line.strip()
         if not stripped:
             reason_above = False           # пустая строка обрывает блок причин
@@ -70,9 +69,31 @@ def test_every_ignore_carries_a_written_reason():
         if stripped.startswith("#"):
             reason_above = True
             continue
-        for code in (c.strip().strip('"') for c in stripped.split(",")):
-            if code:
-                assert reason_above, f"правило {code} отключено без причины рядом"
+        if not reason_above:
+            missing.extend(
+                code for code in (c.strip().strip('"') for c in stripped.split(","))
+                if code
+            )
+        reason_above = False               # причина израсходована этой строкой
+    return missing
+
+
+def test_every_ignore_carries_a_written_reason():
+    """Отключённое правило без объяснения — это тихое сужение совести."""
+    missing = _rules_missing_local_reason(_CONFIG.read_text(encoding="utf-8"))
+    assert not missing, f"правила отключены без причины рядом: {missing}"
+
+
+def test_the_reason_check_catches_a_rule_hiding_behind_a_neighbour():
+    """Доказательство самой проверки: чужая причина не покрывает соседа."""
+    sample = (
+        'ignore = [\n'
+        '    # причина ровно для одного правила\n'
+        '    "AAA001",\n'
+        '    "BBB002",\n'
+        ']'
+    )
+    assert _rules_missing_local_reason(sample) == ["BBB002"]
 
 
 @pytest.mark.skipif(shutil.which("ruff") is None, reason="ruff не установлен")
