@@ -3853,6 +3853,7 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 MEMORY_BLOCK_LABEL,
                 apply_total_budget,
                 rebuild_trimmed_memory,
+                total_trims,
             )
             raw_blocks: list[tuple[str, str]] = []
             for label, art in artifacts.items():
@@ -3908,6 +3909,9 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 long_term_block = f"{memory_block}\n\n" if memory_block else ""
 
             if was_trimmed:
+                # Parsed once; feeds both the trim event and the starvation
+                # detector below (review round #286).
+                _trims = total_trims(trimmed_blocks)
                 self.log.log(
                     "evidence_budget_trim",
                     {
@@ -3933,8 +3937,44 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                         "memory_ids_kept": sorted(surviving_memory_ids)
                         if surviving_memory_ids is not None
                         else None,
+                        # Per-block cut sizes, parsed back from the trim
+                        # notices — without them a starved block is invisible
+                        # in the trace (MIR-073).
+                        "trims": [
+                            {"label": lbl, "kept": kept, "original": orig}
+                            for lbl, kept, orig in _trims
+                        ],
                     },
                 )
+                # MIR-073: the planner chose these sources; if the budget
+                # squeezed one to a sliver, that is two deciders contradicting
+                # each other — journal it on the existing disagreement channel
+                # instead of continuing as if nothing happened. Logging only,
+                # per the operator's sensor policy.
+                try:
+                    from core.subsystem_disagreement import (
+                        detect_budget_starvation,
+                    )
+                    for _ev in detect_budget_starvation(
+                        _trims,
+                        planned_labels=set(artifacts.keys()),
+                        memory_label=memory_label,
+                    ):
+                        self.log.log("subsystem_disagreement", _ev)
+                except Exception as _sd_exc:
+                    # A broken detector must not break the turn — but its
+                    # failure must not be invisible either (review round
+                    # #286, same rule as verification_explained_failed).
+                    try:
+                        self.log.log(
+                            "subsystem_disagreement_error",
+                            {
+                                "error_type": type(_sd_exc).__name__,
+                                "error": str(_sd_exc)[:300],
+                            },
+                        )
+                    except Exception:
+                        pass
 
             blocks: list[str] = [
                 f'<evidence source="{lbl}">\n{content}\n</evidence>'

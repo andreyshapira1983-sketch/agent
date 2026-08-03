@@ -76,6 +76,13 @@ All notable changes to this project are recorded here. The format follows
   rebuilder and the memory-block tags → `core/evidence_budget.py`.
 
 ### Fixed
+- One evidence block no longer absorbs the whole budget overflow (MIR-073,
+  measured live: the file the planner chose to read arrived as 50 of 12204
+  chars while four siblings stayed pristine): `apply_total_budget` floors
+  non-demoted blocks at a fair share and cascades the surplus largest-first;
+  demoted memory still pays first to the absolute floor. When a planned
+  source IS starved, the orchestrator now journals the plan-vs-budget
+  contradiction (`planner_vs_evidence_budget`) instead of seeing nothing.
 - Distinct shell commands get distinct artifact labels (#255, review round
   #257): the loop keys artifacts by label, and sibling commands rendered
   identically, so the second silently overwrote the first (measured twice
