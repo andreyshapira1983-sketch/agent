@@ -1361,4 +1361,11 @@ def _config_from_task(task: RuntimeTask) -> AutonomousRuntimeConfig:
         limit=task.limit,
         include_tests=task.include_tests,
         learning_limit=task.learning_limit,
+        # MIR-068 (operator's autonomy grant, 2026-08-03): a queued goal must
+        # EXECUTE, not be carried and silently dropped — the tick used to
+        # report `completed` while only status+learn ran. One wire, two locks
+        # untouched: `_build_queue` still refuses a goal task for the default
+        # "project health" placeholder, and `_task_goal` still applies the
+        # unattended posture blocks, gateway dry-run and the agent-runs budget.
+        include_goal=True,
     )
