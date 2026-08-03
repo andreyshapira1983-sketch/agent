@@ -1,6 +1,8 @@
 """Shared test fixtures and helpers."""
 from __future__ import annotations
 
+import os
+import socket
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +10,79 @@ import pytest
 
 from core.model_router import _DEFAULT_PROVIDER_ENV, _provider_has_credentials
 from core.planner import PlannerOutput
+
+
+# ── MIR-053: the suite denies outbound network by default ────────────────────
+#
+# Before this boundary existed, correctness depended on every author
+# remembering the per-file convention (delete keys, set mock routing): one
+# diagnostic run forgot, picked live keys up from `.env`, and billed a real
+# provider request — silently. The deny turns that convention into a default:
+# an outbound TCP connect raises loudly with this marker, loopback stays open
+# (local test servers are legitimate), and a run that genuinely needs the
+# network must say so with ``AGENT_TESTS_ALLOW_NETWORK=1``.
+#
+# Scope, deliberately: `connect`/`connect_ex` on TCP sockets — the layer every
+# HTTP client in the suite must pass through. DNS resolution is left alone
+# (the OS resolver does not go through `socket.connect`, and a lookup neither
+# bills nor mutates). Scripts run OUTSIDE pytest are not covered here — a
+# conftest only exists inside the suite; that half of MIR-053 stays open in
+# the registry.
+
+_NETWORK_DENY_MARKER = (
+    "MIR-053: outbound network from tests is denied by default "
+    "(target {address!r}). Loopback is allowed; a test that genuinely needs "
+    "the network must run with AGENT_TESTS_ALLOW_NETWORK=1."
+)
+
+_LOOPBACK_HOSTS = frozenset({"localhost", "::1", ""})
+
+
+def _connect_target_is_local(address: object) -> bool:
+    """True for targets the deny leaves open.
+
+    Non-tuple addresses (AF_UNIX paths, raw bytes) never leave the machine.
+    Tuple addresses are (host, port[, ...]); loopback is 127.0.0.0/8 by
+    address, plus "localhost"/"::1" by name, plus the IPv4-mapped IPv6 form.
+    """
+    if not isinstance(address, tuple) or not address:
+        return True
+    host = address[0]
+    if not isinstance(host, str):
+        return True
+    host = host.strip("[]").lower()
+    if host in _LOOPBACK_HOSTS:
+        return True
+    if host.startswith("127."):
+        return True
+    return host.startswith("::ffff:127.")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _deny_outbound_network():
+    if os.environ.get("AGENT_TESTS_ALLOW_NETWORK") == "1":
+        yield
+        return
+
+    real_connect = socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+
+    def guarded_connect(self, address):
+        if _connect_target_is_local(address):
+            return real_connect(self, address)
+        raise RuntimeError(_NETWORK_DENY_MARKER.format(address=address))
+
+    def guarded_connect_ex(self, address):
+        # `connect_ex` swallows OSError by design, so it needs its own guard:
+        # a client probing with it would otherwise dial out and read the code.
+        if _connect_target_is_local(address):
+            return real_connect_ex(self, address)
+        raise RuntimeError(_NETWORK_DENY_MARKER.format(address=address))
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(socket.socket, "connect", guarded_connect)
+        mp.setattr(socket.socket, "connect_ex", guarded_connect_ex)
+        yield
 
 
 class FakeLLM:
