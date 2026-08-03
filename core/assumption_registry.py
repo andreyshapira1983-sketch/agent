@@ -511,7 +511,10 @@ class AssumptionStore:
             for row in reversed(rows):        # newest first, newest wins
                 category = row.get("category")
                 text = row.get("text")
-                if not (isinstance(category, str) and isinstance(text, str) and text):
+                if not (
+                    isinstance(category, str) and category
+                    and isinstance(text, str) and text
+                ):
                     deduped.append(row)       # no usable identity — keep as unique
                     continue
                 key = (category, text)

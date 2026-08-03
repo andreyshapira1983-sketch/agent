@@ -77,6 +77,22 @@ def test_rows_without_a_usable_key_are_never_merged(tmp_path):
     assert report["kept"] == 2
 
 
+def test_empty_category_is_not_an_identity_either(tmp_path):
+    """Review round #282, second pass: category="" is as unusable an identity
+    as a missing one — two such rows must both survive."""
+    from core.state_integrity import append_state_jsonl_unlocked
+
+    path = tmp_path / "assumptions.jsonl"
+    store = AssumptionStore(path)
+    append_state_jsonl_unlocked(path, [
+        {"category": "", "text": "one shared text", "note": "первая"},
+        {"category": "", "text": "one shared text", "note": "вторая"},
+    ])
+    report = store.compact()
+    assert report["duplicates_removed"] == 0
+    assert report["kept"] == 2
+
+
 def test_dry_run_counts_without_touching_the_file(tmp_path):
     store = _store_with(tmp_path, [
         ("r1", "language", "same text"),
