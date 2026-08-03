@@ -135,3 +135,83 @@ def test_a_fresh_trace_id_does_not_inherit(tmp_path):
     agent2.run("What is 2 plus 2?")
     texts = [a.text for a in agent2.last_assumptions.assumptions]
     assert not any("Russian-language" in t for t in texts)
+
+
+# ── the corners beyond the REPL (subsystem map, 2026-08-03) ──────────────────
+#
+# The daemon tick builds ONE agent per tick (`agent_tick.py`) and serves every
+# queued task with it — the same one-agent-many-goals shape as the REPL. Its
+# memory profile (`UNATTENDED_MEMORY_PROFILE`) allowlists only
+# {"episode", "hygiene"} durable sinks, so the assumptions sink is denied.
+# These tests pin that shape directly: they are corner pins, not fix proofs —
+# the daemon was already leak-free pre-fix (fresh trace id per tick + saves
+# suppressed), and they keep it that way if either premise ever changes.
+
+
+def _daemon_shaped_agent(tmp_path: Path):
+    """An AgentLoop with the unattended profile's durable-writes allowlist,
+    a live assumption store handle, and one trace id — the daemon-tick shape."""
+    llm = _FixedLLM()
+    registry = ToolRegistry()
+    logger = TraceLogger(trace_id="trace_daemon_tick", log_dir=tmp_path, verbose=False)
+    return AgentLoop(
+        registry=registry,
+        policy=PolicyGate(registry),
+        llm=llm,
+        logger=logger,
+        planner=LLMPlanner(llm=llm, registry=registry),
+        memory=WorkingMemory(),
+        assumption_store=AssumptionStore(tmp_path / "assumptions.jsonl"),
+        durable_writes=frozenset({"episode", "hygiene"}),
+    )
+
+
+def test_the_unattended_profile_never_saves_assumptions(tmp_path):
+    """The daemon's allowlist denies the assumptions sink: after two goal
+    tasks through one agent, the archive file holds nothing."""
+    agent = _daemon_shaped_agent(tmp_path)
+    agent.run("Сколько строк в файле журнала?")
+    agent.run("What is 2 plus 2?")
+    store = AssumptionStore(tmp_path / "assumptions.jsonl")
+    assert store.load_recent(50) == []
+
+
+def test_two_daemon_tasks_through_one_agent_stay_isolated(tmp_path):
+    """Cross-TASK isolation on the daemon shape: the second queued goal's
+    active set carries nothing from the first, in memory or in prompt."""
+    agent = _daemon_shaped_agent(tmp_path)
+    agent.run("Сколько строк в файле журнала?")
+    agent.run("What is 2 plus 2?")
+    texts = [a.text for a in agent.last_assumptions.assumptions]
+    assert not any("Russian-language" in t for t in texts)
+    assert "Russian-language" not in agent.last_assumptions.to_prompt_block()
+
+
+def test_the_current_goals_assumptions_do_reach_the_llm_prompt(tmp_path):
+    """The positive corner («будет ли это работать вообще»): the CURRENT
+    goal's own assumptions are injected into the synthesizer prompt — the
+    fix silenced the archive, not the mechanism."""
+    llm = _FixedLLM()
+    seen_prompts: list[str] = []
+    original_complete = llm.complete
+
+    def recording_complete(system, user, **kw):
+        seen_prompts.append(user)
+        return original_complete(system, user, **kw)
+
+    llm.complete = recording_complete  # type: ignore[method-assign]
+    registry = ToolRegistry()
+    logger = TraceLogger(trace_id="trace_prompt_check", log_dir=tmp_path, verbose=False)
+    agent = AgentLoop(
+        registry=registry,
+        policy=PolicyGate(registry),
+        llm=llm,
+        logger=logger,
+        planner=LLMPlanner(llm=llm, registry=registry),
+        memory=WorkingMemory(),
+        assumption_store=AssumptionStore(tmp_path / "assumptions.jsonl"),
+    )
+    agent.run("Сколько строк в файле журнала?")
+    assert any(
+        "<assumptions>" in p and "Russian-language" in p for p in seen_prompts
+    ), "the current run's own assumptions never reached an LLM prompt"
