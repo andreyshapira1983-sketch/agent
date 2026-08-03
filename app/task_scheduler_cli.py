@@ -26,7 +26,7 @@ def _task_queue_for(agent: AgentLoop, workspace: Path) -> TaskQueueStore:
     queue = getattr(agent, "runtime_task_queue", None)
     if queue is None:
         queue = TaskQueueStore(workspace / DEFAULT_RUNTIME_TASKS_PATH)
-        agent.runtime_task_queue = queue
+        setattr(agent, "runtime_task_queue", queue)
     return queue
 
 
@@ -34,7 +34,7 @@ def _scheduler_for(agent: AgentLoop, workspace: Path) -> SchedulerStore:
     scheduler = getattr(agent, "runtime_scheduler", None)
     if scheduler is None:
         scheduler = SchedulerStore(workspace / DEFAULT_RUNTIME_SCHEDULES_PATH)
-        agent.runtime_scheduler = scheduler
+        setattr(agent, "runtime_scheduler", scheduler)
     return scheduler
 
 

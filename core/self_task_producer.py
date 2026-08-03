@@ -200,7 +200,8 @@ _MEANINGLESS_ASSERTS = ("assert true", "assert 1", "assert 1 == 1", "assert not 
 def _module_import_stem(impl_path: str) -> str:
     """``core/foo.py`` -> ``foo`` — the importable stem tests should reference."""
     rel = impl_path.replace("\\", "/").strip()
-    rel = rel.removesuffix(".py")
+    if rel.endswith(".py"):
+        rel = rel[:-3]
     return rel.rsplit("/", 1)[-1]
 
 
@@ -212,7 +213,8 @@ def _test_references_module(test_content: str, impl_path: str) -> bool:
     low = test_content
     # Accept ``from core.foo import ...``, ``import core.foo``, or ``core.foo``.
     dotted = impl_path.replace("\\", "/")
-    dotted = dotted.removesuffix(".py")
+    if dotted.endswith(".py"):
+        dotted = dotted[:-3]
     dotted = dotted.replace("/", ".")
     return dotted in low or re.search(rf"\b{re.escape(stem)}\b", low) is not None
 

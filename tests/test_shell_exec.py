@@ -354,10 +354,11 @@ class TestOutputCapAndRedaction:
             cp.stderr = b""
             return cp
 
-        with mock.patch("subprocess.run", side_effect=fake_run), mock.patch(
-            "tools.shell_exec.shutil.which", return_value="/fake/whoami"
-        ):
-            result = tool.run(["whoami"])
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            with mock.patch(
+                "tools.shell_exec.shutil.which", return_value="/fake/whoami"
+            ):
+                result = tool.run(["whoami"])
 
         assert result["stdout_truncated"] is True
         assert len(result["stdout"].encode("utf-8")) == 128
@@ -375,10 +376,11 @@ class TestOutputCapAndRedaction:
             cp.stderr = b""
             return cp
 
-        with mock.patch("subprocess.run", side_effect=fake_run), mock.patch(
-            "tools.shell_exec.shutil.which", return_value="/fake/whoami"
-        ):
-            result = tool.run(["whoami"])
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            with mock.patch(
+                "tools.shell_exec.shutil.which", return_value="/fake/whoami"
+            ):
+                result = tool.run(["whoami"])
 
         # The literal credential MUST be gone; a [REDACTED:*] tag is fine.
         assert "sk-aaaaaaaaaa" not in result["stdout"]

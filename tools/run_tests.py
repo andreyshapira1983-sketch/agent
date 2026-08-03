@@ -123,7 +123,7 @@ class RunTestsTool(Tool):
     # always involves subprocess and arbitrary user-test code.
     # ------------------------------------------------------------------
 
-    def risk_for(self, arguments: dict[str, Any]) -> Risk:
+    def risk_for(self, arguments: dict[str, Any]) -> Risk:  # noqa: ARG002
         return "reversible"
 
     # ------------------------------------------------------------------

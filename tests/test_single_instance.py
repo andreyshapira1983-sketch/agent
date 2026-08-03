@@ -179,9 +179,10 @@ def test_context_manager_acquires_and_releases(lock_path: Path):
 
 
 def test_context_manager_refuses_nested_instance(lock_path: Path):
-    with SingleInstanceLock(lock_path), pytest.raises(AlreadyRunningError):
-        with SingleInstanceLock(lock_path):
-            pass  # pragma: no cover - never entered
+    with SingleInstanceLock(lock_path):
+        with pytest.raises(AlreadyRunningError):
+            with SingleInstanceLock(lock_path):
+                pass  # pragma: no cover - never entered
 
 
 # ── restart / re-run ────────────────────────────────────────────────────────
@@ -236,7 +237,7 @@ def test_reacquire_rewrites_diagnostics(lock_path: Path):
 
 # -- real cross-process mutual exclusion ------------------------------------
 
-import multiprocessing as mp
+import multiprocessing as mp  # noqa: E402 - grouped with its worker helpers
 
 _PROC_TIMEOUT = 30.0
 

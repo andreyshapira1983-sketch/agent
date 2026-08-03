@@ -74,7 +74,7 @@ def _opener_with(body: bytes, **kw) -> _StubOpener:
 
 
 def _resolver_for(ip: str):
-    def _resolver(host, port, family, socktype, proto, flags):
+    def _resolver(host, port, family, socktype, proto, flags):  # noqa: ANN001, ARG001
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port or 443))]
 
     return _resolver
@@ -381,7 +381,7 @@ class TestNetworkErrors:
 
 class TestCharset:
     def test_utf8_default(self):
-        body = "проверка".encode()
+        body = "проверка".encode("utf-8")
         opener = _opener_with(body, content_type="text/plain")
         out = WebFetchTool(opener=opener).run(url="https://example.com/")
         assert "проверка" in out["text"]
@@ -401,7 +401,7 @@ class TestCharset:
 class TestRedaction:
     def test_secret_in_body_redacted(self):
         secret = "sk-" + "B" * 48
-        body = f"<p>API key: {secret}</p>".encode()
+        body = f"<p>API key: {secret}</p>".encode("utf-8")
         opener = _opener_with(body)
         out = WebFetchTool(opener=opener).run(url="https://example.com/")
         assert secret not in out["text"]

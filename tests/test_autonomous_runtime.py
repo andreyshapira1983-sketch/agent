@@ -281,7 +281,7 @@ def test_tick_marks_timed_out_run_inconclusive_not_healthy(workspace: Path, monk
     )
 
     # run_tick lazily does `from app.bootstrap import build_agent`; patch that symbol.
-    from app import bootstrap
+    import app.bootstrap as bootstrap
     monkeypatch.setattr(bootstrap, "build_agent", lambda *a, **k: agent)
 
     # run_tick does os.environ.setdefault("AGENT_TEST_TIMEOUT_SECONDS", ...);
@@ -405,7 +405,7 @@ def test_tick_failed_tests_drive_a_repair_proposal_into_the_inbox(
         max_replan_attempts=1,
     )
 
-    from app import bootstrap
+    import app.bootstrap as bootstrap
     monkeypatch.setattr(bootstrap, "build_agent", lambda *a, **k: agent)
     monkeypatch.setenv("AGENT_TEST_TIMEOUT_SECONDS", "300")
 
@@ -462,7 +462,7 @@ def test_tick_dry_run_streak_grows_then_resets_on_live(workspace: Path, monkeypa
     (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
 
     agent = _agent(workspace, with_tests=False)
-    from app import bootstrap
+    import app.bootstrap as bootstrap
     monkeypatch.setattr(bootstrap, "build_agent", lambda *a, **k: agent)
     monkeypatch.setenv("AGENT_TEST_TIMEOUT_SECONDS", "300")
 
@@ -1069,7 +1069,7 @@ def test_queue_heartbeat_failure_names_its_own_task(workspace: Path, monkeypatch
         def __enter__(self):
             return self
 
-        def __exit__(self, *_exc: object) -> None:
+        def __exit__(self, *_exc: Any) -> None:
             return None
 
     monkeypatch.setattr(

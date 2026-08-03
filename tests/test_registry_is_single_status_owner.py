@@ -25,7 +25,7 @@ _DOCS = Path(__file__).resolve().parents[1] / "docs"
 _REGISTRY = _DOCS / "audit" / "MASTER_ISSUE_REGISTRY.md"
 
 # A number immediately describing issues, e.g. "50 issues", "53 issues total".
-_COUNT = re.compile(r"\b(\d{2,3})\s+issues?\b", re.IGNORECASE)
+_COUNT = re.compile(r"\b(\d{2,3})\s+issues?\b", re.I)
 
 # Lines allowed to carry a historical count, with the reason they are allowed.
 _ALLOWED = {

@@ -425,7 +425,8 @@ class ReflectionEngine:
         # Strip accidental markdown code fences (```json ... ``` or ``` ... ```)
         if text.startswith("```"):
             text = text.split("```", 2)[1]
-            text = text.removeprefix("json")
+            if text.startswith("json"):
+                text = text[4:]
             if "```" in text:
                 text = text[: text.index("```")]
             text = text.strip()

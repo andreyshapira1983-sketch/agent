@@ -181,7 +181,7 @@ def test_suppression_guards_keep_strict_matching():
     another, and a riskier one. This is asserted at the source level because the
     difference is invisible from the outside until it misfires.
     """
-    blocks = re.split(r"(?=^def )", PATTERN_SOURCE, flags=re.MULTILINE)
+    blocks = re.split(r"(?=^def )", PATTERN_SOURCE, flags=re.M)
     guards = [b for b in blocks if b.startswith("def _looks_like_")]
     assert len(guards) >= 5, "guard extraction collapsed"
     offenders = [
@@ -192,7 +192,7 @@ def test_suppression_guards_keep_strict_matching():
 
 def test_positive_matchers_use_the_loose_primitive():
     """The other half of the same design decision, so it cannot silently revert."""
-    blocks = re.split(r"(?=^def )", PATTERN_SOURCE, flags=re.MULTILINE)
+    blocks = re.split(r"(?=^def )", PATTERN_SOURCE, flags=re.M)
     matchers = [b for b in blocks if b.startswith("def _matches_")]
     assert len(matchers) >= 20, "matcher extraction collapsed"
     strict_only = [

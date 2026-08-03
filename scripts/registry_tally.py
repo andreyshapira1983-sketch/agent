@@ -27,7 +27,7 @@ from pathlib import Path
 
 REGISTRY = Path(__file__).resolve().parents[1] / "docs" / "audit" / "MASTER_ISSUE_REGISTRY.md"
 
-_HEADING = re.compile(r"^### MIR-(\S+)", re.MULTILINE)
+_HEADING = re.compile(r"^### MIR-(\S+)", re.M)
 _STATUS = re.compile(r"\*\*Status:\*\*\s*\**`([a-z_]+)`")
 _TABLE = re.compile(
     r"(?P<start>### Status tally\n\n)"
@@ -40,7 +40,7 @@ _TABLE = re.compile(
 
 def parse(text: str) -> tuple[dict[str, list[str]], list[str]]:
     """Return {status: [issue ids]} plus any sections missing a status line."""
-    parts = re.split(r"^(### MIR-\S+)", text, flags=re.MULTILINE)
+    parts = re.split(r"^(### MIR-\S+)", text, flags=re.M)
     by_status: dict[str, list[str]] = {}
     unparsed: list[str] = []
     for head, body in zip(parts[1::2], parts[2::2]):

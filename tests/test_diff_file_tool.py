@@ -110,7 +110,7 @@ class TestNewFile:
                     proposed_content="hello\nworld\n")
         assert out["file_exists"] is False
         assert out["current_bytes"] == 0
-        assert out["proposed_bytes"] == len(b"hello\nworld\n")
+        assert out["proposed_bytes"] == len("hello\nworld\n".encode("utf-8"))
         assert out["additions"] == 2  # two new lines
         assert out["deletions"] == 0
         assert "hello" in out["diff"]

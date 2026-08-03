@@ -118,7 +118,8 @@ def _module_name_for(target: str) -> str:
     norm = target.replace("\\", "/").strip().lstrip("/")
     if norm.lower().endswith(".py"):
         norm = norm[:-3]
-    norm = norm.removesuffix("/__init__")
+    if norm.endswith("/__init__"):
+        norm = norm[: -len("/__init__")]
     return norm.replace("/", ".")
 
 

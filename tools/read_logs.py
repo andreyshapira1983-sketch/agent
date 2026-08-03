@@ -68,7 +68,7 @@ class ReadLogsTool(Tool):
         self.workspace_root = workspace_root.resolve()
         self.log_dir = self.workspace_root / "logs"
 
-    def risk_for(self, arguments: dict[str, Any]) -> Risk:
+    def risk_for(self, arguments: dict[str, Any]) -> Risk:  # noqa: ARG002
         return "read_only"
 
     # ------------------------------------------------------------------

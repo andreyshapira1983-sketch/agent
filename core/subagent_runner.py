@@ -389,8 +389,8 @@ class SubAgentRunner:
         afterwards.  There is no shared mutable state between runs.
         """
         # Lazy import — breaks the circular dependency with core/loop.py.
-        from core.logger import TraceLogger
-        from core.loop import AgentLoop, new_trace_id
+        from core.logger import TraceLogger  # noqa: PLC0415
+        from core.loop import AgentLoop, new_trace_id  # noqa: PLC0415
 
         # Level 3: classify complexity BEFORE spinning up a child loop so
         # the parent can see the tier even on error paths.
@@ -456,7 +456,7 @@ class SubAgentRunner:
         # annotation.  When the sub-agent's answer propagates to the parent as
         # evidence text the malicious payload would reach the parent LLM's
         # context unchanged.  We do a second scan here to catch that.
-        from core.injection_guard import (
+        from core.injection_guard import (  # noqa: PLC0415
             annotate_suspicious,
             scan_for_injection,
         )

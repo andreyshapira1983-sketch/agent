@@ -159,7 +159,7 @@ def test_record_is_noop_without_store() -> None:
 
 def test_record_swallows_store_errors() -> None:
     class _Boom:
-        def save(self, episode) -> None:
+        def save(self, episode) -> None:  # noqa: ARG002
             raise RuntimeError("disk full")
 
     agent = _FakeAgent(_Boom())
@@ -214,7 +214,7 @@ def test_recent_lessons_swallows_store_errors() -> None:
     from cli.self_build_memory import recent_self_build_lessons
 
     class _Boom:
-        def search_by_tags(self, tags, *, limit: int = 5):
+        def search_by_tags(self, tags, *, limit: int = 5):  # noqa: ARG002
             raise RuntimeError("disk full")
 
     assert recent_self_build_lessons(_FakeAgent(_Boom()), "core/x.py") == []
@@ -276,7 +276,7 @@ def test_recently_vetoed_targets_swallows_store_errors() -> None:
     from cli.self_build_memory import recently_vetoed_self_build_targets
 
     class _Boom:
-        def search_by_tags(self, tags, *, limit: int = 20):
+        def search_by_tags(self, tags, *, limit: int = 20):  # noqa: ARG002
             raise RuntimeError("disk full")
 
     assert recently_vetoed_self_build_targets(_FakeAgent(_Boom())) == frozenset()

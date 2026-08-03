@@ -431,7 +431,7 @@ def _preserve_rejected_raw(workspace: Path, roles: list[RoleOutput]) -> str | No
     if not raw.strip():
         return None
     try:
-        from core.redaction import redact_dlp_text
+        from core.redaction import redact_dlp_text  # noqa: PLC0415 — avoid cycles
 
         safe_raw, _s, _p = redact_dlp_text(raw)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")

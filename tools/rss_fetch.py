@@ -9,6 +9,7 @@ post-gzip size cap, timeout, and redaction before output.
 from __future__ import annotations
 
 import hashlib
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -95,7 +96,7 @@ class RssFetchTool(Tool):
             ),
         )
 
-    def risk_for(self, arguments: dict[str, Any]) -> Risk:
+    def risk_for(self, arguments: dict[str, Any]) -> Risk:  # noqa: ARG002
         return "read_only"
 
     def run(self, url: str, max_entries: int | None = None) -> dict[str, Any]:
@@ -128,7 +129,7 @@ class RssFetchTool(Tool):
             raise ValueError(f"HTTP {exc.code} fetching {url!r}: {exc.reason}") from None
         except urllib.error.URLError as exc:
             raise ValueError(f"URL error fetching {url!r}: {exc.reason}") from None
-        except TimeoutError:
+        except socket.timeout:
             raise ValueError(f"timeout fetching {url!r}") from None
 
         elapsed_ms = int((time.monotonic() - started) * 1000)

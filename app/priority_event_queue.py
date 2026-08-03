@@ -226,7 +226,7 @@ class PriorityEventQueue:
         if self._on_put is not None:
             try:
                 self._on_put(event)
-            except Exception:
+            except Exception:  # noqa: BLE001 - wake hook must not drop queued work
                 logger.exception(
                     "priority event queue on_put callback failed for %s",
                     event.event_id,

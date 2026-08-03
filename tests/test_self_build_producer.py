@@ -1091,7 +1091,7 @@ def test_critic_no_importer_naming_without_dep_map():
 
 # ── A/B/C: cooldown, retry, scale-filter (self-build hardening) ──────────────
 
-import types
+import types  # noqa: E402 — used only by the hardening tests below
 
 
 def _grounded_full_kwargs(workspace: Path, **overrides):

@@ -38,7 +38,7 @@ def _approval_inbox_for(agent: AgentLoop, workspace: Path | None = None) -> Appr
     if inbox is None:
         path = (workspace / DEFAULT_APPROVAL_INBOX_PATH) if workspace is not None else None
         inbox = ApprovalInbox(path=path)
-        agent.approval_inbox = inbox
+        setattr(agent, "approval_inbox", inbox)
     return inbox
 
 

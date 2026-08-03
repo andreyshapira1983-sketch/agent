@@ -127,7 +127,7 @@ def apply_run_exception(
     return store.mark_failed(task_id, error=decision.reason), decision
 
 
-class task_heartbeat:
+class task_heartbeat:  # noqa: N801 - used as a context manager, reads as a verb
     """Refresh a running task's liveness while the work happens.
 
     ``updated_at`` is written once when the task is claimed and then stands

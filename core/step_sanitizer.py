@@ -652,7 +652,7 @@ def sanitize_step(
 
     # ----- spawn_subagent: agent-as-tool pattern -----
     if tool_name == "spawn_subagent":
-        from core.subagent_runner import _SAFE_SUBAGENT_TOOLS
+        from core.subagent_runner import _SAFE_SUBAGENT_TOOLS  # noqa: PLC0415
         from tools.spawn_subagent import (  # local import: avoid cycles
             _MAX_CONTEXT_LEN,
             _MAX_OBJECTIVE_LEN,

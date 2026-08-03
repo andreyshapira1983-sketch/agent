@@ -38,8 +38,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from core.loop import AgentLoop
-from core.smart_memory import (
+from core.loop import AgentLoop  # noqa: E402
+from core.smart_memory import (  # noqa: E402
     EpisodeRecord,
     EpisodicMemoryStore,
     ProceduralMemoryStore,
@@ -49,7 +49,7 @@ from core.smart_memory import (
     procedure_credit_allowed,
     procedure_debit_allowed,
 )
-from scripts.completion_backfill import writer_backfill_verdict
+from scripts.completion_backfill import writer_backfill_verdict  # noqa: E402
 
 # Similarity is the question-shaped half of the fast-path gate and says
 # nothing about the episode. Held at the maximum so the report measures only

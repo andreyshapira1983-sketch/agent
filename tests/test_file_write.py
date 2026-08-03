@@ -26,7 +26,7 @@ class TestCreate:
 
         assert out["mode"] == "create"
         assert out["path"] == str(Path("notes/hello.txt"))
-        assert out["bytes_written"] == len(b"hello world\n")
+        assert out["bytes_written"] == len("hello world\n".encode("utf-8"))
         assert out["backup_path"] is None
 
     def test_create_makes_parent_directories(self, workspace: Path):

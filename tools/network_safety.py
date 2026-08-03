@@ -134,7 +134,7 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
         self.policy = policy
         super().__init__()
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
         old_url = req.full_url
         safe_url = self.policy.validate_redirect(old_url, newurl)
         return super().redirect_request(req, fp, code, msg, headers, safe_url)
@@ -196,11 +196,11 @@ def _guarded_handlers(policy: NetworkSafetyPolicy) -> list[urllib.request.BaseHa
             _assert_peer_ip_global(self.sock, tool_name=tool_name)
 
     class _GuardedHTTPHandler(urllib.request.HTTPHandler):
-        def http_open(self, req):
+        def http_open(self, req):  # noqa: ANN001
             return self.do_open(_GuardedHTTPConnection, req)
 
     class _GuardedHTTPSHandler(urllib.request.HTTPSHandler):
-        def https_open(self, req):
+        def https_open(self, req):  # noqa: ANN001
             return self.do_open(_GuardedHTTPSConnection, req)
 
     return [_GuardedHTTPHandler(), _GuardedHTTPSHandler()]

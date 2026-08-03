@@ -39,10 +39,9 @@ import json
 import os
 import sys
 import traceback
-from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from core import heartbeat_io as _hb
 from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH
@@ -138,8 +137,8 @@ def _check_budget_kill_switch(workspace: Path):
     Returns a ``KillSwitchState``; ``.active`` is True when the autonomous day
     budget is exhausted and the daemon must skip LLM-heavy work.
     """
-    from core.budget_kill_switch import BudgetKillSwitch, default_path
-    from core.budget_ledger import BudgetLedger
+    from core.budget_ledger import BudgetLedger  # noqa: PLC0415 (lazy: after dotenv)
+    from core.budget_kill_switch import BudgetKillSwitch, default_path  # noqa: PLC0415
 
     ledger = BudgetLedger.from_env(
         path=workspace / BUDGET_LEDGER_PATH,
@@ -327,7 +326,7 @@ def _repair_target_from_failures(failed_names: list[str], workspace: Path) -> st
 def _maybe_propose_repair(
     workspace: Path,
     test_report: dict,
-    inbox: ApprovalInbox,
+    inbox: "ApprovalInbox",
     agent: object,
 ) -> dict:
     """If tests failed, ask RepairProposalGenerator for a plan and inbox it."""
@@ -528,7 +527,7 @@ def _self_build_status_lines(
 
 
 def _self_build_status_block(
-    workspace: Path, heartbeat: dict | None, pending_items: list, inbox: ApprovalInbox
+    workspace: Path, heartbeat: dict | None, pending_items: list, inbox: "ApprovalInbox"
 ) -> list[str]:
     """Gather producer state + inbox counts and format them; never raises.
 
@@ -570,7 +569,7 @@ def _self_build_status_block(
 
 def _maybe_produce_self_build(
     workspace: Path,
-    inbox: ApprovalInbox,
+    inbox: "ApprovalInbox",
     *,
     dry_run: bool = True,
     now_iso: str | None = None,
@@ -756,19 +755,19 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     os.environ.setdefault("AGENT_TEST_TIMEOUT_SECONDS", "300")
 
     # Lazy import after dotenv so env vars are available
-    from app.bootstrap import build_agent
-    from app.single_instance import AlreadyRunningError, SingleInstanceLock
     from core.approval_inbox import ApprovalInbox
-    from core.autonomous_runtime import AutonomousRuntime, _config_from_task
-    from core.incident import IncidentLog
     from core.scheduler import SchedulerStore
+    from core.task_queue import TaskQueueStore
     from core.task_lifecycle import (
         apply_run_exception,
         apply_run_outcome,
         recover_orphaned_tasks,
         task_heartbeat,
     )
-    from core.task_queue import TaskQueueStore
+    from core.autonomous_runtime import AutonomousRuntime, _config_from_task
+    from core.incident import IncidentLog
+    from app.bootstrap import build_agent
+    from app.single_instance import AlreadyRunningError, SingleInstanceLock
 
     tick_start = _now_iso()
     summary: dict = {
@@ -819,7 +818,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     )
 
     # Bound before the try so the error path can always release it.
-    _consumer_lock: SingleInstanceLock | None = None
+    _consumer_lock: "SingleInstanceLock | None" = None
     try:
         # ── 0. Budget kill-switch gate (TD-022) ───────────────────────────────
         # Safety-by-default: if the persistent DAY budget is exhausted, skip all
@@ -1246,8 +1245,6 @@ def run_paced_campaign(
     from core.campaign import (
         CampaignConfig,
         CampaignLedger,
-    )
-    from core.campaign import (
         run_campaign as _real_run_campaign,
     )
 

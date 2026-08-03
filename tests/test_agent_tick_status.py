@@ -108,11 +108,11 @@ def test_status_tolerates_corrupt_heartbeat_file(workspace, capsys):
 
 # ── TD-027: self-build producer visibility in --status (read-only) ────────────
 
-from agent_tick import (
+from agent_tick import (  # noqa: E402
     SELF_BUILD_STATE_PATH,
     _self_build_status_lines,
 )
-from core.self_apply_bridge import SELF_APPLY_OPERATION
+from core.self_apply_bridge import SELF_APPLY_OPERATION  # noqa: E402
 
 
 def _write_producer_state_raw(workspace: Path, text: str) -> None:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from core import tool_receipts
+import core.tool_receipts as tool_receipts
 from core.actuation_gateway import GatewayDecision
 from core.approval import AutoApprover
 from core.approval_inbox import ApprovalInbox

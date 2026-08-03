@@ -2,11 +2,7 @@
 
 import pytest
 
-from project_intelligence.db.normalize import (
-    canonicalize,
-    content_hash_text,
-    normalized_value_hash,
-)
+from project_intelligence.db.normalize import canonicalize, content_hash_text, normalized_value_hash
 
 
 def test_string_whitespace_and_nfc():

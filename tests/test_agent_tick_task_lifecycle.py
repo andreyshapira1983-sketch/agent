@@ -39,8 +39,8 @@ def _tick_with_runtime(workspace: Path, monkeypatch, run_impl) -> TaskQueueStore
     """Run one real tick whose AutonomousRuntime.run is `run_impl`."""
     (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
 
+    import app.bootstrap as bootstrap
     import core.autonomous_runtime as ar
-    from app import bootstrap
 
     monkeypatch.setattr(bootstrap, "build_agent", lambda *a, **k: object())
     monkeypatch.setattr(ar.AutonomousRuntime, "__init__", lambda self, *a, **k: None)
@@ -137,8 +137,8 @@ def test_tick_recovers_a_task_orphaned_by_a_dead_process(workspace: Path, monkey
         row["heartbeat_at"] = stale
     rewrite_state_jsonl_unlocked(path, rows)
 
+    import app.bootstrap as bootstrap
     import core.autonomous_runtime as ar
-    from app import bootstrap
 
     monkeypatch.setattr(bootstrap, "build_agent", lambda *a, **k: object())
     monkeypatch.setattr(ar.AutonomousRuntime, "__init__", lambda self, *a, **k: None)
@@ -172,8 +172,8 @@ def test_tick_skips_the_drain_when_another_consumer_holds_the_lock(
         ran["count"] += 1
         return _report("completed")
 
+    import app.bootstrap as bootstrap
     import core.autonomous_runtime as ar
-    from app import bootstrap
 
     monkeypatch.setattr(bootstrap, "build_agent", lambda *a, **k: object())
     monkeypatch.setattr(ar.AutonomousRuntime, "__init__", lambda self, *a, **k: None)

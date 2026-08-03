@@ -14,7 +14,7 @@ from tools.network_safety import (
 
 
 def _resolver_for(ip: str):
-    def _resolver(host, port, family, socktype, proto, flags):
+    def _resolver(host, port, family, socktype, proto, flags):  # noqa: ANN001, ARG001
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port or 443))]
 
     return _resolver

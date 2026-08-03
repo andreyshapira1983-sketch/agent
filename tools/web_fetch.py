@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -147,7 +148,7 @@ class WebFetchTool(Tool):
             ),
         )
 
-    def risk_for(self, arguments: dict[str, Any]) -> Risk:
+    def risk_for(self, arguments: dict[str, Any]) -> Risk:  # noqa: ARG002
         return "read_only"
 
     # ------------------------------------------------------------------
@@ -185,7 +186,7 @@ class WebFetchTool(Tool):
             ) from None
         except urllib.error.URLError as e:
             raise ValueError(f"URL error fetching {url!r}: {e.reason}") from None
-        except TimeoutError:
+        except socket.timeout:
             raise ValueError(f"timeout fetching {url!r}") from None
 
         elapsed_ms = int((time.monotonic() - started) * 1000)

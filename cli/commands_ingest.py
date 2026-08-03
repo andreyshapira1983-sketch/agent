@@ -873,7 +873,8 @@ def _source_field(source, field: str) -> str:
 
 def _display_source_path(value: str) -> str | None:
     out = value.strip().strip("\"'")
-    out = out.removeprefix("file:")
+    if out.startswith("file:"):
+        out = out[len("file:"):]
     out = out.replace("\\", "/")
     while out.startswith("./"):
         out = out[2:]
@@ -1050,7 +1051,8 @@ def _mention_matches_source(mention: str, source) -> bool:
 
 def _normalize_source_key(value: str) -> str:
     out = value.strip().strip("\"'")
-    out = out.removeprefix("file:")
+    if out.startswith("file:"):
+        out = out[len("file:"):]
     out = out.replace("/", "\\")
     while out.startswith(".\\"):
         out = out[2:]

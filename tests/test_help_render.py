@@ -128,7 +128,7 @@ def test_layout_entry_kinds_are_known_and_counted():
 
 def test_help_module_imports_only_the_registry():
     source = (REPO_ROOT / "cli" / "help.py").read_text(encoding="utf-8")
-    imports = re.findall(r"^\s*(?:from|import)\s+([\w.]+)", source, re.MULTILINE)
+    imports = re.findall(r"^\s*(?:from|import)\s+([\w.]+)", source, re.M)
     assert set(imports) <= {"__future__", "cli.command_registry", "re"}, imports
 
 

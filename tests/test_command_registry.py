@@ -175,7 +175,7 @@ def test_registry_is_pure_data():
         ("command_specs_ops.py", {"__future__", "dataclasses", ".command_specs"}),
     ):
         source = (REPO_ROOT / "cli" / name).read_text(encoding="utf-8")
-        imports = re.findall(r"^\s*(?:from|import)\s+([\w.]+)", source, re.MULTILINE)
+        imports = re.findall(r"^\s*(?:from|import)\s+([\w.]+)", source, re.M)
         forbidden = [
             imp
             for imp in imports

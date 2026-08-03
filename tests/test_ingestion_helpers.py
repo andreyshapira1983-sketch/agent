@@ -165,7 +165,7 @@ class _FakeKnowledgePipeline:
         registry = SimpleNamespace(
             sources=[],
             claims=[],
-            to_log_payload=dict,
+            to_log_payload=lambda: {},
         )
         return SimpleNamespace(
             registry=registry,
@@ -174,7 +174,7 @@ class _FakeKnowledgePipeline:
             memory_rejected=0,
             memory_skipped=0,
             conflicts=SimpleNamespace(count=0),
-            to_log_payload=dict,
+            to_log_payload=lambda: {},
         )
 
 

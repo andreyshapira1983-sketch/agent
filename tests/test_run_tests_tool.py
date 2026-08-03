@@ -267,7 +267,7 @@ class TestRedaction:
         secret = "sk-" + "A" * 48
         _patch_run(
             monkeypatch,
-            stdout=f"1 passed in 0.01s\nleaked={secret}\n".encode(),
+            stdout=f"1 passed in 0.01s\nleaked={secret}\n".encode("utf-8"),
         )
         out = RunTestsTool(workspace_root=workspace).run()
         assert secret not in out["stdout_tail"]

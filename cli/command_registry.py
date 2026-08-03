@@ -63,11 +63,11 @@ __all__ = [
     "BOTH_MODES",
     "BY_TOKEN",
     "COMMANDS",
+    "CommandSpec",
     "ONE_SHOT",
     "PHASE_POST_AGENT",
     "PHASE_PRE_DOTENV",
     "REPL",
-    "CommandSpec",
     "all_tokens",
     "lookup",
 ]

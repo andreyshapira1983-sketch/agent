@@ -251,5 +251,6 @@ def _domain(url: str) -> str:
     parsed = urlparse(url)
     host = parsed.netloc or parsed.path.split("/", 1)[0]
     host = host.lower().strip()
-    host = host.removeprefix("www.")
+    if host.startswith("www."):
+        host = host[4:]
     return host
