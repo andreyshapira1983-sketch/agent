@@ -106,7 +106,13 @@ def test_missing_and_corrupt_ledger_loads_empty(tmp_path):
 
 def test_note_is_redacted_and_truncated(tmp_path):
     log = ValueReviewLog.for_workspace(tmp_path)
-    secret = "AKIAABCDEFGHIJKLMNOP"  # matches aws-access-key
+    # AWS's canonical documentation EXAMPLE key — the same fixture every other
+    # redaction test here uses. A fabricated key shape (the previous
+    # "AKIAABCDEFGHIJKLMNOP") is indistinguishable from a real leak to secret
+    # scanners and kept tripping them; the canonical example matches the same
+    # `aws-access-key` pattern (pinned in tests/test_secret_scanner.py) while
+    # being universally recognised as documentation.
+    secret = "AKIAIOSFODNN7EXAMPLE"
     long_tail = "x" * (MAX_NOTE_CHARS + 200)
     log.append("ain_1", "accepted", note=f"leak {secret} {long_tail}")
     review = ValueReviewLog.for_workspace(tmp_path).list()[0]
