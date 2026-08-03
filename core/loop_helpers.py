@@ -7,10 +7,13 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
-from core.ids import new_id
+
+from core.clarification_gate import ASK_BACK_PREFIX as _ASK_BACK_PREFIX
 from core.evidence import Evidence, ProvenanceChain
 from core.file_request_intent import extract_path_mentions, normalize_path_mention
+from core.ids import new_id
 from core.verification_summary import TAIL_PREFIX as _VERIFICATION_TAIL_PREFIX
+
 
 def _to_text(output: Any) -> str:
     """Stringify a tool output for classification + scanning.
@@ -308,11 +311,14 @@ def format_human_response(answer: str) -> str:
         if any(low.startswith(p) for p in _SKIP_PREFIXES):
             section = "skip"
             continue
-        # The five-point verification tail (MIR-069). It rides the notice
-        # ledger and lands AFTER the contract sections, i.e. exactly where the
-        # section walk used to drop it (measured live, 2026-08-03) — so it is
-        # bucketed by its fixed prefix, independent of the current section.
-        if stripped.startswith(_VERIFICATION_TAIL_PREFIX):
+        # The five-point verification tail (MIR-069) and the ask-back
+        # (MIR-075) ride the notice ledger and land AFTER the contract
+        # sections, i.e. exactly where the section walk used to drop them
+        # (measured live, 2026-08-03) — so both are bucketed by their fixed
+        # prefixes, independent of the current section.
+        if stripped.startswith(
+            (_VERIFICATION_TAIL_PREFIX, _ASK_BACK_PREFIX)
+        ):
             verification_tail_lines.append(stripped)
             continue
 
@@ -356,7 +362,9 @@ def format_human_response(answer: str) -> str:
         cleaned = _ANSWER_CITATION_RE.sub("", text).strip()
         return "" if _EMPTY_QUOTE_LINE_RE.match(cleaned) else cleaned
 
-    conclusion = " ".join(_clean(l) for l in conclusion_lines if l.strip()).strip()
+    conclusion = " ".join(
+        _clean(line) for line in conclusion_lines if line.strip()
+    ).strip()
     # Collapse accidental double-spaces from dropped empty quote fragments.
     conclusion = re.sub(r"\s{2,}", " ", conclusion).strip()
     facts_block = "\n".join(facts_lines).strip()
