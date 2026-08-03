@@ -45,7 +45,6 @@ from core.ids import new_id
 from core.state_integrity import (
     append_state_jsonl_unlocked,
     read_state_jsonl_unlocked,
-    rewrite_state_jsonl_unlocked,
     state_file_lock,
 )
 

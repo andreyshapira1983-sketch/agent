@@ -21,17 +21,13 @@ from core.models import Action, ApprovalDecision, ApprovalRequest, ErrorObject, 
 from core.redaction import redact_payload
 from core.smart_memory import EpisodeRecord
 
-from .self_repair_models import RepairProposal, RepairReport, RepairStatus, RepairStepRecord, _ToolRun
+from .self_repair_models import RepairProposal, RepairReport, RepairStepRecord, _ToolRun
 from .self_repair_utils import (
-    _approval_summary,
     _blocked_status,
-    _diff_summary,
     _diagnosis_verified,
     _extract_pass_count,
-    _first_output,
     _is_empty_diff,
     _new_compensation_plan_id,
-    _test_summary,
     _tests_passed,
 )
 

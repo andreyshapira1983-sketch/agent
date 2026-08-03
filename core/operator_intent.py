@@ -12,10 +12,7 @@ from typing import Literal
 
 from .operator_intent_patterns import (
     _explicit_documentation_requested,
-    _has_any,
-    _is_explicit_budget_status_command,
     _looks_like_conversational_turn,
-    _looks_like_engineering_change_request,
     _looks_like_explicit_non_routing_command,
     _looks_like_meta_instruction,
     _looks_like_plain_bug_note,
