@@ -19,6 +19,7 @@ from core.models import (
 from core.redaction import (
     redact_dlp_text,
 )
+from core.sensor_journal import journal_sensor_failure
 
 
 class AgentLoopExtractedMethods:
@@ -49,6 +50,14 @@ class AgentLoopExtractedMethods:
         compensation_log: Any
 
         def _durable_learning_suppressed(self, sink: str) -> bool: ...
+
+    def _sensor_failed(self, sensor: str, exc: BaseException) -> None:
+        """Тонкая делегация в `core/sensor_journal` (MIR-077).
+
+        Логика живёт в отдельном компактном модуле — правило оператора: не
+        раздувать большие файлы, а подключать маленькие.
+        """
+        journal_sensor_failure(self.log, sensor, exc)
 
     def _remember_from_knowledge(
         self,
