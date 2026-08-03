@@ -24,7 +24,6 @@ from core.self_apply_lane import (
     run_self_apply_lane,
 )
 
-
 # ── fakes ────────────────────────────────────────────────────────────────────
 
 

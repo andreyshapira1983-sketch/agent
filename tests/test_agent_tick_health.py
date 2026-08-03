@@ -9,14 +9,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from agent_tick import (
+    EXPECTED_TICK_INTERVAL_SECONDS,
+    STALENESS_FACTOR,
     _classify_test_health,
     _dry_run_visibility,
     _heartbeat_age_seconds,
     _is_stale,
     _read_heartbeat,
     _write_heartbeat,
-    EXPECTED_TICK_INTERVAL_SECONDS,
-    STALENESS_FACTOR,
 )
 
 

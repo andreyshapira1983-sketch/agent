@@ -14,7 +14,6 @@ from core.best_next_action import (
     select_best_next_action,
 )
 
-
 # ── pure suppression semantics ───────────────────────────────────────────────
 
 def test_is_suppressible_severity_excludes_objective_breakages():

@@ -11,7 +11,6 @@ from core.secret_scanner import (
     scan,
 )
 
-
 # Sample credentials are assembled from a prefix plus a body instead of being
 # written as one literal. These shapes are real enough that GitHub's own push
 # protection rejected the first version of this file (Slack token, Slack

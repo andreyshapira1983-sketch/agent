@@ -16,7 +16,6 @@ from types import SimpleNamespace
 
 from core.operator_intent import route_operator_intent
 
-
 # --- 1. routing -----------------------------------------------------------
 
 def test_umeesh_phrasings_route_to_capability_check():

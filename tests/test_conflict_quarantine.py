@@ -29,7 +29,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-
 from core.knowledge_pipeline import KnowledgeWritePolicy, claim_provenance_tag
 from core.knowledge_use_policy import QUARANTINE_TAGS, KnowledgeUsePolicy
 from core.models import MemoryRecord

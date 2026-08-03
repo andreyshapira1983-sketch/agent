@@ -29,7 +29,6 @@ from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
 
-
 _DURABLE_STATE_FILES = (
     "persistent_memory.jsonl",
     "memory_writes.jsonl",

@@ -11,9 +11,9 @@ from pathlib import Path
 
 from core.backlog_selector import build_backlog, load_backlog
 from core.backlog_signals import (
-    OVERSIZED_MODULE_SOURCE,
-    _OVERSIZED_MODULE_MIN_LINES,
     _MAX_OVERSIZED_RECORDS,
+    _OVERSIZED_MODULE_MIN_LINES,
+    OVERSIZED_MODULE_SOURCE,
     oversized_module_candidates,
 )
 

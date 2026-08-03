@@ -6,24 +6,22 @@ structured JSONL trace log.
 """
 from __future__ import annotations
 
+import json
 import time
 from concurrent.futures import ThreadPoolExecutor
-from unittest import mock
-from tools.file_write import FileWriteTool
-from core.models import PlanStep
-
-import json
 from pathlib import Path
+from unittest import mock
 
 from core.approval import AutoApprover
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
+from core.models import PlanStep
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
+from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
-from tests.conftest import FakeLLM, FakePlanner
-
+from tools.file_write import FileWriteTool
 
 PLANNER_FILE_READ_RESPONSE = json.dumps(
     {

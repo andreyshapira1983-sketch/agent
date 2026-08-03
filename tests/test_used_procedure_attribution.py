@@ -26,7 +26,6 @@ Status when written: all fail — `EpisodeRecord` has no `used_procedure_ids`.
 """
 from __future__ import annotations
 
-
 import pytest
 
 from core.smart_memory import (

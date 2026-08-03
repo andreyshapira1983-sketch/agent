@@ -6,7 +6,6 @@ structured tool returns via deterministic locale-aware matching.
 """
 from __future__ import annotations
 
-
 from core.evidence import ProvenanceChain, make_evidence
 from core.verifier import (
     CITATION_PREFIXES,

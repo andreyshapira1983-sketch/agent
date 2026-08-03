@@ -11,14 +11,13 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-
+from cli.commands_memory import _handle_hygiene
 from core.approval import AutoApprover
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
 from core.smart_memory import EpisodeRecord, EpisodicMemoryStore
-from cli.commands_memory import _handle_hygiene
 from tests.conftest import FakeLLM
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool

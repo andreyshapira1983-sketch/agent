@@ -19,12 +19,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import core.model_catalog as mc
-from core.model_catalog import discover_catalog, _load_catalog, _save_catalog
+from core.model_catalog import _load_catalog, _save_catalog, discover_catalog
 from core.model_discovery import (
+    STATUS_UNSUPPORTED_NO_FETCHER,
+    _diff_catalog,
     build_discovery_audit,
     build_discovery_report,
-    _diff_catalog,
-    STATUS_UNSUPPORTED_NO_FETCHER,
 )
 
 

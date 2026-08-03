@@ -23,15 +23,14 @@ from core.hygiene import (
     DedupReport,
     ExpiryReport,
     SummaryReport,
+    _similarity,
     cleanup_backups,
     deduplicate_memory,
     expire_memory,
     find_duplicate,
     summarise_memory,
-    _similarity,
 )
 from core.models import MemoryRecord
-
 
 # ===========================================================
 # 1. Backup cleanup

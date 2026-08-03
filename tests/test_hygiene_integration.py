@@ -16,7 +16,6 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-
 from core.approval import AutoApprover
 from core.hygiene import SUMMARY_TAG
 from core.logger import TraceLogger
@@ -27,11 +26,11 @@ from core.models import MemoryRecord
 from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
+from tests.conftest import FakeLLM
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
 from tools.file_write import FileWriteTool
 from tools.web_search import WebSearchTool
-from tests.conftest import FakeLLM
 
 
 def _events(log_path: Path) -> list[dict]:

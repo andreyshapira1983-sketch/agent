@@ -14,13 +14,13 @@ from pathlib import Path
 
 import core.model_catalog as mc
 from core.model_catalog import (
-    catalog_summary,
-    refresh_catalog,
-    tier_model_for,
+    _catalog_path,
     _load_catalog,
     _save_catalog,
     _ttl_days,
-    _catalog_path,
+    catalog_summary,
+    refresh_catalog,
+    tier_model_for,
 )
 from core.task_complexity import ComplexityTier
 

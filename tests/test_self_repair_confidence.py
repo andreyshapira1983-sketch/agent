@@ -9,14 +9,14 @@ Specifically tests:
 """
 from __future__ import annotations
 
-
 from core.self_repair import (
     _DEFAULT_MIN_REPAIR_CONFIDENCE as MIN_REPAIR_CONFIDENCE,
+)
+from core.self_repair import (
     RepairProposal,
     RepairReport,
     _extract_pass_count,
 )
-
 
 # ---------------------------------------------------------------------------
 # _extract_pass_count

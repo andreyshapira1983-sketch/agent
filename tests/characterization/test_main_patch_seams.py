@@ -23,7 +23,6 @@ import ast
 import re
 from pathlib import Path
 
-
 import main as main_module
 
 REPO_ROOT = Path(main_module.__file__).resolve().parent

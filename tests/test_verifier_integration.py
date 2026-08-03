@@ -14,16 +14,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
 from core.approval import AutoApprover
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.policy import PolicyGate
 from core.verifier import DISCLAIMER_FULLY_UNVERIFIED, DISCLAIMER_NO_CHAIN
+from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
 from tools.web_search import WebSearchTool
-from tests.conftest import FakeLLM, FakePlanner
 
 
 def _events(p: Path) -> list[dict]:

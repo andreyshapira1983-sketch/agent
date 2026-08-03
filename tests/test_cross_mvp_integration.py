@@ -22,7 +22,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 from core.approval import AutoApprover
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
@@ -31,7 +30,6 @@ from core.replan import ReplanPolicy
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import Tool, ToolRegistry
 from tools.file_write import FileWriteTool
-
 
 # ============================================================
 # Shared helpers
@@ -285,8 +283,9 @@ class TestHygienePreservesActiveBackups:
         backup = workspace / "data.txt.bak.20260526T120000Z"
         backup.write_text("original")  # the same content file_write would save
 
-        from core.hygiene import cleanup_backups
         from datetime import datetime, timezone
+
+        from core.hygiene import cleanup_backups
 
         # "Now" matches the backup timestamp closely → backup is fresh.
         now = datetime(2026, 5, 26, 12, 5, 0, tzinfo=timezone.utc)
@@ -310,8 +309,9 @@ class TestHygienePreservesActiveBackups:
         for p in old_backups:
             p.write_text("old")
 
-        from core.hygiene import cleanup_backups
         from datetime import datetime, timezone
+
+        from core.hygiene import cleanup_backups
 
         now = datetime(2026, 5, 26, 12, 0, 0, tzinfo=timezone.utc)
         report = cleanup_backups(workspace, keep_last=2, max_age_days=30, now=now)

@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
 from core.approval_inbox import ApprovalInbox
 from core.backlog_target_mapper import MODEL_DISCOVERY_TARGET
 from core.self_apply_bridge import SELF_APPLY_OPERATION, rehydrate_proposal
@@ -24,7 +23,6 @@ from core.self_build_producer import (
     ProducerReport,
     produce_self_apply_proposal,
 )
-
 
 # ── fakes ────────────────────────────────────────────────────────────────────
 
@@ -1212,8 +1210,8 @@ def _oversized_split_cand(target_rel):
 def test_oversized_split_manager_refusal_does_not_publish_refactor(workspace, monkeypatch):
     # Regression: a mapper-refused split (the real core/loop.py failure mode) is
     # not a proven defect and must not become a deterministic refactor proposal.
-    import core.incremental_splitter as isp
     import core.backlog_target_mapper as btm
+    import core.incremental_splitter as isp
 
     (workspace / "core").mkdir(parents=True, exist_ok=True)
     target_rel = "core/huge_mod.py"
@@ -1442,8 +1440,8 @@ def test_small_split_still_proceeds_past_scale_filter(workspace: Path):
 def test_cooldown_selector_skips_recently_vetoed_target(workspace: Path, monkeypatch):
     # A: the default grounded selector skips a target on cooldown and advances to
     # the next candidate instead of re-picking the same wall.
-    import core.self_build_producer as mod
     import core.backlog_selector as bl
+    import core.self_build_producer as mod
 
     vetoed = _Candidate("core/model_router.py", "split it", "TECH_DEBT.md:1")
     nxt = _Candidate("core/redaction.py", "tidy a helper", "TECH_DEBT.md:2")
@@ -1458,8 +1456,8 @@ def test_cooldown_selector_skips_recently_vetoed_target(workspace: Path, monkeyp
 
 def test_cooldown_selector_noop_without_exclusions(workspace: Path, monkeypatch):
     # A: with no cooldown set the selector is byte-identical to before (picks #1).
-    import core.self_build_producer as mod
     import core.backlog_selector as bl
+    import core.self_build_producer as mod
 
     first = _Candidate("core/model_router.py", "split it", "TECH_DEBT.md:1")
     second = _Candidate("core/redaction.py", "tidy", "TECH_DEBT.md:2")
@@ -1474,9 +1472,9 @@ def test_selector_skips_oversized_split_and_picks_next(workspace: Path, monkeypa
     # C at selection time: an oversized module-split is non-actionable, so the
     # selector advances to the next actionable candidate WITHIN the same run
     # instead of ending the run on a doomed split.
-    from core.self_build_producer import _MAX_SPLIT_TARGET_LINES
-    import core.self_build_producer as mod
     import core.backlog_selector as bl
+    import core.self_build_producer as mod
+    from core.self_build_producer import _MAX_SPLIT_TARGET_LINES
 
     (workspace / "core").mkdir(parents=True, exist_ok=True)
     big_rel = "core/huge_mod.py"
@@ -1502,8 +1500,8 @@ def test_selector_skips_oversized_split_and_picks_next(workspace: Path, monkeypa
 
 def test_selector_keeps_small_split_actionable(workspace: Path, monkeypatch):
     # A normal-sized split stays actionable and is picked first (no false skip).
-    import core.self_build_producer as mod
     import core.backlog_selector as bl
+    import core.self_build_producer as mod
 
     (workspace / "core").mkdir(parents=True, exist_ok=True)
     small_rel = "core/small_mod.py"

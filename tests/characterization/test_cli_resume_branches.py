@@ -21,8 +21,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import cli.app as app_module
 import app.budget_guard as budget_guard_module
+import cli.app as app_module
 import cli.intent_bridge as bridge_module
 import main as main_module
 from core.checkpoint import CheckpointWriter
