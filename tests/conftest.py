@@ -299,7 +299,7 @@ def workspace(tmp_path: Path) -> Path:
 
 def run_git(root: Path, *args: str) -> None:
     """Одна команда git в ``root``. Argv из литералов, без оболочки."""
-    import subprocess
+    import subprocess  # nosec B404
 
     subprocess.run(  # noqa: S603  # nosec B603 B607
         ["git", "-c", "user.name=T", "-c", "user.email=t@localhost", *args],  # noqa: S607
