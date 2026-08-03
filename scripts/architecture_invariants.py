@@ -67,6 +67,11 @@ _ENV_ALLOWLIST: dict[str, str] = {
     # Master flag of the phased plan in MEMORY_LIFECYCLE_CONTRACT.md §15, which
     # is a proposal: phase P0 ("flag scaffolding") has not been built.
     "AGENT_MEMORY_LIFECYCLE": "planned — memory lifecycle plan, phase P0 unbuilt",
+    # Read by tests/conftest.py (`_deny_outbound_network`, MIR-053) — a
+    # test-suite opt-in, so it lives outside the production roots this
+    # invariant scans on purpose. The flag and its reader are pinned by
+    # tests/test_network_deny.py, so this entry cannot mask a dead flag.
+    "AGENT_TESTS_ALLOW_NETWORK": "test-suite flag — read by tests/conftest.py, outside production roots",
 }
 
 #: A flag introduced on a line carrying one of these words is documented as not
