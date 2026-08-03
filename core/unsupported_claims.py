@@ -177,6 +177,10 @@ def _count_categorical_unsupported(report: Any) -> int:
         # about the agent's own previous reply ("я всегда отвечаю по вопросу")
         # is backed by the transcript, and hedging it would reintroduce the
         # issue #119 defect through the short path.
+        # `user_asserted` is deliberately NOT exempt (operator ruling
+        # 2026-08-03, MIR-028): a categorical world claim supported only by
+        # the operator's own words is unconfirmed content, and hedging it is
+        # exactly the honesty the ruling requires.
         if verdict in (
             "verified", "self_declared", "structural", "dialogue_supported"
         ):

@@ -18,6 +18,7 @@ from .verifier_patterns import (
     DISCLAIMER_FULLY_UNVERIFIED,
     DISCLAIMER_NO_CHAIN,
     DISCLAIMER_SESSION_MEMORY,
+    DISCLAIMER_USER_ASSERTED,
     SELF_DECLARED_PREFIXES,
     _NON_CLAIM_SECTIONS,
 )
@@ -95,6 +96,11 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
     examined_chunks: list[ClaimChunk] = []
     verified = unverified = cited_unmatched = topic_supported = memory_only_unmatched = self_declared = structural = 0
     dialogue_supported = 0
+    # Operator ruling 2026-08-03 (MIR-028): the user's words confirm only that
+    # the user said it — never the content's objective truth. Support that
+    # comes solely from the injected user turn gets its own verdict, and it is
+    # never promoted to `verified`.
+    user_asserted = 0
     has_dialogue_evidence = dialogue_evidence_present(chain)
     annotated_chunks: list[str] = []
     # Index into ``annotated_chunks`` for each examined (non-structural) chunk,
@@ -123,6 +129,9 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
         verdict: str
         annotated = chunk_text
         if not cits:
+            # `_find_structured_support` is tool_output-only by construction
+            # (kind filter in verifier_utils), so a user_explicit result is
+            # impossible here — no MIR-028 interception needed on this path.
             struct_ev = _find_structured_support(chunk_text, chain) if not chain_empty else None
             if struct_ev is not None:
                 verdict = "verified"
@@ -154,9 +163,12 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
             stat_claim = is_statistical_claim(chunk_text)
             any_matched = any_self_declared = any_topic_only = False
             any_dialogue = False
+            any_user_asserted = False
             topic_only_replacements: list[tuple[str, str]] = []
             dialogue_replacements: list[tuple[str, str]] = []
             dialogue_ids: list[str] = []
+            user_asserted_replacements: list[tuple[str, str]] = []
+            user_asserted_ids: list[str] = []
             for c in cits:
                 if c.prefix in SELF_DECLARED_PREFIXES:
                     any_self_declared = True
@@ -165,6 +177,19 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                     continue
                 ev = match_citation(c, chain)
                 if ev is None:
+                    continue
+                if getattr(ev, "kind", "") == "user_explicit":
+                    # Operator ruling 2026-08-03 (MIR-028): a citation of the
+                    # operator's own turn confirms the words were said — it is
+                    # never `verified`, whatever the claim's shape (this also
+                    # supersedes the stat-figure exemption for the `user`
+                    # prefix below: the branch is intercepted here first).
+                    any_user_asserted = True
+                    user_asserted_ids.append(ev.id)
+                    body_part = f":{c.body}" if c.body else ""
+                    user_asserted_replacements.append(
+                        (c.raw, f"[user-asserted:{c.prefix}{body_part}]")
+                    )
                     continue
                 if classify_evidence(ev) == "session_dialogue":
                     # The recording of the exchange proves what was SAID. It is
@@ -213,13 +238,19 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
             if any_matched:
                 verdict = "verified"
                 verified += 1
-                for raw, rewrite in topic_only_replacements + dialogue_replacements:
+                for raw, rewrite in topic_only_replacements + dialogue_replacements + user_asserted_replacements:
                     annotated = annotated.replace(raw, rewrite)
             elif any_dialogue:
                 verdict = "dialogue_supported"
                 dialogue_supported += 1
                 matched_ids.extend(dialogue_ids)
-                for raw, rewrite in topic_only_replacements + dialogue_replacements:
+                for raw, rewrite in topic_only_replacements + dialogue_replacements + user_asserted_replacements:
+                    annotated = annotated.replace(raw, rewrite)
+            elif any_user_asserted:
+                verdict = "user_asserted"
+                user_asserted += 1
+                matched_ids.extend(user_asserted_ids)
+                for raw, rewrite in topic_only_replacements + user_asserted_replacements:
                     annotated = annotated.replace(raw, rewrite)
             elif any_self_declared:
                 verdict = "self_declared"
@@ -231,6 +262,7 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                     annotated = annotated.replace(raw, rewrite)
                 annotated = annotated.rstrip() + " [claim-figure-unverified]"
             else:
+                # tool_output-only by construction — cannot return user_explicit.
                 struct_ev = _find_structured_support(chunk_text, chain) if chain.evidences and not chain_empty else None
                 if struct_ev is not None:
                     verdict = "verified"
@@ -242,7 +274,12 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                             annotated = annotated.replace(c.raw, f"[verified:{c.prefix}{body_part}]")
                 elif llm is not None and chain.evidences and not chain_empty:
                     sem_ev = _find_semantic_support(chunk_text, chain, llm)
-                    if sem_ev is not None:
+                    if sem_ev is not None and getattr(sem_ev, "kind", "") == "user_explicit":
+                        verdict = "user_asserted"
+                        user_asserted += 1
+                        matched_ids.append(sem_ev.id)
+                        annotated = annotated.rstrip() + " [user-asserted]"
+                    elif sem_ev is not None:
                         verdict = "verified"
                         verified += 1
                         matched_ids.append(sem_ev.id)
@@ -306,6 +343,10 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
             # Honest on both counts: nothing external was verified, and the
             # support the answer does have is this session's own transcript.
             disclaimer = DISCLAIMER_SESSION_MEMORY
+        elif user_asserted > 0:
+            # The only support is the operator's own words this turn — say
+            # exactly that (operator ruling, MIR-028).
+            disclaimer = DISCLAIMER_USER_ASSERTED
         elif cited_unmatched > 0 and cited_unmatched == memory_only_unmatched:
             disclaimer = DISCLAIMER_SESSION_MEMORY
         elif chain_empty:
@@ -316,4 +357,4 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
         disclaimer = DISCLAIMER_ALL_SELF_DECLARED
     if disclaimer is not None:
         annotated_answer = annotated_answer.rstrip() + "\n\n" + disclaimer
-    return VerificationReport(total_chunks=len(examined_chunks), verified_chunks=verified, unverified_chunks=unverified, cited_but_unmatched_chunks=cited_unmatched, self_declared_chunks=self_declared, structural_chunks=structural, chunks=tuple(examined_chunks), annotated_answer=annotated_answer, fully_unverified=fully_unverified, chain_was_empty=chain_empty, disclaimer=disclaimer, malformed_output=malformed_output, topic_supported_but_claim_unverified_chunks=topic_supported, subagent_asserted_chunks=subagent_asserted, receipt_missing_chunks=receipt_missing, dialogue_supported_chunks=dialogue_supported)
+    return VerificationReport(total_chunks=len(examined_chunks), verified_chunks=verified, unverified_chunks=unverified, cited_but_unmatched_chunks=cited_unmatched, self_declared_chunks=self_declared, structural_chunks=structural, chunks=tuple(examined_chunks), annotated_answer=annotated_answer, fully_unverified=fully_unverified, chain_was_empty=chain_empty, disclaimer=disclaimer, malformed_output=malformed_output, topic_supported_but_claim_unverified_chunks=topic_supported, subagent_asserted_chunks=subagent_asserted, receipt_missing_chunks=receipt_missing, dialogue_supported_chunks=dialogue_supported, user_asserted_chunks=user_asserted)

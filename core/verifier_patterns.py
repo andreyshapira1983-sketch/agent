@@ -118,6 +118,11 @@ DISCLAIMER_SESSION_MEMORY = (
     "[note] This answer draws on the conversation history from this "
     "session (prior turns). No new external sources were consulted."
 )
+DISCLAIMER_USER_ASSERTED = (
+    "[note] The claims above are supported only by the operator's own "
+    "words this turn. That confirms what was said, not that it is true; "
+    "nothing was independently verified."
+)
 DISCLAIMER_ALL_SELF_DECLARED = (
     "[note] Every claim above is marked [declared:general-knowledge] — "
     "the model honestly admits these come from its prior training, not "
