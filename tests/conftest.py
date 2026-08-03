@@ -1,6 +1,7 @@
 """Shared test fixtures and helpers."""
 from __future__ import annotations
 
+import ipaddress
 import os
 import socket
 from pathlib import Path
@@ -18,12 +19,14 @@ from core.planner import PlannerOutput
 # remembering the per-file convention (delete keys, set mock routing): one
 # diagnostic run forgot, picked live keys up from `.env`, and billed a real
 # provider request — silently. The deny turns that convention into a default:
-# an outbound TCP connect raises loudly with this marker, loopback stays open
+# an outbound connect raises loudly with this marker, loopback stays open
 # (local test servers are legitimate), and a run that genuinely needs the
 # network must say so with ``AGENT_TESTS_ALLOW_NETWORK=1``.
 #
-# Scope, deliberately: `connect`/`connect_ex` on TCP sockets — the layer every
-# HTTP client in the suite must pass through. DNS resolution is left alone
+# Scope, deliberately: `connect`/`connect_ex` on ANY Python-level socket —
+# that includes TCP (the layer every HTTP client in the suite must pass
+# through) and a UDP socket that uses `connect`; the guard does not inspect
+# the socket type, and it does not need to. DNS resolution is left alone
 # (the OS resolver does not go through `socket.connect`, and a lookup neither
 # bills nor mutates). Scripts run OUTSIDE pytest are not covered here — a
 # conftest only exists inside the suite; that half of MIR-053 stays open in
@@ -41,21 +44,34 @@ _LOOPBACK_HOSTS = frozenset({"localhost", "::1", ""})
 def _connect_target_is_local(address: object) -> bool:
     """True for targets the deny leaves open.
 
-    Non-tuple addresses (AF_UNIX paths, raw bytes) never leave the machine.
-    Tuple addresses are (host, port[, ...]); loopback is 127.0.0.0/8 by
-    address, plus "localhost"/"::1" by name, plus the IPv4-mapped IPv6 form.
+    Non-tuple addresses (AF_UNIX paths) never leave the machine. Inside a
+    tuple the host may legally be ``str`` or ``bytes`` — the socket module
+    accepts both, so bytes are decoded rather than waved through (a bytes
+    host used to fail OPEN, which was a bypass); any other host type fails
+    CLOSED. Loopback is recognised by `ipaddress.is_loopback` when the host
+    parses as an IP literal (covers 127.0.0.0/8, ``::1`` and the IPv4-mapped
+    form), by name for "localhost"/"", and by the ``127.`` prefix for
+    shorthand literals like ``127.1`` that `ipaddress` rejects but the OS
+    resolver reads as 127.0.0.1.
     """
     if not isinstance(address, tuple) or not address:
         return True
     host = address[0]
+    if isinstance(host, bytes):
+        try:
+            host = host.decode("ascii")
+        except UnicodeDecodeError:
+            return False        # undecodable target — deny, never guess
     if not isinstance(host, str):
-        return True
+        return False            # unknown host shape inside a tuple — deny
     host = host.strip("[]").lower()
     if host in _LOOPBACK_HOSTS:
         return True
-    if host.startswith("127."):
-        return True
-    return host.startswith("::ffff:127.")
+    try:
+        return ipaddress.ip_address(host.removeprefix("::ffff:")).is_loopback
+    except ValueError:
+        pass
+    return host.startswith("127.")
 
 
 @pytest.fixture(scope="session", autouse=True)

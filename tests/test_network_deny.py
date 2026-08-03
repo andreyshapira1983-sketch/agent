@@ -4,9 +4,10 @@ Before this existed, nothing refused an unmocked provider call: a diagnostic
 run picked live keys up from `.env` and billed one real request, silently.
 Test fixtures delete keys per-file, but that is a convention each author must
 remember, not a boundary. The boundary now lives in `tests/conftest.py`
-(`_deny_outbound_network`): an outbound TCP `connect` raises loudly, loopback
-stays open (local test servers are legitimate), and a run that genuinely
-needs the network must say so via ``AGENT_TESTS_ALLOW_NETWORK=1``.
+(`_deny_outbound_network`): an outbound `connect` on any socket raises
+loudly, loopback stays open (local test servers are legitimate), and a run
+that genuinely needs the network must say so via
+``AGENT_TESTS_ALLOW_NETWORK=1``.
 
 The probe target is 192.0.2.1 (RFC 5737 TEST-NET-1): reserved for
 documentation, guaranteed non-routable — so even on the OLD code proving the
@@ -15,10 +16,20 @@ instead of being refused.
 """
 from __future__ import annotations
 
+import os
 import socket
 import threading
 
 import pytest
+
+# Under the documented escape hatch the deny fixture stands down entirely, so
+# these probes would hang into their timeouts and fail for the wrong reason.
+# Skipping is honest: the module tests the guard, and the operator just
+# switched the guard off.
+pytestmark = pytest.mark.skipif(
+    os.environ.get("AGENT_TESTS_ALLOW_NETWORK") == "1",
+    reason="MIR-053 guard explicitly disabled via AGENT_TESTS_ALLOW_NETWORK=1",
+)
 
 
 def test_an_outbound_connect_fails_loudly_instead_of_dialing_out():
@@ -62,6 +73,17 @@ def test_loopback_is_still_open():
         for conn in accepted:
             conn.close()
         listener.close()
+
+
+def test_a_bytes_host_cannot_bypass_the_deny():
+    """The socket module accepts ``bytes`` hostnames; an early version of the
+    guard waved every non-``str`` host through, which made
+    ``connect((b"192.0.2.1", 443))`` a silent bypass. Bytes now decode and
+    face the same rule."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(5)
+        with pytest.raises(RuntimeError, match="MIR-053"):
+            s.connect((b"192.0.2.1", 443))
 
 
 def test_localhost_by_name_is_still_open():
