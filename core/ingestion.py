@@ -18,7 +18,7 @@ from typing import Any, Iterable
 from core.evidence import ProvenanceChain, evidence_from_tool_result, make_evidence
 from core.ingestion_reports import IngestReport, RssIngestReport, WebIngestReport
 from core.ingestion_utils import (
-    SKIP_DIR_NAMES,         # noqa: F401 -- re-exported (core/learning_planner.py imports it from here)
+    SKIP_DIR_NAMES as SKIP_DIR_NAMES,   # re-exported (core/learning_planner.py imports it from here)
     TEXT_EXTENSIONS,
     _candidate_urls,
     _chunk_text,
