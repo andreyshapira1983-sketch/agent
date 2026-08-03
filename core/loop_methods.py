@@ -186,6 +186,11 @@ class AgentLoopExtractedMethods:
             content=safe_content.strip(),
             tags=tags,
             owner=owner,
+            # MIR-074 root fix: persist the origin. Without it every stored
+            # record read back as origin-less, and the MIR-046 independence
+            # rule demoted every memory citation to topic-only — measured as
+            # the all-history ZERO of verified memory citations.
+            source=source,
         )
         self.persistent_store.save(record)
         # Keep a caller-supplied snapshot (TD-019) current so subsequent writes
@@ -490,6 +495,55 @@ class AgentLoopExtractedMethods:
             report["error"] = type(exc).__name__
 
         self.log.log("maintenance_pass", report)
+
+        # MIR-074 (operator ruling): every hygiene pass explains itself in
+        # the shared five-point vocabulary — «что отодвинул и почему», not a
+        # bare counter dump. Deterministic; failure must not break the pass.
+        try:
+            scanned = 0
+            if self.persistent_store is not None:
+                scanned = len(self.persistent_store.load())
+            moved = (
+                report.get("expired", 0)
+                + report.get("deduped", 0)
+                + report.get("archived", 0)
+            )
+            mode = "сухой прогон (только счёт)" if dry_run else "боевой проход"
+            full_text = "\n".join((
+                f"Проверял: {scanned} записей постоянной памяти, "
+                f"{report.get('episodes_pruned', 0)} эпизодов на прунинг, "
+                "архив посылок на дубли и потолок",
+                "Способ: балл важности = вес тегов + причинный кредит "
+                "(цитата в подтверждённом ответе, ×4 против простой вставки) "
+                "− штраф простоя; автозапись-«факт» без причинного кредита "
+                "больше не бессмертна",
+                f"Доказательство: {mode}; истекло {report.get('expired', 0)}, "
+                f"дублей {report.get('deduped', 0)}, в спячку "
+                f"{report.get('archived', 0)}, эпизодов срезано "
+                f"{report.get('episodes_pruned', 0)}, дублей посылок "
+                f"{report.get('assumptions_duplicates_removed', 0)}",
+                "Непроверенным осталось: полезность неarchived записей не "
+                "доказана и не опровергнута — спячка обратима, ничего не "
+                "уничтожено",
+                f"Уверенность: высокая в счёте, {mode}; классификация "
+                "«вредно/опровергнуто» — фаза 2, здесь не выносится",
+            ))
+            self.log.log(
+                "hygiene_explained",
+                {"full_text": full_text, "moved": moved, "dry_run": dry_run},
+            )
+        except Exception as _hx_exc:
+            try:
+                self.log.log(
+                    "hygiene_explained_failed",
+                    {
+                        "error_type": type(_hx_exc).__name__,
+                        "error": str(_hx_exc)[:300],
+                    },
+                )
+            except Exception:  # noqa: S110 — last-resort guard around logging
+                pass
+
         return report
 
     def compact_assumptions(self, *, dry_run: bool = False) -> dict:

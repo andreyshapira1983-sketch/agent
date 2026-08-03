@@ -2312,6 +2312,65 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 except Exception:
                     pass
 
+        # MIR-074 phase 1 (operator ruling): STRONG causal credit. A record
+        # cited [memory:<id>] in a chunk the verifier marked `verified` has
+        # completed the full chain — retrieved → changed the answer →
+        # independently checked. Injection alone stays a near-zero signal
+        # (access_count); this is the one that counts.
+        if (
+            self.last_verification is not None
+            and self.last_provenance is not None
+            and self.persistent_store is not None
+            and not self._durable_learning_suppressed("access_stats")
+        ):
+            try:
+                _ev_by_id = {
+                    ev.id: ev for ev in self.last_provenance.evidences
+                }
+                _credited: list[str] = []
+                for _chunk in self.last_verification.chunks:
+                    if _chunk.verdict != "verified":
+                        continue
+                    for _mid in _chunk.matched_evidence_ids:
+                        _ev = _ev_by_id.get(_mid)
+                        if (
+                            _ev is not None
+                            and _ev.obtained_via == "memory"
+                            and _ev.source_id.startswith("memory:mem")
+                        ):
+                            _rid = _ev.source_id[len("memory:"):]
+                            if _rid not in _credited:
+                                _credited.append(_rid)
+                if _credited:
+                    _by_rid = {
+                        rec.id: rec for rec in self.persistent_store.load()
+                    }
+                    for _rid in _credited:
+                        _rec = _by_rid.get(_rid)
+                        if _rec is not None:
+                            self.persistent_store.update(
+                                _rec.model_copy(
+                                    update={"causal_use": _rec.causal_use + 1}
+                                )
+                            )
+                    self.log.log(
+                        "memory_causal_credit",
+                        {"record_ids": _credited, "count": len(_credited)},
+                    )
+            except Exception as _cc_exc:
+                # Credit must never break the answer — and its failure must
+                # not be invisible (the MIR-077 rule).
+                try:
+                    self.log.log(
+                        "memory_causal_credit_failed",
+                        {
+                            "error_type": type(_cc_exc).__name__,
+                            "error": str(_cc_exc)[:300],
+                        },
+                    )
+                except Exception:
+                    pass
+
         # MIR-075: ask back instead of only philosophising unsupported. Fires
         # ONLY when the self-analysis sensor marked this turn AND the answer's
         # own verification counted zero verified chunks over a non-empty claim

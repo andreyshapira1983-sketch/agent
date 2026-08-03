@@ -11,6 +11,18 @@ All notable changes to this project are recorded here. The format follows
 ## [Unreleased]
 
 ### Added
+- Memory earns its keep causally (MIR-074 phase 1, operator ruling): a
+  `[memory:<id>]` citation the verifier confirms increments the record's
+  `causal_use` — retrieved, changed the answer, independently checked;
+  bare keyword injection stays a near-zero signal. An auto-'fact' record
+  with zero causal credit can now go dormant (archived, returnable) —
+  the tag floor no longer grants immortality; nothing is ever destroyed.
+  Every hygiene pass explains itself in the shared five-point vocabulary
+  (`hygiene_explained`). Root fix underneath: `MemoryRecord` now PERSISTS
+  its origin (`source`) — it was always lost on save, so the MIR-046
+  independence rule demoted every memory citation to topic-only, which is
+  why the measured all-history count of verified memory citations was
+  zero.
 - The agent asks back instead of only philosophising unsupported (MIR-075,
   operator assignment): a self-analysis turn whose answer carries zero
   verified chunks now ends with one canned narrowing question
