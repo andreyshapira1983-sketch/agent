@@ -136,7 +136,7 @@ def _execute_daemon_liveness_probe(workspace: Any) -> CampaignActionOutcome:
         age_s = age or 0
         verdict = (
             f"Пульс свежий: последний тик {age_s:.0f} с назад "
-            f"(event={heartbeat.get('event', '?')}) — демон жив, сигнал снят."
+            f"(event={heartbeat.get('event', '?')}) — демон жив; сигнал будет снят на следующем сборе."
         )
         step = "Не требуется — сигнал снимется на следующем сборе."
         confidence = "высокая (свежесть прочитана из файла пульса)"
