@@ -1,14 +1,16 @@
 """A procedure earns credit for work that was finished, and is debited only
 for a failure the run itself demonstrates.
 
-Before this, `procedure_from_episode`, `with_episode` and `feedback_for_episode`
-each keyed on `outcome` — the evidence axis. So the live store's blocked
-non-answer credited `tools:file_read` up to `success_count=5, confidence=0.857`
-(MIR-057), and an evidence-`partial` answer debited a procedure that may have
-executed perfectly.
+Before this, `procedure_from_episode`, the counter-moving fold-in (then
+`with_episode`; retired 2026-08-03 — production folds in via
+`merged_from_episode`, and counters move only through `with_outcome`) and
+`feedback_for_episode` each keyed on `outcome` — the evidence axis. So the
+live store's blocked non-answer credited `tools:file_read` up to
+`success_count=5, confidence=0.857` (MIR-057), and an evidence-`partial`
+answer debited a procedure that may have executed perfectly.
 
-Two named predicates now decide, and the credit one is used by all three
-paths so they cannot drift:
+Two named predicates now decide, and the credit one is used by every
+crediting path so they cannot drift:
 
     procedure_credit_allowed   achieved + success + tools
     procedure_debit_allowed    a failure the RUN demonstrates
@@ -139,13 +141,18 @@ def test_credit_still_needs_tools() -> None:
     assert procedure_credit_allowed(_ep(tools=())) is False
 
 
-def test_the_same_predicate_guards_the_counter_and_the_creation() -> None:
-    """A path that could credit without creating would drift from one that
-    creates without crediting."""
+def test_the_same_predicate_guards_the_lesson_and_the_creation() -> None:
+    """A path that could bank content without creating would drift from one
+    that creates without banking. Successor of the `with_episode` pin: since
+    #261 the fold-in (`merged_from_episode`) moves NO counter for anyone —
+    the blocked run's guarantee is that it leaves neither credit NOR a
+    lesson, and the same predicate refuses to mint from it."""
     blocked = _ep(completion="blocked")
-    procedure = _procedure().with_episode(blocked)
+    procedure = _procedure().merged_from_episode(blocked)
 
-    assert procedure.success_count == 2, "with_episode must ask the same question"
+    assert procedure.success_count == 2, "the fold-in must never move a counter"
+    assert procedure.status == "active", "the fold-in must never move status"
+    assert procedure.lessons == _procedure().lessons, "no credit, no lesson"
     assert procedure_from_episode(blocked) is None
 
 
