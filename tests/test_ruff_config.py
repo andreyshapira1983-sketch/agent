@@ -24,7 +24,7 @@ _CONFIG = _REPO / "ruff.toml"
 
 #: Замерено 2026-08-03 на зафиксированном наборе. ОПУСКАТЬ по мере уборки;
 #: поднимать — только осознанным решением с причиной в комментарии.
-_BASELINE_FINDINGS = 1010  # 1006 замерено + запас на два новых файла этого PR
+_BASELINE_FINDINGS = 1004  # точное измерение 2026-08-03, без запаса
 
 #: Семейства, без которых наша дисциплина рассыпается: F — неопределённые
 #: имена, I — порядок импортов, S/BLE — безопасность и широкие `except`
@@ -52,16 +52,27 @@ def test_the_disciplinary_families_stay_selected():
 
 
 def test_every_ignore_carries_a_written_reason():
-    """Отключённое правило без объяснения — это тихое сужение совести."""
+    """Отключённое правило без объяснения — это тихое сужение совести.
+
+    Причина обязана стоять В НЕПОСРЕДСТВЕННО предшествующем блоке
+    комментариев: иначе новое правило проезжает под чужим объяснением
+    (замечание ревью #298).
+    """
     text = _CONFIG.read_text(encoding="utf-8")
-    body = text[text.index("ignore = ["):]
-    body = body[: body.index("]")]
-    for line in body.splitlines():
-        code = line.strip().strip('",')
-        if not code or code.startswith(("#", "ignore")):
+    body = text[text.index("ignore = [") : text.index("]", text.index("ignore = ["))]
+    lines = body.splitlines()[1:]          # первая строка — сам `ignore = [`
+    reason_above = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            reason_above = False           # пустая строка обрывает блок причин
             continue
-        # у каждого кода должен быть комментарий выше в том же блоке
-        assert "#" in body[: body.index(code)], f"правило {code} отключено без причины"
+        if stripped.startswith("#"):
+            reason_above = True
+            continue
+        for code in (c.strip().strip('"') for c in stripped.split(",")):
+            if code:
+                assert reason_above, f"правило {code} отключено без причины рядом"
 
 
 @pytest.mark.skipif(shutil.which("ruff") is None, reason="ruff не установлен")
@@ -71,6 +82,11 @@ def test_lint_debt_does_not_grow():
     result = subprocess.run(  # noqa: S603  # nosec B603 — фиксированный argv, полный путь, без shell
         [ruff, "check", "--quiet", "--output-format", "concise", "."],
         cwd=_REPO, capture_output=True, text=True, check=False,
+    )
+    # 0 — чисто, 1 — есть замечания; всё остальное значит, что ruff не
+    # отработал (ошибка конфигурации или запуска), и считать нечего.
+    assert result.returncode in (0, 1), (
+        f"ruff не выполнил прогон (код {result.returncode}): {result.stderr[:400]}"
     )
     found = len([ln for ln in result.stdout.splitlines() if ln.strip()])
     assert found <= _BASELINE_FINDINGS, (
