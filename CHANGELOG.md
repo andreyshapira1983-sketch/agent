@@ -59,6 +59,12 @@ All notable changes to this project are recorded here. The format follows
   to grep the window instead of guessing from the fragment.
 
 ### Changed
+- `core/loop.py` разбирается на модули под операторский потолок 2000 строк
+  (MIR-078, кусок 1): исполнение одного шага плана — политика и одобрение,
+  вызов инструмента, разбор результата, классификация, защита от инъекций,
+  план компенсации, параллельный запуск читающих шагов — уехало в
+  `core/loop_step_execution.py`. Цикл 4232 → 3404 строки; перенос дословный
+  (AST-сверка против истории), импорт-пути и цели подмены в тестах сохранены.
 - Codacy sweep, one PR (operator's order «исправь всё досконально, одним
   PR»): the `loop_methods2` mixin declares its FULL host contract (28
   "no member" HIGHs -> 0, file rating 0.46 -> 10.00); the four self-build

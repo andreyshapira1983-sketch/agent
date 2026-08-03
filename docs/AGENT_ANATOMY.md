@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 157 modules across 12 groups._
+_Total: 158 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -50,6 +50,7 @@ _Planning, verification, clarification, control loop._
 | `core/loop_helpers` | Helpers extracted verbatim from ``core/loop.py`` by the incremental splitter. |
 | `core/loop_methods` | Methods extracted verbatim from ``AgentLoop`` in ``core/loop.py`` by the incremental splitter. |
 | `core/loop_methods2` | Methods extracted verbatim from ``AgentLoop`` in ``core/loop.py`` by the incremental splitter. |
+| `core/loop_step_execution` | Исполнение одного шага плана — вырезано из ``core/loop.py`` дословно. |
 | `core/planner` | LLM-driven Planner (§3 Cognitive Core: Planning). |
 | `core/planner_prompt` | The planner's system prompt (§3 Cognitive Core: Planning). |
 | `core/plan_parsing` | Parsing of the planner LLM's raw output (§3 Cognitive Core: Planning). |
