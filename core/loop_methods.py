@@ -471,6 +471,14 @@ class AgentLoopExtractedMethods:
 
             archive = self.archive_persistent(dry_run=dry_run)
             report["archived"] = len(getattr(archive, "archived", []) or [])
+
+            compacted = self.compact_assumptions(dry_run=dry_run)
+            report["assumptions_duplicates_removed"] = int(
+                compacted.get("duplicates_removed", 0)
+            )
+            report["assumptions_over_cap_removed"] = int(
+                compacted.get("over_cap_removed", 0)
+            )
         except Exception as exc:  # noqa: BLE001
             # Maintenance must never take the tick down with it: a corrupt
             # state file is a reason to skip cleanup, not to stop working.
@@ -481,6 +489,25 @@ class AgentLoopExtractedMethods:
             report["error"] = type(exc).__name__
 
         self.log.log("maintenance_pass", report)
+        return report
+
+    def compact_assumptions(self, *, dry_run: bool = False) -> dict:
+        """Dedupe and cap the assumptions archive (MIR-027's open half).
+
+        The store became a dormant archive when the cross-turn auto-restore
+        was removed; this keeps dormant BOUNDED — duplicates collapse to the
+        newest row, the tail is capped — while retrieval stays with the
+        memory-lifecycle contract.
+        """
+        store = getattr(self, "assumption_store", None)
+        if store is None:
+            report = {
+                "scanned": 0, "duplicates_removed": 0,
+                "over_cap_removed": 0, "kept": 0, "dry_run": dry_run,
+            }
+        else:
+            report = store.compact(dry_run=dry_run)
+        self.log.log("assumptions_archive_compact", report)
         return report
 
     def expire_persistent(self, *, dry_run: bool = False):
