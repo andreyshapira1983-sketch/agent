@@ -129,15 +129,11 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
         verdict: str
         annotated = chunk_text
         if not cits:
+            # `_find_structured_support` is tool_output-only by construction
+            # (kind filter in verifier_utils), so a user_explicit result is
+            # impossible here — no MIR-028 interception needed on this path.
             struct_ev = _find_structured_support(chunk_text, chain) if not chain_empty else None
-            if struct_ev is not None and getattr(struct_ev, "kind", "") == "user_explicit":
-                # Structured overlap with the operator's own words proves the
-                # words were said, nothing more (operator ruling, MIR-028).
-                verdict = "user_asserted"
-                user_asserted += 1
-                matched_ids.append(struct_ev.id)
-                annotated = chunk_text.rstrip() + " [user-asserted]"
-            elif struct_ev is not None:
+            if struct_ev is not None:
                 verdict = "verified"
                 verified += 1
                 matched_ids.append(struct_ev.id)
@@ -266,13 +262,9 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                     annotated = annotated.replace(raw, rewrite)
                 annotated = annotated.rstrip() + " [claim-figure-unverified]"
             else:
+                # tool_output-only by construction — cannot return user_explicit.
                 struct_ev = _find_structured_support(chunk_text, chain) if chain.evidences and not chain_empty else None
-                if struct_ev is not None and getattr(struct_ev, "kind", "") == "user_explicit":
-                    verdict = "user_asserted"
-                    user_asserted += 1
-                    matched_ids.append(struct_ev.id)
-                    annotated = annotated.rstrip() + " [user-asserted]"
-                elif struct_ev is not None:
+                if struct_ev is not None:
                     verdict = "verified"
                     verified += 1
                     matched_ids.append(struct_ev.id)

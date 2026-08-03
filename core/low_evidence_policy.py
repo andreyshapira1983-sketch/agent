@@ -355,13 +355,14 @@ def evaluate_low_evidence_policy(
     subagent_asserted = int(
         getattr(report, "subagent_asserted_chunks", 0) or 0
     )
-    # `user_asserted` (operator ruling 2026-08-03, MIR-028) deliberately joins
-    # NEITHER side: it is not support (the user's words never verify their own
-    # content, so an all-echo answer must not score supported_ratio=1.0 and
-    # slip past this gate), and it is not a false citation either (nothing was
-    # fabricated), so it does not push the unverified floor. Neutral here;
-    # its weight lands in the episode banking (`weak_chunks`) and the
-    # evidence-support score instead.
+    # `user_asserted` (operator ruling 2026-08-03, MIR-028) joins neither
+    # `supported` (the user's words never verify their own content, so an
+    # all-echo answer must not score supported_ratio=1.0 and slip past this
+    # gate) nor `unverified_total` (nothing was fabricated, so it does not
+    # push the floor). It still sits in `total_chunks`, i.e. it DOES drag
+    # supported_ratio down — "neutral" means neutral between those two
+    # counters, not absent from the trigger math. Its main weight lands in
+    # episode banking (`weak_chunks`) and the evidence-support score.
     user_asserted = int(getattr(report, "user_asserted_chunks", 0) or 0)
     unverified_total = (
         unverified + cited_unmatched + topic_supported + subagent_asserted
