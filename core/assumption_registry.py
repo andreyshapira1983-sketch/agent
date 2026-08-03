@@ -48,6 +48,7 @@ from core.ids import new_id
 from core.state_integrity import (
     append_state_jsonl_unlocked,
     read_state_jsonl_unlocked,
+    rewrite_state_jsonl_unlocked,
     state_file_lock,
 )
 
@@ -466,6 +467,56 @@ class AssumptionStore:
         with state_file_lock(self.path):
             append_state_jsonl_unlocked(self.path, payloads)
         return len(payloads)
+
+    # ---------- hygiene ----------
+
+    def compact(self, *, keep_last: int = 500, dry_run: bool = False) -> dict:
+        """Dedupe and cap the archive; the lifecycle ruling made this owed.
+
+        MIR-027's open half (operator ruling 2026-08-03: «сохранить — не
+        значит постоянно помнить»): after the auto-restore was removed the
+        store became a dormant archive — but it grew unbounded and collected
+        duplicates (the Layer-4 profile makes later turns re-extract the same
+        text; measured live: the language assumption saved twice in two
+        turns). One compaction rule, mirroring the persistent-store hygiene:
+
+        * duplicates share (category, text) — the NEWEST row wins, because
+          the archive answers «что предполагалось в последний раз», not
+          «сколько раз»;
+        * at most ``keep_last`` newest rows survive — dormant is bounded.
+
+        ``dry_run=True`` counts and reports without rewriting, exactly like
+        its siblings in ``run_maintenance_pass``.
+        """
+        with state_file_lock(self.path):
+            if not self.path.exists():
+                return {
+                    "scanned": 0, "duplicates_removed": 0,
+                    "over_cap_removed": 0, "kept": 0, "dry_run": dry_run,
+                }
+            rows = read_state_jsonl_unlocked(self.path)
+            scanned = len(rows)
+            deduped: list[dict] = []
+            seen: set[tuple[str, str]] = set()
+            for row in reversed(rows):        # newest first, newest wins
+                key = (str(row.get("category", "")), str(row.get("text", "")))
+                if key in seen:
+                    continue
+                seen.add(key)
+                deduped.append(row)
+            deduped.reverse()                 # restore chronological order
+            duplicates_removed = scanned - len(deduped)
+            kept_rows = deduped[-keep_last:] if keep_last > 0 else []
+            over_cap_removed = len(deduped) - len(kept_rows)
+            if not dry_run and (duplicates_removed or over_cap_removed):
+                rewrite_state_jsonl_unlocked(self.path, kept_rows)
+            return {
+                "scanned": scanned,
+                "duplicates_removed": duplicates_removed,
+                "over_cap_removed": over_cap_removed,
+                "kept": len(kept_rows),
+                "dry_run": dry_run,
+            }
 
     # ---------- reads ----------
 
