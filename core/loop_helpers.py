@@ -11,6 +11,7 @@ from core.ids import new_id
 from core.evidence import Evidence, ProvenanceChain
 from core.file_request_intent import extract_path_mentions, normalize_path_mention
 from core.verification_summary import TAIL_PREFIX as _VERIFICATION_TAIL_PREFIX
+from core.clarification_gate import ASK_BACK_PREFIX as _ASK_BACK_PREFIX
 
 def _to_text(output: Any) -> str:
     """Stringify a tool output for classification + scanning.
@@ -308,11 +309,14 @@ def format_human_response(answer: str) -> str:
         if any(low.startswith(p) for p in _SKIP_PREFIXES):
             section = "skip"
             continue
-        # The five-point verification tail (MIR-069). It rides the notice
-        # ledger and lands AFTER the contract sections, i.e. exactly where the
-        # section walk used to drop it (measured live, 2026-08-03) — so it is
-        # bucketed by its fixed prefix, independent of the current section.
-        if stripped.startswith(_VERIFICATION_TAIL_PREFIX):
+        # The five-point verification tail (MIR-069) and the ask-back
+        # (MIR-075) ride the notice ledger and land AFTER the contract
+        # sections, i.e. exactly where the section walk used to drop them
+        # (measured live, 2026-08-03) — so both are bucketed by their fixed
+        # prefixes, independent of the current section.
+        if stripped.startswith(
+            (_VERIFICATION_TAIL_PREFIX, _ASK_BACK_PREFIX)
+        ):
             verification_tail_lines.append(stripped)
             continue
 
