@@ -71,6 +71,31 @@ def test_a_different_goal_is_a_different_request(tmp_path):
     assert rt.approval_inbox.snapshot()["pending"] == 2
 
 
+def test_secret_bearing_goal_still_dedups(tmp_path):
+    """Review round #284 (Copilot): the stored payload is redacted, so a key
+    carrying raw goal text stops matching once the goal contains a secret —
+    spam would return exactly for sensitive goals. The key must therefore be
+    derived from a stable non-sensitive form (hash), not the raw text."""
+    rt = _runtime(tmp_path)
+    secret_goal = "проверь ключ " + "AKIA" + "IOSFODNN" + "7EXAMPLE" + " в конфиге"
+    first = _run_blocked(rt, secret_goal)
+    again = _run_blocked(rt, secret_goal)
+    assert again.stop_reason == first.stop_reason
+    assert rt.approval_inbox.snapshot()["pending"] == 1
+
+
+def test_dedup_hit_does_not_burn_approval_budget(tmp_path):
+    """Review round #284 (Codacy): a retry that adds nothing must not reserve
+    approval_requests budget — otherwise honest retries starve real asks."""
+    from core.budget_governor import BudgetGovernor
+
+    rt = _runtime(tmp_path)
+    budget = BudgetGovernor()
+    rt.run(AutonomousRuntimeConfig(goal="project health", dry_run=False), budget=budget)
+    rt.run(AutonomousRuntimeConfig(goal="project health", dry_run=False), budget=budget)
+    assert budget.snapshot()["used"]["approval_requests"] == 1
+
+
 def test_a_decided_item_stops_deduping(tmp_path):
     rt = _runtime(tmp_path)
     first = _run_blocked(rt, "project health")

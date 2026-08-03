@@ -446,6 +446,7 @@ class AutonomousRuntime:
         })
 
         if not config.dry_run and not config.effects_approved:
+            _pending_before = {i.id for i in self.approval_inbox.pending()}
             item = self.approval_inbox.add(
                 operation="autonomous_runtime.allow_effects",
                 summary=(
@@ -465,10 +466,22 @@ class AutonomousRuntime:
                 # retries piled up sixteen identical pending items because this
                 # call site never consulted the inbox's own duplicate guard.
                 # Same goal → same pending request; a decided item stops
-                # deduping, so a new run may ask again.
-                dedup_key=f"autonomous_runtime.allow_effects:{config.goal}",
+                # deduping, so a new run may ask again. The key is a HASH of
+                # the goal, not the raw text: the stored payload is redacted,
+                # so a raw-text key would stop matching exactly when the goal
+                # carries a secret (review round #284), and long/sensitive goal
+                # text has no business living inside a durable key.
+                dedup_key=(
+                    "autonomous_runtime.allow_effects:"
+                    + hashlib.sha256(config.goal.encode("utf-8")).hexdigest()[:16]
+                ),
             )
-            budget.reserve("approval_requests", reason="non-dry-run runtime approval")
+            if item.id not in _pending_before:
+                # A dedup hit adds nothing and must not burn request budget
+                # (review round #284).
+                budget.reserve(
+                    "approval_requests", reason="non-dry-run runtime approval"
+                )
             report = AutonomousRunReport(
                 status="blocked",
                 dry_run=False,
