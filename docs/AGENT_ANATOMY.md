@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 158 modules across 12 groups._
+_Total: 159 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -191,6 +191,7 @@ _Logging, identifiers, architecture auditing._
 | `core/logger` | Structured JSONL logger for the agent loop. |
 | `core/ids` | Short unique identifiers for trace correlation. |
 | `core/architecture_audit` | Static architecture gap audit for the autonomous agent project. |
+| `core/code_state` | Отпечаток проверенного кода: какой именно код сейчас под руками. |
 
 ## Learning & Self-Improvement (§9)
 
