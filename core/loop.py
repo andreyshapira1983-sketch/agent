@@ -75,6 +75,7 @@ from core.output_policy import apply_ranker_output_policy
 from core.completion_contract import derive_completion_contract
 from core.completion_obligation import evaluate_completion_obligations
 from core.response_draft import ResponseDraft
+from core.verification_summary import build_verification_summary
 from core.low_evidence_policy import (
     is_evidence_expected,
 )
@@ -2274,6 +2275,28 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         # a truncation could delete the clarifying questions the loop had just
         # decided to ask (measured; see core/response_draft.py).
         draft = ResponseDraft(body=answer)
+
+        # MIR-069 (phase 1): the five-point verification explanation — what was
+        # checked, how, on what evidence, what remains unverified, how
+        # confident. Full text goes to the journal; the compact tail rides the
+        # notice ledger so a later body rewrite cannot delete it. Nothing
+        # examined → no tail (the disclaimers already speak for that case).
+        if self.last_verification is not None:
+            try:
+                _vsummary = build_verification_summary(
+                    self.last_verification, chain=self.last_provenance
+                )
+                self.log.log(
+                    "verification_explained", _vsummary.to_log_payload()
+                )
+                if _vsummary.tail:
+                    draft.add_notice(
+                        author="verification_summary",
+                        channel="append",
+                        text=_vsummary.tail,
+                    )
+            except Exception:
+                pass
 
         policy_result = apply_ranker_output_policy(
             answer=draft.body,

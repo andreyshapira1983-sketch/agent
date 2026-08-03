@@ -10,6 +10,7 @@ from typing import Any
 from core.ids import new_id
 from core.evidence import Evidence, ProvenanceChain
 from core.file_request_intent import extract_path_mentions, normalize_path_mention
+from core.verification_summary import TAIL_PREFIX as _VERIFICATION_TAIL_PREFIX
 
 def _to_text(output: Any) -> str:
     """Stringify a tool output for classification + scanning.
@@ -271,6 +272,7 @@ def format_human_response(answer: str) -> str:
     conclusion_lines: list[str] = []
     facts_lines: list[str] = []
     unverified_lines: list[str] = []
+    verification_tail_lines: list[str] = []
 
     _SKIP_PREFIXES = ("sources:", "confidence:", "safety:", "[note]")
 
@@ -305,6 +307,13 @@ def format_human_response(answer: str) -> str:
             continue
         if any(low.startswith(p) for p in _SKIP_PREFIXES):
             section = "skip"
+            continue
+        # The five-point verification tail (MIR-069). It rides the notice
+        # ledger and lands AFTER the contract sections, i.e. exactly where the
+        # section walk used to drop it (measured live, 2026-08-03) — so it is
+        # bucketed by its fixed prefix, independent of the current section.
+        if stripped.startswith(_VERIFICATION_TAIL_PREFIX):
+            verification_tail_lines.append(stripped)
             continue
 
         # ── content collection ────────────────────────────────────────────
@@ -360,6 +369,8 @@ def format_human_response(answer: str) -> str:
     if unverified_lines:
         note = " ".join(unverified_lines)
         parts.append(f"⚠️ Не подтверждено: {note}")
+    if parts and verification_tail_lines:
+        parts.extend(verification_tail_lines)
 
     return "\n\n".join(parts) if parts else answer
 
