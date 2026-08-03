@@ -452,7 +452,7 @@ def _self_build_payload(workspace: Path, now: datetime) -> dict[str, Any]:
 def _value_review_payload(workspace: Path) -> dict[str, Any]:
     path = workspace / VALUE_REVIEWS_PATH
     rows, state = _read_jsonl_payloads(path)
-    counts = {verdict: 0 for verdict in VALUE_VERDICTS}
+    counts = dict.fromkeys(VALUE_VERDICTS, 0)
     if state != "known":
         return {"status": "unknown", "reason": state, "counts": counts, "path": str(path)}
     effective: dict[str, str] = {}

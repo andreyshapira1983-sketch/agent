@@ -1565,7 +1565,7 @@ Produce a patch proposal for the routing bug.
             workspace,
         ) is True
 
-        inbox = getattr(agent, "approval_inbox")
+        inbox = agent.approval_inbox
         pending = inbox.pending()
         out = capsys.readouterr()
         assert '"capability_type": "telegram"' in out.err
@@ -2130,7 +2130,7 @@ Produce a patch proposal for the routing bug.
         assert inbox is None
 
         assert _handle_auto_run("--allow-effects", agent, workspace) is True
-        inbox = getattr(agent, "approval_inbox")
+        inbox = agent.approval_inbox
         first = inbox.pending()[0]
 
         assert handle_meta_command(":approval-list", agent, workspace) is True
@@ -2151,7 +2151,7 @@ Produce a patch proposal for the routing bug.
         agent = _build_agent(workspace)
 
         assert _handle_auto_run("--allow-effects --no-tests --limit 2", agent, workspace) is True
-        inbox = getattr(agent, "approval_inbox")
+        inbox = agent.approval_inbox
         item = inbox.pending()[0]
 
         assert handle_meta_command(f":approval-run {item.id}", agent, workspace) is True
@@ -2165,7 +2165,7 @@ Produce a patch proposal for the routing bug.
     def test_operator_control_plane_approval_run_rejects_unknown_operation(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
         assert _handle_auto_run("--allow-effects --no-tests --limit 2", agent, workspace) is True
-        inbox = getattr(agent, "approval_inbox")
+        inbox = agent.approval_inbox
         unknown = inbox.add(operation="unknown.operation", summary="Unknown")
 
         assert handle_meta_command(f":approval-approve {unknown.id}", agent, workspace) is True
@@ -2179,7 +2179,7 @@ Produce a patch proposal for the routing bug.
         (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
 
         assert _handle_auto_run("--allow-effects --no-tests --limit 2", agent, workspace) is True
-        inbox = getattr(agent, "approval_inbox")
+        inbox = agent.approval_inbox
         item = inbox.pending()[0]
 
         assert handle_meta_command(f":approval-approve {item.id}", agent, workspace) is True
@@ -2192,7 +2192,7 @@ Produce a patch proposal for the routing bug.
     def test_operator_control_plane_approval_abort(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
         assert _handle_auto_run("--allow-effects --no-tests --limit 2", agent, workspace) is True
-        inbox = getattr(agent, "approval_inbox")
+        inbox = agent.approval_inbox
         item = inbox.pending()[0]
 
         assert handle_meta_command(f":approval-abort {item.id}", agent, workspace) is True

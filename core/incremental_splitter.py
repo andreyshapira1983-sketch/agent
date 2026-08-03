@@ -113,9 +113,7 @@ def _bound_names(node: ast.AST) -> set[str]:
             for alias in sub.names:
                 if alias.name != "*":
                     bound.add((alias.asname or alias.name).split(".")[0])
-        elif isinstance(sub, ast.ExceptHandler) and sub.name:
-            bound.add(sub.name)
-        elif isinstance(sub, ast.MatchAs) and sub.name:
+        elif (isinstance(sub, ast.ExceptHandler) and sub.name) or (isinstance(sub, ast.MatchAs) and sub.name):
             bound.add(sub.name)
     return bound
 

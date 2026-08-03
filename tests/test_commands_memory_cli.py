@@ -252,8 +252,8 @@ def test_rollback_with_an_explicit_id(tmp_path, capsys):
     seen: dict = {}
     agent = SimpleNamespace(
         compensation_log=[],
-        rollback=lambda *, plan_id, workspace_root: seen.setdefault("plan_id", plan_id)
-        and None
+        rollback=lambda *, plan_id, workspace_root: (seen.setdefault("plan_id", plan_id)
+        and None)
         or SimpleNamespace(
             plan_id=plan_id,
             summary=lambda: {"skipped_reason": None, "ok": 0, "noop": 1, "error": 0, "outcomes": []},
@@ -286,7 +286,7 @@ def test_a_skipped_rollback_says_why_and_prints_no_counts(tmp_path, capsys):
 # ── _print_persistent ────────────────────────────────────────────────────────
 
 def test_persistent_listing_when_empty(capsys):
-    _print_persistent(SimpleNamespace(list_persistent=lambda: []))
+    _print_persistent(SimpleNamespace(list_persistent=list))
     assert "(no persistent records)" in capsys.readouterr().err
 
 

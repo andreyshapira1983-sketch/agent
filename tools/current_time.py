@@ -28,7 +28,7 @@ from typing import Any
 from tools.base import Tool
 
 
-def format_duration_seconds(seconds: int | float) -> str:
+def format_duration_seconds(seconds: float) -> str:
     """Format a non-negative duration in seconds.
 
     Examples:

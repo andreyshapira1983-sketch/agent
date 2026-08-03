@@ -424,7 +424,7 @@ def _handle_team_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         )
         return True
     try:
-        from core.subagent_runner import SubAgentRunner  # noqa: PLC0415
+        from core.subagent_runner import SubAgentRunner
         runner = None if dry_run else SubAgentRunner(
             workspace_root=workspace,
             policy=agent.policy,

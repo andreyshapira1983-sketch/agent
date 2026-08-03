@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-import core.tool_receipts as tool_receipts
+from core import tool_receipts
 from core.approval_inbox import ApprovalInbox
 from core.tool_receipts import (
     ToolReceiptLedger,

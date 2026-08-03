@@ -36,7 +36,7 @@ def _make_mock_model_router() -> MagicMock:
     return mr
 
 
-def _make_parent_registry() -> "ToolRegistry":
+def _make_parent_registry() -> ToolRegistry:
     from tools.base import Tool, ToolRegistry
 
     class _DummyTool(Tool):

@@ -677,7 +677,7 @@ class AgentLoopStepExecution:
                     "issues": issues,
                     "data_class": cls_result.cls.value,
                 }
-            elif cls_result.cls == DataClass.SENSITIVE:
+            if cls_result.cls == DataClass.SENSITIVE:
                 findings = collect_pii_findings(flat_output)
                 kinds = sorted({f"pii-{f.kind}" for f in findings})
                 self.log.log(

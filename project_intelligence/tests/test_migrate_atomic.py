@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-
 import pytest
 
 from project_intelligence.db.connection import connect, get_schema_version
 from project_intelligence.db.migrate import (
+    applied_versions,
     apply_migrations,
     apply_one_migration,
-    applied_versions,
     ensure_migrations_table,
 )
 

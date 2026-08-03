@@ -64,7 +64,7 @@ def _opener(body: bytes, **kwargs) -> _StubOpener:
 
 
 def _resolver_for(ip: str):
-    def _resolver(host, port, family, socktype, proto, flags):  # noqa: ANN001, ARG001
+    def _resolver(host, port, family, socktype, proto, flags):
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port or 443))]
 
     return _resolver

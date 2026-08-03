@@ -43,7 +43,7 @@ def test_help_exits_zero_and_lists_exactly_seven_flags(monkeypatch, capsys):
     # at this commit, but filter defensively so prose additions do not break it.
     declared = {flag for flag in found if flag in EXPECTED_FLAGS or flag == "--help"}
     assert declared == EXPECTED_FLAGS | {"--help"}
-    assert EXPECTED_FLAGS <= found
+    assert found >= EXPECTED_FLAGS
 
 
 def test_usage_line_shape(monkeypatch, capsys):

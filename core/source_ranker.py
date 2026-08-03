@@ -501,8 +501,7 @@ def _domain_from_source_id(source_id: str) -> str:
     parsed = urlparse(raw)
     host = parsed.netloc or parsed.path.split("/", 1)[0]
     host = host.lower().strip()
-    if host.startswith("www."):
-        host = host[4:]
+    host = host.removeprefix("www.")
     return host
 
 

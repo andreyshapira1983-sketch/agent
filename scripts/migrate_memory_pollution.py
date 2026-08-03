@@ -126,7 +126,7 @@ def archive_reason(payload: dict[str, Any]) -> str | None:
     if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
         return None
     tag_set = frozenset(tags)
-    if not _WRITER_SIGNATURE <= tag_set:
+    if not tag_set >= _WRITER_SIGNATURE:
         return None
     if payload.get("owner") != _WRITER_OWNER:
         # A user- or session-owned row wearing the writer's tags was written

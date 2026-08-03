@@ -312,9 +312,9 @@ class TestMatchCitationWebPrefixExcluded:
         """Pin the exact set of prefixes excluded from token fallback
         so a future contributor who adds a new URL-ish prefix has to
         make an explicit call about whether it joins the exclusion."""
-        assert _NO_TOKEN_FALLBACK_PREFIXES == frozenset(
+        assert frozenset(
             {"web", "search", "file"}
-        )
+        ) == _NO_TOKEN_FALLBACK_PREFIXES
 
 
 # ===========================================================================

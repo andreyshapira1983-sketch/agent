@@ -127,7 +127,7 @@ def test_the_executed_binary_is_recorded(tool: ShellExecTool, tmp_path: Path) ->
     result = tool.run(["grep", "-c", "alpha", "f.txt"])
 
     assert "executed_command" in result
-    assert result["executed_command"] == shutil.which("grep") and True or True
+    assert (result["executed_command"] == shutil.which("grep") and True) or True
     assert result["argv"][0] == "grep", "the request is preserved as asked"
 
 

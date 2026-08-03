@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Optional, Union
+from typing import Union
 
 PathLike = Union[str, Path]
 
@@ -28,7 +28,7 @@ def connect(db_path: PathLike, *, readonly: bool = False) -> sqlite3.Connection:
     return conn
 
 
-def get_schema_version(conn: sqlite3.Connection) -> Optional[str]:
+def get_schema_version(conn: sqlite3.Connection) -> str | None:
     try:
         row = conn.execute(
             "SELECT value FROM schema_meta WHERE key = 'schema_version'"

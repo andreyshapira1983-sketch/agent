@@ -100,7 +100,7 @@ def _handle_refresh_models(rest: str, agent: AgentLoop) -> bool:
 
     tokens = _split_meta_args(rest)
     requested = [t.lstrip("-") for t in tokens if t.startswith("--")]
-    providers = requested if requested else None  # None = all available
+    providers = requested or None  # None = all available
 
     print(
         "\n(refresh-models: asking each provider for its current model list…)",
@@ -290,7 +290,7 @@ def _handle_provider_catalog_refresh(rest: str, agent: AgentLoop) -> bool:
         t.lstrip("-") for t in tokens
         if t.startswith("--") and t not in _DISCOVERY_OPTION_FLAGS
     ]
-    providers = requested if requested else None
+    providers = requested or None
 
     try:
         report = build_discovery_report(providers=providers)

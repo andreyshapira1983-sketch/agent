@@ -240,7 +240,7 @@ def test_signal_callback_triggers_graceful_stop():
         run_task = asyncio.create_task(daemon.run())
         await asyncio.sleep(0)
 
-        daemon._on_signal(signal.SIGINT)  # noqa: SLF001 - deliberate white-box test
+        daemon._on_signal(signal.SIGINT)
         await run_task
         assert daemon.shutting_down is True
         assert daemon.running is False
@@ -256,7 +256,7 @@ def test_signal_fallback_handler_triggers_stop():
         run_task = asyncio.create_task(daemon.run())
         await asyncio.sleep(0)
 
-        daemon._signal_fallback(signal.SIGINT, None)  # noqa: SLF001
+        daemon._signal_fallback(signal.SIGINT, None)
         await run_task
         assert daemon.shutting_down is True
 
