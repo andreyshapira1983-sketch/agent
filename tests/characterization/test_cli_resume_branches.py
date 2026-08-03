@@ -100,7 +100,7 @@ def test_invalid_trace_id_exit_code_is_two_in_a_real_process(tmp_path):
     env = {**os.environ, "AGENT_PROVIDER": "mock", "PYTHONIOENCODING": "utf-8"}
     # argv фиксирован: sys.executable + наш main.py (S603 подавлен по месту —
     # remote-режим Codacy не читает per-file-ignores, #300).
-    proc = subprocess.run(  # noqa: S603  # check=False: код проверен ниже
+    proc = subprocess.run(  # nosemgrep  # noqa: S603  # nosec B603
         [
             sys.executable,
             str(REPO_ROOT / "main.py"),

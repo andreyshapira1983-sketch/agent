@@ -13,7 +13,7 @@ def _git(ws: Path, *args: str) -> None:
     # Подавления S603/S607 в этом файле: команды фиксированы — git с
     # argv из литералов; Codacy применяет их построчно (per-file-ignores
     # по путям его remote-режим не читает, измерено на #300).
-    subprocess.run(  # noqa: S603
+    subprocess.run(  # noqa: S603  # nosec B603 B607
         ["git", "-c", "user.name=Test", "-c", "user.email=test@localhost", *args],  # noqa: S607
         cwd=str(ws),
         check=True,
@@ -23,8 +23,8 @@ def _git(ws: Path, *args: str) -> None:
 
 
 def _init_repo(ws: Path) -> None:
-    subprocess.run(["git", "init"], cwd=str(ws), check=True, capture_output=True)  # noqa: S607
-    subprocess.run(
+    subprocess.run(["git", "init"], cwd=str(ws), check=True, capture_output=True)  # noqa: S607  # nosec B603 B607
+    subprocess.run(  # nosec B603 B607
         ["git", "symbolic-ref", "HEAD", "refs/heads/main"],  # noqa: S607
         cwd=str(ws), check=True, capture_output=True,
     )
@@ -87,7 +87,7 @@ def test_delete_branch(repo: Path):
     vcs.checkout("main")
     vcs.delete_branch("self-apply/t3")
     # check=True: при сбое git утверждение «ветки нет» проходило по пустоте.
-    branches = subprocess.run(
+    branches = subprocess.run(  # nosec B603 B607
         ["git", "branch"], cwd=str(repo), capture_output=True, text=True,  # noqa: S607
         check=True,
     ).stdout
