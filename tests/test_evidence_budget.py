@@ -254,7 +254,14 @@ def test_fresh_block_survives_intact_when_memory_absorbs_the_overflow(monkeypatc
 
 
 def test_without_demotion_the_largest_block_still_goes_first(monkeypatch):
-    """Default behaviour is unchanged — demotion is opt-in per call."""
+    """Demotion stays opt-in per call: without it, memory is not cut
+    preferentially — the largest block pays first and deepest.
+
+    Updated for MIR-073: the largest block used to absorb the WHOLE excess
+    alone (here: cut to 180 while memory stayed pristine), which is exactly
+    the starvation defect. Now it stops at the fair share and the remainder
+    cascades — so memory may pay the tail, but always less than the largest.
+    """
     monkeypatch.setenv("AGENT_EVIDENCE_TOTAL_CHARS", "900")
     blocks = [("file:core/loop.py", "F" * 700), (MEMORY_BLOCK_LABEL, "M" * 600)]
 
@@ -263,7 +270,12 @@ def test_without_demotion_the_largest_block_still_goes_first(monkeypatch):
     assert was_trimmed
     by_label = dict(result)
     assert "TOTAL-BUDGET" in by_label["file:core/loop.py"]
-    assert by_label[MEMORY_BLOCK_LABEL] == "M" * 600
+    kept_file = len(by_label["file:core/loop.py"].split("\n...[TOTAL-BUDGET")[0])
+    kept_memory = len(by_label[MEMORY_BLOCK_LABEL].split("\n...[TOTAL-BUDGET")[0])
+    assert kept_file < kept_memory, "самый большой блок платит первым и глубже всех"
+    fair_min = 900 // (2 * 2)
+    assert kept_file >= fair_min
+    assert sum(len(c) for _, c in result) <= 900
 
 
 def test_demoted_block_below_the_floor_does_not_stall_the_trim(monkeypatch):
@@ -592,3 +604,76 @@ def test_format_artifact_web_search_unchanged():
     ]
 
     assert url_lines == ["url: " + hits[0]["url"]]
+
+
+# ── MIR-073: one block must not absorb the whole excess ─────────────────────
+
+def test_one_block_does_not_absorb_the_whole_excess(monkeypatch):
+    """MIR-073, measured live 2026-08-03 (operator's self-opinion run): five
+    ~12k blocks against the 32k total — `target = old_len - excess` dumped the
+    ENTIRE overflow into the largest block (the very file the planner chose to
+    read), cutting it to the 50-char floor while four siblings stayed pristine.
+    First pass now floors a non-demoted block at the fair share
+    (budget // (2 * n_blocks)); the surplus still comes off largest-first."""
+    monkeypatch.setenv("AGENT_EVIDENCE_TOTAL_CHARS", "32000")
+    blocks = [(f"file:f{i}.py", "x" * 12_000) for i in range(5)]
+    result, was_trimmed = apply_total_budget(blocks)
+    assert was_trimmed
+    fair_min = 32_000 // (2 * 5)
+    for lbl, content in result:
+        kept = len(content.split("\n...[TOTAL-BUDGET")[0])
+        assert kept >= fair_min, f"{lbl} starved to {kept} chars"
+    assert sum(len(c) for _, c in result) <= 32_000
+
+
+def test_demoted_memory_still_drains_to_the_absolute_floor(monkeypatch):
+    """The fair-share floor must NOT shield demoted memory: recollection pays
+    first, down to the absolute floor — that rule came from its own measured
+    incident and stays."""
+    monkeypatch.setenv("AGENT_EVIDENCE_TOTAL_CHARS", "8100")
+    blocks = [("file:a.py", "x" * 7_900), ("long_term_memory", "m" * 6_000)]
+    result, _ = apply_total_budget(blocks, trim_first_labels={"long_term_memory"})
+    sizes = {lbl: len(c.split("\n...[TOTAL-BUDGET")[0]) for lbl, c in result}
+    fair_min = 8_100 // (2 * 2)
+    assert sizes["long_term_memory"] < fair_min, (
+        "справедливая доля не должна защищать demoted-память — она платит первой"
+    )
+    assert sizes["file:a.py"] == 7_900, "свежий файл не тронут, пока платит память"
+
+
+def test_budget_below_fair_share_still_fits_via_absolute_floor(monkeypatch):
+    """When even fair shares cannot fit, the second pass falls back to the
+    absolute floor — the hard budget is never violated."""
+    monkeypatch.setenv("AGENT_EVIDENCE_TOTAL_CHARS", "800")
+    blocks = [(f"b{i}", "y" * 5_000) for i in range(4)]
+    result, was_trimmed = apply_total_budget(blocks)
+    assert was_trimmed
+    assert sum(len(c) for _, c in result) <= 800
+
+
+def test_total_trims_reads_the_last_notice_not_a_quoted_stale_one():
+    """Review round #286 (CodeRabbit): a block's content can QUOTE an older
+    trim notice (e.g. a memory record built from a previously trimmed reply);
+    the budget writes its own cut at the END — same rule
+    `rebuild_trimmed_memory` already enforces in this module."""
+    from core.evidence_budget import total_trims
+
+    stale = "\n...[TOTAL-BUDGET: trimmed to 50 of 12204 chars to fit 32000-char total evidence budget]"
+    current = "\n...[TOTAL-BUDGET: trimmed to 3200 of 9000 chars to fit 32000-char total evidence budget]"
+    block = ("file:x.py", "цитата старой метки:" + stale + "\nсвежий текст" + current)
+    assert total_trims([block]) == [("file:x.py", 3200, 9000)]
+
+
+def test_total_trims_reports_every_cut_block(monkeypatch):
+    """`total_trims` is the pure reader the orchestrator uses to SEE the cut:
+    (label, kept, original) for every block carrying a TOTAL-BUDGET notice."""
+    from core.evidence_budget import total_trims
+
+    monkeypatch.setenv("AGENT_EVIDENCE_TOTAL_CHARS", "400")
+    blocks = [("a", "A" * 300), ("b", "B" * 200)]
+    result, _ = apply_total_budget(blocks)
+    trims = total_trims(result)
+    assert trims, "хотя бы один блок был срезан и обязан быть виден"
+    for label, kept, original in trims:
+        assert label in {"a", "b"}
+        assert 0 < kept < original

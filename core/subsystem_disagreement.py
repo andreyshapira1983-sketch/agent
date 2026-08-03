@@ -166,3 +166,56 @@ def detect_disagreements(
         })
 
     return events
+
+
+# ── plan vs evidence budget (MIR-073) ────────────────────────────────────────
+
+# A planned source keeping at most this fraction of its content after the
+# total-budget trim counts as STARVED: the planner said "this file is needed",
+# the allocator effectively discarded it. Measured incident: 50 of 12204
+# chars (0.4%) — the self-analysis question shares no keywords with code, so
+# the file the plan was built around arrived as a sliver.
+_STARVED_KEEP_RATIO = 0.05
+
+
+def detect_budget_starvation(
+    trims: Sequence[tuple[str, int, int]],
+    *,
+    planned_labels: Any,
+    memory_label: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return `subsystem_disagreement` payloads for starved PLANNED sources.
+
+    ``trims`` is what `core.evidence_budget.total_trims` parsed back out of
+    the trimmed blocks: (label, kept_chars, original_chars). Pure function,
+    logging-only consumer — per the operator's sensor policy this observes
+    and never changes behaviour.
+
+    The demoted memory block is exempt: memory paying first — down to the
+    absolute floor — is the deliberate outcome of its own measured incident,
+    not a contradiction between deciders.
+    """
+    events: list[dict[str, Any]] = []
+    for label, kept, original in trims:
+        if memory_label is not None and label == memory_label:
+            continue
+        if label not in planned_labels:
+            continue
+        if original <= 0 or kept / original > _STARVED_KEEP_RATIO:
+            continue
+        events.append({
+            "kind": "planner_vs_evidence_budget",
+            "subsystems": ["planner", "evidence_budget"],
+            "severity": "medium",
+            "label": label,
+            "kept_chars": kept,
+            "original_chars": original,
+            "keep_ratio": round(kept / original, 4),
+            "threshold": _STARVED_KEEP_RATIO,
+            "description": (
+                "Planner chose this source; the total evidence budget kept "
+                f"{kept} of {original} chars — the plan's choice was "
+                "effectively discarded."
+            ),
+        })
+    return events
