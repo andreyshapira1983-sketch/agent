@@ -624,22 +624,18 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
         _run_assumptions = AssumptionRegistry(
             run_id=getattr(self.log, "trace_id", ""),
         )
-        # Layer 2→5 bridge: if the store already has assumptions for this run_id
-        # (e.g. a previous failed attempt in the same session), restore them so
-        # they are not duplicated and the prompt block stays accurate.
-        try:
-            if self.assumption_store is not None:
-                _existing = self.assumption_store.load_by_run(
-                    getattr(self.log, "trace_id", "")
-                )
-                if _existing:
-                    _run_assumptions.restore_from_store(_existing)
-                    self.log.log("assumptions_restored", {
-                        "run_id": getattr(self.log, "trace_id", ""),
-                        "count": len(_existing),
-                    })
-        except Exception:
-            pass  # Restore must never abort the run.
+        # The store is an ARCHIVE, not an active input (MIR-027, operator
+        # ruling 2026-08-03: «сохранить — не значит постоянно помнить»). A
+        # cross-turn auto-restore used to sit here, keyed by the session-
+        # lifetime trace id — so in the REPL every turn inherited every
+        # earlier turn's assumptions and fed them to the synthesizer of a
+        # goal they were never extracted from (measured: a 90%-confidence
+        # Russian-language claim steering an unrelated English question).
+        # It served nothing else: one-shot mints a fresh trace id, --resume
+        # builds a fresh agent and carries the QUESTION, and failed replan
+        # attempts share this in-memory registry within the run. Archived
+        # rows may return only through an explicit, applicability-checked
+        # retrieval (memory-lifecycle contract), never by default.
         try:
             _known_lang: str | None = None
             if self.last_user_profile is not None:
