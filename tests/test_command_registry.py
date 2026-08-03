@@ -160,19 +160,31 @@ def _commands_map_usage() -> dict[str, str]:
 # ── purity ───────────────────────────────────────────────────────────────────
 
 def test_registry_is_pure_data():
-    source = (REPO_ROOT / "cli" / "command_registry.py").read_text(encoding="utf-8")
-    imports = re.findall(r"^\s*(?:from|import)\s+([\w.]+)", source, re.M)
-    forbidden = [
-        name
-        for name in imports
-        if name.split(".")[0] in {"core", "app", "tools", "api", "main", "docker"}
-        or name.startswith("cli.commands")
-    ]
-    assert not forbidden, f"registry must import no runtime module, found: {forbidden}"
-    # stdlib only, and no behaviour smuggled in
-    assert set(imports) <= {"__future__", "dataclasses"}, imports
-    for banned in ("subprocess", "open(", "requests", "urllib"):
-        assert banned not in source, banned
+    """The registry and BOTH of its spec volumes are pure data.
+
+    Since the #278 split (authored by the self-build producer) the command
+    table lives in two sibling data modules that the registry combines; the
+    purity contract now covers all three files — the split must never become
+    a door for behaviour."""
+    spec_siblings = {".command_specs", ".command_specs_ops"}
+    for name, allowed in (
+        ("command_registry.py", {"__future__", "dataclasses"} | spec_siblings),
+        ("command_specs.py", {"__future__", "dataclasses"}),
+        ("command_specs_ops.py", {"__future__", "dataclasses", ".command_specs"}),
+    ):
+        source = (REPO_ROOT / "cli" / name).read_text(encoding="utf-8")
+        imports = re.findall(r"^\s*(?:from|import)\s+([\w.]+)", source, re.M)
+        forbidden = [
+            imp
+            for imp in imports
+            if imp.split(".")[0] in {"core", "app", "tools", "api", "main", "docker"}
+            or imp.startswith("cli.commands")
+        ]
+        assert not forbidden, f"{name} must import no runtime module, found: {forbidden}"
+        # stdlib + own pure-data siblings only, and no behaviour smuggled in
+        assert set(imports) <= allowed, (name, imports)
+        for banned in ("subprocess", "open(", "requests", "urllib"):
+            assert banned not in source, (name, banned)
 
 
 def test_registry_import_has_no_side_effects(tmp_path, monkeypatch):
