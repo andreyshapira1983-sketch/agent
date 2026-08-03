@@ -332,7 +332,8 @@ def _task_reporter_publish(
         "origin": TASK_PRODUCER_ORIGIN,
     }
     digest = hashlib.sha1(
-        (impl_path + "\n" + test_content).encode("utf-8")
+        (impl_path + "\n" + test_content).encode("utf-8"),
+        usedforsecurity=False,
     ).hexdigest()[:12]
     dedup_key = f"self_task:{impl_path}:{digest}"
     summary = f"coding task: {build.get('task_title') or impl_path} → {impl_path}"

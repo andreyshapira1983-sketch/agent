@@ -76,9 +76,18 @@ class AgentLoopExtractedMethods2:
         # them). Declared, not defined: a static checker otherwise reads every
         # use as an unknown attribute, and `tests/test_loop_methods_contract`
         # keeps this block from ever shadowing something the mixin really has.
+        # Completed to the FULL contract in the Codacy sweep — the partial
+        # block left 28 "no member" HIGHs (log/write_policy/… ) drowning the
+        # dashboard, the same lesson `loop_methods` already banked.
         retrieval_policy: Any
         episodic_store: EpisodicMemoryStore | None
         procedural_store: ProceduralMemoryStore | None
+        log: Any
+        consolidation_store: Any
+        persistent_store: Any
+        write_policy: Any
+        last_role_context: Any
+        knowledge_use_policy: Any
 
     def _durable_learning_suppressed(self, sink: str | None = None) -> bool:
         """True when a durable learning write must be skipped.
