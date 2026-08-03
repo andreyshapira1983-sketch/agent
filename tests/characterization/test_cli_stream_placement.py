@@ -12,7 +12,6 @@ captured stdout is `"\\n" + rendered + "\\n\\n"` (print supplies the last newlin
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest

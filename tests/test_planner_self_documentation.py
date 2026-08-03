@@ -18,7 +18,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
 
 from core.planner import LLMPlanner
 from tools.base import ToolRegistry

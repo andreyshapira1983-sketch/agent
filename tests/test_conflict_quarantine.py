@@ -29,7 +29,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import pytest
 
 from core.knowledge_pipeline import KnowledgeWritePolicy, claim_provenance_tag
 from core.knowledge_use_policy import QUARANTINE_TAGS, KnowledgeUsePolicy
@@ -135,7 +134,6 @@ def test_conflict_marks_only_the_linked_record() -> None:
         [linked, other, legacy], conflicted_claim_ids={"claim-x"},
     )
 
-    by_content = {id(r): r for r in updated}
     assert report["quarantined"] == 1
     assert "conflicted" in updated[0].tags
     assert "conflicted" not in updated[1].tags, "an unrelated claim is untouched"

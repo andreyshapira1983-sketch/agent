@@ -24,7 +24,6 @@ import pytest
 from core import ingestion
 from core.ingestion import (
     CHUNK_CHARS,
-    MAX_FILE_BYTES,
     ingest_files,
     _chunk_text,
     _ensure_inside_workspace,

@@ -5,7 +5,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import main as main_module
 
 import cli.commands_proposals as proposals_module
 from cli.commands_approval import _handle_approval_run
@@ -14,7 +13,6 @@ from core.subagent_contract import (
     CanonicalBudgetScope,
     CanonicalSubagentContract,
     CanonicalToolScope,
-    approval_payload_from_proposal,
 )
 from core.subagent_contract_audit import (
     ContractAuditIssue,

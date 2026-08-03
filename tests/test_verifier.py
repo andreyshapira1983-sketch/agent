@@ -22,8 +22,6 @@ from core.verifier import (
     DISCLAIMER_SESSION_MEMORY,
     SELF_DECLARED_PREFIXES,
     Citation,
-    ClaimChunk,
-    VerificationReport,
     is_structural_chunk,
     match_citation,
     parse_citations,

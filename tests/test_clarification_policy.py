@@ -14,7 +14,6 @@ import pytest
 
 from core.clarification_policy import (
     AmbiguityFinding,
-    ClarificationResult,
     check_clarification,
 )
 
@@ -154,7 +153,7 @@ class TestLoopClarificationIntegration:
     def _make_loop(self):
         """Build a minimal AgentLoop backed by a mock LLM."""
         import json
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import MagicMock
         from pathlib import Path
 
         from core.loop import AgentLoop
@@ -173,7 +172,6 @@ class TestLoopClarificationIntegration:
 
         registry = ToolRegistry()
         policy = PolicyGate(registry=registry)
-        from core.logger import TraceLogger
         import tempfile
         tmp = Path(tempfile.mkdtemp())
         logger = TraceLogger(trace_id="test-clarif", log_dir=tmp / "logs")

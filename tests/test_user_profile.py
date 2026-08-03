@@ -564,7 +564,6 @@ class TestAgentLoopUserProfileIntegration:
 
     def test_profile_load_event_emitted(self, tmp_path: Path) -> None:
         loop, _ = self._make_loop(tmp_path)
-        events: list[dict] = []
         loop.log._handlers = []  # type: ignore[attr-defined]
 
         # Spy: track log calls.

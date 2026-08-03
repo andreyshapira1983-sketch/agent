@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import types
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
+
+if TYPE_CHECKING:
+    from tools.base import ToolRegistry
 
 import pytest
 
@@ -33,7 +36,7 @@ def _make_mock_model_router() -> MagicMock:
     return mr
 
 
-def _make_parent_registry() -> "ToolRegistry":  # type: ignore[name-defined]
+def _make_parent_registry() -> "ToolRegistry":
     from tools.base import Tool, ToolRegistry
 
     class _DummyTool(Tool):

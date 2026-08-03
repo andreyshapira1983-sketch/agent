@@ -16,7 +16,6 @@ from core.replan import (
     DEFAULT_BUDGETS,
     DEFAULT_MAX_TOTAL_REPLANS,
     FailureBudget,
-    FailureType,
     ReplanDecision,
     ReplanPolicy,
 )

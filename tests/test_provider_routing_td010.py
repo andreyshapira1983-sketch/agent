@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from core.deep_escalation import OperatorEscalation
 from core.model_router import ModelRole, ModelRoute, ModelRouter

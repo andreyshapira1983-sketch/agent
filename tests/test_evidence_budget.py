@@ -1,7 +1,6 @@
 """Tests for core/evidence_budget.py — per-artifact + total evidence budget."""
 from __future__ import annotations
 
-import pytest
 
 from core.loop_helpers import format_artifact
 from core.evidence_budget import rebuild_trimmed_memory

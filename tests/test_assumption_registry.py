@@ -13,10 +13,8 @@ Coverage:
 """
 from __future__ import annotations
 
-import json
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -549,7 +547,6 @@ class TestAgentLoopAssumptionIntegration:
 
     def _make_agent(self, tmp_path, with_store=True):
         """Build a minimal AgentLoop with mocked I/O."""
-        from core.ids import new_id
         from core.logger import TraceLogger
         from core.loop import AgentLoop
         from core.memory import WorkingMemory
@@ -566,7 +563,6 @@ class TestAgentLoopAssumptionIntegration:
                 yield "Conclusion: done.\nSources:\n1. [general-knowledge]\nConfidence: high\nUnverified: nothing"
 
         llm = _FakeLLM()
-        trace_id = f"trace_test_{new_id('t')}"
         logger = TraceLogger(
             trace_id="trace_test_001",
             log_dir=tmp_path,

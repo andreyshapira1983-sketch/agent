@@ -7,7 +7,6 @@ locale (en + ru) and word boundaries.
 """
 from __future__ import annotations
 
-import pytest
 
 from core.structured_facts import (
     StructuredFacts,

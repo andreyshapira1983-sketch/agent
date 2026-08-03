@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 
 from core.approval_inbox import ApprovalInbox
 from core.backlog_target_mapper import MODEL_DISCOVERY_TARGET
@@ -645,7 +644,6 @@ def test_default_grounded_selector_is_read_only(workspace: Path, monkeypatch):
     # The default selector reads TECH_DEBT.md / anatomy / value-reviews strictly
     # read-only; a broken backlog loader must degrade to "no candidate", never
     # crash the producer and never reach the LLM.
-    import core.self_build_producer as mod
 
     def _boom_loader(*a, **k):
         raise RuntimeError("backlog load exploded")

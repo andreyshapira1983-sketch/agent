@@ -3,10 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from core.backlog_selector import (
-    BacklogCandidate,
     build_backlog,
     load_backlog,
     select_top,

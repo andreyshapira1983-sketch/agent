@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.evidence import ProvenanceChain, evidence_from_prior_turn, make_evidence
+from core.evidence import ProvenanceChain, evidence_from_prior_turn
 from core.evidence_classes import (
     classify_evidence,
     is_dialogue_scoped_claim,

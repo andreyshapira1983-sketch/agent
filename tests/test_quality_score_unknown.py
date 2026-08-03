@@ -30,7 +30,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
 
 from core.episodic_hygiene import score_staleness, select_for_pruning
 from core.smart_memory import (

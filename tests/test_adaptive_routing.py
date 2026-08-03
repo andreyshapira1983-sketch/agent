@@ -10,14 +10,13 @@ Verifies that:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from core.loop import AgentLoop, new_trace_id
 from core.logger import TraceLogger
-from core.model_router import ModelRole, ModelRoute, ModelRouter
+from core.model_router import ModelRole, ModelRouter
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
 from core.task_complexity import ComplexityTier, assess_complexity
@@ -94,7 +93,7 @@ class TestPlannerLLMOverride:
 class TestSynthesizeLLMOverride:
     def test_synthesize_override_is_used(self, tmp_path: Path):
         """_synthesize(llm=...) must call the override, not self.llm."""
-        from core.models import Goal, Observation
+        from core.models import Goal
 
         default_llm = FakeLLM(responses=[_make_answer("default answer")])
         override_llm = FakeLLM(responses=[_make_answer("override answer")])
@@ -349,7 +348,6 @@ class TestRoutingFailureIsVisible:
 class TestForTaskFallback:
     def test_falls_back_to_for_role_when_no_tier_model(self, tmp_path: Path):
         """If tier_model_for() returns None, for_task() falls back to for_role()."""
-        from core.llm import LLM
         fake_llm = FakeLLM()
         router = ModelRouter.single(fake_llm)
 

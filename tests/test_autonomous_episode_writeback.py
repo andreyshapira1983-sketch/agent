@@ -36,7 +36,7 @@ from tests.test_memory_core_wiring import (
     _durable_snapshot,
     _drive_one_cycle,
 )
-from tests.conftest import FakeLLM, FakePlanner
+from tests.conftest import FakeLLM
 
 QUESTION = "how much is two plus two"
 

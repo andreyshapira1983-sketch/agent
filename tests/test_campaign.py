@@ -27,7 +27,6 @@ from core.campaign import (
     CampaignConfig,
     CampaignCycleRecord,
     CampaignLedger,
-    CampaignResult,
     _cost_totals,
     run_campaign,
 )

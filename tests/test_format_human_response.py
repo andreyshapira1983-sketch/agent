@@ -1,5 +1,4 @@
 """Tests for format_human_response — Output Contract → clean human text."""
-import pytest
 from core.loop import format_human_response
 
 # ── typical GPT/Opus Output Contract responses ────────────────────────────────

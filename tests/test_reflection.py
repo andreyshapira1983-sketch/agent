@@ -5,14 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 
 from core.reflection import (
-    ErrorPattern,
-    Lesson,
     ReflectionConfig,
     ReflectionEngine,
-    ReflectionReport,
 )
 from core.persistent_memory import PersistentMemoryStore
 from tests.conftest import FakeLLM

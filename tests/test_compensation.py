@@ -10,11 +10,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from core.compensation import (
     CompensationAction,
-    CompensationOutcome,
     CompensationPlan,
     CompensationReport,
     apply_compensation_plan,

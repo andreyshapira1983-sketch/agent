@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from core.incremental_splitter import (
-    SplitPlan,
     _bound_names,
     _free_refs,
     _uses_forbidden_scope,

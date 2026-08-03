@@ -10,7 +10,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from pathlib import Path
 
-import main
 # `handle_conversational_operator_input` resolves `_dispatch_operator_intent` in
 # cli/intent_bridge.py, so a stand-in has to replace the name there, not on main.
 import cli.intent_bridge as bridge
