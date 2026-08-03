@@ -30,7 +30,7 @@ kinds of content, and only one of them is a claim:
     verdict about the claims can make it untrue. Truncating the claims must
     leave it standing.
 
-Two notice channels, matching the two places the loop puts them today:
+Three notice channels, matching the places the loop puts them:
 
 ``prepend``          rendered above the body, in registration order, so the
                      first-registered ends up closest to the body — which
@@ -38,6 +38,10 @@ Two notice channels, matching the two places the loop puts them today:
 ``unverified_note``  merged into the Output Contract's ``Unverified:`` section
                      of whatever body survives, via the same helper
                      ``core.output_policy`` has always used.
+``append``           rendered below the body (MIR-069: the five-point
+                     verification tail). Below, because it is a statement
+                     about the claims and must read after them — and in this
+                     ledger, because a body rewrite must not delete it.
 
 Composition happens once, at the end, in :meth:`ResponseDraft.render`. That is
 the single arbitration point the cycle did not have: before, "who wins" was
@@ -56,10 +60,10 @@ from typing import Any, Literal
 
 from core.output_policy import _merge_unverified
 
-Channel = Literal["body", "prepend", "unverified_note"]
+Channel = Literal["body", "prepend", "unverified_note", "append"]
 
 #: Channels that carry something *about* the answer rather than a claim in it.
-NOTICE_CHANNELS: frozenset[str] = frozenset({"prepend", "unverified_note"})
+NOTICE_CHANNELS: frozenset[str] = frozenset({"prepend", "unverified_note", "append"})
 
 
 @dataclass(frozen=True)
@@ -131,6 +135,9 @@ class ResponseDraft:
         for notice in self.notices:
             if notice.channel == "unverified_note":
                 text = _merge_unverified(text, notice.text)
+        for notice in self.notices:
+            if notice.channel == "append":
+                text = f"{text}\n\n{notice.text}"
         for notice in self.notices:
             if notice.channel == "prepend":
                 # Prepending in registration order leaves the first-registered

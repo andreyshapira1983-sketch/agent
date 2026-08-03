@@ -31,7 +31,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ]),
     ("Cognitive Core & Agent Cycle (§3)", "Planning, verification, clarification, control loop.", [
         "loop", "loop_helpers", "loop_methods", "loop_methods2",
-        "planner", "planner_prompt", "plan_parsing", "doc_routing", "host_tools_context", "step_sanitizer", "verifier", "verifier_core", "verifier_models", "verifier_patterns",
+        "planner", "planner_prompt", "plan_parsing", "doc_routing", "host_tools_context", "step_sanitizer", "verifier", "verifier_core", "verifier_models", "verifier_patterns", "verification_summary",
         "verifier_utils", "replan", "reflection", "clarification_gate",
         "clarification_policy", "instruction_conflict_gate", "directive_extractor",
         "assumption_registry", "referent_resolver",

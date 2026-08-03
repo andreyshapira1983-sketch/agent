@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 155 modules across 12 groups._
+_Total: 156 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -60,6 +60,7 @@ _Planning, verification, clarification, control loop._
 | `core/verifier_core` | The verifier's `verify()` entry point: turns a draft answer and its evidence chain into a per-claim verdict report. |
 | `core/verifier_models` | Verifier value types: a citation, a claim chunk, and the verification report. |
 | `core/verifier_patterns` | Compiled patterns the verifier matches with: citations, sentence splits, headings, and statistical figures. |
+| `core/verification_summary` | MIR-069, phase 1 — the five-point verification explanation. |
 | `core/verifier_utils` | Verifier text utilities: chunk splitting, citation parsing and matching, and statistical-claim detection. |
 | `core/replan` | MVP-12 — Re-planning policy: structured failure types + retry budgets. |
 | `core/reflection` | Reflection engine — self-improvement feedback loop. |
