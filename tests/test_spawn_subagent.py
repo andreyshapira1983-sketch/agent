@@ -668,8 +668,10 @@ def test_estimate_complexity_returns_valid_tier():
     samples = [
         "hi",
         "find the bug",
-        "Analyze and compare the performance of all registered LLM models "
-        "and produce a detailed benchmark report with accuracy and cost metrics",
+        (
+            "Analyze and compare the performance of all registered LLM models "
+            "and produce a detailed benchmark report with accuracy and cost metrics"
+        ),
     ]
     for s in samples:
         assert _estimate_complexity(s) in valid
