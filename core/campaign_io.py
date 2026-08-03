@@ -115,8 +115,17 @@ def _execute_daemon_liveness_probe(workspace: Any) -> CampaignActionOutcome:
         )
         step = "Запустить один тик: agent_tick.py --workspace . ; для постоянной жизни — scripts/install_daemon.ps1"
         confidence = "высокая (файл фактически отсутствует)"
+    elif age is None:
+        # The file exists but carries no readable timestamp — saying
+        # «0.0 мин назад» here would be a lie about a broken record.
+        verdict = (
+            "Файл пульса есть, но повреждён или без метки времени — возраст "
+            "тика неизвестен."
+        )
+        step = "Запустить один тик: agent_tick.py --workspace . — свежий тик перепишет файл; для постоянной жизни — scripts/install_daemon.ps1"
+        confidence = "высокая в том, что файл нечитаем; возраст неизвестен"
     elif is_stale(age):
-        age_min = (age or 0) / 60.0
+        age_min = age / 60.0
         verdict = (
             f"Пульс протух: последний тик {age_min:.1f} мин назад "
             f"(event={heartbeat.get('event', '?')}) — тики не идут по расписанию."

@@ -101,3 +101,22 @@ def test_missing_heartbeat_is_named_missing(tmp_path):
     assert outcome.result == "completed"
     assert outcome.llm_calls_spent == 0
     assert "никогда" in (outcome.artifact or "") or "missing" in (outcome.artifact or "")
+
+
+def test_malformed_heartbeat_is_named_unreadable_not_zero_seconds(tmp_path):
+    """A file WITHOUT a readable timestamp must not report «0 минут назад» —
+    the verdict names the broken record honestly."""
+    path = tmp_path / "data" / "daemon_heartbeat.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"event": "tick_complete"}', encoding="utf-8")
+    outcome = _default_execute_action(
+        agent=_BombAgent(),
+        workspace=tmp_path,
+        action=_action(),
+        config=CampaignConfig(goal="project health", dry_run=True),
+    )
+    assert outcome.result == "completed"
+    assert outcome.llm_calls_spent == 0
+    art = outcome.artifact or ""
+    assert "повреждён" in art or "без метки" in art
+    assert "0.0 мин" not in art

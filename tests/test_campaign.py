@@ -598,7 +598,7 @@ class TestActionFocusedGoal:
                 captured["dry_run"] = config.dry_run
                 goal_task = SimpleNamespace(
                     task=SimpleNamespace(kind="goal"),
-                    details={"answer": "Re-run agent_tick.py --status to confirm liveness."},
+                    details={"answer": "Inspect the last failed tick error and report the cause."},
                 )
                 return SimpleNamespace(
                     status="completed",
