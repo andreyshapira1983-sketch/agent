@@ -82,6 +82,12 @@ All notable changes to this project are recorded here. The format follows
   rebuilder and the memory-block tags → `core/evidence_budget.py`.
 
 ### Fixed
+- The conflict detector no longer manufactures conflicts out of deixis or
+  agreement-in-other-words (MIR-076, both classes measured live): a subject
+  opening with this/этот/данный is context-bound and never grouped across
+  sources, and claim values cluster as one when they are the same statement
+  after negation canonicalisation or a >=3-token prefix match — two doctrine
+  files agreeing now corroborate each other instead of quarantining.
 - One evidence block no longer absorbs the whole budget overflow (MIR-073,
   measured live: the file the planner chose to read arrived as 50 of 12204
   chars while four siblings stayed pristine): `apply_total_budget` floors

@@ -148,3 +148,59 @@ def test_a_prose_source_is_not_contradicted_by_code() -> None:
     ])
 
     assert _conflicts(reg) == []
+
+
+# ==========================================================================
+# MIR-076 — two new false classes, measured on the operator's live session
+# (2026-08-03): deictic noun phrases and same-statement-in-other-words.
+# ==========================================================================
+def test_two_documents_describing_themselves_do_not_conflict() -> None:
+    """`this document` is deictic: each file means ITSELF. The old code only
+    survived the `.py` variant because code locators are excluded wholesale;
+    markdown docs walked straight into the false conflict (measured live)."""
+    reg = _registry([
+        ("docs/a.md", "file", "c1", "This document is the corrected, authoritative version of the audit."),
+        ("docs/b.md", "file", "c2", "This document is the logical home for the long-horizon plan."),
+    ])
+    assert _conflicts(reg) == []
+
+
+def test_russian_deictic_subject_does_not_conflict() -> None:
+    """«Этот документ» — тот же дейксис; раньше «этот» просто срезался и
+    подлежащим становилось «документ», группируя чужие самоописания."""
+    reg = _registry([
+        ("docs/a.md", "file", "c1", "Этот документ является исправленной версией аудита"),
+        ("docs/b.md", "file", "c2", "Этот документ является домом длинного плана"),
+    ])
+    assert _conflicts(reg) == []
+
+
+def test_agreement_in_other_words_is_not_a_conflict() -> None:
+    """Measured live: two doctrine files assert the SAME rule («never proof of
+    implementation» vs «not proof of implementation») and the byte-comparison
+    of values booked the agreement as a contradiction."""
+    reg = _registry([
+        ("docs/a.md", "file", "c1", "File existence is never proof of implementation — the cited"),
+        ("docs/b.md", "file", "c2", "File existence is not proof of implementation;"),
+    ])
+    assert _conflicts(reg) == []
+
+
+def test_genuinely_different_values_still_conflict() -> None:
+    reg = _registry([
+        ("docs/a.md", "file", "c1", "Request timeout is 5 seconds"),
+        ("docs/b.md", "file", "c2", "Request timeout is 10 seconds"),
+    ])
+    found = _conflicts(reg)
+    assert len(found) == 1, "настоящее противоречие обязано остаться конфликтом"
+
+
+def test_short_value_containment_is_still_a_conflict() -> None:
+    """The equivalence rule must not glue short prefixes: «good» ⊄ «good for
+    nothing» — a 1-token prefix is no evidence of agreement."""
+    reg = _registry([
+        ("docs/a.md", "file", "c1", "The plan is good"),
+        ("docs/b.md", "file", "c2", "The plan is good for nothing"),
+    ])
+    found = _conflicts(reg)
+    assert len(found) == 1
