@@ -18,6 +18,8 @@ import inspect
 import subprocess  # nosec B404 — читаем историю через git show, вход фиксирован
 from pathlib import Path
 
+import pytest
+
 import core.loop as loop_mod
 import core.loop_step_execution as step_mod
 from core.loop import AgentLoop
@@ -72,8 +74,8 @@ def test_logic_moved_symbol_for_symbol():
         ["git", "show", "HEAD~1:core/loop.py"],
         capture_output=True, cwd=_REPO, check=False,
     ).stdout.decode("utf-8")
-    if not old_src.strip():  # pragma: no cover — мелкое дерево без истории
-        return
+    if not old_src.strip():  # pragma: no cover — поверхностный клон без истории
+        pytest.skip("история недоступна (shallow clone) — сверку дословности не выполнить")
     old = _methods(ast.parse(old_src), "AgentLoop")
     new = _methods(ast.parse(Path(step_mod.__file__).read_text(encoding="utf-8")))
     for name in MOVED:
@@ -92,8 +94,8 @@ def test_signatures_moved_unchanged():
         ["git", "show", "HEAD~1:core/loop.py"],
         capture_output=True, cwd=_REPO, check=False,
     ).stdout.decode("utf-8")
-    if not old_src.strip():  # pragma: no cover
-        return
+    if not old_src.strip():  # pragma: no cover — поверхностный клон без истории
+        pytest.skip("история недоступна (shallow clone) — сверку сигнатур не выполнить")
     old = _methods(ast.parse(old_src), "AgentLoop")
     new = _methods(ast.parse(Path(step_mod.__file__).read_text(encoding="utf-8")))
     for name in MOVED:
