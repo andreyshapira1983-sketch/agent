@@ -85,6 +85,82 @@ def _default_gather_signals(agent: Any, workspace: Any, approval_inbox: Any) -> 
     return {"heartbeat": hb, "age": age, "triage": triage, "action": action}
 
 
+def _execute_daemon_liveness_probe(workspace: Any) -> CampaignActionOutcome:
+    """MIR-070: answer `restore_daemon_liveness` by READING ACTUAL STATE.
+
+    The signal comes from `core/heartbeat_io`; the old execution path handed
+    the question to a free-planning LLM run, which chose `read_logs` over the
+    agent's own run journal, found 0 events and honestly answered «не
+    подтверждает и не опровергает» — 2 model calls, 63 cost units, signal not
+    cleared (measured live 2026-08-03). No model can add anything the
+    heartbeat file does not already say, so the probe re-reads the SAME
+    window that raised the signal, spends zero LLM calls, and reports in the
+    operator's five-point form (что/как/доказательство/непроверенное/
+    уверенность — the evidence ruling of 2026-08-03).
+    """
+    from core.heartbeat_io import (
+        HEARTBEAT_PATH,
+        heartbeat_age_seconds,
+        is_stale,
+        read_heartbeat,
+    )
+
+    ws = Path(workspace)
+    heartbeat = read_heartbeat(ws)
+    age = heartbeat_age_seconds(heartbeat)
+    if heartbeat is None:
+        verdict = (
+            "Пульса нет вообще — демон никогда не тикал в этом workspace "
+            "(файл отсутствует)."
+        )
+        step = "Запустить один тик: agent_tick.py --workspace . ; для постоянной жизни — scripts/install_daemon.ps1"
+        confidence = "высокая (файл фактически отсутствует)"
+    elif age is None:
+        # The file exists but carries no readable timestamp — saying
+        # «0.0 мин назад» here would be a lie about a broken record.
+        verdict = (
+            "Файл пульса есть, но повреждён или без метки времени — возраст "
+            "тика неизвестен."
+        )
+        step = "Запустить один тик: agent_tick.py --workspace . — свежий тик перепишет файл; для постоянной жизни — scripts/install_daemon.ps1"
+        confidence = "высокая в том, что файл нечитаем; возраст неизвестен"
+    elif is_stale(age):
+        age_min = age / 60.0
+        verdict = (
+            f"Пульс протух: последний тик {age_min:.1f} мин назад "
+            f"(event={heartbeat.get('event', '?')}) — тики не идут по расписанию."
+        )
+        step = "Запустить один тик: agent_tick.py --workspace . ; для постоянной жизни — scripts/install_daemon.ps1"
+        confidence = "высокая (возраст прочитан из файла пульса)"
+    else:
+        age_s = age or 0
+        verdict = (
+            f"Пульс свежий: последний тик {age_s:.0f} с назад "
+            f"(event={heartbeat.get('event', '?')}) — демон жив; сигнал будет снят на следующем сборе."
+        )
+        step = "Не требуется — сигнал снимется на следующем сборе."
+        confidence = "высокая (свежесть прочитана из файла пульса)"
+    artifact = (
+        f"{verdict}\n"
+        f"Проверял: жив ли автономный демон.\n"
+        f"Способ: чтение фактического состояния — файл {HEARTBEAT_PATH} "
+        f"(то же окно, из которого поднят сигнал), без вызова модели.\n"
+        f"Доказательство: возраст пульса = "
+        f"{'нет файла' if age is None else f'{age:.0f} с'}; порог свежести — "
+        f"интервал тика × коэффициент из core/heartbeat_io.\n"
+        f"Непроверенным осталось: жив ли планировщик/процесс сам по себе и не "
+        f"падали ли ранние тики молча — это видно только изнутри тика.\n"
+        f"Уверенность: {confidence}\n"
+        f"Шаг оператора: {step}"
+    )
+    return CampaignActionOutcome(
+        result="completed",
+        llm_calls_spent=0,
+        cost_units_spent=0,
+        artifact=artifact,
+    )
+
+
 def _default_execute_action(
     *,
     agent: Any,
@@ -93,6 +169,10 @@ def _default_execute_action(
     config: CampaignConfig,
     approval_inbox: Any = None,
 ) -> CampaignActionOutcome:
+    # MIR-070: liveness is answerable from state — never spend a model on it.
+    if action.action == "restore_daemon_liveness":
+        return _execute_daemon_liveness_probe(workspace)
+
     from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
     from core.budget_governor import BudgetLimits
 
