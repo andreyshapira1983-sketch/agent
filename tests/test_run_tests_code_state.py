@@ -12,18 +12,17 @@ test_model_router_for_task_standard_equals_for_role». Верификатор п
 спрашивает, о каком состоянии кода улика вообще говорит.
 
 Здесь закрепляется минимум, который делает такую подмену видимой: результат
-прогона несёт отпечаток проверенного кода — коммит, ветку, чистоту дерева и
-отставание от общей ветки.
+прогона несёт отпечаток проверенного кода — коммит, ветку, совпадение с
+общей веткой и число файлов, изменённых после индексации.
 """
 from __future__ import annotations
 
+import subprocess  # nosec B404
 from pathlib import Path
 
 from core.code_state import describe_code_state
 from tests.conftest import run_git
 from tools.run_tests import RunTestsTool
-
-_REPO = Path(__file__).resolve().parents[1]
 
 
 def test_the_state_names_the_commit_and_branch(git_repo: Path):
@@ -65,15 +64,26 @@ def test_a_directory_without_git_says_so_instead_of_guessing(tmp_path: Path):
     assert state["reason"], "нет коммита — обязана быть названа причина"
 
 
-def test_the_tool_result_carries_the_state():
-    """Главное: улика самоописательна — по ней видно, какой код проверялся."""
-    result = RunTestsTool(workspace_root=_REPO).run(
-        paths=["tests/test_run_tests_code_state.py"], pattern="test_the_state_names",
-    )
+def test_the_tool_result_carries_the_state(monkeypatch, git_repo: Path):
+    """Главное: улика самоописательна — по ней видно, какой код проверялся.
+
+    Настоящий pytest здесь не запускаем: рекурсивный прогон внутри прогона
+    стоил ~4 секунды и зависел от состояния репозитория (замечание ревью
+    #301). Подменяем сам запуск — проверяем ровно то, что добавили.
+    """
+    class _Completed:
+        returncode = 0
+        stdout = b"1 passed in 0.01s\n"
+        stderr = b""
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Completed())
+
+    result = RunTestsTool(workspace_root=git_repo).run(paths=["tests"])
 
     assert "code_state" in result, (
         "результат прогона не говорит, какой код проверялся — «тест упал» "
         "нельзя отличить от «упал у меня в устаревшей копии»"
     )
-    assert result["code_state"]["workspace"] == str(_REPO)
-    assert result["code_state"]["commit"]
+    assert result["code_state"]["workspace"] == str(git_repo)
+    assert result["code_state"]["commit"], "коммит проверенного кода не назван"
+    assert result["code_state"]["branch"] == "main"
