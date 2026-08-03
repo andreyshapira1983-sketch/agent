@@ -62,3 +62,4 @@ config/model_registry.json
 # Word documents are binary ZIP containers: they crash Codacy's SARIF writer
 # and neither git nor the agent can read them. Keep prose as .md instead.
 *.docx
+.codacy-cli-v2/

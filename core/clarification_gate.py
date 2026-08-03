@@ -267,3 +267,35 @@ def clarification_for_replan_exhausted() -> ClarificationOutcome:
     the same deterministic clarify semantics without new policy rules.
     """
     return for_loop_suspected()
+
+
+# ── ask-back for unsupported self-analysis (MIR-075) ─────────────────────────
+
+# Fixed prefix: `format_human_response` buckets on it explicitly, the same
+# survival rule the MIR-069 verification tail needed — anything appended after
+# the Output Contract sections is otherwise dropped by the section walk.
+ASK_BACK_PREFIX = "Уточнение:"
+
+
+def build_self_analysis_ask_back() -> str:
+    """The deterministic ask-back for a self-analysis turn with ZERO verified
+    support (MIR-075).
+
+    Measured (operator's live test, 2026-08-03): five abstract questions, not
+    one counter-question — the gate above is reachable only through replan
+    exhaustion, and `completion_contract.needs_clarification` has no consumer.
+    This is the missing wire, deliberately narrow: it fires only when the
+    turn's OWN post-answer numbers already say «я ответил рассуждением без
+    единой подтверждённой опоры» on a turn the self-analysis sensor marked.
+    No LLM call: one canned narrowing question, per the gate's philosophy of
+    exactly one allowed action. Question wording is NOT inspected — the
+    lexical route was retired in #263 (8 of 8 false).
+    """
+    return (
+        f"{ASK_BACK_PREFIX} я ответил рассуждением — без единой проверенной "
+        "опоры, потому что понял вопрос как абстрактный, о моём устройстве "
+        "или принципах. Если ты имел в виду что-то конкретное — файл, "
+        "подсистему, задачу или недавний случай — назови это, и я отвечу "
+        "с проверкой по коду и журналам. Что именно ты хочешь, чтобы я "
+        "разобрал?"
+    )

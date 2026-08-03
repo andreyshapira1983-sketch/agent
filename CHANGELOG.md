@@ -11,6 +11,12 @@ All notable changes to this project are recorded here. The format follows
 ## [Unreleased]
 
 ### Added
+- The agent asks back instead of only philosophising unsupported (MIR-075,
+  operator assignment): a self-analysis turn whose answer carries zero
+  verified chunks now ends with one canned narrowing question
+  («Уточнение: …») — trigger built from measured post-answer numbers, never
+  from question wording (the lexical route died in #263); journaled as
+  `clarification_ask_back`.
 - Every verified answer explains itself in five human points (MIR-069 phase 1):
   `core/verification_summary.py` composes «Проверял / Способ / Доказательство /
   Непроверенным осталось / Уверенность» from the verifier's own numbers, the

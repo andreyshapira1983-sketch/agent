@@ -2310,6 +2310,47 @@ class AgentLoop(AgentLoopExtractedMethods2, AgentLoopExtractedMethods):
                 except Exception:
                     pass
 
+        # MIR-075: ask back instead of only philosophising unsupported. Fires
+        # ONLY when the self-analysis sensor marked this turn AND the answer's
+        # own verification counted zero verified chunks over a non-empty claim
+        # set — the operator's measured «он не переспрашивает» shape. Question
+        # wording is never inspected (the lexical route died in #263).
+        if (
+            self.last_verification is not None
+            and self.last_verification.total_chunks > 0
+            and self.last_verification.verified_chunks == 0
+            and getattr(self.last_self_analysis, "is_self_analysis", False)
+        ):
+            try:
+                from core.clarification_gate import build_self_analysis_ask_back
+                _ask = build_self_analysis_ask_back()
+                if draft.add_notice(
+                    author="clarification_gate",
+                    channel="append",
+                    text=_ask,
+                ):
+                    self.log.log(
+                        "clarification_ask_back",
+                        {
+                            "reason": "self_analysis_zero_verified",
+                            "total_chunks": self.last_verification.total_chunks,
+                            "self_declared_chunks": (
+                                self.last_verification.self_declared_chunks
+                            ),
+                        },
+                    )
+            except Exception as _ab_exc:
+                try:
+                    self.log.log(
+                        "clarification_ask_back_failed",
+                        {
+                            "error_type": type(_ab_exc).__name__,
+                            "error": str(_ab_exc)[:300],
+                        },
+                    )
+                except Exception:
+                    pass
+
         policy_result = apply_ranker_output_policy(
             answer=draft.body,
             ranking=self.last_source_ranking,
