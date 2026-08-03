@@ -23,8 +23,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.memory import WorkingMemory
@@ -53,11 +51,6 @@ ANSWER_CITING_THE_DIALOGUE = (
     "Confidence: 0.6\n"
     "Unverified: это рассуждение, а не факт о мире"
 )
-
-
-@pytest.fixture()
-def workspace(tmp_path: Path) -> Path:
-    return tmp_path
 
 
 def _loop_with_history(workspace: Path) -> tuple[AgentLoop, list[str]]:

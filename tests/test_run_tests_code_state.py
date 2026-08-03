@@ -17,62 +17,39 @@ test_model_router_for_task_standard_equals_for_role». Верификатор п
 """
 from __future__ import annotations
 
-import subprocess  # nosec B404
 from pathlib import Path
 
-import pytest
-
 from core.code_state import describe_code_state
+from tests.conftest import run_git
 from tools.run_tests import RunTestsTool
 
 _REPO = Path(__file__).resolve().parents[1]
 
 
-def _git(ws: Path, *args: str) -> None:
-    # Подавления S603/S607: git с argv из литералов, вход фиксирован.
-    subprocess.run(  # noqa: S603  # nosec B603 B607
-        ["git", "-c", "user.name=T", "-c", "user.email=t@localhost", *args],  # noqa: S607
-        cwd=str(ws), check=True, capture_output=True, text=True,
-    )
-
-
-@pytest.fixture()
-def repo(tmp_path: Path) -> Path:
-    subprocess.run(["git", "init"], cwd=str(tmp_path), check=True, capture_output=True)  # noqa: S607  # nosec B603 B607
-    subprocess.run(  # nosec B603 B607
-        ["git", "symbolic-ref", "HEAD", "refs/heads/main"],  # noqa: S607
-        cwd=str(tmp_path), check=True, capture_output=True,
-    )
-    (tmp_path / "a.txt").write_text("one\n", encoding="utf-8")
-    _git(tmp_path, "add", "-A")
-    _git(tmp_path, "commit", "-m", "init")
-    return tmp_path
-
-
-def test_the_state_names_the_commit_and_branch(repo: Path):
-    state = describe_code_state(repo)
+def test_the_state_names_the_commit_and_branch(git_repo: Path):
+    state = describe_code_state(git_repo)
 
     assert state["commit"], "отпечаток без коммита не отвечает на вопрос «какой код»"
     assert len(state["commit"]) >= 7
     assert state["branch"] == "main"
 
 
-def test_edits_after_indexing_are_counted(repo: Path):
+def test_edits_after_indexing_are_counted(git_repo: Path):
     """Правки поверх зафиксированного кода — признак «проверяли не то»."""
-    (repo / "b.py").write_text("x = 1\n", encoding="utf-8")
+    (git_repo / "b.py").write_text("x = 1\n", encoding="utf-8")
 
-    assert describe_code_state(repo)["files_newer_than_index"] == 1
+    assert describe_code_state(git_repo)["files_newer_than_index"] == 1
 
 
-def test_diverging_from_the_shared_branch_is_visible(repo: Path):
+def test_diverging_from_the_shared_branch_is_visible(git_repo: Path):
     """Ровно случай прогона: копия не та, что у всех, и это обязано быть видно."""
-    (repo / "a.txt").write_text("three\n", encoding="utf-8")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "second")
-    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
-    _git(repo, "reset", "--hard", "HEAD~1")
+    (git_repo / "a.txt").write_text("three\n", encoding="utf-8")
+    run_git(git_repo, "add", "-A")
+    run_git(git_repo, "commit", "-m", "second")
+    run_git(git_repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_git(git_repo, "reset", "--hard", "HEAD~1")
 
-    state = describe_code_state(repo)
+    state = describe_code_state(git_repo)
 
     assert state["shared_commit"], "общая ветка известна, но не прочитана"
     assert state["matches_shared"] is False, (
