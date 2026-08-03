@@ -157,10 +157,23 @@ class MemoryRecord(BaseModel):
     owner: str = "session"
     ttl_seconds: int | None = None
     created_at: datetime = Field(default_factory=_now)
+    # MIR-074 root fix: WHO asserted this. It always existed as a write-policy
+    # input but was never persisted, so every stored record lost its origin —
+    # and the MIR-046 independence rule then demoted EVERY memory citation to
+    # topic-only forever (the measured all-history zero of verified memory
+    # citations). `user-explicit` records are human assertions and may verify;
+    # agent-auto ones stay non-independent by doctrine.
+    source: str | None = None
 
     # --- importance tracking (for archive scoring) ---
     # How many times this record was retrieved and injected into a prompt.
     access_count: int = 0
+    # MIR-074 (operator ruling 2026-08-03): CAUSAL credits — the record was
+    # cited as [memory:<id>] in an answer chunk the verifier marked
+    # `verified`, i.e. retrieved → changed the answer → independently
+    # checked. Injection alone (access_count) is a near-zero signal; THIS
+    # is the strong one, and it is what keeps a record active.
+    causal_use: int = 0
     # Last time this record was retrieved (None = never used after creation).
     last_accessed_at: datetime | None = None
     # Computed importance score 0.0-1.0. Updated by archive_low_value_memory().

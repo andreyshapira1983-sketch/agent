@@ -635,12 +635,25 @@ def _importance_score(record: MemoryRecord, now: datetime) -> float:
     """
     tags_lower = {t.strip().lower() for t in (record.tags or [])}
     base = max((_TAG_WEIGHTS.get(t, 0.0) for t in tags_lower), default=0.3)
+    # MIR-074 (operator ruling): the pipeline stamps every auto-extracted
+    # claim with `fact` (weight 0.8) AND `source-backed` — with the idle
+    # penalty capped at 0.3 that floor (0.5 > threshold 0.25) made auto
+    # records unarchivable FOREVER, however useless. An auto record with
+    # zero CAUSAL credit no longer inherits the tag's immortality: its tag
+    # base is capped so pure idleness can carry it below the threshold —
+    # «пока не пригодилось — отодвинем подальше», dormant, not destroyed.
+    causal_use = int(getattr(record, "causal_use", 0) or 0)
+    if "source-backed" in tags_lower and causal_use == 0:
+        base = min(base, 0.4)
     # Honour an explicitly-stored importance as a floor — a record hand-marked
     # important must not be scored down to the archive by tag/access heuristics.
     base = max(base, float(record.importance or 0.0))
 
-    # Access boost — each use bumps importance
+    # Access boost — each use bumps importance; CAUSAL use (the record was
+    # cited in a verified answer) weighs four times an injection, per the
+    # ruling: «совпадение слов при вставке ≈ нулевой кредит».
     access_boost = min(0.3, record.access_count * 0.05)
+    access_boost += min(0.6, causal_use * 0.2)
 
     # Recency penalty — unused records slowly drift toward the archive
     reference_dt = record.last_accessed_at or record.created_at
