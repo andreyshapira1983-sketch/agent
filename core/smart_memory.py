@@ -470,11 +470,16 @@ class ProcedureRecord:
         changes NO status. Credit flows only through the causal
         `used_procedure_ids` path (`apply_episode_feedback` → `with_outcome`).
 
-        Lessons still accumulate here, under the same gate `with_episode`
-        used: a lesson is content, not credit — MIR-050's reason for keeping
-        `lessons` a list is that unrelated runs pool on one tool-shape key,
-        and dropping the append (the #261 oversight) made the second run's
-        lesson vanish while its episode id was still merged.
+        Lessons still accumulate here, under the credit gate
+        (`procedure_credit_allowed`): a lesson is content, not credit —
+        MIR-050's reason for keeping `lessons` a list is that unrelated runs
+        pool on one tool-shape key, and dropping the append (the #261
+        oversight) made the second run's lesson vanish while its episode id
+        was still merged.
+
+        The cap is applied on EVERY return, not only when a lesson is
+        appended: an uncredited fold-in must repair an oversized older record
+        rather than carry it forward untouched.
         """
         episode_ids = tuple(dict.fromkeys([*self.source_episode_ids, episode.id]))
         lesson = lesson_from_episode(episode)
@@ -488,38 +493,14 @@ class ProcedureRecord:
             updated_at=_now_iso(),
         )
 
-    def with_episode(self, episode: EpisodeRecord) -> "ProcedureRecord":
-        # The counter asks the same question as creation and the verdict. It
-        # is gated here as well as at the entry, because this is where the
-        # number actually moves and it has to answer for itself (MIR-057).
-        episode_ids = tuple(dict.fromkeys([*self.source_episode_ids, episode.id]))
-        success_count = self.success_count + (1 if procedure_credit_allowed(episode) else 0)
-        failure_count = self.failure_count + (1 if procedure_debit_allowed(episode) else 0)
-        confidence = _smoothed_confidence(success_count, failure_count)
-        status: ProcedureStatus = _procedure_status_for(success_count, confidence)
-        # Appended, never replaced, and only when this episode earned credit:
-        # a run that did not finish contributes no lesson, exactly as it
-        # contributes no success count.
-        lesson = lesson_from_episode(episode)
-        # Capped on EVERY return, not only when a lesson is appended: a
-        # debit-only fold-in must repair an oversized older record rather than
-        # carry it forward untouched.
-        lessons = _capped_lessons(self.lessons)
-        if lesson and procedure_credit_allowed(episode):
-            lessons = _capped_lessons([*self.lessons, lesson])
-        # `replace`, not a field-by-field rebuild: this method used to re-list
-        # every column, so `lessons` was silently dropped until it was added by
-        # hand, and the next field added would be dropped the same way.
-        return replace(
-            self,
-            lessons=lessons,
-            source_episode_ids=episode_ids,
-            success_count=success_count,
-            failure_count=failure_count,
-            confidence=confidence,
-            status=status,
-            updated_at=_now_iso(),
-        )
+    # ``with_episode`` (counter-moving fold-in) was retired 2026-08-03: #261
+    # made it unreachable from production — `upsert_from_episode` merges via
+    # `merged_from_episode`, and counters move only through the causal
+    # `apply_episode_feedback` → `with_outcome` path — after which the method
+    # existed solely so its own tests could pass. Removed under the series
+    # audit; its live guarantees are pinned against the live paths in
+    # `tests/test_procedure_lessons.py` and
+    # `tests/test_completion_procedural_gates.py`.
 
 
 @dataclass(frozen=True)
