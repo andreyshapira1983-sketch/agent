@@ -382,6 +382,31 @@ precisely because the checks turned green first.
 **What to do.** Read the threads, then merge. A green suite proves the code
 runs; it proves nothing about the claims made around it.
 
+---
+
+## 19. A floor that keeps nothing
+
+**Symptom.** A budget or quota reserves a minimum "so that something survives",
+but the minimum is smaller than the smallest indivisible item — so nothing
+survives, while the journal reports a trim rather than a deletion.
+
+**Cost (2026-08-04, live run).** Memory policy selected 3 records (655 chars)
+as relevant to the operator's question. The evidence budget cut memory first,
+down to its floor of 50 characters. Memory is then rebuilt from WHOLE records,
+and no record is that short — so the prompt received none. The journal line
+reads `memory_trimmed=True, memory_chars=694, memory_chars_kept=0`: the word
+is "trimmed", the effect is "erased". Total evidence was 31 970 chars and the
+overflow was about a fifth; memory needed 2% of the space.
+
+**How to check yourself.** For each floor, minimum or reserve in the code: what
+is the smallest item it must protect? If the floor is below that size, it
+protects nothing. Grep the journals for pairs like `*_kept=0` next to
+`*_trimmed=True`.
+
+**What to do.** Size the floor in items, not in characters — keep a whole
+record or none, and say which happened. A floor that cannot hold one item is
+worse than an honest zero: it hides the deletion behind the word "trimmed".
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED
@@ -404,9 +429,10 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 11 | [core/self_build_producer.py:409](../core/self_build_producer.py#L409) | the builder calls the model directly: the result never reaches the verifier | assistant, 2026-08-04 | not handled |
 | 12 | [core/task_complexity.py:108](../core/task_complexity.py#L108) | a ~180-character threshold decides which model answers | assistant, 2026-08-04 | PR #301, partly |
 | 15 | [core/self_build_producer.py:110](../core/self_build_producer.py#L110) | two consecutive replies broke at 32 326 and 32 440 — "code inside JSON" is a fragile format | assistant, 2026-08-04 | not handled |
-| 16 | [docs/MISTAKE_NOTEBOOK.md:1](../docs/MISTAKE_NOTEBOOK.md#L1) | an invented example path in the address rule — caught by the docs conformance check | assistant, 2026-08-04 | PR #306 |
+| 16 | [docs/MISTAKE_NOTEBOOK.md:318](../docs/MISTAKE_NOTEBOOK.md#L318) | an invented example path in the address rule — caught by the docs conformance check | assistant, 2026-08-04 | PR #306 |
 | 17 | [tests/test_mistake_notebook_links.py:30](../tests/test_mistake_notebook_links.py#L30) | absoluteness judged by shape, not by `Path.is_absolute` — the host must not change the verdict | CI, 2026-08-04 | PR #306 |
-| 18 | [docs/MISTAKE_NOTEBOOK.md:1](../docs/MISTAKE_NOTEBOOK.md#L1) | section 15 contradicted its own table — merged before the review was read | reviewers, 2026-08-04 | this PR |
+| 18 | [docs/MISTAKE_NOTEBOOK.md:271](../docs/MISTAKE_NOTEBOOK.md#L271) | section 15 contradicted its own table — merged before the review was read | reviewers, 2026-08-04 | this PR |
+| 19 | [core/evidence_budget.py:304](../core/evidence_budget.py#L304) | the 50-char floor for demoted blocks is below any whole memory record, so memory is erased, not trimmed | assistant, 2026-08-04 | not handled |
 | — | [core/self_build_producer.py:110](../core/self_build_producer.py#L110) | the builder's ceiling is 16 000 tokens, yet a live reply took 20 509 — the limit is not honoured | assistant, 2026-08-04 | not investigated |
 
 ## How to append
