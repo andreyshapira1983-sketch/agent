@@ -12,18 +12,26 @@ three files were over their ceilings and it reported that to nobody.
 from __future__ import annotations
 
 import importlib.util
+from functools import lru_cache
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[1]
 _SCRIPT = _REPO / "scripts" / "check_function_length_baseline.py"
 
 
+@lru_cache(maxsize=1)
 def _guard():
     spec = importlib.util.spec_from_file_location("check_function_length_baseline", _SCRIPT)
+    assert spec is not None and spec.loader is not None, f"cannot load {_SCRIPT}"
     module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
+
+
+@lru_cache(maxsize=1)
+def _measured() -> dict[str, int]:
+    """One scan of the tree for the whole module: four tests, one walk."""
+    return _guard().measure(_REPO)
 
 
 def test_the_ratchet_holds():
@@ -38,7 +46,7 @@ def test_the_ratchet_holds():
 def test_every_watched_function_still_exists():
     """A stale entry watches nothing and hides that the ratchet went slack."""
     module = _guard()
-    found = module.measure(_REPO)
+    found = _measured()
     missing = sorted(set(module.WATCH) - set(found))
 
     assert not missing, (
@@ -50,7 +58,7 @@ def test_every_watched_function_still_exists():
 def test_ceilings_stay_close_to_the_measurement():
     """A ceiling far above reality is a ratchet in name only."""
     module = _guard()
-    found = module.measure(_REPO)
+    found = _measured()
     slack = {
         key: (ceiling, found[key])
         for key, ceiling in module.WATCH.items()
@@ -66,7 +74,7 @@ def test_ceilings_stay_close_to_the_measurement():
 def test_the_threshold_and_the_watch_list_agree():
     """Anything above the threshold is watched; nothing below clutters the list."""
     module = _guard()
-    found = module.measure(_REPO)
+    found = _measured()
     unwatched = sorted(
         k for k, n in found.items()
         if n > module.REPORT_THRESHOLD and k not in module.WATCH

@@ -35,45 +35,61 @@ SKIP_DIRS = frozenset({
 
 #: "path:function" -> ceiling. Measured 2026-08-04.
 WATCH: dict[str, int] = {
-    "core/loop.py:_run_inner": 2223,  # цель — разбор на этапы
+    "core/loop.py:AgentLoop._run_inner": 2223,  # цель — разбор на этапы
     "core/step_sanitizer.py:sanitize_step": 668,
-    "core/loop_step_execution.py:_execute_step": 568,
+    "core/loop_step_execution.py:AgentLoopStepExecution._execute_step": 568,
     "agent_tick.py:run_tick": 474,
-    "core/loop.py:_synthesize": 430,  # следующий кусок разбора
+    "core/loop.py:AgentLoop._synthesize": 430,  # следующий кусок разбора
     "core/self_build_producer.py:produce_self_apply_proposal": 375,
     "core/campaign.py:run_campaign": 350,
     "cli/command_dispatch.py:handle_meta_command": 349,
     "core/evidence.py:evidence_from_tool_result": 321,
     "core/verifier_core.py:verify": 283,
     "app/bootstrap.py:build_agent": 246,
-    "core/loop_methods2.py:_record_experience_memory": 246,
-    "core/referent_resolver.py:resolve": 240,
-    "core/loop.py:__init__": 238,
+    "core/loop_methods2.py:AgentLoopExtractedMethods2._record_experience_memory": 246,
+    "core/referent_resolver.py:ReferentResolver.resolve": 240,
+    "core/loop.py:AgentLoop.__init__": 238,
     "core/self_apply_lane.py:run_self_apply_lane": 235,
-    "core/model_router.py:for_task": 227,
-    "core/loop_methods2.py:_retrieve_experience_memory": 218,
+    "core/model_router.py:ModelRouter.for_task": 227,
+    "core/loop_methods2.py:AgentLoopExtractedMethods2._retrieve_experience_memory": 218,
     "core/work_session.py:run_work_session": 211,
     "core/architecture_audit.py:_build_checks": 197,
     "core/self_task_builder.py:build_coding_task": 195,
-    "core/subagent_runner.py:run": 177,
+    "core/subagent_runner.py:SubAgentRunner.run": 177,
     "core/operator_intent.py:route_operator_intent": 175,
-    "core/self_repair.py:run": 173,
+    "core/self_repair.py:SelfRepairController.run": 173,
     "core/self_build_producer.py:_critic_review": 172,
     "core/completion_obligation.py:evaluate_completion_obligations": 171,
     "core/self_apply_bridge.py:run_approved_self_apply": 170,
-    "core/self_repair.py:_execute_tool": 170,
-    "core/autonomous_runtime.py:_task_propose": 167,
-    "core/memory_policy.py:decide": 167,
+    "core/self_repair.py:SelfRepairController._execute_tool": 170,
+    "core/autonomous_runtime.py:AutonomousRuntime._task_propose": 167,
+    "core/memory_policy.py:MemoryWritePolicy.decide": 167,
     "core/self_task_producer.py:produce_coding_task": 167,
     "cli/repl.py:run_repl": 166,
-    "core/role_router.py:route": 163,
+    "core/role_router.py:RoleRouter.route": 163,
     "core/low_evidence_policy.py:evaluate_low_evidence_policy": 161,
-    "core/planner.py:plan": 159,
+    "core/planner.py:LLMPlanner.plan": 159,
 }
 
 
+def _walk(body: list[ast.stmt], prefix: str, rel: str, out: dict[str, int]) -> None:
+    """Collect `path:Class.method` lengths, keeping the enclosing scope.
+
+    A bare `path:name` key merges same-named definitions in one file — two
+    classes with `__init__`, or a helper redefined inside another function —
+    and the ratchet would then watch only the longer of them.
+    """
+    for node in body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            name = f"{prefix}{node.name}"
+            out[f"{rel}:{name}"] = node.end_lineno - node.lineno + 1
+            _walk(node.body, f"{name}.", rel, out)
+        elif isinstance(node, ast.ClassDef):
+            _walk(node.body, f"{prefix}{node.name}.", rel, out)
+
+
 def measure(root: Path) -> dict[str, int]:
-    """Longest definition per `path:name`, for every Python file in the tree."""
+    """Definition lengths per `path:qualified_name`, for the whole tree."""
     found: dict[str, int] = {}
     for path in sorted(root.rglob("*.py")):
         if any(part in SKIP_DIRS for part in path.relative_to(root).parts):
@@ -82,13 +98,7 @@ def measure(root: Path) -> dict[str, int]:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
         except SyntaxError:                      # pragma: no cover - broken file
             continue
-        rel = path.relative_to(root).as_posix()
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            key = f"{rel}:{node.name}"
-            lines = node.end_lineno - node.lineno + 1
-            found[key] = max(found.get(key, 0), lines)
+        _walk(tree.body, "", path.relative_to(root).as_posix(), found)
     return found
 
 
@@ -110,7 +120,10 @@ def main(argv: list[str] | None = None) -> int:
     for key, ceiling in WATCH.items():
         n = found.get(key)
         if n is None:
+            # A stale entry watches nothing: the ratchet looks green while a
+            # ceiling nobody meets sits in the list. Fail so it gets removed.
             print(f"GONE      —   / {ceiling}  {key}  (split or renamed: drop the entry)")
+            exit_code = 1
             continue
         flag = "ok"
         if n > ceiling:
