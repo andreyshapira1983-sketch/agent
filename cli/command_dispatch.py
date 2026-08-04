@@ -65,12 +65,19 @@ from cli.commands_approval import (
     _handle_best_next_action,
     _handle_self_issue_verify,
 )
+from cli.commands_audit import (
+    _handle_architecture_audit,
+    _handle_release_audit,
+    _handle_state_store_drill,
+    _handle_supply_chain_audit,
+)
 from cli.commands_budget import (
     _handle_budget_config,
     _handle_budget_kill_switch,
     _handle_budget_status,
     _handle_budget_window_status,
 )
+from cli.commands_connectors import _handle_connector_plan, _handle_connectors
 from cli.commands_health import _handle_dry_health_pass
 from cli.commands_ingest import (
     _handle_implementation_plan,
@@ -84,25 +91,14 @@ from cli.commands_ingest import (
     _handle_source_registry,
     _handle_source_review_plan,
 )
+from cli.commands_knowledge_review import _handle_assumptions, _handle_conflicts
+from cli.commands_learn import _handle_learn
 from cli.commands_memory import (
     _handle_hygiene,
     _handle_memory_consolidate,
     _handle_rollback,
     _handle_smart_memory,
     _print_persistent,
-)
-from cli.commands_misc import (
-    _handle_architecture_audit,
-    _handle_assumptions,
-    _handle_conflicts,
-    _handle_connector_plan,
-    _handle_connectors,
-    _handle_learn,
-    _handle_release_audit,
-    _handle_state_store_drill,
-    _handle_supply_chain_audit,
-    _handle_team_plan,
-    _handle_team_run,
 )
 from cli.commands_models import (
     _handle_model_discovery_audit,
@@ -130,6 +126,7 @@ from cli.commands_self_task import (
     _handle_self_task_build,
     _handle_self_task_propose,
 )
+from cli.commands_team import _handle_team_plan, _handle_team_run
 from cli.commands_value_review import (
     _handle_value_review,
     _handle_value_review_list,

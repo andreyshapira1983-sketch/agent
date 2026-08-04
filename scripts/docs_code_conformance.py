@@ -129,6 +129,12 @@ _RENAMED_PATHS: dict[str, str] = {
     # `core/loop_memory_commands.py`, `core/loop_repair.py` and the one named
     # below, which the mapping can point at.
     "core/loop_methods.py": "core/loop_hygiene.py",
+    # Dissolved 2026-08-04: a file whose own docstring said "Miscellaneous"
+    # and held six unrelated subjects. Successors: `cli/commands_team.py`,
+    # `cli/commands_connectors.py`, `cli/commands_learn.py`,
+    # `cli/commands_knowledge_review.py` and the one named below.
+    "cli/commands_misc.py": "cli/commands_audit.py",
+    "tests/test_commands_misc.py": "tests/test_cli_operator_commands.py",
 }
 
 #: Documents whose renamed-path references are provenance **by nature**: dated
@@ -155,6 +161,11 @@ _HISTORICAL_RENAME_DOCS = {
     "MEMORY_FIX_PLAN.md",
     "MEMORY_SYSTEM_AUDIT.md",
     "Технический_анализ_автономного_агента_и_функций_мозга.md",
+    # Добавлены с роспуском `cli/commands_misc.py`: датированный снимок
+    # поверхности CLI и разбор уроков аудита — оба говорят о том, что было
+    # верно на момент написания.
+    "refactor/CLI_BASELINE.md",
+    "self-audit-lessons.md",
 }
 
 #: Inline escape hatch for a **mixed** document — a current-facing page that
