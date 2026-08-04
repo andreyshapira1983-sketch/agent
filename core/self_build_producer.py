@@ -326,10 +326,15 @@ def _why_json_failed(build: dict[str, Any]) -> str:
     raw = str(build.get("raw_reply") or "")
     if not raw.strip():
         return "сырец не сохранён"
+    # Судим по JSON-части, а не по всему сырцу: модель нередко оборачивает
+    # объект прозой или заборчиком, и `json.loads` на целом тексте сказал бы
+    # «Expecting value» вместо настоящей причины (замечание ревью #303).
+    start, end = raw.find("{"), raw.rfind("}")
+    candidate = raw[start:end + 1] if start != -1 and end > start else raw
     try:
-        json.loads(raw)
+        json.loads(candidate)
     except json.JSONDecodeError as exc:
-        near = raw[max(0, exc.pos - 40): exc.pos + 20].replace("\n", "⏎")
+        near = candidate[max(0, exc.pos - 40): exc.pos + 20].replace("\n", "⏎")
         return f"JSON невалиден: {exc.msg} (позиция {exc.pos}), рядом: …{near}…"
     except (TypeError, ValueError):  # pragma: no cover — не JSON вовсе
         return "ответ не является JSON"

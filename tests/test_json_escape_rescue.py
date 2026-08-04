@@ -60,6 +60,20 @@ def test_valid_escapes_survive_the_rescue():
     assert obj["kept"] == "keep \\ this", "валидное экранирование испорчено починкой"
 
 
+def test_a_windows_path_is_repaired_not_mistaken_for_a_unicode_escape():
+    """`\\u` без четырёх hex-цифр — обычный слэш, а не экранирование.
+
+    Про букву после слэша: `\\b`, `\\n`, `\\t` в JSON законны, поэтому
+    `C:\\bin` неотличим от «backspace + in» в принципе — это свойство формата,
+    а не починки. Здесь проверяется ровно то, что чинится: `\\u` без hex.
+    """
+    obj = extract_json_object('{"p": "C:\\users\\project", "q": "\\u0041"}')
+
+    assert obj is not None, "путь Windows не восстановлен"
+    assert obj["p"] == "C:\\users\\project"
+    assert obj["q"] == "A", "настоящее \\uXXXX испорчено починкой"
+
+
 def test_genuinely_broken_json_still_fails():
     """Спасение не должно превращать мусор в объект."""
     assert extract_json_object('{"unclosed": "value') is None
@@ -80,7 +94,8 @@ def test_the_actual_rejected_reply_parses_if_it_is_still_on_disk():
     когда их нет. Но пока сырец на месте — он стережёт живой случай целиком,
     а не его уменьшенную копию.
     """
-    rejects = sorted(Path("logs/self_build_rejects").glob("reject_*.txt"))
+    repo = Path(__file__).resolve().parents[1]
+    rejects = sorted((repo / "logs" / "self_build_rejects").glob("reject_*.txt"))
     if not rejects:
         pytest.skip("сырцов отклонённых ответов на диске нет")
 
