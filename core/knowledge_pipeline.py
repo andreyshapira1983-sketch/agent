@@ -409,8 +409,8 @@ class KnowledgeWritePolicy:
         if _th.is_hype:
             return KnowledgeWriteDecision(
                 "reject",
-                (f"claim is promotional hype (no checkable substance): "
-                 f"{'; '.join(_th.reasons[:2])}",),
+                ((f"claim is promotional hype (no checkable substance): "
+                 f"{'; '.join(_th.reasons[:2])}"),),
             )
         if claim.status in {"unverified", "conflicted"}:
             return KnowledgeWriteDecision("reject", (f"claim status is {claim.status}",))
@@ -435,8 +435,8 @@ class KnowledgeWritePolicy:
             # class, before the trust ladder is even consulted for weakness.
             return KnowledgeWriteDecision(
                 "reject",
-                (f"source type {source.type} does not assert facts "
-                 f"(observation of one moment, not a standing claim)",),
+                ((f"source type {source.type} does not assert facts "
+                 f"(observation of one moment, not a standing claim)"),),
             )
         if source.type in {"forum", "unknown"}:
             return KnowledgeWriteDecision("reject", (f"source type {source.type} is too weak",))
@@ -448,8 +448,8 @@ class KnowledgeWritePolicy:
             # Prose files (.md, .txt) stay in scope: they really state things.
             return KnowledgeWriteDecision(
                 "reject",
-                (f"source is a code file ({source.locator}): programs do not "
-                 f"assert facts",),
+                ((f"source is a code file ({source.locator}): programs do not "
+                 f"assert facts"),),
             )
         reasons.append(f"claim confidence={claim.confidence:.2f}")
         reasons.append(f"source trust={source.trust_level:.2f}")

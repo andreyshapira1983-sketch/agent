@@ -60,9 +60,9 @@ def _preflight_file_hint(file_hint: str | None, workspace: Path) -> tuple[bool, 
         return True, None
     return (
         False,
-        "ERROR: file hint does not exist:\n"
+        ("ERROR: file hint does not exist:\n"
         f"{path}\n\n"
-        "No model calls were made.",
+        "No model calls were made."),
     )
 
 

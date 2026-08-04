@@ -67,8 +67,8 @@ def _agent(workspace: Path, *, llm: FakeLLM | None = None) -> tuple[AgentLoop, P
         llm=llm
         or FakeLLM(
             responses=[
-                "Conclusion: ok\nFacts:\n- x [user:target]\nSources: user:target\n"
-                "Confidence: low\nUnverified: -\nSafety: ok"
+                ("Conclusion: ok\nFacts:\n- x [user:target]\nSources: user:target\n"
+                "Confidence: low\nUnverified: -\nSafety: ok")
             ]
         ),
         logger=TraceLogger(trace_id=trace_id, log_dir=workspace / "logs", verbose=False),
@@ -132,10 +132,10 @@ def test_local_critique_show_only_forbids_offer_language(
     monkeypatch.setenv("AGENT_REFERENT_RESOLVER", "on")
     llm = FakeLLM(
         responses=[
-            "Conclusion: Слабые стороны перечислены. [user:target]\n"
+            ("Conclusion: Слабые стороны перечислены. [user:target]\n"
             "Facts:\n- Тезис повторяется. [user:target]\n"
             "Sources:\n1. user:target\nConfidence: medium\n"
-            "Unverified:\nnothing\nSafety:\nnothing\n"
+            "Unverified:\nnothing\nSafety:\nnothing\n")
         ]
     )
     agent, log_path, _planner = _agent(workspace, llm=llm)
@@ -159,10 +159,10 @@ def test_shadow_would_change_but_keeps_default_synth(
     monkeypatch.setenv("AGENT_REFERENT_RESOLVER", "shadow")
     llm = FakeLLM(
         responses=[
-            "Conclusion: Нет объекта. [general-knowledge]\n"
+            ("Conclusion: Нет объекта. [general-knowledge]\n"
             "Facts:\n- объект не указан [general-knowledge]\n"
             "Sources:\n1. general-knowledge\nConfidence: low\n"
-            "Unverified:\nnothing\nSafety:\nnothing\n"
+            "Unverified:\nnothing\nSafety:\nnothing\n")
         ]
     )
     # Empty planner sources so FakePlanner is used if called.
@@ -204,8 +204,8 @@ def test_off_mode_unchanged(workspace: Path, monkeypatch):
     monkeypatch.delenv("AGENT_REFERENT_RESOLVER", raising=False)
     llm = FakeLLM(
         responses=[
-            "Conclusion: ok\nFacts:\n- x [general-knowledge]\nSources: gk\n"
-            "Confidence: low\nUnverified: -\nSafety: ok"
+            ("Conclusion: ok\nFacts:\n- x [general-knowledge]\nSources: gk\n"
+            "Confidence: low\nUnverified: -\nSafety: ok")
         ]
     )
     reg = ToolRegistry()

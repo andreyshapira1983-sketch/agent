@@ -159,8 +159,8 @@ def format_replan_context(
     if not failure_history and not advice and not forbidden_actions:
         return ""
     lines = [
-        f"<replan_context attempt=\"{attempt}\" "
-        f"max_attempts=\"{max_attempts}\">"
+        (f"<replan_context attempt=\"{attempt}\" "
+        f"max_attempts=\"{max_attempts}\">")
     ]
     if failure_history:
         lines.append(

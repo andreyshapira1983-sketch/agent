@@ -86,8 +86,8 @@ def _build_loop(
     planner = FakePlanner(sources=[planned_step])
     llm = FakeLLM(
         responses=[
-            "Conclusion: ok. [stub:t]\nFacts:\n- ran [stub:t]\n"
-            "Sources:\n1. stub:t - t\nConfidence: medium\nUnverified: nothing\n"
+            ("Conclusion: ok. [stub:t]\nFacts:\n- ran [stub:t]\n"
+            "Sources:\n1. stub:t - t\nConfidence: medium\nUnverified: nothing\n")
         ]
     )
     trace_id = new_trace_id()

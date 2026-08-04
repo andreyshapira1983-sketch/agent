@@ -69,8 +69,8 @@ def _resume_question_from_checkpoint(ctx) -> str:
             f"Completed steps: {json.dumps(completed, ensure_ascii=False)}",
             f"Remaining steps: {json.dumps(remaining, ensure_ascii=False)}",
             f"Planned steps: {json.dumps(planned, ensure_ascii=False)}",
-            "Continue from the remaining steps when they are still relevant. "
-            "Do not repeat completed discovery unless it must be refreshed.",
+            ("Continue from the remaining steps when they are still relevant. "
+            "Do not repeat completed discovery unless it must be refreshed."),
         ]
     )
 

@@ -233,8 +233,8 @@ class SubAgentRunResult:
         # sub-agent's answer is admissible as `verified` evidence.
         kinds_csv = ",".join(self.external_evidence_kinds)
         lines = [
-            f"[subagent-meta external_evidence_count={self.external_evidence_count}"
-            f" external_kinds={kinds_csv}]",
+            (f"[subagent-meta external_evidence_count={self.external_evidence_count}"
+            f" external_kinds={kinds_csv}]"),
             f"SubAgent name={self.contract_name!r}",
             f"  role           : {self.role}",
             f"  objective      : {self.objective}",

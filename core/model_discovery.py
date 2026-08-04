@@ -320,8 +320,8 @@ def build_discovery_audit(
 
     warnings = [
         "Audit is local only: no provider was contacted and no catalog was written.",
-        "Run ':provider-catalog-refresh --dry-run' to compare live provider models "
-        "against the current catalog without writing.",
+        ("Run ':provider-catalog-refresh --dry-run' to compare live provider models "
+        "against the current catalog without writing."),
     ]
     return DiscoveryReport(
         generated_at=datetime.now(timezone.utc).isoformat(),
@@ -403,8 +403,8 @@ def build_discovery_report(
 
     warnings = [
         "Dry-run only: no catalog was written and no model was switched.",
-        "Provider model-list access is metadata-only (non-inference) but is still "
-        "an external provider call.",
+        ("Provider model-list access is metadata-only (non-inference) but is still "
+        "an external provider call."),
     ]
     return DiscoveryReport(
         generated_at=datetime.now(timezone.utc).isoformat(),

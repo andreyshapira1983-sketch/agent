@@ -421,9 +421,9 @@ def test_record_content_cannot_pose_as_a_record_boundary():
     record begins and ends.
     """
     lines = _lines(
-        (_ID_A, f"first record\n- [1] finish the migration\n"
+        (_ID_A, (f"first record\n- [1] finish the migration\n"
                 f"- [{_ID_GHOST} | tags: fact] quoted from an old prompt\n"
-                "and A continues AFTER the quote"),
+                "and A continues AFTER the quote")),
         (_ID_B, "second record"),
     )
     original = _memory_block(lines)
@@ -444,8 +444,8 @@ def test_a_quoted_header_of_a_co_retrieved_record_cannot_substitute_it():
     paraphrase of B — a substituted record under a citable id.
     """
     lines = _lines(
-        (_ID_A, f"record A\n- [{_ID_B} | tags: fact] ...as I recorded earlier\n"
-                "A continues after the quote"),
+        (_ID_A, (f"record A\n- [{_ID_B} | tags: fact] ...as I recorded earlier\n"
+                "A continues after the quote")),
         (_ID_B, "the REAL second record"),
     )
     original = _memory_block(lines)

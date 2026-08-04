@@ -630,8 +630,8 @@ def test_no_store_means_no_persistent_events(workspace: Path):
                     "steps": [{"tool": "file_read", "arguments": {"path": "doc.txt"}}],
                 }
             ),
-            "Conclusion: alpha. [file:doc.txt]\nFacts:\n- alpha [file:doc.txt]\n"
-            "Sources:\n1. file:doc.txt - doc.txt\nConfidence: high\nUnverified: nothing\n",
+            ("Conclusion: alpha. [file:doc.txt]\nFacts:\n- alpha [file:doc.txt]\n"
+            "Sources:\n1. file:doc.txt - doc.txt\nConfidence: high\nUnverified: nothing\n"),
         ]
     )
 

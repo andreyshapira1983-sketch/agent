@@ -214,8 +214,8 @@ def classify_patch_risk(
     if rejected:
         return (
             False,
-            "patch is not low-risk: files outside the allowlist or on the "
-            "denylist",
+            ("patch is not low-risk: files outside the allowlist or on the "
+            "denylist"),
             rejected,
         )
     return True, "all files are low-risk (allowlisted, not denylisted)", []
@@ -544,8 +544,8 @@ def run_self_apply_lane(
         rollback_status="none",
         commit_hash=commit_hash,
         risks=[
-            "change is committed locally only — not pushed, not merged; a human "
-            "must review before it reaches the base branch"
+            ("change is committed locally only — not pushed, not merged; a human "
+            "must review before it reaches the base branch")
         ],
         next_human_action=next_human,
     )

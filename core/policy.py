@@ -75,8 +75,8 @@ class PolicyGate:
                 action="tool_call",
                 decision="deny",
                 reasons=[
-                    f"tool '{action.tool_name}' is blocked in this context "
-                    "(effects disabled / dry-run)"
+                    (f"tool '{action.tool_name}' is blocked in this context "
+                    "(effects disabled / dry-run)")
                 ],
             )
 
@@ -101,8 +101,8 @@ class PolicyGate:
                     action="tool_call",
                     decision="escalate",
                     reasons=[
-                        f"reversible action ({tool.name}) requires approval in "
-                        "this context (agent/runtime writes need a human checkpoint)"
+                        (f"reversible action ({tool.name}) requires approval in "
+                        "this context (agent/runtime writes need a human checkpoint)")
                     ],
                 )
             return PolicyDecision(
