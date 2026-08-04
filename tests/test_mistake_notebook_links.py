@@ -27,10 +27,40 @@ def test_the_notebook_exists_and_carries_addresses():
     assert _links(), "в журнале нет ни одного адреса — искать снова придётся руками"
 
 
+def _inside_repo(rel: str) -> bool:
+    """Ведёт ли адрес внутрь репозитория.
+
+    Регулярка адресов допускает точки и слэши, поэтому `../../secrets.py`
+    проходит её без возражений. Ссылка наружу в блокноте бессмысленна, а
+    журнал пополняет в том числе агент — пусть сторож это ловит.
+    """
+    try:
+        (_REPO / rel).resolve().relative_to(_REPO.resolve())
+    except (ValueError, OSError):
+        return False
+    return True
+
+
+def test_no_address_escapes_the_repository():
+    outside = sorted({rel for rel, _ in _links() if not _inside_repo(rel)})
+
+    assert not outside, f"адреса ведут за пределы репозитория: {outside}"
+
+
+def test_the_escape_check_actually_catches_a_way_out():
+    """Доказательство сторожа: путь наружу обязан быть отвергнут."""
+    assert not _inside_repo("../../../etc/passwd.py")
+    assert not _inside_repo("a/../../b.py")
+    assert _inside_repo("core/loop.py")
+
+
 def test_every_address_points_at_a_real_line():
     broken: list[str] = []
     cache: dict[str, list[str] | None] = {}   # один файл читаем один раз
     for rel, lineno in _links():
+        if not _inside_repo(rel):
+            broken.append(f"{rel}:{lineno} — путь ведёт наружу")
+            continue
         if rel not in cache:
             path = _REPO / rel
             cache[rel] = (
