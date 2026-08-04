@@ -1,65 +1,28 @@
-"""Helpers extracted verbatim from ``core/loop.py`` by the incremental
-splitter. The original module re-exports every name below, so all
-existing import paths keep working."""
+"""Как ответ выглядит: контракт вывода, человеческая печать, цитаты.
 
+Приехало из `core/loop_helpers.py`, которого больше нет. Тот файл сделал
+автоматический резчик, и «helpers» не говорило ничего: по имени нельзя было
+узнать, что внутри — а внутри почти целиком одна тема, вот эта.
+
+Префикс `loop_` тоже снят намеренно: `format_human_response` зовут семь
+модулей, из них четыре — CLI (`cli/repl.py`, `cli/one_shot.py`,
+`cli/resume.py`, `cli/intent_bridge.py`). Это не принадлежность цикла.
+
+Здесь три слоя одного предмета: `SYSTEM_ANSWER` — контракт, который выдаётся
+модели; `format_human_response` — как размеченный ответ показывают человеку;
+остальное — грамматика цитат, по которой верификатор потом сверяет claims с
+уликами. Они обязаны жить рядом: разъедутся — разъедется и грамматика,
+которую одна сторона выдаёт, а другая проверяет.
+"""
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
 from core.clarification_gate import ASK_BACK_PREFIX as _ASK_BACK_PREFIX
 from core.evidence import Evidence, ProvenanceChain
 from core.file_request_intent import extract_path_mentions, normalize_path_mention
-from core.ids import new_id
 from core.verification_summary import TAIL_PREFIX as _VERIFICATION_TAIL_PREFIX
-
-
-def _to_text(output: Any) -> str:
-    """Stringify a tool output for classification + scanning.
-
-    Tools return heterogeneous shapes (file_read → str, web_search → list).
-    We need ONE flat text view to feed the classifier.
-    """
-    if isinstance(output, str):
-        return output
-    try:
-        return json.dumps(output, ensure_ascii=False, default=str)
-    except Exception:
-        return str(output)
-
-
-# Structured tool outputs carry framework-generated envelope metadata
-# (argv we chose, our own compensation-plan descriptions, timing counters)
-# alongside the genuinely untrusted payload. The injection guard must scan
-# ONLY the untrusted payload — scanning the whole envelope makes our own
-# metadata (e.g. a compensation description "read-only command 'where'; …")
-# trip instruction-override patterns, producing false-positive
-# injection_suspicious flags and drowning real detections in alert-fatigue.
-#
-# Maps tool_name -> the output-dict keys whose values are untrusted (i.e.
-# originate outside our trust boundary). Tools not listed here have no
-# envelope: their entire output IS the untrusted payload and is scanned whole.
-_UNTRUSTED_OUTPUT_FIELDS: dict[str, tuple[str, ...]] = {
-    "shell_exec": ("stdout", "stderr"),
-}
-
-
-def untrusted_scan_view(tool_name: str | None, output: Any) -> str:
-    """Return the untrusted portion of *output* for injection scanning.
-
-    For tools with a structured envelope (see ``_UNTRUSTED_OUTPUT_FIELDS``)
-    only the untrusted payload fields are returned; framework metadata is
-    excluded. For every other shape the flat text view is scanned whole,
-    preserving the prior (fail-safe) behaviour.
-    """
-    fields = _UNTRUSTED_OUTPUT_FIELDS.get(tool_name or "")
-    if fields and isinstance(output, dict):
-        return "\n".join(_to_text(output.get(f, "")) for f in fields)
-    return _to_text(output)
-
-
-DEFAULT_MAX_REPLAN_ATTEMPTS = 3
 
 SYSTEM_ANSWER = """You are a careful research analyst.
 
@@ -211,7 +174,6 @@ LOCAL CRITIQUE MODE (overrides the no-evidence general-knowledge rule above):
 # table-only diagnostic contract) omits these.
 _GENERIC_CONTRACT_MARKERS = ("Conclusion:", "Facts:")
 
-
 def output_contract_requires_headers(system_prompt: str | None) -> bool:
     """Whether *system_prompt* enforces the generic Conclusion/Facts contract.
 
@@ -228,7 +190,6 @@ def output_contract_requires_headers(system_prompt: str | None) -> bool:
     if not system_prompt:
         return True
     return all(marker in system_prompt for marker in _GENERIC_CONTRACT_MARKERS)
-
 
 _VERIF_MARKER_RE = re.compile(
     r"\s*\["
@@ -254,7 +215,6 @@ _ANSWER_CITATION_RE = re.compile(
 )
 
 _EMPTY_QUOTE_LINE_RE = re.compile(r"^>+\s*$")
-
 
 def format_human_response(answer: str) -> str:
     """Convert the internal Output Contract format to clean human-readable text.
@@ -382,18 +342,6 @@ def format_human_response(answer: str) -> str:
 
     return "\n\n".join(parts) if parts else answer
 
-
-def new_trace_id() -> str:
-    return new_id("run")
-
-
-# ── Evidence -> synthesizer-prompt rendering ────────────────────────────────
-# Moved from AgentLoop (piece 4 of the loop decomposition, 2026-08-02). This
-# module already owns SYSTEM_ANSWER — the output contract that tells the model
-# which citation grammar to use — so the renderers that produce the citable
-# list, the artifact text and the scope notice now live beside the contract
-# they feed. All four are pure; none reads loop state.
-
 def citation_for_evidence(ev: Evidence) -> str | None:
     source_id = ev.source_id
     if ev.kind == "file" and source_id.startswith("file:"):
@@ -428,8 +376,6 @@ def citation_for_evidence(ev: Evidence) -> str | None:
     if ev.kind == "user_explicit":
         return "[user]"
     return None
-
-
 
 def format_allowed_citations_block(
     chain: ProvenanceChain,
@@ -471,8 +417,6 @@ def format_allowed_citations_block(
     lines.append("</allowed_citations>")
     return "\n".join(lines) + "\n\n" if len(lines) > 2 else ""
 
-
-
 def format_artifact(tool_name: str | None, output: Any, *, question: str = "") -> str:
     """Render a tool output into a stable string the LLM can ground on.
 
@@ -504,8 +448,6 @@ def format_artifact(tool_name: str | None, output: Any, *, question: str = "") -
     # Fallback: stringify whatever came back.
     return str(output)
 
-
-
 def file_scope_notice(
     question: str,
     artifacts: dict[str, dict[str, Any]],
@@ -532,5 +474,3 @@ def file_scope_notice(
         f"Evidence scope: I only have evidence for {actual}. "
         f"I did not verify {unverified}."
     )
-
-

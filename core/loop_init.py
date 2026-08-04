@@ -32,7 +32,6 @@ from core.knowledge_pipeline import KnowledgePipeline, KnowledgePipelineResult
 from core.knowledge_use_policy import KnowledgeUsePolicy
 from core.llm import LLM
 from core.logger import TraceLogger
-from core.loop_helpers import DEFAULT_MAX_REPLAN_ATTEMPTS
 from core.memory import WorkingMemory
 from core.memory_policy import MemoryRetrievalPolicy, MemoryWritePolicy
 from core.model_router import ModelRole, ModelRouter
@@ -40,7 +39,7 @@ from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
 from core.referent_resolver import ReferentDecision
-from core.replan import ReplanTrigger
+from core.replan import DEFAULT_MAX_REPLAN_ATTEMPTS, ReplanTrigger
 from core.role_router import RoleContext, RoleRouter
 from core.smart_memory import (
     EpisodicMemoryStore,

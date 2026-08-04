@@ -23,14 +23,14 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ("Interface & Interaction (§1)", "Operator-facing I/O, intent routing, output shaping.", [
         "operator_intent", "operator_intent_patterns", "intent_understanding",
         "file_request_intent",
-        "lang_match", "output_policy", "user_profile", "truth_hype_filter",
+        "answer_format", "lang_match", "output_policy", "user_profile", "truth_hype_filter",
         "alert_ack",
     ]),
     ("Perception & Adversarial Defense (§2)", "Input handling and injection/exfiltration defense.", [
         "injection_guard", "redaction", "data_classifier", "dlp", "secret_scanner",
     ]),
     ("Cognitive Core & Agent Cycle (§3)", "Planning, verification, clarification, control loop.", [
-        "loop", "loop_helpers", "loop_step_execution", "loop_sensor",
+        "loop", "loop_step_execution", "loop_sensor",
         "loop_knowledge", "loop_memory_commands", "loop_repair", "loop_hygiene",
         "loop_memory_read", "loop_memory_write",
         "loop_response_deciders", "loop_synthesis", "loop_evidence_chain",

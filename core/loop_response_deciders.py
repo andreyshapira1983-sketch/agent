@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from core.loop_helpers import file_scope_notice
+from core.answer_format import file_scope_notice
 from core.low_evidence_policy import is_evidence_expected
 from core.output_policy import apply_ranker_output_policy
 from core.response_draft import ResponseDraft

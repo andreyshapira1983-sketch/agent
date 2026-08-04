@@ -1,6 +1,7 @@
 """Tests for core/evidence_budget.py — per-artifact + total evidence budget."""
 from __future__ import annotations
 
+from core.answer_format import format_artifact
 from core.evidence_budget import (
     EVIDENCE_FILE_CHARS,
     EVIDENCE_TOTAL_CHARS,
@@ -11,7 +12,6 @@ from core.evidence_budget import (
     extract_relevant,
     rebuild_trimmed_memory,
 )
-from core.loop_helpers import format_artifact
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -353,7 +353,7 @@ def test_unknown_demoted_label_is_harmless(monkeypatch):
     assert sum(len(c) for _, c in result) <= 400
 
 
-# ── integration: format_artifact (moved to core.loop_helpers) ───────────────────────────────────
+# ── integration: format_artifact (moved to core.answer_format) ───────────────────────────────────
 
 def test_format_artifact_small_file_unchanged():
     """Files smaller than the per-artifact budget pass through untouched."""

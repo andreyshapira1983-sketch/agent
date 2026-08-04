@@ -35,28 +35,29 @@ from core.run_context import run_scope
 
 if TYPE_CHECKING:
     from core.approval_inbox import ApprovalInbox
-from core.completion_contract import derive_completion_contract
-from core.loop_attempt import AgentLoopAttempt, AttemptState
-from core.loop_context import AgentLoopContext
-from core.loop_evidence_chain import AgentLoopEvidenceChain
-from core.loop_gates import AgentLoopGates
-from core.loop_helpers import (  # noqa: F401 -- re-exported
+# Ре-экспорт сохранён целиком: десятки тестов и соседей импортируют эти имена
+# как `from core.loop import …`, и роспуск `loop_helpers` не имеет права рвать
+# их пути. Сами имена теперь живут там, где их предмет.
+from core.answer_format import (  # noqa: F401 -- re-exported
     _ANSWER_CITATION_RE,
     _VERIF_MARKER_RE,
-    DEFAULT_MAX_REPLAN_ATTEMPTS,
     LOCAL_CRITIQUE_SYSTEM_ADDENDUM,
     SYSTEM_ANSWER,
     _strip_verification_markers,
-    _to_text,
     citation_for_evidence,
     file_scope_notice,
     format_allowed_citations_block,
     format_artifact,
     format_human_response,
-    new_trace_id,
     output_contract_requires_headers,
-    untrusted_scan_view,
 )
+from core.completion_contract import derive_completion_contract
+from core.ids import new_trace_id  # noqa: F401 -- re-exported
+from core.injection_guard import _to_text, untrusted_scan_view  # noqa: F401 -- re-exported
+from core.loop_attempt import AgentLoopAttempt, AttemptState
+from core.loop_context import AgentLoopContext
+from core.loop_evidence_chain import AgentLoopEvidenceChain
+from core.loop_gates import AgentLoopGates
 from core.loop_hygiene import AgentLoopHygiene
 from core.loop_init import AgentLoopInit
 from core.loop_knowledge import AgentLoopKnowledge
@@ -87,6 +88,7 @@ from core.models import (
     Plan,
 )
 from core.planner import PlannerOutput
+from core.replan import DEFAULT_MAX_REPLAN_ATTEMPTS  # noqa: F401 -- re-exported
 
 # Шаг плана уехал в свой модуль (правило «компактные модули»); имена
 # ре-экспортируются, чтобы существующие импорт-пути не порвались.

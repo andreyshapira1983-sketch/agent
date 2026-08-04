@@ -594,3 +594,8 @@ class ReplanPolicy:
             seen.add(key)
             forbidden.append(key)
         return tuple(forbidden)
+
+
+# Приехало из `core/loop_helpers.py`: бюджет попыток перепланирования —
+# предмет этого модуля, рядом с `DEFAULT_MAX_TOTAL_REPLANS`.
+DEFAULT_MAX_REPLAN_ATTEMPTS = 3

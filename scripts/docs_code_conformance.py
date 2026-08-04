@@ -134,6 +134,13 @@ _RENAMED_PATHS: dict[str, str] = {
     # `cli/commands_connectors.py`, `cli/commands_learn.py`,
     # `cli/commands_knowledge_review.py` and the one named below.
     "cli/commands_misc.py": "cli/commands_audit.py",
+    # Dissolved 2026-08-04: "helpers" named nothing. Almost the whole file was
+    # one subject — how the answer is formatted and how citations are written —
+    # and it moved to the name below. Four foreign pieces went to their own
+    # subjects: `_to_text`/`untrusted_scan_view` to `core/injection_guard.py`,
+    # `new_trace_id` to `core/ids.py`, `DEFAULT_MAX_REPLAN_ATTEMPTS` to
+    # `core/replan.py`.
+    "core/loop_helpers.py": "core/answer_format.py",
     "tests/test_commands_misc.py": "tests/test_cli_operator_commands.py",
 }
 

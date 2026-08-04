@@ -22,6 +22,7 @@ _Operator-facing I/O, intent routing, output shaping._
 | `core/operator_intent_patterns` | Trigger phrases and matchers behind the no-LLM operator-intent router, including the one-inserted-word tolerance and the suppression guards that stay strict. |
 | `core/intent_understanding` | Intent understanding — the translator between plain human language and the autonomous agent's actions. |
 | `core/file_request_intent` | What kind of file request is this question? |
+| `core/answer_format` | Как ответ выглядит: контракт вывода, человеческая печать, цитаты. |
 | `core/lang_match` | Language-aware term matching for question routing. |
 | `core/output_policy` | Ranker-to-output policy. |
 | `core/user_profile` | User Profile — Layer 4 (User Mental Model). |
@@ -47,7 +48,6 @@ _Planning, verification, clarification, control loop._
 | Module | Purpose |
 | ------ | ------- |
 | `core/loop` | Control Loop — Observe -> Interpret -> Plan -> Act -> Verify -> Respond. |
-| `core/loop_helpers` | Helpers extracted verbatim from ``core/loop.py`` by the incremental splitter. |
 | `core/loop_step_execution` | Исполнение одного шага плана — вырезано из ``core/loop.py`` дословно. |
 | `core/loop_sensor` | Запись о сбое наблюдательного сенсора — один метод, и это его дом. |
 | `core/loop_knowledge` | Запись знаний, добытых конвейером, в долгую память. |

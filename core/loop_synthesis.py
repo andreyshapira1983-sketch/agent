@@ -34,12 +34,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from core.completion_marker import (
-    marker_instruction as completion_marker_instruction,
-)
-from core.completion_marker import new_nonce as new_completion_nonce
-from core.completion_marker import parse_completion_marker
-from core.loop_helpers import (
+from core.answer_format import (
     LOCAL_CRITIQUE_SYSTEM_ADDENDUM,
     SYSTEM_ANSWER,
     file_scope_notice,
@@ -47,6 +42,11 @@ from core.loop_helpers import (
     format_artifact,
     output_contract_requires_headers,
 )
+from core.completion_marker import (
+    marker_instruction as completion_marker_instruction,
+)
+from core.completion_marker import new_nonce as new_completion_nonce
+from core.completion_marker import parse_completion_marker
 from core.model_router import ModelRole
 from core.model_usage import ModelBudgetExceeded
 from core.models import Goal
