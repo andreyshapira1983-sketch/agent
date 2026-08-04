@@ -30,7 +30,6 @@ import core.loop as loop_mod
 from core.llm import LLM
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
-from core.models import Plan
 from core.planner import PlannerOutput
 from core.policy import PolicyGate
 from tools.base import ToolRegistry
@@ -42,19 +41,36 @@ _CORE = _REPO / "core"
 _NOT_MIXINS = frozenset({"loop", "loop_helpers"})
 
 
+#: Минимальный ответ по Output Contract. Пустая строка сюда не годится:
+#: синтезатор на ней вырождается, лестница отдаёт запасной текст, и прогон
+#: уходит по АВАРИЙНОЙ ветке. Проверка ниже сверяет поля прогона — а на
+#: вырожденном ходе часть из них просто не заводится, и сверка молча
+#: ослабевает. Обнаружено ревью PR #312: фикстура возвращала "".
+_CONTRACT_ANSWER = "Conclusion: ответ. [general-knowledge]\nConfidence: low"
+
+
 class _SilentLLM(LLM):
-    """Хватает, чтобы собрать цикл: до модели ни один тест здесь не доходит."""
+    """Отвечает валидным контрактом, чтобы ход дошёл до конца обычным путём."""
 
     def __init__(self) -> None:
         pass
 
     def complete(self, *_a, **_kw) -> str:
-        return ""
+        return _CONTRACT_ANSWER
 
 
 class _EmptyPlanner:
+    """Пустой план — но по НАСТОЯЩЕЙ подписи `PlannerOutput`.
+
+    Прежняя версия звала конструктор с несуществующим `plan=` и без
+    обязательного `raw_response`. Тесты это не ловили: на «привет» цикл
+    уходит на пропуск планировщика и сюда не заходит вовсе. То есть в
+    фикстуре лежал мёртвый код, который взорвался бы у первого, кто напишет
+    тест на ход с планом.
+    """
+
     def plan(self, *_a, **_kw) -> PlannerOutput:
-        return PlannerOutput(plan=Plan(steps=[]), reasoning="", sources=[])
+        return PlannerOutput(reasoning="", sources=[], raw_response="")
 
 
 @pytest.fixture()
@@ -211,6 +227,15 @@ def test_the_agent_still_constructs_and_answers_without_a_model(agent: AgentLoop
     """
     answer = agent.run("привет")
     assert isinstance(answer, str)
+    # И ход обязан пройти ОБЫЧНЫМ путём, а не аварийным. Пока фикстура
+    # возвращала "", синтезатор вырождался, лестница отдавала запасной текст —
+    # и все проверки полей прогона выше сверялись против сокращённой ветки,
+    # где часть полей просто не заводится. Отказ был бы не в них, а в их
+    # молчаливом ослаблении, поэтому проверяется здесь и явно.
+    assert agent._last_synth_degraded is False, (
+        "синтез выродился — фикстура перестала давать валидный Output Contract, "
+        "и проверки контракта хоста сверяются против аварийной ветки"
+    )
 
 
 # ── связи МЕЖДУ примесями ────────────────────────────────────────────────────

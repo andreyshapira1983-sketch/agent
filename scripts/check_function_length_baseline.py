@@ -35,7 +35,7 @@ SKIP_DIRS = frozenset({
 
 #: "path:function" -> ceiling. Measured 2026-08-04.
 WATCH: dict[str, int] = {
-    "core/loop.py:AgentLoop._run_inner": 427,  # 2213 → 417 за шестнадцать кусков разбора
+    "core/loop.py:AgentLoop._run_inner": 427,  # замер 417 (2213 до раскола) + запас 10
     "core/step_sanitizer.py:sanitize_step": 668,
     "core/loop_step_execution.py:AgentLoopStepExecution._execute_step": 568,
     "agent_tick.py:run_tick": 474,

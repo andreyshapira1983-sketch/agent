@@ -542,9 +542,9 @@ The "Where handled" column is history, not status: **defect status is owned by
 | — | [core/self_build_producer.py:110](../core/self_build_producer.py#L110) | the builder's ceiling is 16 000 tokens, yet a live reply took 20 509 — the limit is not honoured | assistant, 2026-08-04 | not investigated |
 | 20 | [core/loop_attempt.py:576](../core/loop_attempt.py#L576) | the `@staticmethod` that an AST `lineno` cut left behind — restored here, and the whole move is now compared decorator by decorator | assistant, 2026-08-04 | this change |
 | 21 | [core/loop_run_tail.py:36](../core/loop_run_tail.py#L36) | the import a dead `ruff --select E999` failed to miss; the sensor's `except Exception` hid the `NameError` | assistant, 2026-08-04 | this change |
-| 21 | [tests/test_loop_split_wiring.py:95](../tests/test_loop_split_wiring.py#L95) | `if TYPE_CHECKING` host contracts were checked by nobody — two mixins declared fields they never touch | assistant, 2026-08-04 | this change |
-| 22 | [tests/test_loop_split_wiring.py:254](../tests/test_loop_split_wiring.py#L254) | 21 cross-mixin borrows worked through the MRO with nothing recording them; the contract is now checked in both directions | assistant, 2026-08-04 | this change |
-| 22 | [tests/test_loop_split_wiring.py:320](../tests/test_loop_split_wiring.py#L320) | a check whose docstring claimed more than it did — it passed a probe it said it would catch | assistant, 2026-08-04 | this change |
+| 21 | [tests/test_loop_split_wiring.py:112](../tests/test_loop_split_wiring.py#L112) | `if TYPE_CHECKING` host contracts were checked by nobody — two mixins declared fields they never touch | assistant, 2026-08-04 | this change |
+| 22 | [tests/test_loop_split_wiring.py:279](../tests/test_loop_split_wiring.py#L279) | 21 cross-mixin borrows worked through the MRO with nothing recording them; the contract is now checked in both directions | assistant, 2026-08-04 | this change |
+| 22 | [tests/test_loop_split_wiring.py:345](../tests/test_loop_split_wiring.py#L345) | a check whose docstring claimed more than it did — it passed a probe it said it would catch | assistant, 2026-08-04 | this change |
 
 ## How to append
 

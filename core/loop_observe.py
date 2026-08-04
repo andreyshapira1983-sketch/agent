@@ -58,7 +58,10 @@ class AgentLoopObserve:
         user_question: str,
         *,
         file_hint: str | None,
-        deep_escalation: bool,
+        # `Any`, а не `bool`: хост принимает необязательный
+        # `core.deep_escalation.OperatorEscalation`, и маршрутизатор
+        # моделей читает именно его, а не флаг.
+        deep_escalation: Any,
         _cp: Any,
     ) -> tuple[Goal, Any, Any]:
         """Цель хода и две модели под него (планировщик, синтезатор).

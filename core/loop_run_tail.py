@@ -184,8 +184,8 @@ class AgentLoopRunTail:
                     "turn_index": turn.index,
                     "tools_used": turn.tools_used,
                     "labels": turn.artifact_labels,
-                    },
-                )
+                },
+            )
             # Anthropic 2025 context engineering — compact older turns into
             # one summary Turn instead of silently dropping them when
             # max_turns is exceeded. No-op until the threshold is crossed.
