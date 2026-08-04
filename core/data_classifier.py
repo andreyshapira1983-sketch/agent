@@ -29,7 +29,11 @@ class DataClass(str, Enum):
     PUBLIC = "public"
     PRIVATE = "private"
     SENSITIVE = "sensitive"
-    SECRET = "secret"
+    # Подавление по месту, а не по пути: это ЧЛЕН ПЕРЕЧИСЛЕНИЯ классов
+    # данных — метка «здесь секрет», а не сам секрет. Правило смотрит на имя.
+    # (Строка пояснения не должна начинаться со слова-директивы: раф прочтёт
+    # её как сплошное подавление всей строки.)
+    SECRET = "secret"  # noqa: S105
 
 
 # Source hints carry the provenance of the text. They decide the default
