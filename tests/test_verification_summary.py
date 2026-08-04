@@ -63,25 +63,25 @@ def _chunk(verdict: str, ev_ids: tuple[str, ...] = ()) -> ClaimChunk:
 
 def _report(chunks: tuple[ClaimChunk, ...], **overrides) -> VerificationReport:
     verdicts = [c.verdict for c in chunks]
-    fields = dict(
-        total_chunks=len(chunks),
-        verified_chunks=verdicts.count("verified"),
-        unverified_chunks=verdicts.count("unverified"),
-        cited_but_unmatched_chunks=verdicts.count("cited_but_unmatched"),
-        self_declared_chunks=verdicts.count("self_declared"),
-        structural_chunks=verdicts.count("structural"),
-        chunks=chunks,
-        annotated_answer="\n".join(c.text for c in chunks),
-        fully_unverified=(verdicts.count("verified") == 0),
-        chain_was_empty=False,
-        dialogue_supported_chunks=verdicts.count("dialogue_supported"),
-        user_asserted_chunks=verdicts.count("user_asserted"),
-        topic_supported_but_claim_unverified_chunks=verdicts.count(
+    fields = {
+        "total_chunks": len(chunks),
+        "verified_chunks": verdicts.count("verified"),
+        "unverified_chunks": verdicts.count("unverified"),
+        "cited_but_unmatched_chunks": verdicts.count("cited_but_unmatched"),
+        "self_declared_chunks": verdicts.count("self_declared"),
+        "structural_chunks": verdicts.count("structural"),
+        "chunks": chunks,
+        "annotated_answer": "\n".join(c.text for c in chunks),
+        "fully_unverified": (verdicts.count("verified") == 0),
+        "chain_was_empty": False,
+        "dialogue_supported_chunks": verdicts.count("dialogue_supported"),
+        "user_asserted_chunks": verdicts.count("user_asserted"),
+        "topic_supported_but_claim_unverified_chunks": verdicts.count(
             "topic_supported_but_claim_unverified"
         ),
-        subagent_asserted_chunks=verdicts.count("subagent_asserted"),
-        receipt_missing_chunks=verdicts.count("receipt_missing"),
-    )
+        "subagent_asserted_chunks": verdicts.count("subagent_asserted"),
+        "receipt_missing_chunks": verdicts.count("receipt_missing"),
+    }
     fields.update(overrides)
     return VerificationReport(**fields)
 

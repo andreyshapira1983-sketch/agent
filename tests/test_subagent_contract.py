@@ -228,18 +228,18 @@ def test_canonical_payload_rejects_invalid_nested_types() -> None:
 
 
 def _canonical(**overrides) -> CanonicalSubagentContract:
-    fields = dict(
-        contract_id="c_model_role",
-        source="proposal",
-        name="Auditor",
-        role="RepositoryAuditor",
-        objective="Audit the repository",
-        outputs=("report",),
-        tool_scope=CanonicalToolScope(allowed_tools=("file_read",)),
-        budget_scope=CanonicalBudgetScope(max_model_calls=1, max_iterations=1),
-        risk_level="low",
-        approval_required=False,
-    )
+    fields = {
+        "contract_id": "c_model_role",
+        "source": "proposal",
+        "name": "Auditor",
+        "role": "RepositoryAuditor",
+        "objective": "Audit the repository",
+        "outputs": ("report",),
+        "tool_scope": CanonicalToolScope(allowed_tools=("file_read",)),
+        "budget_scope": CanonicalBudgetScope(max_model_calls=1, max_iterations=1),
+        "risk_level": "low",
+        "approval_required": False,
+    }
     fields.update(overrides)
     return CanonicalSubagentContract(**fields)
 

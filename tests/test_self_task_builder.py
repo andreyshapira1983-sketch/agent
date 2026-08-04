@@ -113,14 +113,14 @@ def _seed_task(
 
 
 def _run(workspace: Path, inbox: ApprovalInbox, approval_id: str, **kwargs):
-    defaults = dict(
-        workspace=workspace,
-        inbox=inbox,
-        approval_id=approval_id,
-        llm=FakeLLM([_builder_json()]),
-        vcs=FakeVCS(),
-        file_reader=_reader({_IMPL: _CURRENT}),
-    )
+    defaults = {
+        "workspace": workspace,
+        "inbox": inbox,
+        "approval_id": approval_id,
+        "llm": FakeLLM([_builder_json()]),
+        "vcs": FakeVCS(),
+        "file_reader": _reader({_IMPL: _CURRENT}),
+    }
     defaults.update(kwargs)
     return build_coding_task(**defaults)
 

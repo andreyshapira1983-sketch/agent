@@ -313,7 +313,7 @@ class TestValidateOutput:
     def test_negative_counts_rejected(self, workspace: Path):
         out = self._ok()
         out["passed"] = -1
-        ok, issues = RunTestsTool(workspace_root=workspace).validate_output(out)
+        ok, _issues = RunTestsTool(workspace_root=workspace).validate_output(out)
         assert not ok
 
     def test_total_less_than_sum_rejected(self, workspace: Path):

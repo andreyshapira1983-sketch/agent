@@ -113,14 +113,14 @@ def _reader(files: dict[str, str]):
 
 
 def _run(workspace: Path, **kwargs):
-    defaults = dict(
-        workspace=workspace,
-        inbox=ApprovalInbox(path=None),
-        llm=FakeLLM([_builder()]),
-        vcs=FakeVCS(),
-        task_selector=lambda: _candidate(),
-        file_reader=_reader({_IMPL: "SECRET = 1\n"}),
-    )
+    defaults = {
+        "workspace": workspace,
+        "inbox": ApprovalInbox(path=None),
+        "llm": FakeLLM([_builder()]),
+        "vcs": FakeVCS(),
+        "task_selector": lambda: _candidate(),
+        "file_reader": _reader({_IMPL: "SECRET = 1\n"}),
+    }
     defaults.update(kwargs)
     return defaults["inbox"], produce_coding_task(**defaults)
 

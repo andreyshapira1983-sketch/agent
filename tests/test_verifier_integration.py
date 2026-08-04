@@ -78,7 +78,7 @@ class TestVerifiedAnswer:
             "Facts: hello is in doc.txt [file:doc.txt].\n"
             "Sources: doc.txt"
         )
-        agent, log_path = _agent(
+        agent, _log_path = _agent(
             workspace,
             llm_response=llm_answer,
             canned_sources=[{

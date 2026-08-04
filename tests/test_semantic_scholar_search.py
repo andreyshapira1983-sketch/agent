@@ -118,7 +118,7 @@ class TestHardFails:
         assert any("expected list" in i for i in issues)
 
     def test_non_list_dict_is_hard_fail(self):
-        ok, issues = TOOL.validate_output({"title": "oops"})
+        ok, _issues = TOOL.validate_output({"title": "oops"})
         assert ok is False
 
     def test_all_rows_missing_title_is_hard_fail(self):

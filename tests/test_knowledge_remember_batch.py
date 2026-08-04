@@ -71,7 +71,7 @@ def test_knowledge_remember_batch_loads_store_once(workspace: Path):
     ]
     saved = 0
     for text in contents:
-        decision, record = remember(text, ["fact", "knowledge"], "agent-auto", "semantic", "self")
+        decision, _record = remember(text, ["fact", "knowledge"], "agent-auto", "semantic", "self")
         if decision.decision == "save":
             saved += 1
 
@@ -82,7 +82,7 @@ def test_knowledge_remember_batch_loads_store_once(workspace: Path):
 
 def test_knowledge_remember_batch_still_dedups_within_pass(workspace: Path):
     path = workspace / "data" / "mem.jsonl"
-    agent, store, _ = _build_agent(workspace, FakeLLM(), path)
+    agent, _store, _ = _build_agent(workspace, FakeLLM(), path)
 
     remember = agent._knowledge_remember_batch()
     text = "The deep escalation gate downgrades unapproved deep requests."

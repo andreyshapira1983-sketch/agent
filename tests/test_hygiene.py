@@ -276,7 +276,7 @@ class _InMemoryStore:
 
 
 def _rec(text: str, created_at: datetime | None = None, tags=None) -> MemoryRecord:
-    kwargs = dict(content=text, tags=tags or ["fact"], owner="user")
+    kwargs = {"content": text, "tags": tags or ["fact"], "owner": "user"}
     if created_at is not None:
         kwargs["created_at"] = created_at
     return MemoryRecord(**kwargs)

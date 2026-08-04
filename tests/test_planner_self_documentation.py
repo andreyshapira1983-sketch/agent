@@ -232,7 +232,7 @@ class TestSelfDocStillCheckedByOtherRules:
         can't — the validator filters), a step asking for a non-ASCII
         path stays dropped by the existing ASCII-only check."""
         p = _planner(workspace)
-        sources, warnings = _run(
+        sources, _warnings = _run(
             p,
             [{"tool": "file_read", "arguments": {"path": "привет.md"}}],
             hint=None,

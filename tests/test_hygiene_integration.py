@@ -278,7 +278,7 @@ class TestSummariseLoop:
         # FakeLLM returns the canned summary on `complete()`. The agent
         # builds the prompt itself; we don't care about its shape here,
         # only that the merged record actually lands on disk.
-        agent, log_path, store, llm = _build_agent(
+        agent, log_path, store, _llm = _build_agent(
             workspace,
             canned_llm_responses=["merged: ships Fri at noon; on-call rotates"],
         )

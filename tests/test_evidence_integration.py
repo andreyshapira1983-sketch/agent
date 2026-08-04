@@ -262,7 +262,7 @@ class TestEvidenceCollectedEvent:
 
 class TestMemoryToEvidence:
     def test_persistent_record_becomes_memory_evidence(self, workspace: Path):
-        agent, log_path = _build_agent(
+        agent, _log_path = _build_agent(
             workspace,
             canned_sources=[{
                 "tool": "file_read",
@@ -422,7 +422,7 @@ class TestMalformedMemoryRecordDoesNotTruncateChain:
     def test_one_bad_record_only_skips_itself(
         self, workspace: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        agent, log_path = _build_agent(
+        agent, _log_path = _build_agent(
             workspace,
             canned_sources=[{
                 "tool": "file_read",

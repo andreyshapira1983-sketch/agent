@@ -116,7 +116,7 @@ class TestResolveWorkspaceTextFile:
 
 class TestParseRepairGenerationArgs:
     def test_empty_returns_usage_error(self):
-        target, tests, pattern, trace, error = _parse_repair_generation_args("")
+        target, _tests, _pattern, _trace, error = _parse_repair_generation_args("")
         assert target is None
         assert error and error.startswith("Usage:")
 
@@ -127,11 +127,11 @@ class TestParseRepairGenerationArgs:
         assert pattern is None and trace is None and error is None
 
     def test_explicit_test_paths(self):
-        target, tests, *_ = _parse_repair_generation_args("core/foo.py tests/a.py tests/b.py")
+        _target, tests, *_ = _parse_repair_generation_args("core/foo.py tests/a.py tests/b.py")
         assert tests == ("tests/a.py", "tests/b.py")
 
     def test_pattern_and_trace_flags(self):
-        target, tests, pattern, trace, error = _parse_repair_generation_args(
+        target, _tests, pattern, trace, error = _parse_repair_generation_args(
             "core/foo.py --pattern test_x --trace t-42"
         )
         assert target == "core/foo.py"
@@ -170,12 +170,12 @@ class TestSplitMetaArgs:
 
 class TestParseIngestOptions:
     def test_path_only(self):
-        path, dry, auto, limit, error = _parse_ingest_options("docs/readme.md", default_path=None)
+        path, dry, auto, _limit, error = _parse_ingest_options("docs/readme.md", default_path=None)
         assert path == "docs/readme.md"
         assert dry is False and auto is None and error is None
 
     def test_flags(self):
-        path, dry, auto, limit, error = _parse_ingest_options(
+        path, dry, auto, _limit, _error = _parse_ingest_options(
             "docs --dry-run --write-memory", default_path=None
         )
         assert path == "docs"
@@ -236,7 +236,7 @@ class TestParseSourcePlanningArgs:
         assert goal == "learn rust"
 
     def test_limit_flag(self):
-        as_json, limit, goal = _parse_source_planning_args(
+        _as_json, limit, goal = _parse_source_planning_args(
             "topic --limit 3", usage=self.USAGE
         )
         assert limit == 3

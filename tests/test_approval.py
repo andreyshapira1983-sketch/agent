@@ -448,7 +448,7 @@ class TestExternalRiskAlsoEscalates:
     def test_external_tool_requires_approval(self, workspace: Path):
         tool = RecordingTool("external_call", "external")
         approver = AutoApprover(default="deny")
-        agent, log_path = _build_loop(
+        agent, _log_path = _build_loop(
             workspace,
             tool,
             _step_for("external_call"),

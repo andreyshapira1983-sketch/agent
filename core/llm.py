@@ -370,12 +370,12 @@ class LLM:
         temperature: float,
         on_token: Any | None,
     ) -> str:
-        kwargs: dict = dict(
-            model=self.model,
-            system=system,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": user}],
-        )
+        kwargs: dict = {
+            "model": self.model,
+            "system": system,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": user}],
+        }
         if self._anthropic_supports_temperature(self.model):
             kwargs["temperature"] = temperature
         accumulated = []
@@ -404,15 +404,15 @@ class LLM:
         model: str,
         on_token: Any | None,
     ) -> str:
-        kwargs: dict = dict(
-            model=model,
-            messages=[
+        kwargs: dict = {
+            "model": model,
+            "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            stream=True,
-            stream_options={"include_usage": True},
-        )
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
         if self._is_o_series(model):
             kwargs["max_completion_tokens"] = max_tokens
         else:
@@ -523,12 +523,12 @@ class LLM:
                 # These models reject a trailing assistant turn outright, so ask
                 # for the continuation explicitly instead of prefilling it.
                 messages.append({"role": "user", "content": _CONTINUE_INSTRUCTION})
-        kwargs: dict = dict(
-            model=self.model,
-            system=system,
-            max_tokens=max_tokens,
-            messages=messages,
-        )
+        kwargs: dict = {
+            "model": self.model,
+            "system": system,
+            "max_tokens": max_tokens,
+            "messages": messages,
+        }
         if self._anthropic_supports_temperature(self.model):
             kwargs["temperature"] = temperature
         message = self._client.messages.create(**kwargs)

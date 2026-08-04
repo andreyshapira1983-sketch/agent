@@ -111,14 +111,14 @@ def test_a_fresh_catalog_still_resolves_the_tier(tmp_path, monkeypatch):
 def _gate(**overrides):
     from core.deep_escalation import DeepEscalationRequest, evaluate_deep_escalation
 
-    base = dict(
-        role="repair_proposal",
-        reason="high_value_repair",
-        expected_output="minimal_patch_plan",
-        budget_ok=True,
-        operator_approved=False,
-        deep_model_available=False,
-    )
+    base = {
+        "role": "repair_proposal",
+        "reason": "high_value_repair",
+        "expected_output": "minimal_patch_plan",
+        "budget_ok": True,
+        "operator_approved": False,
+        "deep_model_available": False,
+    }
     base.update(overrides)
     return evaluate_deep_escalation(DeepEscalationRequest(**base))
 

@@ -245,7 +245,7 @@ class TestListAndForget:
 
     def test_forget_one_removes_only_that_record(self, workspace: Path):
         path = workspace / "data" / "mem.jsonl"
-        agent, store, log_path = _build_agent(workspace, FakeLLM(), path)
+        agent, _store, log_path = _build_agent(workspace, FakeLLM(), path)
 
         _, r1 = agent.remember(content="keep me", tags=["fact"], source="user-explicit")
         _, r2 = agent.remember(content="drop me", tags=["fact"], source="user-explicit")

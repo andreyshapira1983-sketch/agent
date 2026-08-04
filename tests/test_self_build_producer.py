@@ -128,14 +128,14 @@ def _headroom_budget() -> dict:
 
 
 def _produce(workspace: Path, **kwargs) -> ProducerReport:
-    defaults = dict(
-        workspace=workspace,
-        inbox=ApprovalInbox(path=None),
-        vcs=FakeVCS(clean=True),
-        budget_snapshot=_headroom_budget(),
-        kill_switch=FakeKillSwitch(active=False),
-        file_reader=_reader({_TARGET: "OLD = 0\n"}),
-    )
+    defaults = {
+        "workspace": workspace,
+        "inbox": ApprovalInbox(path=None),
+        "vcs": FakeVCS(clean=True),
+        "budget_snapshot": _headroom_budget(),
+        "kill_switch": FakeKillSwitch(active=False),
+        "file_reader": _reader({_TARGET: "OLD = 0\n"}),
+    }
     # These legacy tests exercise the LLM Manager path directly. Since TD-036's
     # follow-up made the grounded selector the default, opt them back into the
     # legacy path explicitly unless the test drives a grounded selector itself.
@@ -1097,14 +1097,14 @@ import types  # noqa: E402 — used only by the hardening tests below
 def _grounded_full_kwargs(workspace: Path, **overrides):
     """Direct produce_self_apply_proposal kwargs driving a grounded candidate
     (no legacy LLM manager); ready for A/B/C overrides."""
-    base = dict(
-        workspace=workspace,
-        inbox=ApprovalInbox(path=None),
-        vcs=FakeVCS(clean=True),
-        budget_snapshot=_headroom_budget(),
-        kill_switch=FakeKillSwitch(active=False),
-        file_reader=_reader({_TARGET: "OLD = 0\n"}),
-    )
+    base = {
+        "workspace": workspace,
+        "inbox": ApprovalInbox(path=None),
+        "vcs": FakeVCS(clean=True),
+        "budget_snapshot": _headroom_budget(),
+        "kill_switch": FakeKillSwitch(active=False),
+        "file_reader": _reader({_TARGET: "OLD = 0\n"}),
+    }
     base.update(overrides)
     return base
 
