@@ -29,16 +29,20 @@ def test_the_notebook_exists_and_carries_addresses():
 
 def test_every_address_points_at_a_real_line():
     broken: list[str] = []
+    cache: dict[str, list[str] | None] = {}   # один файл читаем один раз
     for rel, lineno in _links():
-        path = _REPO / rel
-        if not path.is_file():
+        if rel not in cache:
+            path = _REPO / rel
+            cache[rel] = (
+                path.read_text(encoding="utf-8", errors="replace").splitlines()
+                if path.is_file() else None
+            )
+        lines = cache[rel]
+        if lines is None:
             broken.append(f"{rel}:{lineno} — файла нет")
-            continue
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        if not 1 <= lineno <= len(lines):
+        elif not 1 <= lineno <= len(lines):
             broken.append(f"{rel}:{lineno} — строки нет (всего {len(lines)})")
-            continue
-        if not lines[lineno - 1].strip():
+        elif not lines[lineno - 1].strip():
             broken.append(f"{rel}:{lineno} — строка пустая, адрес уехал")
 
     assert not broken, "адреса в блокноте протухли:\n  " + "\n  ".join(broken)
@@ -47,8 +51,12 @@ def test_every_address_points_at_a_real_line():
 def test_each_finding_row_names_a_place():
     """Строка журнала без адреса — это жалоба, а не находка."""
     text = _NOTEBOOK.read_text(encoding="utf-8")
-    start = text.index("| № | Файл:строка |")
-    table = text[start:].split("\n\n", 1)[0]
+    header = "| № | Файл:строка |"
+    assert header in text, (
+        f"в блокноте нет журнала находок с заголовком {header!r} — "
+        "либо таблицу переименовали, либо потеряли"
+    )
+    table = text[text.index(header):].split("\n\n", 1)[0]
     rows = [r for r in table.splitlines() if r.startswith("| ") and "---" not in r]
     body = rows[1:]  # без заголовка
 
