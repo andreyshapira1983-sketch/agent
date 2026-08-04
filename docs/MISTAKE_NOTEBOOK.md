@@ -273,7 +273,7 @@ and measurements belong in the commit message.
 **Symptom.** The builder's reply fails to parse as JSON. The cause differs each
 time; the position barely does.
 
-**Cost (two consecutive runs, 2026-08-04).**
+**Cost (three consecutive runs, 2026-08-04).**
 
 | run | reply size | breakage | position | rescued? |
 |---|---|---|---|---|
@@ -281,8 +281,10 @@ time; the position barely does.
 | 07:19 | 47 830 chars, 22 719 tokens, 189 units | an unescaped quote closed the string early | 32 440 | no |
 | 08:05 | 46 501 chars, 18 602 tokens, 183 units | an unescaped quote, again | 37 678 | no |
 
-Three runs out of three discarded: **555 budget units**, about eight minutes of
-model time, zero candidates delivered.
+All three replies were rejected at the time they were produced: **555 budget
+units**, about eight minutes of model time, no candidate reaching the approval
+inbox. The first one is parseable today only because #303 landed afterwards —
+it was still discarded when it mattered.
 
 **A hypothesis of mine died here.** After the first two I wrote that the
 breakages cluster "around the 32nd thousand characters" — 114 characters apart.
@@ -356,6 +358,28 @@ decided by the leading `/` and by a drive letter in the first segment, so
 Windows and Linux agree. A green local run is not proof for a file that is
 read on both.
 
+---
+
+## 18. Merged before reading the review
+
+**Symptom.** Checks are green, so the merge goes through — and the reviewer's
+comments are read afterwards, if at all.
+
+**Cost (2026-08-04, PR #307).** Three comments were waiting, all correct: the
+section was still headed "two consecutive runs" while the table listed three,
+and the summary said "zero candidates delivered" while the same table marked
+the first reply as rescued. Green checks say nothing about whether a document
+contradicts itself. A follow-up PR was needed for what would have been one
+edit before the merge.
+
+**How to check yourself.** Before merging: are there unresolved review threads?
+`gh api graphql` on `reviewThreads { isResolved }` answers in one call. A
+comment that arrived while the checks were still running is easy to miss
+precisely because the checks turned green first.
+
+**What to do.** Read the threads, then merge. A green suite proves the code
+runs; it proves nothing about the claims made around it.
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED
@@ -380,6 +404,7 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 15 | [core/self_build_producer.py:110](../core/self_build_producer.py#L110) | two consecutive replies broke at 32 326 and 32 440 — "code inside JSON" is a fragile format | assistant, 2026-08-04 | not handled |
 | 16 | [docs/MISTAKE_NOTEBOOK.md:1](../docs/MISTAKE_NOTEBOOK.md#L1) | an invented example path in the address rule — caught by the docs conformance check | assistant, 2026-08-04 | PR #306 |
 | 17 | [tests/test_mistake_notebook_links.py:30](../tests/test_mistake_notebook_links.py#L30) | absoluteness judged by shape, not by `Path.is_absolute` — the host must not change the verdict | CI, 2026-08-04 | PR #306 |
+| 18 | [docs/MISTAKE_NOTEBOOK.md:1](../docs/MISTAKE_NOTEBOOK.md#L1) | section 15 contradicted its own table — merged before the review was read | reviewers, 2026-08-04 | this PR |
 | — | [core/self_build_producer.py:110](../core/self_build_producer.py#L110) | the builder's ceiling is 16 000 tokens, yet a live reply took 20 509 — the limit is not honoured | assistant, 2026-08-04 | not investigated |
 
 ## How to append
