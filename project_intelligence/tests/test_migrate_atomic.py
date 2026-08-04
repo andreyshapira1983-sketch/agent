@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from project_intelligence.db.connection import connect, get_schema_version
@@ -37,7 +39,12 @@ def test_mid_migration_failure_rolls_back(tmp_path, monkeypatch):
         """
     )
 
-    with pytest.raises(Exception):
+    # `IntegrityError`, а не голое `Exception`: миграция обязана падать именно
+    # на нарушении ограничения, которое в неё заложено. Широкий перехват
+    # зеленел бы и на опечатке в SQL, и на неверном пути к файлу — то есть
+    # тест подтверждал бы откат, ни разу не дойдя до причины, ради которой
+    # его написали.
+    with pytest.raises(sqlite3.IntegrityError):
         apply_one_migration(conn, broken, "002")
 
     after = applied_versions(conn)

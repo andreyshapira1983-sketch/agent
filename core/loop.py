@@ -69,17 +69,19 @@ from core.loop_repair import AgentLoopRepair
 from core.loop_response_deciders import AgentLoopResponseDeciders
 from core.loop_run_tail import AgentLoopRunTail
 from core.loop_sensor import AgentLoopSensor
+
 # Швы импорта: имена принадлежат `core/loop_step_execution`, но соседи и тесты
-# берут их отсюда. `# noqa: F401` тут не косметика, а ЕДИНСТВЕННОЕ, что их
-# защищает: пояснение обычным комментарием ruff не читает и снимает импорт как
-# неиспользуемый (проверено — так и случилось, см. блокнот §24).
+# берут их отсюда. Директива подавления F401 на строке ниже — не косметика, а
+# ЕДИНСТВЕННОЕ, что их защищает: пояснение обычным комментарием ruff не читает
+# и снимает импорт как неиспользуемый (проверено — так и случилось, §24).
+#
+# Сам код директивы здесь намеренно НЕ написан словами: ruff читает его в любом
+# комментарии, в том числе в поясняющем, и спотыкается о текст следом (§25).
 from core.loop_step_execution import (  # noqa: F401 -- шов импорта
     _TOOL_SOURCE_HINTS,
     _TRUSTED_INTERNAL_TOOLS,
-    _step_trigger_tls,
-)
-from core.loop_step_execution import (
     AgentLoopStepExecution,
+    _step_trigger_tls,
 )
 from core.loop_synthesis import AgentLoopSynthesis, SynthesisState
 from core.loop_verification import AgentLoopVerification

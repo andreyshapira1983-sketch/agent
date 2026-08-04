@@ -13,6 +13,7 @@ Classes:
 from __future__ import annotations
 
 import hashlib
+import re
 from typing import ClassVar
 
 import pytest
@@ -168,12 +169,12 @@ class TestUnknownKey:
 
     def test_get_raises_key_error(self, monkeypatch):
         monkeypatch.delenv("AGENT_PROMPT_UNKNOWN_KEY", raising=False)
-        with pytest.raises(KeyError, match="unknown.key"):
+        with pytest.raises(KeyError, match=re.escape("unknown.key")):
             self.reg.get("unknown.key")
 
     def test_error_mentions_known_keys(self, monkeypatch):
         monkeypatch.delenv("AGENT_PROMPT_UNKNOWN_KEY", raising=False)
-        with pytest.raises(KeyError, match="known.key"):
+        with pytest.raises(KeyError, match=re.escape("known.key")):
             self.reg.get("unknown.key")
 
     def test_get_record_raises_key_error(self, monkeypatch):

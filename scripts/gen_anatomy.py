@@ -14,6 +14,7 @@ import ast
 import os
 import re
 import sys
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORE = os.path.join(ROOT, "core")
@@ -110,7 +111,7 @@ def _first_doc_line(stem: str) -> str:
     """
     path = os.path.join(CORE, f"{stem}.py")
     try:
-        doc = ast.get_docstring(ast.parse(open(path, encoding="utf-8").read())) or ""
+        doc = ast.get_docstring(ast.parse(Path(path).read_text(encoding="utf-8"))) or ""
     except Exception:
         doc = ""
     if not doc.strip():

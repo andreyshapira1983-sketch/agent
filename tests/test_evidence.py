@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import FrozenInstanceError
 
 import pytest
 
@@ -147,7 +148,10 @@ class TestMakeEvidence:
             kind="file", source_id="x", obtained_via="x",
             claim="x", excerpt="x",
         )
-        with pytest.raises(Exception):
+        # `FrozenInstanceError`, а не голое `Exception`: проверяется КОНКРЕТНЫЙ
+        # механизм. Широкий перехват зеленел бы и в том случае, если класс
+        # перестал быть замороженным датаклассом и запрещает запись как-то иначе.
+        with pytest.raises(FrozenInstanceError):
             ev.confidence = 0.0  # type: ignore[misc]
 
     def test_to_dict_roundtrip(self):
