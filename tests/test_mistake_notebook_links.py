@@ -1,9 +1,9 @@
-"""Адреса в блокноте ошибок должны вести в существующие места.
+"""Addresses in the mistake notebook must point at real places.
 
-`docs/MISTAKE_NOTEBOOK.md` — общий канал между ассистентом и автономным
-агентом: один пишет находку с адресом `файл:строка`, другой идёт и смотрит.
-Битая ссылка обесценивает запись — искать снова придётся руками, а ради
-избавления от этого поиска журнал и заведён.
+`docs/MISTAKE_NOTEBOOK.md` is the shared channel between the assistant and the
+autonomous agent: one writes a finding with a `file:line` address, the other
+walks over and looks. A broken link makes the record worthless — the manual
+search it was meant to remove comes right back.
 """
 from __future__ import annotations
 
@@ -13,8 +13,12 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parents[1]
 _NOTEBOOK = _REPO / "docs" / "MISTAKE_NOTEBOOK.md"
 
-#: Ссылка вида `[core/foo.py:123]` в тексте журнала.
-_LINK_RE = re.compile(r"\[([\w/.\-]+\.py):(\d+)\]")
+#: A link such as `[core/loop.py:123]`. Documents are addressable too: a
+#: mistake can live in prose, and the guard caught exactly such a record.
+_LINK_RE = re.compile(r"\[([\w/.\-]+\.(?:py|md)):(\d+)\]")
+
+#: Header of the findings table; the journal is located by it.
+_TABLE_HEADER = "| # | File:line |"
 
 
 def _links() -> list[tuple[str, int]]:
@@ -22,15 +26,58 @@ def _links() -> list[tuple[str, int]]:
     return [(m.group(1), int(m.group(2))) for m in _LINK_RE.finditer(text)]
 
 
+def _inside_repo(rel: str) -> bool:
+    """Does the address stay inside the repository?
+
+    The address pattern allows dots and slashes, so `../../secrets.py` passes
+    it unchallenged. A link pointing outside is meaningless here, and the
+    journal is appended to by the agent as well — the guard must catch it.
+
+    Absoluteness is judged by shape, not by `Path.is_absolute`: that answer
+    depends on the host. `C:/Windows/x.py` is absolute on Windows and an
+    ordinary folder on Linux, which made an earlier version of this guard pass
+    locally and fail in CI. The notebook is read on both, so the verdict must
+    not depend on where it is read.
+    """
+    first = rel.replace("\\", "/").split("/", 1)[0]
+    if rel.startswith(("/", "\\")) or ":" in first:
+        return False
+    try:
+        (_REPO / rel).resolve().relative_to(_REPO.resolve())
+    except (ValueError, OSError):
+        return False
+    return True
+
+
 def test_the_notebook_exists_and_carries_addresses():
-    assert _NOTEBOOK.is_file(), "блокнот ошибок пропал"
-    assert _links(), "в журнале нет ни одного адреса — искать снова придётся руками"
+    assert _NOTEBOOK.is_file(), "the mistake notebook is gone"
+    assert _links(), "the journal holds no address — the manual search is back"
+
+
+def test_no_address_escapes_the_repository():
+    outside = sorted({rel for rel, _ in _links() if not _inside_repo(rel)})
+
+    assert not outside, f"addresses point outside the repository: {outside}"
+
+
+def test_the_escape_check_actually_catches_a_way_out():
+    """Proof of the guard: anything leading out must be rejected."""
+    assert not _inside_repo("../../../etc/passwd.py")
+    assert not _inside_repo("a/../../b.py")
+    # Absolute addresses are not portable and are not ours either way.
+    assert not _inside_repo("/etc/passwd.py")
+    assert not _inside_repo("C:/Windows/system.py")
+    assert not _inside_repo("//server/share/x.py")
+    assert _inside_repo("core/loop.py")
 
 
 def test_every_address_points_at_a_real_line():
     broken: list[str] = []
-    cache: dict[str, list[str] | None] = {}   # один файл читаем один раз
+    cache: dict[str, list[str] | None] = {}   # read each file once
     for rel, lineno in _links():
+        if not _inside_repo(rel):
+            broken.append(f"{rel}:{lineno} — path leads outside")
+            continue
         if rel not in cache:
             path = _REPO / rel
             cache[rel] = (
@@ -39,27 +86,26 @@ def test_every_address_points_at_a_real_line():
             )
         lines = cache[rel]
         if lines is None:
-            broken.append(f"{rel}:{lineno} — файла нет")
+            broken.append(f"{rel}:{lineno} — no such file")
         elif not 1 <= lineno <= len(lines):
-            broken.append(f"{rel}:{lineno} — строки нет (всего {len(lines)})")
+            broken.append(f"{rel}:{lineno} — no such line ({len(lines)} total)")
         elif not lines[lineno - 1].strip():
-            broken.append(f"{rel}:{lineno} — строка пустая, адрес уехал")
+            broken.append(f"{rel}:{lineno} — blank line, the address drifted")
 
-    assert not broken, "адреса в блокноте протухли:\n  " + "\n  ".join(broken)
+    assert not broken, "notebook addresses went stale:\n  " + "\n  ".join(broken)
 
 
 def test_each_finding_row_names_a_place():
-    """Строка журнала без адреса — это жалоба, а не находка."""
+    """A journal row without an address is a complaint, not a finding."""
     text = _NOTEBOOK.read_text(encoding="utf-8")
-    header = "| № | Файл:строка |"
-    assert header in text, (
-        f"в блокноте нет журнала находок с заголовком {header!r} — "
-        "либо таблицу переименовали, либо потеряли"
+    assert _TABLE_HEADER in text, (
+        f"the notebook has no findings journal headed {_TABLE_HEADER!r} — "
+        "the table was renamed or lost"
     )
-    table = text[text.index(header):].split("\n\n", 1)[0]
+    table = text[text.index(_TABLE_HEADER):].split("\n\n", 1)[0]
     rows = [r for r in table.splitlines() if r.startswith("| ") and "---" not in r]
-    body = rows[1:]  # без заголовка
+    body = rows[1:]  # drop the header
 
-    assert body, "журнал находок пуст"
+    assert body, "the findings journal is empty"
     for row in body:
-        assert _LINK_RE.search(row), f"строка журнала без адреса: {row[:80]}"
+        assert _LINK_RE.search(row), f"journal row without an address: {row[:80]}"
