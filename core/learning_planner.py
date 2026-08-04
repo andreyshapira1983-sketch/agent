@@ -85,6 +85,9 @@ class LearningPlanner:
         skipped: list[str] = []
         goal_l = goal.casefold()
         named = _named_paths(goal_l)
+        if named:
+            candidates += _named_candidates(workspace, named)
+        seen: set[Path] = set()
         for path in candidates:
             try:
                 path = path.resolve()
@@ -94,6 +97,9 @@ class LearningPlanner:
                 continue
             if not path.is_file():
                 continue
+            if path in seen:      # a named file may also be inside `root`
+                continue
+            seen.add(path)
             if path.suffix.casefold() not in TEXT_EXTENSIONS:
                 skipped.append(f"{_rel(workspace, path)}: unsupported extension")
                 continue
@@ -213,26 +219,62 @@ def _score(
 #: subject of the pass, not a candidate for it.
 _NAMED_BY_GOAL_BONUS = 500
 
-_PATH_IN_GOAL_RE = re.compile(r"[\w][\w./\\-]*\.[A-Za-z0-9]{1,5}")
+_PATH_IN_GOAL_RE = re.compile(r"[\w][\w./\\-]*\.[A-Za-z0-9_]{1,20}")
+_TEXT_SUFFIXES = frozenset(ext.lstrip(".") for ext in TEXT_EXTENSIONS)
 
 
 def _named_paths(goal: str) -> frozenset[str]:
-    """Paths the goal names outright, as workspace-relative-looking strings."""
-    out = {
-        raw.replace("\\", "/").strip("./").casefold()
-        for raw in _PATH_IN_GOAL_RE.findall(goal or "")
-    }
-    return frozenset(p for p in out if p)
+    """Paths the goal names outright, normalised to a workspace-relative shape.
+
+    The reflection prompt asks for "file or module", so both arrive:
+    `core/memory.py` and `core.memory`. Dotted module notation is turned into a
+    path — a token with no slash whose last segment is not a known text suffix
+    is a module, not a filename.
+    """
+    out: set[str] = set()
+    for raw in _PATH_IN_GOAL_RE.findall(goal or ""):
+        token = raw.replace("\\", "/").strip("./").casefold()
+        if not token:
+            continue
+        if "/" not in token and token.rsplit(".", 1)[-1] not in _TEXT_SUFFIXES:
+            token = token.replace(".", "/")
+        out.add(token)
+    return frozenset(out)
 
 
 def _is_named(rel: str, named: frozenset[str]) -> bool:
     """True when `rel` is one of the named paths, or the file they mean.
 
-    A bare filename counts: the model is asked for a path but does not always
-    give one. Matching is by whole path segments, so `memory.py` never matches
-    `smart_memory.py`.
+    Compared both with and without the suffix, so a module name matches the
+    file that implements it. Matching is by whole path segments, so `memory.py`
+    never matches `smart_memory.py`.
     """
-    return any(rel == n or rel.endswith("/" + n) for n in named)
+    stem = rel.rsplit(".", 1)[0] if "." in rel.rsplit("/", 1)[-1] else rel
+    return any(
+        rel == n or rel.endswith("/" + n) or stem == n or stem.endswith("/" + n)
+        for n in named
+    )
+
+
+def _named_candidates(workspace: Path, named: frozenset[str]) -> list[Path]:
+    """Files the goal names, resolved regardless of the pass's `root`.
+
+    A rotated `root` used to exclude the named file from the candidate set
+    entirely, so the plan was quietly about something else. Only the named file
+    crosses that boundary — everything else stays inside `root` — and it must
+    still resolve inside the workspace: the path comes from model output.
+    """
+    found: list[Path] = []
+    for name in named:
+        for candidate in (name, *(f"{name}{ext}" for ext in TEXT_EXTENSIONS)):
+            try:
+                path = (workspace / candidate).resolve()
+                path.relative_to(workspace)
+            except (ValueError, OSError):
+                continue
+            if path.is_file():
+                found.append(path)
+    return found
 
 
 def _goal_terms(goal: str) -> tuple[str, ...]:

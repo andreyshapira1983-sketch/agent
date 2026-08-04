@@ -123,6 +123,70 @@ def test_a_goal_naming_no_file_still_picks_the_usual_sources(tmp_path: Path):
     assert plan.source_paths
 
 
+def test_a_focus_area_written_as_a_module_is_resolved(tmp_path: Path):
+    """The prompt says "file OR MODULE", so `core.memory` must work too."""
+    workspace = _workspace_with_files(tmp_path, [
+        "core/memory.py",
+        "core/architecture_audit.py",
+        "README.md",
+    ])
+
+    plan = LearningPlanner().plan(
+        workspace=workspace,
+        goal="reflection: study weak areas — core.memory",
+        limit=2,
+    )
+
+    assert plan.source_paths[0].replace("\\", "/") == "core/memory.py"
+
+
+def test_the_named_file_is_studied_even_from_a_narrowed_root(tmp_path: Path):
+    """The `:learn` path rotates `root`; the named file may live outside it.
+
+    Reflection names a weak spot in `core/`, the pass happens to be rooted at
+    `tools/`, and the file simply never enters the candidate set — the plan is
+    silently about something else.
+    """
+    workspace = _workspace_with_files(tmp_path, [
+        "core/planner.py",
+        "tools/web_fetch.py",
+        "tools/shell_exec.py",
+    ])
+
+    plan = LearningPlanner().plan(
+        workspace=workspace,
+        goal="reflection: study weak areas — core/planner.py",
+        root="tools",
+        limit=3,
+    )
+
+    picked = [p.replace("\\", "/") for p in plan.source_paths]
+    assert "core/planner.py" in picked
+
+
+def test_a_narrowed_root_still_bounds_everything_else(tmp_path: Path):
+    """Only the named file crosses the root — the rest of the pass stays put."""
+    workspace = _workspace_with_files(tmp_path, [
+        "core/planner.py",
+        "core/evidence.py",
+        "core/architecture_audit.py",
+        "tools/web_fetch.py",
+    ])
+
+    plan = LearningPlanner().plan(
+        workspace=workspace,
+        goal="reflection: study weak areas — core/planner.py",
+        root="tools",
+        limit=5,
+    )
+
+    picked = [p.replace("\\", "/") for p in plan.source_paths]
+    assert "core/planner.py" in picked
+    assert not [p for p in picked if p.startswith("core/") and p != "core/planner.py"], (
+        "files other than the named one leaked in from outside the root"
+    )
+
+
 def test_a_named_path_cannot_reach_outside_the_workspace(tmp_path: Path):
     """A path in the goal is untrusted text: it must not widen what is read."""
     outside = tmp_path / "outside"
