@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import json
 import re
 import sys
 from collections.abc import Callable
@@ -314,6 +315,25 @@ def _split_target_too_large(content: str) -> tuple[bool, int]:
     """
     line_count = len((content or "").splitlines())
     return line_count > _MAX_SPLIT_TARGET_LINES, line_count
+
+
+def _why_json_failed(build: dict[str, Any]) -> str:
+    """Чем именно не понравился ответ строителя — словами, а не пустотой.
+
+    Прежняя формулировка называла только длину сырца, поэтому живой отказ на
+    183 единицы бюджета не подсказывал ничего: причиной был один слэш.
+    """
+    raw = str(build.get("raw_reply") or "")
+    if not raw.strip():
+        return "сырец не сохранён"
+    try:
+        json.loads(raw)
+    except json.JSONDecodeError as exc:
+        near = raw[max(0, exc.pos - 40): exc.pos + 20].replace("\n", "⏎")
+        return f"JSON невалиден: {exc.msg} (позиция {exc.pos}), рядом: …{near}…"
+    except (TypeError, ValueError):  # pragma: no cover — не JSON вовсе
+        return "ответ не является JSON"
+    return "JSON разобран, но нужного поля в нём нет"
 
 
 def _is_critical(rel: str) -> bool:
@@ -977,7 +997,7 @@ def _critic_review(
             # 15948-token, 84-cost-unit reply. Name the real failure.
             veto.append(
                 f"builder reply did not parse into usable content "
-                f"(raw_chars={raw_chars})"
+                f"(raw_chars={raw_chars}; {_why_json_failed(build)})"
             )
         else:
             veto.append("empty generated content")

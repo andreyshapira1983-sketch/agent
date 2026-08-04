@@ -232,6 +232,35 @@ def embedded_json_objects(text: str) -> Iterator[str]:
         index = closed_at + 1
 
 
+#: Что JSON признаёт после обратного слэша (RFC 8259). Всё прочее — не
+#: экранирование, а слэш, который забыли удвоить.
+_JSON_ESCAPABLE = frozenset('"\\/bfnrtu')
+
+
+def escape_stray_backslashes(text: str) -> str:
+    """Удвоить одиночные `\\`, за которыми стоит неэкранируемый символ.
+
+    Правильные пары (`\\n`, `\\"`, `\\\\`) не трогаются: пара съедается целиком,
+    поэтому её второй символ не может быть принят за начало нового слэша.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch != "\\":
+            out.append(ch)
+            i += 1
+            continue
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+        if nxt in _JSON_ESCAPABLE:
+            out.append(ch + nxt)
+            i += 2
+        else:
+            out.append("\\\\")
+            i += 1
+    return "".join(out)
+
+
 def extract_json_object(text: str) -> dict[str, Any] | None:
     """Best-effort: the JSON object inside a raw LLM reply, or ``None``.
 
@@ -261,9 +290,25 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
     start, end = t.find("{"), t.rfind("}")
     if start != -1 and end > start:
         candidates.append(t[start : end + 1])
-    for candidate in (*candidates, *embedded_json_objects(t)):
+    scanned = [*candidates, *embedded_json_objects(t)]
+    for candidate in scanned:
         try:
             obj = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    # Последний рубеж: одиночный '\' перед символом, который JSON не признаёт
+    # экранированием. Модель пишет так, продолжая строку кода. Живой тик
+    # 2026-08-04: из-за ОДНОГО такого слэша пропал ответ на 46 057 символов
+    # и 183 единицы бюджета. Здоровых ответов это не касается — сюда доходят
+    # только те, что уже не разобрались.
+    for candidate in scanned:
+        repaired = escape_stray_backslashes(candidate)
+        if repaired == candidate:
+            continue
+        try:
+            obj = json.loads(repaired)
         except json.JSONDecodeError:
             continue
         if isinstance(obj, dict):
