@@ -728,6 +728,47 @@ def test_auto_runtime_queue_can_run_specific_task_ids(workspace: Path):
     assert queue.get(old.id).status == "pending"
 
 
+def test_auto_runtime_queue_skips_a_task_another_consumer_took(workspace: Path):
+    """The pending list is read once; the tail may be claimed before we get there.
+
+    `:task-run` and `:schedule-tick --run` drain the queue without the
+    single-instance lock, so this really happens. Losing the race must cost this
+    run one task, not the whole drain.
+    """
+    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
+    agent = _agent(workspace, with_tests=False)
+    queue = TaskQueueStore(workspace / "tasks.jsonl")
+    ours = queue.add(goal="ours to run", priority=0, include_tests=False, limit=1)
+    tail = queue.add(goal="claimed while we work", priority=5,
+                     include_tests=False, limit=1)
+
+    runtime = AutonomousRuntime(agent, workspace=workspace)
+    original_run = runtime.run
+    stolen: list[str] = []
+
+    def run_and_let_the_other_consumer_in(config, **kwargs):
+        # Marking the task before `run_task_queue` would prove nothing: the
+        # pending list is read inside, so a task already `running` never enters
+        # it. The race is only real once the list is in hand — i.e. now, while
+        # the first task runs.
+        if not stolen:
+            queue.mark_running(tail.id, owner_pid=4242, owner_host="other")
+            stolen.append(tail.id)
+        return original_run(config, **kwargs)
+
+    runtime.run = run_and_let_the_other_consumer_in
+    report = runtime.run_task_queue(queue, max_tasks=2)
+
+    assert stolen, "the hook never fired — the model does not exercise the race"
+    assert report.status == "completed"
+    assert [p.task_id for p in report.processed] == [ours.id]
+    assert queue.get(ours.id).status == "done"
+    after = queue.get(tail.id)
+    assert after.status == "running", "we ran the other consumer's task as well"
+    assert after.attempts == 1, "our lost claim burned an attempt"
+    assert after.owner_pid == 4242, "our lost claim overwrote the real owner"
+
+
 def test_dry_run_goal_uses_gateway_simulate_and_restores(workspace: Path):
     """A dry-run goal task must set gateway_dry_run on the parent loop (not
     policy.blocked_tools for effect tools), then restore afterwards."""

@@ -31,6 +31,15 @@ _VALID_STATUSES = {
     "pending", "running", "done", "failed", "cancelled", "paused", "blocked",
 }
 
+class TaskAlreadyClaimed(RuntimeError):
+    """Raised when a claim loses the race — the task is no longer `pending`.
+
+    Distinct from ``KeyError`` on purpose: a task that is gone and a task
+    somebody else is already running call for different reactions from a
+    consumer, and both used to be indistinguishable because neither happened.
+    """
+
+
 #: A run that stopped because a human must approve something is neither a
 #: success nor a failure — retrying it on a timer cannot help, and burning the
 #: attempt budget on it hides the real reason. `blocked` is its own resting
@@ -207,6 +216,9 @@ class TaskQueueStore:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._on_task_added = on_task_added
+        #: Rows the last read could not parse. Zero is the normal case; anything
+        #: else means queued work disappeared and somebody must look at the file.
+        self.last_unreadable_rows = 0
 
     def add(
         self,
@@ -221,6 +233,12 @@ class TaskQueueStore:
         limit: int = 5,
         learning_limit: int = 5,
     ) -> RuntimeTask:
+        # Validated here, not only in `from_dict`: an unknown kind used to be
+        # accepted, written to disk, and then dropped by every later read —
+        # the caller saw a task object and the work never ran (2026-08-04).
+        kind = _choice(  # type: ignore[assignment]
+            kind, default="auto_run", allowed=_VALID_KINDS, field_name="kind",
+        )
         task = RuntimeTask(
             kind=kind,
             goal=goal.strip() or "project health",
@@ -281,13 +299,28 @@ class TaskQueueStore:
 
     def _load_unlocked(self) -> list[RuntimeTask]:
         if not self.path.exists():
+            # The counter describes THIS read, so the no-file path has to clear
+            # it too. Left alone, a queue that was rotated away would keep
+            # reporting the dropped rows of the read before it — a number about
+            # data that is no longer there, which is the very failure this
+            # counter exists to make visible.
+            self.last_unreadable_rows = 0
             return []
         tasks: list[RuntimeTask] = []
+        unreadable = 0
         for raw in read_state_jsonl_unlocked(self.path):
             try:
                 tasks.append(RuntimeTask.from_dict(raw))
-            except (TypeError, ValueError):
-                continue
+            except (TypeError, ValueError) as exc:
+                # Skipping stays — one bad row must not sink the queue. Silence
+                # does not: this is a task nobody will ever run again.
+                unreadable += 1
+                fields = raw if isinstance(raw, dict) else {}
+                logger.warning(
+                    "runtime task row dropped (%s): id=%s kind=%s",
+                    exc, fields.get("id", "?"), fields.get("kind", "?"),
+                )
+        self.last_unreadable_rows = unreadable
         return tasks
 
     def list(self, *, status: RuntimeTaskStatus | str | None = None) -> list[RuntimeTask]:
@@ -341,19 +374,35 @@ class TaskQueueStore:
         owner_pid: int | None = None,
         owner_host: str | None = None,
     ) -> RuntimeTask:
+        """Claim a pending task. Exclusive: a second claimant is refused.
+
+        The check runs inside `_update_one`'s file lock, on the row as just read
+        from disk, so the test and the write are one transaction. Without it two
+        consumers both claimed the same task — measured with two processes: the
+        second claim burned an attempt and overwrote `owner_pid`, so the row no
+        longer named the process that was actually running it.
+
+        The single-instance lock is not enough on its own: `agent_tick` takes it,
+        but `:task-run` and `:schedule-tick --run` do not.
+        """
         pid = os.getpid() if owner_pid is None else int(owner_pid)
         host = socket.gethostname() if owner_host is None else str(owner_host)
-        return self._update_one(
-            task_id,
-            lambda task: task.with_updates(
+
+        def claim(task: RuntimeTask) -> RuntimeTask:
+            if task.status != "pending":
+                raise TaskAlreadyClaimed(
+                    f"task {task.id} is {task.status}, not pending"
+                )
+            return task.with_updates(
                 status="running",
                 attempts=task.attempts + 1,
                 last_error="",
                 heartbeat_at=_iso(),
                 owner_pid=pid,
                 owner_host=host,
-            ),
-        )
+            )
+
+        return self._update_one(task_id, claim)
 
     def heartbeat(self, task_id: str) -> RuntimeTask | None:
         """Refresh liveness for a task that is still running.

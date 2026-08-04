@@ -40,7 +40,7 @@ from core.task_lifecycle import (
     apply_run_outcome,
     task_heartbeat,
 )
-from core.task_queue import RuntimeTask, TaskQueueStore
+from core.task_queue import RuntimeTask, TaskAlreadyClaimed, TaskQueueStore
 from core.tool_receipts import ReceiptPath, receipt_context
 
 AutonomousTaskKind = Literal["status", "learn", "tests", "goal", "propose"]
@@ -337,7 +337,14 @@ class AutonomousRuntime:
             {"max_tasks": max_tasks, "pending_selected": [t.id for t in pending]},
         )
         for task in pending:
-            task_queue.mark_running(task.id)
+            try:
+                task_queue.mark_running(task.id)
+            except TaskAlreadyClaimed:
+                # The list was read once, up front; by the time we reach a task
+                # in the tail another consumer may have taken it. Skipping is
+                # the correct outcome, and it is journaled rather than silent.
+                self._log("task_claim_lost", {"task_id": task.id})
+                continue
             try:
                 # The heartbeat is what lets startup recovery tell a killed
                 # process from a slow one (MIR-040); without it a long run and

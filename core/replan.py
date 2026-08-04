@@ -568,8 +568,6 @@ class ReplanPolicy:
         the args dict to a sorted JSON string so the planner sanitiser
         can do exact-match dedup without worrying about key order.
         """
-        import json
-
         forbidden: list[tuple[str, str]] = []
         seen: set[tuple[str, str]] = set()
         for t in triggers:

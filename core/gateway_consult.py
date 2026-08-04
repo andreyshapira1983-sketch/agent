@@ -93,10 +93,16 @@ def collect_hard_stop_reasons(
     *,
     kill_switch: Any | None,
     budget_snapshot: Mapping[str, Any] | None,
-    readiness_blockers: tuple[str, ...] = (),
+    blockers: tuple[str, ...] = (),
     check_readiness: bool = False,
 ) -> tuple[str, ...]:
-    """Return non-empty reason tuple when gateway must ``block``."""
+    """Return non-empty reason tuple when gateway must ``block``.
+
+    ``blockers`` rather than ``readiness_blockers``: the latter is a function in
+    this same module, and a parameter of that name shadowed it here — inside
+    this body the name meant a tuple, so the function could not be called at
+    all. Nothing tried to, which is why it cost nothing until now.
+    """
     reasons: list[str] = []
     if kill_switch is not None:
         state = kill_switch.status(budget_snapshot)
@@ -108,6 +114,6 @@ def collect_hard_stop_reasons(
             )
             reasons.append(f"kill_switch_active: {detail}".strip())
     if check_readiness:
-        for item in readiness_blockers:
+        for item in blockers:
             reasons.append(f"readiness_blocker: {item}")
     return tuple(reasons)

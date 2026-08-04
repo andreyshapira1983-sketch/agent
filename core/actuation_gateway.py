@@ -95,7 +95,7 @@ class ActuationGateway:
         reasons = collect_hard_stop_reasons(
             kill_switch=self.kill_switch,
             budget_snapshot=self.budget_snapshot,
-            readiness_blockers=self.readiness_blockers,
+            blockers=self.readiness_blockers,
             check_readiness=self.check_readiness,
         )
         if not reasons:

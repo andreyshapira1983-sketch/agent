@@ -146,6 +146,10 @@ class LLM:
         self.last_usage: dict[str, int] = {
             "input_tokens": 0, "output_tokens": 0, "total_tokens": 0
         }
+        #: Whether the last answer stopped on the token limit rather than
+        #: finishing. A caller that declined continuation needs this to tell a
+        #: short answer from a broken one.
+        self.last_answer_was_truncated: bool = False
 
     # ------------------------------------------------------------------
     # Usage helpers
@@ -234,6 +238,8 @@ class LLM:
         user: str,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = 0.7,
+        *,
+        allow_continuation: bool = True,
     ) -> str:
         """Send a single-turn prompt and return the text response.
 
@@ -246,10 +252,22 @@ class LLM:
         and the model resumes where it left off — until it finishes naturally or
         ``AGENT_MAX_CONTINUATIONS`` rounds are reached. Token usage is summed
         across every round so the budget ledger sees the full spend.
+
+        ``allow_continuation=False`` is for callers whose answer must parse as a
+        whole — JSON, above all. Stitching cannot resume a JSON string: the
+        model comes back writing plain code where escaped code was required, and
+        the joined text is corrupt in a way no reader can tell from a model that
+        simply wrote nonsense. Three live builder replies died exactly so on
+        2026-08-04, each after paying for extra legs. Such a caller gets the
+        first leg and reads :attr:`last_answer_was_truncated` to learn why it is
+        short — asking for less is an answer; a corrupted splice is not.
         """
         text, stop_reason = self._complete_once(
             system, user, max_tokens, temperature, prior=None
         )
+        self.last_answer_was_truncated = stop_reason in _TRUNCATION_REASONS
+        if not allow_continuation:
+            return text if self.provider == "mock" else text.strip()
         # The per-leg provider calls now return RAW text (no .strip()) so that
         # whitespace at a truncation boundary is preserved when legs are
         # concatenated below. Trimming happens once, centrally, on the final
@@ -309,6 +327,9 @@ class LLM:
             "output_tokens": agg_out,
             "total_tokens": agg_in + agg_out,
         }
+        # Still truncated here means the rounds ran out, not that the model
+        # finished — the caller is holding an answer that stops mid-sentence.
+        self.last_answer_was_truncated = stop_reason in _TRUNCATION_REASONS
         return combined.strip()
 
     def _complete_once(

@@ -510,13 +510,53 @@ class UsageTrackedLLM:
         except Exception:  # pragma: no cover - defensive
             return None
 
+    def _call_llm(
+        self,
+        *,
+        system: str,
+        user: str,
+        max_tokens: int,
+        temperature: float,
+        allow_continuation: bool,
+    ) -> str:
+        """Call the wrapped provider, tolerating one that predates the flag.
+
+        Test doubles and older wrappers accept only the four original
+        arguments. Continuation is ON in those, which is the historical
+        behaviour — the caller's request for a whole answer simply cannot be
+        honoured there, and pretending otherwise would hide it.
+        """
+        if allow_continuation:
+            return self._llm.complete(
+                system=system, user=user,
+                max_tokens=max_tokens, temperature=temperature,
+            )
+        try:
+            return self._llm.complete(
+                system=system, user=user,
+                max_tokens=max_tokens, temperature=temperature,
+                allow_continuation=False,
+            )
+        except TypeError:
+            return self._llm.complete(
+                system=system, user=user,
+                max_tokens=max_tokens, temperature=temperature,
+            )
+
     def complete(
         self,
         system: str,
         user: str,
         max_tokens: int = 2048,
         temperature: float = 0.7,
+        *,
+        allow_continuation: bool = True,
     ) -> str:
+        """Route one completion. See :meth:`core.llm.LLM.complete`.
+
+        ``allow_continuation=False`` travels through to the provider wrapper for
+        callers whose answer must parse as a whole.
+        """
         route_reason = self.route.reason
         tried: list[str] = []
         while True:
@@ -541,11 +581,12 @@ class UsageTrackedLLM:
             started_at = utc_now_iso()
             started = time.perf_counter()
             try:
-                output = self._llm.complete(
+                output = self._call_llm(
                     system=system,
                     user=user,
                     max_tokens=max_tokens,
                     temperature=temperature,
+                    allow_continuation=allow_continuation,
                 )
             except Exception as exc:
                 completed_at = utc_now_iso()

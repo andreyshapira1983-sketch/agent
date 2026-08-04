@@ -589,6 +589,228 @@ reason on the import itself. Treat a lint rule that edits import statements as
 touching the module's public surface, and run batches that do so one at a time,
 with the seam tests in view.
 
+---
+
+## 25. Validated where it is read, not where it is written
+
+**Symptom.** A store checks its data on the way OUT and not on the way IN. The
+writer is told the value was accepted; every reader afterwards rejects it and
+skips the row. Nothing raises, nothing is logged, and both sides believe the
+other one has the data.
+
+**Cost (2026-08-04, live probe).** `TaskQueueStore.add(kind="status")` — a kind
+that does not exist — returned a task object with an id, and the queue file grew
+by 626 bytes. The next `load()` returned an empty list: `RuntimeTask.from_dict`
+raised on the unknown kind and `_load_unlocked` swallowed it with a bare
+`continue`. The queue is how the daemon is told to do anything, so the whole
+instruction disappeared between two adjacent calls.
+
+**How to check yourself.** For every field with a fixed set of legal values,
+find the line that enforces the set. If it sits in the deserialiser, the writer
+does not enforce anything. Second question: when a stored row cannot be parsed,
+what does the reader do — and would you be able to tell from the outside that a
+row was dropped?
+
+**What to do.** One definition of legality, invoked at the point where the
+mistake is made. Keep skipping a bad row on read — one bad line must not sink
+the whole store — but count it and log it: a row that vanishes must at least
+leave a number behind.
+
+## 26. A guard against an exception nobody raises
+
+**Symptom.** A caller wraps an operation in `try/except` with a comment naming
+the condition it defends against — "another process already claimed it",
+"the file may be gone", "this can be stale". The operation never raises that
+condition, because nothing inside it checks for it. The guard reads as proof
+that the hazard was considered, so nobody looks again.
+
+**Cost (2026-08-04, two real processes).** `agent_tick.py` carried
+`except Exception: continue  # another process already claimed it`. But
+`mark_running` set the status without ever testing it — `_update_one` raises
+only `KeyError` for a missing id — so the claim of a task somebody else was
+already running succeeded. Measured: both processes claimed the same task,
+`attempts` went to 2 on the claims alone, and the second `owner_pid` overwrote
+the first, so the row no longer named the process actually running it. Both
+consumers then did the same work. Two of the three entry points
+(`:task-run`, `:schedule-tick --run`) take no single-instance lock, so this is
+the ordinary operator path, not an exotic one.
+
+**How to check yourself.** For every `except` whose comment names a specific
+condition: find the line in the callee that raises it. Not a line that could
+plausibly raise something — the one that raises THIS. If you cannot point at
+it, the guard is decorative and the hazard is live.
+
+**What to do.** Make the callee raise a named exception for that condition —
+here `TaskAlreadyClaimed`, distinct from `KeyError` so "taken" and "gone" stay
+different answers — and check it inside the lock that already protects the
+read-modify-write, so the test and the write are one transaction.
+
+## 27. The output does not depend on the input
+
+**Symptom.** A feature takes a decision — which files to study, which memories
+to recall, which sources to trust — and produces a plausible result every time.
+Nobody notices that the result is the *same* result whatever it was given. The
+feature is wired, called, logged, and decorative.
+
+**Cost (2026-08-04, measured against the real repository).** Reflection names
+the weak spot it found as a path and the agent then ingests whatever the plan
+returns. Across five focus areas of exactly the shape the prompt asks for, the
+named file was picked **zero times out of five**, and the top of every plan was
+identical: `core/architecture_audit.py`, `tests/test_architecture_audit.py`, …
+Being named by the goal was worth 0 points; a filename containing the word
+"architecture" was worth 95. The agent, having found its own weak spot, went off
+to read something else — and wrote the results into memory as learning.
+
+**How to check yourself.** This is the cheapest audit there is: **change the
+input, keep everything else, and diff the output.** Same output means the input
+is not connected. Do it with two or three genuinely different inputs, not one.
+Coverage will not tell you this — the code ran, the branches ran, the numbers
+were computed. Ask instead which line reads the input, and what it is worth
+next to the constants around it.
+
+**What to do.** Make the connection explicit and strong enough to win: the thing
+the request is *about* must outrank every generic heuristic, not tie with it.
+Then pin it with a test that varies the input and asserts the output moves —
+and one that pins what must NOT move, so the fix does not swallow the old
+behaviour.
+
+## 28. A limit that is per attempt, read as per result
+
+**Symptom.** A cap is set — tokens, retries, bytes, seconds — and everyone
+downstream reasons as if it bounds the whole operation. It bounds one attempt.
+A retry, continuation or failover mechanism sitting underneath multiplies it,
+and the real bound is the cap times a number nobody wrote down.
+
+**Cost (2026-08-04).** The builder's cap read `_BUILDER_MAX_TOKENS = 16_000`
+with a comment reasoning about how much room a real file needs. Underneath,
+`complete()` auto-continues a truncated answer up to four more times by
+default — so the true ceiling was five legs, and a live reply reached 20 509
+tokens. Worse than the size: **continuation cannot resume a JSON string.** The
+proof is in three preserved replies where the escaping style flips exactly at
+the leg boundary — escaped `\n` and `\"` before it, real newlines and bare
+quotes after. The model came back writing plain code, not knowing it stood
+inside a JSON string. Each of those runs paid for the extra legs and produced
+an unparseable answer, and the veto that followed blamed the target file.
+
+**How to check yourself.** For every limit, ask: per what? Then find the layer
+below it and ask whether that layer can repeat the operation. Multiply. If the
+product is the real bound, the constant's comment is describing something that
+does not exist. Second question: if the answer must parse as a whole, is any
+layer allowed to concatenate pieces of it?
+
+**What to do.** Say which unit the limit is in, right at the constant. Give
+callers whose answer must parse as a whole a way to decline stitching, and a
+way to learn they were cut off — "it did not fit" is a usable answer, a
+corrupted splice is not.
+
+## 29. The lesson is written, and cannot be found
+
+**Symptom.** A system records what went wrong, and reads it back before trying
+again — but the write and the read do not agree on the key. Both halves look
+correct in isolation. The recall returns nothing, silently, and the same
+mistake gets repeated at full price.
+
+**Cost (2026-08-04, the agent's own memory).** A rolled-back patch is banked as
+a lesson; the next attempt on the same file asks for lessons about that file.
+The writer took the file from `result["target_path"]` — which an apply result
+does not have, it has `files_changed` — so the episode carried no path tag,
+and the reader, which searches by path tag, found **0**. Two of the three
+rollbacks in the live store are the same file, the same test and the same
+assertion: `test_ambiguous_capability_check_still_uses_model_veto`,
+"assert True is False". The agent repeated its own mistake because the warning
+it had written for itself was unreachable.
+
+**How to check yourself.** Do not read the writer and the reader separately —
+put them side by side and compare the KEY. Then run the recall against real
+stored data and count what comes back. Zero results from a recall that "works"
+is the same false zero as an empty grep on the wrong field.
+
+**What to do.** Take the key from what the result actually contains, and pin it
+with a test that goes through both halves: bank an episode, then recall it. For
+records already written under the old key, make the reader fall back to the
+evidence they did keep — do not rewrite the store to match the code.
+
+## 30. Understanding and lookup are not the same faculty
+
+**Symptom.** A system is told "everything internal is in language X", and the
+rule is applied to things that do not have a language at all — or to the wrong
+half. Comprehension comes from the model and is language-agnostic; lookup is
+literal string comparison and is not. Confusing the two produces a component
+that "understands" a request perfectly and then finds nothing about it.
+
+**Cost (2026-08-04, the agent's own store, 47 records, 46 Latin-only).**
+«кто владеет архитектурой?» recalled **0** records; "who owns the architecture?"
+recalled **3**. Same question, same store, different alphabet. Nothing was
+broken and nothing raised — the operator simply got answers with no memory
+behind them. It went unnoticed because a question containing one Latin word
+("README") works in both languages.
+
+**How to check yourself.** Ask of each component: does this UNDERSTAND text, or
+does it COMPARE text? The second kind is every place with `in`, `startswith`,
+set intersection or a keyword table. For each of those, feed it the input the
+user actually produces — the language they actually type in — and count the
+results. A component tested only in the language its code is written in has not
+been tested in production conditions.
+
+**What to do.** Bridge the two vocabularies where the comparison happens, with
+a table small enough to stay honest and testable. Then journal the misses with
+enough detail to tell "the table is too small" from "we genuinely do not know
+that" — otherwise the next decision is an impression again.
+
+## 31. The instrument lies, and the reasoning on top of it is sound
+
+**Symptom.** A component asks its environment a question — is this binary here,
+is this path writable, is this service up — and the probe itself is broken. The
+answer comes back false, the reasoning built on it is impeccable, and the
+conclusion is wrong. It looks exactly like bad judgement, so that is what gets
+blamed and "fixed".
+
+**Cost (2026-08-04, live operator run).** The operator told the agent its tools
+were all connected and demanded it check rather than believe. The agent did the
+right thing: it ran `shell_exec(['where', 'python'])`. Result: `exit_code=1`,
+"Could not find files for the given pattern(s)" — on a machine where python is
+on PATH. It reported that declared connectivity and real availability "are
+different things". The sandbox forwarded `PATH` but not `PATHEXT`, and on
+Windows PATHEXT is what turns the name `python` into `python.exe`. Same PATH,
+only that variable differing: **exit 1 and empty without it, exit 0 and the
+full path with it.**
+
+**How to check yourself.** When a component reports something surprising about
+its own environment, reproduce the probe by hand before touching the component.
+Two runs, one variable apart. If the hand-run disagrees, the defect is in the
+instrument and every "fix" to the reasoning would have made things worse.
+
+**What to do.** Fix the instrument, and say in the code what a wrong reading
+costs — here, that an agent which refuses to take a claim on trust gets punished
+for verifying. That is the worst possible lesson to teach a system you are
+trying to make honest.
+
+## 32. A test that passes because of where you ran it
+
+**Symptom.** A test reads something from the ambient environment — a variable,
+a locale, a binary on PATH, a clock — and asserts on it. It is green on the
+author's machine and only there. The next runner gets a red that reproduces
+nowhere, or worse, a green that hides a real defect.
+
+**Cost (2026-08-04).** I fixed a missing `PATHEXT` in the shell sandbox and
+wrote a test asserting `"PATHEXT" in _safe_env()`, reading the variable from
+whatever shell happened to be running. Green for me, all suite green, committed.
+**The live agent then ran the same suite through its own `run_tests` tool and
+reported those two tests as failures** — because that tool strips the
+environment and dropped PATHEXT too. Same commit, opposite verdicts. The agent
+found the defect in my work, not the other way round, and its report looked
+exactly like the kind of thing that gets dismissed as the model being confused.
+
+**How to check yourself.** For every new test, ask: what does this read that I
+did not set? Then run it under a stripped environment, not just your shell —
+`env={...}` with the bare minimum. Two runs disagreeing is the whole signal.
+
+**What to do.** Set the input explicitly in the test and assert the behaviour,
+plus the converse case (absent input must not be invented). And when a tool
+builds an environment for a subprocess, treat that list as a contract with its
+own test — a runner that reports different results to different callers makes
+every verdict it produces worthless.
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED
@@ -601,21 +823,21 @@ The "Where handled" column is history, not status: **defect status is owned by
 
 | # | File:line | What is there | Found by | Where handled |
 |---|---|---|---|---|
-| 3 | [core/self_build_memory.py:119](../core/self_build_memory.py#L119) | rejection lesson: the veto cause is not distinguished ("bad candidate" vs "broken pipeline") | assistant, 2026-08-04 | not handled |
+| 3 | [core/self_build_memory.py:105](../core/self_build_memory.py#L105) | rejection lesson: the veto cause is not distinguished ("bad candidate" vs "broken pipeline") | assistant, 2026-08-04 | MIR-083 |
 | 2 | [core/smart_memory.py:1546](../core/smart_memory.py#L1546) | episodes are written wrapped in `{_integrity, payload}` — a top-level search returns a false zero | assistant, 2026-08-04 | reading trap, not a defect |
-| 3 | [core/self_build_memory.py:165](../core/self_build_memory.py#L165) | avoid list: also filled by tool breakages | assistant, 2026-08-04 | not handled |
+| 3 | [core/self_build_memory.py:236](../core/self_build_memory.py#L236) | avoid list: also filled by tool breakages — 4 of 5 live vetoes punished the target for our own failure | assistant, 2026-08-04 | MIR-083 |
 | 4 | [core/plan_parsing.py:242](../core/plan_parsing.py#L242) | rescuing JSON from a lone `\` — an example of how to fix this class | assistant, 2026-08-04 | PR #303 |
-| 5 | [core/self_build_producer.py:320](../core/self_build_producer.py#L320) | a rejection now names the cause, the position and the fragment | assistant, 2026-08-04 | PR #303 |
+| 5 | [core/builder_reply_diagnosis.py:17](../core/builder_reply_diagnosis.py#L17) | a rejection now names the cause, the position and the fragment (moved out of the producer by MIR-084) | assistant, 2026-08-04 | PR #303 |
 | 6 | [core/code_state.py:97](../core/code_state.py#L97) | fingerprint of the checked code — commit, branch, divergence | assistant, 2026-08-04 | PR #301 |
 | 6 | [core/autonomous_runtime.py:684](../core/autonomous_runtime.py#L684) | the autonomous test report carries the fingerprint | assistant, 2026-08-04 | PR #302 |
-| 11 | [core/self_build_producer.py:409](../core/self_build_producer.py#L409) | the builder calls the model directly: the result never reaches the verifier | assistant, 2026-08-04 | not handled |
+| 11 | [core/self_build_producer.py:391](../core/self_build_producer.py#L391) | ~~"the result never reaches the verifier"~~ — **wrong as written**: the patch does get checked (critic's structural vetoes, then targeted + full tests on apply, red ⇒ rollback). What is model self-report is `confidence`, and 3 of the live proposals passed that gate and still failed the tests | assistant, 2026-08-04 | claim corrected; the real defect is row 29 |
 | 12 | [core/task_complexity.py:108](../core/task_complexity.py#L108) | a ~180-character threshold decides which model answers | assistant, 2026-08-04 | PR #301, partly |
-| 15 | [core/self_build_producer.py:110](../core/self_build_producer.py#L110) | two consecutive replies broke at 32 326 and 32 440 — "code inside JSON" is a fragile format | assistant, 2026-08-04 | not handled |
+| 15 | [core/llm.py:302](../core/llm.py#L302) | three replies broke at 32 326 / 32 440 / 37 678 — continuation stitched a JSON string it could not resume | assistant, 2026-08-04 | MIR-084 |
 | 16 | [docs/MISTAKE_NOTEBOOK.md:318](../docs/MISTAKE_NOTEBOOK.md#L318) | an invented example path in the address rule — caught by the docs conformance check | assistant, 2026-08-04 | PR #306 |
 | 17 | [tests/test_mistake_notebook_links.py:30](../tests/test_mistake_notebook_links.py#L30) | absoluteness judged by shape, not by `Path.is_absolute` — the host must not change the verdict | CI, 2026-08-04 | PR #306 |
 | 18 | [docs/MISTAKE_NOTEBOOK.md:271](../docs/MISTAKE_NOTEBOOK.md#L271) | section 15 contradicted its own table — merged before the review was read | reviewers, 2026-08-04 | this PR |
-| 19 | [core/evidence_budget.py:304](../core/evidence_budget.py#L304) | the 50-char floor for demoted blocks is below any whole memory record, so memory is erased, not trimmed | assistant, 2026-08-04 | not handled |
-| — | [core/self_build_producer.py:110](../core/self_build_producer.py#L110) | the builder's ceiling is 16 000 tokens, yet a live reply took 20 509 — the limit is not honoured | assistant, 2026-08-04 | not investigated |
+| 19 | [core/evidence_budget.py:385](../core/evidence_budget.py#L385) | the 50-char floor for demoted blocks is below any whole memory record, so memory is erased, not trimmed | assistant, 2026-08-04 | not handled |
+| 28 | [core/self_build_producer.py:111](../core/self_build_producer.py#L111) | the 16 000-token ceiling is PER LEG, not per answer: auto-continuation could stretch it to five legs (a live reply hit 20 509) | assistant, 2026-08-04 | MIR-084 |
 | 20 | [core/loop_attempt.py:576](../core/loop_attempt.py#L576) | the `@staticmethod` that an AST `lineno` cut left behind — restored here, and the whole move is now compared decorator by decorator | assistant, 2026-08-04 | this change |
 | 21 | [core/loop_run_tail.py:36](../core/loop_run_tail.py#L36) | the import a dead `ruff --select E999` failed to miss; the sensor's `except Exception` hid the `NameError` | assistant, 2026-08-04 | this change |
 | 21 | [tests/test_loop_split_wiring.py:112](../tests/test_loop_split_wiring.py#L112) | `if TYPE_CHECKING` host contracts were checked by nobody — two mixins declared fields they never touch | assistant, 2026-08-04 | this change |
@@ -623,6 +845,17 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 22 | [tests/test_loop_split_wiring.py:345](../tests/test_loop_split_wiring.py#L345) | a check whose docstring claimed more than it did — it passed a probe it said it would catch | assistant, 2026-08-04 | this change |
 | 23 | [cli/app.py:95](../cli/app.py#L95) | `if args.resume:` — truthiness where argparse's `None`/`""` needs identity; an explicitly empty flag silently started a new run | assistant, 2026-08-04 | this change |
 | 24 | [core/loop.py:76](../core/loop.py#L76) | three re-export seams deleted by `PLC0414` then `F401` in successive batches; restored under `# noqa: F401` | assistant, 2026-08-04 | this change |
+| 25 | [core/task_queue.py:223](../core/task_queue.py#L223) | `add` took any `kind` and wrote it; only `from_dict` validated, so the row was durable and unreadable | assistant, 2026-08-04 | MIR-080 |
+| 25 | [core/task_queue.py:314](../core/task_queue.py#L314) | an unparseable queue row was skipped with a bare `continue` — a task nobody will ever run again | assistant, 2026-08-04 | MIR-080 |
+| 26 | [core/task_queue.py:392](../core/task_queue.py#L392) | `mark_running` claimed without checking the task was still `pending` — two processes ran one task | assistant, 2026-08-04 | MIR-081 |
+| 26 | [agent_tick.py:928](../agent_tick.py#L928) | `except Exception: continue  # another process already claimed it` — a guard for an exception nobody raised | assistant, 2026-08-04 | MIR-081 |
+| 27 | [core/learning_planner.py:167](../core/learning_planner.py#L167) | the file named as the weak spot scored 0 for being named; a filename with "architecture" scored 95 | assistant, 2026-08-04 | MIR-082 |
+| 27 | [core/autonomous_runtime.py:1247](../core/autonomous_runtime.py#L1247) | the branch that makes the agent study its weak spots had no test at all | coverage, 2026-08-04 | MIR-082 |
+| 29 | [core/self_build_memory.py:137](../core/self_build_memory.py#L137) | a rollback was banked with no file tag, so `recent_self_build_lessons` found 0 — the agent broke the same test the same way twice | assistant, 2026-08-04 | MIR-085 |
+| 30 | [core/memory_policy.py:324](../core/memory_policy.py#L324) | recall scored Russian questions against English records by word overlap: «кто владеет архитектурой?» 0 records, the English form 3 | assistant, 2026-08-04 | MIR-086 |
+| 30 | [core/bilingual_terms.py:74](../core/bilingual_terms.py#L74) | every recall miss now says whether the table could widen the question at all — the number that decides the next step | assistant, 2026-08-04 | MIR-086 |
+| 31 | [tools/shell_exec.py:877](../tools/shell_exec.py#L877) | PATHEXT was withheld, so `where python` returned exit 1 on a machine where python is on PATH — the agent read that as "my tools may not be connected" | operator run, 2026-08-04 | MIR-087 |
+| 32 | [tools/run_tests.py:322](../tools/run_tests.py#L322) | the agent's own test run strips PATHEXT, so it reported 2 failures the operator's terminal did not have — same commit, opposite verdicts | **the agent**, 2026-08-04 | MIR-088 |
 
 ## How to append
 

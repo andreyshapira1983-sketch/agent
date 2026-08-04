@@ -56,33 +56,48 @@ class PersistentMemoryStore:
         return len(payloads)
 
     def update(self, record: MemoryRecord) -> bool:
-        """Replace an existing record in-place (full rewrite). Returns True on success."""
-        records = self.load()
-        updated = False
-        new_records = []
-        for r in records:
-            if r.id == record.id:
-                new_records.append(record)
-                updated = True
-            else:
-                new_records.append(r)
-        if updated:
-            self._rewrite(new_records)
+        """Replace an existing record in-place (full rewrite). Returns True on success.
+
+        Read and rewrite happen under ONE lock: between them the file is a
+        stale copy, and anything another writer appends in that window is
+        overwritten with no error and no log line. `_rewrite` cannot be used
+        here — it takes the same lock, which is not reentrant.
+        """
+        with state_file_lock(self.path):
+            records = self._active_unlocked()
+            new_records = []
+            updated = False
+            for r in records:
+                if r.id == record.id:
+                    new_records.append(record)
+                    updated = True
+                else:
+                    new_records.append(r)
+            if updated:
+                rewrite_state_jsonl_unlocked(
+                    self.path,
+                    [r.model_dump(mode="json") for r in new_records],
+                )
         return updated
 
     def archive_record(self, record_id: str) -> bool:
         """Move a record from active store to archive. Returns True if moved."""
-        records = self.load()
-        target = next((r for r in records if r.id == record_id), None)
-        if target is None:
-            return False
-        # Mark as archived and append to archive store
-        target = target.model_copy(update={"archived": True})
-        with state_file_lock(self.archive_path):
-            append_state_jsonl_unlocked(self.archive_path, [target.model_dump(mode="json")])
-        # Remove from active store
-        keep = [r for r in records if r.id != record_id]
-        self._rewrite(keep)
+        # The active file stays locked across read, archive-append and rewrite:
+        # an append landing in that window used to be dropped by the rewrite.
+        with state_file_lock(self.path):
+            records = self._active_unlocked()
+            target = next((r for r in records if r.id == record_id), None)
+            if target is None:
+                return False
+            target = target.model_copy(update={"archived": True})
+            with state_file_lock(self.archive_path):   # different file, own lock
+                append_state_jsonl_unlocked(
+                    self.archive_path, [target.model_dump(mode="json")],
+                )
+            keep = [r for r in records if r.id != record_id]
+            rewrite_state_jsonl_unlocked(
+                self.path, [r.model_dump(mode="json") for r in keep],
+            )
         return True
 
     # ---------- reads ----------
@@ -100,18 +115,63 @@ class PersistentMemoryStore:
         live: list[MemoryRecord] = []
         expired_found = False
         for rec in all_records:
-            if rec.ttl_seconds is not None:
-                expires_at = rec.created_at + _dt.timedelta(seconds=rec.ttl_seconds)
-                if expires_at.tzinfo is None:
-                    expires_at = expires_at.replace(tzinfo=_dt.timezone.utc)
-                if expires_at <= now:
-                    expired_found = True
-                    continue
+            if self._is_expired(rec, now):
+                expired_found = True
+                continue
             live.append(rec)
         # Lazy eviction: rewrite store only when expired records are found
         if expired_found:
             self._rewrite(live)
         return live
+
+    def _active_unlocked(self) -> list[MemoryRecord]:
+        """Live (non-expired) records, read inside an already-held lock.
+
+        TTL eviction is deliberately NOT performed here: the caller is midway
+        through its own rewrite and will write the surviving set itself. A
+        second rewrite from inside would race with it.
+        """
+        now = _dt.datetime.now(_dt.timezone.utc)
+        return [rec for rec in self._load_raw_unlocked() if not self._is_expired(rec, now)]
+
+    @staticmethod
+    def _is_expired(rec: MemoryRecord, now: _dt.datetime) -> bool:
+        """Has this record's TTL run out as of ``now``?
+
+        One predicate, two callers, and they are not interchangeable: `active`
+        reads and evicts, `_active_unlocked` reads inside a lock its caller
+        already holds and leaves the rewrite to that caller. They must agree on
+        WHICH records are alive, or a rewrite would preserve rows the read path
+        has already stopped returning — the store would keep answering "gone"
+        while never actually letting go.
+
+        `created_at` is timezone-naive on rows written before the store moved to
+        aware timestamps. Those are read as UTC, which is what they were; a naive
+        value compared against an aware `now` raises instead.
+        """
+        if rec.ttl_seconds is None:
+            return False
+        expires_at = rec.created_at + _dt.timedelta(seconds=rec.ttl_seconds)
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=_dt.timezone.utc)
+        return expires_at <= now
+
+    def _load_raw_unlocked(self) -> list[MemoryRecord]:
+        """Same as `_load_raw`, but the caller already holds the file lock.
+
+        The lock is not reentrant: `update`/`delete`/`archive_record` hold it
+        across read+rewrite, and re-taking it here deadlocks
+        (`OSError: Resource deadlock avoided`).
+        """
+        if not self.path.exists():
+            return []
+        out: list[MemoryRecord] = []
+        for row in read_state_jsonl_unlocked(self.path):
+            try:
+                out.append(MemoryRecord.model_validate(row))
+            except ValueError:
+                continue
+        return out
 
     def _load_raw(self) -> list[MemoryRecord]:
         """Load ALL records from disk without TTL filtering.
@@ -161,12 +221,18 @@ class PersistentMemoryStore:
     # ---------- deletes ----------
 
     def delete(self, record_id: str) -> bool:
-        """Returns True if a record was actually removed."""
-        records = self.load()
-        keep = [r for r in records if r.id != record_id]
-        if len(keep) == len(records):
-            return False
-        self._rewrite(keep)
+        """Returns True if a record was actually removed.
+
+        One lock over read and rewrite, for the same reason as `update`.
+        """
+        with state_file_lock(self.path):
+            records = self._active_unlocked()
+            keep = [r for r in records if r.id != record_id]
+            if len(keep) == len(records):
+                return False
+            rewrite_state_jsonl_unlocked(
+                self.path, [r.model_dump(mode="json") for r in keep],
+            )
         return True
 
     def delete_all(self) -> int:

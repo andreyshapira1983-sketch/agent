@@ -98,3 +98,34 @@ def test_a_generous_budget_leaves_memory_whole(monkeypatch):
 
     assert not was_trimmed
     assert dict(trimmed)[MEMORY] == memory
+
+
+def test_a_small_overflow_keeps_at_least_one_whole_record(monkeypatch):
+    """Characterisation of the boundary, written after measuring it.
+
+    Measured 2026-08-04 on a 425-char block of three 128-char records, useful
+    floor 147, budget 1500: overflow 40/80/150 chars → the block survives at
+    351/311/241 chars and rebuilds into ONE whole record; overflow 250 and up →
+    the block is dropped whole and rebuilds into none.
+
+    Only one record survives a small overflow because the trim notice is
+    reserved at ~120 chars, roughly the size of a record. That is a deliberate,
+    documented trade in `rebuild_trimmed_memory` — "whole records only" applied
+    honestly — not a defect. This test exists so a future change that quietly
+    drops everything on a tiny overflow is caught.
+    """
+    monkeypatch.setenv("AGENT_EVIDENCE_TOTAL_CHARS", "1500")
+    lines = _records(3, size=120)
+    memory = _memory_block(lines)
+    fresh = "y" * (1500 - len(memory) + 80)      # overflow ≈ 80 chars
+    blocks = [("file:fresh.py", fresh), (MEMORY, memory)]
+
+    trimmed, _ = apply_total_budget(
+        blocks, trim_first_labels={MEMORY}, min_useful={MEMORY: _min_useful(lines)}
+    )
+    kept = dict(trimmed)[MEMORY]
+
+    assert kept, "an 80-char overflow erased every record"
+    survivors, ids = rebuild_trimmed_memory(kept, memory, lines)
+    assert survivors, "what survived the trim rebuilds into no whole record"
+    assert len(ids) == 1, f"expected exactly one whole record, kept {sorted(ids)}"

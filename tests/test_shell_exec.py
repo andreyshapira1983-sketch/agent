@@ -233,9 +233,14 @@ class TestReadOnlyExecution:
             # Env is still stripped down — no dotenv leaks, no PYTHONPATH
             # overrides. The home variables joined the allowed set so `git
             # commit` can find who is committing; they name a directory and
-            # carry no credential. Nothing else may appear here.
+            # carry no credential. PATHEXT joined it on 2026-08-04: without it
+            # Windows cannot turn the NAME `python` into `python.exe`, so every
+            # by-name lookup failed and the agent read that false negative as
+            # evidence its own tools were not connected. It is a list of file
+            # suffixes. Nothing else may appear here.
             assert set(kwargs["env"].keys()) <= {
-                "PATH", "SystemRoot", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+                "PATH", "PATHEXT", "SystemRoot",
+                "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
             }
 
     def test_unknown_binary_surfaces_clean_error(self, workspace: Path):
@@ -716,8 +721,10 @@ class TestGitRecordingSubcommands:
             run.return_value = mock.Mock(returncode=0, stdout="agent/work")
             tool._current_branch()
         env = run.call_args.kwargs["env"]
-        assert set(env) <= {"PATH", "SystemRoot", "HOME", "USERPROFILE",
-                            "HOMEDRIVE", "HOMEPATH"}
+        # PATHEXT is in the allowed set since 2026-08-04 — see the note in
+        # `test_cwd_is_workspace`; it is a list of file suffixes, not a secret.
+        assert set(env) <= {"PATH", "PATHEXT", "SystemRoot", "HOME",
+                            "USERPROFILE", "HOMEDRIVE", "HOMEPATH"}
 
     def test_a_protected_branch_is_refused(self, workspace: Path):
         tool = self._repo(workspace, "agent/work")

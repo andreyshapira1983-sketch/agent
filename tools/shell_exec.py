@@ -882,6 +882,15 @@ class ShellExecTool(Tool):
             sr = os.environ.get("SystemRoot")
             if sr:
                 env["SystemRoot"] = sr
+            # PATHEXT is how Windows turns the NAME `python` into `python.exe`.
+            # Without it every by-name lookup fails, and the agent asking its own
+            # environment a question gets a false negative: measured 2026-08-04,
+            # `where python` returned exit 1 on the very machine where python is
+            # on PATH, and the agent concluded from that its tools might not be
+            # connected. It carries no credential — it is a list of suffixes.
+            pathext = os.environ.get("PATHEXT")
+            if pathext:
+                env["PATHEXT"] = pathext
         for name in self._GIT_IDENTITY_ENV:
             value = os.environ.get(name)
             if value:

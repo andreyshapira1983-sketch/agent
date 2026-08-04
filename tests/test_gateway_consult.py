@@ -32,7 +32,7 @@ def test_collect_hard_stop_readiness() -> None:
     reasons = collect_hard_stop_reasons(
         kill_switch=None,
         budget_snapshot=None,
-        readiness_blockers=("2 approval item(s) pending",),
+        blockers=("2 approval item(s) pending",),
         check_readiness=True,
     )
     assert reasons == ("readiness_blocker: 2 approval item(s) pending",)
