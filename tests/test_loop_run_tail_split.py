@@ -34,7 +34,18 @@ _SLICE_START = "safe_answer, answer_findings, answer_pii_findings = redact_dlp_t
 _SLICE_END_MARKER = "self.assumption_store.save_many("
 
 
-def _history(rev: str = "HEAD") -> str:
+#: Коммит ПЕРЕД расколом — источник истины для сверок ниже.
+#:
+#: Раньше здесь стоял `HEAD`, и это работало ровно до первого коммита: как
+#: только раскол попал в историю, `HEAD:core/loop.py` стал расколотым файлом,
+#: сверять стало не с чем, и все проверки дословности ушли в `skip`. Отказ был
+#: виден в отчёте, но гарантия исчезла бы навсегда — а именно её этот файл и
+#: держит. Ссылка закреплена на конкретный коммит, поэтому переезд остаётся
+#: проверяемым и через год.
+_BEFORE_THE_SPLIT = "76941e061bdd8f85dcb6bdc7ab283262be349f62"
+
+
+def _history(rev: str = _BEFORE_THE_SPLIT) -> str:
     # Подавления по месту, а не через per-file-ignores: remote-режим Codacy
     # путевые исключения не читает (#300). Argv фиксирован, shell не поднимается.
     return subprocess.run(  # noqa: S603  # nosec B603 B607
