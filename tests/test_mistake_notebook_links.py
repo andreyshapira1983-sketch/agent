@@ -32,7 +32,16 @@ def _inside_repo(rel: str) -> bool:
     The address pattern allows dots and slashes, so `../../secrets.py` passes
     it unchallenged. A link pointing outside is meaningless here, and the
     journal is appended to by the agent as well — the guard must catch it.
+
+    Absoluteness is judged by shape, not by `Path.is_absolute`: that answer
+    depends on the host. `C:/Windows/x.py` is absolute on Windows and an
+    ordinary folder on Linux, which made an earlier version of this guard pass
+    locally and fail in CI. The notebook is read on both, so the verdict must
+    not depend on where it is read.
     """
+    first = rel.replace("\\", "/").split("/", 1)[0]
+    if rel.startswith(("/", "\\")) or ":" in first:
+        return False
     try:
         (_REPO / rel).resolve().relative_to(_REPO.resolve())
     except (ValueError, OSError):

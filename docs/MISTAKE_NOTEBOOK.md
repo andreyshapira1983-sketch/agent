@@ -323,6 +323,28 @@ exactly what caught me the second time, on the quotation itself.
 
 ---
 
+---
+
+## 17. Checked on one platform, declared universal
+
+**Symptom.** A check passes locally and fails in CI — or the other way round —
+because the answer depends on the operating system.
+
+**Cost (2026-08-04).** A guard was asserting that `C:/Windows/system.py` is
+rejected as an absolute path. True on Windows, where the work was done. On
+Linux, where CI runs, that string is an ordinary folder inside the repository,
+the guard accepted it, and the suite went red — after the local full run had
+been green.
+
+**How to check yourself.** For every check that touches paths, encodings,
+line endings, locale or time: does its verdict depend on the host? If yes,
+either make the rule host-independent or state the platform explicitly.
+
+**What to do.** Judge by shape, not by host behaviour: here absoluteness is
+decided by the leading `/` and by a drive letter in the first segment, so
+Windows and Linux agree. A green local run is not proof for a file that is
+read on both.
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED
@@ -346,6 +368,7 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 12 | [core/task_complexity.py:108](../core/task_complexity.py#L108) | a ~180-character threshold decides which model answers | assistant, 2026-08-04 | PR #301, partly |
 | 15 | [core/self_build_producer.py:110](../core/self_build_producer.py#L110) | two consecutive replies broke at 32 326 and 32 440 — "code inside JSON" is a fragile format | assistant, 2026-08-04 | not handled |
 | 16 | [docs/MISTAKE_NOTEBOOK.md:1](../docs/MISTAKE_NOTEBOOK.md#L1) | an invented example path in the address rule — caught by the docs conformance check | assistant, 2026-08-04 | PR #306 |
+| 17 | [tests/test_mistake_notebook_links.py:30](../tests/test_mistake_notebook_links.py#L30) | absoluteness judged by shape, not by `Path.is_absolute` — the host must not change the verdict | CI, 2026-08-04 | PR #306 |
 | — | [core/self_build_producer.py:110](../core/self_build_producer.py#L110) | the builder's ceiling is 16 000 tokens, yet a live reply took 20 509 — the limit is not honoured | assistant, 2026-08-04 | not investigated |
 
 ## How to append
