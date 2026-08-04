@@ -28,7 +28,7 @@ import pytest
 
 from app.bootstrap import DEFAULT_EPISODIC_MEMORY_PATH, build_agent
 from core.loop import AgentLoop
-from core.loop_methods2 import KNOWN_DURABLE_SINKS
+from core.loop_memory_write import KNOWN_DURABLE_SINKS
 from core.models import MemoryRecord
 from core.smart_memory import EpisodeRecord, EpisodicMemoryStore
 

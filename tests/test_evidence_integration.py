@@ -450,7 +450,10 @@ class TestMalformedMemoryRecordDoesNotTruncateChain:
         # retrieval selects a subset by relevance, and a record that was never
         # selected is not evidence of truncation. The defect is only about
         # records that reached the loop.
-        import core.loop as loop_mod
+        # Цель подмены — модуль, в чьих globals имя РАЗРЕШАЕТСЯ. Досборка
+        # цепочки уехала из `core/loop.py` в свой модуль (раскол, кусок 4),
+        # и фабрика улик уехала вместе с ней.
+        import core.loop_evidence_chain as loop_mod
 
         real = loop_mod.evidence_from_memory_record
         seen: list[str] = []
@@ -515,7 +518,8 @@ class TestMalformedMemoryRecordDoesNotTruncateChain:
         agent.persistent_store.save_many([rec])
         (workspace / "a.txt").write_text("dummy", encoding="utf-8")
 
-        import core.loop as loop_mod
+        # Тот же переезд, что и выше: имя живёт в модуле досборки цепочки.
+        import core.loop_evidence_chain as loop_mod
 
         def always_bad(*, record_id: str, content: str, source, created_at):
             raise ValueError("malformed record")

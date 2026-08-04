@@ -93,12 +93,27 @@ def test_oversized_ranks_below_real_work() -> None:
 
 
 # ── integration against the real repo ─────────────────────────────────────────
-def test_real_repo_surfaces_loop_as_oversized() -> None:
+def test_real_repo_surfaces_the_largest_module_first() -> None:
+    """Худший — первым. Кто именно худший, тест не назначает, а измеряет.
+
+    Раньше здесь стояло `split:core/loop.py` — на момент написания он был
+    крупнейшим (3408 строк) и заодно единственным сверх операторского потолка
+    в 2000. После разбора на модули он ушёл из вершины списка, и захардкоженное
+    имя стало проверять не свойство, а исторический факт. Свойство — порядок:
+    сигнал обязан звать чинить самое крупное, а не что придётся.
+    """
     candidates = load_backlog(REPO_ROOT)
     oversized = [c for c in candidates if c.signal_source == OVERSIZED_MODULE_SOURCE]
     assert oversized, "expected at least one oversized module in this repo"
-    targets = {c.target_path for c in oversized}
-    # core/loop.py is the known monster module; it must be reported.
-    assert "split:core/loop.py" in targets
-    # Worst-first: the largest module outranks its oversized peers.
-    assert oversized[0].target_path == "split:core/loop.py"
+
+    def _lines(candidate) -> int:
+        rel = candidate.target_path.removeprefix("split:")
+        return len((REPO_ROOT / rel).read_text(encoding="utf-8").splitlines())
+
+    sizes = [_lines(c) for c in oversized]
+    assert sizes == sorted(sizes, reverse=True), (
+        "порядок не «худший первым»: "
+        f"{[(c.target_path, n) for c, n in zip(oversized, sizes, strict=True)]}"
+    )
+    # И заодно фиксируем выигрыш: цикл больше не крупнейший в дереве.
+    assert oversized[0].target_path != "split:core/loop.py"

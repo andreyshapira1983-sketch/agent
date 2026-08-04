@@ -111,6 +111,24 @@ _RENAMED_PATHS: dict[str, str] = {
     # (docs/audit/SENSOR_SIGNAL_MEASUREMENT.md).
     "core/confidence_gate.py": "core/evidence_support.py",
     "tests/test_confidence_gate.py": "tests/test_evidence_support.py",
+    # Dissolved 2026-08-04. `loop_methods2` was never a module: it was the
+    # output of `core/incremental_splitter.py`, which cut `core/loop.py` by
+    # LINE BUDGET rather than by responsibility, so the name was a sequence
+    # number and told a reader nothing. Ten of its eleven methods turned out to
+    # be one subject — the loop's memory — and it split in two along the line
+    # that matters: reading and writing. The mapping below can only name one
+    # successor; the other is `core/loop_memory_write.py`, and the eleventh
+    # method (`_interpret`, 6 lines, not memory at all) went to
+    # `core/loop_observe.py`, beside its only caller.
+    "core/loop_methods2.py": "core/loop_memory_read.py",
+    # Dissolved 2026-08-04, same reason and same tool. This one held FIVE
+    # unrelated responsibilities, and three of them were never loop code at
+    # all: the operator memory commands, repair and hygiene are called by the
+    # CLI and by `agent_tick.py`, never by the cycle. Successors:
+    # `core/loop_sensor.py`, `core/loop_knowledge.py`,
+    # `core/loop_memory_commands.py`, `core/loop_repair.py` and the one named
+    # below, which the mapping can point at.
+    "core/loop_methods.py": "core/loop_hygiene.py",
 }
 
 #: Documents whose renamed-path references are provenance **by nature**: dated
@@ -127,6 +145,16 @@ _HISTORICAL_RENAME_DOCS = {
     "audit/AUDIT_PROGRESS.md",
     "audit/DOCUMENT_INVENTORY.md",
     "audit/MASTER_ISSUE_REGISTRY.md",
+    "audit/MEMORY_MAP.md",
+    "audit/PROVIDER_STRUCTURED_OUTPUT_AUDIT.md",
+    # Added 2026-08-04 with the `loop_methods2` dissolution: dated audits and
+    # fix plans whose job is to say what was true when they were written. The
+    # old module name is the CORRECT word there — the finding was made against
+    # that file, and rewriting it would falsify the record.
+    "../FABLE_AUDIT.md",
+    "MEMORY_FIX_PLAN.md",
+    "MEMORY_SYSTEM_AUDIT.md",
+    "Технический_анализ_автономного_агента_и_функций_мозга.md",
 }
 
 #: Inline escape hatch for a **mixed** document — a current-facing page that

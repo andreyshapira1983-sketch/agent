@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 159 modules across 12 groups._
+_Total: 175 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -48,9 +48,25 @@ _Planning, verification, clarification, control loop._
 | ------ | ------- |
 | `core/loop` | Control Loop — Observe -> Interpret -> Plan -> Act -> Verify -> Respond. |
 | `core/loop_helpers` | Helpers extracted verbatim from ``core/loop.py`` by the incremental splitter. |
-| `core/loop_methods` | Methods extracted verbatim from ``AgentLoop`` in ``core/loop.py`` by the incremental splitter. |
-| `core/loop_methods2` | Methods extracted verbatim from ``AgentLoop`` in ``core/loop.py`` by the incremental splitter. |
 | `core/loop_step_execution` | Исполнение одного шага плана — вырезано из ``core/loop.py`` дословно. |
+| `core/loop_sensor` | Запись о сбое наблюдательного сенсора — один метод, и это его дом. |
+| `core/loop_knowledge` | Запись знаний, добытых конвейером, в долгую память. |
+| `core/loop_memory_commands` | Операторские команды памяти: запомнить, забыть, показать. |
+| `core/loop_repair` | Починка кода: предложение, применение, откат, уборка резервных копий. |
+| `core/loop_hygiene` | Гигиена памяти: один проход обслуживания и шесть его шагов. |
+| `core/loop_memory_read` | Чтение памяти циклом: долгая, опытная, сводка. |
+| `core/loop_memory_write` | Запись памяти циклом — и право на неё. |
+| `core/loop_response_deciders` | Черновик ответа и решатели над ним — вырезано из ``core/loop.py`` дословно. |
+| `core/loop_synthesis` | Синтез ответа — метод `_synthesize`, вырезанный из ``core/loop.py`` дословно. |
+| `core/loop_evidence_chain` | Досборка цепочки улик — вырезано из ``core/loop.py`` дословно. |
+| `core/loop_verification` | Проверка черновика и сенсоры вокруг неё — вырезано из ``core/loop.py``. |
+| `core/loop_observe` | Наблюдение, разбор запроса и выбор модели — вырезано из ``core/loop.py``. |
+| `core/loop_run_tail` | Хвост прогона: ответ готов, эпизод ещё не записан — из ``core/loop.py``. |
+| `core/loop_context` | Контекст хода до планирования — вырезано из ``core/loop.py`` дословно. |
+| `core/loop_attempt` | Цикл попыток: план → исполнение → вердикт → перепланирование. |
+| `core/loop_verify_replan` | Проверка ответа и перепланирование по неразрешённым цитатам. |
+| `core/loop_init` | Сборка ``AgentLoop`` — конструктор, вырезанный из ``core/loop.py`` дословно. |
+| `core/loop_gates` | Ворота цикла: четыре места, где ход заканчивается, не начавшись. |
 | `core/planner` | LLM-driven Planner (§3 Cognitive Core: Planning). |
 | `core/planner_prompt` | The planner's system prompt (§3 Cognitive Core: Planning). |
 | `core/plan_parsing` | Parsing of the planner LLM's raw output (§3 Cognitive Core: Planning). |

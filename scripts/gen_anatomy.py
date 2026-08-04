@@ -30,7 +30,12 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "injection_guard", "redaction", "data_classifier", "dlp", "secret_scanner",
     ]),
     ("Cognitive Core & Agent Cycle (§3)", "Planning, verification, clarification, control loop.", [
-        "loop", "loop_helpers", "loop_methods", "loop_methods2", "loop_step_execution",
+        "loop", "loop_helpers", "loop_step_execution", "loop_sensor",
+        "loop_knowledge", "loop_memory_commands", "loop_repair", "loop_hygiene",
+        "loop_memory_read", "loop_memory_write",
+        "loop_response_deciders", "loop_synthesis", "loop_evidence_chain",
+        "loop_verification", "loop_observe", "loop_run_tail", "loop_context",
+        "loop_attempt", "loop_verify_replan", "loop_init", "loop_gates",
         "planner", "planner_prompt", "plan_parsing", "doc_routing", "host_tools_context", "step_sanitizer", "verifier", "verifier_core", "verifier_models", "verifier_patterns", "verification_summary", "sensor_journal",
         "verifier_utils", "replan", "reflection", "clarification_gate",
         "clarification_policy", "instruction_conflict_gate", "directive_extractor",

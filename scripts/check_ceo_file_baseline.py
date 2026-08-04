@@ -20,7 +20,7 @@ from pathlib import Path
 # three files sat over their ceilings with the guard reporting it to nobody.
 # It now runs inside the test suite (tests/test_file_size_ratchet.py).
 WATCH: dict[str, int] = {
-    "core/loop.py": 3410,                  # разбор на модули (правило оператора: потолок 2000): −828 строк ушло в core/loop_step_execution; цель — довести ниже 2000
+    "core/loop.py": 733,                  # разбор на модули (правило оператора: потолок 2000): −828 строк ушло в core/loop_step_execution, −234 в core/loop_response_deciders, −423 в core/loop_synthesis, −106 в core/loop_evidence_chain, −123 в core/loop_verification, −122 в core/loop_observe, −165 в core/loop_run_tail, −57 и −63 в loop_evidence_chain/loop_context, −375 в core/loop_attempt, −341 в core/loop_verify_replan, −254 в core/loop_init, −84 в core/loop_synthesis, −158 мелких методов, −139 ворот в core/loop_gates, −97 пролога и обязательств; оркестратор
     "main.py": 2000,                       # 47 today; the old extraction's win
     "core/planner.py": 560,                # measured 516 after piece 5 (host-tools context out)
     "agent_tick.py": 1500,                 # measured 1458; aspiration 1300

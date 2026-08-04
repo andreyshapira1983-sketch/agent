@@ -103,13 +103,23 @@ class TestDerivedBeforeWork:
             __import__("core.loop", fromlist=["loop"])
         )
         contract_at = source.index('self.log.log(\n            "completion_contract"')
-        # Исполнение шага уехало в `core/loop_step_execution` (разбор
-        # больших файлов на модули); в цикле остался его ВЫЗОВ — по нему
-        # и меряем порядок, проверяемое свойство то же.
-        execute_at = source.index("self._execute_steps_parallel(")
-        plan_at = source.index('self.log.log("plan"')
-        assert contract_at < plan_at, "contract must be fixed before planning"
-        assert contract_at < execute_at
+        # Планирование и исполнение уехали в `core/loop_attempt` целым циклом
+        # попыток (разбор больших файлов на модули); в `core/loop.py` остался
+        # его ВЫЗОВ — по нему и меряем порядок, проверяемое свойство то же.
+        attempt_at = source.index("self._run_attempt_loop(")
+        assert contract_at < attempt_at, "contract must be fixed before planning"
+
+        # И проверка, без которой предыдущая строка ничего не значит: план и
+        # исполнение действительно живут ВНУТРИ этого вызова. Уедь они куда-то
+        # ещё — «раньше вызова» перестало бы означать «раньше работы».
+        attempt_src = inspect.getsource(
+            __import__("core.loop_attempt", fromlist=["loop_attempt"])
+        )
+        assert 'self.log.log("plan"' in attempt_src
+        assert "self._execute_steps_parallel(" in attempt_src
+        assert 'self.log.log("plan"' not in source, (
+            "планирование вернулось в цикл — порядок надо мерить заново"
+        )
 
 
 class TestAnswerCannotSatisfy:

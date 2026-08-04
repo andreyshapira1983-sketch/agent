@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from core.loop_methods2 import AgentLoopExtractedMethods2
+from core.loop_memory_read import AgentLoopMemoryRead
 from core.smart_memory import EpisodeRecord, EpisodicMemoryStore
 
 
@@ -49,7 +49,7 @@ def test_partial_episode_not_injected_as_experience(tmp_path):
     store.save(_ep("partial", "deploy did not complete"))
 
     me = _fake_self(store)
-    AgentLoopExtractedMethods2._retrieve_experience_memory(me, "how to deploy the service now")
+    AgentLoopMemoryRead._retrieve_experience_memory(me, "how to deploy the service now")
 
     outcomes = {ep.outcome for ep in me._last_episode_records}
     assert "success" in outcomes, "the successful episode should be injected"
@@ -70,7 +70,7 @@ def test_lesson_episode_kept_even_if_not_success(tmp_path):
     store.save(lesson)
 
     me = _fake_self(store)
-    AgentLoopExtractedMethods2._retrieve_experience_memory(me, "how to deploy the service now")
+    AgentLoopMemoryRead._retrieve_experience_memory(me, "how to deploy the service now")
 
     assert any("lesson" in ep.tags for ep in me._last_episode_records), (
         "a curated lesson episode must be kept regardless of outcome"

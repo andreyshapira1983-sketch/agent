@@ -334,12 +334,16 @@ class TestLoopWiring:
         """Review round #283: a broken summary must not vanish silently —
         the loop keeps answering, and the journal says WHY there is no
         explanation this turn."""
-        import core.loop as loop_mod
+        # Цель подмены — модуль, в чьих globals имя РАЗРЕШАЕТСЯ. Решатели
+        # черновика уехали из `core/loop.py` в свой модуль (раскол, кусок 2),
+        # и вместе с ними уехала эта цель. Патч по старому адресу теперь не
+        # молчал бы, а падал бы AttributeError — что и произошло.
+        import core.loop_response_deciders as deciders_mod
 
         def _boom(report, chain=None):
             raise RuntimeError("схема вердиктов изменилась")
 
-        monkeypatch.setattr(loop_mod, "build_verification_summary", _boom)
+        monkeypatch.setattr(deciders_mod, "build_verification_summary", _boom)
         (workspace / "doc.txt").write_text("hello", encoding="utf-8")
         agent, log_path = _agent(
             workspace,
