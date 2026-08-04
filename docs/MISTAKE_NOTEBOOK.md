@@ -589,6 +589,33 @@ reason on the import itself. Treat a lint rule that edits import statements as
 touching the module's public surface, and run batches that do so one at a time,
 with the seam tests in view.
 
+---
+
+## 25. Validated where it is read, not where it is written
+
+**Symptom.** A store checks its data on the way OUT and not on the way IN. The
+writer is told the value was accepted; every reader afterwards rejects it and
+skips the row. Nothing raises, nothing is logged, and both sides believe the
+other one has the data.
+
+**Cost (2026-08-04, live probe).** `TaskQueueStore.add(kind="status")` — a kind
+that does not exist — returned a task object with an id, and the queue file grew
+by 626 bytes. The next `load()` returned an empty list: `RuntimeTask.from_dict`
+raised on the unknown kind and `_load_unlocked` swallowed it with a bare
+`continue`. The queue is how the daemon is told to do anything, so the whole
+instruction disappeared between two adjacent calls.
+
+**How to check yourself.** For every field with a fixed set of legal values,
+find the line that enforces the set. If it sits in the deserialiser, the writer
+does not enforce anything. Second question: when a stored row cannot be parsed,
+what does the reader do — and would you be able to tell from the outside that a
+row was dropped?
+
+**What to do.** One definition of legality, invoked at the point where the
+mistake is made. Keep skipping a bad row on read — one bad line must not sink
+the whole store — but count it and log it: a row that vanishes must at least
+leave a number behind.
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED
@@ -623,6 +650,8 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 22 | [tests/test_loop_split_wiring.py:345](../tests/test_loop_split_wiring.py#L345) | a check whose docstring claimed more than it did — it passed a probe it said it would catch | assistant, 2026-08-04 | this change |
 | 23 | [cli/app.py:95](../cli/app.py#L95) | `if args.resume:` — truthiness where argparse's `None`/`""` needs identity; an explicitly empty flag silently started a new run | assistant, 2026-08-04 | this change |
 | 24 | [core/loop.py:76](../core/loop.py#L76) | three re-export seams deleted by `PLC0414` then `F401` in successive batches; restored under `# noqa: F401` | assistant, 2026-08-04 | this change |
+| 25 | [core/task_queue.py:214](../core/task_queue.py#L214) | `add` took any `kind` and wrote it; only `from_dict` validated, so the row was durable and unreadable | assistant, 2026-08-04 | MIR-080 |
+| 25 | [core/task_queue.py:299](../core/task_queue.py#L299) | an unparseable queue row was skipped with a bare `continue` — a task nobody will ever run again | assistant, 2026-08-04 | MIR-080 |
 
 ## How to append
 

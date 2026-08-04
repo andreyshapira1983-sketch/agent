@@ -207,6 +207,9 @@ class TaskQueueStore:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._on_task_added = on_task_added
+        #: Rows the last read could not parse. Zero is the normal case; anything
+        #: else means queued work disappeared and somebody must look at the file.
+        self.last_unreadable_rows = 0
 
     def add(
         self,
@@ -221,6 +224,12 @@ class TaskQueueStore:
         limit: int = 5,
         learning_limit: int = 5,
     ) -> RuntimeTask:
+        # Validated here, not only in `from_dict`: an unknown kind used to be
+        # accepted, written to disk, and then dropped by every later read —
+        # the caller saw a task object and the work never ran (2026-08-04).
+        kind = _choice(  # type: ignore[assignment]
+            kind, default="auto_run", allowed=_VALID_KINDS, field_name="kind",
+        )
         task = RuntimeTask(
             kind=kind,
             goal=goal.strip() or "project health",
@@ -283,11 +292,20 @@ class TaskQueueStore:
         if not self.path.exists():
             return []
         tasks: list[RuntimeTask] = []
+        unreadable = 0
         for raw in read_state_jsonl_unlocked(self.path):
             try:
                 tasks.append(RuntimeTask.from_dict(raw))
-            except (TypeError, ValueError):
-                continue
+            except (TypeError, ValueError) as exc:
+                # Skipping stays — one bad row must not sink the queue. Silence
+                # does not: this is a task nobody will ever run again.
+                unreadable += 1
+                fields = raw if isinstance(raw, dict) else {}
+                logger.warning(
+                    "runtime task row dropped (%s): id=%s kind=%s",
+                    exc, fields.get("id", "?"), fields.get("kind", "?"),
+                )
+        self.last_unreadable_rows = unreadable
         return tasks
 
     def list(self, *, status: RuntimeTaskStatus | str | None = None) -> list[RuntimeTask]:
