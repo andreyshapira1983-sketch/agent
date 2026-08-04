@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Mapping
 from collections.abc import Set as AbstractSet
 
 # ── configurable limits ────────────────────────────────────────────────────────
@@ -258,6 +259,7 @@ def apply_total_budget(
     blocks: list[tuple[str, str]],
     *,
     trim_first_labels: AbstractSet[str] | None = None,
+    min_useful: Mapping[str, int] | None = None,
 ) -> tuple[list[tuple[str, str]], bool]:
     """Trim evidence blocks until their total fits in AGENT_EVIDENCE_TOTAL_CHARS.
 
@@ -370,6 +372,18 @@ def apply_total_budget(
             target    = kepts[biggest] - excess - _NOTICE_OVERHEAD
             new_len   = max(_floor_for(biggest, relaxed), target)
             label     = result[biggest][0]
+            # A block whose smallest indivisible item no longer fits keeps
+            # nothing usable: memory rebuilt from WHOLE records returns none,
+            # while the stub still costs its notice. Measured live 2026-08-04
+            # (`memory_trimmed=True, memory_chars_kept=0`). Drop it outright —
+            # "whole items or an honest zero".
+            floor_useful = (min_useful or {}).get(label)
+            if floor_useful is not None and new_len < floor_useful:
+                result[biggest] = (label, "")
+                sizes[biggest]  = 0
+                kepts[biggest]  = 0
+                was_trimmed = True
+                continue
             notice    = _trim_notice(new_len, old_len, budget)
             result[biggest] = (label, originals[biggest][:new_len] + notice)
             sizes[biggest]  = new_len + len(notice)
