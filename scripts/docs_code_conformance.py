@@ -141,6 +141,11 @@ _RENAMED_PATHS: dict[str, str] = {
     # `new_trace_id` to `core/ids.py`, `DEFAULT_MAX_REPLAN_ATTEMPTS` to
     # `core/replan.py`.
     "core/loop_helpers.py": "core/answer_format.py",
+    # Split 2026-08-04 by domain: the file said "Memory Hygiene" but one of its
+    # policies removed `.bak` FILES for the self-apply lane, not memory records.
+    # Backups went to `core/backup_cleanup.py`; the four memory policies kept
+    # their subject under the name below.
+    "core/hygiene.py": "core/memory_hygiene.py",
     "tests/test_commands_misc.py": "tests/test_cli_operator_commands.py",
 }
 

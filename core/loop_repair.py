@@ -203,11 +203,7 @@ class AgentLoopRepair:
         dry_run: bool = False,
     ):
         """Delete old `.bak.<ts>` files under the workspace root."""
-        from core.hygiene import (
-            DEFAULT_KEEP_LAST,
-            DEFAULT_MAX_AGE_DAYS,
-            cleanup_backups,
-        )
+        from core.backup_cleanup import DEFAULT_KEEP_LAST, DEFAULT_MAX_AGE_DAYS, cleanup_backups
 
         report = cleanup_backups(
             workspace_root,

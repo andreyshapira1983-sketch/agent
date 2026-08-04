@@ -17,10 +17,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.approval import AutoApprover
-from core.hygiene import SUMMARY_TAG
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.memory import WorkingMemory
+from core.memory_hygiene import SUMMARY_TAG
 from core.memory_policy import MemoryRetrievalPolicy, MemoryWritePolicy
 from core.models import MemoryRecord
 from core.persistent_memory import PersistentMemoryStore

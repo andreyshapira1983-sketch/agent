@@ -185,10 +185,10 @@ class AgentLoopHygiene:
 
     def expire_persistent(self, *, dry_run: bool = False):
         """Remove persistent records whose TTL has elapsed."""
-        from core.hygiene import expire_memory
+        from core.memory_hygiene import expire_memory
 
         if self.persistent_store is None:
-            from core.hygiene import ExpiryReport
+            from core.memory_hygiene import ExpiryReport
 
             empty = ExpiryReport(dry_run=dry_run)
             self.log.log("persistent_memory_expire", empty.summary())
@@ -199,10 +199,10 @@ class AgentLoopHygiene:
 
     def dedupe_persistent(self, *, threshold: float | None = None, dry_run: bool = False):
         """Collapse near-duplicate persistent records (oldest kept)."""
-        from core.hygiene import DEFAULT_DEDUP_THRESHOLD, deduplicate_memory
+        from core.memory_hygiene import DEFAULT_DEDUP_THRESHOLD, deduplicate_memory
 
         if self.persistent_store is None:
-            from core.hygiene import DedupReport
+            from core.memory_hygiene import DedupReport
 
             empty = DedupReport(
                 threshold=DEFAULT_DEDUP_THRESHOLD if threshold is None else threshold,
@@ -259,10 +259,10 @@ class AgentLoopHygiene:
         dry_run: bool = False,
     ):
         """Merge records sharing `tag` into a single summary via the LLM."""
-        from core.hygiene import DEFAULT_SUMMARY_MAX_RECORDS, summarise_memory
+        from core.memory_hygiene import DEFAULT_SUMMARY_MAX_RECORDS, summarise_memory
 
         if self.persistent_store is None:
-            from core.hygiene import SummaryReport
+            from core.memory_hygiene import SummaryReport
 
             empty = SummaryReport(tag=tag, skipped_reason="no store", dry_run=dry_run)
             self.log.log("persistent_memory_summarise", empty.summary())
@@ -285,7 +285,7 @@ class AgentLoopHygiene:
         dry_run: bool = False,
     ):
         """Move low-importance, old records to the archive (never deleted)."""
-        from core.hygiene import (
+        from core.memory_hygiene import (
             DEFAULT_ARCHIVE_MIN_AGE_DAYS,
             DEFAULT_ARCHIVE_THRESHOLD,
             ArchiveReport,

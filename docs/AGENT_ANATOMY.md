@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 175 modules across 12 groups._
+_Total: 176 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -117,7 +117,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/smart_memory` | Episodic, procedural and consolidation memory for autonomous operation. |
 | `core/memory_policy` | Memory Write Policy + Memory Retrieval Policy (§4 + §12.4). |
 | `core/memory_echo_antibody` | Memory Echo Antibody (A1) — refuse agent-auto memory that *echoes* itself. |
-| `core/hygiene` | Memory Hygiene (§4 Memory Governance — cleanup, dedup, expiry, summarise). |
+| `core/memory_hygiene` | Гигиена памяти: просрочка, дедупликация, сводка, архивация. |
 | `core/episodic_hygiene` | Episodic memory hygiene — staleness scoring and pruning. |
 | `core/knowledge_use_policy` | Contextual memory-use policy. |
 | `core/knowledge_pipeline` | Knowledge pipeline integration. |
@@ -146,6 +146,7 @@ _Effect gateways, receipts, compensation, VCS safety._
 | `core/gateway_consult` | Gateway hard-stop consult helpers (G5a). |
 | `core/tool_receipts` | Append-only tool receipt ledger — Stage 1 evidence layer (slice 1a + G5b). |
 | `core/receipt_consumer` | Tool receipts slice 1c — minimal consumer for verifier integration. |
+| `core/backup_cleanup` | Уборка резервных копий `.bak.<ts>` из рабочего каталога. |
 | `core/compensation` | Compensation System (§5 Undo) — first introduced for MVP-11 shell_exec. |
 | `core/safe_vcs` | Narrow, safe VCS helper for the trusted self-apply lane (TD-023). |
 | `core/supply_chain` | Release/supply-chain audit helpers. |

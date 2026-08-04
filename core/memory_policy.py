@@ -251,7 +251,7 @@ class MemoryWritePolicy:
         if existing_list:
             # Local import keeps memory_policy import-free of hygiene at
             # module load time (and breaks the otherwise-tempting cycle).
-            from core.hygiene import DEFAULT_DEDUP_THRESHOLD, find_duplicate
+            from core.memory_hygiene import DEFAULT_DEDUP_THRESHOLD, find_duplicate
 
             match = find_duplicate(
                 text, existing_list, threshold=DEFAULT_DEDUP_THRESHOLD

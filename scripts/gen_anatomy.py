@@ -49,7 +49,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ]),
     ("Memory & Knowledge Governance (§4)", "Working/persistent memory, hygiene, ingestion, evidence.", [
         "memory", "persistent_memory", "smart_memory", "memory_policy", "memory_echo_antibody",
-        "hygiene", "episodic_hygiene", "knowledge_use_policy", "knowledge_pipeline",
+        "memory_hygiene", "episodic_hygiene", "knowledge_use_policy", "knowledge_pipeline",
         "ingestion", "ingestion_reports", "ingestion_utils",
         "structured_facts", "evidence", "evidence_classes", "evidence_budget",
         "conflict_review", "conflict_episode",
@@ -58,6 +58,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ]),
     ("Tools, Actions & Execution (§5)", "Effect gateways, receipts, compensation, VCS safety.", [
         "actuation_gateway", "gateway_consult", "tool_receipts", "receipt_consumer",
+        "backup_cleanup",
         "compensation", "safe_vcs", "supply_chain",
     ]),
     ("Runtime, State & Orchestration (§6)", "Autonomous loop, scheduling, budgets, state durability.", [

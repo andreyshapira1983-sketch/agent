@@ -116,7 +116,7 @@ are constrained (e.g. `operator_explicitly_requested_opus`,
 Memory writes are policy-checked (`core/memory_policy`) and defended against
 self-echo (`core/memory_echo_antibody`). Procedure confidence is smoothed
 (`core/smart_memory`) so one success does not mint certainty. Hygiene prunes
-stale/duplicate memory (`core/hygiene`, `core/episodic_hygiene`).
+stale/duplicate memory (`core/memory_hygiene`, `core/episodic_hygiene`).
 
 ---
 

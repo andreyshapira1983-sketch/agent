@@ -16,15 +16,14 @@ from pathlib import Path
 
 import pytest
 
-from core.hygiene import (
+from core.backup_cleanup import BackupCleanupReport, cleanup_backups
+from core.memory_hygiene import (
     DEFAULT_DEDUP_THRESHOLD,
     SUMMARY_TAG,
-    BackupCleanupReport,
     DedupReport,
     ExpiryReport,
     SummaryReport,
     _similarity,
-    cleanup_backups,
     deduplicate_memory,
     expire_memory,
     find_duplicate,
