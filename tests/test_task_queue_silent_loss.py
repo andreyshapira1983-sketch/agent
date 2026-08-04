@@ -61,6 +61,30 @@ def test_unreadable_rows_are_counted_not_just_skipped(tmp_path: Path):
     )
 
 
+def test_the_counter_describes_the_last_read_not_an_older_one(tmp_path: Path):
+    """A rotated-away queue must not keep reporting the rows of a read before it.
+
+    `_load_unlocked` returns early when the file is gone. That path used to
+    leave `last_unreadable_rows` at its previous value, so a caller reading it
+    after an empty load was told rows had been dropped from a file that no
+    longer exists — a stale number, in the one field whose whole purpose is to
+    say what THIS read lost.
+    """
+    path = tmp_path / "tasks.jsonl"
+    store = TaskQueueStore(path)
+    store.add(goal="good one", kind="auto_run")
+    append_state_jsonl_unlocked(path, [{"id": "rtask_bad", "kind": "nonesuch"}])
+    store.load()
+    assert store.last_unreadable_rows == 1, "нужен ненулевой счётчик до отката"
+
+    path.unlink()
+
+    assert store.load() == []
+    assert store.last_unreadable_rows == 0, (
+        "счётчик пережил чтение, в котором нечего было терять"
+    )
+
+
 def test_a_valid_kind_still_works(tmp_path: Path):
     store = TaskQueueStore(tmp_path / "tasks.jsonl")
     task = store.add(goal="probe", kind="auto_run")

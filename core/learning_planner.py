@@ -219,6 +219,15 @@ def _score(
 #: subject of the pass, not a candidate for it.
 _NAMED_BY_GOAL_BONUS = 500
 
+#: The dot is load-bearing, not an oversight: it is the only thing separating a
+#: path from an ordinary word in a sentence. Widening this to extensionless
+#: names (review of #313 suggested `README`, `Makefile`) would make every word
+#: of the goal a "named file" worth `_NAMED_BY_GOAL_BONUS` — measured on
+#: "improve the memory handling in core/memory.py" the pattern picks exactly one
+#: token today. The case it would buy is empty here: the repository has two
+#: extensionless tracked files, `Dockerfile` and `LICENSE`, and neither is
+#: something the learning planner studies. Reconsider only alongside a different
+#: discriminator, e.g. "the token resolves to a file that exists".
 _PATH_IN_GOAL_RE = re.compile(r"[\w][\w./\\-]*\.[A-Za-z0-9_]{1,20}")
 _TEXT_SUFFIXES = frozenset(ext.lstrip(".") for ext in TEXT_EXTENSIONS)
 

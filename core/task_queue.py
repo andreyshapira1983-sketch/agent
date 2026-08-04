@@ -299,6 +299,12 @@ class TaskQueueStore:
 
     def _load_unlocked(self) -> list[RuntimeTask]:
         if not self.path.exists():
+            # The counter describes THIS read, so the no-file path has to clear
+            # it too. Left alone, a queue that was rotated away would keep
+            # reporting the dropped rows of the read before it — a number about
+            # data that is no longer there, which is the very failure this
+            # counter exists to make visible.
+            self.last_unreadable_rows = 0
             return []
         tasks: list[RuntimeTask] = []
         unreadable = 0

@@ -115,13 +115,9 @@ class PersistentMemoryStore:
         live: list[MemoryRecord] = []
         expired_found = False
         for rec in all_records:
-            if rec.ttl_seconds is not None:
-                expires_at = rec.created_at + _dt.timedelta(seconds=rec.ttl_seconds)
-                if expires_at.tzinfo is None:
-                    expires_at = expires_at.replace(tzinfo=_dt.timezone.utc)
-                if expires_at <= now:
-                    expired_found = True
-                    continue
+            if self._is_expired(rec, now):
+                expired_found = True
+                continue
             live.append(rec)
         # Lazy eviction: rewrite store only when expired records are found
         if expired_found:
@@ -136,16 +132,29 @@ class PersistentMemoryStore:
         second rewrite from inside would race with it.
         """
         now = _dt.datetime.now(_dt.timezone.utc)
-        live: list[MemoryRecord] = []
-        for rec in self._load_raw_unlocked():
-            if rec.ttl_seconds is not None:
-                expires_at = rec.created_at + _dt.timedelta(seconds=rec.ttl_seconds)
-                if expires_at.tzinfo is None:
-                    expires_at = expires_at.replace(tzinfo=_dt.timezone.utc)
-                if expires_at <= now:
-                    continue
-            live.append(rec)
-        return live
+        return [rec for rec in self._load_raw_unlocked() if not self._is_expired(rec, now)]
+
+    @staticmethod
+    def _is_expired(rec: MemoryRecord, now: _dt.datetime) -> bool:
+        """Has this record's TTL run out as of ``now``?
+
+        One predicate, two callers, and they are not interchangeable: `active`
+        reads and evicts, `_active_unlocked` reads inside a lock its caller
+        already holds and leaves the rewrite to that caller. They must agree on
+        WHICH records are alive, or a rewrite would preserve rows the read path
+        has already stopped returning — the store would keep answering "gone"
+        while never actually letting go.
+
+        `created_at` is timezone-naive on rows written before the store moved to
+        aware timestamps. Those are read as UTC, which is what they were; a naive
+        value compared against an aware `now` raises instead.
+        """
+        if rec.ttl_seconds is None:
+            return False
+        expires_at = rec.created_at + _dt.timedelta(seconds=rec.ttl_seconds)
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=_dt.timezone.utc)
+        return expires_at <= now
 
     def _load_raw_unlocked(self) -> list[MemoryRecord]:
         """Same as `_load_raw`, but the caller already holds the file lock.

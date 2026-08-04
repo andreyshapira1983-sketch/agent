@@ -846,10 +846,10 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 23 | [cli/app.py:95](../cli/app.py#L95) | `if args.resume:` — truthiness where argparse's `None`/`""` needs identity; an explicitly empty flag silently started a new run | assistant, 2026-08-04 | this change |
 | 24 | [core/loop.py:76](../core/loop.py#L76) | three re-export seams deleted by `PLC0414` then `F401` in successive batches; restored under `# noqa: F401` | assistant, 2026-08-04 | this change |
 | 25 | [core/task_queue.py:223](../core/task_queue.py#L223) | `add` took any `kind` and wrote it; only `from_dict` validated, so the row was durable and unreadable | assistant, 2026-08-04 | MIR-080 |
-| 25 | [core/task_queue.py:308](../core/task_queue.py#L308) | an unparseable queue row was skipped with a bare `continue` — a task nobody will ever run again | assistant, 2026-08-04 | MIR-080 |
-| 26 | [core/task_queue.py:386](../core/task_queue.py#L386) | `mark_running` claimed without checking the task was still `pending` — two processes ran one task | assistant, 2026-08-04 | MIR-081 |
+| 25 | [core/task_queue.py:314](../core/task_queue.py#L314) | an unparseable queue row was skipped with a bare `continue` — a task nobody will ever run again | assistant, 2026-08-04 | MIR-080 |
+| 26 | [core/task_queue.py:392](../core/task_queue.py#L392) | `mark_running` claimed without checking the task was still `pending` — two processes ran one task | assistant, 2026-08-04 | MIR-081 |
 | 26 | [agent_tick.py:928](../agent_tick.py#L928) | `except Exception: continue  # another process already claimed it` — a guard for an exception nobody raised | assistant, 2026-08-04 | MIR-081 |
-| 27 | [core/learning_planner.py:142](../core/learning_planner.py#L142) | the file named as the weak spot scored 0 for being named; a filename with "architecture" scored 95 | assistant, 2026-08-04 | MIR-082 |
+| 27 | [core/learning_planner.py:167](../core/learning_planner.py#L167) | the file named as the weak spot scored 0 for being named; a filename with "architecture" scored 95 | assistant, 2026-08-04 | MIR-082 |
 | 27 | [core/autonomous_runtime.py:1247](../core/autonomous_runtime.py#L1247) | the branch that makes the agent study its weak spots had no test at all | coverage, 2026-08-04 | MIR-082 |
 | 29 | [core/self_build_memory.py:137](../core/self_build_memory.py#L137) | a rollback was banked with no file tag, so `recent_self_build_lessons` found 0 — the agent broke the same test the same way twice | assistant, 2026-08-04 | MIR-085 |
 | 30 | [core/memory_policy.py:324](../core/memory_policy.py#L324) | recall scored Russian questions against English records by word overlap: «кто владеет архитектурой?» 0 records, the English form 3 | assistant, 2026-08-04 | MIR-086 |
