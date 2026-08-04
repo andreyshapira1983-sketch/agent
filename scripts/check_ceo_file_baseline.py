@@ -24,7 +24,12 @@ WATCH: dict[str, int] = {
     "main.py": 2000,                       # 47 today; the old extraction's win
     "core/planner.py": 560,                # measured 516 after piece 5 (host-tools context out)
     "agent_tick.py": 1500,                 # measured 1458; aspiration 1300
-    "core/autonomous_runtime.py": 1400,    # measured 1364; aspiration 1150
+    # 2026-08-05, MIR-077: 1364 -> 1476. Ten broad handlers here were the
+    # largest single concentration of the invisible-failure class; each
+    # now journals its failure or says why silence is right. The file is
+    # further from its 1150 aspiration and closer to being diagnosable —
+    # a trade taken deliberately, not a drift. Splitting it is MIR-078.
+    "core/autonomous_runtime.py": 1490,    # measured 1476; aspiration 1150
     "core/smart_memory.py": 1900,          # measured 1861 after the causal-credit split + outcome extraction
     "core/self_build_producer.py": 1841,   # 1860 → 1841: reply diagnosis moved out to core/builder_reply_diagnosis.py (MIR-084)
     "core/model_router.py": 1800,          # measured 1719 — new watch

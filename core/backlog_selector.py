@@ -13,6 +13,7 @@ performs read-only file IO only.
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +33,8 @@ from core.backlog_signals import (
     self_build_docs_candidate,
     value_review_penalties,
 )
+
+logger = logging.getLogger(__name__)
 
 # Deterministic per-source base rank and confidence. Human-authored TECH_DEBT
 # work outranks the docs pilot, which outranks the agent's own architecture-audit
@@ -219,7 +222,14 @@ def _load_architecture_audit(root: Path) -> tuple[list[SignalRecord], str]:
         return architecture_audit_candidates(
             gaps, exists=lambda rel: _path_exists(root / rel)
         )
-    except Exception:
+    except Exception as exc:
+        # An empty candidate list is indistinguishable from "the audit found
+        # nothing wrong" — the backlog quietly loses a whole source of work and
+        # looks healthier for it (MIR-077).
+        logger.warning(
+            "architecture audit unavailable for backlog: %s: %s",
+            type(exc).__name__, exc,
+        )
         return [], ""
 
 

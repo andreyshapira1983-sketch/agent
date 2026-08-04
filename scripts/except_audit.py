@@ -43,10 +43,21 @@ def _is_log_call(n: ast.AST) -> bool:
         f = f.value
     if isinstance(f, ast.Name):
         name = f.id + "." + name if name else f.id
-    parts = name.lower().split(".")
-    # Token match, not substring: `login()`/`logic()` must not count as
-    # journaling (review round #292).
-    return any(k in parts for k in _LOGGY)
+    # Leading underscores stripped BEFORE matching: a private journaling
+    # helper is journaling. `self._log(...)` used to score as silence, because
+    # the token was `_log` and the match is exact — so five handlers in
+    # `core/autonomous_runtime.py` that do report their failure were counted
+    # in the target class, and the audit sent a reader to fix what was not
+    # broken. Measured 2026-08-05: 46 flagged, 5 of them journaling this way.
+    #
+    # Stripping does not widen the match: `_login`/`_logic` become
+    # `login`/`logic`, neither of which is in `_LOGGY`, so the token rule from
+    # review round #292 still holds — `login()` is not journaling.
+    parts = [p.lstrip("_") for p in name.lower().split(".")]
+    # `log_error` / `log_summary` are journaling too, and both exist in `core/`.
+    # The prefix is `log_` WITH the separator on purpose: it admits those and
+    # still refuses `login` and `logic`, which is the whole point of #292.
+    return any(k in parts for k in _LOGGY) or any(p.startswith("log_") for p in parts)
 
 
 def _has_log_call(node: ast.AST) -> bool:

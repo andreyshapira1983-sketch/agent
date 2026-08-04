@@ -48,8 +48,8 @@ re-grounded against **current code on `main` @ `f317c4c`**.
 
 | Status | Count | IDs |
 |---|---|---|
-| fixed | 47 | MIR-001, MIR-002, MIR-003, MIR-004, MIR-005, MIR-010, MIR-017, MIR-027, MIR-028, MIR-036, MIR-037, MIR-039, MIR-040, MIR-041, MIR-043, MIR-046, MIR-047, MIR-048, MIR-049, MIR-051, MIR-052, MIR-054, MIR-055, MIR-056, MIR-057, MIR-059, MIR-062, MIR-063, MIR-064, MIR-065, MIR-066, MIR-068, MIR-070, MIR-072, MIR-073, MIR-075, MIR-076, MIR-079, MIR-080, MIR-081, MIR-082, MIR-083, MIR-084, MIR-085, MIR-086, MIR-087, MIR-088 |
-| open | 16 | MIR-008, MIR-011, MIR-015, MIR-016, MIR-020, MIR-021, MIR-023, MIR-024, MIR-026, MIR-035, MIR-044, MIR-045, MIR-050, MIR-058, MIR-060, MIR-077 |
+| fixed | 48 | MIR-001, MIR-002, MIR-003, MIR-004, MIR-005, MIR-010, MIR-017, MIR-027, MIR-028, MIR-036, MIR-037, MIR-039, MIR-040, MIR-041, MIR-043, MIR-046, MIR-047, MIR-048, MIR-049, MIR-051, MIR-052, MIR-054, MIR-055, MIR-056, MIR-057, MIR-059, MIR-062, MIR-063, MIR-064, MIR-065, MIR-066, MIR-068, MIR-070, MIR-072, MIR-073, MIR-075, MIR-076, MIR-077, MIR-079, MIR-080, MIR-081, MIR-082, MIR-083, MIR-084, MIR-085, MIR-086, MIR-087, MIR-088 |
+| open | 15 | MIR-008, MIR-011, MIR-015, MIR-016, MIR-020, MIR-021, MIR-023, MIR-024, MIR-026, MIR-035, MIR-044, MIR-045, MIR-050, MIR-058, MIR-060 |
 | partially_fixed | 8 | MIR-007, MIR-042, MIR-053, MIR-067, MIR-069, MIR-071, MIR-074, MIR-078 |
 | planned_gap | 8 | MIR-009, MIR-018, MIR-022, MIR-029, MIR-030, MIR-031, MIR-034, MIR-038 |
 | code_fixed_needs_runtime_verification | 4 | MIR-012, MIR-013, MIR-014, MIR-061 |
@@ -1084,8 +1084,38 @@ for MIR-002 and MIR-041 (approved next step) · then the minimal file set for th
 - **Aliases:** none. **Related:** the #283 round (`verification_explained_failed`) and the #286 round (`subsystem_disagreement_error`) — both found THIS class live and fixed one site each; the Codacy sweep (#290) deliberately excluded the class as behavioural. **Provenance:** operator-sanctioned audit (2026-08-03, «самое главное — находить корень проблем»).
 - **Map (AST scan, `scripts/except_audit.py`, 2026-08-03):** 157 broad `except Exception`/bare handlers in `core/` = 21 journaled + 2 re-raise + 5 log-guards (the try-body is itself only journaling — the deliberate #283/#286 inner pattern) + **129 silent**, of which **61 state no reason at all** (no comment, no log): `autonomous_runtime.py` 15, `loop.py` 15, the tail spread thinner. The FIRST numbers (31/52) came from a scanner whose substring match counted `login`-shaped calls as journaling — the #292 review round fixed token matching, the full logging-level vocabulary, recursive traversal and the comment span, and the honest recount surfaced 9 more hidden silents; the correction is recorded here deliberately.
 - **Why it matters (measured twice):** a broken subsystem inside such a handler is INVISIBLE — the exact shape both review rounds caught in freshly-written code; 52 standing instances mean 52 places where a real failure already may be vanishing today.
-- **Status:** `open` — map complete, fixing proceeds by classes in separate PRs (per the conveyor: one class, failing test, journal event, prove). **Guard landed with the map:** `tests/test_except_audit_ratchet.py` pins the baseline at 52 — a NEW unjustified silent handler fails CI; fixing a site (journal the failure, name the reason, or narrow the exception) shrinks the ratchet.
+- **Status:** `fixed` (2026-08-05) — the target class is **0**. 162 broad handlers remain in `core/`; 50 journal the failure (was 23) and every silent one carries a written reason. `tests/test_except_audit_ratchet.py` pins the baseline at zero, so the class cannot grow: a new broad handler must journal, re-raise, narrow its type, or say in words why silence is right.
 - **Fix order (by blast radius):** (1) `loop.py` 15 — **ЗАКРЫТ 2026-08-03**: 11 наблюдательных сенсоров журналируют сбой через новый компактный модуль `core/sensor_journal.py` (один канал `sensor_failed` вместо одиннадцати копий try/except/log), 4 законных значения по умолчанию назвали причину; храповик опущен 61 → 46 (`_BASELINE_UNJUSTIFIED_SILENT = 46`), а `core/loop.py` при этом СТАЛ КОРОЧЕ на 3 строки (правило оператора: компактные подключаемые модули, а не раздувание). Спека: `tests/test_sensor_failure_journal.py`. (2) `autonomous_runtime.py` 15 — следующий; (3) хвост. Каждый PR опускает `_BASELINE_UNJUSTIFIED_SILENT`.
+- **Закрытие 2026-08-05 (одним заходом, PR по MIR-077):**
+  - **Прибор чинился первым.** `scripts/except_audit.py` сравнивал имена вызовов
+    точным токеном, поэтому приватный помощник `self._log` читался как молчание:
+    5 из 46 «немотивированных» на деле журналировали. Правило расширено на
+    ведущие подчёркивания и префикс `log_` (`_log`, `_log_error`, `_log_summary`),
+    и по-прежнему отказывает `login`/`logic` — граница закреплена двумя тестами.
+    Аудит, посылающий чинить исправное, хуже отсутствия аудита.
+  - **`_emit` намеренно НЕ добавлен** в распознаватель: ложное «журналирует»
+    прячет настоящее молчание, а это худшая сторона для ошибки. Единственное
+    такое место (`core/subagent_memory_scope.py`) закрыто комментарием.
+  - **Разбор 41 оставшегося места по существу, а не по галочке.** Комментарий
+    выводит место из целевого класса, поэтому 41 комментарий закрыл бы сторож,
+    не починив ничего. По каждому решалось отдельно: молчание верно (14 мест —
+    подстановка при неудачной сериализации, путь вне рабочего каталога, ключ
+    кэша, ответ «строка не декодируется»), сбой уже уезжает в возвращаемый отчёт
+    (13 мест — `report.errors`, `warnings`, `AutonomousTaskReport`, `{"ok": False}`),
+    либо сбой действительно исчезал (14 мест — теперь журналируются).
+  - **Что журналирование открыло.** Счётчики, где «ноль» и «не смог сосчитать»
+    были одним числом; выключение дедупликации предложений при нечитаемом входящем;
+    отказ ворот бюджета, который пропускал действие вместо того чтобы задержать;
+    аудит моделей, докладывавший чистоту вместо непрочитанного; три ненаписанных
+    квитанции на эффектной операции self-apply; судья ответа субагента, чей крах
+    неотличим от оценки «плохо».
+  - **Побочные находки:** `AssumptionStore` терял неразбираемую строку молча —
+    теперь считает и пишет (`last_dropped_rows`), а докстрока «Corrupted lines are
+    silently skipped» перестала быть неправдой; на раннем выходе счётчик
+    сбрасывается (та же ловушка, что в MIR-080).
+  - **Стоимость:** `core/autonomous_runtime.py` 1364 → 1476 строк, потолок поднят
+    осознанно; `ingest_web_topic` сидел на 149 при пороге 150 и зарегистрирован,
+    а не подстрижен. 6877 passed, ruff 402 при базе 405.
 
 ### MIR-088 — the agent's test run sees a different world than the operator's
 - **Aliases:** none. **Related:** MIR-087 (same missing variable, different tool). **Provenance:** **found by the live agent**, 2026-08-04. Asked to check its own system, it ran the whole suite through `run_tests` and reported 2 failures in `tests/test_shell_exec_windows_pathext.py`. The same suite had been green in the operator's terminal minutes earlier, on the same commit. Neither side was wrong.
