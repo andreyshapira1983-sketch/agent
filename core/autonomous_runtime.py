@@ -719,6 +719,10 @@ class AutonomousRuntime:
                 "failed": output.get("failed", 0),
                 "errors": output.get("errors", 0),
                 "failed_tests": output.get("failed_tests", []),
+                # Какой код проверялся. Инструмент это возвращает (PR #301), а
+                # отчёт выбрасывал — и автономный путь, где агент судит о себе
+                # сам, оставался без ответа на «упало у меня или в проекте».
+                "code_state": output.get("code_state"),
             },
         )
 
