@@ -1,351 +1,367 @@
-# Блокнот ошибок — что проверить у себя, прежде чем сказать «готово»
+# Mistake notebook — what to check on yourself before saying "done"
 
-> **Что это.** Список ошибок, ПОЙМАННЫХ на живых прогонах этого проекта: часть
-> сделал ассистент-разработчик, часть — сам агент. Каждая записана так, чтобы
-> её можно было найти У СЕБЯ: симптом, проверка, что делать.
+> **What this is.** Mistakes CAUGHT on live runs of this project: some made by
+> the assistant, some by the agent itself. Each one is written so that you can
+> find it in your own work: symptom, cost, self-check, what to do.
 >
-> **Как этим пользоваться агенту.** Прочитать файл, взять любую строку и
-> выполнить её колонку «Как проверить у себя» на своём коде и своих журналах.
-> Найденное — не повод оправдываться, а повод завести дефект и починить.
+> **How an agent uses it.** Read the file, take any section, and run its
+> "How to check yourself" part against your own code and your own journals.
+> A hit is not something to argue with — it is a defect to file and fix.
 >
-> **Чем это НЕ является.** Не список правил поведения (это
-> [AGENT_DOCTRINE.md](AGENT_DOCTRINE.md)) и не реестр дефектов
-> (`MASTER_ISSUE_REGISTRY.md`). Здесь только ошибки, за которые уже заплачено.
+> **What this is NOT.** Not a set of behavioural rules (that is
+> [AGENT_DOCTRINE.md](AGENT_DOCTRINE.md)) and not a defect ledger
+> (`MASTER_ISSUE_REGISTRY.md`). Only mistakes already paid for.
 >
-> Ведётся с 2026-08-04. Дописывать сразу, как ошибка поймана.
+> Kept since 2026-08-04. Append the moment a mistake is caught.
 
 ---
 
-## 1. Диагноз без измерения
+## 1. A diagnosis with no measurement
 
-**Симптом.** В отчёте появляется «наверное, потому что…», «скорее всего это
-из-за…», и работа идёт дальше на этой догадке.
+**Symptom.** The report says "probably because…", "most likely due to…", and
+the work continues on that guess.
 
-**Цена.** Красный тест дважды объяснили «устаревшей рабочей копией». Обе
-версии были ложными: копия была свежая, а падение вызывала переменная
-`AGENT_TIER_PROVIDERS_STANDARD` из `.env` оператора. Проверка стоила одну
-команду; неверный диагноз стоил двух разборов.
+**Cost.** A red test was explained away twice as "a stale working copy". Both
+versions were false: the copy was current, and the failure came from
+`AGENT_TIER_PROVIDERS_STANDARD` in the operator's `.env`. Verifying cost one
+command; the wrong diagnosis cost two investigations.
 
-**Как проверить у себя.** Найти в своих ответах и журналах слова «вероятно»,
-«возможно», «скорее всего» рядом с выводом о причине. Для каждого: было ли
-измерение? Воспроизводил ли я это?
+**How to check yourself.** Search your own answers and journals for "probably",
+"likely", "seems to be" next to a conclusion about a cause. For each one: was
+there a measurement? Did I reproduce it?
 
-**Что делать.** Причину называть только после воспроизведения. Не воспроизвёл —
-писать «причина не установлена», а не гипотезу в утвердительной форме.
-
----
-
-## 2. Пустому результату поверили
-
-**Симптом.** Поиск вернул ноль → «значит, этого нет».
-
-**Цена.** Вывод «агент вообще не записывает свои отказы» — при том, что эпизод
-был записан. Искали поле `created_at` на верхнем уровне, а записи обёрнуты в
-`{_integrity, payload}`, и дата лежит внутри.
-
-**Как проверить у себя.** Любой свой вывод вида «записей нет / файла нет /
-механизм отсутствует» перепроверить так: вывести ОДНУ запись целиком и
-посмотреть её настоящие поля.
-
-**Что делать.** Ноль — это сначала «не там смотрел», и только потом «нет».
+**What to do.** Name a cause only after reproducing it. Not reproduced — write
+"cause not established" instead of stating a guess as fact.
 
 ---
 
-## 3. Ложный урок: сломался инструмент, а виноватой назначена цель
+## 2. An empty result was believed
 
-**Симптом.** Работа отвергнута из-за дефекта конвейера, а в память записан урок
-про ЦЕЛЬ («эта задача плохая»), и цель попадает в список избегаемых.
+**Symptom.** A search returned zero, therefore "it does not exist".
 
-**Цена.** 2026-08-04: строитель верно предложил разделить `core/loop_methods2.py`
-(уверенность 0.85), но ответ не разобрался из-за одного символа. В памяти
-осталось «critic_veto по core/loop_methods2.py», файл занесён в избегаемые —
-и после починки разборщика урок продолжает отталкивать от правильной работы.
+**Cost.** The conclusion "the agent never banks its rejections" — while the
+episode had in fact been written. The search looked for `created_at` at the top
+level, but records are wrapped in `{_integrity, payload}` and the date lives
+inside.
 
-**Как проверить у себя.** `recently_vetoed_self_build_targets(agent)` — по
-каждой цели прочитать `recent_self_build_lessons(agent, target)` и спросить:
-это вето о качестве кандидата или о поломке конвейера (не разобрался ответ,
-упал инструмент, кончился бюджет)?
+**How to check yourself.** Any conclusion of the form "no records / no file /
+the mechanism is missing" must be re-checked like this: print ONE record in
+full and look at its real fields.
 
-**Что делать.** Урок о поломке конвейера не должен блокировать цель. Причина
-устранена — гасить урок, а не хранить вечно.
+**What to do.** Zero means "looked in the wrong place" first, and "does not
+exist" only after that.
 
 ---
 
-## 4. Вся работа выброшена из-за одного символа
+## 3. A false lesson: the tool broke, the target was blamed
 
-**Симптом.** Длинный ответ модели не разобрался, и он отбрасывается целиком.
+**Symptom.** Work is rejected because of a pipeline defect, but the lesson
+stored in memory is about the TARGET ("this task is bad"), and the target lands
+on the avoid list.
 
-**Цена.** 170 секунд, 20 509 токенов, 183 единицы бюджета — в ноль из-за
-одиночного `\` перед пробелом. JSON был завершён корректно; повреждён один
-символ из 46 057.
+**Cost.** 2026-08-04: the builder correctly proposed splitting
+`core/loop_methods2.py` (confidence 0.85), but the reply failed to parse over a
+single character. Memory kept "critic_veto on core/loop_methods2.py" and the
+file went onto the avoid list — so even after the parser was fixed, the lesson
+keeps pushing the agent away from correct work.
 
-**Как проверить у себя.** Найти в журналах отказы вида «не разобрался»,
-«did not parse», «malformed». Для каждого взять сохранённый сырец и проверить,
-насколько он был близок к валидному.
+**How to check yourself.** `recently_vetoed_self_build_targets(agent)` — for
+each target read `recent_self_build_lessons(agent, target)` and ask: is this a
+veto about candidate quality, or about a broken pipeline (reply did not parse,
+tool crashed, budget ran out)?
 
-**Что делать.** Перед тем как выбросить дорогой результат, попытаться его
-спасти. Спасение — последний рубеж, а не подмена нормального разбора.
-
----
-
-## 5. Отказ без причины
-
-**Симптом.** В отчёте «отклонено», «вето», «не удалось» — и ни слова о том,
-что именно не так.
-
-**Цена.** Строка `builder reply did not parse into usable content
-(raw_chars=46057)` не подсказывала ничего: причиной был один слэш, и найти
-его удалось только вручную.
-
-**Как проверить у себя.** Прочитать свои сообщения об отказах глазами того,
-кто их получит. Можно ли по тексту понять, что чинить?
-
-**Что делать.** Называть причину, место и фрагмент. Длина сырца — не причина.
+**What to do.** A lesson about a broken pipeline must not block a target. Once
+the cause is removed, retire the lesson instead of keeping it forever.
 
 ---
 
-## 6. Улика без предмета
+## 4. All the work discarded over one character
 
-**Симптом.** «Тест упал», «сборка красная» — без указания, какой код
-проверялся.
+**Symptom.** A long model reply fails to parse and is thrown away whole.
 
-**Цена.** Красная строка из рабочей копии была доложена как дефект проекта, и
-проверка это подтвердила: цитата совпадала с выводом инструмента.
+**Cost.** 170 seconds, 20 509 tokens, 183 budget units — to zero, because of a
+single `\` before a space. The JSON was properly terminated; one character out
+of 46 057 was damaged.
 
-**Как проверить у себя.** В любом отчёте о прогоне найти ответ на вопрос
-«какой код проверялся»: коммит, ветка, совпадение с общей веткой. Нет ответа —
-улика неполная.
+**How to check yourself.** Find rejections in the journals of the form "did not
+parse", "malformed", "unparseable". For each one, take the preserved raw reply
+and measure how close it was to valid.
 
-**Что делать.** Прогон обязан нести отпечаток кода (`core/code_state.py`).
-
----
-
-## 7. Правка ломает соседей, о которых не подумали
-
-**Симптом.** Локальное улучшение — и красные тесты в чужих местах.
-
-**Цена.** Диагностика, зовущая `git` отдельным процессом, уронила 20 тестов:
-они перехватывают запуск процессов и ловили чужие вызовы. Автоправка
-директив подавления снесла импорты со скрытым эффектом — ещё 17.
-
-**Как проверить у себя.** Перед коммитом: кто ещё пользуется этим механизмом?
-Полный набор тестов прогнан ДО коммита, а не после?
-
-**Что делать.** Общее место правится только с полным прогоном. Диагностика не
-имеет права порождать процессы и побочные эффекты.
+**What to do.** Before discarding an expensive result, try to rescue it. Rescue
+is a last resort, never a replacement for normal parsing.
 
 ---
 
-## 8. Чинится симптом, а не решающее место
+## 5. A rejection with no reason
 
-**Симптом.** Правка в файле, где ошибка ВИДНА, а не там, где принимается
-решение.
+**Symptom.** The report says "rejected", "veto", "failed" — and nothing about
+what exactly is wrong.
 
-**Цена.** Клеймо «выдуманная ссылка» ставил верификатор — и был прав: улику ему
-просто не положили. Настоящее место было на файл раньше.
+**Cost.** The line `builder reply did not parse into usable content
+(raw_chars=46057)` gave no clue: the cause was a single backslash, and finding
+it took manual work.
 
-**Как проверить у себя.** Для каждой своей правки: это место, где решение
-принимается, или место, где последствие заметно?
+**How to check yourself.** Read your own rejection messages through the eyes of
+whoever receives them. Can they tell what to fix?
 
-**Что делать.** Идти от симптома к решающему месту. Соседний дефект по дороге —
-регистрировать, а не чинить попутно.
-
----
-
-## 9. Тест, который ничего не проверяет
-
-**Симптом.** Утверждение вида `assert X and True or True`, `assert x or True`,
-`in ("score",)` — всегда истинно.
-
-**Цена.** Тест про подмену программы годами проходил, ничего не проверяя.
-Когда утверждение восстановили, оно упало: ожидание было неверным изначально.
-
-**Как проверить у себя.** Искать `or True` / `and True` **внутри строки,
-начинающейся с `assert`** — проверено на этом проекте: поиск по всему тексту
-даёт ложные срабатывания (идиома `seen.append(x) or True` в подменах и
-`assert True` внутри генерируемых тестовых файлов — не дефекты). Для каждого
-найденного: сломай проверяемый код нарочно — тест покраснеет?
-
-**Что делать.** Восстановить настоящую проверку. Если она падает — это находка,
-а не повод вернуть заглушку.
+**What to do.** Name the cause, the position and the surrounding fragment. The
+length of the raw reply is not a cause.
 
 ---
 
-## 10. Скрытый контракт через строку
+## 6. Evidence with no subject
 
-**Симптом.** Поля и методы, которых нет в классе, ставятся снаружи через
-`getattr`/`setattr` со строковым именем.
+**Symptom.** "A test failed", "the build is red" — with no statement of which
+code was under test.
 
-**Цена.** Связь между CLI и ядром была невидима для любой проверки типов;
-анализатор справедливо назвал это обходом.
+**Cost.** A red line from a working copy was reported as a project defect, and
+verification confirmed it: the quotation did match the tool output.
 
-**Как проверить у себя.** Найти `getattr(obj, "…")` и `setattr(obj, "…")` со
-строковым литералом. Объявлен ли атрибут в классе?
+**How to check yourself.** In any run report, look for the answer to "which
+code was checked": commit, branch, whether it matches the shared branch. No
+answer means the evidence is incomplete.
 
-**Что делать.** Объявить явно. Значение по умолчанию оставить прежним.
-
----
-
-## 11. Работа мимо проверки
-
-**Симптом.** Часть работы зовёт модель напрямую, минуя общий цикл — и потому
-не проходит верификацию, не пишет улики, не оставляет обычного следа.
-
-**Цена.** Самопостроение идёт своим путём: у него свои роли, своё вето и своя
-запись в память. Что там проверено, а что нет — по журналу цикла не видно.
-
-**Как проверить у себя.** Для каждого места, где зовётся модель: проходит ли
-результат через верификатор? Пишутся ли улики? Если нет — почему.
-
-**Что делать.** Либо вести через общий цикл, либо честно называть это отдельным
-путём с собственными гарантиями — и перечислить их.
+**What to do.** A run must carry a code fingerprint (`core/code_state.py`).
 
 ---
 
-## 12. Решение принимается по форме, а не по сути
+## 7. A fix breaks neighbours nobody thought about
 
-**Симптом.** Выбор зависит от длины строки, числа символов, порядка слов.
+**Symptom.** A local improvement, and red tests somewhere else entirely.
 
-**Цена.** Вопрос «что ты думаешь о себе» (160 символов) уходил на самую слабую
-модель, а тот же вопрос на 194 символа — на сильную. Разницу давала длина.
+**Cost.** Diagnostics that called `git` as a subprocess broke 20 tests: they
+patch process spawning globally and were catching the git calls instead of
+pytest. An automatic fix to suppression directives removed imports with side
+effects — 17 more.
 
-**Как проверить у себя.** Найти в коде решения, где участвует `len(...)` от
-пользовательского текста. Меняется ли решение, если то же самое сказать
-длиннее?
+**How to check yourself.** Before committing: who else uses this mechanism? Was
+the full suite run BEFORE the commit, not after?
 
-**Что делать.** Решать по существу; длину использовать только как ограничение
-ресурса, а не как признак сложности.
-
----
-
-## 13. Мёртвый код, который выглядит защитой
-
-**Симптом.** Ветка `except`, которая не может сработать; директива подавления,
-которой нечего подавлять; параметр, который никто не передаёт.
-
-**Цена.** Ложное чувство защищённости и лишние строки. Отдельный класс —
-директивы не тому анализатору: `noqa` там, где нужен `nosec`.
-
-**Как проверить у себя.** `ruff check .` (полным набором из `ruff.toml`) и
-искать `RUF100` в выводе. **Не** `ruff check --select RUF100`: суженный набор
-отключает остальные правила, и живые директивы для них выглядят мёртвыми —
-проверено, такая команда даёт пять ложных находок в `agent_tick.py`, тогда
-как на полном наборе мёртвых директив ноль. Для каждой `except`: какой вызов
-может выбросить это исключение?
-
-**Что делать.** Удалять. Защита, которая не срабатывает, хуже отсутствия
-защиты — на неё рассчитывают.
-
-**Отдельно: проверка суженным набором врёт.** Любой инструмент, запущенный с
-`--select` / `--only` / одним правилом, судит в другом мире, чем боевой
-прогон. Сверяться надо с той же настройкой, что стоит в проекте.
+**What to do.** A shared place is only changed with a full run. Diagnostics may
+not spawn processes or cause side effects.
 
 ---
 
-## 14. Объяснение вместо кода
+## 8. Fixing the symptom instead of the deciding place
 
-**Симптом.** Комментарий на пятнадцать строк над тремя строками логики.
+**Symptom.** The change lands where the error is VISIBLE, not where the
+decision is made.
 
-**Цена.** Читателю приходится продираться через прозу к сути. Оператор назвал
-это «декларацией».
+**Cost.** The "fabricated citation" verdict came from the verifier — and it was
+right: the evidence had simply never been handed to it. The real place was one
+file earlier.
 
-**Как проверить у себя.** Найти комментарии длиннее пяти строк. Что из них
-нельзя увидеть из самого кода?
+**How to check yourself.** For each of your changes: is this where the decision
+is made, or where the consequence shows?
 
-**Что делать.** В коде — причина, которой не видно из кода. История и
-измерения — в сообщение коммита.
+**What to do.** Walk from the symptom to the deciding place. A neighbouring
+defect found on the way gets filed, not fixed in passing.
 
 ---
 
-## 15. Строитель сбивается на длинном ответе — примерно в одной точке
+## 9. A test that checks nothing
 
-**Симптом.** Ответ строителя не разбирается как JSON. Причина каждый раз
-разная, а место — почти одно.
+**Symptom.** An assertion of the form `assert X and True or True`,
+`assert x or True` — always true.
 
-**Цена (два прогона подряд, 2026-08-04).**
+**Cost.** A test guarding against binary substitution passed for a long time
+while checking nothing. When the assertion was restored it failed: the
+expectation had been wrong from the start.
 
-| прогон | размер ответа | поломка | позиция |
+**How to check yourself.** Search for `or True` / `and True` **inside lines
+that begin with `assert`** — verified on this project: searching the whole text
+produces false hits (the `seen.append(x) or True` idiom in fakes, and
+`assert True` inside generated test files are not defects). For every real hit:
+break the code under test on purpose — does the test go red?
+
+**What to do.** Restore a real assertion. If it fails, that is a finding, not a
+reason to put the placeholder back.
+
+---
+
+## 10. A hidden contract through a string
+
+**Symptom.** Attributes and methods that the class does not declare are set
+from outside via `getattr` / `setattr` with a string name.
+
+**Cost.** The link between the CLI and the kernel was invisible to any type
+check; the analyser rightly called it a bypass.
+
+**How to check yourself.** Find `getattr(obj, "…")` and `setattr(obj, "…")`
+with a string literal. Is the attribute declared on the class?
+
+**What to do.** Declare it explicitly. Keep the same default value.
+
+---
+
+## 11. Work that bypasses verification
+
+**Symptom.** Part of the work calls the model directly, outside the shared
+cycle — so it is never verified, writes no evidence and leaves no ordinary
+trace.
+
+**Cost.** Self-build runs its own path: its own roles, its own veto, its own
+memory write. What was verified there and what was not cannot be seen from the
+cycle journal.
+
+**How to check yourself.** For every place that calls a model: does the result
+pass the verifier? Is evidence written? If not, why not.
+
+**What to do.** Either route it through the shared cycle, or state honestly
+that it is a separate path with its own guarantees — and list them.
+
+---
+
+## 12. A decision made on form instead of substance
+
+**Symptom.** The choice depends on string length, character count, word order.
+
+**Cost.** "What do you think about yourself" (160 characters) went to the
+weakest model, while the same question at 194 characters went to a strong one.
+Length made the difference.
+
+**How to check yourself.** Find decisions in the code that use `len(...)` of
+user text. Does the decision change if the same thing is said at greater
+length?
+
+**What to do.** Decide on substance; use length only as a resource limit, never
+as a proxy for difficulty.
+
+---
+
+## 13. Dead code that looks like protection
+
+**Symptom.** An `except` branch that cannot fire; a suppression directive with
+nothing to suppress; a parameter nobody passes.
+
+**Cost.** A false sense of safety and extra lines. A related class: directives
+aimed at the wrong analyser — `noqa` where `nosec` is required.
+
+**How to check yourself.** `ruff check .` (with the full rule set from
+`ruff.toml`) and look for `RUF100` in the output. **Not**
+`ruff check --select RUF100`: a narrowed set disables the other rules, so live
+directives for them look dead — verified, that command produces five false hits
+in `agent_tick.py`, while the full set reports zero dead directives. For every
+`except`: which call can raise that?
+
+**What to do.** Delete it. Protection that never fires is worse than none —
+people rely on it.
+
+**Related: a narrowed check lies.** Any tool run with `--select` / `--only` /
+a single rule judges in a different world than the real run. Compare against
+the same configuration the project actually uses.
+
+---
+
+## 14. Explanation instead of code
+
+**Symptom.** A fifteen-line comment above three lines of logic.
+
+**Cost.** The reader has to wade through prose to reach the point. The operator
+called it "a tax declaration".
+
+**How to check yourself.** Find comments longer than five lines. What in them
+cannot be seen from the code itself?
+
+**What to do.** In the code, keep the reason that the code cannot show. History
+and measurements belong in the commit message.
+
+---
+
+## 15. The builder derails on a long reply — at roughly the same point
+
+**Symptom.** The builder's reply fails to parse as JSON. The cause differs each
+time; the position barely does.
+
+**Cost (two consecutive runs, 2026-08-04).**
+
+| run | reply size | breakage | position |
 |---|---|---|---|
-| 06:24 | 46 057 симв, 20 509 токенов, 183 единицы | одиночный `\` перед пробелом | 32 326 |
-| 07:19 | 47 830 симв, 22 719 токенов, 189 единиц | кавычка без экранирования: строка закрылась раньше времени | 32 440 |
+| 06:24 | 46 057 chars, 20 509 tokens, 183 units | a lone `\` before a space | 32 326 |
+| 07:19 | 47 830 chars, 22 719 tokens, 189 units | an unescaped quote closed the string early | 32 440 |
 
-Разница позиций — **114 символов** при разных причинах и разных прогонах.
-Оба раза модель писала код на Python внутри JSON-строки, экранируя кавычки,
-и оба раза сбивалась примерно на 32-й тысяче символов. Суммарно выброшено
-372 единицы бюджета и ~6 минут работы.
+**114 characters apart** with different causes on different runs. Both times
+the model was writing Python inside a JSON string with escaped quotes, and both
+times it derailed around the 32nd thousand characters. Total discarded: 372
+budget units and roughly six minutes of work.
 
-**Причина не установлена.** Связь с лимитом токенов не проверена: заявленный
-предел строителя 16 000 токенов, а ответы занимали 20 509 и 22 719 — то есть
-предел и так не соблюдается, и это отдельный незакрытый вопрос.
+**Cause not established.** The relation to the token limit is unverified: the
+builder's declared ceiling is 16 000 tokens while the replies took 20 509 and
+22 719 — so the ceiling is not honoured either, which is a separate open
+question.
 
-**Как проверить у себя.** Взять все сохранённые отказы
-(`logs/self_build_rejects/`), для каждого получить позицию ошибки JSON и
-сравнить. Позиции кучкуются? Значит дело не в «случайной ошибке модели».
+**How to check yourself.** Take every preserved rejection
+(`logs/self_build_rejects/`), get the JSON error position for each, and compare
+them. Do the positions cluster? Then it is not "a random model slip".
 
-**Что делать.** Не просить у модели гигантский JSON с кодом внутри строк:
-44 000 символов кода с экранированием — заведомо хрупкий формат. Отдавать
-файлы по одному либо разделителями, а не JSON-строками. Пластыри (спасение
-одиночного слэша, PR #303) чинят следствие, а не это.
+**What to do.** Do not ask a model for a giant JSON with code inside strings:
+44 000 characters of escaped code is a fragile format by construction. Hand
+files over one at a time, or with delimiters instead of JSON strings. Patches
+(rescuing a lone backslash, PR #303) treat the consequence, not this.
 
 ---
 
-## 16. Выдуманный пример в документации
+## 16. An invented example in the documentation
 
-**Симптом.** В документе приведён путь, класс или команда «для примера» —
-и такого файла в проекте нет.
+**Symptom.** A document cites a path, class or command "as an example" — and no
+such file exists in the project.
 
-**Цена (2026-08-04, поймано в тот же час, когда заведён этот блокнот).**
-В правило адреса я вписал образец вида `core/<ВЫДУМАННОЕ>.py:120`. Файла нет.
-Проверка
-`scripts/docs_code_conformance.py` покраснела, два теста упали, ушёл лишний
-цикл правки — в документе про то, как избегать ошибок.
+**Cost (2026-08-04, caught within an hour of starting this notebook).** The
+address rule carried a sample of the form `core/<INVENTED>.py:120`. No such
+file. `scripts/docs_code_conformance.py` went red, two tests failed, and an
+extra fix cycle was spent — in the very document about avoiding mistakes.
 
-**Как проверить у себя.** `python scripts/docs_code_conformance.py` — она
-разрешает каждую ссылку на код во всех документах. Красная строка
-`MISSING PATHS` называет файл и строку.
+**How to check yourself.** `python scripts/docs_code_conformance.py` resolves
+every code reference across all documents. A red `MISSING PATHS` line names the
+file and the line.
 
-**Что делать.** Примеры брать из настоящего кода. Выдуманное имя в документе
-неотличимо от устаревшей ссылки — и то и другое ведёт читателя в пустоту.
-Если нужно ПОКАЗАТЬ плохой пример — писать его так, чтобы он не выглядел
-путём (угловые скобки, кириллица): описание ошибки не должно её повторять.
-Именно на этом проверка поймала меня во второй раз, уже на цитате.
+**What to do.** Take examples from real code. An invented name in a document is
+indistinguishable from a stale reference — both send the reader nowhere. If a
+bad example must be SHOWN, write it so it does not look like a path (angle
+brackets, non-Latin letters): describing a mistake must not repeat it. That is
+exactly what caught me the second time, on the quotation itself.
 
-## Журнал находок — точный адрес каждой ошибки
+---
 
-Таблица ниже избавляет от поиска: файл и строка названы. Это ОБЩИЙ журнал —
-сюда пишут оба, ассистент и автономный агент, и оба его читают.
+## Findings journal — the exact address of each mistake
 
-Колонка «Где разбиралось» — история, а не статус: **статусом дефектов владеет
-`MASTER_ISSUE_REGISTRY.md`**, и дублировать его здесь запрещено правилом «один
-вопрос — один владелец» (см. `docs/INDEX.md`).
+The table below removes the search: file and line are named. This is a SHARED
+journal — both the assistant and the autonomous agent write into it and read
+from it.
 
-| № | Файл:строка | Что там | Кто нашёл | Где разбиралось |
+The "Where handled" column is history, not status: **defect status is owned by
+`MASTER_ISSUE_REGISTRY.md`**, and duplicating it here is forbidden by the
+"one question, one owner" rule (see `docs/INDEX.md`).
+
+| # | File:line | What is there | Found by | Where handled |
 |---|---|---|---|---|
-| 3 | [core/self_build_memory.py:119](../core/self_build_memory.py#L119) | запись урока об отказе: причина вето не различается («кандидат плох» ↔ «конвейер сломался») | ассистент, 2026-08-04 | не разбиралось |
-| 2 | [core/smart_memory.py:1546](../core/smart_memory.py#L1546) | эпизоды пишутся в конверте `{_integrity, payload}` — поиск по верхнему уровню даёт ложный ноль | ассистент, 2026-08-04 | ловушка чтения, не дефект |
-| 3 | [core/self_build_memory.py:165](../core/self_build_memory.py#L165) | список избегаемых целей: пополняется и от поломок инструмента | ассистент, 2026-08-04 | не разбиралось |
-| 4 | [core/plan_parsing.py:242](../core/plan_parsing.py#L242) | спасение JSON от одиночного `\` — пример, как чинить этот класс | ассистент, 2026-08-04 | PR #303 |
-| 5 | [core/self_build_producer.py:320](../core/self_build_producer.py#L320) | отказ теперь называет причину, позицию и фрагмент | ассистент, 2026-08-04 | PR #303 |
-| 6 | [core/code_state.py:97](../core/code_state.py#L97) | отпечаток проверенного кода — коммит, ветка, расхождение | ассистент, 2026-08-04 | PR #301 |
-| 6 | [core/autonomous_runtime.py:684](../core/autonomous_runtime.py#L684) | автономный отчёт о тестах несёт отпечаток | ассистент, 2026-08-04 | PR #302 |
-| 11 | [core/self_build_producer.py:409](../core/self_build_producer.py#L409) | строитель зовёт модель напрямую: результат не проходит верификатор | ассистент, 2026-08-04 | не разбиралось |
-| 12 | [core/task_complexity.py:108](../core/task_complexity.py#L108) | порог длины ~180 символов решает, какая модель ответит | ассистент, 2026-08-04 | PR #301, частично |
-| 15 | [core/self_build_producer.py:110](../core/self_build_producer.py#L110) | два ответа подряд сломались на позициях 32 326 и 32 440 — формат «код внутри JSON» хрупок | ассистент, 2026-08-04 | не разбиралось |
-| 16 | [docs/MISTAKE_NOTEBOOK.md:1](../docs/MISTAKE_NOTEBOOK.md#L1) | выдуманный пример пути в правиле адреса — поймала конформация документации | ассистент, 2026-08-04 | PR #306 |
-| — | [core/self_build_producer.py:110](../core/self_build_producer.py#L110) | лимит строителя 16 000 токенов, а живой ответ занял 20 509 — предел не соблюдается | ассистент, 2026-08-04 | не разбиралось |
+| 3 | [core/self_build_memory.py:119](../core/self_build_memory.py#L119) | rejection lesson: the veto cause is not distinguished ("bad candidate" vs "broken pipeline") | assistant, 2026-08-04 | not handled |
+| 2 | [core/smart_memory.py:1546](../core/smart_memory.py#L1546) | episodes are written wrapped in `{_integrity, payload}` — a top-level search returns a false zero | assistant, 2026-08-04 | reading trap, not a defect |
+| 3 | [core/self_build_memory.py:165](../core/self_build_memory.py#L165) | avoid list: also filled by tool breakages | assistant, 2026-08-04 | not handled |
+| 4 | [core/plan_parsing.py:242](../core/plan_parsing.py#L242) | rescuing JSON from a lone `\` — an example of how to fix this class | assistant, 2026-08-04 | PR #303 |
+| 5 | [core/self_build_producer.py:320](../core/self_build_producer.py#L320) | a rejection now names the cause, the position and the fragment | assistant, 2026-08-04 | PR #303 |
+| 6 | [core/code_state.py:97](../core/code_state.py#L97) | fingerprint of the checked code — commit, branch, divergence | assistant, 2026-08-04 | PR #301 |
+| 6 | [core/autonomous_runtime.py:684](../core/autonomous_runtime.py#L684) | the autonomous test report carries the fingerprint | assistant, 2026-08-04 | PR #302 |
+| 11 | [core/self_build_producer.py:409](../core/self_build_producer.py#L409) | the builder calls the model directly: the result never reaches the verifier | assistant, 2026-08-04 | not handled |
+| 12 | [core/task_complexity.py:108](../core/task_complexity.py#L108) | a ~180-character threshold decides which model answers | assistant, 2026-08-04 | PR #301, partly |
+| 15 | [core/self_build_producer.py:110](../core/self_build_producer.py#L110) | two consecutive replies broke at 32 326 and 32 440 — "code inside JSON" is a fragile format | assistant, 2026-08-04 | not handled |
+| 16 | [docs/MISTAKE_NOTEBOOK.md:1](../docs/MISTAKE_NOTEBOOK.md#L1) | an invented example path in the address rule — caught by the docs conformance check | assistant, 2026-08-04 | PR #306 |
+| — | [core/self_build_producer.py:110](../core/self_build_producer.py#L110) | the builder's ceiling is 16 000 tokens, yet a live reply took 20 509 — the limit is not honoured | assistant, 2026-08-04 | not investigated |
 
-## Как пополнять
+## How to append
 
-Одна ошибка — один раздел, в том же виде: симптом, цена (с числами), как
-проверить у себя, что делать. Без чисел запись бесполезна: «бывает плохо» не
-проверяется. Новую находку — строкой в журнал выше, обязательно с `файл:строка`.
+One mistake, one section, in the same shape: symptom, cost (with numbers), how
+to check yourself, what to do. Without numbers a record is useless: "sometimes
+this goes wrong" cannot be checked. A new finding goes as a row into the table
+above, always with `file:line`.
 
-**Правило адреса:** путь только внутрь репозитория, от его корня
-(например, `core/loop.py:120`). Ссылка наружу (`../…`) отвергается сторожем: в блокноте
-она бессмысленна.
+**Address rule:** paths point inside the repository, from its root (for
+example, `core/loop.py:120`). A path leading outside (`../…`) is rejected by
+the guard: in this notebook it is meaningless.
 
-**Агенту:** дописывай в конец таблицы своей строкой, поле «Кто нашёл» —
-`агент, ГГГГ-ММ-ДД`. Если проверка из раздела дала у тебя срабатывание,
-которое дефектом не является, — не молчи: напиши это в разделе, чтобы проверка
-уточнилась (так уже сделано в разделе 9). Ошибку, которую заметил ты, а
-ассистент пропустил, отмечай явно: это ценнее всего остального в файле.
+**For the agent:** append your own row at the end of the table, with "Found by"
+set to `agent, YYYY-MM-DD`. If a check from a section fires on you but is not a
+real defect, say so: write it into the section so the check gets sharpened —
+that has already happened in section 9. A mistake that you spotted and the
+assistant missed should be marked explicitly: it is the most valuable thing in
+this file.
