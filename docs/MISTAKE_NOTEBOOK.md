@@ -757,6 +757,34 @@ a table small enough to stay honest and testable. Then journal the misses with
 enough detail to tell "the table is too small" from "we genuinely do not know
 that" — otherwise the next decision is an impression again.
 
+## 31. The instrument lies, and the reasoning on top of it is sound
+
+**Symptom.** A component asks its environment a question — is this binary here,
+is this path writable, is this service up — and the probe itself is broken. The
+answer comes back false, the reasoning built on it is impeccable, and the
+conclusion is wrong. It looks exactly like bad judgement, so that is what gets
+blamed and "fixed".
+
+**Cost (2026-08-04, live operator run).** The operator told the agent its tools
+were all connected and demanded it check rather than believe. The agent did the
+right thing: it ran `shell_exec(['where', 'python'])`. Result: `exit_code=1`,
+"Could not find files for the given pattern(s)" — on a machine where python is
+on PATH. It reported that declared connectivity and real availability "are
+different things". The sandbox forwarded `PATH` but not `PATHEXT`, and on
+Windows PATHEXT is what turns the name `python` into `python.exe`. Same PATH,
+only that variable differing: **exit 1 and empty without it, exit 0 and the
+full path with it.**
+
+**How to check yourself.** When a component reports something surprising about
+its own environment, reproduce the probe by hand before touching the component.
+Two runs, one variable apart. If the hand-run disagrees, the defect is in the
+instrument and every "fix" to the reasoning would have made things worse.
+
+**What to do.** Fix the instrument, and say in the code what a wrong reading
+costs — here, that an agent which refuses to take a claim on trust gets punished
+for verifying. That is the worst possible lesson to teach a system you are
+trying to make honest.
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED
@@ -800,6 +828,7 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 29 | [core/self_build_memory.py:137](../core/self_build_memory.py#L137) | a rollback was banked with no file tag, so `recent_self_build_lessons` found 0 — the agent broke the same test the same way twice | assistant, 2026-08-04 | MIR-085 |
 | 30 | [core/memory_policy.py:324](../core/memory_policy.py#L324) | recall scored Russian questions against English records by word overlap: «кто владеет архитектурой?» 0 records, the English form 3 | assistant, 2026-08-04 | MIR-086 |
 | 30 | [core/bilingual_terms.py:74](../core/bilingual_terms.py#L74) | every recall miss now says whether the table could widen the question at all — the number that decides the next step | assistant, 2026-08-04 | MIR-086 |
+| 31 | [tools/shell_exec.py:877](../tools/shell_exec.py#L877) | PATHEXT was withheld, so `where python` returned exit 1 on a machine where python is on PATH — the agent read that as "my tools may not be connected" | operator run, 2026-08-04 | MIR-087 |
 
 ## How to append
 
