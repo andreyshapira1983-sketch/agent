@@ -35,23 +35,24 @@ SKIP_DIRS = frozenset({
 
 #: "path:function" -> ceiling. Measured 2026-08-04.
 WATCH: dict[str, int] = {
-    "core/loop.py:AgentLoop._run_inner": 2223,  # цель — разбор на этапы
+    "core/loop.py:AgentLoop._run_inner": 427,  # замер 417 (2213 до раскола) + запас 10
     "core/step_sanitizer.py:sanitize_step": 668,
     "core/loop_step_execution.py:AgentLoopStepExecution._execute_step": 568,
     "agent_tick.py:run_tick": 474,
-    "core/loop.py:AgentLoop._synthesize": 430,  # следующий кусок разбора
+    "core/loop_synthesis.py:AgentLoopSynthesis._synthesize": 430,  # уехал целиком из core/loop.py
+    "core/loop_response_deciders.py:AgentLoopResponseDeciders._build_response_draft": 269,
     "core/self_build_producer.py:produce_self_apply_proposal": 375,
     "core/campaign.py:run_campaign": 350,
     "cli/command_dispatch.py:handle_meta_command": 349,
     "core/evidence.py:evidence_from_tool_result": 321,
     "core/verifier_core.py:verify": 283,
     "app/bootstrap.py:build_agent": 246,
-    "core/loop_methods2.py:AgentLoopExtractedMethods2._record_experience_memory": 246,
+    "core/loop_memory_write.py:AgentLoopMemoryWrite._record_experience_memory": 246,
     "core/referent_resolver.py:ReferentResolver.resolve": 240,
-    "core/loop.py:AgentLoop.__init__": 238,
+    "core/loop_init.py:AgentLoopInit.__init__": 238,  # уехал целиком из core/loop.py
     "core/self_apply_lane.py:run_self_apply_lane": 235,
     "core/model_router.py:ModelRouter.for_task": 227,
-    "core/loop_methods2.py:AgentLoopExtractedMethods2._retrieve_experience_memory": 218,
+    "core/loop_memory_read.py:AgentLoopMemoryRead._retrieve_experience_memory": 218,
     "core/work_session.py:run_work_session": 211,
     "core/architecture_audit.py:_build_checks": 197,
     "core/self_task_builder.py:build_coding_task": 195,
@@ -69,6 +70,10 @@ WATCH: dict[str, int] = {
     "core/role_router.py:RoleRouter.route": 163,
     "core/low_evidence_policy.py:evaluate_low_evidence_policy": 161,
     "core/planner.py:LLMPlanner.plan": 159,
+    "core/loop_verification.py:AgentLoopVerification._verify_draft": 165,
+    "core/loop_run_tail.py:AgentLoopRunTail._finalize_run_tail": 203,
+    "core/loop_attempt.py:AgentLoopAttempt._run_attempt_loop": 433,
+    "core/loop_verify_replan.py:AgentLoopVerifyReplan._verify_and_settle_answer": 358,
 }
 
 

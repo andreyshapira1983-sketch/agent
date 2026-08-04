@@ -290,7 +290,7 @@ class TestValidateOutput:
         out = self._ok()
         out["events_returned"] = 5
         out["total_events"] = 1
-        ok, issues = ReadLogsTool(workspace_root=workspace).validate_output(out)
+        ok, _issues = ReadLogsTool(workspace_root=workspace).validate_output(out)
         assert not ok
 
     def test_returned_greater_than_total_ok_when_filtered(self, workspace: Path):

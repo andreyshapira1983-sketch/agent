@@ -33,10 +33,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.approval import AutoApprover
-from core.hygiene import archive_low_value_memory
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.memory import WorkingMemory
+from core.memory_hygiene import archive_low_value_memory
 from core.memory_policy import MemoryRetrievalPolicy, MemoryWritePolicy
 from core.models import MemoryRecord
 from core.persistent_memory import PersistentMemoryStore

@@ -105,7 +105,7 @@ job description.
 
 | # | Decision | Where it is made today |
 |---|---|---|
-| D1 | Do we need the model at all for this input? | `core/strategy_router.py`, `core/operator_intent.py`, episodic fast path in `core/loop.py:862-928` |
+| D1 | Do we need the model at all for this input? | `core/strategy_router.py`, `core/operator_intent.py`, episodic fast path in `core/loop_gates.py:123-189` (уехало из `core/loop.py` при разборе на модули; прежний якорь — строка 862 того файла — к тому времени уже указывал не туда и держался только тем, что попадал в диапазон) |
 | D2 | Is the request understood well enough to start? | `core/clarification_gate.py`, `core/clarification_policy.py`, `core/operational_domain.py` |
 | D3 | What is the plan, and is this plan admissible? | `core/planner.py` proposes; `core/loop.py` admits (`plan_parse_failed`, `plan_tool_drop`) |
 | D4 | May this specific action execute? | `core/policy.py`, `core/actuation_gateway.py`, `core/approval.py` |
@@ -257,7 +257,7 @@ nothing, spend nothing, and remember nothing on its own.*
    answer at Jaccard ≥ 0.85 and quality ≥ 0.70, and only for tool-free
    episodes), and the **planner cache / cheap path**.
    *Proof:* `tests/test_operator_intent.py`, `tests/test_strategy_router.py`;
-   the fast path's guards are in `core/loop.py:862-928`.
+   the fast path's guards are in `core/loop_gates.py:123-189` (см. пометку про прежний якорь выше).
 
 > **RECALL CORRECTION (2026-07-26) — this is the tooth that misses, and it misses
 > most of the time.** Precision is fine: when the router matches, it routes
@@ -507,7 +507,10 @@ nothing, spend nothing, and remember nothing on its own.*
 > exists and is already wired into the loop: `core/low_evidence_policy.py` (its
 > own docstring calls itself *"the enforcement layer paired with the gate"*) plus
 > `core/unsupported_claims.py::apply_answer_enforcement`, called at
-> `core/loop.py:2170`. It rewrites a severely under-supported answer into a short
+> `core/loop_response_deciders.py:286` (жил в `core/loop.py` до разбора на
+> модули; прежний якорь на строку 2170 к тому времени уже указывал не туда и
+> держался только тем, что попадал в диапазон файла). It rewrites a severely
+> under-supported answer into a short
 > honest reply and downgrades the Confidence line.
 >
 > Three separate reasons it changed nothing in practice, all measured by replaying

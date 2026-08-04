@@ -416,7 +416,7 @@ def test_bridge_does_not_import_shell_exec():
     import_lines = [
         line
         for line in Path(bridge.__file__).read_text(encoding="utf-8").splitlines()
-        if line.startswith("import ") or line.startswith("from ")
+        if line.startswith(("import ", "from "))
     ]
     joined = "\n".join(import_lines)
     assert "shell_exec" not in joined

@@ -19,33 +19,33 @@ from core.smart_memory import (
 
 
 def _candidate(**over) -> ProcedureRecord:
-    base = dict(
-        name="read and enumerate",
-        workflow_key="tools:file_read",
-        trigger_tags=("functions",),
-        steps=("Situation: x", "Run tool: file_read"),
-        lessons=(),
-        source_episode_ids=(),
-        success_count=1,
-        failure_count=0,
-        confidence=0.667,
-        status="candidate",
-    )
+    base = {
+        "name": "read and enumerate",
+        "workflow_key": "tools:file_read",
+        "trigger_tags": ("functions",),
+        "steps": ("Situation: x", "Run tool: file_read"),
+        "lessons": (),
+        "source_episode_ids": (),
+        "success_count": 1,
+        "failure_count": 0,
+        "confidence": 0.667,
+        "status": "candidate",
+    }
     base.update(over)
     return ProcedureRecord(**base)
 
 
 def _episode(**over) -> EpisodeRecord:
-    base = dict(
-        goal="fix the parser bug",
-        question="fix the parser bug",
-        summary="read and fixed",
-        outcome="success",
-        tools_used=("file_read",),
-        completion_state="achieved",
-        declared_completion="achieved",
-        used_procedure_ids=(),  # the procedure was NOT applied
-    )
+    base = {
+        "goal": "fix the parser bug",
+        "question": "fix the parser bug",
+        "summary": "read and fixed",
+        "outcome": "success",
+        "tools_used": ("file_read",),
+        "completion_state": "achieved",
+        "declared_completion": "achieved",
+        "used_procedure_ids": (),  # the procedure was NOT applied
+    }
     base.update(over)
     return EpisodeRecord(**base)
 

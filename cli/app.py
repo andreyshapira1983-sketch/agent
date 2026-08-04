@@ -60,9 +60,9 @@ def _preflight_file_hint(file_hint: str | None, workspace: Path) -> tuple[bool, 
         return True, None
     return (
         False,
-        "ERROR: file hint does not exist:\n"
+        ("ERROR: file hint does not exist:\n"
         f"{path}\n\n"
-        "No model calls were made.",
+        "No model calls were made."),
     )
 
 
@@ -85,7 +85,14 @@ def run_cli() -> int:
 
     # §3.5 Resume: if --resume is given, look up the checkpoint file and
     # short-circuit before building the full agent stack when possible.
-    if args.resume:
+    #
+    # `is not None`, а НЕ проверка истинности: argparse ставит `None`, когда
+    # флага не было, и пустую строку, когда его дали пустым. При проверке
+    # истинности `--resume ""` проваливался мимо всей ветки — оператор просил
+    # возобновить, молча получал новый прогон с кодом 0, тогда как остальные
+    # четыре негодных значения честно падали с кодом 2. Проверка в
+    # `resolve_resume` пустую строку отвергает; до неё просто не доходило.
+    if args.resume is not None:
         decision = resolve_resume(
             args.resume,
             workspace=workspace,

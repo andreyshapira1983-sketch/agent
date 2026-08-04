@@ -16,15 +16,14 @@ from pathlib import Path
 
 import pytest
 
-from core.hygiene import (
+from core.backup_cleanup import BackupCleanupReport, cleanup_backups
+from core.memory_hygiene import (
     DEFAULT_DEDUP_THRESHOLD,
     SUMMARY_TAG,
-    BackupCleanupReport,
     DedupReport,
     ExpiryReport,
     SummaryReport,
     _similarity,
-    cleanup_backups,
     deduplicate_memory,
     expire_memory,
     find_duplicate,
@@ -277,7 +276,7 @@ class _InMemoryStore:
 
 
 def _rec(text: str, created_at: datetime | None = None, tags=None) -> MemoryRecord:
-    kwargs = dict(content=text, tags=tags or ["fact"], owner="user")
+    kwargs = {"content": text, "tags": tags or ["fact"], "owner": "user"}
     if created_at is not None:
         kwargs["created_at"] = created_at
     return MemoryRecord(**kwargs)

@@ -111,10 +111,7 @@ def _reasoning_mentions(reasoning: str, tool: str) -> bool:
     text = reasoning.lower()
     if tool.lower() in text:
         return True
-    for kw in _TOOL_KEYWORDS.get(tool, ()):
-        if _keyword_in_text(text, kw):
-            return True
-    return False
+    return any(_keyword_in_text(text, kw) for kw in _TOOL_KEYWORDS.get(tool, ()))
 
 
 def _tool_alias_in_text(text: str, tool: str) -> bool:
@@ -135,7 +132,7 @@ def check_reasoning_actions(
     """
     text = (reasoning or "").strip()
     tools_list = [t for t in tools_used if t]
-    if not text or text.startswith("(no reasoning") or text.startswith("(planner output"):
+    if not text or text.startswith(("(no reasoning", "(planner output")):
         return MismatchReport()
 
     used_set = set(tools_list)

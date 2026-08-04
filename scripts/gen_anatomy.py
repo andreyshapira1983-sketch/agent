@@ -14,6 +14,7 @@ import ast
 import os
 import re
 import sys
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORE = os.path.join(ROOT, "core")
@@ -23,14 +24,19 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ("Interface & Interaction (§1)", "Operator-facing I/O, intent routing, output shaping.", [
         "operator_intent", "operator_intent_patterns", "intent_understanding",
         "file_request_intent",
-        "lang_match", "output_policy", "user_profile", "truth_hype_filter",
+        "answer_format", "lang_match", "output_policy", "user_profile", "truth_hype_filter",
         "alert_ack",
     ]),
     ("Perception & Adversarial Defense (§2)", "Input handling and injection/exfiltration defense.", [
         "injection_guard", "redaction", "data_classifier", "dlp", "secret_scanner",
     ]),
     ("Cognitive Core & Agent Cycle (§3)", "Planning, verification, clarification, control loop.", [
-        "loop", "loop_helpers", "loop_methods", "loop_methods2", "loop_step_execution",
+        "loop", "loop_step_execution", "loop_sensor",
+        "loop_knowledge", "loop_memory_commands", "loop_repair", "loop_hygiene",
+        "loop_memory_read", "loop_memory_write",
+        "loop_response_deciders", "loop_synthesis", "loop_evidence_chain",
+        "loop_verification", "loop_observe", "loop_run_tail", "loop_context",
+        "loop_attempt", "loop_verify_replan", "loop_init", "loop_gates",
         "planner", "planner_prompt", "plan_parsing", "doc_routing", "host_tools_context", "step_sanitizer", "verifier", "verifier_core", "verifier_models", "verifier_patterns", "verification_summary", "sensor_journal",
         "verifier_utils", "replan", "reflection", "clarification_gate",
         "clarification_policy", "instruction_conflict_gate", "directive_extractor",
@@ -44,7 +50,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ]),
     ("Memory & Knowledge Governance (§4)", "Working/persistent memory, hygiene, ingestion, evidence.", [
         "memory", "persistent_memory", "smart_memory", "memory_policy", "memory_echo_antibody",
-        "hygiene", "episodic_hygiene", "knowledge_use_policy", "knowledge_pipeline",
+        "memory_hygiene", "episodic_hygiene", "knowledge_use_policy", "knowledge_pipeline",
         "ingestion", "ingestion_reports", "ingestion_utils",
         "structured_facts", "evidence", "evidence_classes", "evidence_budget",
         "conflict_review", "conflict_episode",
@@ -53,6 +59,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ]),
     ("Tools, Actions & Execution (§5)", "Effect gateways, receipts, compensation, VCS safety.", [
         "actuation_gateway", "gateway_consult", "tool_receipts", "receipt_consumer",
+        "backup_cleanup",
         "compensation", "safe_vcs", "supply_chain",
     ]),
     ("Runtime, State & Orchestration (§6)", "Autonomous loop, scheduling, budgets, state durability.", [
@@ -104,7 +111,7 @@ def _first_doc_line(stem: str) -> str:
     """
     path = os.path.join(CORE, f"{stem}.py")
     try:
-        doc = ast.get_docstring(ast.parse(open(path, encoding="utf-8").read())) or ""
+        doc = ast.get_docstring(ast.parse(Path(path).read_text(encoding="utf-8"))) or ""
     except Exception:
         doc = ""
     if not doc.strip():

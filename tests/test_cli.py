@@ -542,7 +542,7 @@ class TestHandleMetaCommand:
                 return _FakeReport()
 
         monkeypatch.setattr("core.subagent_runner.SubAgentRunner", _FakeRunner)
-        monkeypatch.setattr("cli.commands_misc.TeamExecutor", _FakeExecutor)
+        monkeypatch.setattr("cli.commands_team.TeamExecutor", _FakeExecutor)
 
         agent = _build_agent(workspace)
         assert handle_meta_command(

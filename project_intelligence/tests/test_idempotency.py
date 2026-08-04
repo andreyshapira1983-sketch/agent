@@ -142,19 +142,19 @@ def test_fk_violation_not_silenced(conn):
 
 def test_entity_claim_idempotent_includes_subsystem(conn):
     s = _base(conn)
-    kwargs = dict(
-        entity_id=s["entity_id"],
-        claim_type="status",
-        claim_value="open",
-        source_class="canonical_doc",
-        source_revision_id=s["revision_id"],
-        scan_run_id=s["run_id"],
-        extractor_id="ex",
-        extractor_version="1",
-        line_start=1,
-        line_end=1,
-        subsystem="memory",
-    )
+    kwargs = {
+        "entity_id": s["entity_id"],
+        "claim_type": "status",
+        "claim_value": "open",
+        "source_class": "canonical_doc",
+        "source_revision_id": s["revision_id"],
+        "scan_run_id": s["run_id"],
+        "extractor_id": "ex",
+        "extractor_version": "1",
+        "line_start": 1,
+        "line_end": 1,
+        "subsystem": "memory",
+    }
     r1 = insert_entity_claim(conn, claim_id="c1", **kwargs)
     r2 = insert_entity_claim(conn, claim_id="c2", **kwargs)
     assert r1.created is True

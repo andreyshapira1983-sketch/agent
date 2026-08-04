@@ -152,13 +152,13 @@ class _FakeAgent:
 
 
 def _proposal(**kw: Any) -> RepairProposal:
-    base = dict(
-        path="core/example.py",
-        proposed_content="# fixed content\n",
-        reason="invert the broken guard",
-        confidence=0.9,
-        evidence=("tests/test_example.py::test_x failed",),
-    )
+    base = {
+        "path": "core/example.py",
+        "proposed_content": "# fixed content\n",
+        "reason": "invert the broken guard",
+        "confidence": 0.9,
+        "evidence": ("tests/test_example.py::test_x failed",),
+    }
     base.update(kw)
     return RepairProposal(**base)
 

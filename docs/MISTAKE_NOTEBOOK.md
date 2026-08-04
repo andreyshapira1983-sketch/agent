@@ -60,8 +60,8 @@ stored in memory is about the TARGET ("this task is bad"), and the target lands
 on the avoid list.
 
 **Cost.** 2026-08-04: the builder correctly proposed splitting
-`core/loop_methods2.py` (confidence 0.85), but the reply failed to parse over a
-single character. Memory kept "critic_veto on core/loop_methods2.py" and the
+`core/loop_methods2.py` (confidence 0.85), <!-- historical-ref: dissolved the same day into core/loop_memory_read.py and core/loop_memory_write.py; the old name is the correct word for what the builder was looking at --> but the reply failed to parse over a
+single character. Memory kept "critic_veto on core/loop_methods2.py" <!-- historical-ref --> and the
 file went onto the avoid list — so even after the parser was fixed, the lesson
 keeps pushing the agent away from correct work.
 
@@ -408,6 +408,187 @@ protects nothing. Grep the journals for pairs like `*_kept=0` next to
 record or none, and say which happened. A floor that cannot hold one item is
 worse than an honest zero: it hides the deletion behind the word "trimmed".
 
+---
+
+## 20. A node's `lineno` is not where its source starts
+
+**Symptom.** Code is cut or moved by AST coordinates — `node.lineno` to
+`node.end_lineno` — and something that belongs to the definition stays behind.
+For a decorated function `lineno` points at the `def` line; the decorators sit
+ABOVE it, in `decorator_list`, each with its own line. The same gap exists for
+leading comments and for the `async` keyword.
+
+**Cost (2026-08-04, splitting `core/loop.py`).** Five methods were moved out by
+`lineno..end_lineno`. `@staticmethod` belonging to `_checkpoint_step_summaries`
+stayed in the file and attached itself to the NEXT definition,
+`_file_read_workspace_root(self)` — which then received no `self`. 312 tests
+failed. The moved method, meanwhile, silently lost its decorator in the new
+module.
+
+The loudness was luck, not design: the damaged method is called from the hot
+path. The same decorator lost on a method reached only from a rare branch — a
+refusal, an exhausted budget, a broken sensor — would have passed the whole
+suite.
+
+**How to check yourself.** After any AST-coordinate surgery: for every moved
+definition compare `decorator_list` against the source of truth, and grep the
+donor file for a `@staticmethod` sitting above a method that takes `self`. If a
+tool cuts by `lineno`, ask what lives above `lineno` and still belongs to the
+node.
+
+**What to do.** Compute the start as `min(node.lineno, *(d.lineno for d in
+node.decorator_list))`, then walk further up over comment lines. Pin the result
+with a check that compares decorators across the whole move, not only the
+definitions you happened to think about —
+[tests/test_loop_small_methods_split.py:79](../tests/test_loop_small_methods_split.py#L79).
+
+---
+
+## 21. A check that did not run looks exactly like a check that passed
+
+**Symptom.** A verification command is filtered through `grep`/`head` with
+`2>&1`, prints nothing, and the silence is read as "clean". The command in fact
+refused to start.
+
+**Cost (2026-08-04, splitting `core/loop.py`).** New modules were checked with
+`ruff check … --select F821,E999 | grep "^F821"`. Rule `E999` had been REMOVED
+from ruff, so the whole invocation aborted with `ruff failed: Rule E999 was
+removed and cannot be selected` — and `grep` ate that line together with the
+error stream. Exit status was lost to the pipe. Empty output was taken as "no
+undefined names", and `evaluate_completion_obligations` travelled into
+`core/loop_run_tail.py` without its import. The `except Exception` around that
+observational sensor swallowed the `NameError`; the turn kept answering. What
+caught it was `tests/test_sensor_failure_journal.py` — the sensor failed
+silently but was journalled, and a test reads that journal.
+
+Note the earlier report of this incident called both this and section 20 "the
+same class — the tool was misconfigured, not the code". That was wrong and is
+corrected here: in section 20 the SURGERY was wrong and the check worked; here
+the check never ran. Only this one is about verification.
+
+**How to check yourself.** Grep your own commands for `2>&1 |` followed by a
+filter. For each: would a startup failure be distinguishable from a clean run?
+Check the exit status, not the filtered text — in a pipeline `$?` belongs to
+the last command, so `grep` reports its own success.
+
+**What to do.** Read the exit status of the checker itself, and let it print
+its summary line ("Found N errors" / "All checks passed") rather than filtering
+it away. Where the check is worth keeping, make it a test instead of a shell
+one-liner: an undefined name in a mixin is now caught by
+[tests/test_loop_split_wiring.py:119](../tests/test_loop_split_wiring.py#L119),
+which also verifies that every declared host contract is real.
+
+---
+
+## 22. `git checkout <file>` used to undo a probe, on work that was never committed
+
+**Symptom.** A file is temporarily modified to prove a check bites, then
+restored with `git checkout -- <file>`. For a file whose real state lives only
+in the working tree, that command does not undo the probe — it discards
+everything since the last commit.
+
+**Cost (2026-08-04, splitting `core/loop.py`).** Three negative probes were run
+against `tests/test_loop_split_wiring.py`. Two used a file copy
+(`cp x /tmp/x.bak` … `cp /tmp/x.bak x`) and restored correctly. The third used
+`git checkout core/loop.py` — and reverted the file to `HEAD`, which still held
+the pre-split 3 408-line version. Sixteen pieces of work on that one file, about
+2 700 lines of edits, were gone in one command. The other twenty modules
+survived only because the probe happened to touch `core/loop.py` alone.
+
+Recovery was possible by luck, not by design: `git stash`/`git stash pop` had
+been used minutes earlier for an unrelated lint comparison, and a popped stash
+leaves a dangling commit until garbage collection. `git fsck --lost-found`
+listed 149 of them; the right one was found by reading the loop file out of each
+candidate commit and comparing line counts (731 was the expected size), then
+verified by content before restoring. Had no stash been made
+that session, or had `git gc` run, the work would simply have been lost.
+
+**How to check yourself.** Grep your own commands for `git checkout --`,
+`git restore`, `git reset --hard`, `git clean` against paths. For each: is the
+content of that path committed anywhere? If the answer is "no, it is working-tree
+only", the command is a delete, not an undo.
+
+**What to do.** Undo a temporary edit the way it was made: copy the file aside
+first and copy it back. Reach for git only for content git actually has. And
+when a session's work lives uncommitted for hours, that is itself the risk —
+the recovery above worked on a coincidence, and a coincidence is not a backup.
+
+---
+
+## 23. A skip that records a defect instead of reporting it
+
+**Symptom.** A parametrised test calls `pytest.skip` for one input, with a
+comment that correctly explains why that input behaves differently. The
+explanation is right; treating it as a reason to skip is not. The suite reports
+the skip forever and nobody re-reads the comment.
+
+**Cost (2026-08-04).** `tests/characterization/test_cli_resume_branches.py`
+checks five invalid `--resume` values. Four exit 2 with an error. The fifth —
+the empty string — was skipped, noting "empty `--resume` is falsy: no
+validation branch is entered".
+
+That sentence describes a defect. `cli/app.py` guarded the resume block with
+`if args.resume:` — a TRUTHINESS test where argparse's contract calls for an
+identity test: `None` means the flag was absent, `""` means it was given empty.
+So `main.py --resume ""` skipped validation entirely and started a NEW session,
+exit 0 — verified live: a fresh trace id, 47 memory records loaded, no notice to
+the operator who had asked to resume. The validator itself was correct all along
+(`cli/resume.py` rejects the empty id); it was simply never reached.
+
+A characterization suite exists to PIN current behaviour. This one noticed
+behaviour it could not explain away and then recorded nothing about it.
+
+**How to check yourself.** Grep the suite for `pytest.skip` with a hand-written
+reason (not `importorskip`, not a platform guard). For each: is the reason a
+property of the ENVIRONMENT (fine) or a statement about how the code behaves
+(a finding)? If it is the second, the skip is a defect report nobody filed.
+
+Separately: any skip that can never turn into a pass is noise. It trains readers
+to scroll past skips, and the next skip — the one that matters — scrolls past
+with it. Exclude the case explicitly, with the reason, so the count is honest.
+
+**What to do.** Assert the behaviour instead of skipping. If the asserted
+behaviour is wrong, that is a defect with a one-line fix and a test that now
+guards it — which is exactly what happened here: `is not None`, and the fifth
+case joined the other four.
+
+---
+
+## 24. Two safe lint fixes composed into a broken import seam
+
+**Symptom.** A module re-exports a name so neighbours can import it from there.
+One lint rule removes the marker that made the re-export explicit; a later rule
+removes the now-"unused" import. Each step is correct in isolation. Together
+they delete a public seam.
+
+**Cost (2026-08-04, ruff cleanup).** `core/loop.py` re-exported
+`_TOOL_SOURCE_HINTS`, `_TRUSTED_INTERNAL_TOOLS` and `_step_trigger_tls` in the
+PEP 484 form `from x import Y as Y`. Batch 4 applied `PLC0414`
+(useless-import-alias) and stripped the `as Y` — the suite stayed green, because
+a plain import still re-exports at runtime. Batch 5 then applied `F401`, saw
+three unused imports and removed them. `tests/test_loop_step_execution_split.py::
+test_import_seams_survive` went red.
+
+The same run took `SKIP_DIR_NAMES` out of `core/ingestion.py`, breaking
+`core/learning_planner.py` at import time. That line carried the comment
+`# re-exported (core/learning_planner.py imports it from here)` — and it made no
+difference: **a prose comment does not protect an import, only `# noqa: F401`
+does.** The comment was written for a human and read by nobody.
+
+**How to check yourself.** After any `--fix` run, `git diff` the removed
+imports, not just the test result: `git diff -U0 | grep '^-from\|^-import'`.
+For each name, grep the tree for other modules importing it FROM the file it was
+removed from. A green suite is not proof — the second failure above only
+surfaced because an unrelated test imported the chain.
+
+Before enabling `PLC0414` anywhere, check whether the aliases it "simplifies"
+are `X as X` re-export markers.
+
+**What to do.** Mark every deliberate re-export with `# noqa: F401` and a short
+reason on the import itself. Treat a lint rule that edits import statements as
+touching the module's public surface, and run batches that do so one at a time,
+with the seam tests in view.
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED
@@ -435,6 +616,13 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 18 | [docs/MISTAKE_NOTEBOOK.md:271](../docs/MISTAKE_NOTEBOOK.md#L271) | section 15 contradicted its own table — merged before the review was read | reviewers, 2026-08-04 | this PR |
 | 19 | [core/evidence_budget.py:304](../core/evidence_budget.py#L304) | the 50-char floor for demoted blocks is below any whole memory record, so memory is erased, not trimmed | assistant, 2026-08-04 | not handled |
 | — | [core/self_build_producer.py:110](../core/self_build_producer.py#L110) | the builder's ceiling is 16 000 tokens, yet a live reply took 20 509 — the limit is not honoured | assistant, 2026-08-04 | not investigated |
+| 20 | [core/loop_attempt.py:576](../core/loop_attempt.py#L576) | the `@staticmethod` that an AST `lineno` cut left behind — restored here, and the whole move is now compared decorator by decorator | assistant, 2026-08-04 | this change |
+| 21 | [core/loop_run_tail.py:36](../core/loop_run_tail.py#L36) | the import a dead `ruff --select E999` failed to miss; the sensor's `except Exception` hid the `NameError` | assistant, 2026-08-04 | this change |
+| 21 | [tests/test_loop_split_wiring.py:112](../tests/test_loop_split_wiring.py#L112) | `if TYPE_CHECKING` host contracts were checked by nobody — two mixins declared fields they never touch | assistant, 2026-08-04 | this change |
+| 22 | [tests/test_loop_split_wiring.py:279](../tests/test_loop_split_wiring.py#L279) | 21 cross-mixin borrows worked through the MRO with nothing recording them; the contract is now checked in both directions | assistant, 2026-08-04 | this change |
+| 22 | [tests/test_loop_split_wiring.py:345](../tests/test_loop_split_wiring.py#L345) | a check whose docstring claimed more than it did — it passed a probe it said it would catch | assistant, 2026-08-04 | this change |
+| 23 | [cli/app.py:95](../cli/app.py#L95) | `if args.resume:` — truthiness where argparse's `None`/`""` needs identity; an explicitly empty flag silently started a new run | assistant, 2026-08-04 | this change |
+| 24 | [core/loop.py:76](../core/loop.py#L76) | three re-export seams deleted by `PLC0414` then `F401` in successive batches; restored under `# noqa: F401` | assistant, 2026-08-04 | this change |
 
 ## How to append
 

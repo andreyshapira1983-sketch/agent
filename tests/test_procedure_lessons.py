@@ -23,16 +23,16 @@ from core.smart_memory import (
 
 
 def _episode(**kw):
-    base = dict(
-        goal="Answer the question: where is the output lost",
-        question="Where is the shell_exec output lost on the way to the synthesizer?",
-        answer="a",
-        tools_used=["shell_exec", "file_read"],
-        source_labels=["shell_exec:grep -n", "file:core/loop.py"],
-        verified_chunks=8,
-        unverified_chunks=1,
-        declared_completion="achieved",
-    )
+    base = {
+        "goal": "Answer the question: where is the output lost",
+        "question": "Where is the shell_exec output lost on the way to the synthesizer?",
+        "answer": "a",
+        "tools_used": ["shell_exec", "file_read"],
+        "source_labels": ["shell_exec:grep -n", "file:core/loop.py"],
+        "verified_chunks": 8,
+        "unverified_chunks": 1,
+        "declared_completion": "achieved",
+    }
     base.update(kw)
     return episode_from_agent_cycle(**base)
 

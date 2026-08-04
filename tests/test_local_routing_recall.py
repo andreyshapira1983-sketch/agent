@@ -76,7 +76,7 @@ def test_the_corpus_is_derived_and_not_empty():
     """Guard the guard: a broken extractor must not make this file vacuous."""
     routed = _declared_phrases()
     assert len(routed) >= 50, f"phrase extraction collapsed: {len(routed)}"
-    assert len({kind for kind in routed.values()}) >= 10, "too few intents represented"
+    assert len(set(routed.values())) >= 10, "too few intents represented"
 
 
 def test_an_inserted_filler_never_costs_a_local_route():

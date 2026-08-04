@@ -73,7 +73,7 @@ def enforce_unsupported_claims_mode() -> str:
     raw = (os.getenv(_ENV_MODE) or "").strip().lower()
     if raw in ("on", "true", "1", "yes"):
         return "on"
-    if raw in ("shadow",):
+    if raw == "shadow":
         return "shadow"
     return "off"
 
@@ -150,7 +150,7 @@ def _hedge_short_categorical(answer: str, *, locale: str, count: int) -> str:
             "treat them as unverified."
         )
     if re.search(r"(?im)^Unverified:\s*", hedged):
-        hedged = re.sub(
+        return re.sub(
             r"(?im)^(Unverified:\s*)(.*)$",
             lambda m: (
                 m.group(1)
@@ -164,7 +164,6 @@ def _hedge_short_categorical(answer: str, *, locale: str, count: int) -> str:
             hedged,
             count=1,
         )
-        return hedged
     return hedged.rstrip() + f"\n\nUnverified: {note}"
 
 

@@ -232,8 +232,8 @@ class AutonomousRunReport:
 
     def user_summary(self) -> str:
         parts = [
-            f"(auto-run status={self.status} dry_run={self.dry_run} "
-            f"tasks={len(self.tasks)} stop={self.stop_reason or '-'})"
+            (f"(auto-run status={self.status} dry_run={self.dry_run} "
+            f"tasks={len(self.tasks)} stop={self.stop_reason or '-'})")
         ]
         for report in self.tasks:
             parts.append(
@@ -285,8 +285,8 @@ class AutonomousQueueRunReport:
 
     def user_summary(self) -> str:
         parts = [
-            f"(task-run status={self.status}; processed={len(self.processed)}; "
-            f"stop={self.stop_reason or '-'})"
+            (f"(task-run status={self.status}; processed={len(self.processed)}; "
+            f"stop={self.stop_reason or '-'})")
         ]
         for item in self.processed:
             parts.append(

@@ -23,15 +23,15 @@ from core.smart_memory import episode_from_agent_cycle, procedure_credit_allowed
 
 
 def _episode(**over):
-    base = dict(
-        goal="run the experiment",
-        question="run a full controlled learning experiment",
-        answer="Conclusion: the experiment was NOT performed. [file:docs/x.md]",
-        tools_used=["file_read"],
-        source_labels=["file:docs/x.md"],
-        verified_chunks=3,      # a perfectly cited non-delivery
-        unverified_chunks=0,
-    )
+    base = {
+        "goal": "run the experiment",
+        "question": "run a full controlled learning experiment",
+        "answer": "Conclusion: the experiment was NOT performed. [file:docs/x.md]",
+        "tools_used": ["file_read"],
+        "source_labels": ["file:docs/x.md"],
+        "verified_chunks": 3,      # a perfectly cited non-delivery
+        "unverified_chunks": 0,
+    }
     base.update(over)
     return episode_from_agent_cycle(**base)
 

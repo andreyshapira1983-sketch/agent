@@ -47,7 +47,7 @@ def referent_resolver_mode() -> str:
     raw = (os.getenv(_ENV_MODE) or "").strip().lower()
     if raw in ("on", "true", "1", "yes"):
         return "on"
-    if raw in ("shadow",):
+    if raw == "shadow":
         return "shadow"
     return "off"
 
@@ -171,7 +171,7 @@ def _now() -> datetime:
 
 
 def _token_set(text: str) -> set[str]:
-    return {t for t in re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9_]{3,}", text.casefold())}
+    return set(re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9_]{3,}", text.casefold()))
 
 
 def _jaccard(a: set[str], b: set[str]) -> float:

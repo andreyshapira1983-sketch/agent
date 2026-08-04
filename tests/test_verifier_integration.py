@@ -78,7 +78,7 @@ class TestVerifiedAnswer:
             "Facts: hello is in doc.txt [file:doc.txt].\n"
             "Sources: doc.txt"
         )
-        agent, log_path = _agent(
+        agent, _log_path = _agent(
             workspace,
             llm_response=llm_answer,
             canned_sources=[{
@@ -190,7 +190,7 @@ class TestVerificationEvent:
         )
         agent.run("q", file_hint="doc.txt")
         events = _events(log_path)
-        ver = [e for e in events if e["event"] == "verification"][0]
+        ver = next(e for e in events if e["event"] == "verification")
         assert ver["payload"]["disclaimer_set"] is True
 
 

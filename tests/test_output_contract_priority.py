@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from core.answer_format import output_contract_requires_headers
 from core.evidence import ProvenanceChain, make_evidence
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
-from core.loop_helpers import output_contract_requires_headers
 from core.policy import PolicyGate
 from core.verifier import verify
 from tests.conftest import FakeLLM, FakePlanner
@@ -44,7 +44,7 @@ _TABLE_ONLY_CONTRACT = (
 
 
 def test_generic_contract_detected_from_system_answer():
-    from core.loop_helpers import SYSTEM_ANSWER
+    from core.answer_format import SYSTEM_ANSWER
 
     assert output_contract_requires_headers(SYSTEM_ANSWER) is True
 

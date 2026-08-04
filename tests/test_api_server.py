@@ -30,8 +30,7 @@ def server(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     # env-sensitive tests (e.g. the model router's route-reason assertions).
     monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: None)
     import api.server as server_mod
-    server_mod = importlib.reload(server_mod)
-    return server_mod
+    return importlib.reload(server_mod)
 
 
 def test_concurrent_ask_calls_do_not_interleave_agent_run(server, monkeypatch):

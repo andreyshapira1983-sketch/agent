@@ -635,8 +635,8 @@ def test_can_skip_planner_handles_non_string_and_empty():
 
 @pytest.mark.parametrize("text", [
     # The exact class of question that was mis-routed in production.
-    "Investigate the root cause of this recurring self-build failure "
-    "and propose a safe repair procedure.",
+    ("Investigate the root cause of this recurring self-build failure "
+    "and propose a safe repair procedure."),
     # "hi" inside "this"
     "Why is this failing?",
     "Rewrite this function",

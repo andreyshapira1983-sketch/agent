@@ -96,7 +96,4 @@ def any_term_matches(text: str, terms) -> bool:
     ``text`` is tokenized once; each term is tokenized (and cached) once.
     """
     text_tokens = tokenize(text)
-    for term in terms:
-        if term_matches_tokens(text_tokens, _tokenize_term(term)):
-            return True
-    return False
+    return any(term_matches_tokens(text_tokens, _tokenize_term(term)) for term in terms)

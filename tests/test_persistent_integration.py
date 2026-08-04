@@ -245,7 +245,7 @@ class TestListAndForget:
 
     def test_forget_one_removes_only_that_record(self, workspace: Path):
         path = workspace / "data" / "mem.jsonl"
-        agent, store, log_path = _build_agent(workspace, FakeLLM(), path)
+        agent, _store, log_path = _build_agent(workspace, FakeLLM(), path)
 
         _, r1 = agent.remember(content="keep me", tags=["fact"], source="user-explicit")
         _, r2 = agent.remember(content="drop me", tags=["fact"], source="user-explicit")
@@ -630,8 +630,8 @@ def test_no_store_means_no_persistent_events(workspace: Path):
                     "steps": [{"tool": "file_read", "arguments": {"path": "doc.txt"}}],
                 }
             ),
-            "Conclusion: alpha. [file:doc.txt]\nFacts:\n- alpha [file:doc.txt]\n"
-            "Sources:\n1. file:doc.txt - doc.txt\nConfidence: high\nUnverified: nothing\n",
+            ("Conclusion: alpha. [file:doc.txt]\nFacts:\n- alpha [file:doc.txt]\n"
+            "Sources:\n1. file:doc.txt - doc.txt\nConfidence: high\nUnverified: nothing\n"),
         ]
     )
 

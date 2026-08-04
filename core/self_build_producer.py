@@ -239,9 +239,8 @@ def _top_level_defined_names(tree: ast.Module) -> set[str]:
             for tgt in node.targets:
                 if isinstance(tgt, ast.Name):
                     names.add(tgt.id)
-        elif isinstance(node, ast.AnnAssign):
-            if isinstance(node.target, ast.Name):
-                names.add(node.target.id)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
     return {n for n in names if not (n.startswith("__") and n.endswith("__"))}
 
 

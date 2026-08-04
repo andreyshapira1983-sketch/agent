@@ -730,7 +730,7 @@ class ShellExecTool(Tool):
             # Classified on `real_cmd` — the binary that actually ran.
             **dict(zip(
                 ("execution_status", "answer_result"),
-                classify_shell_result(real_cmd, exit_code=exit_code, stderr=stderr_safe),
+                classify_shell_result(real_cmd, exit_code=exit_code, stderr=stderr_safe), strict=False,
             )),
             # The live log showed `argv: ['grep', ...]` beside `FINDSTR:` in
             # stderr with nothing connecting them. A substitution that cannot
@@ -788,7 +788,7 @@ class ShellExecTool(Tool):
             # involved, so the requested command IS the one that ran.
             **dict(zip(
                 ("execution_status", "answer_result"),
-                classify_shell_result(cmd, exit_code=exit_code, stderr=stderr_safe),
+                classify_shell_result(cmd, exit_code=exit_code, stderr=stderr_safe), strict=False,
             )),
             "compensation_plan": plan.to_dict(),
         }

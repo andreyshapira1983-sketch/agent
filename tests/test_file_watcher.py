@@ -257,7 +257,7 @@ def test_no_change_emits_nothing_and_no_self_echo(workspace: Path):
         [workspace], now=clock.now, sleep=clock.sleep, poll_interval=1.0, debounce=0.3
     )
     batches: list = []
-    watcher._on_change = lambda batch: batches.append(batch)
+    watcher._on_change = batches.append
 
     def on_sleep(count: int):
         if count >= 5:
@@ -374,7 +374,7 @@ def test_stop_before_run_exits_without_scanning(workspace: Path):
         [workspace], now=clock.now, sleep=clock.sleep, emit_existing=True
     )
     batches: list = []
-    watcher._on_change = lambda batch: batches.append(batch)
+    watcher._on_change = batches.append
     watcher.stop()
     run_async(watcher.run())
     # emit_existing would have reported the file, but stop short-circuits first.
@@ -434,7 +434,7 @@ def test_flush_pending_on_stop_before_debounce(workspace: Path):
         [workspace], now=clock.now, sleep=clock.sleep, poll_interval=1.0, debounce=100.0
     )
     batches: list = []
-    watcher._on_change = lambda batch: batches.append(batch)
+    watcher._on_change = batches.append
     target = workspace / "pending.txt"
 
     def on_sleep(count: int):
