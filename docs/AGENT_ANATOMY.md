@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 176 modules across 12 groups._
+_Total: 177 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -226,6 +226,7 @@ _Reflection-driven repair, self-build, value gating._
 | `core/self_build_supervisor` | Lightweight, read-only self-build supervisor cycle. |
 | `core/self_build_memory` | Record self-build / self-apply attempt outcomes into episodic memory. |
 | `core/self_build_rules` | Hard rules learned from self-build rollbacks. |
+| `core/veto_cause` | Was a self-build veto a verdict on the target, or our own pipeline breaking? |
 | `core/self_task_producer` | Stage A of the coding-skill ladder (roadmap Ступень 1): propose a grounded coding TASK plus its acceptance test for HUMAN approval. |
 | `core/self_task_builder` | Stage B of the coding-skill ladder (roadmap Ступень 1): write code to make a HUMAN-APPROVED, FROZEN acceptance test pass. |
 | `core/writer_completion` | The completion verdict a mechanical writer settles from its own outcome. |

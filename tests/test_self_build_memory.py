@@ -224,8 +224,13 @@ def test_recent_lessons_swallows_store_errors() -> None:
 
 
 class _TaggedEpisode:
-    def __init__(self, tags) -> None:
+    def __init__(self, tags, summary: str = "") -> None:
         self.tags = tuple(tags)
+        # Real episodes always carry the veto reason (`build_self_build_episode`
+        # composes it), and since 2026-08-04 the cooldown reads it: a veto
+        # caused by the builder's reply failing to parse is not a verdict on the
+        # target. A fixture with no reason at all is not a real shape.
+        self.summary = summary
 
 
 class _TagFilterStore:
@@ -244,10 +249,13 @@ class _TagFilterStore:
 def test_recently_vetoed_targets_extracts_path_from_veto_episodes() -> None:
     from cli.self_build_memory import recently_vetoed_self_build_targets
 
+    _judged = "self-build critic_veto: confidence 0.02 below threshold 0.60"
     store = _TagFilterStore([
-        _TaggedEpisode(("self-build", "critic_veto", "failed", "core/model_router.py")),
+        _TaggedEpisode(("self-build", "critic_veto", "failed", "core/model_router.py"),
+                       _judged),
         _TaggedEpisode(("self-build", "proposed", "success", "core/redaction.py")),
-        _TaggedEpisode(("self-build", "critic_veto", "failed", "docs/self_build.md")),
+        _TaggedEpisode(("self-build", "critic_veto", "failed", "docs/self_build.md"),
+                       _judged),
     ])
     got = recently_vetoed_self_build_targets(_FakeAgent(store))
     assert got == frozenset({"core/model_router.py", "docs/self_build.md"})

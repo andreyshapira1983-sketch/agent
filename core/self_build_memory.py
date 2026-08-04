@@ -29,6 +29,7 @@ from core.self_improvement_issues import (
     DEFAULT_ISSUE_PATH,
     SelfImprovementIssueRegistry,
 )
+from core.veto_cause import veto_blames_the_target
 from core.writer_completion import COMPLETION_BY_OUTCOME
 
 # Map each command status to a coarse episodic outcome the agent already
@@ -101,6 +102,13 @@ def build_self_build_episode(kind: str, result: dict[str, Any]) -> Any:
             summary += " | veto: " + "; ".join(str(v) for v in veto)
 
     tags = ["self-build", "lesson", kind, status, outcome]
+    if status == "critic_veto":
+        # Which kind of veto this was decides whether the target goes on the
+        # cooldown list. Settled here, where the reasons are still in hand.
+        blames_target = veto_blames_the_target(
+            reason or "; ".join(str(v) for v in veto)
+        )
+        tags.append("veto_judgement" if blames_target else "veto_pipeline")
     if target:
         tags.append(target)
 
@@ -162,6 +170,20 @@ def recent_self_build_lessons(agent: Any, target: str, *, limit: int = 3) -> lis
         return []
 
 
+def _veto_was_about_the_target(episode: Any, tags: tuple[str, ...]) -> bool:
+    """Read the classification tag; fall back to the summary for older rows.
+
+    Episodes banked before the classification existed carry neither tag, and
+    they are the ones already sitting in the store — judging them by their own
+    veto text is the same rule, applied to the only evidence they kept.
+    """
+    if "veto_pipeline" in tags:
+        return False
+    if "veto_judgement" in tags:
+        return True
+    return veto_blames_the_target(str(getattr(episode, "summary", "") or ""))
+
+
 def recently_vetoed_self_build_targets(agent: Any, *, limit: int = 20) -> frozenset[str]:
     """Return concrete target paths whose LAST self-build attempt was critic-vetoed.
 
@@ -180,7 +202,10 @@ def recently_vetoed_self_build_targets(agent: Any, *, limit: int = 20) -> frozen
         episodes = store.search_by_tags(["self-build", "critic_veto"], limit=limit)
         targets: set[str] = set()
         for episode in episodes:
-            for tag in getattr(episode, "tags", ()) or ():
+            tags = tuple(getattr(episode, "tags", ()) or ())
+            if not _veto_was_about_the_target(episode, tags):
+                continue
+            for tag in tags:
                 candidate = str(tag).replace("\\", "/").strip()
                 if "/" in candidate and (
                     candidate.endswith((".py", ".md"))
