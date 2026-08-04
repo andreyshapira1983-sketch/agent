@@ -37,6 +37,7 @@ general             — catch-all for other implicit assumptions.
 from __future__ import annotations
 
 import html
+import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,6 +52,8 @@ from core.state_integrity import (
     rewrite_state_jsonl_unlocked,
     state_file_lock,
 )
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Types
@@ -444,12 +447,16 @@ class AssumptionStore:
     """Append-only JSONL store for Assumption objects across runs.
 
     Each line in the JSONL file is a single serialised ``Assumption``.
-    Corrupted lines are silently skipped.
+    A corrupted line is skipped — one bad row must not sink the store — but it
+    is counted in :attr:`last_dropped_rows` and logged, so a shorter list can
+    be told apart from a shorter file (MIR-077).
     """
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        #: Rows the LAST read could not parse. Describes that read only.
+        self.last_dropped_rows = 0
 
     # ---------- writes ----------
 
@@ -539,14 +546,29 @@ class AssumptionStore:
 
     def _load_all(self) -> list[Assumption]:
         if not self.path.exists():
+            # The counter describes THIS read, so the no-file path clears it
+            # too: a store that was rotated away must not keep reporting rows
+            # dropped by the read before it.
+            self.last_dropped_rows = 0
             return []
         rows = read_state_jsonl_unlocked(self.path)
         result: list[Assumption] = []
+        dropped = 0
         for row in rows:
             try:
                 result.append(Assumption.from_dict(row))
-            except Exception:
-                pass
+            except Exception as exc:
+                # Skipping stays — one bad row must not sink the register — but
+                # silence does not: an assumption that cannot be parsed is an
+                # assumption nobody will ever be asked to confirm, and the
+                # caller sees a shorter list with no reason for it. Same shape
+                # as MIR-080 in the task queue.
+                dropped += 1
+                logger.warning(
+                    "assumption row dropped (%s): id=%s",
+                    exc, (row or {}).get("id", "?") if isinstance(row, dict) else "?",
+                )
+        self.last_dropped_rows = dropped
         return result
 
     def load_by_run(self, run_id: str) -> list[Assumption]:

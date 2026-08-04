@@ -32,6 +32,7 @@ Typical flow
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -44,6 +45,8 @@ from core.subagent_contract_audit import (
     audit_subagent_execution,
 )
 from tools.base import ToolRegistry
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from core.model_router import ModelRouter
@@ -514,9 +517,17 @@ class SubAgentRunner:
                         if _ev.kind not in seen:
                             seen.append(_ev.kind)
                 ext_kinds = tuple(seen)
-        except Exception:
+        except Exception as exc:
+            # Zero external evidence is a JUDGEMENT about the sub-agent's
+            # answer — it feeds the quality score. "The child cited nothing
+            # external" and "we could not read the child's chain" are different
+            # facts that used to produce the same zero (MIR-077).
             ext_count = 0
             ext_kinds = ()
+            child_logger.log(
+                "subagent_external_evidence_unreadable",
+                {"error_type": type(exc).__name__, "error": str(exc)[:200]},
+            )
 
         child_logger.log(
             "subagent_done",
@@ -644,7 +655,16 @@ class SubAgentRunner:
                 return 0
             m = re.search(r"[1-5]", response)
             return int(m.group()) if m else 0
-        except Exception:
+        except Exception as exc:
+            # 0 is the worst rating on a 1-5 scale, so a judge that CRASHED is
+            # indistinguishable from a judge that read the answer and hated it
+            # — and the score gates whether the sub-agent's work is used.
+            # No run logger reaches this method, so the module logger carries
+            # it (MIR-077).
+            logger.warning(
+                "sub-agent answer judge failed, scoring 0: %s: %s",
+                type(exc).__name__, exc,
+            )
             return 0
 
     def _build_child_registry(self, allowed_tools: list[str] | None) -> ToolRegistry:

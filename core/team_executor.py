@@ -303,6 +303,11 @@ class TeamExecutor:
                             audit_report=getattr(result, "contract_audit", None),
                         )
                 except Exception as exc:
+                    # Not silence: the typed reason becomes the step's summary,
+                    # goes into `warnings`, flips the plan to `blocked`, and is
+                    # recorded against the contract via `_record_contract_run`.
+                    # Broad on purpose — one contract must not abort the team
+                    # run, and every failure mode ends in the same four writes.
                     step_status = "error"
                     answer = ""
                     summary = f"error: {type(exc).__name__}: {exc}"
@@ -356,6 +361,9 @@ class TeamExecutor:
                     audit_report=audit_report,
                 )
         except Exception as exc:
+            # The registry write is bookkeeping ABOUT a run that already
+            # happened; losing it must not turn a completed contract into a
+            # failed one. The typed reason goes to the caller's `warnings`.
             warnings.append(
                 "contract registry write failed: "
                 f"{type(exc).__name__}: {exc}"

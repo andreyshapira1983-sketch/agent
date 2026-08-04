@@ -569,6 +569,10 @@ def evidence_from_tool_result(
     try:
         excerpt = repr(output)
     except Exception:
+        # Silence is the whole point: this IS the failure report. A tool whose
+        # `__repr__` raises still produced output worth an evidence record, and
+        # the placeholder says so in the text a reader sees. Journaling it
+        # would add an event about a string, not about a defect.
         excerpt = "<unserialisable tool output>"
     if not excerpt or excerpt in ("None", "''"):
         return None

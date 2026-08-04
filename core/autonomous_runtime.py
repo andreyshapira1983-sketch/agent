@@ -7,6 +7,8 @@ approval items instead of silently crossing a risky boundary.
 """
 from __future__ import annotations
 
+import logging
+
 import hashlib
 import json
 import re
@@ -42,6 +44,8 @@ from core.task_lifecycle import (
 )
 from core.task_queue import RuntimeTask, TaskAlreadyClaimed, TaskQueueStore
 from core.tool_receipts import ReceiptPath, receipt_context
+
+logger = logging.getLogger(__name__)
 
 AutonomousTaskKind = Literal["status", "learn", "tests", "goal", "propose"]
 AutonomousTaskStatus = Literal["pending", "done", "failed", "skipped", "inconclusive", "clarify"]
@@ -587,7 +591,20 @@ class AutonomousRuntime:
                     "failed_tasks": failed,
                 },
             )
-        except Exception:
+        except Exception as exc:
+            # This method exists to leave a record that the run halted. Failing
+            # it silently produces exactly the state it was written to prevent:
+            # a halt with no incident, indistinguishable from a clean stop
+            # (MIR-077).
+            self._log(
+                "incident_record_failed",
+                {
+                    "trigger": trigger,
+                    "stop_reason": stop_reason,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:200],
+                },
+            )
             return
 
     def status(self) -> dict:
@@ -623,6 +640,11 @@ class AutonomousRuntime:
             if task.kind == "propose":
                 return self._task_propose(task, config, budget)
         except Exception as exc:
+            # Not silence: the failure leaves as the task's own report — status
+            # `failed`, the exception type in the summary AND in `details`,
+            # which `run_task_queue` writes to the queue row and `_log`s as
+            # `autonomous_task_end`. Broad on purpose: one task must not take
+            # the whole unattended run down with it.
             return AutonomousTaskReport(
                 task,
                 "failed",
@@ -783,8 +805,16 @@ class AutonomousRuntime:
         if callable(by_kind):
             try:
                 web_fetches = len(by_kind("web_page"))
-            except Exception:
+            except Exception as exc:
+                # 0 stays, because the caller wants an int — but a 0 that means
+                # "counted none" and a 0 that means "could not count" read the
+                # same in the run report, and the operator has no way to tell
+                # them apart. The event is what separates them (MIR-077).
                 web_fetches = 0
+                self._log(
+                    "usage_counter_failed",
+                    {"counter": "web_fetches", "error_type": type(exc).__name__},
+                )
         return {
             "cycles": 0,
             "agent_runs": 0,
@@ -807,7 +837,14 @@ class AutonomousRuntime:
             return 0
         try:
             return len(list_persistent())
-        except Exception:
+        except Exception as exc:
+            # Same shape as `_usage_counters`: "the store holds 0 records" and
+            # "the store could not be read" are different facts and used to
+            # produce the same number in the report (MIR-077).
+            self._log(
+                "memory_count_failed",
+                {"error_type": type(exc).__name__, "error": str(exc)[:200]},
+            )
             return 0
 
     def _gateway_path(self) -> GatewayPath:
@@ -1122,8 +1159,16 @@ class AutonomousRuntime:
                     if "lesson" in (getattr(r, "tags", ()) or ())
                 ]
                 digest["recent_lessons"] = lessons[-5:]
-            except Exception:
+            except Exception as exc:
+                # An empty list here goes into the prompt that asks the model
+                # what to propose next. "No lessons banked" and "the store
+                # would not open" lead to different proposals, and both used to
+                # arrive as the same empty list (MIR-077).
                 digest["recent_lessons"] = []
+                self._log(
+                    "proposal_digest_lessons_failed",
+                    {"error_type": type(exc).__name__, "error": str(exc)[:200]},
+                )
         return digest
 
     def _existing_proposal_fingerprints(
@@ -1138,7 +1183,15 @@ class AutonomousRuntime:
         token_sets: list[tuple[str, frozenset[str]]] = []
         try:
             snap = self.approval_inbox.snapshot()
-        except Exception:
+        except Exception as exc:
+            # Returning empty sets does not merely lose information: it turns
+            # duplicate detection OFF for this cycle, so the very next proposal
+            # is admitted as new however many times it has already been filed.
+            # The inbox fills up and nothing says why (MIR-077).
+            self._log(
+                "proposal_dedup_unavailable",
+                {"error_type": type(exc).__name__, "error": str(exc)[:200]},
+            )
             return hashes, token_sets
         for item in snap.get("items", []) or []:
             if item.get("operation") != "proposed_task":
@@ -1173,13 +1226,31 @@ class AutonomousRuntime:
         try:
             data = json.loads(text)
         except Exception:
+            # Silent on purpose: this is not the verdict, it is the first of
+            # two attempts. A reply wrapped in prose is ordinary and the
+            # brace-slice below is the normal recovery — journaling here would
+            # log a failure that did not happen.
             start = text.find("{")
             end = text.rfind("}")
             if start < 0 or end <= start:
+                # `@staticmethod`: no `self` here, so the module logger
+                # carries it.
+                logger.warning(
+                    "proposal reply has no JSON object (raw_chars=%d)", len(text)
+                )
                 return None
             try:
                 data = json.loads(text[start : end + 1])
-            except Exception:
+            except Exception as exc:
+                # This one IS the verdict: both attempts are spent and a paid
+                # model reply is about to be dropped. §4 of the notebook was
+                # written for exactly this — an expensive result discarded with
+                # nothing said about why (MIR-077).
+                logger.warning(
+                    "proposal reply did not parse after brace-slice rescue "
+                    "(raw_chars=%d, sliced_chars=%d): %s: %s",
+                    len(text), end + 1 - start, type(exc).__name__, exc,
+                )
                 return None
         if not isinstance(data, dict):
             return None
@@ -1283,7 +1354,15 @@ class AutonomousRuntime:
                 item.operation == "self_apply_lane.run"
                 for item in self.approval_inbox.pending()
             )
-        except Exception:
+        except Exception as exc:
+            # False is the permissive answer — it means "nothing pending, go
+            # ahead and propose". An unreadable inbox therefore does not block
+            # the lane, it opens it, which is the wrong direction to fail in
+            # silence (MIR-077).
+            self._log(
+                "pending_self_build_check_failed",
+                {"error_type": type(exc).__name__, "error": str(exc)[:200]},
+            )
             return False
 
     def _run_self_build_proposal(self, config: AutonomousRuntimeConfig) -> dict | None:
@@ -1307,8 +1386,15 @@ class AutonomousRuntime:
         if model_router is not None:
             try:
                 llm = model_router.for_role("synthesizer")
-            except Exception:
+            except Exception as exc:
+                # `None` sends the caller down the no-model branch, which looks
+                # from the outside like a deliberate choice not to use one
+                # (MIR-077).
                 llm = None
+                self._log(
+                    "self_build_router_unavailable",
+                    {"role": "synthesizer", "error_type": type(exc).__name__},
+                )
         if llm is None:
             llm = getattr(agent, "llm", None)
         if llm is None:

@@ -811,6 +811,40 @@ builds an environment for a subprocess, treat that list as a contract with its
 own test — a runner that reports different results to different callers makes
 every verdict it produces worthless.
 
+---
+
+## 33. The instrument could not see it, so it reported it as a finding
+
+**Symptom.** An audit names a list of places to fix. Some of them are not
+broken: the scanner cannot recognise the thing it is looking for, and reports
+its own blindness as a defect in the code.
+
+**Cost (2026-08-05, closing MIR-077).** `scripts/except_audit.py` classifies a
+broad `except` as journaling when the handler calls something "loggy", matching
+by exact token. `self._log(...)` splits into `["self", "_log"]`, and `_log` is
+not the word `log` — so five handlers in `core/autonomous_runtime.py` that DO
+report their failure sat in the target class of 46. A reader sent to fix them
+finds working code, and the next finding from that audit is believed a little
+less. The same rule missed `_log_error` and `_log_summary`, both defined in
+`core/`.
+
+**The second half is worse.** A site leaves the target class as soon as ANY
+comment appears near it. So 46 comments would have turned the ratchet green
+without changing a single behaviour — the measurement and the fix share a
+control, and only the fix is expensive.
+
+**How to check yourself.** Before working a list an instrument produced, take
+five entries and confirm by hand that each is what the tool says. Then ask the
+opposite question: what is the cheapest edit that satisfies this check, and
+does that edit fix anything? If the answer is "a comment", the check measures
+diligence, not the defect.
+
+**What to do.** Fix the instrument first and pin its boundary with tests —
+here, `_log` and `_log_error` count, `login` and `logic` still do not. Widen it
+only in the direction that keeps flagging: an emitter like `_emit` was
+deliberately NOT added, because a false "journaled" hides a real silence, while
+a false "silent" only costs a reading.
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED
@@ -856,6 +890,7 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 30 | [core/bilingual_terms.py:74](../core/bilingual_terms.py#L74) | every recall miss now says whether the table could widen the question at all — the number that decides the next step | assistant, 2026-08-04 | MIR-086 |
 | 31 | [tools/shell_exec.py:877](../tools/shell_exec.py#L877) | PATHEXT was withheld, so `where python` returned exit 1 on a machine where python is on PATH — the agent read that as "my tools may not be connected" | operator run, 2026-08-04 | MIR-087 |
 | 32 | [tools/run_tests.py:322](../tools/run_tests.py#L322) | the agent's own test run strips PATHEXT, so it reported 2 failures the operator's terminal did not have — same commit, opposite verdicts | **the agent**, 2026-08-04 | MIR-088 |
+| 33 | [scripts/except_audit.py:36](../scripts/except_audit.py#L36) | the audit matched call names by exact token, so `self._log` read as silence and 5 of 46 flagged sites were never broken | assistant, 2026-08-05 | MIR-077 |
 
 ## How to append
 

@@ -408,6 +408,9 @@ class ReflectionEngine:
                 temperature=0.3,
             )
         except Exception as exc:
+            # `warnings` is returned to the caller and printed with the
+            # reflection result, so an empty lesson list always arrives next to
+            # the reason it is empty.
             warnings.append(f"LLM call failed: {type(exc).__name__}: {exc}")
             return []
 
@@ -522,6 +525,8 @@ class ReflectionEngine:
                 limit=config.learning_limit,
             )
         except Exception as exc:
+            # Same channel as the lesson synthesiser above: `None` never
+            # travels without the sentence explaining it.
             warnings.append(f"LearningPlanner failed: {type(exc).__name__}: {exc}")
             return None
 

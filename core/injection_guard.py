@@ -317,6 +317,10 @@ def _to_text(output: Any) -> str:
     try:
         return json.dumps(output, ensure_ascii=False, default=str)
     except Exception:
+        # The fallback loses formatting, never content: this text exists to be
+        # SCANNED for injection markers, and `str()` keeps every character the
+        # scanner looks at. Failing closed here would mean refusing to scan,
+        # which is the one outcome worse than scanning a rougher string.
         return str(output)
 
 # Structured tool outputs carry framework-generated envelope metadata

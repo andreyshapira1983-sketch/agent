@@ -328,6 +328,11 @@ def record_tool_invoke_receipt(
         try:
             risk = str(risk_for(call.arguments))
         except Exception:
+            # Falls back to the tool's DECLARED risk, which is the conservative
+            # direction: a receipt is still written, and written with the
+            # tool's own class rather than with a guess. `read_only` as the
+            # last resort matches the registry default for tools that declare
+            # nothing.
             risk = str(getattr(tool, "risk", "read_only"))
 
     status: ReceiptStatus = "success" if result.status == "success" else "error"
