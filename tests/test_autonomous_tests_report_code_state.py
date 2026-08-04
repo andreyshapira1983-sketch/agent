@@ -33,7 +33,10 @@ class _FakeTool:
                 "errors": 0,
                 "failed_tests": [],
                 "code_state": {
-                    "workspace": "/tmp/copy",
+                    # Не настоящий путь: значение поля в отпечатке. Строка
+                    # вида «/tmp/...» тут выглядела для bandit как небезопасный
+                    # временный файл (замечание гейта #302).
+                    "workspace": "workspace-under-test",
                     "commit": "abc1234",
                     "branch": "main",
                     "matches_shared": False,
