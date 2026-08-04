@@ -390,9 +390,10 @@ runs; it proves nothing about the claims made around it.
 but the minimum is smaller than the smallest indivisible item — so nothing
 survives, while the journal reports a trim rather than a deletion.
 
-**Cost (2026-08-04, live run).** Memory policy selected 3 records (655 chars)
-as relevant to the operator's question. The evidence budget cut memory first,
-down to its floor of 50 characters. Memory is then rebuilt from WHOLE records,
+**Cost (2026-08-04, live run).** Memory policy selected 3 records — 655
+characters of record text, 694 once wrapped into a prompt block, which is the
+number the budget sees. The evidence budget cut memory first, down to its
+floor of 50 characters. Memory is then rebuilt from WHOLE records,
 and no record is that short — so the prompt received none. The journal line
 reads `memory_trimmed=True, memory_chars=694, memory_chars_kept=0`: the word
 is "trimmed", the effect is "erased". Total evidence was 31 970 chars and the
