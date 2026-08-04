@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Literal
 
+from core.bilingual_terms import english_terms_for
 from core.dlp import contains_pii
 from core.doc_routing import is_broad_project_self_knowledge_question
 from core.models import MemoryRecord
@@ -324,6 +325,11 @@ def _query_tokens(text: str) -> set[str]:
     tokens = _tokens(text)
     if is_broad_project_self_knowledge_question(text):
         tokens |= _BROAD_PROJECT_MEMORY_TOKENS
+    # The operator asks in Russian, memory is written in English, and scoring is
+    # word overlap — so the two never met. Measured on the live store:
+    # "кто владеет архитектурой?" 0 records, "who owns the architecture?" 3.
+    # The bilingual set above only fired for broad self-knowledge questions.
+    tokens |= english_terms_for(tokens)
     return tokens
 
 

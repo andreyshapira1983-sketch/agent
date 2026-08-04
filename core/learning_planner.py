@@ -5,6 +5,7 @@ sources are worth feeding into that tool for a learning goal.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -83,6 +84,10 @@ class LearningPlanner:
         scored: list[tuple[int, str, Path, list[str]]] = []
         skipped: list[str] = []
         goal_l = goal.casefold()
+        named = _named_paths(goal_l)
+        if named:
+            candidates += _named_candidates(workspace, named)
+        seen: set[Path] = set()
         for path in candidates:
             try:
                 path = path.resolve()
@@ -92,10 +97,13 @@ class LearningPlanner:
                 continue
             if not path.is_file():
                 continue
+            if path in seen:      # a named file may also be inside `root`
+                continue
+            seen.add(path)
             if path.suffix.casefold() not in TEXT_EXTENSIONS:
                 skipped.append(f"{_rel(workspace, path)}: unsupported extension")
                 continue
-            score, reasons = _score(path, workspace=workspace, goal=goal_l)
+            score, reasons = _score(path, workspace=workspace, goal=goal_l, named=named)
             if score <= 0:
                 skipped.append(f"{_rel(workspace, path)}: low learning value")
                 continue
@@ -137,11 +145,28 @@ def _iter_candidates(root: Path):
             yield path
 
 
-def _score(path: Path, *, workspace: Path, goal: str) -> tuple[int, list[str]]:
+def _score(
+    path: Path,
+    *,
+    workspace: Path,
+    goal: str,
+    named: frozenset[str] = frozenset(),
+) -> tuple[int, list[str]]:
     rel = _rel(workspace, path).casefold()
     name = path.name.casefold()
     score = 0
     reasons: list[str] = []
+
+    # Reflection names its weak spot as a path (`core/reflection.py:375`), and
+    # whatever this plan picks is what the agent then reads. Until 2026-08-04
+    # being named was worth nothing: `core/planner.py` scored 115 against
+    # `core/architecture_audit.py`'s 165, which won on its filename alone — so
+    # the plan came out the same whatever reflection had found.
+    # This only re-ranks candidates already inside the workspace; a path in the
+    # goal is untrusted text and must never widen what may be read.
+    if named and _is_named(rel, named):
+        score += _NAMED_BY_GOAL_BONUS
+        reasons.append("named by the goal")
     doctrine_goal = is_doctrine_corporate_question(goal)
     confidence_goal = is_confidence_evidence_diagnostic_question(goal)
 
@@ -187,6 +212,78 @@ def _score(path: Path, *, workspace: Path, goal: str) -> tuple[int, list[str]]:
         reasons.append("not primary evidence for confidence internals")
 
     return score, reasons
+
+
+#: Must outrank every generic bonus, including the doctrine (300+) and
+#: confidence (360+) source priorities: a file the goal names outright is the
+#: subject of the pass, not a candidate for it.
+_NAMED_BY_GOAL_BONUS = 500
+
+#: The dot is load-bearing, not an oversight: it is the only thing separating a
+#: path from an ordinary word in a sentence. Widening this to extensionless
+#: names (review of #313 suggested `README`, `Makefile`) would make every word
+#: of the goal a "named file" worth `_NAMED_BY_GOAL_BONUS` — measured on
+#: "improve the memory handling in core/memory.py" the pattern picks exactly one
+#: token today. The case it would buy is empty here: the repository has two
+#: extensionless tracked files, `Dockerfile` and `LICENSE`, and neither is
+#: something the learning planner studies. Reconsider only alongside a different
+#: discriminator, e.g. "the token resolves to a file that exists".
+_PATH_IN_GOAL_RE = re.compile(r"[\w][\w./\\-]*\.[A-Za-z0-9_]{1,20}")
+_TEXT_SUFFIXES = frozenset(ext.lstrip(".") for ext in TEXT_EXTENSIONS)
+
+
+def _named_paths(goal: str) -> frozenset[str]:
+    """Paths the goal names outright, normalised to a workspace-relative shape.
+
+    The reflection prompt asks for "file or module", so both arrive:
+    `core/memory.py` and `core.memory`. Dotted module notation is turned into a
+    path — a token with no slash whose last segment is not a known text suffix
+    is a module, not a filename.
+    """
+    out: set[str] = set()
+    for raw in _PATH_IN_GOAL_RE.findall(goal or ""):
+        token = raw.replace("\\", "/").strip("./").casefold()
+        if not token:
+            continue
+        if "/" not in token and token.rsplit(".", 1)[-1] not in _TEXT_SUFFIXES:
+            token = token.replace(".", "/")
+        out.add(token)
+    return frozenset(out)
+
+
+def _is_named(rel: str, named: frozenset[str]) -> bool:
+    """True when `rel` is one of the named paths, or the file they mean.
+
+    Compared both with and without the suffix, so a module name matches the
+    file that implements it. Matching is by whole path segments, so `memory.py`
+    never matches `smart_memory.py`.
+    """
+    stem = rel.rsplit(".", 1)[0] if "." in rel.rsplit("/", 1)[-1] else rel
+    return any(
+        rel == n or rel.endswith("/" + n) or stem == n or stem.endswith("/" + n)
+        for n in named
+    )
+
+
+def _named_candidates(workspace: Path, named: frozenset[str]) -> list[Path]:
+    """Files the goal names, resolved regardless of the pass's `root`.
+
+    A rotated `root` used to exclude the named file from the candidate set
+    entirely, so the plan was quietly about something else. Only the named file
+    crosses that boundary — everything else stays inside `root` — and it must
+    still resolve inside the workspace: the path comes from model output.
+    """
+    found: list[Path] = []
+    for name in named:
+        for candidate in (name, *(f"{name}{ext}" for ext in TEXT_EXTENSIONS)):
+            try:
+                path = (workspace / candidate).resolve()
+                path.relative_to(workspace)
+            except (ValueError, OSError):
+                continue
+            if path.is_file():
+                found.append(path)
+    return found
 
 
 def _goal_terms(goal: str) -> tuple[str, ...]:

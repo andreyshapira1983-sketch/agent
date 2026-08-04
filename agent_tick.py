@@ -768,7 +768,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         recover_orphaned_tasks,
         task_heartbeat,
     )
-    from core.task_queue import TaskQueueStore
+    from core.task_queue import TaskAlreadyClaimed, TaskQueueStore
 
     tick_start = _now_iso()
     summary: dict = {
@@ -925,8 +925,18 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
             for task in pending_tasks:
                 try:
                     task_store.mark_running(task.id)
-                except Exception:
-                    continue   # another process already claimed it
+                except TaskAlreadyClaimed:
+                    # Until 2026-08-04 this caught `Exception` and the comment
+                    # claimed it meant "already claimed" — but `mark_running`
+                    # never refused a second claim, so the guard was decorative
+                    # and two consumers did run the same task.
+                    _log_tick(workspace, {"event": "task_claim_lost",
+                                          "task_id": task.id})
+                    continue
+                except KeyError:
+                    _log_tick(workspace, {"event": "task_vanished",
+                                          "task_id": task.id})
+                    continue
 
                 config = _config_from_task(task)
                 # Always honour dry_run flag from CLI / env

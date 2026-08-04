@@ -50,6 +50,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ]),
     ("Memory & Knowledge Governance (§4)", "Working/persistent memory, hygiene, ingestion, evidence.", [
         "memory", "persistent_memory", "smart_memory", "memory_policy", "memory_echo_antibody",
+        "bilingual_terms",
         "memory_hygiene", "episodic_hygiene", "knowledge_use_policy", "knowledge_pipeline",
         "ingestion", "ingestion_reports", "ingestion_utils",
         "structured_facts", "evidence", "evidence_classes", "evidence_budget",
@@ -82,7 +83,8 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "self_repair", "self_repair_models", "self_repair_utils", "repair_proposal",
         "self_apply_bridge", "self_apply_lane",
         "self_build_producer", "self_build_supervisor", "self_build_memory",
-        "self_build_rules", "self_task_producer", "self_task_builder",
+        "self_build_rules", "veto_cause", "builder_reply_diagnosis",
+        "self_task_producer", "self_task_builder",
         "writer_completion",
         "self_improvement_issues", "incremental_splitter", "dependency_map",
         "learning_planner", "value_review", "proposal_value_gate", "release_hygiene",

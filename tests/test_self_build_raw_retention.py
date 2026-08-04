@@ -47,7 +47,7 @@ def _grounded(target: str):
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _produce(tmp_path: Path, reply: str):
+def _produce(tmp_path: Path, reply: str, llm: object | None = None):
     target = "core/release_hygiene.py"
     src = (_REPO_ROOT / target).read_text(encoding="utf-8")
     ws = tmp_path
@@ -55,6 +55,8 @@ def _produce(tmp_path: Path, reply: str):
     (ws / target).write_text(src, encoding="utf-8")
 
     class _LLM:
+        """Predates `allow_continuation` on purpose — older wrappers exist."""
+
         provider = "mock"
         model = "mock-1"
 
@@ -64,7 +66,7 @@ def _produce(tmp_path: Path, reply: str):
     return produce_self_apply_proposal(
         workspace=ws,
         inbox=_Inbox(),
-        llm=_LLM(),
+        llm=llm if llm is not None else _LLM(),
         candidate_targets=(target,),
         grounded_selector=_grounded(target),
         max_builder_attempts=1,
@@ -118,3 +120,49 @@ def test_a_genuinely_empty_reply_stays_empty_with_nothing_preserved(tmp_path):
     assert "empty generated content" in joined
     assert "raw builder reply preserved:" not in joined
     assert not (tmp_path / "logs" / "self_build_rejects").exists()
+
+
+# ── A truncated reply is a different failure from a nonsense reply ──────────
+# Measured 2026-08-04: three live builder replies were stitched from two legs
+# and came back with the escaping style flipping at the boundary — escaped
+# `\n` inside the JSON string before it, real newlines after. Unparseable, each
+# after paying for extra legs, and the veto that followed said only "did not
+# parse", so the target took the blame (MIR-083).
+
+
+class _TruncatingLLM:
+    """Stops on the token cap and reports it, as `core.llm.LLM` now does."""
+
+    provider = "mock"
+    model = "mock-1"
+
+    def __init__(self):
+        self.last_answer_was_truncated = True
+        self.continuation_allowed = None
+
+    def complete(self, system, user, max_tokens=2000, temperature=0.0,
+                 allow_continuation=True):
+        self.continuation_allowed = allow_continuation
+        # Leg one, cut off inside the JSON string — exactly what the live
+        # replies looked like before anything was stitched onto them.
+        return '{"files": [{"path": "core/x.py", "content": "def f():\\n'
+
+
+def test_the_builder_declines_stitching(tmp_path):
+    """The answer must parse as one object; a splice cannot be trusted."""
+    llm = _TruncatingLLM()
+
+    _produce(tmp_path, "", llm=llm)
+
+    assert llm.continuation_allowed is False
+
+
+def test_a_truncated_reply_is_named_as_too_big_not_as_nonsense(tmp_path):
+    report = _produce(tmp_path, "", llm=_TruncatingLLM())
+
+    joined = "; ".join(report.veto_reasons)
+    assert report.status == "critic_veto"
+    assert "too large for a single pass" in joined, joined
+    assert "invalid JSON" not in joined, (
+        "a reply that ran out of room was reported as a malformed one"
+    )

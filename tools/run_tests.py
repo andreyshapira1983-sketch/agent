@@ -328,6 +328,14 @@ class RunTestsTool(Tool):
 
         keep_keys = (
             "PATH",
+            # Without PATHEXT, Windows cannot turn the NAME `python` into
+            # `python.exe`, so any test that resolves an executable by name
+            # fails only inside this subprocess. Measured 2026-08-04: the agent
+            # ran the suite through this tool and reported two failures the
+            # operator's terminal did not have. A test tool whose verdict
+            # depends on who launched it makes the agent's own verification
+            # worthless exactly when it matters.
+            "PATHEXT",
             "PYTHONPATH",
             "SYSTEMROOT",
             "TEMP",
