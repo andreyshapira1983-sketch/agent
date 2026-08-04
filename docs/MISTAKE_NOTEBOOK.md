@@ -275,20 +275,31 @@ time; the position barely does.
 
 **Cost (two consecutive runs, 2026-08-04).**
 
-| run | reply size | breakage | position |
-|---|---|---|---|
-| 06:24 | 46 057 chars, 20 509 tokens, 183 units | a lone `\` before a space | 32 326 |
-| 07:19 | 47 830 chars, 22 719 tokens, 189 units | an unescaped quote closed the string early | 32 440 |
+| run | reply size | breakage | position | rescued? |
+|---|---|---|---|---|
+| 06:24 | 46 057 chars, 20 509 tokens, 183 units | a lone `\` before a space | 32 326 | yes (PR #303) |
+| 07:19 | 47 830 chars, 22 719 tokens, 189 units | an unescaped quote closed the string early | 32 440 | no |
+| 08:05 | 46 501 chars, 18 602 tokens, 183 units | an unescaped quote, again | 37 678 | no |
 
-**114 characters apart** with different causes on different runs. Both times
-the model was writing Python inside a JSON string with escaped quotes, and both
-times it derailed around the 32nd thousand characters. Total discarded: 372
-budget units and roughly six minutes of work.
+Three runs out of three discarded: **555 budget units**, about eight minutes of
+model time, zero candidates delivered.
+
+**A hypothesis of mine died here.** After the first two I wrote that the
+breakages cluster "around the 32nd thousand characters" — 114 characters apart.
+The third landed at 37 678, more than five thousand further on. The clustering
+was two points, and two points make a line no matter where they fall. What
+survives measurement is narrower: every time, the model is writing Python
+inside a JSON string, and every time it loses track of escaping.
+
+**Naive repair does not save it.** Iteratively escaping the quote that closed a
+string too early was tried on the third reply: 500 substitutions, still
+unparseable. Each fix moves the error rather than removing it, because the
+model dropped escaping on whole regions, not on single characters.
 
 **Cause not established.** The relation to the token limit is unverified: the
-builder's declared ceiling is 16 000 tokens while the replies took 20 509 and
-22 719 — so the ceiling is not honoured either, which is a separate open
-question.
+builder's declared ceiling is 16 000 tokens while the replies took 20 509,
+22 719 and 18 602 — so the ceiling is not honoured either, which is a separate
+open question.
 
 **How to check yourself.** Take every preserved rejection
 (`logs/self_build_rejects/`), get the JSON error position for each, and compare
