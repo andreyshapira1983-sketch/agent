@@ -1113,9 +1113,14 @@ for MIR-002 and MIR-041 (approved next step) · then the minimal file set for th
     теперь считает и пишет (`last_dropped_rows`), а докстрока «Corrupted lines are
     silently skipped» перестала быть неправдой; на раннем выходе счётчик
     сбрасывается (та же ловушка, что в MIR-080).
-  - **Стоимость:** `core/autonomous_runtime.py` 1364 → 1476 строк, потолок поднят
-    осознанно; `ingest_web_topic` сидел на 149 при пороге 150 и зарегистрирован,
-    а не подстрижен. 6877 passed, ruff 402 при базе 405.
+  - **Стоимость:** `core/autonomous_runtime.py` 1397 → 1483 строки, потолок поднят
+    осознанно; `ingest_web_topic` 149 → 152 при пороге отчёта 150 — зарегистрирован,
+    а не подстрижен; `SubAgentRunner.run` 170 → 178. 6943 passed, ruff 401 при
+    базе 405.
+  - **Числа в комментариях к потолкам сверены поимённо** после замечания ревью:
+    первая редакция писала «+1» там, где выросло на 8, и повторяла замер старого
+    дерева вместо текущего. Потолок обязан нести измеренное число, иначе
+    следующий, кто его поднимет, будет опираться на чужую память.
 
 ### MIR-088 — the agent's test run sees a different world than the operator's
 - **Aliases:** none. **Related:** MIR-087 (same missing variable, different tool). **Provenance:** **found by the live agent**, 2026-08-04. Asked to check its own system, it ran the whole suite through `run_tests` and reported 2 failures in `tests/test_shell_exec_windows_pathext.py`. The same suite had been green in the operator's terminal minutes earlier, on the same commit. Neither side was wrong.

@@ -56,9 +56,11 @@ WATCH: dict[str, int] = {
     "core/work_session.py:run_work_session": 211,
     "core/architecture_audit.py:_build_checks": 197,
     "core/self_task_builder.py:build_coding_task": 195,
-    # 2026-08-05, MIR-077: +1 for the journal line on the handler that used
-    # to turn "could not read the child's evidence chain" into the same
-    # zero as "the child cited nothing".
+    # 2026-08-05, MIR-077: measured 170 -> 178. The handler that used to turn
+    # "could not read the child's evidence chain" into the same zero as "the
+    # child cited nothing" gained five lines of reason and a four-line journal
+    # call. The old ceiling of 177 was never met (170), so the raise is smaller
+    # than it looks; 180 keeps this entry's usual two lines of headroom.
     "core/subagent_runner.py:SubAgentRunner.run": 180,
     "core/operator_intent.py:route_operator_intent": 175,
     "core/self_repair.py:SelfRepairController.run": 173,
@@ -73,11 +75,11 @@ WATCH: dict[str, int] = {
     "core/role_router.py:RoleRouter.route": 163,
     "core/low_evidence_policy.py:evaluate_low_evidence_policy": 161,
     "core/planner.py:LLMPlanner.plan": 159,
-    # 2026-08-05, MIR-077: sat at 149 — one line under the report
-    # threshold — and crossed it when its two broad handlers were made to
-    # say where the failure goes. Registered rather than shaved: the
-    # length was already there, the audit only made it visible. Splitting
-    # the search / fetch / store phases is its own change.
+    # 2026-08-05, MIR-077: measured 149 -> 152. It sat one line under the 150
+    # report threshold and crossed it when its two broad handlers were made to
+    # say where the failure goes. Registered rather than shaved: the length was
+    # already there, the audit only made it visible. Ceiling 155, three lines
+    # of headroom. Splitting the search / fetch / store phases is its own change.
     "core/ingestion.py:ingest_web_topic": 155,
     "core/loop_verification.py:AgentLoopVerification._verify_draft": 165,
     "core/loop_run_tail.py:AgentLoopRunTail._finalize_run_tail": 203,
