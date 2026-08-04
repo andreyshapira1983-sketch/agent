@@ -76,7 +76,39 @@ exclude_paths:
 # three engines an empty file list. Tools whose language is genuinely
 # present -- SQLint and tsqllint (.sql), psscriptanalyzer (.ps1),
 # remark-lint (.md), hadolint (Dockerfile) -- are left alone.
+# pylint is kept for `core/`, `tools/`, `cli/` and switched off for the two test
+# trees. Not a taste call — measured 2026-08-05 with our own `.pylintrc`:
+#
+#   tests/ + project_intelligence/tests/   553 findings, 0 true positives
+#   core/ + tools/ + cli/                    2 findings, 2 true positives
+#
+# 448 of the 553 are one rule, `redefined-outer-name`, firing on pytest's
+# fixture injection: a test parameter MUST carry the fixture's name or pytest
+# hands it nothing, so the "shadowing" is the only way to request a fixture at
+# all. The remaining 105 are the same shape of blindness — `FieldInfo` has no
+# `.startswith` (pydantic descriptors resolve at runtime),
+# `__dataclass_fields__` "missing" from a dataclass, `Engine` missing from a
+# module built by `exec`, and `frozenset.add` inside a `pytest.raises` that
+# exists precisely to prove the set is frozen. A suite made of doubles, fakes
+# and dynamically built objects is where static inference has least to go on.
+#
+# The rule itself stays ENABLED, because on real code it earns its place: both
+# production hits were genuine and are fixed in this change — a parameter that
+# shadowed a same-named function in `core/gateway_consult.py`, so the function
+# could not be called inside that body, and a redundant local `import json` in
+# `core/replan.py` shadowing the module-level one. Disabling it in `.pylintrc`
+# would have thrown those away too; `.pylintrc` also forbids putting
+# bug-catching checks on its disable list, and this is one.
+#
+# `exclude_paths` is the lever because it is the ONLY one this schema offers
+# (see the note above: `enabled:` is silently dropped) and the only one remote
+# mode honours — `.codacy/cli-config.yaml` says `mode: remote`, where the rule
+# set comes from the server and no config file in this repository is read.
 engines:
+  pylint:
+    exclude_paths:
+      - "tests/**"
+      - "project_intelligence/tests/**"
   pmd:
     exclude_paths:
       - "**"
