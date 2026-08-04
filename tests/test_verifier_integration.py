@@ -190,7 +190,7 @@ class TestVerificationEvent:
         )
         agent.run("q", file_hint="doc.txt")
         events = _events(log_path)
-        ver = [e for e in events if e["event"] == "verification"][0]
+        ver = next(e for e in events if e["event"] == "verification")
         assert ver["payload"]["disclaimer_set"] is True
 
 

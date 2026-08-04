@@ -302,7 +302,7 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
         from core.receipt_consumer import matched_evidence_lacks_receipt
         ev_by_id: dict[str, Evidence] = {ev.id: ev for ev in chain.evidences}
         rebuilt_chunks: list[ClaimChunk] = []
-        for ch, ann_idx in zip(examined_chunks, examined_annotated_idx):
+        for ch, ann_idx in zip(examined_chunks, examined_annotated_idx, strict=False):
             if ch.verdict != "verified" or not ch.matched_evidence_ids:
                 rebuilt_chunks.append(ch)
                 continue

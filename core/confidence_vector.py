@@ -228,7 +228,7 @@ def _weighted_geometric_mean(values: Sequence[float], weights: Sequence[float]) 
     eps = 1e-3
     log_sum = 0.0
     weight_sum = 0.0
-    for v, w in zip(values, weights):
+    for v, w in zip(values, weights, strict=False):
         v_clamped = max(eps, min(1.0, v))
         log_sum += w * math.log(v_clamped)
         weight_sum += w

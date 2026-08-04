@@ -212,7 +212,7 @@ class DiffFileTool(Tool):
         for line in diff_text.splitlines():
             if not line:
                 continue
-            if line.startswith("+++") or line.startswith("---"):
+            if line.startswith(("+++", "---")):
                 continue
             if line.startswith("+"):
                 adds += 1

@@ -60,12 +60,12 @@ def test_content_hash_text():
 def test_canonicalize_nested():
     c = canonicalize({"b": [1, {"x": "  y  "}], "a": None})
     assert c["t"] == "dict"
-    pairs = {k: v for k, v in c["v"]}
+    pairs = dict(c["v"])
     assert pairs["a"] == {"t": "null"}
     assert pairs["b"]["t"] == "list"
     assert pairs["b"]["v"][0] == {"t": "int", "v": 1}
     assert pairs["b"]["v"][1]["t"] == "dict"
-    inner = {k: v for k, v in pairs["b"]["v"][1]["v"]}
+    inner = dict(pairs["b"]["v"][1]["v"])
     assert inner["x"] == {"t": "str", "v": "y"}
 
 

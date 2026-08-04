@@ -296,14 +296,14 @@ def _handle_campaign_start(rest: str, agent: AgentLoop, workspace: Path) -> bool
             max_wall_clock_seconds = value
             i += 2
             continue
-        if token in ("--max-minutes",):
+        if token == "--max-minutes":
             value = _int_arg(token, i)
             if value is None:
                 return True
             max_wall_clock_seconds = value * 60
             i += 2
             continue
-        if token in ("--max-hours",):
+        if token == "--max-hours":
             value = _int_arg(token, i)
             if value is None:
                 return True

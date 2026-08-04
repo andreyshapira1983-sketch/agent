@@ -345,7 +345,7 @@ class TestSummariseLoop:
         records = store.load()
         selected = agent.retrieval_policy.select(records, "project ships on Friday")
         assert len(selected) == 1
-        assert selected[0].id == [r.id for r in records][0]
+        assert selected[0].id == next(r.id for r in records)
 
 
 # ===========================================================

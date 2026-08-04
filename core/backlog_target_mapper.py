@@ -343,8 +343,7 @@ def _is_model_discovery_candidate(candidate: Any) -> bool:
 
 def _normalize_title(text: str) -> str:
     text = (text or "").replace("—", "-")
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _field(candidate: Any, name: str) -> str:

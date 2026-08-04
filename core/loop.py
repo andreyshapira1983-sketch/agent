@@ -70,16 +70,16 @@ from core.loop_response_deciders import AgentLoopResponseDeciders
 from core.loop_run_tail import AgentLoopRunTail
 from core.loop_sensor import AgentLoopSensor
 from core.loop_step_execution import (
-    _TOOL_SOURCE_HINTS as _TOOL_SOURCE_HINTS,
+    _TOOL_SOURCE_HINTS,
 )
 from core.loop_step_execution import (
-    _TRUSTED_INTERNAL_TOOLS as _TRUSTED_INTERNAL_TOOLS,
+    _TRUSTED_INTERNAL_TOOLS,
 )
 from core.loop_step_execution import (
     AgentLoopStepExecution,
 )
 from core.loop_step_execution import (
-    _step_trigger_tls as _step_trigger_tls,
+    _step_trigger_tls,
 )
 from core.loop_synthesis import AgentLoopSynthesis, SynthesisState
 from core.loop_verification import AgentLoopVerification

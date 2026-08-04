@@ -555,9 +555,7 @@ class LLM:
             return True
         # gpt-5 and beyond (major version >= 5)
         match = re.search(r"\bgpt-(\d+)", m)
-        if match and int(match.group(1)) >= 5:
-            return True
-        return False
+        return bool(match and int(match.group(1)) >= 5)
 
     def _reasoning_budget(self, max_tokens: int) -> int:
         """Effective token budget for an OpenAI reasoning model.

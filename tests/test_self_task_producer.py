@@ -118,7 +118,7 @@ def _run(workspace: Path, **kwargs):
         "inbox": ApprovalInbox(path=None),
         "llm": FakeLLM([_builder()]),
         "vcs": FakeVCS(),
-        "task_selector": lambda: _candidate(),
+        "task_selector": _candidate,
         "file_reader": _reader({_IMPL: "SECRET = 1\n"}),
     }
     defaults.update(kwargs)

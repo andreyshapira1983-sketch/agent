@@ -175,13 +175,12 @@ class TestLoopClarificationIntegration:
         tmp = Path(tempfile.mkdtemp())
         logger = TraceLogger(trace_id="test-clarif", log_dir=tmp / "logs")
 
-        loop = AgentLoop(
+        return AgentLoop(
             registry=registry,
             policy=policy,
             llm=mock_llm,
             logger=logger,
         )
-        return loop
 
     def test_ambiguous_destructive_returns_question(self) -> None:
         loop = self._make_loop()

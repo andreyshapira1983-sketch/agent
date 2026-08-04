@@ -301,7 +301,4 @@ def claim_supported_by(claim: str, facts: StructuredFacts) -> bool:
     for s in facts.booleans:
         if _word_in(s, text):
             return True
-    for s in facts.strings:
-        if len(s) >= 3 and _word_in(s, text):
-            return True
-    return False
+    return any(len(s) >= 3 and _word_in(s, text) for s in facts.strings)

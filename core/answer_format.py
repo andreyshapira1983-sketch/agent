@@ -243,9 +243,7 @@ def format_human_response(answer: str) -> str:
         if not clean:
             return False
         # Bare markdown quote leftovers after citation strip (user-visible `>`).
-        if _EMPTY_QUOTE_LINE_RE.match(clean):
-            return False
-        return True
+        return not _EMPTY_QUOTE_LINE_RE.match(clean)
 
     for raw in lines:
         stripped = raw.strip()
@@ -291,7 +289,7 @@ def format_human_response(answer: str) -> str:
             if not stripped:
                 continue
             # Bold subheader like **Сбор данных:**
-            if stripped.startswith("**") and (stripped.endswith("**") or stripped.endswith(":**")):
+            if stripped.startswith("**") and (stripped.endswith(("**", ":**"))):
                 label = stripped.strip("*").rstrip(":").strip()
                 if label:
                     facts_lines.append(f"\n{label}:")

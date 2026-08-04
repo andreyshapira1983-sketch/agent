@@ -199,8 +199,7 @@ class SpawnSubagentTool(Tool):
                 return candidate
         # Fallback: turn role into an ASCII slug
         slug = "".join(c if c.isascii() and (c.isalnum() or c in "_-") else "_" for c in role)
-        slug = slug[:40].strip("_") or "SubAgent"
-        return slug
+        return slug[:40].strip("_") or "SubAgent"
 
     def validate_output(self, output: Any) -> tuple[bool, list[str]]:
         if not isinstance(output, str):

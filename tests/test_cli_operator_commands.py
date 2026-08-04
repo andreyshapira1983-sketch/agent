@@ -463,7 +463,7 @@ def test_allow_effects_builds_a_runner_and_logs_a_real_execution(
 
     captured: dict = {}
     _fake_team(monkeypatch, captured)
-    monkeypatch.setattr(runner_mod, "SubAgentRunner", lambda **kwargs: SimpleNamespace(**kwargs))
+    monkeypatch.setattr(runner_mod, "SubAgentRunner", SimpleNamespace)
     agent.policy = "P"
     agent.model_router = "R"
     agent.registry = "REG"

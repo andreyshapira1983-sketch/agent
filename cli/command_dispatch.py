@@ -271,7 +271,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     if head in {":model-discovery-audit", ":discovery-audit"}:
         return _handle_model_discovery_audit(rest.strip(), agent)
 
-    if head in {":provider-catalog-refresh"}:
+    if head == ":provider-catalog-refresh":
         return _handle_provider_catalog_refresh(rest.strip(), agent)
 
     if head in {":architecture-audit", ":arch-audit", ":roadmap-audit"}:

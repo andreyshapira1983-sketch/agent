@@ -611,7 +611,7 @@ def test_legacy_llm_manager_flag_preserves_llm_selection(workspace: Path):
     llm = FakeLLM([_manager_ok(), _builder_ok()])
     report = _produce(workspace, llm=llm)  # helper injects legacy_llm_manager=True
     assert report.status == "proposed"
-    assert [r.role for r in report.role_outputs][0] == "manager"
+    assert next(r.role for r in report.role_outputs) == "manager"
     # The manager consulted the LLM (first canned response consumed).
     assert any("Manager" in c["system"] for c in llm.calls)
 

@@ -38,7 +38,7 @@ def _iso(dt: datetime | None = None) -> str:
 
 
 def _parse_iso(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    return datetime.fromisoformat(value).astimezone(timezone.utc)
 
 
 def _status(value: object, *, default: str = "active") -> str:

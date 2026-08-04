@@ -175,9 +175,7 @@ def _is_denied(rel: str) -> bool:
         return True
     if name in _DENY_NAMES:
         return True
-    if any(sub in name for sub in _DENY_NAME_SUBSTR):
-        return True
-    return False
+    return bool(any(sub in name for sub in _DENY_NAME_SUBSTR))
 
 
 def _is_allowed(rel: str) -> bool:
@@ -187,9 +185,7 @@ def _is_allowed(rel: str) -> bool:
         return True
     if top == "docs":
         return True
-    if lower.endswith(".md"):
-        return True
-    return False
+    return bool(lower.endswith(".md"))
 
 
 def classify_patch_risk(

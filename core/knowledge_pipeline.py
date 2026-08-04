@@ -625,9 +625,7 @@ def _looks_like_code_fragment(text: str) -> bool:
     # A chunk cut mid-sentence: ends on a conjunction/preposition/article and
     # has no terminal punctuation.
     last = re.findall(r"[\w']+", low)
-    if last and last[-1] in _DANGLING_TAIL and not stripped.endswith((".", "!", "?")):
-        return True
-    return False
+    return bool(last and last[-1] in _DANGLING_TAIL and not stripped.endswith((".", "!", "?")))
 
 
 def _is_meaningful_claim(text: str) -> bool:

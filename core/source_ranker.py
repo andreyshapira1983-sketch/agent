@@ -487,9 +487,7 @@ def _has_realtime_timestamp(evidence: Evidence) -> bool:
     # Common ISO/date-time shapes. A fetched page timestamp alone is handled
     # by `fetched_at`; here we need the source/tool content itself to expose a
     # timestamp for the market value.
-    if re.search(r"\b20\d{2}-\d{2}-\d{2}[t\s]\d{2}:\d{2}", text):
-        return True
-    return False
+    return bool(re.search(r"\b20\d{2}-\d{2}-\d{2}[t\s]\d{2}:\d{2}", text))
 
 
 def _domain_from_source_id(source_id: str) -> str:
@@ -501,12 +499,11 @@ def _domain_from_source_id(source_id: str) -> str:
     parsed = urlparse(raw)
     host = parsed.netloc or parsed.path.split("/", 1)[0]
     host = host.lower().strip()
-    host = host.removeprefix("www.")
-    return host
+    return host.removeprefix("www.")
 
 
 def _is_official_domain(domain: str) -> bool:
-    if domain.endswith(".gov") or domain.endswith(".edu"):
+    if domain.endswith((".gov", ".edu")):
         return True
     if domain in {
         "docs.python.org",

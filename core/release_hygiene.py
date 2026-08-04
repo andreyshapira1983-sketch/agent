@@ -185,9 +185,7 @@ def _is_excluded(
         return True
     if path.name in exclude_files:
         return True
-    if any(path.name.endswith(suffix) for suffix in FORBIDDEN_RELEASE_SUFFIXES):
-        return True
-    return False
+    return bool(any(path.name.endswith(suffix) for suffix in FORBIDDEN_RELEASE_SUFFIXES))
 
 
 def _is_forbidden_path(path: Path) -> bool:
