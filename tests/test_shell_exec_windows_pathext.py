@@ -30,13 +30,8 @@ import pytest
 from tools.shell_exec import ShellExecTool
 
 
-@pytest.fixture()
-def tool(tmp_path: Path) -> ShellExecTool:
-    return ShellExecTool(workspace_root=tmp_path)
-
-
 @pytest.mark.skipif(sys.platform != "win32", reason="PATHEXT is Windows-only")
-def test_pathext_is_passed_through(tool: ShellExecTool, monkeypatch):
+def test_pathext_is_passed_through(tmp_path: Path, monkeypatch):
     """Set the variable explicitly — the test must not depend on the shell it runs in.
 
     The first version of this test asserted `"PATHEXT" in _safe_env()` and read
@@ -46,21 +41,24 @@ def test_pathext_is_passed_through(tool: ShellExecTool, monkeypatch):
     dropped PATHEXT — the live agent found this failure before I did.
     """
     monkeypatch.setenv("PATHEXT", ".COM;.EXE;.BAT")
+    tool = ShellExecTool(workspace_root=tmp_path)
 
     assert tool._safe_env().get("PATHEXT") == ".COM;.EXE;.BAT"
 
 
-def test_pathext_is_not_invented_when_absent(tool: ShellExecTool, monkeypatch):
+def test_pathext_is_not_invented_when_absent(tmp_path: Path, monkeypatch):
     """Forwarding means passing on what exists, never fabricating a value."""
     monkeypatch.delenv("PATHEXT", raising=False)
+    tool = ShellExecTool(workspace_root=tmp_path)
 
     assert "PATHEXT" not in tool._safe_env()
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="PATHEXT is Windows-only")
-def test_a_name_on_path_can_actually_be_resolved(tool: ShellExecTool, monkeypatch):
+def test_a_name_on_path_can_actually_be_resolved(tmp_path: Path, monkeypatch):
     """The end-to-end shape of the live failure: `where` must find what exists."""
     monkeypatch.setenv("PATHEXT", os.environ.get("PATHEXT") or ".COM;.EXE;.BAT")
+    tool = ShellExecTool(workspace_root=tmp_path)
 
     result = tool.run(argv=["where", "where"])
     payload = result if isinstance(result, dict) else getattr(result, "output", {})
@@ -71,8 +69,9 @@ def test_a_name_on_path_can_actually_be_resolved(tool: ShellExecTool, monkeypatc
     assert "where" in str(payload.get("stdout", "")).lower()
 
 
-def test_the_env_stays_minimal(tool: ShellExecTool):
+def test_the_env_stays_minimal(tmp_path: Path):
     """Widening the env is a security decision, so pin exactly what is allowed."""
+    tool = ShellExecTool(workspace_root=tmp_path)
     allowed = {"PATH", "PATHEXT", "SystemRoot", "HOME", "USERPROFILE",
                "HOMEDRIVE", "HOMEPATH"}
 
