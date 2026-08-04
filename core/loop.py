@@ -3141,6 +3141,7 @@ class AgentLoop(
         elif artifacts:
             from core.evidence_budget import (
                 MEMORY_BLOCK_LABEL,
+                MEMORY_OPEN_TAG,
                 apply_total_budget,
                 rebuild_trimmed_memory,
                 total_trims,
@@ -3168,10 +3169,14 @@ class AgentLoop(
             if memory_payload:
                 raw_blocks.append((memory_label, memory_payload))
 
+            # Below one whole record memory rebuilds into nothing, so a stub
+            # keeps chars and no citable id (measured live 2026-08-04).
+            _lines = self.memory_record_lines(getattr(self, "_last_persistent_records", []))
             trimmed_blocks, was_trimmed = apply_total_budget(
-                raw_blocks, trim_first_labels={memory_label}
+                raw_blocks, trim_first_labels={memory_label},
+                min_useful=({memory_label: len(f"{MEMORY_OPEN_TAG}\n{_lines[0]}")}
+                            if _lines else None),
             )
-
             memory_trimmed = False
             # None = memory was not trimmed, so every retrieved record is still
             # in the prompt and citable. A set = only these survived.
@@ -3210,19 +3215,13 @@ class AgentLoop(
                         # includes the memory block — not comparable with
                         # totals logged before that change.
                         "total_chars": sum(len(c) for _, c in trimmed_blocks),
-                        # Which side paid for the overflow — the whole point of
-                        # the demotion rule, and unreadable from `labels` alone.
-                        # `memory_chars` separates "memory was there and
-                        # survived" from "there was no memory at all", which a
-                        # bare `memory_trimmed: False` cannot express.
+                        # Which side paid, and whether memory existed at all —
+                        # `memory_trimmed: False` alone cannot say that.
                         "memory_trimmed": memory_trimmed,
                         "memory_chars": len(memory_payload),
-                        # What actually reached the model. Without these two,
-                        # `persistent_memory_inject` (which fires BEFORE the
-                        # budget) is the only memory signal in the trace, and
-                        # it reports records that may have been trimmed away
-                        # entirely — a reader reconstructing the run from the
-                        # log would count memory the model never saw.
+                        # What actually reached the model: `persistent_memory_inject`
+                        # fires BEFORE the budget and counts records the model
+                        # may never have seen.
                         "memory_chars_kept": len(long_term_block.strip()),
                         "memory_ids_kept": sorted(surviving_memory_ids)
                         if surviving_memory_ids is not None
