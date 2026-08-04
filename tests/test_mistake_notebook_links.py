@@ -13,8 +13,9 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parents[1]
 _NOTEBOOK = _REPO / "docs" / "MISTAKE_NOTEBOOK.md"
 
-#: Ссылка вида `[core/foo.py:123]` в тексте журнала.
-_LINK_RE = re.compile(r"\[([\w/.\-]+\.py):(\d+)\]")
+#: Ссылка вида `[core/loop.py:123]` в тексте журнала. Документы тоже адресуем:
+#: ошибка бывает и в тексте — на этом сторож поймал первую же такую запись.
+_LINK_RE = re.compile(r"\[([\w/.\-]+\.(?:py|md)):(\d+)\]")
 
 
 def _links() -> list[tuple[str, int]]:
