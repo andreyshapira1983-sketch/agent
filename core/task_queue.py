@@ -31,6 +31,15 @@ _VALID_STATUSES = {
     "pending", "running", "done", "failed", "cancelled", "paused", "blocked",
 }
 
+class TaskAlreadyClaimed(RuntimeError):
+    """Raised when a claim loses the race — the task is no longer `pending`.
+
+    Distinct from ``KeyError`` on purpose: a task that is gone and a task
+    somebody else is already running call for different reactions from a
+    consumer, and both used to be indistinguishable because neither happened.
+    """
+
+
 #: A run that stopped because a human must approve something is neither a
 #: success nor a failure — retrying it on a timer cannot help, and burning the
 #: attempt budget on it hides the real reason. `blocked` is its own resting
@@ -359,19 +368,35 @@ class TaskQueueStore:
         owner_pid: int | None = None,
         owner_host: str | None = None,
     ) -> RuntimeTask:
+        """Claim a pending task. Exclusive: a second claimant is refused.
+
+        The check runs inside `_update_one`'s file lock, on the row as just read
+        from disk, so the test and the write are one transaction. Without it two
+        consumers both claimed the same task — measured with two processes: the
+        second claim burned an attempt and overwrote `owner_pid`, so the row no
+        longer named the process that was actually running it.
+
+        The single-instance lock is not enough on its own: `agent_tick` takes it,
+        but `:task-run` and `:schedule-tick --run` do not.
+        """
         pid = os.getpid() if owner_pid is None else int(owner_pid)
         host = socket.gethostname() if owner_host is None else str(owner_host)
-        return self._update_one(
-            task_id,
-            lambda task: task.with_updates(
+
+        def claim(task: RuntimeTask) -> RuntimeTask:
+            if task.status != "pending":
+                raise TaskAlreadyClaimed(
+                    f"task {task.id} is {task.status}, not pending"
+                )
+            return task.with_updates(
                 status="running",
                 attempts=task.attempts + 1,
                 last_error="",
                 heartbeat_at=_iso(),
                 owner_pid=pid,
                 owner_host=host,
-            ),
-        )
+            )
+
+        return self._update_one(task_id, claim)
 
     def heartbeat(self, task_id: str) -> RuntimeTask | None:
         """Refresh liveness for a task that is still running.

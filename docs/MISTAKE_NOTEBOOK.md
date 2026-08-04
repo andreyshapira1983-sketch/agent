@@ -616,6 +616,35 @@ mistake is made. Keep skipping a bad row on read — one bad line must not sink
 the whole store — but count it and log it: a row that vanishes must at least
 leave a number behind.
 
+## 26. A guard against an exception nobody raises
+
+**Symptom.** A caller wraps an operation in `try/except` with a comment naming
+the condition it defends against — "another process already claimed it",
+"the file may be gone", "this can be stale". The operation never raises that
+condition, because nothing inside it checks for it. The guard reads as proof
+that the hazard was considered, so nobody looks again.
+
+**Cost (2026-08-04, two real processes).** `agent_tick.py` carried
+`except Exception: continue  # another process already claimed it`. But
+`mark_running` set the status without ever testing it — `_update_one` raises
+only `KeyError` for a missing id — so the claim of a task somebody else was
+already running succeeded. Measured: both processes claimed the same task,
+`attempts` went to 2 on the claims alone, and the second `owner_pid` overwrote
+the first, so the row no longer named the process actually running it. Both
+consumers then did the same work. Two of the three entry points
+(`:task-run`, `:schedule-tick --run`) take no single-instance lock, so this is
+the ordinary operator path, not an exotic one.
+
+**How to check yourself.** For every `except` whose comment names a specific
+condition: find the line in the callee that raises it. Not a line that could
+plausibly raise something — the one that raises THIS. If you cannot point at
+it, the guard is decorative and the hazard is live.
+
+**What to do.** Make the callee raise a named exception for that condition —
+here `TaskAlreadyClaimed`, distinct from `KeyError` so "taken" and "gone" stay
+different answers — and check it inside the lock that already protects the
+read-modify-write, so the test and the write are one transaction.
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED
@@ -650,8 +679,10 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 22 | [tests/test_loop_split_wiring.py:345](../tests/test_loop_split_wiring.py#L345) | a check whose docstring claimed more than it did — it passed a probe it said it would catch | assistant, 2026-08-04 | this change |
 | 23 | [cli/app.py:95](../cli/app.py#L95) | `if args.resume:` — truthiness where argparse's `None`/`""` needs identity; an explicitly empty flag silently started a new run | assistant, 2026-08-04 | this change |
 | 24 | [core/loop.py:76](../core/loop.py#L76) | three re-export seams deleted by `PLC0414` then `F401` in successive batches; restored under `# noqa: F401` | assistant, 2026-08-04 | this change |
-| 25 | [core/task_queue.py:214](../core/task_queue.py#L214) | `add` took any `kind` and wrote it; only `from_dict` validated, so the row was durable and unreadable | assistant, 2026-08-04 | MIR-080 |
-| 25 | [core/task_queue.py:299](../core/task_queue.py#L299) | an unparseable queue row was skipped with a bare `continue` — a task nobody will ever run again | assistant, 2026-08-04 | MIR-080 |
+| 25 | [core/task_queue.py:223](../core/task_queue.py#L223) | `add` took any `kind` and wrote it; only `from_dict` validated, so the row was durable and unreadable | assistant, 2026-08-04 | MIR-080 |
+| 25 | [core/task_queue.py:308](../core/task_queue.py#L308) | an unparseable queue row was skipped with a bare `continue` — a task nobody will ever run again | assistant, 2026-08-04 | MIR-080 |
+| 26 | [core/task_queue.py:386](../core/task_queue.py#L386) | `mark_running` claimed without checking the task was still `pending` — two processes ran one task | assistant, 2026-08-04 | MIR-081 |
+| 26 | [agent_tick.py:928](../agent_tick.py#L928) | `except Exception: continue  # another process already claimed it` — a guard for an exception nobody raised | assistant, 2026-08-04 | MIR-081 |
 
 ## How to append
 
