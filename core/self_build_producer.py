@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from core.backlog_target_mapper import map_backlog_candidate
+from core.builder_reply_diagnosis import why_builder_reply_failed
 from core.injection_guard import prepare_untrusted_text_for_llm
 from core.plan_parsing import extract_json_object
 from core.proposal_value_gate import evaluate_proposal_value
@@ -317,27 +318,8 @@ def _split_target_too_large(content: str) -> tuple[bool, int]:
 
 
 def _why_json_failed(build: dict[str, Any]) -> str:
-    """Чем именно не понравился ответ строителя — словами, а не пустотой.
-
-    Прежняя формулировка называла только длину сырца, поэтому живой отказ на
-    183 единицы бюджета не подсказывал ничего: причиной был один слэш.
-    """
-    raw = str(build.get("raw_reply") or "")
-    if not raw.strip():
-        return "сырец не сохранён"
-    # Судим по JSON-части, а не по всему сырцу: модель нередко оборачивает
-    # объект прозой или заборчиком, и `json.loads` на целом тексте сказал бы
-    # «Expecting value» вместо настоящей причины (замечание ревью #303).
-    start, end = raw.find("{"), raw.rfind("}")
-    candidate = raw[start:end + 1] if start != -1 and end > start else raw
-    try:
-        json.loads(candidate)
-    except json.JSONDecodeError as exc:
-        near = candidate[max(0, exc.pos - 40): exc.pos + 20].replace("\n", "⏎")
-        return f"JSON невалиден: {exc.msg} (позиция {exc.pos}), рядом: …{near}…"
-    except (TypeError, ValueError):  # pragma: no cover — не JSON вовсе
-        return "ответ не является JSON"
-    return "JSON разобран, но нужного поля в нём нет"
+    """Thin delegation — the wording lives in `core/builder_reply_diagnosis`."""
+    return why_builder_reply_failed(build, max_tokens=_BUILDER_MAX_TOKENS)
 
 
 def _is_critical(rel: str) -> bool:
@@ -413,15 +395,28 @@ def _llm_json_with_raw(
     MIR-071: a builder reply that fails (or fragment-parses) used to be
     discarded with no trace — 84 cost units for a 15948-token reply left
     nothing to diagnose. The raw travels back so the head can preserve it.
+
+    Continuation is declined here: the answer must parse as one JSON object, and
+    stitching cannot resume a JSON string. Measured 2026-08-04 — three builder
+    replies came back with the escaping style flipping at the leg boundary
+    (escaped `\\n` before it, real newlines after), unparseable, each after
+    paying for extra legs. A truncated first leg says "too big for one pass",
+    which is a usable answer; a corrupted splice says nothing at all.
     """
     safe_user, _redact_meta = prepare_text_for_llm_boundary(user)
     try:
         answer = llm.complete(
-            system=system, user=safe_user, max_tokens=max_tokens, temperature=0.0
+            system=system, user=safe_user, max_tokens=max_tokens, temperature=0.0,
+            allow_continuation=False,
         )
     except TypeError:
-        # Tolerate positional-only fakes.
-        answer = llm.complete(system, safe_user)
+        # Wrappers and fakes that predate the flag, then positional-only ones.
+        try:
+            answer = llm.complete(
+                system=system, user=safe_user, max_tokens=max_tokens, temperature=0.0
+            )
+        except TypeError:
+            answer = llm.complete(system, safe_user)
     raw = answer if isinstance(answer, str) else ""
     return extract_json_object(raw), raw
 
@@ -934,7 +929,13 @@ def _builder_generate(
             "builder returned no parseable JSON",
             # MIR-071: the head preserves this to disk and strips it from the
             # report, so the misfire is diagnosable without ballooning logs.
-            {"raw_reply": raw_reply, "raw_chars": len(raw_reply)},
+            # `truncated` separates "the file does not fit in one pass" from
+            # "the model wrote nonsense" — the same veto text used to cover both.
+            {
+                "raw_reply": raw_reply,
+                "raw_chars": len(raw_reply),
+                "truncated": bool(getattr(llm, "last_answer_was_truncated", False)),
+            },
         )
     files, content = _normalize_builder_files(parsed, target)
     test_paths = parsed.get("test_paths") or ["tests"]

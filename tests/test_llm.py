@@ -1032,6 +1032,69 @@ class TestLargeOutputContinuation:
         out = llm.complete(system="s", user="u")
         assert out == "the quick brown fox jumps"
 
+
+class TestStructuredAnswersAreNotBlindlyStitched:
+    """Continuation cannot resume a JSON string, and corrupts it silently.
+
+    Three live builder replies died this way on 2026-08-04 (preserved under
+    `logs/self_build_rejects/`). The evidence is the escaping style flipping
+    mid-answer at the leg boundary: before it, `\\\\n` and `\\\\"` (escaped,
+    inside a JSON string); after it, real newlines and bare `"` — the model
+    resumed writing plain code, not knowing it stood inside a JSON string.
+    The three break positions (32 326 / 32 440 / 37 678 chars) all sit at
+    2.0–2.35 chars per token from the start of a 16 000-token first leg.
+
+    Each of those runs paid for up to four extra legs to produce garbage, and
+    the veto that followed blamed the target file (MIR-083).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_env(self, monkeypatch):
+        monkeypatch.delenv("AGENT_AUTO_CONTINUE", raising=False)
+        monkeypatch.delenv("AGENT_MAX_CONTINUATIONS", raising=False)
+
+    #: Shaped like the real failure: leg 1 is inside a JSON string, leg 2 is not.
+    _LEG_1 = '{"content": "def f():\\n    return 1\\n'
+    _LEG_2 = '"}\n        raise\n'
+
+    def test_a_structured_call_stops_at_the_first_leg(self):
+        llm = _scripted_anthropic_llm([
+            (self._LEG_1, 10, 5, "max_tokens"),
+            (self._LEG_2, 3, 4, "end_turn"),
+        ])
+
+        out = llm.complete(system="s", user="u", allow_continuation=False)
+
+        assert out == self._LEG_1.strip()
+        assert len(llm._client.messages.calls) == 1, (
+            "a second leg was requested and paid for"
+        )
+
+    def test_a_structured_call_reports_it_was_truncated(self):
+        """Truncated must be distinguishable from "the model wrote nonsense"."""
+        llm = _scripted_anthropic_llm([(self._LEG_1, 10, 5, "max_tokens")])
+
+        llm.complete(system="s", user="u", allow_continuation=False)
+
+        assert llm.last_answer_was_truncated is True
+
+    def test_a_complete_structured_answer_is_not_flagged(self):
+        llm = _scripted_anthropic_llm([('{"content": "ok"}', 10, 5, "end_turn")])
+
+        llm.complete(system="s", user="u", allow_continuation=False)
+
+        assert llm.last_answer_was_truncated is False
+
+    def test_prose_answers_are_still_continued(self):
+        """Only structured callers opt out — long prose still gets stitched."""
+        llm = _scripted_anthropic_llm([
+            ("AAAA", 10, 5, "max_tokens"),
+            ("BBBB", 3, 4, "end_turn"),
+        ])
+
+        assert llm.complete(system="s", user="u") == "AAAABBBB"
+
+
 class TestReasoningTokenBudget:
     """OpenAI reasoning models spend the budget on thinking before answering.
 

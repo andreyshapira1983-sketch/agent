@@ -674,6 +674,35 @@ Then pin it with a test that varies the input and asserts the output moves —
 and one that pins what must NOT move, so the fix does not swallow the old
 behaviour.
 
+## 28. A limit that is per attempt, read as per result
+
+**Symptom.** A cap is set — tokens, retries, bytes, seconds — and everyone
+downstream reasons as if it bounds the whole operation. It bounds one attempt.
+A retry, continuation or failover mechanism sitting underneath multiplies it,
+and the real bound is the cap times a number nobody wrote down.
+
+**Cost (2026-08-04).** The builder's cap read `_BUILDER_MAX_TOKENS = 16_000`
+with a comment reasoning about how much room a real file needs. Underneath,
+`complete()` auto-continues a truncated answer up to four more times by
+default — so the true ceiling was five legs, and a live reply reached 20 509
+tokens. Worse than the size: **continuation cannot resume a JSON string.** The
+proof is in three preserved replies where the escaping style flips exactly at
+the leg boundary — escaped `\n` and `\"` before it, real newlines and bare
+quotes after. The model came back writing plain code, not knowing it stood
+inside a JSON string. Each of those runs paid for the extra legs and produced
+an unparseable answer, and the veto that followed blamed the target file.
+
+**How to check yourself.** For every limit, ask: per what? Then find the layer
+below it and ask whether that layer can repeat the operation. Multiply. If the
+product is the real bound, the constant's comment is describing something that
+does not exist. Second question: if the answer must parse as a whole, is any
+layer allowed to concatenate pieces of it?
+
+**What to do.** Say which unit the limit is in, right at the constant. Give
+callers whose answer must parse as a whole a way to decline stitching, and a
+way to learn they were cut off — "it did not fit" is a usable answer, a
+corrupted splice is not.
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED
@@ -690,17 +719,17 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 2 | [core/smart_memory.py:1546](../core/smart_memory.py#L1546) | episodes are written wrapped in `{_integrity, payload}` — a top-level search returns a false zero | assistant, 2026-08-04 | reading trap, not a defect |
 | 3 | [core/self_build_memory.py:187](../core/self_build_memory.py#L187) | avoid list: also filled by tool breakages — 4 of 5 live vetoes punished the target for our own failure | assistant, 2026-08-04 | MIR-083 |
 | 4 | [core/plan_parsing.py:242](../core/plan_parsing.py#L242) | rescuing JSON from a lone `\` — an example of how to fix this class | assistant, 2026-08-04 | PR #303 |
-| 5 | [core/self_build_producer.py:320](../core/self_build_producer.py#L320) | a rejection now names the cause, the position and the fragment | assistant, 2026-08-04 | PR #303 |
+| 5 | [core/builder_reply_diagnosis.py:17](../core/builder_reply_diagnosis.py#L17) | a rejection now names the cause, the position and the fragment (moved out of the producer by MIR-084) | assistant, 2026-08-04 | PR #303 |
 | 6 | [core/code_state.py:97](../core/code_state.py#L97) | fingerprint of the checked code — commit, branch, divergence | assistant, 2026-08-04 | PR #301 |
 | 6 | [core/autonomous_runtime.py:684](../core/autonomous_runtime.py#L684) | the autonomous test report carries the fingerprint | assistant, 2026-08-04 | PR #302 |
 | 11 | [core/self_build_producer.py:409](../core/self_build_producer.py#L409) | the builder calls the model directly: the result never reaches the verifier | assistant, 2026-08-04 | not handled |
 | 12 | [core/task_complexity.py:108](../core/task_complexity.py#L108) | a ~180-character threshold decides which model answers | assistant, 2026-08-04 | PR #301, partly |
-| 15 | [core/self_build_producer.py:110](../core/self_build_producer.py#L110) | two consecutive replies broke at 32 326 and 32 440 — "code inside JSON" is a fragile format | assistant, 2026-08-04 | not handled |
+| 15 | [core/llm.py:302](../core/llm.py#L302) | three replies broke at 32 326 / 32 440 / 37 678 — continuation stitched a JSON string it could not resume | assistant, 2026-08-04 | MIR-084 |
 | 16 | [docs/MISTAKE_NOTEBOOK.md:318](../docs/MISTAKE_NOTEBOOK.md#L318) | an invented example path in the address rule — caught by the docs conformance check | assistant, 2026-08-04 | PR #306 |
 | 17 | [tests/test_mistake_notebook_links.py:30](../tests/test_mistake_notebook_links.py#L30) | absoluteness judged by shape, not by `Path.is_absolute` — the host must not change the verdict | CI, 2026-08-04 | PR #306 |
 | 18 | [docs/MISTAKE_NOTEBOOK.md:271](../docs/MISTAKE_NOTEBOOK.md#L271) | section 15 contradicted its own table — merged before the review was read | reviewers, 2026-08-04 | this PR |
 | 19 | [core/evidence_budget.py:304](../core/evidence_budget.py#L304) | the 50-char floor for demoted blocks is below any whole memory record, so memory is erased, not trimmed | assistant, 2026-08-04 | not handled |
-| — | [core/self_build_producer.py:110](../core/self_build_producer.py#L110) | the builder's ceiling is 16 000 tokens, yet a live reply took 20 509 — the limit is not honoured | assistant, 2026-08-04 | not investigated |
+| 28 | [core/self_build_producer.py:111](../core/self_build_producer.py#L111) | the 16 000-token ceiling is PER LEG, not per answer: auto-continuation could stretch it to five legs (a live reply hit 20 509) | assistant, 2026-08-04 | MIR-084 |
 | 20 | [core/loop_attempt.py:576](../core/loop_attempt.py#L576) | the `@staticmethod` that an AST `lineno` cut left behind — restored here, and the whole move is now compared decorator by decorator | assistant, 2026-08-04 | this change |
 | 21 | [core/loop_run_tail.py:36](../core/loop_run_tail.py#L36) | the import a dead `ruff --select E999` failed to miss; the sensor's `except Exception` hid the `NameError` | assistant, 2026-08-04 | this change |
 | 21 | [tests/test_loop_split_wiring.py:112](../tests/test_loop_split_wiring.py#L112) | `if TYPE_CHECKING` host contracts were checked by nobody — two mixins declared fields they never touch | assistant, 2026-08-04 | this change |
