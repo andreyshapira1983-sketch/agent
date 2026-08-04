@@ -205,6 +205,13 @@ def fake_llm() -> FakeLLM:
 # — otherwise the suite is green only by accident of the shell. The daemon's own
 # health-check runs this suite under its .env, so hermeticity here keeps that
 # self-test stable regardless of routing mode.
+#: Семейства переменных, которыми оператор настраивает выбор модели. Держим
+#: префиксами, а не поимённо: список имён дрейфует молча — переменную
+#: добавляют в роутер, а про тесты забывают. Так и вышло с
+#: `AGENT_TIER_PROVIDERS_STANDARD`: она осталась вне списка, протекла из .env
+#: оператора и роняла тест роутинга у него, оставаясь зелёным в CI.
+_OPERATOR_MODEL_ENV_PREFIXES = ("AGENT_TIER_PROVIDERS_", "AGENT_MODEL_TIER_")
+
 _OPERATOR_MODEL_ENV_VARS = (
     "AGENT_MODEL_POLICY",
     "AGENT_MODEL_MAX_COST",
@@ -213,6 +220,12 @@ _OPERATOR_MODEL_ENV_VARS = (
     "AGENT_MODEL",
     "AGENT_MODEL_REGISTRY_JSON",
     "AGENT_MODEL_REGISTRY_PATH",
+    "AGENT_TIER_PROVIDERS_LIGHT",
+    "AGENT_TIER_PROVIDERS_STANDARD",
+    "AGENT_TIER_PROVIDERS_DEEP",
+    "AGENT_MODEL_TIER_LIGHT",
+    "AGENT_MODEL_TIER_STANDARD",
+    "AGENT_MODEL_TIER_DEEP",
 )
 
 
@@ -225,7 +238,8 @@ def _neutralize_operator_model_env(monkeypatch, tmp_path_factory):
     vars are usually unset, making this a no-op; under an offline/mock operator
     environment it prevents routing tests from flipping red.
     """
-    for var in _OPERATOR_MODEL_ENV_VARS:
+    ambient = [k for k in os.environ if k.startswith(_OPERATOR_MODEL_ENV_PREFIXES)]
+    for var in (*_OPERATOR_MODEL_ENV_VARS, *ambient):
         monkeypatch.delenv(var, raising=False)
     empty_registry = tmp_path_factory.getbasetemp() / "empty_model_registry.json"
     empty_registry.write_text('{"models": []}\n', encoding="utf-8")
