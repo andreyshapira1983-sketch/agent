@@ -5,6 +5,7 @@ sources are worth feeding into that tool for a learning goal.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -83,6 +84,7 @@ class LearningPlanner:
         scored: list[tuple[int, str, Path, list[str]]] = []
         skipped: list[str] = []
         goal_l = goal.casefold()
+        named = _named_paths(goal_l)
         for path in candidates:
             try:
                 path = path.resolve()
@@ -95,7 +97,7 @@ class LearningPlanner:
             if path.suffix.casefold() not in TEXT_EXTENSIONS:
                 skipped.append(f"{_rel(workspace, path)}: unsupported extension")
                 continue
-            score, reasons = _score(path, workspace=workspace, goal=goal_l)
+            score, reasons = _score(path, workspace=workspace, goal=goal_l, named=named)
             if score <= 0:
                 skipped.append(f"{_rel(workspace, path)}: low learning value")
                 continue
@@ -137,11 +139,28 @@ def _iter_candidates(root: Path):
             yield path
 
 
-def _score(path: Path, *, workspace: Path, goal: str) -> tuple[int, list[str]]:
+def _score(
+    path: Path,
+    *,
+    workspace: Path,
+    goal: str,
+    named: frozenset[str] = frozenset(),
+) -> tuple[int, list[str]]:
     rel = _rel(workspace, path).casefold()
     name = path.name.casefold()
     score = 0
     reasons: list[str] = []
+
+    # Reflection names its weak spot as a path (`core/reflection.py:375`), and
+    # whatever this plan picks is what the agent then reads. Until 2026-08-04
+    # being named was worth nothing: `core/planner.py` scored 115 against
+    # `core/architecture_audit.py`'s 165, which won on its filename alone — so
+    # the plan came out the same whatever reflection had found.
+    # This only re-ranks candidates already inside the workspace; a path in the
+    # goal is untrusted text and must never widen what may be read.
+    if named and _is_named(rel, named):
+        score += _NAMED_BY_GOAL_BONUS
+        reasons.append("named by the goal")
     doctrine_goal = is_doctrine_corporate_question(goal)
     confidence_goal = is_confidence_evidence_diagnostic_question(goal)
 
@@ -187,6 +206,33 @@ def _score(path: Path, *, workspace: Path, goal: str) -> tuple[int, list[str]]:
         reasons.append("not primary evidence for confidence internals")
 
     return score, reasons
+
+
+#: Must outrank every generic bonus, including the doctrine (300+) and
+#: confidence (360+) source priorities: a file the goal names outright is the
+#: subject of the pass, not a candidate for it.
+_NAMED_BY_GOAL_BONUS = 500
+
+_PATH_IN_GOAL_RE = re.compile(r"[\w][\w./\\-]*\.[A-Za-z0-9]{1,5}")
+
+
+def _named_paths(goal: str) -> frozenset[str]:
+    """Paths the goal names outright, as workspace-relative-looking strings."""
+    out = {
+        raw.replace("\\", "/").strip("./").casefold()
+        for raw in _PATH_IN_GOAL_RE.findall(goal or "")
+    }
+    return frozenset(p for p in out if p)
+
+
+def _is_named(rel: str, named: frozenset[str]) -> bool:
+    """True when `rel` is one of the named paths, or the file they mean.
+
+    A bare filename counts: the model is asked for a path but does not always
+    give one. Matching is by whole path segments, so `memory.py` never matches
+    `smart_memory.py`.
+    """
+    return any(rel == n or rel.endswith("/" + n) for n in named)
 
 
 def _goal_terms(goal: str) -> tuple[str, ...]:

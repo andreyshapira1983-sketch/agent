@@ -645,6 +645,35 @@ here `TaskAlreadyClaimed`, distinct from `KeyError` so "taken" and "gone" stay
 different answers — and check it inside the lock that already protects the
 read-modify-write, so the test and the write are one transaction.
 
+## 27. The output does not depend on the input
+
+**Symptom.** A feature takes a decision — which files to study, which memories
+to recall, which sources to trust — and produces a plausible result every time.
+Nobody notices that the result is the *same* result whatever it was given. The
+feature is wired, called, logged, and decorative.
+
+**Cost (2026-08-04, measured against the real repository).** Reflection names
+the weak spot it found as a path and the agent then ingests whatever the plan
+returns. Across five focus areas of exactly the shape the prompt asks for, the
+named file was picked **zero times out of five**, and the top of every plan was
+identical: `core/architecture_audit.py`, `tests/test_architecture_audit.py`, …
+Being named by the goal was worth 0 points; a filename containing the word
+"architecture" was worth 95. The agent, having found its own weak spot, went off
+to read something else — and wrote the results into memory as learning.
+
+**How to check yourself.** This is the cheapest audit there is: **change the
+input, keep everything else, and diff the output.** Same output means the input
+is not connected. Do it with two or three genuinely different inputs, not one.
+Coverage will not tell you this — the code ran, the branches ran, the numbers
+were computed. Ask instead which line reads the input, and what it is worth
+next to the constants around it.
+
+**What to do.** Make the connection explicit and strong enough to win: the thing
+the request is *about* must outrank every generic heuristic, not tie with it.
+Then pin it with a test that varies the input and asserts the output moves —
+and one that pins what must NOT move, so the fix does not swallow the old
+behaviour.
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED
@@ -683,6 +712,8 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 25 | [core/task_queue.py:308](../core/task_queue.py#L308) | an unparseable queue row was skipped with a bare `continue` — a task nobody will ever run again | assistant, 2026-08-04 | MIR-080 |
 | 26 | [core/task_queue.py:386](../core/task_queue.py#L386) | `mark_running` claimed without checking the task was still `pending` — two processes ran one task | assistant, 2026-08-04 | MIR-081 |
 | 26 | [agent_tick.py:928](../agent_tick.py#L928) | `except Exception: continue  # another process already claimed it` — a guard for an exception nobody raised | assistant, 2026-08-04 | MIR-081 |
+| 27 | [core/learning_planner.py:142](../core/learning_planner.py#L142) | the file named as the weak spot scored 0 for being named; a filename with "architecture" scored 95 | assistant, 2026-08-04 | MIR-082 |
+| 27 | [core/autonomous_runtime.py:1247](../core/autonomous_runtime.py#L1247) | the branch that makes the agent study its weak spots had no test at all | coverage, 2026-08-04 | MIR-082 |
 
 ## How to append
 
