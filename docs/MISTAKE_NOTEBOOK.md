@@ -552,6 +552,43 @@ behaviour is wrong, that is a defect with a one-line fix and a test that now
 guards it — which is exactly what happened here: `is not None`, and the fifth
 case joined the other four.
 
+---
+
+## 24. Two safe lint fixes composed into a broken import seam
+
+**Symptom.** A module re-exports a name so neighbours can import it from there.
+One lint rule removes the marker that made the re-export explicit; a later rule
+removes the now-"unused" import. Each step is correct in isolation. Together
+they delete a public seam.
+
+**Cost (2026-08-04, ruff cleanup).** `core/loop.py` re-exported
+`_TOOL_SOURCE_HINTS`, `_TRUSTED_INTERNAL_TOOLS` and `_step_trigger_tls` in the
+PEP 484 form `from x import Y as Y`. Batch 4 applied `PLC0414`
+(useless-import-alias) and stripped the `as Y` — the suite stayed green, because
+a plain import still re-exports at runtime. Batch 5 then applied `F401`, saw
+three unused imports and removed them. `tests/test_loop_step_execution_split.py::
+test_import_seams_survive` went red.
+
+The same run took `SKIP_DIR_NAMES` out of `core/ingestion.py`, breaking
+`core/learning_planner.py` at import time. That line carried the comment
+`# re-exported (core/learning_planner.py imports it from here)` — and it made no
+difference: **a prose comment does not protect an import, only `# noqa: F401`
+does.** The comment was written for a human and read by nobody.
+
+**How to check yourself.** After any `--fix` run, `git diff` the removed
+imports, not just the test result: `git diff -U0 | grep '^-from\|^-import'`.
+For each name, grep the tree for other modules importing it FROM the file it was
+removed from. A green suite is not proof — the second failure above only
+surfaced because an unrelated test imported the chain.
+
+Before enabling `PLC0414` anywhere, check whether the aliases it "simplifies"
+are `X as X` re-export markers.
+
+**What to do.** Mark every deliberate re-export with `# noqa: F401` and a short
+reason on the import itself. Treat a lint rule that edits import statements as
+touching the module's public surface, and run batches that do so one at a time,
+with the seam tests in view.
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED
@@ -585,6 +622,7 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 22 | [tests/test_loop_split_wiring.py:279](../tests/test_loop_split_wiring.py#L279) | 21 cross-mixin borrows worked through the MRO with nothing recording them; the contract is now checked in both directions | assistant, 2026-08-04 | this change |
 | 22 | [tests/test_loop_split_wiring.py:345](../tests/test_loop_split_wiring.py#L345) | a check whose docstring claimed more than it did — it passed a probe it said it would catch | assistant, 2026-08-04 | this change |
 | 23 | [cli/app.py:95](../cli/app.py#L95) | `if args.resume:` — truthiness where argparse's `None`/`""` needs identity; an explicitly empty flag silently started a new run | assistant, 2026-08-04 | this change |
+| 24 | [core/loop.py:76](../core/loop.py#L76) | three re-export seams deleted by `PLC0414` then `F401` in successive batches; restored under `# noqa: F401` | assistant, 2026-08-04 | this change |
 
 ## How to append
 

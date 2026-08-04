@@ -13,6 +13,7 @@ Classes:
 from __future__ import annotations
 
 import hashlib
+from typing import ClassVar
 
 import pytest
 
@@ -257,7 +258,7 @@ class TestGlobalHelpers:
 class TestRegisteredPrompts:
     """Verify the 5 primary prompts auto-register when their modules are imported."""
 
-    _EXPECTED = {
+    _EXPECTED: ClassVar[dict[str, str]] = {
         "synthesizer.system": "core.loop",
         "planner.system": "core.planner_prompt",
         "repair_proposal.system": "core.repair_proposal",

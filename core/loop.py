@@ -69,17 +69,17 @@ from core.loop_repair import AgentLoopRepair
 from core.loop_response_deciders import AgentLoopResponseDeciders
 from core.loop_run_tail import AgentLoopRunTail
 from core.loop_sensor import AgentLoopSensor
-from core.loop_step_execution import (
+# Швы импорта: имена принадлежат `core/loop_step_execution`, но соседи и тесты
+# берут их отсюда. `# noqa: F401` тут не косметика, а ЕДИНСТВЕННОЕ, что их
+# защищает: пояснение обычным комментарием ruff не читает и снимает импорт как
+# неиспользуемый (проверено — так и случилось, см. блокнот §24).
+from core.loop_step_execution import (  # noqa: F401 -- шов импорта
     _TOOL_SOURCE_HINTS,
-)
-from core.loop_step_execution import (
     _TRUSTED_INTERNAL_TOOLS,
+    _step_trigger_tls,
 )
 from core.loop_step_execution import (
     AgentLoopStepExecution,
-)
-from core.loop_step_execution import (
-    _step_trigger_tls,
 )
 from core.loop_synthesis import AgentLoopSynthesis, SynthesisState
 from core.loop_verification import AgentLoopVerification

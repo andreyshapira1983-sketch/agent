@@ -272,8 +272,14 @@ def test_notify_wakes_before_long_sleep_elapses(workspace: Path):
             await asyncio.sleep(0.01)
             service.notify()
 
-        asyncio.create_task(poke())
-        return await service._sleep_or_wake(30)
+        # Ссылку держим: задача без неё — единственный владелец сама себе,
+        # и сборщик мусора вправе снять её посреди работы. Тест стал бы
+        # плавающим, а причина искалась бы не здесь.
+        poke_task = asyncio.create_task(poke())
+        try:
+            return await service._sleep_or_wake(30)
+        finally:
+            await poke_task
 
     assert run_async(scenario()) is True
 
