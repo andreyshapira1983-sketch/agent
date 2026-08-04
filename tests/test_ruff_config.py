@@ -64,6 +64,7 @@ def _config() -> dict:
     return tomllib.loads(_CONFIG.read_text(encoding="utf-8"))
 
 
+@pytest.mark.skipif(shutil.which("ruff") is None, reason="ruff не установлен")
 def test_no_comment_is_mistaken_for_a_suppression_directive():
     """Пояснение, в котором написан код подавления, ruff читает как директиву.
 
