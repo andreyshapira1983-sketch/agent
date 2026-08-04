@@ -3,7 +3,7 @@
 
 Operator instruction 2026-08-05: do not choose a fix direction by opinion —
 turn it into a measurable experiment. This is step two, the baseline: how many
-of the 40 tasks in `tests/data/capability_tasks.py` the system gets right
+of the 40 tasks in `tests/capability_tasks.py` the system gets right
 BEFORE anything is changed.
 
 Two axes are scored, and they are not the same question.
@@ -38,7 +38,7 @@ from core.evidence import ProvenanceChain, make_evidence  # noqa: E402
 from core.reasoning_action_check import check_reasoning_actions  # noqa: E402
 from core.replan import ReplanPolicy, ReplanTrigger, format_replan_context  # noqa: E402
 from core.verifier_core import verify  # noqa: E402
-from tests.data.capability_tasks import ALL_TASKS, CATEGORIES, Task  # noqa: E402
+from tests.capability_tasks import ALL_TASKS, CATEGORIES, Task  # noqa: E402
 
 _CLAIM_CATEGORIES = ("inference", "arithmetic", "contradiction")
 

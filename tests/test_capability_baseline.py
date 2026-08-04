@@ -15,7 +15,7 @@ import importlib.util
 from collections import Counter
 from pathlib import Path
 
-from tests.data.capability_tasks import ALL_TASKS, CATEGORIES
+from tests.capability_tasks import ALL_TASKS, CATEGORIES
 
 _REPO = Path(__file__).resolve().parents[1]
 
