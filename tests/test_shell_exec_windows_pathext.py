@@ -21,6 +21,7 @@ is here, not in its reasoning.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -35,13 +36,32 @@ def tool(tmp_path: Path) -> ShellExecTool:
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="PATHEXT is Windows-only")
-def test_pathext_is_passed_through(tool: ShellExecTool):
-    assert "PATHEXT" in tool._safe_env()
+def test_pathext_is_passed_through(tool: ShellExecTool, monkeypatch):
+    """Set the variable explicitly — the test must not depend on the shell it runs in.
+
+    The first version of this test asserted `"PATHEXT" in _safe_env()` and read
+    the variable straight from the ambient environment. It was green in a
+    developer terminal and RED when the agent ran the suite through its own
+    `run_tests` tool, which strips the environment down and (until this change)
+    dropped PATHEXT — the live agent found this failure before I did.
+    """
+    monkeypatch.setenv("PATHEXT", ".COM;.EXE;.BAT")
+
+    assert tool._safe_env().get("PATHEXT") == ".COM;.EXE;.BAT"
+
+
+def test_pathext_is_not_invented_when_absent(tool: ShellExecTool, monkeypatch):
+    """Forwarding means passing on what exists, never fabricating a value."""
+    monkeypatch.delenv("PATHEXT", raising=False)
+
+    assert "PATHEXT" not in tool._safe_env()
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="PATHEXT is Windows-only")
-def test_a_name_on_path_can_actually_be_resolved(tool: ShellExecTool):
+def test_a_name_on_path_can_actually_be_resolved(tool: ShellExecTool, monkeypatch):
     """The end-to-end shape of the live failure: `where` must find what exists."""
+    monkeypatch.setenv("PATHEXT", os.environ.get("PATHEXT") or ".COM;.EXE;.BAT")
+
     result = tool.run(argv=["where", "where"])
     payload = result if isinstance(result, dict) else getattr(result, "output", {})
 

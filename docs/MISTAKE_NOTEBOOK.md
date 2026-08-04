@@ -785,6 +785,32 @@ costs — here, that an agent which refuses to take a claim on trust gets punish
 for verifying. That is the worst possible lesson to teach a system you are
 trying to make honest.
 
+## 32. A test that passes because of where you ran it
+
+**Symptom.** A test reads something from the ambient environment — a variable,
+a locale, a binary on PATH, a clock — and asserts on it. It is green on the
+author's machine and only there. The next runner gets a red that reproduces
+nowhere, or worse, a green that hides a real defect.
+
+**Cost (2026-08-04).** I fixed a missing `PATHEXT` in the shell sandbox and
+wrote a test asserting `"PATHEXT" in _safe_env()`, reading the variable from
+whatever shell happened to be running. Green for me, all suite green, committed.
+**The live agent then ran the same suite through its own `run_tests` tool and
+reported those two tests as failures** — because that tool strips the
+environment and dropped PATHEXT too. Same commit, opposite verdicts. The agent
+found the defect in my work, not the other way round, and its report looked
+exactly like the kind of thing that gets dismissed as the model being confused.
+
+**How to check yourself.** For every new test, ask: what does this read that I
+did not set? Then run it under a stripped environment, not just your shell —
+`env={...}` with the bare minimum. Two runs disagreeing is the whole signal.
+
+**What to do.** Set the input explicitly in the test and assert the behaviour,
+plus the converse case (absent input must not be invented). And when a tool
+builds an environment for a subprocess, treat that list as a contract with its
+own test — a runner that reports different results to different callers makes
+every verdict it produces worthless.
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED
@@ -829,6 +855,7 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 30 | [core/memory_policy.py:324](../core/memory_policy.py#L324) | recall scored Russian questions against English records by word overlap: «кто владеет архитектурой?» 0 records, the English form 3 | assistant, 2026-08-04 | MIR-086 |
 | 30 | [core/bilingual_terms.py:74](../core/bilingual_terms.py#L74) | every recall miss now says whether the table could widen the question at all — the number that decides the next step | assistant, 2026-08-04 | MIR-086 |
 | 31 | [tools/shell_exec.py:877](../tools/shell_exec.py#L877) | PATHEXT was withheld, so `where python` returned exit 1 on a machine where python is on PATH — the agent read that as "my tools may not be connected" | operator run, 2026-08-04 | MIR-087 |
+| 32 | [tools/run_tests.py:322](../tools/run_tests.py#L322) | the agent's own test run strips PATHEXT, so it reported 2 failures the operator's terminal did not have — same commit, opposite verdicts | **the agent**, 2026-08-04 | MIR-088 |
 
 ## How to append
 
