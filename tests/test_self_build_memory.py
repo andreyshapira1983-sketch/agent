@@ -180,9 +180,14 @@ class _RecallStore:
     def __init__(self, episodes) -> None:
         self._episodes = list(episodes)
         self.queried_tags = None
+        # Since 2026-08-04 recall may issue a SECOND, broader query to reach
+        # rollbacks banked before path tags existed. Keeping only the last one
+        # would hide the targeted query that must still happen first.
+        self.all_queries: list[list[str]] = []
 
     def search_by_tags(self, tags, *, limit: int = 5):
         self.queried_tags = list(tags)
+        self.all_queries.append(list(tags))
         return self._episodes[:limit]
 
 
@@ -197,10 +202,10 @@ def test_recent_lessons_returns_past_failure_summaries() -> None:
     lessons = recent_self_build_lessons(agent, "core/self_repair.py")
     assert len(lessons) == 1
     assert "_ToolRun" in lessons[0]
-    # Query is scoped to failed self-build lessons for the exact target.
-    assert "self-build" in store.queried_tags
-    assert "failed" in store.queried_tags
-    assert "core/self_repair.py" in store.queried_tags
+    # The targeted query still happens, and it is the FIRST one: the broader
+    # legacy sweep only runs when the exact-tag search came back short.
+    assert store.all_queries[0] == ["self-build", "failed", "core/self_repair.py"]
+    assert all("self-build" in q and "failed" in q for q in store.all_queries)
 
 
 def test_recent_lessons_is_empty_without_store_or_target() -> None:

@@ -65,6 +65,24 @@ _OUTCOME_BY_STATUS: dict[str, str] = {
 _COMPLETION_BY_OUTCOME = COMPLETION_BY_OUTCOME
 
 
+#: Tags exist so a later attempt can FIND this episode by file, not to hold a
+#: manifest of the change. A wide split would otherwise bury the other tags.
+_MAX_PATH_TAGS = 10
+
+
+def _touched_paths(result: dict[str, Any]) -> list[str]:
+    """Repo-relative files this attempt changed, normalised for tag lookup."""
+    raw = result.get("files_changed") or []
+    if not isinstance(raw, (list, tuple)):
+        return []
+    out: list[str] = []
+    for item in raw:
+        path = str(item or "").replace("\\", "/").strip()
+        if path and path not in out:
+            out.append(path)
+    return out[:_MAX_PATH_TAGS]
+
+
 def build_self_build_episode(kind: str, result: dict[str, Any]) -> Any:
     """Build an :class:`EpisodeRecord` describing one attempt (no I/O).
 
@@ -111,6 +129,13 @@ def build_self_build_episode(kind: str, result: dict[str, Any]) -> Any:
         tags.append("veto_judgement" if blames_target else "veto_pipeline")
     if target:
         tags.append(target)
+    # An apply result names `files_changed`, never `target_path`, so the episode
+    # used to carry no path at all and `recent_self_build_lessons(agent, file)`
+    # — which needs the path tag — found nothing. Measured on the live store:
+    # two of three rollbacks were the same file, the same test and the same
+    # assertion, because the first lesson was invisible to the second attempt.
+    for path in _touched_paths(result):
+        tags.append(path)
 
     return EpisodeRecord(
         goal=goal[:500],
@@ -144,6 +169,22 @@ def record_self_build_episode(agent: Any, *, kind: str, result: dict[str, Any]) 
         return False
 
 
+def _with_untagged_lessons(
+    store: Any, target: str, found: list[Any], *, limit: int
+) -> list[Any]:
+    """Add failed episodes whose summary names the file but whose tags do not."""
+    seen = {id(e) for e in found}
+    out = list(found)
+    for episode in store.search_by_tags(["self-build", "failed"], limit=limit * 8):
+        if len(out) >= limit:
+            break
+        if id(episode) in seen:
+            continue
+        if target in str(getattr(episode, "summary", "") or ""):
+            out.append(episode)
+    return out
+
+
 def recent_self_build_lessons(agent: Any, target: str, *, limit: int = 3) -> list[str]:
     """Return short summaries of PAST FAILED self-build attempts for ``target``.
 
@@ -152,6 +193,12 @@ def recent_self_build_lessons(agent: Any, target: str, *, limit: int = 3) -> lis
     repeat a mistake it already made on this exact file (e.g. "left a dangling
     import to a class it forgot to move"). Best-effort: returns ``[]`` when memory
     is unavailable or empty, and never raises.
+
+    Rollbacks banked before the path tag existed are still found: their summary
+    names the files (``files=['cli/intent_bridge.py', …]``). Without this the
+    three rollbacks already in the live store would stay invisible forever, and
+    the next attempt on those files would repeat their mistakes — which is
+    exactly what happened twice.
     """
     try:
         store = getattr(agent, "episodic_store", None)
@@ -160,6 +207,8 @@ def recent_self_build_lessons(agent: Any, target: str, *, limit: int = 3) -> lis
         episodes = store.search_by_tags(
             ["self-build", "failed", target], limit=limit
         )
+        if len(episodes) < limit:
+            episodes = _with_untagged_lessons(store, target, episodes, limit=limit)
         lessons: list[str] = []
         for episode in episodes:
             summary = str(getattr(episode, "summary", "") or "").strip()

@@ -703,6 +703,33 @@ callers whose answer must parse as a whole a way to decline stitching, and a
 way to learn they were cut off — "it did not fit" is a usable answer, a
 corrupted splice is not.
 
+## 24. The lesson is written, and cannot be found
+
+**Symptom.** A system records what went wrong, and reads it back before trying
+again — but the write and the read do not agree on the key. Both halves look
+correct in isolation. The recall returns nothing, silently, and the same
+mistake gets repeated at full price.
+
+**Cost (2026-08-04, the agent's own memory).** A rolled-back patch is banked as
+a lesson; the next attempt on the same file asks for lessons about that file.
+The writer took the file from `result["target_path"]` — which an apply result
+does not have, it has `files_changed` — so the episode carried no path tag,
+and the reader, which searches by path tag, found **0**. Two of the three
+rollbacks in the live store are the same file, the same test and the same
+assertion: `test_ambiguous_capability_check_still_uses_model_veto`,
+"assert True is False". The agent repeated its own mistake because the warning
+it had written for itself was unreachable.
+
+**How to check yourself.** Do not read the writer and the reader separately —
+put them side by side and compare the KEY. Then run the recall against real
+stored data and count what comes back. Zero results from a recall that "works"
+is the same false zero as an empty grep on the wrong field.
+
+**What to do.** Take the key from what the result actually contains, and pin it
+with a test that goes through both halves: bank an episode, then recall it. For
+records already written under the old key, make the reader fall back to the
+evidence they did keep — do not rewrite the store to match the code.
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED
@@ -717,12 +744,13 @@ The "Where handled" column is history, not status: **defect status is owned by
 |---|---|---|---|---|
 | 3 | [core/self_build_memory.py:105](../core/self_build_memory.py#L105) | rejection lesson: the veto cause is not distinguished ("bad candidate" vs "broken pipeline") | assistant, 2026-08-04 | MIR-083 |
 | 2 | [core/smart_memory.py:1546](../core/smart_memory.py#L1546) | episodes are written wrapped in `{_integrity, payload}` — a top-level search returns a false zero | assistant, 2026-08-04 | reading trap, not a defect |
-| 3 | [core/self_build_memory.py:187](../core/self_build_memory.py#L187) | avoid list: also filled by tool breakages — 4 of 5 live vetoes punished the target for our own failure | assistant, 2026-08-04 | MIR-083 |
+| 3 | [core/self_build_memory.py:236](../core/self_build_memory.py#L236) | avoid list: also filled by tool breakages — 4 of 5 live vetoes punished the target for our own failure | assistant, 2026-08-04 | MIR-083 |
 | 4 | [core/plan_parsing.py:242](../core/plan_parsing.py#L242) | rescuing JSON from a lone `\` — an example of how to fix this class | assistant, 2026-08-04 | PR #303 |
 | 5 | [core/builder_reply_diagnosis.py:17](../core/builder_reply_diagnosis.py#L17) | a rejection now names the cause, the position and the fragment (moved out of the producer by MIR-084) | assistant, 2026-08-04 | PR #303 |
 | 6 | [core/code_state.py:97](../core/code_state.py#L97) | fingerprint of the checked code — commit, branch, divergence | assistant, 2026-08-04 | PR #301 |
 | 6 | [core/autonomous_runtime.py:684](../core/autonomous_runtime.py#L684) | the autonomous test report carries the fingerprint | assistant, 2026-08-04 | PR #302 |
-| 11 | [core/self_build_producer.py:409](../core/self_build_producer.py#L409) | the builder calls the model directly: the result never reaches the verifier | assistant, 2026-08-04 | not handled |
+| 11 | [core/self_build_producer.py:391](../core/self_build_producer.py#L391) | ~~"the result never reaches the verifier"~~ — **wrong as written**: the patch does get checked (critic's structural vetoes, then targeted + full tests on apply, red ⇒ rollback). What is model self-report is `confidence`, and 3 of the live proposals passed that gate and still failed the tests | assistant, 2026-08-04 | claim corrected; the real defect is row 24 |
+| 24 | [core/self_build_memory.py:137](../core/self_build_memory.py#L137) | a rollback was banked with no file tag, so `recent_self_build_lessons` found 0 — the agent broke the same test the same way twice | assistant, 2026-08-04 | MIR-085 |
 | 12 | [core/task_complexity.py:108](../core/task_complexity.py#L108) | a ~180-character threshold decides which model answers | assistant, 2026-08-04 | PR #301, partly |
 | 15 | [core/llm.py:302](../core/llm.py#L302) | three replies broke at 32 326 / 32 440 / 37 678 — continuation stitched a JSON string it could not resume | assistant, 2026-08-04 | MIR-084 |
 | 16 | [docs/MISTAKE_NOTEBOOK.md:318](../docs/MISTAKE_NOTEBOOK.md#L318) | an invented example path in the address rule — caught by the docs conformance check | assistant, 2026-08-04 | PR #306 |
