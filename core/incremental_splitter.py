@@ -263,8 +263,7 @@ def _movable_function_group(
                 # references a name that stays behind (module-level or unknown)
                 del candidates[name]
                 changed = True
-    ordered = sorted(candidates.values(), key=lambda n: n.lineno)
-    return ordered
+    return sorted(candidates.values(), key=lambda n: n.lineno)
 
 
 def _trim_to_budget(

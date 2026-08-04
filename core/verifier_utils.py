@@ -33,8 +33,7 @@ from .verifier_patterns import (
 def _normalise_figure(fig: str) -> str:
     s = fig.lower()
     s = re.sub(r"\s+", "", s)
-    s = s.replace("\u2013", "-").replace("\u2014", "-")
-    return s
+    return s.replace("\u2013", "-").replace("\u2014", "-")
 
 
 def extract_statistical_figures(text: str) -> list[str]:
@@ -84,12 +83,9 @@ def is_structural_chunk(text: str) -> bool:
     stripped = text.strip()
     if _output_contract_header_name(stripped) is not None:
         return True
-    if _MD_HEADING_RE.match(stripped):
-        if "[" not in stripped:
-            return True
-    if _BARE_LIST_MARKER_RE.match(stripped):
+    if _MD_HEADING_RE.match(stripped) and "[" not in stripped:
         return True
-    return False
+    return bool(_BARE_LIST_MARKER_RE.match(stripped))
 
 
 def parse_citations(text: str) -> list[Citation]:
@@ -141,7 +137,7 @@ def extract_unresolved_web_urls(report: VerificationReport) -> list[str]:
             if not url:
                 continue
             lowered = url.lower()
-            if not (lowered.startswith("http://") or lowered.startswith("https://")):
+            if not (lowered.startswith(("http://", "https://"))):
                 continue
             if url in seen:
                 continue
@@ -277,6 +273,4 @@ def _is_derivative_subagent_evidence(ev: Evidence) -> bool:
     if _SUBAGENT_META_RE.search(excerpt) is not None:
         return True
     sid = ev.source_id or ""
-    if "subagent_" in sid or sid == "tool_output:spawn_subagent":
-        return True
-    return False
+    return bool("subagent_" in sid or sid == "tool_output:spawn_subagent")

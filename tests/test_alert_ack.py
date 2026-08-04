@@ -151,6 +151,8 @@ def test_store_acknowledge_rejects_empty_action(tmp_path: Path):
     store = AlertAckStore(path=tmp_path / "alert_acks.jsonl")
     try:
         store.acknowledge(action="   ")
-        assert False, "expected ValueError"
+        # Не `assert False`: под `python -O` он вырезается, и тест начинает
+        # молча проходить там, где обязан падать.
+        raise AssertionError("expected ValueError")
     except ValueError:
         pass

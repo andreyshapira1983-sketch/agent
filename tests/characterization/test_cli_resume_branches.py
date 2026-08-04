@@ -77,12 +77,6 @@ def test_invalid_trace_id_returns_two_without_building_agent(bad, tmp_path, monk
     state = _patch(monkeypatch)
     monkeypatch.setattr(sys, "argv", _argv(tmp_path, bad))
 
-    if bad == "":
-        # An empty --resume is falsy, so the resume block is skipped entirely and
-        # the run proceeds as an ordinary REPL/one-shot invocation. Recorded so
-        # the allowlist is not credited with behavior it does not have.
-        pytest.skip("empty --resume is falsy: no validation branch is entered")
-
     assert main_module.main() == 2
     assert state["build"] == []
     err = capsys.readouterr().err

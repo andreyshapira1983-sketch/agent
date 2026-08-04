@@ -175,9 +175,7 @@ def _is_denied(rel: str) -> bool:
         return True
     if name in _DENY_NAMES:
         return True
-    if any(sub in name for sub in _DENY_NAME_SUBSTR):
-        return True
-    return False
+    return bool(any(sub in name for sub in _DENY_NAME_SUBSTR))
 
 
 def _is_allowed(rel: str) -> bool:
@@ -187,9 +185,7 @@ def _is_allowed(rel: str) -> bool:
         return True
     if top == "docs":
         return True
-    if lower.endswith(".md"):
-        return True
-    return False
+    return bool(lower.endswith(".md"))
 
 
 def classify_patch_risk(
@@ -214,8 +210,8 @@ def classify_patch_risk(
     if rejected:
         return (
             False,
-            "patch is not low-risk: files outside the allowlist or on the "
-            "denylist",
+            ("patch is not low-risk: files outside the allowlist or on the "
+            "denylist"),
             rejected,
         )
     return True, "all files are low-risk (allowlisted, not denylisted)", []
@@ -544,8 +540,8 @@ def run_self_apply_lane(
         rollback_status="none",
         commit_hash=commit_hash,
         risks=[
-            "change is committed locally only — not pushed, not merged; a human "
-            "must review before it reaches the base branch"
+            ("change is committed locally only — not pushed, not merged; a human "
+            "must review before it reaches the base branch")
         ],
         next_human_action=next_human,
     )

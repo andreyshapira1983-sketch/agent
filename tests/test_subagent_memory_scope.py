@@ -147,16 +147,16 @@ def test_budget_scope_frozen():
 # ── SubagentProposal ──────────────────────────────────────────────────────────
 
 def _make_proposal(**overrides: Any) -> SubagentProposal:
-    defaults = dict(
-        task_goal="monitor Upwork",
-        why_needed="background task",
-        proposed_role="UpworkScanner",
-        memory_scope=MemoryScope(read_tags=("project",), write_tags=()),
-        tool_scope=ToolScope(allowed_tools=("web_search",), forbidden_tools=("shell_exec",)),
-        budget_scope=BudgetScope(),
-        risk_level="low",
-        expected_output="List of opportunities",
-    )
+    defaults = {
+        "task_goal": "monitor Upwork",
+        "why_needed": "background task",
+        "proposed_role": "UpworkScanner",
+        "memory_scope": MemoryScope(read_tags=("project",), write_tags=()),
+        "tool_scope": ToolScope(allowed_tools=("web_search",), forbidden_tools=("shell_exec",)),
+        "budget_scope": BudgetScope(),
+        "risk_level": "low",
+        "expected_output": "List of opportunities",
+    }
     defaults.update(overrides)
     return SubagentProposal(**defaults)
 

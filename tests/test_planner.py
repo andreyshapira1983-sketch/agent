@@ -1658,8 +1658,8 @@ def test_thematic_injector_keeps_unrelated_duplicates_untouched() -> None:
     ("question", "directive"),
     (
         (
-            "Explain the corporate model, central agent governance, subagents, "
-            "self-build, night observation, and safe autonomy.",
+            ("Explain the corporate model, central agent governance, subagents, "
+            "self-build, night observation, and safe autonomy."),
             "[DOCTRINE_DOCS=required",
         ),
         (

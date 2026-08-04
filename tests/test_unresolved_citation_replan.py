@@ -262,7 +262,7 @@ class TestUnresolvedCitationHappyPath:
             "Facts: definition cited [web:" + url + "].\n"
             "Sources: " + url
         )
-        agent, log_path, opener = _build_agent(
+        agent, log_path, _opener = _build_agent(
             workspace,
             planner=planner,
             llm_responses=[llm_answer],

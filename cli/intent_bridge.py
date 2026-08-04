@@ -41,13 +41,13 @@ from cli.commands_approval import (
     _handle_approval_list,
     _handle_best_next_action,
 )
+from cli.commands_audit import _handle_architecture_audit
 from cli.commands_ingest import (
     _handle_implementation_plan,
     _handle_patch_proposal_plan,
     _handle_source_review_plan,
 )
 from cli.commands_memory import _handle_smart_memory
-from cli.commands_misc import _handle_architecture_audit
 from cli.commands_models import _handle_models
 from cli.commands_proposals import (
     _handle_capability_request,

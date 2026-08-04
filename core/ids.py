@@ -11,3 +11,9 @@ def new_id(prefix: str) -> str:
     and eliminates birthday-collision risk in distributed logs.
     """
     return f"{prefix}_{secrets.token_hex(16)}"
+
+
+# Приехало из `core/loop_helpers.py`: идентификатор трассы — это идентификатор,
+# и его дом здесь, рядом с `new_id`, которым он и сделан.
+def new_trace_id() -> str:
+    return new_id("run")

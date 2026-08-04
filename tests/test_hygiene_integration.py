@@ -17,10 +17,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.approval import AutoApprover
-from core.hygiene import SUMMARY_TAG
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.memory import WorkingMemory
+from core.memory_hygiene import SUMMARY_TAG
 from core.memory_policy import MemoryRetrievalPolicy, MemoryWritePolicy
 from core.models import MemoryRecord
 from core.persistent_memory import PersistentMemoryStore
@@ -278,7 +278,7 @@ class TestSummariseLoop:
         # FakeLLM returns the canned summary on `complete()`. The agent
         # builds the prompt itself; we don't care about its shape here,
         # only that the merged record actually lands on disk.
-        agent, log_path, store, llm = _build_agent(
+        agent, log_path, store, _llm = _build_agent(
             workspace,
             canned_llm_responses=["merged: ships Fri at noon; on-call rotates"],
         )
@@ -345,7 +345,7 @@ class TestSummariseLoop:
         records = store.load()
         selected = agent.retrieval_policy.select(records, "project ships on Friday")
         assert len(selected) == 1
-        assert selected[0].id == [r.id for r in records][0]
+        assert selected[0].id == next(r.id for r in records)
 
 
 # ===========================================================

@@ -356,7 +356,7 @@ def sanitize_step(
             )
             return None
         url_lower = url.lower()
-        if not (url_lower.startswith("http://") or url_lower.startswith("https://")):
+        if not (url_lower.startswith(("http://", "https://"))):
             warnings.append(
                 f"step[{idx}]: web_fetch url must start with http:// or https://, dropped"
             )
@@ -396,7 +396,7 @@ def sanitize_step(
             warnings.append(f"step[{idx}]: rss_fetch url not ASCII, dropped")
             return None
         url_lower = url.lower()
-        if not (url_lower.startswith("http://") or url_lower.startswith("https://")):
+        if not (url_lower.startswith(("http://", "https://"))):
             warnings.append(
                 f"step[{idx}]: rss_fetch url must start with http:// or https://, dropped"
             )

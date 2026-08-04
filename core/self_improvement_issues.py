@@ -33,7 +33,7 @@ def _now() -> str:
 
 def _stamp(value: str) -> datetime:
     try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(str(value))
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
     except ValueError:
         return datetime.min.replace(tzinfo=timezone.utc)
@@ -190,7 +190,7 @@ class SelfImprovementIssueRegistry:
             merged = replace(
                 current,
                 status=status,
-                last_seen=max((current.last_seen, observed_at), key=lambda value: _stamp(value)),
+                last_seen=max((current.last_seen, observed_at), key=_stamp),
                 evidence=tuple(dict.fromkeys((*current.evidence, *incoming.evidence)))[-8:],
                 related_error_text=incoming.related_error_text or current.related_error_text,
             )

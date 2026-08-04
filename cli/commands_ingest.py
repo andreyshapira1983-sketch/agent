@@ -589,11 +589,11 @@ def _insufficient_source_evidence_payload(
         },
         "files_not_read": missing,
         "next_actions": [
-            "Read the named files first: re-ask without a deterministic planning "
+            ("Read the named files first: re-ask without a deterministic planning "
             "shortcut so the read-capable planner opens them, or use explicit "
-            "multi-file review mode.",
-            "Or ingest them (:ingest-source / :ingest-project) so the Source "
-            "Registry has verifiable claims, then re-run the plan.",
+            "multi-file review mode."),
+            ("Or ingest them (:ingest-source / :ingest-project) so the Source "
+            "Registry has verifiable claims, then re-run the plan."),
         ],
         "constraints": [
             "read-only planning guard",

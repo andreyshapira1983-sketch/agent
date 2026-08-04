@@ -44,7 +44,7 @@ def classify_model_error(exc: BaseException) -> str:
     name = type(exc).__name__.lower()
     text = str(exc).lower()
 
-    if status_int in (429,) or "ratelimit" in name or "rate limit" in text or "too many requests" in text:
+    if status_int == 429 or "ratelimit" in name or "rate limit" in text or "too many requests" in text:
         return "rate_limit"
     if "timeout" in name or "timedout" in name or "timed out" in text:
         return "timeout"

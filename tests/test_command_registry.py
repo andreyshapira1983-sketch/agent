@@ -21,6 +21,7 @@ import importlib.util
 import io
 import re
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -400,5 +401,8 @@ def test_categories_match_the_commands_map_sections():
 
 def test_command_spec_is_frozen():
     spec = reg.COMMANDS[0]
-    with pytest.raises(Exception):
+    # `FrozenInstanceError`, а не голое `Exception`: проверяется КОНКРЕТНЫЙ
+    # механизм. Широкий перехват зеленел бы и в том случае, если класс
+    # перестал быть замороженным датаклассом и запрещает запись как-то иначе.
+    with pytest.raises(FrozenInstanceError):
         spec.canonical = ":changed"  # type: ignore[misc]

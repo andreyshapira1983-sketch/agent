@@ -550,7 +550,7 @@ class TestRollback:
         assert (workspace / "alive_dir").exists()
 
     def test_rollback_without_workspace_root_skips(self, workspace: Path):
-        agent, log_path, _ = _build_agent(
+        agent, _log_path, _ = _build_agent(
             workspace,
             approval_default="approve",
             canned_sources=[{

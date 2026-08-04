@@ -303,12 +303,12 @@ def test_spawn_tool_validate_output_accepts_nonempty_string(spawn_tool):
 
 
 def test_spawn_tool_validate_output_rejects_empty_string(spawn_tool):
-    ok, issues = spawn_tool.validate_output("   ")
+    ok, _issues = spawn_tool.validate_output("   ")
     assert ok is False
 
 
 def test_spawn_tool_validate_output_rejects_non_string(spawn_tool):
-    ok, issues = spawn_tool.validate_output(123)
+    ok, _issues = spawn_tool.validate_output(123)
     assert ok is False
 
 

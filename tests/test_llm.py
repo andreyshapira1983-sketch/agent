@@ -562,7 +562,7 @@ class TestAnthropicCallPath:
         llm = _anthropic_llm()
         seen = []
         out = llm.stream_complete(
-            system="s", user="u", on_token=lambda t: seen.append(t)
+            system="s", user="u", on_token=seen.append
         )
         assert out == "hello"
         assert seen == ["he", "llo"]
@@ -666,7 +666,7 @@ class TestOpenAICallPath:
         llm = _openai_llm()
         seen = []
         out = llm.stream_complete(
-            system="s", user="u", on_token=lambda t: seen.append(t)
+            system="s", user="u", on_token=seen.append
         )
         assert out == "hello"
         assert seen == ["he", "llo"]

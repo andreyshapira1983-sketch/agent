@@ -156,7 +156,7 @@ def test_classifier_rejects_denylisted_or_non_allowlisted(path: str):
 
 
 def test_classifier_rejects_empty_patch():
-    ok, _reason, rejected = classify_patch_risk([])
+    ok, _reason, _rejected = classify_patch_risk([])
     assert ok is False
 
 

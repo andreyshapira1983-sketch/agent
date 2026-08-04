@@ -559,7 +559,7 @@ def test_every_action_carries_evidence_and_unknowns():
 
 
 def test_selection_is_deterministic_for_same_signals():
-    kwargs = dict(tests_health="fail", failed_tests=("a",), dry_run_streak=8)
+    kwargs = {"tests_health": "fail", "failed_tests": ("a",), "dry_run_streak": 8}
     first = select_best_next_action(**kwargs)
     second = select_best_next_action(**kwargs)
     assert first.to_dict() == second.to_dict()

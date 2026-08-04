@@ -63,25 +63,25 @@ def _chunk(verdict: str, ev_ids: tuple[str, ...] = ()) -> ClaimChunk:
 
 def _report(chunks: tuple[ClaimChunk, ...], **overrides) -> VerificationReport:
     verdicts = [c.verdict for c in chunks]
-    fields = dict(
-        total_chunks=len(chunks),
-        verified_chunks=verdicts.count("verified"),
-        unverified_chunks=verdicts.count("unverified"),
-        cited_but_unmatched_chunks=verdicts.count("cited_but_unmatched"),
-        self_declared_chunks=verdicts.count("self_declared"),
-        structural_chunks=verdicts.count("structural"),
-        chunks=chunks,
-        annotated_answer="\n".join(c.text for c in chunks),
-        fully_unverified=(verdicts.count("verified") == 0),
-        chain_was_empty=False,
-        dialogue_supported_chunks=verdicts.count("dialogue_supported"),
-        user_asserted_chunks=verdicts.count("user_asserted"),
-        topic_supported_but_claim_unverified_chunks=verdicts.count(
+    fields = {
+        "total_chunks": len(chunks),
+        "verified_chunks": verdicts.count("verified"),
+        "unverified_chunks": verdicts.count("unverified"),
+        "cited_but_unmatched_chunks": verdicts.count("cited_but_unmatched"),
+        "self_declared_chunks": verdicts.count("self_declared"),
+        "structural_chunks": verdicts.count("structural"),
+        "chunks": chunks,
+        "annotated_answer": "\n".join(c.text for c in chunks),
+        "fully_unverified": (verdicts.count("verified") == 0),
+        "chain_was_empty": False,
+        "dialogue_supported_chunks": verdicts.count("dialogue_supported"),
+        "user_asserted_chunks": verdicts.count("user_asserted"),
+        "topic_supported_but_claim_unverified_chunks": verdicts.count(
             "topic_supported_but_claim_unverified"
         ),
-        subagent_asserted_chunks=verdicts.count("subagent_asserted"),
-        receipt_missing_chunks=verdicts.count("receipt_missing"),
-    )
+        "subagent_asserted_chunks": verdicts.count("subagent_asserted"),
+        "receipt_missing_chunks": verdicts.count("receipt_missing"),
+    }
     fields.update(overrides)
     return VerificationReport(**fields)
 
@@ -334,12 +334,16 @@ class TestLoopWiring:
         """Review round #283: a broken summary must not vanish silently —
         the loop keeps answering, and the journal says WHY there is no
         explanation this turn."""
-        import core.loop as loop_mod
+        # Цель подмены — модуль, в чьих globals имя РАЗРЕШАЕТСЯ. Решатели
+        # черновика уехали из `core/loop.py` в свой модуль (раскол, кусок 2),
+        # и вместе с ними уехала эта цель. Патч по старому адресу теперь не
+        # молчал бы, а падал бы AttributeError — что и произошло.
+        import core.loop_response_deciders as deciders_mod
 
         def _boom(report, chain=None):
             raise RuntimeError("схема вердиктов изменилась")
 
-        monkeypatch.setattr(loop_mod, "build_verification_summary", _boom)
+        monkeypatch.setattr(deciders_mod, "build_verification_summary", _boom)
         (workspace / "doc.txt").write_text("hello", encoding="utf-8")
         agent, log_path = _agent(
             workspace,

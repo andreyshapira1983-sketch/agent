@@ -28,7 +28,7 @@ import pytest
 
 from app.bootstrap import build_agent
 from core.loop import AgentLoop
-from core.loop_methods2 import KNOWN_DURABLE_SINKS
+from core.loop_memory_write import KNOWN_DURABLE_SINKS
 
 # Shared cycle/snapshot helpers live with the wiring suite that introduced them.
 from tests.test_memory_core_wiring import _drive_one_cycle, _durable_snapshot

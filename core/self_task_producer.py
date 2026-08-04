@@ -219,7 +219,7 @@ def _test_references_module(test_content: str, impl_path: str) -> bool:
 
 def _has_meaningful_assert(test_content: str) -> bool:
     lines = [ln.strip().lower() for ln in test_content.splitlines()]
-    asserts = [ln for ln in lines if ln.startswith("assert ") or ln.startswith("assert(")]
+    asserts = [ln for ln in lines if ln.startswith(("assert ", "assert("))]
     if not asserts:
         # pytest.raises / self.assert* also count as real assertions.
         low = test_content.lower()

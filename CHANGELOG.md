@@ -110,7 +110,7 @@ All notable changes to this project are recorded here. The format follows
 - `core/loop.py` decomposed by six bounded pieces (4733 → 4047 lines): replan
   vocabulary → `core/replan.py`; file-request classifiers, path parsers and
   the multi-file review decision → `core/file_request_intent.py` (new);
-  evidence→prompt renderers → `core/loop_helpers.py`; the trimmed-memory
+  evidence→prompt renderers → `core/loop_helpers.py` <!-- historical-ref: renamed to core/answer_format.py when the "helpers" bag was dissolved; the old name is what this release actually did -->; the trimmed-memory
   rebuilder and the memory-block tags → `core/evidence_budget.py`.
 
 ### Fixed

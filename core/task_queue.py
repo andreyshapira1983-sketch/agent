@@ -57,7 +57,7 @@ def _iso(dt: datetime | None = None) -> str:
 
 
 def _parse_iso(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    return datetime.fromisoformat(value).astimezone(timezone.utc)
 
 
 def _choice(value: object, *, default: str, allowed: set[str], field_name: str) -> str:
@@ -343,7 +343,7 @@ class TaskQueueStore:
     ) -> RuntimeTask:
         pid = os.getpid() if owner_pid is None else int(owner_pid)
         host = socket.gethostname() if owner_host is None else str(owner_host)
-        task = self._update_one(
+        return self._update_one(
             task_id,
             lambda task: task.with_updates(
                 status="running",
@@ -354,7 +354,6 @@ class TaskQueueStore:
                 owner_host=host,
             ),
         )
-        return task
 
     def heartbeat(self, task_id: str) -> RuntimeTask | None:
         """Refresh liveness for a task that is still running.

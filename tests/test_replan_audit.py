@@ -631,7 +631,7 @@ class TestForbiddenFullyStripsPlan:
         # Tool never ran.
         assert target.calls == 0
         # `respond.replan_exhausted` is False — we ended in success.
-        respond = [e for e in events if e["event"] == "respond"][0]
+        respond = next(e for e in events if e["event"] == "respond")
         assert respond["payload"]["replan_exhausted"] is False
         assert respond["payload"]["attempts_used"] == 2
         # And no `replan_exhausted` event emitted.

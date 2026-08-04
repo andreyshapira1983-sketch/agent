@@ -101,7 +101,7 @@ def test_a_bad_call_to_the_episode_factory_raises(tmp_path: Path,
         )
 
     monkeypatch.setattr(
-        "core.loop_methods2.episode_from_agent_cycle", _signature_mismatch
+        "core.loop_memory_write.episode_from_agent_cycle", _signature_mismatch
     )
 
     with pytest.raises(TypeError, match="unexpected keyword argument"):
@@ -117,7 +117,7 @@ def test_a_bad_call_is_not_reported_as_a_memory_error(tmp_path: Path,
         raise TypeError("bad keyword argument")
 
     monkeypatch.setattr(
-        "core.loop_methods2.episode_from_agent_cycle", _signature_mismatch
+        "core.loop_memory_write.episode_from_agent_cycle", _signature_mismatch
     )
 
     with pytest.raises(TypeError):

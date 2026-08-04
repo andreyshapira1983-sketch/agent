@@ -18,8 +18,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Any, Literal
 
 from core.data_classifier import DataClass, SourceHint, classify
-from core.injection_guard import annotate_suspicious, scan_for_injection
-from core.loop_helpers import _to_text, untrusted_scan_view
+from core.injection_guard import (
+    _to_text,
+    annotate_suspicious,
+    scan_for_injection,
+    untrusted_scan_view,
+)
 from core.models import (
     Action,
     ApprovalRequest,

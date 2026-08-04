@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 159 modules across 12 groups._
+_Total: 176 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -22,6 +22,7 @@ _Operator-facing I/O, intent routing, output shaping._
 | `core/operator_intent_patterns` | Trigger phrases and matchers behind the no-LLM operator-intent router, including the one-inserted-word tolerance and the suppression guards that stay strict. |
 | `core/intent_understanding` | Intent understanding — the translator between plain human language and the autonomous agent's actions. |
 | `core/file_request_intent` | What kind of file request is this question? |
+| `core/answer_format` | Как ответ выглядит: контракт вывода, человеческая печать, цитаты. |
 | `core/lang_match` | Language-aware term matching for question routing. |
 | `core/output_policy` | Ranker-to-output policy. |
 | `core/user_profile` | User Profile — Layer 4 (User Mental Model). |
@@ -47,10 +48,25 @@ _Planning, verification, clarification, control loop._
 | Module | Purpose |
 | ------ | ------- |
 | `core/loop` | Control Loop — Observe -> Interpret -> Plan -> Act -> Verify -> Respond. |
-| `core/loop_helpers` | Helpers extracted verbatim from ``core/loop.py`` by the incremental splitter. |
-| `core/loop_methods` | Methods extracted verbatim from ``AgentLoop`` in ``core/loop.py`` by the incremental splitter. |
-| `core/loop_methods2` | Methods extracted verbatim from ``AgentLoop`` in ``core/loop.py`` by the incremental splitter. |
 | `core/loop_step_execution` | Исполнение одного шага плана — вырезано из ``core/loop.py`` дословно. |
+| `core/loop_sensor` | Запись о сбое наблюдательного сенсора — один метод, и это его дом. |
+| `core/loop_knowledge` | Запись знаний, добытых конвейером, в долгую память. |
+| `core/loop_memory_commands` | Операторские команды памяти: запомнить, забыть, показать. |
+| `core/loop_repair` | Починка кода: предложение, применение, откат, уборка резервных копий. |
+| `core/loop_hygiene` | Гигиена памяти: один проход обслуживания и шесть его шагов. |
+| `core/loop_memory_read` | Чтение памяти циклом: долгая, опытная, сводка. |
+| `core/loop_memory_write` | Запись памяти циклом — и право на неё. |
+| `core/loop_response_deciders` | Черновик ответа и решатели над ним — вырезано из ``core/loop.py`` дословно. |
+| `core/loop_synthesis` | Синтез ответа — метод `_synthesize`, вырезанный из ``core/loop.py`` дословно. |
+| `core/loop_evidence_chain` | Досборка цепочки улик — вырезано из ``core/loop.py`` дословно. |
+| `core/loop_verification` | Проверка черновика и сенсоры вокруг неё — вырезано из ``core/loop.py``. |
+| `core/loop_observe` | Наблюдение, разбор запроса и выбор модели — вырезано из ``core/loop.py``. |
+| `core/loop_run_tail` | Хвост прогона: ответ готов, эпизод ещё не записан — из ``core/loop.py``. |
+| `core/loop_context` | Контекст хода до планирования — вырезано из ``core/loop.py`` дословно. |
+| `core/loop_attempt` | Цикл попыток: план → исполнение → вердикт → перепланирование. |
+| `core/loop_verify_replan` | Проверка ответа и перепланирование по неразрешённым цитатам. |
+| `core/loop_init` | Сборка ``AgentLoop`` — конструктор, вырезанный из ``core/loop.py`` дословно. |
+| `core/loop_gates` | Ворота цикла: четыре места, где ход заканчивается, не начавшись. |
 | `core/planner` | LLM-driven Planner (§3 Cognitive Core: Planning). |
 | `core/planner_prompt` | The planner's system prompt (§3 Cognitive Core: Planning). |
 | `core/plan_parsing` | Parsing of the planner LLM's raw output (§3 Cognitive Core: Planning). |
@@ -101,7 +117,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/smart_memory` | Episodic, procedural and consolidation memory for autonomous operation. |
 | `core/memory_policy` | Memory Write Policy + Memory Retrieval Policy (§4 + §12.4). |
 | `core/memory_echo_antibody` | Memory Echo Antibody (A1) — refuse agent-auto memory that *echoes* itself. |
-| `core/hygiene` | Memory Hygiene (§4 Memory Governance — cleanup, dedup, expiry, summarise). |
+| `core/memory_hygiene` | Гигиена памяти: просрочка, дедупликация, сводка, архивация. |
 | `core/episodic_hygiene` | Episodic memory hygiene — staleness scoring and pruning. |
 | `core/knowledge_use_policy` | Contextual memory-use policy. |
 | `core/knowledge_pipeline` | Knowledge pipeline integration. |
@@ -130,6 +146,7 @@ _Effect gateways, receipts, compensation, VCS safety._
 | `core/gateway_consult` | Gateway hard-stop consult helpers (G5a). |
 | `core/tool_receipts` | Append-only tool receipt ledger — Stage 1 evidence layer (slice 1a + G5b). |
 | `core/receipt_consumer` | Tool receipts slice 1c — minimal consumer for verifier integration. |
+| `core/backup_cleanup` | Уборка резервных копий `.bak.<ts>` из рабочего каталога. |
 | `core/compensation` | Compensation System (§5 Undo) — first introduced for MVP-11 shell_exec. |
 | `core/safe_vcs` | Narrow, safe VCS helper for the trusted self-apply lane (TD-023). |
 | `core/supply_chain` | Release/supply-chain audit helpers. |

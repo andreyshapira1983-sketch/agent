@@ -12,6 +12,8 @@ Coverage targets:
 """
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from core.operational_domain import (
@@ -142,7 +144,10 @@ class TestResultShape:
 
     def test_finding_is_frozen(self) -> None:
         f = DomainFinding(kind="real_money", evidence="x", confidence=0.9)
-        with pytest.raises(Exception):
+        # `FrozenInstanceError`, а не голое `Exception`: проверяется КОНКРЕТНЫЙ
+        # механизм. Широкий перехват зеленел бы и в том случае, если класс
+        # перестал быть замороженным датаклассом и запрещает запись как-то иначе.
+        with pytest.raises(FrozenInstanceError):
             f.confidence = 0.1  # type: ignore[misc]
 
 

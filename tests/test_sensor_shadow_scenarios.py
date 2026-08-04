@@ -112,7 +112,7 @@ def test_s5_planner_planned_tools_but_executor_produced_nothing():
         report=_R(total_chunks=3, verified_chunks=1, unverified_chunks=2),
     )
     assert "planner_vs_executor" in _kinds(events)
-    assert [e for e in events if e["kind"] == "planner_vs_executor"][0]["severity"] == "low"
+    assert next(e for e in events if e["kind"] == "planner_vs_executor")["severity"] == "low"
 
 
 def test_s5_citations_the_verifier_cannot_match():

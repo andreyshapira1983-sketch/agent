@@ -140,7 +140,7 @@ class TestArgvValidation:
         ["$HOME", "~/.ssh", "${PATH}"],
     )
     def test_tilde_and_dollar_rejected(self, workspace: Path, arg: str):
-        with pytest.raises(PermissionError, match="forbids|metachar"):
+        with pytest.raises(PermissionError, match=r"forbids|metachar"):
             self._tool(workspace).run(["touch", arg])
 
     def test_command_outside_whitelist_rejected(self, workspace: Path):
@@ -179,7 +179,7 @@ class TestPathValidation:
     def test_dotdot_traversal_rejected(self, workspace: Path):
         with pytest.raises(PermissionError, match="'\\.\\.' traversal"):
             self._tool(workspace).run(["mkdir", "../escape"])
-        with pytest.raises(PermissionError, match="traversal|escape"):
+        with pytest.raises(PermissionError, match=r"traversal|escape"):
             self._tool(workspace).run(["mkdir", "sub/../../escape"])
 
 

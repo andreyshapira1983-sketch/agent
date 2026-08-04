@@ -42,7 +42,7 @@ from typing import Literal
 # step with the on-disk dedup gate (`core.hygiene`). Importing the internal
 # helper avoids re-implementing — and silently drifting from — the similarity
 # definition the rest of the system already trusts.
-from core.hygiene import _similarity as _text_similarity
+from core.memory_hygiene import _similarity as _text_similarity
 
 # The single write source this antibody guards. Everything else — most
 # importantly `user-explicit` — passes straight through untouched.

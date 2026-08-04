@@ -17,7 +17,7 @@ So the ratio itself is kept and the *return type* changed: case A now reports
 support ratio at all.
 """
 
-from dataclasses import dataclass
+from dataclasses import FrozenInstanceError, dataclass
 
 import pytest
 
@@ -193,5 +193,8 @@ def test_not_applicable_payload_reports_a_null_score():
 def test_result_is_frozen():
     res = evaluate_evidence_support(_FakeReport(total_chunks=2), evidence_expected=True)
     assert isinstance(res, EvidenceSupportResult)
-    with pytest.raises(Exception):
+    # `FrozenInstanceError`, а не голое `Exception`: проверяется КОНКРЕТНЫЙ
+    # механизм. Широкий перехват зеленел бы и в том случае, если класс
+    # перестал быть замороженным датаклассом и запрещает запись как-то иначе.
+    with pytest.raises(FrozenInstanceError):
         res.score = 1.0  # type: ignore[misc]

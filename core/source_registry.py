@@ -424,7 +424,7 @@ def _web_source_type(source_id: str) -> SourceType:
         "openlibrary.org",
     )):
         return "book"
-    if domain.endswith(".gov") or domain.endswith(".edu"):
+    if domain.endswith((".gov", ".edu")):
         return "official_site"
     if any(domain == item or domain.endswith("." + item) for item in ("reddit.com", "quora.com")):
         return "forum"
@@ -473,8 +473,7 @@ def _domain(locator: str) -> str:
     parsed = urlparse(locator)
     host = parsed.netloc or parsed.path.split("/", 1)[0]
     host = host.lower().strip()
-    host = host.removeprefix("www.")
-    return host
+    return host.removeprefix("www.")
 
 
 def _bounded_trust(value: float) -> float:

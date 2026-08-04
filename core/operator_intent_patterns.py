@@ -107,7 +107,7 @@ def _looks_like_plain_bug_note(text: str) -> bool:
 def _looks_like_explicit_non_routing_command(text: str) -> bool:
     stripped = text.strip()
     return stripped.startswith(":") and not (
-        stripped.startswith(":patch-proposal-plan") or stripped.startswith(":patch-plan")
+        stripped.startswith((":patch-proposal-plan", ":patch-plan"))
     )
 
 
@@ -251,9 +251,7 @@ def _matches_self_build_request(text: str) -> bool:
         "без согласия",
     ):
         consent_stripped = consent_stripped.replace(consent, " ")
-    if _looks_like_meta_instruction(consent_stripped):
-        return False
-    return True
+    return not _looks_like_meta_instruction(consent_stripped)
 
 
 def _matches_inbox_task_request(text: str) -> bool:
@@ -323,7 +321,7 @@ def _explicit_documentation_requested(text: str) -> bool:
 
 def _matches_patch_proposal(text: str) -> bool:
     stripped = text.strip()
-    if stripped.startswith(":patch-proposal-plan") or stripped.startswith(":patch-plan"):
+    if stripped.startswith((":patch-proposal-plan", ":patch-plan")):
         return True
     return _has_any_loose(
         text,
@@ -1086,6 +1084,4 @@ def _matches_approval_status(text: str) -> bool:
     # Ambiguous stems ("подтвержд", "разрешени") only count when paired with an
     # approval/inbox context word — otherwise phrases like "подтверждённые
     # факты" must NOT be routed to the approval inbox.
-    if _has_any_loose(text, _APPROVAL_AMBIGUOUS) and _has_any_loose(text, _APPROVAL_CONTEXT):
-        return True
-    return False
+    return bool(_has_any_loose(text, _APPROVAL_AMBIGUOUS) and _has_any_loose(text, _APPROVAL_CONTEXT))

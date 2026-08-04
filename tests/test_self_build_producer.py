@@ -128,14 +128,14 @@ def _headroom_budget() -> dict:
 
 
 def _produce(workspace: Path, **kwargs) -> ProducerReport:
-    defaults = dict(
-        workspace=workspace,
-        inbox=ApprovalInbox(path=None),
-        vcs=FakeVCS(clean=True),
-        budget_snapshot=_headroom_budget(),
-        kill_switch=FakeKillSwitch(active=False),
-        file_reader=_reader({_TARGET: "OLD = 0\n"}),
-    )
+    defaults = {
+        "workspace": workspace,
+        "inbox": ApprovalInbox(path=None),
+        "vcs": FakeVCS(clean=True),
+        "budget_snapshot": _headroom_budget(),
+        "kill_switch": FakeKillSwitch(active=False),
+        "file_reader": _reader({_TARGET: "OLD = 0\n"}),
+    }
     # These legacy tests exercise the LLM Manager path directly. Since TD-036's
     # follow-up made the grounded selector the default, opt them back into the
     # legacy path explicitly unless the test drives a grounded selector itself.
@@ -611,7 +611,7 @@ def test_legacy_llm_manager_flag_preserves_llm_selection(workspace: Path):
     llm = FakeLLM([_manager_ok(), _builder_ok()])
     report = _produce(workspace, llm=llm)  # helper injects legacy_llm_manager=True
     assert report.status == "proposed"
-    assert [r.role for r in report.role_outputs][0] == "manager"
+    assert next(r.role for r in report.role_outputs) == "manager"
     # The manager consulted the LLM (first canned response consumed).
     assert any("Manager" in c["system"] for c in llm.calls)
 
@@ -1097,14 +1097,14 @@ import types  # noqa: E402 — used only by the hardening tests below
 def _grounded_full_kwargs(workspace: Path, **overrides):
     """Direct produce_self_apply_proposal kwargs driving a grounded candidate
     (no legacy LLM manager); ready for A/B/C overrides."""
-    base = dict(
-        workspace=workspace,
-        inbox=ApprovalInbox(path=None),
-        vcs=FakeVCS(clean=True),
-        budget_snapshot=_headroom_budget(),
-        kill_switch=FakeKillSwitch(active=False),
-        file_reader=_reader({_TARGET: "OLD = 0\n"}),
-    )
+    base = {
+        "workspace": workspace,
+        "inbox": ApprovalInbox(path=None),
+        "vcs": FakeVCS(clean=True),
+        "budget_snapshot": _headroom_budget(),
+        "kill_switch": FakeKillSwitch(active=False),
+        "file_reader": _reader({_TARGET: "OLD = 0\n"}),
+    }
     base.update(overrides)
     return base
 

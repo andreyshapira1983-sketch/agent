@@ -1,15 +1,18 @@
-"""Memory Hygiene (§4 Memory Governance — cleanup, dedup, expiry, summarise).
+"""Гигиена памяти: просрочка, дедупликация, сводка, архивация.
 
-Four independent policies, one principle: *cleanup is a deliberate
-operation, never a side effect of another action*. Each call returns a
-typed report so the caller (CLI, audit log, future scheduler) can record
-exactly what was removed and why. Every removal goes through
-`PersistentMemoryStore`'s atomic rewrite — there is no partial state.
+Переименовано из `core/hygiene.py` — прежнее имя не говорило, ЧЬЯ это гигиена,
+и под него затесалась уборка резервных копий, к памяти не относящаяся (уехала
+в `core/backup_cleanup.py`).
 
-Policies are intentionally NOT chained together inside the module: the
-CLI surface (`:hygiene`) chains them in a deterministic order
-(`expire` -> `dedupe` -> `summarise` -> `backups`), and every step
-emits its own audit event. Tests can call them individually.
+Четыре независимые политики, один принцип: *уборка — намеренная операция, а не
+побочный эффект другого действия*. Каждая возвращает типизированный отчёт,
+чтобы вызывающий (CLI, журнал аудита, планировщик) записал, что именно удалено
+и почему. Всякое удаление идёт через атомарную перезапись
+`PersistentMemoryStore` — промежуточного состояния не бывает.
+
+Политики намеренно НЕ сцеплены здесь между собой: порядок задаёт поверхность
+`:hygiene` в CLI (`expire` -> `dedupe` -> `summarise` -> `backups`), и каждый
+шаг пишет своё событие аудита. Тесты зовут их по одной.
 """
 from __future__ import annotations
 
@@ -17,186 +20,17 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Protocol
 
 from core.models import MemoryRecord
 
-# ============================================================
-# 1. Backup cleanup
-# ============================================================
-
-# Matches FileWriteTool's `<path>.bak.<YYYYMMDDTHHMMSSZ>` pattern.
-# Captures group 1 = the target filename, group 2 = the timestamp.
-BACKUP_NAME_RE = re.compile(r"^(?P<target>.+)\.bak\.(?P<ts>\d{8}T\d{6}Z)$")
-
-# Retention defaults — conservative on purpose. Even a very old single
-# backup is preserved by the `keep_last` floor, because a sole backup is
-# usually the most valuable kind.
-DEFAULT_KEEP_LAST = 3
-DEFAULT_MAX_AGE_DAYS = 14
-
-
-@dataclass(frozen=True)
-class BackupCandidate:
-    path: Path             # absolute path on disk
-    target_name: str       # the file the backup belongs to (without .bak.<ts>)
-    ts: datetime           # parsed from the suffix (tz-aware UTC)
-
-
-@dataclass
-class BackupCleanupReport:
-    workspace_root: Path
-    keep_last: int
-    max_age_days: int
-    scanned: int = 0
-    deleted: list[str] = field(default_factory=list)   # workspace-relative paths
-    kept: list[str] = field(default_factory=list)      # workspace-relative paths
-    dry_run: bool = False
-
-    def summary(self) -> dict:
-        return {
-            "workspace_root": str(self.workspace_root),
-            "keep_last": self.keep_last,
-            "max_age_days": self.max_age_days,
-            "scanned": self.scanned,
-            "deleted_count": len(self.deleted),
-            "kept_count": len(self.kept),
-            "dry_run": self.dry_run,
-            "deleted": list(self.deleted),
-        }
-
-
-def _parse_backup_ts(stem: str) -> datetime | None:
-    """Decode `YYYYMMDDTHHMMSSZ` into a tz-aware UTC datetime."""
-    try:
-        return datetime.strptime(stem, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
-    except ValueError:
-        return None
-
-
-def _scan_backups(workspace_root: Path) -> list[BackupCandidate]:
-    """Walk the workspace and collect every `.bak.<ts>` file we recognise.
-
-    Files whose suffix doesn't parse are ignored — we never touch a file
-    we don't fully understand.
-    """
-    out: list[BackupCandidate] = []
-    if not workspace_root.exists():
-        return out
-    for path in workspace_root.rglob("*.bak.*"):
-        if not path.is_file():
-            continue
-        m = BACKUP_NAME_RE.match(path.name)
-        if not m:
-            continue
-        ts = _parse_backup_ts(m.group("ts"))
-        if ts is None:
-            continue
-        out.append(
-            BackupCandidate(path=path, target_name=m.group("target"), ts=ts)
-        )
-    return out
-
-
-def cleanup_backups(
-    workspace_root: Path,
-    *,
-    keep_last: int = DEFAULT_KEEP_LAST,
-    max_age_days: int = DEFAULT_MAX_AGE_DAYS,
-    now: datetime | None = None,
-    dry_run: bool = False,
-) -> BackupCleanupReport:
-    """Remove old `.bak.<ts>` files; never touch the active file itself.
-
-    Retention rule — a backup is DELETED only when BOTH hold:
-      - more than `keep_last` newer backups exist for the same target
-      - the backup is older than `max_age_days`
-
-    The newest `keep_last` backups per target are always kept regardless
-    of age. The cleanest backup is sometimes the only one — so a sole
-    survivor is never removed.
-
-    `dry_run=True` returns the same report but performs no deletions.
-    """
-    if keep_last < 0:
-        raise ValueError(f"keep_last must be >= 0, got {keep_last}")
-    if max_age_days < 0:
-        raise ValueError(f"max_age_days must be >= 0, got {max_age_days}")
-
-    workspace_root = Path(workspace_root).resolve()
-    now = now or datetime.now(timezone.utc)
-    cutoff = now - _timedelta_days(max_age_days)
-
-    candidates = _scan_backups(workspace_root)
-    report = BackupCleanupReport(
-        workspace_root=workspace_root,
-        keep_last=keep_last,
-        max_age_days=max_age_days,
-        scanned=len(candidates),
-        dry_run=dry_run,
-    )
-
-    # Group by (parent_dir, target_name) so identically-named files in
-    # different sub-folders don't get pooled together.
-    groups: dict[tuple[Path, str], list[BackupCandidate]] = {}
-    for c in candidates:
-        groups.setdefault((c.path.parent, c.target_name), []).append(c)
-
-    for _key, group in groups.items():
-        # Newest first.
-        group.sort(key=lambda c: c.ts, reverse=True)
-        # Keep the newest keep_last unconditionally.
-        protected = group[:keep_last]
-        rest = group[keep_last:]
-        # Among the unprotected, anything older than cutoff is deleted.
-        for c in rest:
-            rel = _relative_or_absolute(c.path, workspace_root)
-            if c.ts < cutoff:
-                if not dry_run:
-                    try:
-                        c.path.unlink()
-                    except OSError:
-                        # Treat as kept so we don't lie in the audit log.
-                        report.kept.append(rel)
-                        continue
-                report.deleted.append(rel)
-            else:
-                report.kept.append(rel)
-        for c in protected:
-            report.kept.append(_relative_or_absolute(c.path, workspace_root))
-
-    # Sort for deterministic reports.
-    report.deleted.sort()
-    report.kept.sort()
-    return report
-
-
-def _timedelta_days(days: int):
-    from datetime import timedelta
-    return timedelta(days=days)
-
-
-def _relative_or_absolute(path: Path, root: Path) -> str:
-    """Best-effort workspace-relative string (falls back to absolute)."""
-    try:
-        return str(path.relative_to(root))
-    except ValueError:
-        return str(path)
-
-
-# ============================================================
-# 2. Deduplication (write-time + post-hoc)
-# ============================================================
-
 DEFAULT_DEDUP_THRESHOLD = 0.85
-_WS_RE = re.compile(r"\s+")
 
+_WS_RE = re.compile(r"\s+")
 
 def _normalise(text: str) -> str:
     """Case-insensitive, whitespace-collapsed comparison key."""
     return _WS_RE.sub(" ", (text or "").strip().lower())
-
 
 def _similarity(a: str, b: str) -> float:
     """Cheap Jaccard over word sets, then boosted by substring containment.
@@ -235,7 +69,6 @@ def _similarity(a: str, b: str) -> float:
 
     return jaccard
 
-
 def find_duplicate(
     text: str,
     existing: Sequence[MemoryRecord],
@@ -256,13 +89,11 @@ def find_duplicate(
             best = (rec, score)
     return best
 
-
 @dataclass(frozen=True)
 class DuplicateGroup:
     canonical_id: str
     canonical_content_preview: str
     duplicate_ids: list[str]
-
 
 @dataclass
 class DedupReport:
@@ -282,14 +113,12 @@ class DedupReport:
             "dry_run": self.dry_run,
         }
 
-
 class _StoreProto(Protocol):
     """Minimal interface deduplicate_memory / expire_memory need."""
 
     def load(self) -> list[MemoryRecord]: ...
     def _load_raw(self) -> list[MemoryRecord]: ...
     def _rewrite(self, records: list[MemoryRecord]) -> None: ...
-
 
 def deduplicate_memory(
     store: _StoreProto,
@@ -356,11 +185,6 @@ def deduplicate_memory(
         store._rewrite(keep)
     return report
 
-
-# ============================================================
-# 3. TTL / expiration
-# ============================================================
-
 @dataclass
 class ExpiryReport:
     scanned: int = 0
@@ -375,13 +199,11 @@ class ExpiryReport:
             "dry_run": self.dry_run,
         }
 
-
 def _is_expired(record: MemoryRecord, now: datetime) -> bool:
     if record.ttl_seconds is None or record.ttl_seconds <= 0:
         return False
     age = (now - record.created_at).total_seconds()
     return age >= record.ttl_seconds
-
 
 def expire_memory(
     store: _StoreProto,
@@ -412,11 +234,6 @@ def expire_memory(
         store._rewrite(keep)
     return report
 
-
-# ============================================================
-# 4. Summarisation
-# ============================================================
-
 @dataclass
 class SummaryReport:
     tag: str
@@ -437,7 +254,6 @@ class SummaryReport:
             "dry_run": self.dry_run,
         }
 
-
 class _LLMProto(Protocol):
     def complete(
         self,
@@ -447,9 +263,10 @@ class _LLMProto(Protocol):
         temperature: float = ...,
     ) -> str: ...
 
-
 SUMMARY_TAG = "summarised"
+
 DEFAULT_SUMMARY_MAX_RECORDS = 10
+
 _SUMMARY_SYSTEM = (
     "You are compressing a list of long-term memory records into ONE "
     "concise note. Preserve every distinct fact, drop redundancy, drop "
@@ -457,7 +274,6 @@ _SUMMARY_SYSTEM = (
     "bullets unless the source items were already enumerated. Maximum "
     "800 characters."
 )
-
 
 def summarise_memory(
     store: _StoreProto,
@@ -572,14 +388,6 @@ def summarise_memory(
     report.new_record_id = new_record.id
     return report
 
-
-# ============================================================
-# 5. Importance-based archiving
-# ============================================================
-# Records that are NEVER used and have low value move to the archive store
-# instead of being deleted. This keeps the active store lean (fast retrieval)
-# while preserving everything — like a filing cabinet vs a bin.
-
 # Tag importance weights — higher = more valuable
 _TAG_WEIGHTS: dict[str, float] = {
     "decision":     1.0,
@@ -604,7 +412,6 @@ DEFAULT_ARCHIVE_THRESHOLD = 0.25
 # Records younger than this (in days) are never archived regardless of score
 DEFAULT_ARCHIVE_MIN_AGE_DAYS = 7
 
-
 @dataclass
 class ArchiveReport:
     threshold: float
@@ -622,7 +429,6 @@ class ArchiveReport:
             "archived_ids": list(self.archived),
             "dry_run": self.dry_run,
         }
-
 
 def _importance_score(record: MemoryRecord, now: datetime) -> float:
     """Score a memory record 0.0-1.0. Higher = more worth keeping active.
@@ -662,14 +468,12 @@ def _importance_score(record: MemoryRecord, now: datetime) -> float:
 
     return max(0.0, min(1.0, base + access_boost - recency_penalty))
 
-
 class _ArchiveStoreProto(Protocol):
     """Minimal interface required by archive_low_value_memory."""
 
     def load(self) -> list[MemoryRecord]: ...
     def archive_record(self, record_id: str) -> bool: ...
     def _rewrite(self, records: list[MemoryRecord]) -> None: ...
-
 
 def archive_low_value_memory(
     store: _ArchiveStoreProto,

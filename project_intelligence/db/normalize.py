@@ -31,8 +31,7 @@ _WS_RE = re.compile(r"[\t\n\r\f\v ]+")
 def _normalize_string(s: str) -> str:
     s = unicodedata.normalize("NFC", s)
     s = s.strip()
-    s = _WS_RE.sub(" ", s)
-    return s
+    return _WS_RE.sub(" ", s)
 
 
 def _float_decimal(f: float) -> str:

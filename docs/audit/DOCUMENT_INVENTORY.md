@@ -56,7 +56,7 @@ not updated to reflect that, so they now *over-state* the number of open defects
 | CORE-07 / OFM-010 (retry no backoff) | `core/task_queue.py:294` `mark_failed` | exponential `run_after` backoff added (comment cites OFM-010/CORE-07) | `tests/test_task_queue_retry_backoff.py` |
 | CORE-09 / MGA-06 / A1 (web_fetch classified private) | `core/loop_step_execution.py:64` | `"web_fetch": "web"` added to `_TOOL_SOURCE_HINTS` (уехало из `core/loop.py` при разборе на модули) | `tests/test_web_fetch_classification.py` |
 | CORE-10 (tokenizer drops short/numeric) | `core/smart_memory.py:95` | keeps any digit-bearing token (comment cites CORE-10) | `tests/test_episodic_tokenizer_numeric.py` |
-| LPF-001 (host_tools as fake evidence) | `core/loop.py:3382-3393` (synthesis critique), `core/host_tools_context.py:50,65` (gate + block; lived in `core/planner.py` until #246), `core/loop_helpers.py:65-68` | `<host_environment>` non-citable block + `host_tools_relevant()` gate | `tests/test_host_tools_context.py` |
+| LPF-001 (host_tools as fake evidence) | `core/loop_synthesis.py:459-470` (synthesis critique; уехало из `core/loop.py` при разборе на модули), `core/host_tools_context.py:50,65` (gate + block; lived in `core/planner.py` until #246), `core/loop_helpers.py:65-68` | `<host_environment>` non-citable block + `host_tools_relevant()` gate | `tests/test_host_tools_context.py` |
 | #9 (injection scan scope) | `core/loop_helpers.py` `untrusted_scan_view` | scans untrusted payload only | `tests/test_injection_scan_scope.py` |
 
 **Verified STILL OPEN in current code (anchor unchanged):**
@@ -64,7 +64,7 @@ not updated to reflect that, so they now *over-state* the number of open defects
 | Finding id(s) | Location | Current state |
 |---|---|---|
 | CORE-06 / LPF-010 (command failure recorded as step success) | `tools/shell_exec.py:520-539` `validate_output` | only warns on timed_out/exit_code *consistency*; `exit_code!=0` still not mapped to failure. (Audit itself warns a naive fix is wrong — needs per-command semantics.) |
-| CORE-08 / MGA-04 / A8 (suspicious injection enters evidence chain) | `core/loop.py:3181-3186` | `suspicious` verdict still only `annotate_suspicious()`-d and passed through as `Evidence`. |
+| CORE-08 / MGA-04 / A8 (suspicious injection enters evidence chain) | `core/loop_step_execution.py:634-639` (уехало из `core/loop.py` при разборе на модули; прежний якорь — строка 3181 того же файла — к тому времени уже указывал не туда и держался только тем, что попадал в диапазон файла) | `suspicious` verdict still only `annotate_suspicious()`-d and passed through as `Evidence`. |
 | CORE-03 / LPF-011 / A3 (quality 1.0 on empty chain) | `core/smart_memory.py:51-52` | still `return 1.0` on `total==0`; docstring **reframed** as intentional "neutral, not penalised". Effectively a *won't-fix / re-scoped* item, not applied per MEMORY_FIX_PLAN A3. |
 
 **Ambiguous — needs Stage-2 verification:**

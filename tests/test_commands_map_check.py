@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+from pathlib import Path
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SCRIPT = os.path.join(_ROOT, "scripts", "commands_map_check.py")
@@ -57,7 +58,7 @@ def test_verdict_comes_from_the_registry_not_from_main_py():
     from cli.command_registry import all_tokens
 
     assert mod.registry_commands() == set(all_tokens())
-    source = open(_SCRIPT, encoding="utf-8").read()
+    source = Path(_SCRIPT).read_text(encoding="utf-8")
     # dispatched_commands is kept as a helper, but must not feed the verdict
     verdict_body = source.split("def main(", 1)[1]
     assert "dispatched_commands" not in verdict_body
@@ -127,9 +128,9 @@ def test_dispatch_parser_still_matches_the_live_registry():
     """The dispatch chain (now in cli/command_dispatch.py) and the registry must
     agree exactly."""
     mod = _load_module()
-    dispatch_source = open(
-        os.path.join(_ROOT, "cli", "command_dispatch.py"), encoding="utf-8"
-    ).read()
+    dispatch_source = Path(
+        os.path.join(_ROOT, "cli", "command_dispatch.py")
+    ).read_text(encoding="utf-8")
     assert mod.dispatched_commands(dispatch_source) == mod.registry_commands()
 
 

@@ -132,9 +132,9 @@ class ReflectionReport:
 
     def user_summary(self) -> str:
         lines = [
-            f"(reflection logs={self.logs_scanned} events={self.events_scanned} "
+            (f"(reflection logs={self.logs_scanned} events={self.events_scanned} "
             f"patterns={len(self.patterns_found)} lessons={len(self.lessons)} "
-            f"saved={self.memory_records_saved})"
+            f"saved={self.memory_records_saved})")
         ]
         for lesson in self.lessons:
             lines.append(f"  [{lesson.action}] {lesson.insight[:100]}")

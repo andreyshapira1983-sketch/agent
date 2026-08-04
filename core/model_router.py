@@ -92,9 +92,7 @@ class ModelSpec:
             return False
         if self.provider == "mock" and not allow_mock:
             return False
-        if require_available and not self.requirements_satisfied():
-            return False
-        return True
+        return not (require_available and not self.requirements_satisfied())
 
     def to_dict(self) -> dict[str, Any]:
         return {

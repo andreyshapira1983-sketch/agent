@@ -1,6 +1,10 @@
 """The eleven miscellaneous operator commands — flags, refusals, and output modes.
 
-`cli/commands_misc.py` is almost entirely argument parsing in front of a `core`
+`cli/commands_misc.py` разошёлся на пять модулей по темам (команда агентов,
+коннекторы, аудиты, обучение, разбор знаний) — этот файл проверяет их все,
+поэтому назван по предмету, а не по бывшему файлу.
+
+Каждый обработчик — почти целиком разбор аргументов перед вызовом `core`
 report: `:connectors`, `:connector-plan`, `:architecture-audit`, `:learn`,
 `:conflicts`, `:state-store-drill`, `:release-audit`, `:supply-chain-audit`,
 `:team-plan`, `:team-run`, `:assumptions`. At 63% the untested part was exactly
@@ -25,18 +29,20 @@ from types import SimpleNamespace
 
 import pytest
 
-import cli.commands_misc as mod
-from cli.commands_misc import (
+# Цели подмены — модули, в чьих globals имя РАЗРЕШАЕТСЯ. `commands_misc`
+# разошёлся по темам, и один псевдоним `mod` стал тремя.
+import cli.commands_audit as audit_mod
+import cli.commands_knowledge_review as review_mod
+import cli.commands_learn as learn_mod
+import cli.commands_team as team_mod
+from cli.commands_audit import (
     _handle_architecture_audit,
-    _handle_assumptions,
-    _handle_conflicts,
-    _handle_connector_plan,
-    _handle_connectors,
-    _handle_learn,
     _handle_release_audit,
-    _handle_team_plan,
-    _handle_team_run,
 )
+from cli.commands_connectors import _handle_connector_plan, _handle_connectors
+from cli.commands_knowledge_review import _handle_assumptions, _handle_conflicts
+from cli.commands_learn import _handle_learn
+from cli.commands_team import _handle_team_plan, _handle_team_run
 
 
 class FakeLog:
@@ -136,7 +142,7 @@ def test_connector_plan_prints_a_summary_and_json(capsys):
 def test_architecture_audit_usage_errors_never_run_the_audit(
     rest, expected, agent, tmp_path, capsys, monkeypatch
 ):
-    monkeypatch.setattr(mod, "audit_architecture", never)
+    monkeypatch.setattr(audit_mod, "audit_architecture", never)
     assert _handle_architecture_audit(rest, agent, tmp_path) is True
     assert expected in capsys.readouterr().err
     assert agent.log.kinds() == []
@@ -144,7 +150,7 @@ def test_architecture_audit_usage_errors_never_run_the_audit(
 
 def test_architecture_audit_logs_and_prints_both_modes(agent, tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(
-        mod, "audit_architecture", lambda ws: FakeReport({"findings": []}, "AUDIT-TEXT")
+        audit_mod, "audit_architecture", lambda ws: FakeReport({"findings": []}, "AUDIT-TEXT")
     )
 
     assert _handle_architecture_audit("--limit 3", agent, tmp_path) is True
@@ -168,8 +174,8 @@ def test_architecture_audit_logs_and_prints_both_modes(agent, tmp_path, capsys, 
 def test_learn_usage_errors_never_plan_or_ingest(
     rest, expected, agent, tmp_path, capsys, monkeypatch
 ):
-    monkeypatch.setattr(mod, "LearningPlanner", never)
-    monkeypatch.setattr(mod, "ingest_files", never)
+    monkeypatch.setattr(learn_mod, "LearningPlanner", never)
+    monkeypatch.setattr(learn_mod, "ingest_files", never)
     assert _handle_learn(rest, agent, tmp_path) is True
     assert expected in capsys.readouterr().err
 
@@ -191,8 +197,8 @@ def test_learn_stops_when_the_plan_has_no_sources(agent, tmp_path, capsys, monke
     actually ran.
     """
     calls: list[dict] = []
-    monkeypatch.setattr(mod, "LearningPlanner", _planner_returning([]))
-    monkeypatch.setattr(mod, "ingest_files", lambda **kw: calls.append(kw) or FakeReport())
+    monkeypatch.setattr(learn_mod, "LearningPlanner", _planner_returning([]))
+    monkeypatch.setattr(learn_mod, "ingest_files", lambda **kw: calls.append(kw) or FakeReport())
 
     assert _handle_learn("study the repo", agent, tmp_path) is True
 
@@ -210,8 +216,8 @@ def test_learn_ingests_the_planned_sources(agent, tmp_path, capsys, monkeypatch)
         seen.update(kwargs)
         return FakeReport(summary="INGEST-TEXT")
 
-    monkeypatch.setattr(mod, "LearningPlanner", _planner_returning(["a.py"]))
-    monkeypatch.setattr(mod, "ingest_files", _ingest)
+    monkeypatch.setattr(learn_mod, "LearningPlanner", _planner_returning(["a.py"]))
+    monkeypatch.setattr(learn_mod, "ingest_files", _ingest)
 
     assert _handle_learn("study --dry-run --no-memory --limit 3 --root src", agent, tmp_path) is True
 
@@ -224,8 +230,8 @@ def test_learn_ingests_the_planned_sources(agent, tmp_path, capsys, monkeypatch)
 
 def test_learn_write_memory_flag_is_forwarded(agent, tmp_path, monkeypatch):
     seen: dict = {}
-    monkeypatch.setattr(mod, "LearningPlanner", _planner_returning(["a.py"]))
-    monkeypatch.setattr(mod, "ingest_files", lambda **kw: seen.update(kw) or FakeReport())
+    monkeypatch.setattr(learn_mod, "LearningPlanner", _planner_returning(["a.py"]))
+    monkeypatch.setattr(learn_mod, "ingest_files", lambda **kw: seen.update(kw) or FakeReport())
 
     assert _handle_learn("study --write-memory", agent, tmp_path) is True
     assert seen["auto_write_memory"] is True
@@ -236,7 +242,7 @@ def test_learn_reports_a_planner_failure_instead_of_raising(agent, tmp_path, cap
     def _boom():
         raise RuntimeError("planner unavailable")
 
-    monkeypatch.setattr(mod, "LearningPlanner", _boom)
+    monkeypatch.setattr(learn_mod, "LearningPlanner", _boom)
     assert _handle_learn("study", agent, tmp_path) is True
     assert "learn failed: RuntimeError: planner unavailable" in capsys.readouterr().err
 
@@ -253,7 +259,7 @@ def test_learn_reports_a_planner_failure_instead_of_raising(agent, tmp_path, cap
     ],
 )
 def test_conflicts_usage_errors_never_review(rest, expected, agent, tmp_path, capsys, monkeypatch):
-    monkeypatch.setattr(mod, "ConflictReview", never)
+    monkeypatch.setattr(review_mod, "ConflictReview", never)
     assert _handle_conflicts(rest, agent, tmp_path) is True
     assert expected in capsys.readouterr().err
 
@@ -272,7 +278,7 @@ def test_conflicts_falls_back_to_the_last_run_registry(agent, tmp_path, capsys, 
 
     reviewed: list = []
     monkeypatch.setattr(
-        mod,
+        review_mod,
         "ConflictReview",
         lambda: SimpleNamespace(
             review=lambda registry: reviewed.append(registry) or FakeReport(summary="CONFLICTS")
@@ -291,7 +297,7 @@ def test_conflicts_json_mode(agent, tmp_path, capsys, monkeypatch):
         load_registry=lambda: SimpleNamespace(sources=["s"], claims=["c"])
     )
     monkeypatch.setattr(
-        mod,
+        review_mod,
         "ConflictReview",
         lambda: SimpleNamespace(review=lambda registry: FakeReport({"conflicts": 0})),
     )
@@ -312,8 +318,8 @@ AUDITS = [
 def test_single_flag_audit_rejects_extra_arguments(
     handler_name, dep, usage, event, agent, tmp_path, capsys, monkeypatch
 ):
-    monkeypatch.setattr(mod, dep, never)
-    handler = getattr(mod, handler_name)
+    monkeypatch.setattr(audit_mod, dep, never)
+    handler = getattr(audit_mod, handler_name)
     assert handler("--verbose", agent, tmp_path) is True
     assert f"Usage: {usage} [--json]" in capsys.readouterr().err
 
@@ -322,8 +328,8 @@ def test_single_flag_audit_rejects_extra_arguments(
 def test_single_flag_audit_prints_both_modes_and_logs(
     handler_name, dep, usage, event, agent, tmp_path, capsys, monkeypatch
 ):
-    monkeypatch.setattr(mod, dep, lambda ws: FakeReport({"status": "ok"}, "AUDIT"))
-    handler = getattr(mod, handler_name)
+    monkeypatch.setattr(audit_mod, dep, lambda ws: FakeReport({"status": "ok"}, "AUDIT"))
+    handler = getattr(audit_mod, handler_name)
 
     assert handler("", agent, tmp_path) is True
     assert "AUDIT" in capsys.readouterr().err
@@ -334,14 +340,14 @@ def test_single_flag_audit_prints_both_modes_and_logs(
 
 
 def test_release_audit_rejects_extra_arguments(agent, tmp_path, capsys, monkeypatch):
-    monkeypatch.setattr(mod, "build_release_manifest", never)
+    monkeypatch.setattr(audit_mod, "build_release_manifest", never)
     assert _handle_release_audit("now", agent, tmp_path) is True
     assert "Usage: :release-audit [--json]" in capsys.readouterr().err
 
 
 def test_release_audit_prints_both_modes_and_logs(agent, tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(
-        mod,
+        audit_mod,
         "build_release_manifest",
         lambda ws: SimpleNamespace(report=lambda: FakeReport({"clean": True}, "RELEASE")),
     )
@@ -365,7 +371,7 @@ def test_release_audit_prints_both_modes_and_logs(agent, tmp_path, capsys, monke
     ],
 )
 def test_team_plan_usage_errors_never_plan(rest, expected, agent, capsys, monkeypatch):
-    monkeypatch.setattr(mod, "TeamPlanner", never)
+    monkeypatch.setattr(team_mod, "TeamPlanner", never)
     assert _handle_team_plan(rest, agent) is True
     assert expected in capsys.readouterr().err
 
@@ -376,14 +382,14 @@ def test_team_plan_turns_a_planner_refusal_into_usage_text(agent, capsys, monkey
             plan=lambda goal, limit: (_ for _ in ()).throw(ValueError("goal too vague"))
         )
 
-    monkeypatch.setattr(mod, "TeamPlanner", _refuse)
+    monkeypatch.setattr(team_mod, "TeamPlanner", _refuse)
     assert _handle_team_plan("do stuff", agent) is True
     assert "Usage: goal too vague" in capsys.readouterr().err
 
 
 def test_team_plan_prints_both_modes(agent, capsys, monkeypatch):
     monkeypatch.setattr(
-        mod,
+        team_mod,
         "TeamPlanner",
         lambda: SimpleNamespace(plan=lambda goal, limit: FakeReport({"roles": []}, "TEAM-PLAN")),
     )
@@ -410,15 +416,15 @@ def test_team_plan_prints_both_modes(agent, capsys, monkeypatch):
     ],
 )
 def test_team_run_usage_errors_never_execute(rest, expected, agent, tmp_path, capsys, monkeypatch):
-    monkeypatch.setattr(mod, "TeamPlanner", never)
-    monkeypatch.setattr(mod, "TeamExecutor", never)
+    monkeypatch.setattr(team_mod, "TeamPlanner", never)
+    monkeypatch.setattr(team_mod, "TeamExecutor", never)
     assert _handle_team_run(rest, agent, tmp_path) is True
     assert expected in capsys.readouterr().err
 
 
 def _fake_team(monkeypatch, captured: dict):
     monkeypatch.setattr(
-        mod, "TeamPlanner", lambda: SimpleNamespace(plan=lambda goal, limit: "PLAN")
+        team_mod, "TeamPlanner", lambda: SimpleNamespace(plan=lambda goal, limit: "PLAN")
     )
 
     def _executor(*, runner):
@@ -431,7 +437,7 @@ def _fake_team(monkeypatch, captured: dict):
 
         return SimpleNamespace(run=_run)
 
-    monkeypatch.setattr(mod, "TeamExecutor", _executor)
+    monkeypatch.setattr(team_mod, "TeamExecutor", _executor)
 
 
 def test_team_run_defaults_to_dry_run_without_a_subagent_runner(
@@ -457,7 +463,7 @@ def test_allow_effects_builds_a_runner_and_logs_a_real_execution(
 
     captured: dict = {}
     _fake_team(monkeypatch, captured)
-    monkeypatch.setattr(runner_mod, "SubAgentRunner", lambda **kwargs: SimpleNamespace(**kwargs))
+    monkeypatch.setattr(runner_mod, "SubAgentRunner", SimpleNamespace)
     agent.policy = "P"
     agent.model_router = "R"
     agent.registry = "REG"
@@ -480,7 +486,7 @@ def test_explicit_dry_run_flag_keeps_effects_off(agent, tmp_path, capsys, monkey
     captured: dict = {}
     _fake_team(monkeypatch, captured)
     monkeypatch.setattr(
-        mod, "TeamPlanner", lambda: SimpleNamespace(plan=lambda goal, limit: captured.setdefault("limit", limit))
+        team_mod, "TeamPlanner", lambda: SimpleNamespace(plan=lambda goal, limit: captured.setdefault("limit", limit))
     )
 
     assert _handle_team_run("ship it --allow-effects --dry-run --limit 7", agent, tmp_path) is True
@@ -493,13 +499,13 @@ def test_explicit_dry_run_flag_keeps_effects_off(agent, tmp_path, capsys, monkey
 
 def test_team_run_turns_a_planner_refusal_into_usage_text(agent, tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(
-        mod,
+        team_mod,
         "TeamPlanner",
         lambda: SimpleNamespace(
             plan=lambda goal, limit: (_ for _ in ()).throw(ValueError("unknown role"))
         ),
     )
-    monkeypatch.setattr(mod, "TeamExecutor", never)
+    monkeypatch.setattr(team_mod, "TeamExecutor", never)
 
     assert _handle_team_run("ship it", agent, tmp_path) is True
     assert "Usage: unknown role" in capsys.readouterr().err

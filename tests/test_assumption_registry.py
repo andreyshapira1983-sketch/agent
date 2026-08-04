@@ -573,7 +573,7 @@ class TestAgentLoopAssumptionIntegration:
         planner = LLMPlanner(llm=llm, registry=registry)
         store = _store(tmp_path) if with_store else None
 
-        agent = AgentLoop(
+        return AgentLoop(
             registry=registry,
             policy=policy,
             llm=llm,
@@ -582,7 +582,6 @@ class TestAgentLoopAssumptionIntegration:
             memory=memory,
             assumption_store=store,
         )
-        return agent
 
     def test_accepts_assumption_store_param(self, tmp_path):
         agent = self._make_agent(tmp_path, with_store=True)

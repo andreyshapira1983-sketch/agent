@@ -86,8 +86,8 @@ def _build_loop(
     planner = FakePlanner(sources=[planned_step])
     llm = FakeLLM(
         responses=[
-            "Conclusion: ok. [stub:t]\nFacts:\n- ran [stub:t]\n"
-            "Sources:\n1. stub:t - t\nConfidence: medium\nUnverified: nothing\n"
+            ("Conclusion: ok. [stub:t]\nFacts:\n- ran [stub:t]\n"
+            "Sources:\n1. stub:t - t\nConfidence: medium\nUnverified: nothing\n")
         ]
     )
     trace_id = new_trace_id()
@@ -448,7 +448,7 @@ class TestExternalRiskAlsoEscalates:
     def test_external_tool_requires_approval(self, workspace: Path):
         tool = RecordingTool("external_call", "external")
         approver = AutoApprover(default="deny")
-        agent, log_path = _build_loop(
+        agent, _log_path = _build_loop(
             workspace,
             tool,
             _step_for("external_call"),

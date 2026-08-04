@@ -183,7 +183,7 @@ def recently_vetoed_self_build_targets(agent: Any, *, limit: int = 20) -> frozen
             for tag in getattr(episode, "tags", ()) or ():
                 candidate = str(tag).replace("\\", "/").strip()
                 if "/" in candidate and (
-                    candidate.endswith(".py") or candidate.endswith(".md")
+                    candidate.endswith((".py", ".md"))
                 ):
                     targets.add(candidate)
         return frozenset(targets)
@@ -202,7 +202,7 @@ def _recent_self_improvement_events(
 
     def add(created_at: object, text: object, kind: str = "failure", **extra: Any) -> None:
         try:
-            stamp = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+            stamp = datetime.fromisoformat(str(created_at))
             if stamp.tzinfo is None:
                 stamp = stamp.replace(tzinfo=timezone.utc)
         except (TypeError, ValueError):

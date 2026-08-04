@@ -21,15 +21,15 @@ from core.smart_memory import (
 
 
 def _episode(**kw):
-    base = dict(
-        goal="g",
-        question="q",
-        answer="a",
-        tools_used=["file_read"],
-        source_labels=["file:x"],
-        verified_chunks=3,
-        unverified_chunks=0,
-    )
+    base = {
+        "goal": "g",
+        "question": "q",
+        "answer": "a",
+        "tools_used": ["file_read"],
+        "source_labels": ["file:x"],
+        "verified_chunks": 3,
+        "unverified_chunks": 0,
+    }
     base.update(kw)
     return episode_from_agent_cycle(**base)
 

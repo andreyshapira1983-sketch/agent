@@ -136,15 +136,15 @@ class TestWorkSessionCycleReport:
 
 class TestWorkSessionResult:
     def _make(self, **kw: Any) -> WorkSessionResult:
-        defaults: dict[str, Any] = dict(
-            status="completed",
-            goal="project health",
-            dry_run=True,
-            cycles_run=2,
-            stop_reason="",
-            cycle_reports=[],
-            total_elapsed_s=0.12,
-        )
+        defaults: dict[str, Any] = {
+            "status": "completed",
+            "goal": "project health",
+            "dry_run": True,
+            "cycles_run": 2,
+            "stop_reason": "",
+            "cycle_reports": [],
+            "total_elapsed_s": 0.12,
+        }
         defaults.update(kw)
         return WorkSessionResult(**defaults)
 

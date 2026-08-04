@@ -53,7 +53,7 @@ Observe → Interpret → Plan → Act → Verify → Respond, driven by an LLM 
   bounded hygiene automatically. What an episode may influence is a separate
   permission from whether it is stored (`usage_eligible`), and durable writes
   are governed per sink with default-deny.
-- Write / retrieval policy + hygiene: `core/memory_policy`, `core/hygiene`,
+- Write / retrieval policy + hygiene: `core/memory_policy`, `core/memory_hygiene`,
   `core/episodic_hygiene`, `core/memory_echo_antibody`.
 - Controlled ingestion: `core/ingestion*`, `core/knowledge_pipeline`.
 

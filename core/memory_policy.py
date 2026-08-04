@@ -150,8 +150,8 @@ class MemoryWritePolicy:
             return MemoryWriteDecision(
                 "reject",
                 [
-                    f"auto-memory writes frozen in this context "
-                    f"(source='{source}' needs a human checkpoint)"
+                    (f"auto-memory writes frozen in this context "
+                    f"(source='{source}' needs a human checkpoint)")
                 ],
             )
 
@@ -181,8 +181,8 @@ class MemoryWritePolicy:
                 "reject",
                 pii_reasons
                 + [
-                    "sensitive data requires explicit "
-                    f"'{SENSITIVE_DATA_CONSENT_TAG}' tag"
+                    ("sensitive data requires explicit "
+                    f"'{SENSITIVE_DATA_CONSENT_TAG}' tag")
                 ],
             )
 
@@ -203,8 +203,8 @@ class MemoryWritePolicy:
             return MemoryWriteDecision(
                 "reject",
                 [
-                    "no consent signal: source must be 'user-explicit' or "
-                    f"tags must include one of {sorted(CONSENT_TAGS)}"
+                    ("no consent signal: source must be 'user-explicit' or "
+                    f"tags must include one of {sorted(CONSENT_TAGS)}")
                 ],
             )
 
@@ -218,8 +218,8 @@ class MemoryWritePolicy:
             return MemoryWriteDecision(
                 "reject",
                 [
-                    f"owner='{owner}' is third-party and tag "
-                    f"'{CROSS_OWNER_CONSENT_TAG}' is missing"
+                    (f"owner='{owner}' is third-party and tag "
+                    f"'{CROSS_OWNER_CONSENT_TAG}' is missing")
                 ],
             )
 
@@ -251,7 +251,7 @@ class MemoryWritePolicy:
         if existing_list:
             # Local import keeps memory_policy import-free of hygiene at
             # module load time (and breaks the otherwise-tempting cycle).
-            from core.hygiene import DEFAULT_DEDUP_THRESHOLD, find_duplicate
+            from core.memory_hygiene import DEFAULT_DEDUP_THRESHOLD, find_duplicate
 
             match = find_duplicate(
                 text, existing_list, threshold=DEFAULT_DEDUP_THRESHOLD
@@ -261,8 +261,8 @@ class MemoryWritePolicy:
                 return MemoryWriteDecision(
                     "reject",
                     [
-                        f"duplicate of {rec.id} "
-                        f"(similarity={score:.2f} >= {DEFAULT_DEDUP_THRESHOLD})"
+                        (f"duplicate of {rec.id} "
+                        f"(similarity={score:.2f} >= {DEFAULT_DEDUP_THRESHOLD})")
                     ],
                 )
 

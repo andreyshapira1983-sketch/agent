@@ -88,9 +88,9 @@ class DependencyMap:
                 f"on it."
             )
         parts = [
-            f"PROJECT IMPORT MAP for {self.module_name} -- these symbols are "
+            (f"PROJECT IMPORT MAP for {self.module_name} -- these symbols are "
             f"imported by other project files and MUST remain importable from "
-            f"the target after your change:"
+            f"the target after your change:")
         ]
         symbols = self.imported_symbols
         for sym in sorted(symbols)[:max_symbols]:

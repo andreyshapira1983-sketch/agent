@@ -20,8 +20,20 @@ from pathlib import Path
 import pytest
 
 MIXIN_SOURCES = [
-    Path("core/loop_methods.py"),
-    Path("core/loop_methods2.py"),
+    # `core/loop_methods.py` разошёлся на пять модулей по ответственностям:
+    # три из них (команды памяти, починка, гигиена) вообще не код цикла —
+    # их зовут CLI и `agent_tick.py`, а рядом с циклом они жили лишь потому,
+    # что оттуда до них дотягивался CLI.
+    Path("core/loop_sensor.py"),
+    Path("core/loop_knowledge.py"),
+    Path("core/loop_memory_commands.py"),
+    Path("core/loop_repair.py"),
+    Path("core/loop_hygiene.py"),
+    # `core/loop_methods2.py` разошёлся на два модуля, названных по делу:
+    # он был отвалом автоматического резчика (имя — порядковый номер), а
+    # 10 из 11 его методов оказались одной темой — памятью цикла.
+    Path("core/loop_memory_read.py"),
+    Path("core/loop_memory_write.py"),
 ]
 
 

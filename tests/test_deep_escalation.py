@@ -13,14 +13,14 @@ from core.deep_escalation import (
 
 
 def _approved_request(**overrides) -> DeepEscalationRequest:
-    base = dict(
-        role="planner",
-        reason="planner_multi_file_architecture_change",
-        expected_output="architecture_tradeoff",
-        deep_model_available=True,
-        budget_ok=True,
-        operator_approved=True,
-    )
+    base = {
+        "role": "planner",
+        "reason": "planner_multi_file_architecture_change",
+        "expected_output": "architecture_tradeoff",
+        "deep_model_available": True,
+        "budget_ok": True,
+        "operator_approved": True,
+    }
     base.update(overrides)
     return DeepEscalationRequest(**base)
 

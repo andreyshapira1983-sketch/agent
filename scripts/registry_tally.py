@@ -43,7 +43,7 @@ def parse(text: str) -> tuple[dict[str, list[str]], list[str]]:
     parts = re.split(r"^(### MIR-\S+)", text, flags=re.MULTILINE)
     by_status: dict[str, list[str]] = {}
     unparsed: list[str] = []
-    for head, body in zip(parts[1::2], parts[2::2]):
+    for head, body in zip(parts[1::2], parts[2::2], strict=False):
         ident = _HEADING.match(head).group(1)
         if not ident.isdigit():
             continue                      # the external checklist is not an issue

@@ -95,7 +95,7 @@ def test_memory_inject_fires_only_after_first_turn(workspace: Path) -> None:
 
     # Turn 1 — no prior turns, planner must not see <conversation_history>
     agent.run(user_question="What is in doc.txt?", file_hint="doc.txt")
-    turn1_planner_user = [c for c in llm.calls if "PLANNER_MODE" in c["system"]][0]["user"]
+    turn1_planner_user = next(c for c in llm.calls if "PLANNER_MODE" in c["system"])["user"]
     assert "<conversation_history>" not in turn1_planner_user
 
     # Turn 2 — memory now has 1 turn, planner MUST see it

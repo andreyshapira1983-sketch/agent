@@ -157,7 +157,7 @@ def test_mir002_3_legacy_episode_without_provenance_must_not_fast_path(workspace
 def test_mir041_4_replay_must_not_be_recorded_verified(workspace: Path):
     """(4) When a fast-path replay happens, the replay episode it banks must NOT
     carry verified_chunks=1 (a replay produces no new evidence)."""
-    loop, events, store = _make_loop(workspace)
+    loop, _events, store = _make_loop(workspace)
     source = episode_from_agent_cycle(
         goal="answer", question=_Q, answer="Canberra.",
         tools_used=[], source_labels=["file:atlas.txt"],
@@ -205,7 +205,7 @@ def test_mir041_6_repeated_asks_must_not_self_reinforce_verified_chain(workspace
     """(6) Repeated near-identical asks must not grow a self-reinforcing chain of
     verified-success episodes. Only the one genuinely-evidenced source may remain
     a 'verified' record."""
-    loop, events, store = _make_loop(workspace)
+    loop, _events, store = _make_loop(workspace)
     source = episode_from_agent_cycle(
         goal="answer", question=_Q, answer="Canberra.",
         tools_used=[], source_labels=["file:atlas.txt"],

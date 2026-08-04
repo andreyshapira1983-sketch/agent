@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from core.hygiene import archive_low_value_memory
+from core.memory_hygiene import archive_low_value_memory
 from core.models import MemoryRecord
 from core.persistent_memory import PersistentMemoryStore
 

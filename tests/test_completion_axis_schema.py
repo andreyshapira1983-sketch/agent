@@ -35,15 +35,15 @@ from core.smart_memory import (
 
 
 def _cycle(**kwargs):
-    base = dict(
-        goal="count the lines",
-        question="сколько строк в файле core/loop_methods2.py",
-        answer="Conclusion: точное число определить нельзя, содержимое обрезано",
-        tools_used=["file_read"],
-        source_labels=["file:core/loop_methods2.py"],
-        verified_chunks=3,
-        unverified_chunks=2,
-    )
+    base = {
+        "goal": "count the lines",
+        "question": "сколько строк в файле core/loop_methods2.py",
+        "answer": "Conclusion: точное число определить нельзя, содержимое обрезано",
+        "tools_used": ["file_read"],
+        "source_labels": ["file:core/loop_methods2.py"],
+        "verified_chunks": 3,
+        "unverified_chunks": 2,
+    }
     base.update(kwargs)
     return episode_from_agent_cycle(**base)
 

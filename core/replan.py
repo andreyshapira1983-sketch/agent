@@ -159,8 +159,8 @@ def format_replan_context(
     if not failure_history and not advice and not forbidden_actions:
         return ""
     lines = [
-        f"<replan_context attempt=\"{attempt}\" "
-        f"max_attempts=\"{max_attempts}\">"
+        (f"<replan_context attempt=\"{attempt}\" "
+        f"max_attempts=\"{max_attempts}\">")
     ]
     if failure_history:
         lines.append(
@@ -594,3 +594,8 @@ class ReplanPolicy:
             seen.add(key)
             forbidden.append(key)
         return tuple(forbidden)
+
+
+# Приехало из `core/loop_helpers.py`: бюджет попыток перепланирования —
+# предмет этого модуля, рядом с `DEFAULT_MAX_TOTAL_REPLANS`.
+DEFAULT_MAX_REPLAN_ATTEMPTS = 3

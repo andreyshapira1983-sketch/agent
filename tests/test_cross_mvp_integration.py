@@ -285,7 +285,7 @@ class TestHygienePreservesActiveBackups:
 
         from datetime import datetime, timezone
 
-        from core.hygiene import cleanup_backups
+        from core.backup_cleanup import cleanup_backups
 
         # "Now" matches the backup timestamp closely → backup is fresh.
         now = datetime(2026, 5, 26, 12, 5, 0, tzinfo=timezone.utc)
@@ -311,7 +311,7 @@ class TestHygienePreservesActiveBackups:
 
         from datetime import datetime, timezone
 
-        from core.hygiene import cleanup_backups
+        from core.backup_cleanup import cleanup_backups
 
         now = datetime(2026, 5, 26, 12, 0, 0, tzinfo=timezone.utc)
         report = cleanup_backups(workspace, keep_last=2, max_age_days=30, now=now)

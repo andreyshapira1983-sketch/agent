@@ -44,14 +44,14 @@ from core.deep_escalation import (
 
 
 def _request(**overrides) -> DeepEscalationRequest:
-    base = dict(
-        role="repair_proposal",
-        reason="high_value_repair",
-        expected_output="minimal_patch_plan",
-        deep_model_available=True,
-        budget_ok=True,
-        operator_approved=False,
-    )
+    base = {
+        "role": "repair_proposal",
+        "reason": "high_value_repair",
+        "expected_output": "minimal_patch_plan",
+        "deep_model_available": True,
+        "budget_ok": True,
+        "operator_approved": False,
+    }
     base.update(overrides)
     return DeepEscalationRequest(**base)
 

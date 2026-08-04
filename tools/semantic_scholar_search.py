@@ -124,11 +124,14 @@ class SemanticScholarSearchTool(Tool):
     def _ddg_fallback(self, query: str, n: int) -> list[dict[str, Any]]:
         try:
             from ddgs import DDGS
-        except ImportError:
+        except ImportError as exc:
+            # `from exc` обязательно: без него трассировка теряет исходную
+            # причину, и «пакет не установлен» перестаёт отличаться от сбоя
+            # внутри самого обработчика.
             raise RuntimeError(
                 "ddgs package not installed; cannot fall back to DuckDuckGo. "
                 "Install it with: pip install ddgs"
-            )
+            ) from exc
 
         results: list[dict[str, Any]] = []
         ddg_query = f"{query} site:semanticscholar.org"

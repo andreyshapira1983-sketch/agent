@@ -319,7 +319,7 @@ def _tests_really_passed(output: Any) -> bool:
         return False
     if output.get("timed_out"):
         return False
-    if output.get("exit_code") not in (0,):
+    if output.get("exit_code") != 0:
         return False
     return int(output.get("failed") or 0) == 0 and int(output.get("errors") or 0) == 0
 

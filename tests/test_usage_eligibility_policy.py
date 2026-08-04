@@ -86,16 +86,16 @@ def _ep(
 @pytest.mark.parametrize(
     "case,episode_kwargs,expected",
     [
-        ("verified success",        dict(outcome="success", verified=3, unverified=0), True),
-        ("mostly verified success", dict(outcome="success", verified=8, unverified=2), True),
-        ("success, no evidence",    dict(outcome="success", verified=0, unverified=0), False),
-        ("success, only unverified", dict(outcome="success", verified=0, unverified=5), False),
-        ("partial outcome",         dict(outcome="partial", verified=3, unverified=9), False),
-        ("failed outcome",          dict(outcome="failed",  verified=3, unverified=0), False),
-        ("replay",                  dict(outcome="success", verified=0, unverified=1,
-                                         labels=("memory:ep_prev",)),                  False),
-        ("lesson, failed",          dict(outcome="failed",  verified=0, unverified=1,
-                                         tags=("lesson",)),                            True),
+        ("verified success",        {"outcome": "success", "verified": 3, "unverified": 0}, True),
+        ("mostly verified success", {"outcome": "success", "verified": 8, "unverified": 2}, True),
+        ("success, no evidence",    {"outcome": "success", "verified": 0, "unverified": 0}, False),
+        ("success, only unverified", {"outcome": "success", "verified": 0, "unverified": 5}, False),
+        ("partial outcome",         {"outcome": "partial", "verified": 3, "unverified": 9}, False),
+        ("failed outcome",          {"outcome": "failed",  "verified": 3, "unverified": 0}, False),
+        ("replay",                  {"outcome": "success", "verified": 0, "unverified": 1,
+                                         "labels": ("memory:ep_prev",)},                  False),
+        ("lesson, failed",          {"outcome": "failed",  "verified": 0, "unverified": 1,
+                                         "tags": ("lesson",)},                            True),
     ],
 )
 def test_admission_matrix(case: str, episode_kwargs: dict, expected: bool) -> None:
@@ -108,7 +108,7 @@ def test_policy_returns_a_bool_never_none() -> None:
     A policy decision is always explicit, so it must not manufacture the
     legacy state for an episode it just judged.
     """
-    for kwargs in (dict(outcome="success", verified=3), dict(outcome="failed", verified=0)):
+    for kwargs in ({"outcome": "success", "verified": 3}, {"outcome": "failed", "verified": 0}):
         assert isinstance(decide_usage_eligibility(_ep(**kwargs)), bool)
 
 

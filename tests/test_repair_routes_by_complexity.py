@@ -159,7 +159,7 @@ def test_the_generator_asks_for_its_model_after_the_baseline(tmp_path):
 
 def test_the_wiring_does_not_hardcode_the_failing_count():
     """Source-level guard: the literal that made this unreachable is banned."""
-    source = Path("core/loop_methods.py").read_text(encoding="utf-8")
+    source = Path("core/loop_repair.py").read_text(encoding="utf-8")
     start = source.index("def propose_repair(")
     end = source.index("def repair(", start)
     body = source[start:end]
@@ -174,7 +174,7 @@ def test_the_wiring_does_not_hardcode_the_failing_count():
 
 def test_propose_repair_no_longer_uses_the_unescalatable_path():
     """`for_role` cannot reach deep at all — repair must not be built on it."""
-    source = Path("core/loop_methods.py").read_text(encoding="utf-8")
+    source = Path("core/loop_repair.py").read_text(encoding="utf-8")
     start = source.index("def propose_repair(")
     end = source.index("def repair(", start)
     body = source[start:end]
@@ -196,7 +196,7 @@ def test_propose_repair_no_longer_uses_the_unescalatable_path():
 
 def test_propose_repair_asks_with_a_concrete_deliverable():
     """A vague ask downgrades by design, so the wiring must name what it wants."""
-    source = Path("core/loop_methods.py").read_text(encoding="utf-8")
+    source = Path("core/loop_repair.py").read_text(encoding="utf-8")
     start = source.index("def propose_repair(")
     end = source.index("def repair(", start)
     body = source[start:end]

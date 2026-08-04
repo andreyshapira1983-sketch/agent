@@ -54,12 +54,12 @@ class ProposeOnlyRuntime(AutonomousRuntime):
 
 
 def _config(**kw: Any) -> AutonomousRuntimeConfig:
-    defaults: dict[str, Any] = dict(
-        limit=1,
-        include_tests=False,
-        enable_reflection=False,
-        include_proposals=True,
-    )
+    defaults: dict[str, Any] = {
+        "limit": 1,
+        "include_tests": False,
+        "enable_reflection": False,
+        "include_proposals": True,
+    }
     defaults.update(kw)
     return AutonomousRuntimeConfig(**defaults)
 

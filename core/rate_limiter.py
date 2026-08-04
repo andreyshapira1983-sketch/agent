@@ -95,8 +95,7 @@ class CLIRateLimiter:
         """Return current token count without consuming or advancing time."""
         now = time.monotonic()
         elapsed = now - self._last_refill
-        projected = min(self._tokens + elapsed * self._refill_rate, float(self.max_requests))
-        return projected
+        return min(self._tokens + elapsed * self._refill_rate, float(self.max_requests))
 
     # ------------------------------------------------------------------
     # Internal

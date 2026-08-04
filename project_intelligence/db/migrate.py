@@ -47,9 +47,7 @@ def _split_sql(script: str) -> list[str]:
             return False
         if pos > 0 and (text[pos - 1].isalnum() or text[pos - 1] == "_"):
             return False
-        if end < len(text) and (text[end].isalnum() or text[end] == "_"):
-            return False
-        return True
+        return not (end < len(text) and (text[end].isalnum() or text[end] == "_"))
 
     while i < len(text):
         ch = text[i]
