@@ -37,8 +37,18 @@ from tools.base import ToolRegistry
 _REPO = Path(__file__).resolve().parents[1]
 _CORE = _REPO / "core"
 
-#: Модули раскола. `loop_helpers` не примесь (свободные функции), `loop` — хост.
-_NOT_MIXINS = frozenset({"loop", "loop_helpers"})
+#: Модули раскола. `loop` — хост, примесью не является.
+_NOT_MIXINS = frozenset({"loop"})
+
+#: Примеси, у которых контракта хоста нет ПО УСТРОЙСТВУ, а не по недосмотру.
+#: `loop_init` — конструктор: он поля СОЗДАЁТ, а не берёт, поэтому объявлять
+#: ему нечего.
+#:
+#: Вынесены из параметризации, а не пропущены через `pytest.skip`: пропуск,
+#: который никогда не станет проходом, — это шум, приучающий не смотреть на
+#: пропуски вообще. Если у `loop_init` однажды появится заимствование, он
+#: выпадет отсюда и попадёт под обе проверки.
+_NO_HOST_CONTRACT = frozenset({"loop_init"})
 
 
 #: Минимальный ответ по Output Contract. Пустая строка сюда не годится:
@@ -93,6 +103,11 @@ def _mixin_modules() -> list[str]:
     )
 
 
+def _with_host_contract() -> list[str]:
+    """Примеси, у которых контракт хоста есть и обязан быть проверен."""
+    return [m for m in _mixin_modules() if m not in _NO_HOST_CONTRACT]
+
+
 def _declared_host_contract(module_name: str) -> set[str]:
     """Имена, объявленные примесью в блоке ``if TYPE_CHECKING``."""
     mod = importlib.import_module(f"core.{module_name}")
@@ -108,7 +123,7 @@ def _declared_host_contract(module_name: str) -> set[str]:
     return declared
 
 
-@pytest.mark.parametrize("module_name", _mixin_modules())
+@pytest.mark.parametrize("module_name", _with_host_contract())
 def test_the_host_supplies_everything_the_mixin_declares(module_name: str, agent: AgentLoop):
     """Что примесь заявила — цикл обязан иметь ПОСЛЕ прогона.
 
@@ -122,8 +137,10 @@ def test_the_host_supplies_everything_the_mixin_declares(module_name: str, agent
     анализатору и становится проверяемым обязательством.
     """
     declared = _declared_host_contract(module_name)
-    if not declared:
-        pytest.skip(f"core/{module_name} не объявляет контракта хоста")
+    assert declared, (
+        f"core/{module_name} перестал объявлять контракт хоста — "
+        "либо это ошибка, либо модуль пора внести в `_NO_HOST_CONTRACT`"
+    )
     agent.run("привет")  # заводим прогонные поля
     missing = sorted(name for name in declared if not hasattr(agent, name))
     assert not missing, (
@@ -132,7 +149,7 @@ def test_the_host_supplies_everything_the_mixin_declares(module_name: str, agent
     )
 
 
-@pytest.mark.parametrize("module_name", _mixin_modules())
+@pytest.mark.parametrize("module_name", _with_host_contract())
 def test_the_mixin_uses_everything_it_declares(module_name: str):
     """Объявление, которым примесь не пользуется, — ложь о её потребностях.
 
@@ -143,8 +160,10 @@ def test_the_mixin_uses_everything_it_declares(module_name: str):
     их убрать.
     """
     declared = _declared_host_contract(module_name)
-    if not declared:
-        pytest.skip(f"core/{module_name} не объявляет контракта хоста")
+    assert declared, (
+        f"core/{module_name} перестал объявлять контракт хоста — "
+        "либо это ошибка, либо модуль пора внести в `_NO_HOST_CONTRACT`"
+    )
     mod = importlib.import_module(f"core.{module_name}")
     tree = ast.parse(Path(mod.__file__).read_text(encoding="utf-8"))
     used = {

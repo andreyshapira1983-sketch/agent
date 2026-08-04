@@ -513,6 +513,45 @@ first and copy it back. Reach for git only for content git actually has. And
 when a session's work lives uncommitted for hours, that is itself the risk —
 the recovery above worked on a coincidence, and a coincidence is not a backup.
 
+---
+
+## 23. A skip that records a defect instead of reporting it
+
+**Symptom.** A parametrised test calls `pytest.skip` for one input, with a
+comment that correctly explains why that input behaves differently. The
+explanation is right; treating it as a reason to skip is not. The suite reports
+the skip forever and nobody re-reads the comment.
+
+**Cost (2026-08-04).** `tests/characterization/test_cli_resume_branches.py`
+checks five invalid `--resume` values. Four exit 2 with an error. The fifth —
+the empty string — was skipped, noting "empty `--resume` is falsy: no
+validation branch is entered".
+
+That sentence describes a defect. `cli/app.py` guarded the resume block with
+`if args.resume:` — a TRUTHINESS test where argparse's contract calls for an
+identity test: `None` means the flag was absent, `""` means it was given empty.
+So `main.py --resume ""` skipped validation entirely and started a NEW session,
+exit 0 — verified live: a fresh trace id, 47 memory records loaded, no notice to
+the operator who had asked to resume. The validator itself was correct all along
+(`cli/resume.py` rejects the empty id); it was simply never reached.
+
+A characterization suite exists to PIN current behaviour. This one noticed
+behaviour it could not explain away and then recorded nothing about it.
+
+**How to check yourself.** Grep the suite for `pytest.skip` with a hand-written
+reason (not `importorskip`, not a platform guard). For each: is the reason a
+property of the ENVIRONMENT (fine) or a statement about how the code behaves
+(a finding)? If it is the second, the skip is a defect report nobody filed.
+
+Separately: any skip that can never turn into a pass is noise. It trains readers
+to scroll past skips, and the next skip — the one that matters — scrolls past
+with it. Exclude the case explicitly, with the reason, so the count is honest.
+
+**What to do.** Assert the behaviour instead of skipping. If the asserted
+behaviour is wrong, that is a defect with a one-line fix and a test that now
+guards it — which is exactly what happened here: `is not None`, and the fifth
+case joined the other four.
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED
@@ -545,6 +584,7 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 21 | [tests/test_loop_split_wiring.py:112](../tests/test_loop_split_wiring.py#L112) | `if TYPE_CHECKING` host contracts were checked by nobody — two mixins declared fields they never touch | assistant, 2026-08-04 | this change |
 | 22 | [tests/test_loop_split_wiring.py:279](../tests/test_loop_split_wiring.py#L279) | 21 cross-mixin borrows worked through the MRO with nothing recording them; the contract is now checked in both directions | assistant, 2026-08-04 | this change |
 | 22 | [tests/test_loop_split_wiring.py:345](../tests/test_loop_split_wiring.py#L345) | a check whose docstring claimed more than it did — it passed a probe it said it would catch | assistant, 2026-08-04 | this change |
+| 23 | [cli/app.py:95](../cli/app.py#L95) | `if args.resume:` — truthiness where argparse's `None`/`""` needs identity; an explicitly empty flag silently started a new run | assistant, 2026-08-04 | this change |
 
 ## How to append
 
