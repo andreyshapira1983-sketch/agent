@@ -205,21 +205,10 @@ def fake_llm() -> FakeLLM:
 # — otherwise the suite is green only by accident of the shell. The daemon's own
 # health-check runs this suite under its .env, so hermeticity here keeps that
 # self-test stable regardless of routing mode.
-#: Изоляция идёт по ДВУМ спискам сразу, и это намеренно.
-#:
-#: Префиксы ловят целые семейства ярусных переменных — включая те, что ещё не
-#: написаны: имя вида `AGENT_TIER_PROVIDERS_<ЯРУС>` роутер собирает на лету,
-#: перечислить их все заранее нельзя. Именно здесь и произошёл прокол:
-#: `AGENT_TIER_PROVIDERS_STANDARD` не попала в поимённый список, протекла из
-#: `.env` оператора и роняла тест роутинга у него, оставаясь зелёной в CI.
-#:
-#: Поимённый список ниже нужен для переменных без общего префикса
-#: (`AGENT_MODEL_POLICY`, `AGENT_PROVIDER`, …) — их префиксом не поймать.
-#: Известные ярусные имена продублированы в нём для читаемости: видно, что
-#: именно снимается, без чтения кода фикстуры.
-#:
-#: За тем, чтобы оба списка не отстали от роутера, следит
-#: `tests/test_operator_env_isolation.py`.
+#: Ярусные имена роутер собирает на лету, поэтому ловим их префиксом, а не
+#: перечислением: `AGENT_TIER_PROVIDERS_STANDARD` из .env оператора роняла
+#: тест роутинга, оставаясь зелёной в CI. Список ниже — для переменных без
+#: общего префикса. Оба стережёт tests/test_operator_env_isolation.py.
 _OPERATOR_MODEL_ENV_PREFIXES = ("AGENT_TIER_PROVIDERS_", "AGENT_MODEL_TIER_")
 
 _OPERATOR_MODEL_ENV_VARS = (
