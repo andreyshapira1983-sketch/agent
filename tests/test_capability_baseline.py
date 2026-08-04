@@ -19,11 +19,15 @@ from tests.capability_tasks import ALL_TASKS, CATEGORIES
 
 _REPO = Path(__file__).resolve().parents[1]
 
-#: Measured 2026-08-05 on the code as it stands, before any MIR-060 fix.
+#: Measured 2026-08-05.
 #:   verdict — did the system reach the right yes/no
 #:   reason  — did it produce a sentence the agent could repair itself from
-_BASELINE_VERDICT = 26
-_BASELINE_REASON = 13
+#:
+#: 26 / 13 before MIR-060 direction (b); 29 / 17 after. Raised deliberately,
+#: with the run that earned it. A floor, never a target: lowering it to make a
+#: run pass would turn the bench into a formality.
+_BASELINE_VERDICT = 29
+_BASELINE_REASON = 17
 
 
 def _harness():
@@ -82,22 +86,38 @@ def test_the_score_does_not_fall_below_the_recorded_baseline():
     )
 
 
-def test_the_verifier_still_produces_no_repairable_reason():
-    """The finding that decides the fork, pinned so it cannot pass unnoticed.
+_PAIRS = "alpha=1" + chr(10) + "beta=2" + chr(10) + "gamma=3" + chr(10)
 
-    `ClaimChunk` is `(text, citations, matched_evidence_ids, verdict)` — there
-    is no field a reason could live in. So across all 24 claim tasks the reason
-    column is exactly zero, and no choice among the three fix directions can
-    change that without changing the data structure. When it does change, this
-    test goes red and the number above is raised deliberately.
+
+def test_the_verifier_now_explains_an_arithmetic_refutation():
+    """The finding that decided the fork, and its repair.
+
+    Before direction (b) this test asserted the opposite: `ClaimChunk` was
+    `(text, citations, matched_evidence_ids, verdict)` with no field a reason
+    could live in, so the reason column was exactly zero across all 24 claim
+    tasks — and no choice among the three fix directions could have changed it
+    without changing the data structure. That was the measurement that made
+    the argument decidable.
+
+    It now checks the other direction: a refuted arithmetic claim carries the
+    computed value, the claimed value and the numbers behind them, so the agent
+    is told what to change rather than merely that it was wrong.
     """
-    harness = _harness()
-    with_reason = [
-        t.id for t in ALL_TASKS
-        if t.category in ("inference", "arithmetic", "contradiction")
-        and harness._RUNNERS[t.category](t)[1]
-    ]
-    assert not with_reason, (
-        "верификатор начал отдавать причину — подними базу и сними этот тест: "
-        f"{with_reason}"
+    from core.claim_arithmetic import evaluate
+
+    verdict = evaluate("The three values sum to 99", _PAIRS)
+
+    assert verdict.refutes
+    assert verdict.expected == "6" and verdict.actual == "99"
+    assert "6" in verdict.explanation and "99" in verdict.explanation
+    assert "alpha=1" in verdict.computed_from, (
+        "опровержение без выкладки — это штамп, а не причина"
     )
+
+
+def test_a_shape_it_does_not_recognise_stays_silent():
+    """Silent, never `refutes` — a false accusation is the unrecoverable error."""
+    from core.claim_arithmetic import evaluate
+
+    assert evaluate("The configuration looks reasonable", _PAIRS).outcome == "silent"
+    assert evaluate("The three values sum to 3", "prose, not pairs").outcome == "silent"

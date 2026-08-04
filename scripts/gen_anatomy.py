@@ -38,7 +38,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "loop_verification", "loop_observe", "loop_run_tail", "loop_context",
         "loop_attempt", "loop_verify_replan", "loop_init", "loop_gates",
         "planner", "planner_prompt", "plan_parsing", "doc_routing", "host_tools_context", "step_sanitizer", "verifier", "verifier_core", "verifier_models", "verifier_patterns", "verification_summary", "sensor_journal",
-        "verifier_utils", "replan", "reflection", "clarification_gate",
+        "verifier_utils", "claim_arithmetic", "replan", "reflection", "clarification_gate",
         "clarification_policy", "instruction_conflict_gate", "directive_extractor",
         "assumption_registry", "referent_resolver",
         "evidence_support", "confidence_vector",

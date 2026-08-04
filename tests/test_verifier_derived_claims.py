@@ -24,7 +24,11 @@ does not), or give derived claims their own verdict (honest, but every consumer
 of `verified_chunks` must then be re-examined). Choosing is an operator
 decision, not a detail of writing the test.
 
-So these tests state the CORRECT behaviour and are expected to fail. They are
+Four of the five markers came off on 2026-08-05 when direction (b) landed and
+the suite went red with `XPASS(strict)` — the instrument doing its job. What
+remains marked is the entailment check, which only direction (a) reaches.
+
+So these tests state the CORRECT behaviour. They are
 not skips: a skip whose reason describes code behaviour is a defect report
 nobody filed (notebook §23). `strict=True` means the day the behaviour changes
 — by a fix or by accident — the suite goes red and someone must come back
@@ -77,7 +81,6 @@ def _verdict(claim: str, *, excerpt: str = _EXCERPT, llm: Any = None) -> str:
 # False derived claims — each cites a source that resolves, and each is wrong
 # --------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason=_MIR_060)
 @pytest.mark.parametrize("claim", [
     "The three values sum to 99",      # arithmetic over the excerpt: 6, not 99
     "The file defines 7 keys",         # a count: three keys, not seven
@@ -87,8 +90,13 @@ def test_a_false_derived_claim_is_not_verified(claim: str):
     """Resolution is not evaluation.
 
     All three cite `vals.txt`, which is in the chain and contains exactly the
-    numbers that refute them. Today each scores `verified` — identically to the
-    true derivation and to a literal quotation.
+    numbers that refute them. Each used to score `verified` — identically to
+    the true derivation and to a literal quotation.
+
+    FIXED 2026-08-05 by MIR-060 direction (b): `core/claim_arithmetic.py`
+    computes the sum, the count and the comparison from the excerpt and a
+    refutation both demotes the claim and attaches its working. The strict
+    marker came off the day the behaviour changed, which is what it is for.
     """
     assert _verdict(claim) != "verified", (
         f"{claim!r} is false against the cited excerpt and still scored "
@@ -120,7 +128,6 @@ def test_a_statistical_claim_without_its_figure_is_held_back():
     assert _verdict("Coverage rose 40%") != "verified"
 
 
-@pytest.mark.xfail(strict=True, reason=_MIR_060 + " (containment, not evaluation)")
 def test_an_unrelated_number_cannot_certify_an_average():
     """`port=12` is not the average of 1, 2 and 3.
 
@@ -128,6 +135,10 @@ def test_an_unrelated_number_cannot_certify_an_average():
     in the excerpt. It does not compute the average and has no notion of which
     number belongs to which quantity, so an unrelated `port=12` flips the
     verdict from held-back to `verified` — closure criterion 4.
+
+    FIXED 2026-08-05: the arithmetic gate computes the average as 2 and refutes
+    the claim before containment is consulted, so an unrelated number can no
+    longer certify it.
     """
     verdict = _verdict("The average value is 12",
                        excerpt=_EXCERPT + "port=12\n")
