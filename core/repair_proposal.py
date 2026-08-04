@@ -276,6 +276,11 @@ class RepairProposalGenerator:
         try:
             current_content = self.file_read.run(target_path)
         except Exception as exc:
+            # Not silence: the failure becomes the report's own status
+            # (`tool_error`) with the exception type and message in `warnings`,
+            # and `_finish` is what the caller reads. Broad on purpose — this
+            # is a tool boundary, and every way `file_read` can fail is the
+            # same answer here: no baseline content, no proposal.
             return self._finish(ProposalGenerationReport(
                 status="tool_error",
                 warnings=[f"file_read failed: {type(exc).__name__}: {exc}"],
@@ -420,6 +425,8 @@ class RepairProposalGenerator:
                 context_lines=3,
             )
         except Exception as exc:
+            # The reason travels in `reasons`, which `_rejected` puts into the
+            # returned report — the operator sees why the draft was refused.
             reasons.append(f"diff_file rejected proposal: {type(exc).__name__}: {exc}")
             return self._rejected(raw_response, baseline_tests, diagnostic_logs, reasons)
 
@@ -492,6 +499,9 @@ class RepairProposalGenerator:
                 return {"ok": False, "error": "run_tests invalid output: " + "; ".join(issues), "output": output}
             return {"ok": True, "output": redact_payload(output)}
         except Exception as exc:
+            # `ok=False` plus the typed reason IS the report; the caller
+            # branches on it and shows the text. A raise here would abort a
+            # proposal run over a tool that is allowed to be unavailable.
             return {"ok": False, "error": f"run_tests failed: {type(exc).__name__}: {exc}"}
 
     def _read_logs(self, *, trace_id: str) -> dict[str, Any]:
@@ -506,6 +516,7 @@ class RepairProposalGenerator:
                 return {"ok": False, "error": "read_logs invalid output: " + "; ".join(issues), "output": output}
             return {"ok": True, "output": redact_payload(output)}
         except Exception as exc:
+            # Same contract as `_run_tests` above: the failure is the value.
             return {"ok": False, "error": f"read_logs failed: {type(exc).__name__}: {exc}"}
 
     def _build_prompt(

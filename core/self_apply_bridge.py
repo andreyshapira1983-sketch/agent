@@ -31,6 +31,7 @@ inbox item executed; transient refusals (``budget_kill_switch`` /
 from __future__ import annotations
 
 import base64
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,8 @@ from core.self_apply_lane import (
     classify_patch_risk,
     run_self_apply_lane,
 )
+
+logger = logging.getLogger(__name__)
 
 # Only approval-inbox items carrying exactly this operation may be routed
 # through the self-apply lane. Anything else is refused.
@@ -376,8 +379,14 @@ def run_approved_self_apply(
         record_gateway_receipt(
             decision, workspace=workspace, refs={"proposal_id": item_id}
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        # A receipt missing from the audit trail of an EFFECTFUL operation is
+        # the gap the trail exists to close: the self-apply ran, and nothing
+        # durable says under which decision (MIR-077).
+        logger.warning(
+            "self-apply gateway receipt not written for %s: %s: %s",
+            item_id, type(exc).__name__, exc,
+        )
 
     if outcome == "simulate":
         return _refusal(
@@ -436,8 +445,15 @@ def _record_self_apply_gateway_error(workspace: Path, item_id: str) -> None:
             status="error",
             refs={"proposal_id": item_id},
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        # This IS the fail-closed path: it exists to leave a receipt saying the
+        # gateway raised. Failing it silently produces the state it was written
+        # to prevent — an effectful operation refused with no record that it
+        # was even attempted (MIR-077).
+        logger.warning(
+            "fail-closed gateway receipt not written for %s: %s: %s",
+            item_id, type(exc).__name__, exc,
+        )
 
 
 def _gateway_for(
@@ -484,8 +500,14 @@ def _record_lane_outcome(registry: Any, item: Any, status: str) -> None:
         if _origin_of(item) != PRODUCER_ORIGIN:
             return
         registry.apply_lane_outcome(getattr(item, "id", None), status)
-    except Exception:
-        pass
+    except Exception as exc:
+        # The lane outcome is what stops the producer proposing the same target
+        # again. Losing it silently means the next cycle re-proposes work that
+        # has already been applied or refused (MIR-077).
+        logger.warning(
+            "self-apply lane outcome not recorded for %s: %s: %s",
+            getattr(item, "id", "?"), type(exc).__name__, exc,
+        )
 
 
 def _origin_of(item: Any) -> str:

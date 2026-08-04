@@ -25,7 +25,13 @@ _REPO = Path(__file__).resolve().parents[1]
 # целиком (15 мест: 11 сенсоров журналируют сбой через
 # `core/sensor_journal`, 4 значения по умолчанию назвали причину) —
 # база опущена 61 → 46. Опускать дальше по мере починки; не поднимать.
-_BASELINE_UNJUSTIFIED_SILENT = 46
+#: 2026-08-05: closed to ZERO. 162 broad handlers remain; 50 journal the
+#: failure (was 23) and every silent one now carries a written reason. The
+#: scanner was fixed first — it matched call names by exact token, so a private
+#: helper like `self._log` read as silence and 5 of the 46 were never broken.
+#: From here the class cannot grow: a new broad handler must journal, re-raise,
+#: narrow its type, or say in words why silence is right.
+_BASELINE_UNJUSTIFIED_SILENT = 0
 
 
 def _load_audit():
@@ -128,3 +134,41 @@ def test_hash_inside_a_string_is_not_a_justification():
         'try:\n    x = 1\nexcept Exception:\n    y = "#not a comment"\n', "f.py"
     )
     assert rows[0]["commented"] is False
+
+
+def test_a_private_journaling_helper_counts_as_journaling():
+    """`self._log(...)` reports the failure; the audit must not call it silence.
+
+    Measured 2026-08-05: the token match was exact, so the leading underscore
+    made `_log` a different word from `log` and five handlers in
+    `core/autonomous_runtime.py` that DO journal were counted in the target
+    class. An audit that sends a reader to fix what is not broken is worse
+    than no audit — the reader learns to distrust it.
+    """
+    audit = _load_audit()
+    rows = audit.classify_source(
+        "try:\n    x = 1\nexcept Exception as e:\n"
+        '    self._log("failed", {"error": type(e).__name__})\n',
+        "f.py",
+    )
+    assert rows[0]["kind"] == "journaled"
+
+
+def test_log_prefixed_helpers_count_but_login_does_not():
+    """The widening is `log_` WITH the separator, so #292's rule still holds.
+
+    `core/` defines `_log_error` and `_log_summary`; both are journaling. It
+    also has to keep refusing `login` and `logic`, which is why the check is a
+    prefix with the underscore and not a substring.
+    """
+    audit = _load_audit()
+    for call, expected in (
+        ("self._log_error(e)", "journaled"),
+        ("self._log_summary(r)", "journaled"),
+        ("self._login(u)", "silent_other"),
+        ("compute_logic()", "silent_other"),
+    ):
+        rows = audit.classify_source(
+            f"try:\n    x = 1\nexcept Exception as e:\n    {call}\n", "f.py"
+        )
+        assert rows[0]["kind"] == expected, f"{call} -> {rows[0]['kind']}"

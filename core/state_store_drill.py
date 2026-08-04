@@ -141,5 +141,9 @@ def _active_file_integrity_ok(path: Path) -> bool:
         try:
             decode_state_row(line)
         except Exception:
+            # `False` is not a swallowed failure, it is the answer: this
+            # function asks "does every row decode?", and a row that does not
+            # is precisely a negative. The caller reports the verdict; naming
+            # the row here would duplicate the drill's own output.
             return False
     return True

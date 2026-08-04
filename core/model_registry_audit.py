@@ -14,10 +14,13 @@ therefore reads the ledger as well and reports both directions of that drift.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from core.model_router import ModelRouter
+
+logger = logging.getLogger(__name__)
 
 
 def _model_key(provider: str | None, model: str | None) -> str:
@@ -35,7 +38,14 @@ def _observed_model_keys(router: ModelRouter) -> tuple[str, ...]:
         return ()
     try:
         by_model = (ledger.snapshot() or {}).get("by_model") or {}
-    except Exception:
+    except Exception as exc:
+        # An empty key set makes the audit report "no models observed", which
+        # reads as a clean bill of health rather than as a reading that never
+        # happened (MIR-077).
+        logger.warning(
+            "model usage ledger unreadable, audit sees no observed models: %s: %s",
+            type(exc).__name__, exc,
+        )
         return ()
     keys: set[str] = set()
     for entry in by_model:

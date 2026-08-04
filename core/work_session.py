@@ -20,6 +20,7 @@ Usage (CLI):
 """
 from __future__ import annotations
 
+import logging
 import sys
 import time
 from dataclasses import dataclass, field
@@ -28,6 +29,8 @@ from typing import Any, Literal
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
 from core.budget_governor import BudgetLimits
 from core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+
+logger = logging.getLogger(__name__)
 
 WorkSessionStatus = Literal["completed", "stopped", "interrupted"]
 WorkSessionStopReason = Literal[
@@ -361,7 +364,17 @@ def _cycle_signature(run_report: Any) -> tuple:
             for t in getattr(run_report, "tasks", []) or []
         )
         return (getattr(run_report, "status", ""), tasks)
-    except Exception:
+    except Exception as exc:
+        # The signature feeds repetition detection. `("__unknown__",)` is
+        # deliberately CONSTANT: two unreadable reports in a row compare equal
+        # and trip the "nothing is changing" guard, which is the safe direction
+        # — a stuck session stops. Journaled because otherwise the operator
+        # sees a session halted for looping when in fact the report could not
+        # be read (MIR-077).
+        logger.warning(
+            "run report unreadable, cycle signature degraded: %s: %s",
+            type(exc).__name__, exc,
+        )
         return ("__unknown__",)
 
 
@@ -383,7 +396,14 @@ def _is_budget_exhausted(run_report: Any) -> bool:
             if details.get("error_type") == "ModelBudgetExceeded":
                 return True
         return False
-    except Exception:
+    except Exception as exc:
+        # `False` means "budget is fine, keep going" — the permissive answer.
+        # An unreadable report therefore does not stop the session, it lets it
+        # spend on (MIR-077).
+        logger.warning(
+            "budget-exhaustion check could not read the run report: %s: %s",
+            type(exc).__name__, exc,
+        )
         return False
 
 
@@ -414,7 +434,14 @@ def _is_approval_blocked(run_report: Any) -> bool:
             if "approval" in str(details.get("reason", "")).lower():
                 return True
         return False
-    except Exception:
+    except Exception as exc:
+        # Same permissive direction as the budget check above: `False` means
+        # "nothing is waiting for a human", so an unreadable report silently
+        # removes the reason to pause (MIR-077).
+        logger.warning(
+            "approval-block check could not read the run report: %s: %s",
+            type(exc).__name__, exc,
+        )
         return False
 
 

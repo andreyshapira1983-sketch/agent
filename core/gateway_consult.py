@@ -5,9 +5,12 @@ readiness blockers. Keeps gateway wiring out of CLI modules.
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def _budget_int(value: object) -> int:
@@ -85,7 +88,15 @@ def budget_ledger_snapshot(workspace: Path) -> dict | None:
             config_path=root / "config" / "budget_limits.json",
         )
         return ledger.snapshot()
-    except Exception:
+    except Exception as exc:
+        # `None` makes the caller skip the budget check entirely, so an
+        # unreadable ledger does not block the action — it waves it through.
+        # Failing open on a spend guard is exactly the direction that must
+        # never be silent (MIR-077).
+        logger.warning(
+            "budget ledger unreadable, budget hard-stop not evaluated: %s: %s",
+            type(exc).__name__, exc,
+        )
         return None
 
 

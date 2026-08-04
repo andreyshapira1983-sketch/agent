@@ -337,6 +337,10 @@ def propose_subagent(
     try:
         proposal = _parse_proposal(goal, data)
     except Exception as exc:
+        # Journaled, despite what the audit scanner says: `_emit` forwards to
+        # `logger.log`, and the scanner matches call NAMES, so it cannot see
+        # through an emitter. Widening it to accept any `_emit` would be the
+        # wrong trade — a false "journaled" hides a real silence.
         _emit(logger, "subagent_proposal_parse_error", {
             "goal": goal,
             "error": str(exc),
