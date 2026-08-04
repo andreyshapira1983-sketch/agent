@@ -52,9 +52,13 @@ def test_no_address_escapes_the_repository():
 
 
 def test_the_escape_check_actually_catches_a_way_out():
-    """Proof of the guard: a path leading out must be rejected."""
+    """Proof of the guard: anything leading out must be rejected."""
     assert not _inside_repo("../../../etc/passwd.py")
     assert not _inside_repo("a/../../b.py")
+    # Absolute addresses are not portable and are not ours either way.
+    assert not _inside_repo("/etc/passwd.py")
+    assert not _inside_repo("C:/Windows/system.py")
+    assert not _inside_repo("//server/share/x.py")
     assert _inside_repo("core/loop.py")
 
 

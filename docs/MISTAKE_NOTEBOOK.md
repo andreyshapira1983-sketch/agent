@@ -355,9 +355,11 @@ to check yourself, what to do. Without numbers a record is useless: "sometimes
 this goes wrong" cannot be checked. A new finding goes as a row into the table
 above, always with `file:line`.
 
-**Address rule:** paths point inside the repository, from its root (for
-example, `core/loop.py:120`). A path leading outside (`../…`) is rejected by
-the guard: in this notebook it is meaningless.
+**Address rule.** The guard reads the address in the LINK TEXT — the
+`core/loop.py:120` part — and requires it to stay inside the repository:
+written from the repository root, never absolute, never climbing out with
+`../`. The link URL beside it is a different thing and may legitimately start
+with `../`, because this document lives in `docs/` and points one level up.
 
 **For the agent:** append your own row at the end of the table, with "Found by"
 set to `agent, YYYY-MM-DD`. If a check from a section fires on you but is not a
