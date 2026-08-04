@@ -281,6 +281,10 @@ def apply_total_budget(
     blocks : list of (label, formatted_content)
     trim_first_labels : labels to spend before anything else (order within the
         group is still largest-first). Unknown labels are ignored.
+    min_useful : per-label size below which a block keeps nothing usable, so it
+        is dropped whole instead of being cut to a stub. Memory passes the size
+        of its first whole record: rebuilt from WHOLE records, a shorter block
+        yields no citable id yet still costs its ~120-char trim notice.
 
     Returns
     -------
@@ -323,6 +327,7 @@ def apply_total_budget(
     if isinstance(trim_first_labels, str):
         trim_first_labels = {trim_first_labels}
     demoted = frozenset(trim_first_labels or ())
+    _useful_floors = dict(min_useful or {})   # resolved once, not per trim
 
     # Content chars each block currently keeps (before its notice). The cut
     # target must be computed from THIS, not from the original length: with
@@ -377,7 +382,7 @@ def apply_total_budget(
             # while the stub still costs its notice. Measured live 2026-08-04
             # (`memory_trimmed=True, memory_chars_kept=0`). Drop it outright —
             # "whole items or an honest zero".
-            floor_useful = (min_useful or {}).get(label)
+            floor_useful = _useful_floors.get(label)
             if floor_useful is not None and new_len < floor_useful:
                 result[biggest] = (label, "")
                 sizes[biggest]  = 0
