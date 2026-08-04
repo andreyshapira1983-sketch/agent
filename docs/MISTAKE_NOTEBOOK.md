@@ -271,7 +271,8 @@ and measurements belong in the commit message.
 ## 15. The builder derails on a long reply — at roughly the same point
 
 **Symptom.** The builder's reply fails to parse as JSON. The cause differs each
-time; the position barely does.
+time, and the position moves as well — the two are not correlated the way I
+first assumed.
 
 **Cost (three consecutive runs, 2026-08-04).**
 
@@ -373,7 +374,8 @@ contradicts itself. A follow-up PR was needed for what would have been one
 edit before the merge.
 
 **How to check yourself.** Before merging: are there unresolved review threads?
-`gh api graphql` on `reviewThreads { isResolved }` answers in one call. A
+one `gh pr view <N> --json reviewDecision,comments` (or a GraphQL query that
+nests `reviewThreads` under `repository.pullRequest`) answers it. A
 comment that arrived while the checks were still running is easy to miss
 precisely because the checks turned green first.
 
