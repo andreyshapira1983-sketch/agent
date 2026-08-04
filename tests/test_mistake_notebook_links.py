@@ -1,0 +1,57 @@
+"""Адреса в блокноте ошибок должны вести в существующие места.
+
+`docs/MISTAKE_NOTEBOOK.md` — общий канал между ассистентом и автономным
+агентом: один пишет находку с адресом `файл:строка`, другой идёт и смотрит.
+Битая ссылка обесценивает запись — искать снова придётся руками, а ради
+избавления от этого поиска журнал и заведён.
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+_REPO = Path(__file__).resolve().parents[1]
+_NOTEBOOK = _REPO / "docs" / "MISTAKE_NOTEBOOK.md"
+
+#: Ссылка вида `[core/foo.py:123]` в тексте журнала.
+_LINK_RE = re.compile(r"\[([\w/.\-]+\.py):(\d+)\]")
+
+
+def _links() -> list[tuple[str, int]]:
+    text = _NOTEBOOK.read_text(encoding="utf-8")
+    return [(m.group(1), int(m.group(2))) for m in _LINK_RE.finditer(text)]
+
+
+def test_the_notebook_exists_and_carries_addresses():
+    assert _NOTEBOOK.is_file(), "блокнот ошибок пропал"
+    assert _links(), "в журнале нет ни одного адреса — искать снова придётся руками"
+
+
+def test_every_address_points_at_a_real_line():
+    broken: list[str] = []
+    for rel, lineno in _links():
+        path = _REPO / rel
+        if not path.is_file():
+            broken.append(f"{rel}:{lineno} — файла нет")
+            continue
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        if not 1 <= lineno <= len(lines):
+            broken.append(f"{rel}:{lineno} — строки нет (всего {len(lines)})")
+            continue
+        if not lines[lineno - 1].strip():
+            broken.append(f"{rel}:{lineno} — строка пустая, адрес уехал")
+
+    assert not broken, "адреса в блокноте протухли:\n  " + "\n  ".join(broken)
+
+
+def test_each_finding_row_names_a_place():
+    """Строка журнала без адреса — это жалоба, а не находка."""
+    text = _NOTEBOOK.read_text(encoding="utf-8")
+    start = text.index("| № | Файл:строка |")
+    table = text[start:].split("\n\n", 1)[0]
+    rows = [r for r in table.splitlines() if r.startswith("| ") and "---" not in r]
+    body = rows[1:]  # без заголовка
+
+    assert body, "журнал находок пуст"
+    for row in body:
+        assert _LINK_RE.search(row), f"строка журнала без адреса: {row[:80]}"
