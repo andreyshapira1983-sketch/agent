@@ -50,6 +50,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ]),
     ("Memory & Knowledge Governance (§4)", "Working/persistent memory, hygiene, ingestion, evidence.", [
         "memory", "persistent_memory", "smart_memory", "memory_policy", "memory_echo_antibody",
+        "bilingual_terms",
         "memory_hygiene", "episodic_hygiene", "knowledge_use_policy", "knowledge_pipeline",
         "ingestion", "ingestion_reports", "ingestion_utils",
         "structured_facts", "evidence", "evidence_classes", "evidence_budget",

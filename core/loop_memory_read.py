@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from core.bilingual_terms import recall_language_diagnostics
 from core.evidence_budget import MEMORY_CLOSE_TAG, MEMORY_OPEN_TAG
 from core.smart_memory import (
     PROCEDURE_STATUSES,
@@ -122,6 +123,10 @@ class AgentLoopMemoryRead:
                     "role": self.last_role_context.role,
                     "records_applicable": len(use_report.allowed),
                     "rejected_by": rejected_by,
+                    # Is this miss the language gap or genuine absence? Counted
+                    # rather than guessed, so a decision about translating the
+                    # question (or semantic search) rests on numbers.
+                    **recall_language_diagnostics(question),
                 },
             )
             return ""

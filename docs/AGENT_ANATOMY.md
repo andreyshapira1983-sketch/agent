@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 178 modules across 12 groups._
+_Total: 179 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -117,6 +117,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/smart_memory` | Episodic, procedural and consolidation memory for autonomous operation. |
 | `core/memory_policy` | Memory Write Policy + Memory Retrieval Policy (§4 + §12.4). |
 | `core/memory_echo_antibody` | Memory Echo Antibody (A1) — refuse agent-auto memory that *echoes* itself. |
+| `core/bilingual_terms` | Russian question, English record — one domain vocabulary between them. |
 | `core/memory_hygiene` | Гигиена памяти: просрочка, дедупликация, сводка, архивация. |
 | `core/episodic_hygiene` | Episodic memory hygiene — staleness scoring and pruning. |
 | `core/knowledge_use_policy` | Contextual memory-use policy. |

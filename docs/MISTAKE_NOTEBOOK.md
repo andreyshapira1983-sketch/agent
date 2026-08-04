@@ -703,7 +703,7 @@ callers whose answer must parse as a whole a way to decline stitching, and a
 way to learn they were cut off — "it did not fit" is a usable answer, a
 corrupted splice is not.
 
-## 24. The lesson is written, and cannot be found
+## 29. The lesson is written, and cannot be found
 
 **Symptom.** A system records what went wrong, and reads it back before trying
 again — but the write and the read do not agree on the key. Both halves look
@@ -730,6 +730,33 @@ with a test that goes through both halves: bank an episode, then recall it. For
 records already written under the old key, make the reader fall back to the
 evidence they did keep — do not rewrite the store to match the code.
 
+## 30. Understanding and lookup are not the same faculty
+
+**Symptom.** A system is told "everything internal is in language X", and the
+rule is applied to things that do not have a language at all — or to the wrong
+half. Comprehension comes from the model and is language-agnostic; lookup is
+literal string comparison and is not. Confusing the two produces a component
+that "understands" a request perfectly and then finds nothing about it.
+
+**Cost (2026-08-04, the agent's own store, 47 records, 46 Latin-only).**
+«кто владеет архитектурой?» recalled **0** records; "who owns the architecture?"
+recalled **3**. Same question, same store, different alphabet. Nothing was
+broken and nothing raised — the operator simply got answers with no memory
+behind them. It went unnoticed because a question containing one Latin word
+("README") works in both languages.
+
+**How to check yourself.** Ask of each component: does this UNDERSTAND text, or
+does it COMPARE text? The second kind is every place with `in`, `startswith`,
+set intersection or a keyword table. For each of those, feed it the input the
+user actually produces — the language they actually type in — and count the
+results. A component tested only in the language its code is written in has not
+been tested in production conditions.
+
+**What to do.** Bridge the two vocabularies where the comparison happens, with
+a table small enough to stay honest and testable. Then journal the misses with
+enough detail to tell "the table is too small" from "we genuinely do not know
+that" — otherwise the next decision is an impression again.
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED
@@ -749,8 +776,7 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 5 | [core/builder_reply_diagnosis.py:17](../core/builder_reply_diagnosis.py#L17) | a rejection now names the cause, the position and the fragment (moved out of the producer by MIR-084) | assistant, 2026-08-04 | PR #303 |
 | 6 | [core/code_state.py:97](../core/code_state.py#L97) | fingerprint of the checked code — commit, branch, divergence | assistant, 2026-08-04 | PR #301 |
 | 6 | [core/autonomous_runtime.py:684](../core/autonomous_runtime.py#L684) | the autonomous test report carries the fingerprint | assistant, 2026-08-04 | PR #302 |
-| 11 | [core/self_build_producer.py:391](../core/self_build_producer.py#L391) | ~~"the result never reaches the verifier"~~ — **wrong as written**: the patch does get checked (critic's structural vetoes, then targeted + full tests on apply, red ⇒ rollback). What is model self-report is `confidence`, and 3 of the live proposals passed that gate and still failed the tests | assistant, 2026-08-04 | claim corrected; the real defect is row 24 |
-| 24 | [core/self_build_memory.py:137](../core/self_build_memory.py#L137) | a rollback was banked with no file tag, so `recent_self_build_lessons` found 0 — the agent broke the same test the same way twice | assistant, 2026-08-04 | MIR-085 |
+| 11 | [core/self_build_producer.py:391](../core/self_build_producer.py#L391) | ~~"the result never reaches the verifier"~~ — **wrong as written**: the patch does get checked (critic's structural vetoes, then targeted + full tests on apply, red ⇒ rollback). What is model self-report is `confidence`, and 3 of the live proposals passed that gate and still failed the tests | assistant, 2026-08-04 | claim corrected; the real defect is row 29 |
 | 12 | [core/task_complexity.py:108](../core/task_complexity.py#L108) | a ~180-character threshold decides which model answers | assistant, 2026-08-04 | PR #301, partly |
 | 15 | [core/llm.py:302](../core/llm.py#L302) | three replies broke at 32 326 / 32 440 / 37 678 — continuation stitched a JSON string it could not resume | assistant, 2026-08-04 | MIR-084 |
 | 16 | [docs/MISTAKE_NOTEBOOK.md:318](../docs/MISTAKE_NOTEBOOK.md#L318) | an invented example path in the address rule — caught by the docs conformance check | assistant, 2026-08-04 | PR #306 |
@@ -771,6 +797,9 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 26 | [agent_tick.py:928](../agent_tick.py#L928) | `except Exception: continue  # another process already claimed it` — a guard for an exception nobody raised | assistant, 2026-08-04 | MIR-081 |
 | 27 | [core/learning_planner.py:142](../core/learning_planner.py#L142) | the file named as the weak spot scored 0 for being named; a filename with "architecture" scored 95 | assistant, 2026-08-04 | MIR-082 |
 | 27 | [core/autonomous_runtime.py:1247](../core/autonomous_runtime.py#L1247) | the branch that makes the agent study its weak spots had no test at all | coverage, 2026-08-04 | MIR-082 |
+| 29 | [core/self_build_memory.py:137](../core/self_build_memory.py#L137) | a rollback was banked with no file tag, so `recent_self_build_lessons` found 0 — the agent broke the same test the same way twice | assistant, 2026-08-04 | MIR-085 |
+| 30 | [core/memory_policy.py:324](../core/memory_policy.py#L324) | recall scored Russian questions against English records by word overlap: «кто владеет архитектурой?» 0 records, the English form 3 | assistant, 2026-08-04 | MIR-086 |
+| 30 | [core/bilingual_terms.py:74](../core/bilingual_terms.py#L74) | every recall miss now says whether the table could widen the question at all — the number that decides the next step | assistant, 2026-08-04 | MIR-086 |
 
 ## How to append
 
