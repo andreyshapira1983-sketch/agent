@@ -477,7 +477,53 @@ Full suite 7071 passed, 1 xfailed. Except-audit target 0.
 - ~90 lines of `_run_inner` do nothing but move values between them.
 - **The order is not optional:** this happens **before** any further extraction,
   or each new one costs a sixth state object.
-- [ ] done
+
+**Step one done 2026-08-05, per the operator's instruction — a characterization
+test and a lifetime classification, no code changed. And the measurement
+corrects this entry rather than confirming it.**
+
+`tests/test_run_state_lifetime.py`, 10 tests. Every list is derived by walking
+the AST at test time, because hand-counting produced wrong numbers twice during
+this census.
+
+**28** fields are mutable run state — written somewhere other than the
+constructor. Everything else on the agent is wiring handed in once.
+
+- **12** are reset by `_run_inner` itself. Checked live, not just in the syntax
+  tree: an assignment behind a branch that never fires satisfies an AST walk
+  and leaks anyway.
+- **16** survive the run. Of those, 12 are read somewhere in the layer and 4
+  are write-only reporting surfaces.
+
+Then the question this item was really written for: does turn 1 reach turn 2?
+Measured by planting a marker between two live runs, one field at a time.
+**25 of 28 are replaced outright by the next run. Exactly three carry a value
+across**, and none of the three is the defect this entry implied:
+
+  `_audit_froze_agent_auto`, `audit_read_only` — session state by design; the
+  audit brake is set once for a session and resetting it per turn would be
+  the bug.
+  `last_user_profile` — stands still only because this configuration has no
+  profile store, so the tail never writes it. An artefact of the fixture,
+  recorded as such rather than dressed up as a finding.
+
+**So the framing above is wrong and stays visible instead of being edited
+away.** "~25 fields on the agent instance" was listed as a fifth home with the
+implication that state leaks between turns. Per-turn isolation holds. What
+remains is that one run's state is spread over five places with no declared
+boundary, which costs whoever reads it — a real problem, but a readability one,
+and smaller than what was written down. **Step two should be scoped to that,
+and the case for a RunContext is now weaker than this entry assumed.**
+
+An honest note on method: the first version of the live measurement compared
+`id()` across runs and was worthless — `True`, `False` and small ints are
+interned, so `_current_attempt` and `audit_read_only` read as "untouched" no
+matter what happened. Five of the six fields it flagged were artefacts. The
+mistake is written at `_Marker` in the test rather than quietly fixed.
+
+- [x] step one — characterization test and lifetime classification
+- [ ] step two — scope decided against the measurement above, not against the
+      original framing
 
 ### B3. Cataloguing written twice
 
