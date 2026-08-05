@@ -120,7 +120,24 @@ half is measured.
 - **Wrong how:** both swallow without a trace. The layer has `_sensor_failed`
   for exactly this, but it is **not declared** in this file's host contract, so
   the file cannot call it. Declare it and use it.
-- [ ] done
+
+**Done 2026-08-05.** Reproduced first, and the two hid differently. Referent
+resolution: healthy logs `referent_decision` and sets a decision, broken logged
+NOTHING and left it `None`, so the local-critique path silently never engaged.
+Assumption extraction hid better — healthy registered 2 assumptions, broken 0,
+and **no event either way**, because `assumptions_registered` fires later and
+only when the registry is non-empty. A crash therefore produced exactly the
+silence of a question with nothing to assume.
+
+`_sensor_failed` declared in the host contract (that was the root cause: the
+cure existed, the connection did not) and called from both. The referent
+handler keeps `last_referent_decision = None` — reporting and failing safe are
+different jobs, and the old code did only the second.
+
+Cover: `tests/test_turn_context_failures_are_reported.py`, 8 tests, **3 of them
+red on the old code**. Includes the reverse case — a question with nothing to
+assume must stay silent, or one indistinguishable pair is traded for another.
+- [x] done
 
 ### A4. Silent fallback of the synthesis contract
 
