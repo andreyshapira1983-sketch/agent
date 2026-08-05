@@ -157,12 +157,33 @@ def test_the_generator_asks_for_its_model_after_the_baseline(tmp_path):
     )
 
 
+def _propose_repair_source() -> str:
+    """The body of `propose_repair`, found through the MODULE, not a path.
+
+    Was `Path("core/loop_repair.py").read_text()` sliced between `def
+    propose_repair(` and `def repair(`. Two problems with that, and the census
+    named the first: it broke the moment the file moved, which is why it blocked
+    B1 — `core/loop_repair.py` has no caller inside the cycle and belongs
+    elsewhere. The second is quieter: a method added between those two `def`s
+    would have silently widened what these guards read.
+
+    `inspect.getsource` follows the object. The guards below still judge SOURCE
+    TEXT, which is the weaker kind of test — kept because the behaviour they
+    protect (routing through `for_task` so the tier can escalate) is one line
+    deep inside a generator that needs a live model to exercise. The real
+    behavioural check is `test_the_selector_sees_the_baseline_count` above; these
+    are belt to its braces.
+    """
+    import inspect
+
+    from core.loop_repair import AgentLoopRepair
+
+    return inspect.getsource(AgentLoopRepair.propose_repair)
+
+
 def test_the_wiring_does_not_hardcode_the_failing_count():
     """Source-level guard: the literal that made this unreachable is banned."""
-    source = Path("core/loop_repair.py").read_text(encoding="utf-8")
-    start = source.index("def propose_repair(")
-    end = source.index("def repair(", start)
-    body = source[start:end]
+    body = _propose_repair_source()
 
     assert "failing_tests=0" not in body, (
         "the failing-test signal is pinned to zero again, so the count can "
@@ -174,10 +195,7 @@ def test_the_wiring_does_not_hardcode_the_failing_count():
 
 def test_propose_repair_no_longer_uses_the_unescalatable_path():
     """`for_role` cannot reach deep at all — repair must not be built on it."""
-    source = Path("core/loop_repair.py").read_text(encoding="utf-8")
-    start = source.index("def propose_repair(")
-    end = source.index("def repair(", start)
-    body = source[start:end]
+    body = _propose_repair_source()
 
     # The model that answers the request must come from `for_task`, chosen by a
     # selector once the baseline is known. A `for_role` call may still appear as
@@ -196,10 +214,7 @@ def test_propose_repair_no_longer_uses_the_unescalatable_path():
 
 def test_propose_repair_asks_with_a_concrete_deliverable():
     """A vague ask downgrades by design, so the wiring must name what it wants."""
-    source = Path("core/loop_repair.py").read_text(encoding="utf-8")
-    start = source.index("def propose_repair(")
-    end = source.index("def repair(", start)
-    body = source[start:end]
+    body = _propose_repair_source()
 
     assert "high_value_repair" in body
     assert "minimal_patch_plan" in body
