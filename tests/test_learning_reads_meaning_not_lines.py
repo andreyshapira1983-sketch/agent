@@ -24,7 +24,11 @@ from __future__ import annotations
 
 import textwrap
 
-from core.ingestion_utils import _chunk_python, _chunk_text
+# Через `core.ingestion`, а не `core.ingestion_utils`: соседний
+# `tests/test_ingestion_helpers.py` берёт эти же швы оттуда, и это тот
+# слой, который тесты поддерживают. Заодно проверка, что шов реэкспорта
+# жив — его уже однажды снесла автоправка ruff (§24).
+from core.ingestion import _chunk_python, _chunk_text
 
 _SOURCE = textwrap.dedent('''
     """The module explains itself in one sentence."""
@@ -120,3 +124,58 @@ def test_prose_files_are_untouched_by_this():
 
     assert len(kept) == 1, "short paragraphs are accumulated, not split"
     assert "First paragraph" in kept[0] and "Second paragraph" in kept[0]
+
+
+def test_a_documented_definition_inside_a_block_is_not_lost():
+    """`if` / `try` / `with` are not walls, and this repository writes all three.
+
+    The first version recursed only into definition bodies, so a function under
+    `if TYPE_CHECKING:`, one in an `except ImportError:` fallback, and a class
+    inside a `with` were dropped without a trace — the shape a reader would
+    never notice, because the file still produced chunks.
+    """
+    source = textwrap.dedent('''
+        """Module."""
+        import sys
+
+        if sys.version_info >= (3, 11):
+            def modern():
+                """Behaviour available on new runtimes."""
+
+        try:
+            from x import y
+        except ImportError:
+            def fallback():
+                """What we do when the optional dependency is missing."""
+
+        with open("f") as fh:
+            class Inline:
+                """Defined inside a with-block, documented all the same."""
+    ''').lstrip()
+
+    chunks = _chunk_python(source, max_chunks=20)
+
+    assert any(c.startswith("modern: ") for c in chunks), chunks
+    assert any(c.startswith("fallback: ") for c in chunks), chunks
+    assert any(c.startswith("Inline: ") for c in chunks), chunks
+
+
+def test_a_block_is_not_a_namespace():
+    """`Inline` inside a `with` is `Inline`, not `with.Inline`.
+
+    The prefix grows through classes and functions only — those are the things
+    a reader would name when saying whose behaviour a claim describes.
+    """
+    source = textwrap.dedent('''
+        class Store:
+            """Holds rows."""
+
+            if True:
+                def load(self):
+                    """Every row that parsed."""
+    ''').lstrip()
+
+    chunks = _chunk_python(source, max_chunks=20)
+
+    assert any(c.startswith("Store.load: ") for c in chunks), chunks
+    assert not any("True" in c.split(":")[0] for c in chunks), chunks
