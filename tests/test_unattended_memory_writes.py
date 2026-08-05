@@ -34,6 +34,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+import pytest
+
 from core.autonomous_runtime import AutonomousRuntimeConfig
 from core.evidence import ProvenanceChain, make_evidence
 from core.knowledge_pipeline import KnowledgePipeline
@@ -152,26 +154,43 @@ def test_the_gate_lets_a_verified_claim_through_the_real_run(monkeypatch):
     assert result.memory_skipped == 0
 
 
+@pytest.mark.xfail(strict=True, reason=(
+    "А1 очереди починок: два вызова конвейера знаний на пути ХОДА не передают "
+    "require_verified — core/loop_evidence_chain.py:257 и "
+    "core/loop_verify_replan.py:452 (второй внутри цикла добычи цитат). "
+    "Сторож расширен на весь core/ и честно красный. Отметка strict: когда "
+    "дефект починят, тест станет XPASS и потребует снять эту строку — "
+    "молча зазеленеть он не сможет."
+))
 def test_the_unattended_path_always_demands_verification():
-    """The runtime hardcodes `require_verified=True` — the flag opens the door,
-    it does not remove the lock.
+    """Флаг открывает дверь, но не снимает замок — и дверей больше одной.
 
-    Read from the source rather than exercised, because reaching that line needs
-    a whole configured runtime; what matters is that no configuration can turn
-    the content gate off while turning writing on.
+    Область сторожа — ВЕСЬ `core/`, а не один модуль. Первая редакция разбирала
+    только `core.autonomous_runtime`, и это было не осторожностью, а догадкой о
+    том, где может быть дефект. Перепись 2026-08-05 показала, чего догадка не
+    видела: необслуживаемый прогон идёт через обычный цикл
+    (`core/autonomous_runtime.py` зовёт `agent.run`), а конвейер знаний хода
+    вызывается ещё из `core/loop_evidence_chain.py` и
+    `core/loop_verify_replan.py` — причём второй внутри цикла добычи цитат, то
+    есть на каждой итерации. Сторож был честен внутри своей области и не знал,
+    что область выбрана заранее.
+
+    Читается из исходника, а не исполняется: чтобы дойти до этих строк, нужен
+    целиком собранный прогон, а проверить надо простое — что ни одна настройка
+    не может включить запись, не включив содержательные ворота.
     """
     import ast
-    import inspect
+    import pathlib
 
-    from core import autonomous_runtime
-
-    tree = ast.parse(inspect.getsource(autonomous_runtime))
-    calls = [
-        node for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and any(kw.arg == "auto_write_memory" for kw in node.keywords)
-    ]
-    assert calls, "the learning call sites disappeared — update this guard"
+    calls = []
+    for path in sorted(pathlib.Path("core").glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        calls.extend(
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and any(kw.arg == "auto_write_memory" for kw in node.keywords)
+        )
+    assert calls, "места записи знаний исчезли — обновите этого сторожа"
     for call in calls:
         kwargs = {kw.arg for kw in call.keywords}
         assert "require_verified" in kwargs, (
