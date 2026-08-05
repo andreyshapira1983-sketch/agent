@@ -267,3 +267,18 @@ def test_every_skip_path_says_why_not_only_the_new_one():
     assert "auto_write_memory" in off_reason, off_reason
     assert "writer" in unwired_reason, unwired_reason
     assert off_reason != unwired_reason, "две разные причины слились в одну"
+
+    # And in the machine-readable half of the row. The prose differed while
+    # `policy_id` said `auto_write_memory` for both, so anyone filtering
+    # decisions by rule saw the operator blamed for a run where the operator
+    # had opted in and no writer was wired. Two facts, one label, and the
+    # label is what a filter reads — the same invisible failure one field
+    # further down than the one this test was written for.
+    off_rule = off.decisions[0]["knowledge_decision"]["policy_id"]
+    unwired_rule = unwired.decisions[0]["knowledge_decision"]["policy_id"]
+    assert off_rule != unwired_rule, (
+        f"обе причины помечены одним правилом {off_rule!r}: "
+        "по метаданным их уже не различить"
+    )
+    assert off_rule == "auto_write_memory", off_rule
+    assert "writer" in unwired_rule, unwired_rule
