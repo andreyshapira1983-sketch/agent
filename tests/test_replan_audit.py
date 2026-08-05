@@ -194,7 +194,13 @@ class TestTaxonomyDrift:
         """Grep `core/loop.py` for hard-coded `code=` assignments to
         ReplanTrigger and verify every one of them is a known code.
         This catches a typo like `code="too_error"`."""
-        loop_src = Path("core/loop.py").read_text(encoding="utf-8")
+        # Through the module (census C1). The grep is about the codes THIS
+        # module hard-codes, and that question travels with it.
+        import inspect
+
+        from core import loop as _loop_mod
+
+        loop_src = inspect.getsource(_loop_mod)
         # very loose pattern: `code="something"` anywhere in the file
         import re
         codes_used = set(re.findall(r'code\s*=\s*"([a-z_]+)"', loop_src))

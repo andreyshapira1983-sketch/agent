@@ -78,8 +78,13 @@ class TestPlannerIgnoresProfile:
         # Source-level contract: core/planner.py must not import the
         # user_profile module at all. Importing it would mean the
         # planner has access to operator history, which P2 forbids.
-        import pathlib
-        src = pathlib.Path("core/planner.py").read_text(encoding="utf-8")
+        # Through the module (census C1): the rule is about what the PLANNER
+        # may import, and it holds wherever the planner lives.
+        import inspect
+
+        from core import planner as _planner_mod
+
+        src = inspect.getsource(_planner_mod)
         assert "from core.user_profile" not in src
         assert "import core.user_profile" not in src
 

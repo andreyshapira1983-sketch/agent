@@ -349,7 +349,36 @@ evidence, one handler at a time, as the census did.
 - **Why first:** this class breaks on **any** file move, so it blocks all of
   Part B.
 - One instance named: `tests/test_repair_routes_by_complexity.py`.
-- [ ] done
+
+**Done 2026-08-05, and measuring shrank the item by an order of magnitude.**
+
+The "96 files" was a crude count of anything calling `read_text`. Narrowed to
+what the item is actually about — tests that break when a file MOVES — it is
+**6 sites in 4 files**. Another **72 sites in 22 files** read source through
+`module.__file__` or `inspect.getsource`; those follow the object and were never
+the problem. So "96 files block Part B" was wrong: **one file did**, the one
+pinning `core/loop_repair.py`, the very module B1 moves.
+
+All six now find the source through the module. The blocking file gained a
+`_propose_repair_source()` helper using `inspect.getsource`, which also removed
+a quieter fault: it had been slicing text between `def propose_repair(` and
+`def repair(`, so a method added between them would have silently widened what
+three guards read.
+
+Reading source is not forbidden — some invariants live only in the text (what a
+module may import, whether a banned literal returned). What is forbidden is
+coupling that check to a PATH, because a lawful move then reddens a test about
+something else, and a test that fails for a reason it does not describe is worse
+than no test.
+
+Cover: `tests/test_no_test_pins_a_production_path.py`, 3 tests, red on the old
+code. One of them caught ME: the first version searched for the literal string
+and went red on the docstring recording what the file used to do — the
+punishes-you-for-writing-down-history shape the census had already found in
+`tests/test_one_task_store.py`. Judged by CALL now, not by text.
+
+**Part B is unblocked.**
+- [x] done
 
 ### C2. Mutation testing as the standing method
 
