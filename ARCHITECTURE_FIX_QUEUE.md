@@ -386,7 +386,42 @@ punishes-you-for-writing-down-history shape the census had already found in
   Run per class and keep the result beside the test.
 - **Shown to work:** a test with no assertion at all went red on a deliberately
   broken path guard and green again after the revert.
-- [ ] done
+
+**Done 2026-08-05.** `scripts/mutation_probe.py` breaks one thing at a time,
+runs a chosen slice of the suite, and restores the file in a `finally`. It
+refuses to start on a dirty working tree — an interrupted run must not be able
+to lose work that was never committed — and refuses to start on a red selection,
+because a survivor would mean nothing there.
+
+**First real run: `core/low_evidence_policy.py`, ten mutations, SIX survived.**
+That is the module deciding whether an answer is truncated for insufficient
+evidence — the one whose failure (A2) hands a user a confident unsupported
+claim. Its thresholds are largely unpinned:
+
+```
+low_evidence_policy.py:59   number 6 -> 7        _DEFAULT_UNVERIFIED_FLOOR
+low_evidence_policy.py:85   boolean False -> True
+low_evidence_policy.py:136  boolean True -> False
+low_evidence_policy.py:172  number 3 -> 4
+low_evidence_policy.py:173  number 3 -> 4
+low_evidence_policy.py:208  comparison Eq -> NotEq
+```
+
+Recorded, not closed. Closing them is its own job, and naming them is what stops
+it being forgotten.
+
+**The probe corrected itself twice on its first outing**, and both are written
+into it. It reported five survivors of which **three were parameter defaults**
+every caller overrides — unobservable changes reported as gaps, and a probe that
+flags what cannot matter stops being read. And the skip set it gained was built
+from a SECOND parse, so it matched nodes by `id()` against a tree the mutator
+never walked and did nothing at all — an inert guard reporting success, caught
+before it ran and pinned by a test so it cannot return.
+
+Cover: `tests/test_mutation_probe.py`, 9 tests, on synthetic sources so they
+stay fast. The slow half — running the suite under a mutation — is what the
+script does when a human asks.
+- [x] done
 
 ### C3. Fifty-two files carrying 25+ tests
 
