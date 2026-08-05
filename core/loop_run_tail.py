@@ -243,8 +243,10 @@ class AgentLoopRunTail:
                         "novice_signals": updated.novice_signals,
                     },
                 )
-            except Exception:
-                pass  # Profile update must never abort the run.
+            except Exception as exc:
+                # A7: must never abort the run, and must not be invisible.
+                # Silence here reads exactly like "no update was due".
+                self._sensor_failed("user_profile_update", exc)
 
         # Layer 5 — persist assumptions and expose via last_assumptions.
         self.last_assumptions = _run_assumptions
@@ -255,8 +257,10 @@ class AgentLoopRunTail:
         ):
             try:
                 self.assumption_store.save_many(_run_assumptions.new_assumptions)
-            except Exception:
-                pass  # Store failure must never abort the run.
+            except Exception as exc:
+                # A7, the worse of the two: measured, a run that lost every
+                # assumption journalled exactly like a healthy one.
+                self._sensor_failed("assumption_store_save", exc)
 
         return answer, verification, weak_chunks
 

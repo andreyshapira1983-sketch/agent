@@ -64,7 +64,19 @@ from except_audit import journal_silent_in, loop_layer_files  # noqa: E402
 #: as a measurement correction rather than a repair, because a budget that
 #: cannot tell those apart is worth nothing — the same distinction that caught
 #: B1 moving a silent handler out of scope an hour earlier.
-JOURNAL_SILENT_BASELINE = 16
+#:
+#: 16 -> 15, also a measurement correction: `core/loop_run_tail.py:155` guards
+#: a `try` whose body is nothing but a journal write. `classify_source` already
+#: excluded that shape as `try_only_logs`; the rule had simply never been
+#: carried into this counter, so the layer was charged for a silence it had no
+#: way to remove.
+#:
+#: 15 -> 13, and THESE two were repairs. `core/loop_run_tail.py:246` and `:258`
+#: now report through `_sensor_failed`. See
+#: tests/test_run_tail_failures_are_reported.py for what each failure looked
+#: like before — the assumption-store one produced a journal identical to a
+#: healthy run.
+JOURNAL_SILENT_BASELINE = 13
 
 _LAYER = Path("core")
 
@@ -278,9 +290,15 @@ def test_a_helper_that_only_sometimes_logs_does_not_launder_the_silence():
 
 
 def test_a_write_inside_a_try_still_counts_as_unconditional():
-    """`try` is not a branch — the body runs. `_safe_answer_after_enforcement_failure`
-    wraps its journal write in one so a logging failure cannot stop the refusal,
-    and reading that as "might not log" would have kept the false positive.
+    """`try` is not a branch — the body runs.
+
+    `_safe_answer_after_enforcement_failure` wraps its journal write in one so a
+    logging failure cannot stop the refusal, and reading that as "might not log"
+    would have kept the false positive this rule exists to remove.
+
+    Both handlers here are legitimate, for two different structural reasons:
+    the outer one delegates its report, and the inner one guards the write
+    itself. Neither is a silence the layer could remove.
     """
     from except_audit import journal_silent_handlers
 
@@ -297,8 +315,43 @@ def test_a_write_inside_a_try_still_counts_as_unconditional():
         "        except ValueError as exc:\n"
         "            self._report(exc)\n"
     )
-    rows = journal_silent_handlers(src, "x.py")
-    assert [r["line"] for r in rows] == [5], (
-        "the guard around the write itself is the one legitimate silence here; "
-        f"the delegating handler must not be counted. Got {rows}"
+    assert journal_silent_handlers(src, "x.py") == []
+
+
+def test_a_handler_guarding_a_pure_journal_write_is_not_counted():
+    """Found in A7 at `core/loop_run_tail.py:155`, and the fix was already
+    written elsewhere: `classify_source` has excluded this shape as
+    `try_only_logs` since the older audit. The rule had never been carried into
+    this counter, so the layer was charged for a silence it had no way to
+    remove — reporting a failed report is a recursion, not a fix.
+    """
+    from except_audit import journal_silent_handlers
+
+    src = (
+        "def f(self):\n"
+        "    try:\n"
+        "        self.log.log('thing', {})\n"
+        "    except Exception:\n"
+        "        pass\n"
     )
+    assert journal_silent_handlers(src, "x.py") == []
+
+
+def test_a_handler_guarding_real_work_beside_a_write_is_still_counted():
+    """The limit of the rule above. `core/loop_run_tail.py:246` had a journal
+    call in its `try` too — right after the profile update that could fail. If
+    the presence of ANY write bought the exemption, that defect would have been
+    excused instead of found.
+    """
+    from except_audit import journal_silent_handlers
+
+    src = (
+        "def f(self):\n"
+        "    try:\n"
+        "        self.profile = update()\n"
+        "        self.log.log('profile_update', {})\n"
+        "    except Exception:\n"
+        "        pass\n"
+    )
+    rows = journal_silent_handlers(src, "x.py")
+    assert [r["line"] for r in rows] == [5], rows

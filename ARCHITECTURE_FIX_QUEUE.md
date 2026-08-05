@@ -305,8 +305,55 @@ all of `core/`, and calling those defects would be claiming past the
 measurement — the exact mistake this exercise is about. Widening wants its own
 evidence, one handler at a time, as the census did.
 
+**Closing them, 2026-08-05: 17 -> 13. Three of the four reductions were the
+COUNTER being wrong, and saying which is which is the whole discipline here.**
+
+Measurement corrections (no code was repaired):
+
+- The scope was spelled `loop*`, so when B1 moved `propose_repair` out it
+  carried a silent handler past the edge of the measurement. 17 -> 16 with
+  nothing fixed. `loop_layer_files` now follows the dotted-alias import a
+  facade uses, and **the budget must equal the measurement exactly** — the old
+  slack of two is what let that pass in silence.
+- The counter matched a literal `.log(` in the handler's own body, so
+  `_enforce_answer_safety` scored silent while delegating to
+  `_safe_answer_after_enforcement_failure`, whose first statement writes.
+  Punishing code for moving a report into a helper is the counter's error. The
+  helper list was hand-maintained and held exactly one name — the same
+  wherever-someone-looked scope, one layer down; it is derived now.
+- `core/loop_run_tail.py:155` guards a `try` containing nothing but a journal
+  write. `classify_source` already excluded that shape as `try_only_logs`; the
+  rule had never been carried across.
+
+Repairs (two handlers, `core/loop_run_tail.py:246` and `:258`):
+
+- The user-profile update failed invisibly, and its silence read exactly like
+  "no update was due" — two causes, one picture.
+- The assumption-store write was the worse one. Measured: a run that lost every
+  assumption journalled **byte-for-byte like a healthy run**, and
+  `last_assumptions` still reported them because it is set from the in-memory
+  object before the store call. Nothing downstream could tell.
+
+Both now report through `_sensor_failed`, which this file already declared and
+used twice a few lines above. Cover:
+`tests/test_run_tail_failures_are_reported.py`, 9 tests, **2 red on the old
+code**.
+
+Examined and deliberately left silent: `core/repair_commands.py:64`. Measured
+rather than assumed — a missing target does reach `_select_llm` and does lower
+the tier, but the generator cannot read the file either and reports
+`file_read failed` with `status: tool_error`. No two-causes-one-picture, so no
+defect. Written at the handler.
+
+**A guard was removed to make this possible**, and it belongs in the record:
+`tests/test_loop_run_tail_split.py::test_logic_moved_symbol_for_symbol` compared
+the tail against the pre-split commit node for node. It was right during the
+move and since meant "the run tail may never change" — it did not catch these
+two defects, it protected them from being fixed. The five substantive checks in
+that file stay; the reason is written where it stood.
+
 - [x] counter fixed and ratcheted
-- [ ] the 17 closed one at a time
+- [ ] the remaining 13, one at a time
 
 ---
 
