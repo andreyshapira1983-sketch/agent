@@ -157,12 +157,17 @@ class AgentLoopMemoryRead:
             from datetime import datetime
             from datetime import timezone as _tz
             _now_dt = datetime.now(_tz.utc)
-            for rec in selected:
-                updated = rec.model_copy(update={
+            # ONE rewrite, not one per record. `update` rewrites the whole file
+            # each time (`core/persistent_memory.py`), so the loop this replaced
+            # was quadratic: measured on five records, 5 rewrites and 25 rows
+            # written where this does 1 and 5 (census A5).
+            self.persistent_store.update_many(
+                rec.model_copy(update={
                     "access_count": rec.access_count + 1,
                     "last_accessed_at": _now_dt,
                 })
-                self.persistent_store.update(updated)
+                for rec in selected
+            )
 
         return f"{MEMORY_OPEN_TAG}\n{formatted}\n{MEMORY_CLOSE_TAG}"
 

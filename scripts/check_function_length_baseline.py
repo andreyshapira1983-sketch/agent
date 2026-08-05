@@ -40,7 +40,7 @@ WATCH: dict[str, int] = {
     "core/loop_step_execution.py:AgentLoopStepExecution._execute_step": 568,
     "agent_tick.py:run_tick": 474,
     "core/loop_synthesis.py:AgentLoopSynthesis._synthesize": 430,  # уехал целиком из core/loop.py
-    "core/loop_response_deciders.py:AgentLoopResponseDeciders._build_response_draft": 220,
+    "core/loop_response_deciders.py:AgentLoopResponseDeciders._build_response_draft": 154,
     "core/self_build_producer.py:produce_self_apply_proposal": 375,
     "core/campaign.py:run_campaign": 350,
     "cli/command_dispatch.py:handle_meta_command": 349,

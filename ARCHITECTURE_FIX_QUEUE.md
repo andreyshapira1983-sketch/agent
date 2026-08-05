@@ -184,7 +184,35 @@ never took the cheap path must stay silent.
   five times.
 - **The corrected form already exists:** `core/loop_response_deciders.py:147-164`
   — "one load, all increments in memory, ONE rewrite", review round #294.
-- [ ] done
+
+**Done 2026-08-05, and the root was deeper than two loops.** Measured on five
+records: the loop performed **5 rewrites and wrote 25 rows** where a batch does
+**1 and 5** — quadratic, not merely wasteful.
+
+The three callers had not been careless. The store offered **no public bulk
+update**: `update` rewrites per record and `save_many` APPENDS. So each of them
+improvised, and the one that found the right shape first (review #294) had to
+reach past the API into `_rewrite` to get it. One missing operation, three
+workarounds, and a fix applied at one site while the class stayed open at the
+other two — the same shape as Л10 itself.
+
+`PersistentMemoryStore.update_many` is that operation: one lock, one rewrite,
+unknown ids skipped rather than raising (hygiene can archive a record between a
+caller's read and its write, and that must not fail a turn). All three callers
+now use it, including the one that had been reaching past the boundary.
+
+Cover: `tests/test_persistent_bulk_update.py`, 8 tests, **7 red on the old
+code**. The quadratic measurement is kept as a test rather than as a claim, and
+the last test guards the CLASS — no caller may loop over `update` or touch
+`_rewrite` — because fixing three instances is what left this open the first
+time.
+
+Alongside: the memory-credit block moved out of `_build_response_draft` into
+`_credit_memory_records_used_in_the_answer`. The length ratchet asked for it and
+the census had already said the same thing — it is memory accounting that landed
+in a response builder because the verdict and the chain happened to be in scope.
+220 -> 154 lines, ceiling lowered to bank it.
+- [x] done
 
 ### A6. Hidden couplings through `getattr` with a default (Л6)
 
