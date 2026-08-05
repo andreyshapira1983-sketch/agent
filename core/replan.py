@@ -54,6 +54,7 @@ FailureType = Literal[
     "approval_unavailable",  # no approval channel wired but risk needed one
     "policy_blocked",        # PolicyGate refused (unknown tool, missing reg)
     "unresolved_citation",   # MVP-14.5: Verifier saw [web:URL] but no web_fetch ran
+    "claim_refuted",         # MIR-060 (b): arithmetic over the cited excerpt says NO
     "injection_blocked",     # §2 Adversarial Defence: tool output contained injection
     "plan_parse_failed",     # planner LLM output was not valid JSON
     "unknown",               # safety net for any code path the audit missed
@@ -70,6 +71,7 @@ ALL_FAILURE_TYPES: tuple[FailureType, ...] = (
     "approval_unavailable",
     "policy_blocked",
     "unresolved_citation",
+    "claim_refuted",
     "injection_blocked",
     "plan_parse_failed",
     "unknown",
@@ -271,6 +273,25 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
             "different tool, or different arguments that would produce "
             "richer / more relevant output."
         ),
+    ),
+    # MIR-060 (b). Distinct from every other entry here: the failure is not
+    # that a tool broke, it is that the ANSWER was wrong and we can say by how
+    # much. The advice therefore carries the arithmetic itself — the trigger's
+    # `reason` already holds "the sum is 6, not 99, over alpha=1 beta=2
+    # gamma=3", and `format_replan_context` puts it in front of the next
+    # attempt. A budget of 2 because a refuted computation is a fixable
+    # mistake, not a broken environment: one correction is usually enough, and
+    # a model that gets it wrong twice with the numbers in hand will not get it
+    # right on a third pass.
+    "claim_refuted":  FailureBudget(
+        max_occurrences=2,
+        advice=(
+            "A claim in your answer was CHECKED against the source it cited "
+            "and does not follow from it. The correct value is stated in the "
+            "failure reason above. Use that value, or drop the claim — do not "
+            "restate the same number."
+        ),
+        requires_different_action=True,
     ),
     "web_empty":      FailureBudget(
         max_occurrences=2,

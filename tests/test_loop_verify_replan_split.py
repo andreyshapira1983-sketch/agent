@@ -158,10 +158,17 @@ def test_the_prefix_is_the_earlier_piece_and_nothing_else():
         if ast.unparse(s) != _OWNED_FROM
     ][: len(block.body) - len(_owned(block)) + len(block.orelse)]
     kinds = [type(s).__name__ for s in prefix]
-    assert kinds == ["ImportFrom", "ImportFrom", "Assign"], (
-        f"начало блока перестало быть «два импорта и вызов куска 5»: {kinds}"
+    assert kinds == ["ImportFrom", "ImportFrom", "Assign", "Expr"], (
+        f"начало блока перестало быть «два импорта, вызов куска 5 и передача "
+        f"опровергнутых утверждений в перепланирование»: {kinds}"
     )
-    assert "self._verify_draft(" in ast.unparse(prefix[-1]), (
+    # MIR-060 (b), 2026-08-05: четвёртый оператор добавлен ОСОЗНАННО. Сторож
+    # запрещает дописывать сюда тихо — не запрещает дописывать вовсе; правка
+    # без обновления этой строки покраснела бы, что и произошло.
+    assert "_replan_on_refuted_claims(" in ast.unparse(prefix[-1]), (
+        "причина опровержения перестала уходить в следующую попытку"
+    )
+    assert "self._verify_draft(" in ast.unparse(prefix[-2]), (
         "начало блока больше не вызывает вынесенную куском 5 проверку"
     )
 

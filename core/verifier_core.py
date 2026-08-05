@@ -13,7 +13,8 @@ from core.evidence_classes import (
     is_dialogue_scoped_claim,
 )
 
-from .verifier_models import ClaimChunk, VerificationReport
+from .claim_arithmetic import evaluate as evaluate_claim_arithmetic
+from .verifier_models import ClaimChunk, ClaimReason, VerificationReport
 from .verifier_patterns import (
     _NON_CLAIM_SECTIONS,
     DISCLAIMER_ALL_SELF_DECLARED,
@@ -125,6 +126,7 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
             annotated_chunks.append(chunk_text)
             continue
         cits = parse_citations(chunk_text)
+        chunk_reason: ClaimReason | None = None
         matched_ids: list[str] = []
         verdict: str
         annotated = chunk_text
@@ -218,6 +220,23 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                     # remembered something (MIR-046). Demoted to topic-only, so
                     # it still shows as supporting context but never as proof.
                     strict_ok = False
+                # MIR-060 (b): the third content gate. The other two ask WHOSE
+                # evidence this is and whether a figure appears in it; this one
+                # COMPUTES. Where the claim is a sum, a count, a comparison or
+                # a multiple over `key=value` lines it is decided arithmetically
+                # and, when refuted, says so with its working — a stamp tells
+                # the agent it was wrong, this tells it what to change.
+                # Silent by construction on every shape it does not recognise,
+                # so it can only ever remove a false `verified`, never create
+                # one.
+                arith = evaluate_claim_arithmetic(chunk_text, ev.excerpt or "")
+                if arith.refutes:
+                    strict_ok = False
+                    chunk_reason = ClaimReason(
+                        code=arith.code, expected=arith.expected,
+                        actual=arith.actual, explanation=arith.explanation,
+                        computed_from=arith.computed_from,
+                    )
                 if stat_claim and c.prefix not in {"user", "memory", "general-knowledge"}:
                     excerpt = ev.excerpt or ""
                     if stat_figures:
@@ -294,7 +313,9 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                     cited_unmatched += 1
                     if cits and all(c.prefix == "memory" or c.prefix in SELF_DECLARED_PREFIXES for c in cits):
                         memory_only_unmatched += 1
-        examined_chunks.append(ClaimChunk(text=chunk_text, citations=tuple(cits), matched_evidence_ids=tuple(matched_ids), verdict=verdict))
+        examined_chunks.append(ClaimChunk(text=chunk_text, citations=tuple(cits),
+                                         matched_evidence_ids=tuple(matched_ids),
+                                         verdict=verdict, reason=chunk_reason))
         annotated_chunks.append(annotated)
         examined_annotated_idx.append(len(annotated_chunks) - 1)
     subagent_asserted = receipt_missing = 0
@@ -314,7 +335,9 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
             if all(_is_derivative_subagent_evidence(e) for e in evs):
                 verified -= 1
                 subagent_asserted += 1
-                rebuilt_chunks.append(ClaimChunk(text=ch.text, citations=ch.citations, matched_evidence_ids=ch.matched_evidence_ids, verdict="subagent_asserted"))
+                rebuilt_chunks.append(ClaimChunk(text=ch.text, citations=ch.citations,
+                                                 matched_evidence_ids=ch.matched_evidence_ids,
+                                                 verdict="subagent_asserted", reason=ch.reason))
                 line = annotated_chunks[ann_idx]
                 if "[subagent-asserted]" not in line:
                     annotated_chunks[ann_idx] = line.rstrip() + " [subagent-asserted]"
