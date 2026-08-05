@@ -161,7 +161,8 @@ class TestChunkText:
 # ── _ingest_paths skip branches via ingest_files ─────────────────────────────
 
 class _FakeKnowledgePipeline:
-    def run(self, chain, *, ranking, source_store, remember, auto_write_memory):
+    def run(self, chain, *, ranking, source_store, remember, auto_write_memory,
+            require_verified=False):
         registry = SimpleNamespace(
             sources=[],
             claims=[],
