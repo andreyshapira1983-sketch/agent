@@ -226,7 +226,37 @@ in a response builder because the verdict and the chain happened to be in scope.
 - **Check:** a test requiring every attribute read from a neighbouring mixin to
   be declared in the host contract, and forbidding `getattr` with a default on
   such fields.
-- [ ] done
+
+**Done 2026-08-05, and the measurement narrowed the item sharply.** The layer has
+**20** such reads, not 3. Nineteen read a field `core/loop_init.py` sets at
+construction, so their default can never fire — defensive habit, no hazard, and
+rewriting them would be churn that blunts the rule for the case that matters.
+**`assumption_store` from this item's own description is in that harmless
+group**, and is deliberately left alone.
+
+Exactly one field is neither set by the constructor nor reset per run:
+`_synthesis_expects_contract_headers`. It is assigned ~370 lines into
+`_synthesize`, after 44 calls that can raise, and the synthesis ladder catches
+exceptions — so a turn whose synthesis broke early inherited the PREVIOUS turn's
+value, and the `getattr` default hid it. Measured, wrong both ways:
+
+```
+turn 1 task-specific -> False ; turn 2 generic, synthesis raises early
+   -> reads False -> a genuinely malformed answer is NOT flagged
+turn 1 generic -> True ; turn 2 task-specific, synthesis raises early
+   -> reads True  -> a correct table-only answer IS flagged malformed
+```
+
+Fixed by making it per-run state like its neighbours: reset to `True` in
+`_run_inner` (the safe side — a contract never established is judged by the
+generic one), declared in both readers' host contracts, read directly.
+
+Cover: `tests/test_cross_mixin_fields_are_guaranteed.py`, 5 tests, **4 red on
+the old code**. The rule is stated as a class — no `getattr` default may hide a
+field that neither the constructor guarantees nor the run resets — and one test
+asserts that the nineteen harmless sites stay allowed, so the guard cannot creep
+into flagging everything and stop being read.
+- [x] done
 
 ### A7. Twenty-eight silent handlers (Л9)
 

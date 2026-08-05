@@ -115,6 +115,10 @@ class AgentLoopVerifyReplan:
         _executed_tools: Any
         _save_budget_pause_checkpoint: Any
         _verification_receipt_kwargs: Any
+        # Ставит `core/loop_synthesis.py`, сбрасывает за ход `core/loop.py`.
+        # Читалось через `getattr` с умолчанием, и умолчание превращало
+        # отсутствие связи в тихий вердикт по чужому правилу (A6).
+        _synthesis_expects_contract_headers: Any
         _unattended_run: Any
 
     def _replan_on_refuted_claims(self, report: Any, st: VerifyState) -> None:
@@ -399,9 +403,7 @@ class AgentLoopVerifyReplan:
                         answer=st.draft_answer,
                         chain=st.chain,
                         user_question=st.user_question,
-                        expects_contract_headers=getattr(
-                            self, "_synthesis_expects_contract_headers", True
-                        ),
+                        expects_contract_headers=self._synthesis_expects_contract_headers,
                         **self._verification_receipt_kwargs(),
                     )
                 except Exception as _ver_exc:
