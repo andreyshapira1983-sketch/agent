@@ -4,6 +4,8 @@ Extracted from `core/ingestion` by autonomous self-build module split.
 """
 from __future__ import annotations
 
+import ast
+
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -97,6 +99,56 @@ def _iter_project_files(root: Path, *, limit: int) -> Iterable[Path]:
             continue
         yield path
         yielded += 1
+
+
+def _chunk_python(text: str, *, max_chunks: int) -> list[str]:
+    """Knowledge from a Python file: what it SAYS about itself, not its lines.
+
+    `_chunk_text` splits prose by blank line, and a source file has plenty of
+    those, so a test'"'"'s setup line becomes a "claim". Measured on a live
+    learning run 2026-08-05: the planner chose five test files and the
+    pipeline extracted 34 claims, the first of which was
+    `_touch(tmp_path / "core" / ...)`. Nothing there is knowledge about the
+    project; it is scaffolding, and only `auto_write_memory=False` kept it out
+    of long-term memory.
+
+    What a test does carry is the behaviour it pins — its name and its
+    docstring. What a module carries is its own docstring and those of its
+    definitions. That is what this returns: one chunk per documented
+    definition, prefixed with the qualified name so the claim says WHOSE
+    behaviour it describes, plus the module docstring.
+
+    Falls back to `_chunk_text` when the file does not parse or carries no
+    documentation at all. A file that explains nothing about itself is not
+    made more informative by refusing to read it — but it is also not worth
+    a claim per code block, so an undocumented source yields nothing and the
+    caller skips it.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        # Not our file to judge: a source that will not parse is still text,
+        # and the prose chunker is the honest fallback.
+        return _chunk_text(text, max_chunks=max_chunks)
+
+    out: list[str] = []
+    module_doc = ast.get_docstring(tree)
+    if module_doc and module_doc.strip():
+        out.append(module_doc.strip())
+
+    def walk(body: list[ast.stmt], prefix: str) -> None:
+        for node in body:
+            if len(out) >= max_chunks:
+                return
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                name = f"{prefix}{node.name}"
+                doc = ast.get_docstring(node)
+                if doc and doc.strip():
+                    out.append(f"{name}: {doc.strip()}")
+                walk(node.body, f"{name}.")
+
+    walk(tree.body, "")
+    return out[:max_chunks]
 
 
 def _chunk_text(text: str, *, max_chunks: int) -> list[str]:

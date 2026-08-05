@@ -19,9 +19,18 @@ from typing import Any
 from core.evidence import ProvenanceChain, evidence_from_tool_result, make_evidence
 from core.ingestion_reports import IngestReport, RssIngestReport, WebIngestReport
 from core.ingestion_utils import (  # noqa: F401 -- шов импорта
+    # Шов: имя принадлежит `core/ingestion_utils`, но
+    # `core/learning_planner.py` берёт его ОТСЮДА. Подавление на строке
+    # выше — не косметика: автоправка ruff уже удалила это имя как
+    # неиспользуемое (2026-08-05), и `learning_planner` перестал
+    # импортироваться совсем. Тот же класс, что §24 блокнота.
+    #
+    # Пояснение стоит ВНУТРИ скобок: комментарий между импортами isort
+    # читает как разрыв блока и требует пересортировки без конца.
     SKIP_DIR_NAMES,
     TEXT_EXTENSIONS,
     _candidate_urls,
+    _chunk_python,
     _chunk_text,
     _ensure_inside_workspace,
     _iter_project_files,
@@ -451,9 +460,19 @@ def _ingest_paths(
             continue
 
         rel = _relative_label(workspace, path)
-        chunks = _chunk_text(text, max_chunks=max_chunks_per_file)
+        # Source files are read for what they SAY about themselves, not
+        # sliced by blank line like prose. A live learning run on
+        # 2026-08-05 turned five test files into 34 "claims", the first
+        # being `_touch(tmp_path / "core" / ...)` — scaffolding, not
+        # knowledge, and only `auto_write_memory=False` kept it out of
+        # long-term memory.
+        chunker = _chunk_python if path.suffix.lower() == ".py" else _chunk_text
+        chunks = chunker(text, max_chunks=max_chunks_per_file)
         if not chunks:
-            _skip(report, path, workspace, "no text chunks")
+            # An undocumented source explains nothing about itself, and a
+            # claim per code block would be worse than none.
+            _skip(report, path, workspace, "no documented definitions"
+                  if path.suffix.lower() == ".py" else "no text chunks")
             continue
         report.files_ingested += 1
         report.bytes_read += path.stat().st_size
