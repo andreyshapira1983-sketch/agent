@@ -338,7 +338,35 @@ evidence, one handler at a time, as the census did.
 
 - `core/loop_verify_replan.py:442-486` repeats
   `core/loop_evidence_chain.py:243-270` instead of calling it.
-- [ ] done
+
+**Done 2026-08-05, first of Part B, per the operator's decision: extract the
+shared core returning a result; iteration and non-iteration updates stay with
+the callers; no mode parameter and no boolean flag.**
+
+`AgentLoopEvidenceChain._catalogue_chain` computes `rank_chain` then
+`knowledge_pipeline.run` and returns a `CatalogueResult`. It does **not** log and
+does **not** store, because those are exactly what differs: the evidence-chain
+caller skips the pipeline on the cheap path and logs a plain payload; the verify
+caller runs inside the citation-fetch loop, stamps every event with `phase` and
+`iteration`, writes into the run state as well, and quarantines conflicted
+records afterwards. Folding those in would have needed the flag the decision
+ruled out.
+
+**The extraction proved itself before any test did.** The wiring guard went red:
+five host attributes — `knowledge_pipeline`, `knowledge_auto_write`,
+`source_registry_store`, `_knowledge_remember_batch`, `_unattended_run` — became
+unused in `loop_verify_replan`. It had removed a coupling, not relocated a call.
+Their declarations are gone.
+
+A1 got stronger as a side effect: the loop layer now asks "who drives the run"
+in **one** place instead of two, and the write-site count dropped 5 -> 4. The A1
+tests were updated to pin exactly one, not at least one — a second site
+reappearing is how that defect returns.
+
+Cover: `tests/test_catalogue_core_is_shared.py`, 6 tests, red on the old code
+(the module did not exist). The class is guarded, not the instance: only one
+module in the layer may run the pipeline for a turn.
+- [x] done
 
 ---
 

@@ -32,6 +32,7 @@
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from core.evidence import (
@@ -40,7 +41,23 @@ from core.evidence import (
     evidence_from_prior_turn,
     make_evidence,
 )
+from core.knowledge_pipeline import KnowledgePipelineResult
 from core.source_ranker import SourceRankingReport, rank_chain
+
+
+@dataclass(frozen=True)
+class CatalogueResult:
+    """What cataloguing a chain produces, before anyone decides what to do with it.
+
+    Two values and no side effects. Both callers used to compute these inline
+    and then diverge — one skips the pipeline on the cheap path, the other runs
+    inside the citation-fetch loop, quarantines conflicted records and stamps
+    every event with its iteration. Those differences are real, so they stay
+    with the callers; what was duplicated is only the computation above them.
+    """
+
+    ranking: SourceRankingReport
+    knowledge: KnowledgePipelineResult
 
 
 class AgentLoopEvidenceChain:
@@ -72,6 +89,40 @@ class AgentLoopEvidenceChain:
         _sensor_failed: Any
         _knowledge_remember_batch: Any
         _unattended_run: Any
+
+    def _catalogue_chain(
+        self,
+        chain: ProvenanceChain,
+        *,
+        question: str,
+        may_knowledge: bool,
+        may_source_registry: bool,
+    ) -> CatalogueResult:
+        """Rank the chain and run the knowledge pipeline over it. Nothing else.
+
+        The sequence was written twice — here and in
+        `core/loop_verify_replan.py`, which repeated it rather than calling it
+        (census B3). It deliberately does NOT log and does NOT store: the two
+        callers log different payloads (the verify path stamps `phase` and
+        `iteration` on every event) and store into different places (`self` here,
+        the run state there). Folding those in would need a mode flag, and a
+        function that behaves two ways by argument is two functions wearing one
+        name.
+        """
+        ranking = rank_chain(chain, question=question)
+        knowledge = self.knowledge_pipeline.run(
+            chain,
+            ranking=ranking,
+            source_store=self.source_registry_store if may_source_registry else None,
+            remember=self._knowledge_remember_batch() if may_knowledge else None,
+            auto_write_memory=(
+                self.knowledge_auto_write if may_knowledge else False
+            ),
+            # Unattended runs demand corroboration; a human at the REPL can
+            # judge a single source themselves.
+            require_verified=self._unattended_run(),
+        )
+        return CatalogueResult(ranking=ranking, knowledge=knowledge)
 
     def _fold_evidence_chain(
         self,
@@ -241,32 +292,32 @@ class AgentLoopEvidenceChain:
                 "chain": chain.to_log_payload(),
             },
         )
-        source_ranking = rank_chain(chain, question=user_question)
-        self.last_source_ranking = source_ranking
-        self.log.log("source_ranking", source_ranking.to_log_payload())
         if cheap_path_active:
             # Cheap path: the chain is empty (no tools ran) so the knowledge
             # pipeline and source-registry build have nothing to catalog.
             # Skip them to avoid the per-turn cost the user flagged, and keep
             # the empty registry reset at the top of run().
+            # Ranked all the same: the event is what tells a reader the chain
+            # was empty rather than unexamined.
+            source_ranking = rank_chain(chain, question=user_question)
+            self.last_source_ranking = source_ranking
+            self.log.log("source_ranking", source_ranking.to_log_payload())
             source_registry = self.last_source_registry
             self.log.log(
                 "knowledge_pipeline_skipped",
                 {"reason": "cheap_path", "chain_size": len(chain)},
             )
         else:
-            knowledge_result = self.knowledge_pipeline.run(
+            catalogued = self._catalogue_chain(
                 chain,
-                ranking=source_ranking,
-                source_store=self.source_registry_store if may_source_registry else None,
-                remember=self._knowledge_remember_batch() if may_knowledge else None,
-                auto_write_memory=(
-                    self.knowledge_auto_write if may_knowledge else False
-                ),
-                # Unattended runs demand corroboration; a human at the REPL
-                # can judge a single source themselves.
-                require_verified=self._unattended_run(),
+                question=user_question,
+                may_knowledge=may_knowledge,
+                may_source_registry=may_source_registry,
             )
+            source_ranking = catalogued.ranking
+            self.last_source_ranking = source_ranking
+            self.log.log("source_ranking", source_ranking.to_log_payload())
+            knowledge_result = catalogued.knowledge
             source_registry = knowledge_result.registry
             self.last_source_registry = source_registry
             self.log.log("source_registry", source_registry.to_log_payload())
