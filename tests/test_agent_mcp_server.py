@@ -26,7 +26,8 @@ from pathlib import Path
 import pytest
 
 _REPO = Path(__file__).resolve().parents[1]
-_SERVER = _REPO / "tools" / "agent_mcp_server.py"
+_VIEW = _REPO / "tools" / "agent_state_view.py"
+_TRANSPORT = _REPO / "tools" / "agent_mcp_server.py"
 
 #: Every name that mutates something, as it would appear in a call. Checked
 #: against the server's AST rather than its behaviour: a write reached only on
@@ -40,7 +41,7 @@ _MUTATORS = (
 
 
 def _module():
-    spec = importlib.util.spec_from_file_location("agent_mcp_server", _SERVER)
+    spec = importlib.util.spec_from_file_location("agent_state_view", _VIEW)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -61,7 +62,7 @@ def test_nothing_in_the_server_can_write():
     it runs `agent_tick.py --status`, which the agent's own CLI already treats
     as a read. Everything else that could mutate a store must be absent.
     """
-    tree = ast.parse(_SERVER.read_text(encoding="utf-8"))
+    tree = ast.parse(_VIEW.read_text(encoding="utf-8"))
     found: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -121,3 +122,32 @@ def test_every_tool_answers_without_raising(tool: str):
     module = _module()
     result = getattr(module, tool)()
     assert isinstance(result, dict), (tool, type(result))
+
+
+def test_the_transport_holds_no_logic_of_its_own():
+    """Everything testable lives where CI can reach it without `mcp` installed.
+
+    `mcp` is not a project requirement — it brings 18 direct dependencies
+    including a web-server stack, and this repository pins, locks and SBOMs
+    everything it ships. So the transport must stay a binding: if reading logic
+    migrates back into it, CI can no longer test that logic at all, and the
+    guard above would be scanning an empty file while the real code went
+    unchecked.
+    """
+    tree = ast.parse(_TRANSPORT.read_text(encoding="utf-8"))
+    defined = [n.name for n in ast.walk(tree)
+               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
+    assert not defined, f"в транспорте появилась логика: {defined}"
+
+
+def test_the_status_view_captures_the_stream_the_agent_actually_writes():
+    """`_print_status` writes to stderr; a stdout-only capture returns nothing.
+
+    Measured, after exactly that mistake: the redirect caught zero characters
+    while the text still reached the terminal, so the viewer would have
+    reported "(no output)" about silence it created itself.
+    """
+    module = _module()
+    status = module.agent_status()
+    assert status != "(no output)"
+    assert "Daemon:" in status, status[:200]
