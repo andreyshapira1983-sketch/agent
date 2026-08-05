@@ -237,3 +237,33 @@ def test_a_skipped_claim_leaves_a_reason_not_just_a_counter():
     assert decision["decision"] == "skip"
     assert decision["policy_id"] == "require_verified"
     assert "verified" in decision["reasons"][0], decision["reasons"]
+
+
+def test_every_skip_path_says_why_not_only_the_new_one():
+    """Both silent paths, because fixing one of two is not fixing the class.
+
+    The `require_verified` skip got a decision row and the older
+    `auto_write_memory` short-circuit did not, so a live run on 2026-08-05
+    reported `memory_skipped=45, decisions=[]`: forty-five claims went nowhere
+    and nothing said why. The two reasons are also different facts — "the
+    operator has not opted in" and "no memory writer is wired" — and a reader
+    diagnosing an empty memory needs to know which.
+    """
+    pipeline = KnowledgePipeline()
+    chain = _chain_with("Alpha is the first letter.\n")
+
+    off = pipeline.run(chain, remember=_RecordingRemember(), auto_write_memory=False)
+    unwired = pipeline.run(chain, remember=None, auto_write_memory=True)
+
+    for result in (off, unwired):
+        assert result.memory_skipped > 0
+        assert len(result.decisions) == result.memory_skipped, (
+            "пропуск без строки решения: счётчик есть, причины нет"
+        )
+        assert result.decisions[0]["knowledge_decision"]["decision"] == "skip"
+
+    off_reason = off.decisions[0]["knowledge_decision"]["reasons"][0]
+    unwired_reason = unwired.decisions[0]["knowledge_decision"]["reasons"][0]
+    assert "auto_write_memory" in off_reason, off_reason
+    assert "writer" in unwired_reason, unwired_reason
+    assert off_reason != unwired_reason, "две разные причины слились в одну"
