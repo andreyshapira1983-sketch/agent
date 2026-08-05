@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 180 modules across 12 groups._
+_Total: 182 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -52,8 +52,10 @@ _Planning, verification, clarification, control loop._
 | `core/loop_sensor` | Запись о сбое наблюдательного сенсора — один метод, и это его дом. |
 | `core/loop_knowledge` | Запись знаний, добытых конвейером, в долгую память. |
 | `core/loop_memory_commands` | Операторские команды памяти: запомнить, забыть, показать. |
-| `core/loop_repair` | Починка кода: предложение, применение, откат, уборка резервных копий. |
-| `core/loop_hygiene` | Гигиена памяти: один проход обслуживания и шесть его шагов. |
+| `core/loop_repair` | Фасад операторских команд починки на объекте агента. |
+| `core/loop_hygiene` | Фасад команд гигиены памяти на объекте агента. |
+| `core/repair_commands` | Operator repair commands: propose, roll back, clean up backups. |
+| `core/memory_hygiene_commands` | Memory hygiene as operator and daemon commands: expire, dedupe, prune, archive. |
 | `core/loop_memory_read` | Чтение памяти циклом: долгая, опытная, сводка. |
 | `core/loop_memory_write` | Запись памяти циклом — и право на неё. |
 | `core/loop_response_deciders` | Черновик ответа и решатели над ним — вырезано из ``core/loop.py`` дословно. |

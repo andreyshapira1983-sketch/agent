@@ -218,7 +218,7 @@ in a response builder because the verdict and the chain happened to be in scope.
 
 - **Where:** `_synthesis_expects_contract_headers` is read at
   `core/loop_verification.py:102` and `core/loop_verify_replan.py:402`;
-  `assumption_store` at `core/loop_hygiene.py:175`.
+  `assumption_store` at `core/loop_hygiene.py:79`.
 - **Wrong how:** a third file sets the field, the readers do not declare it, and
   the default turns "no connection" into quiet behaviour under someone else's
   rule. For `_synthesis_expects_contract_headers` the default `True` also biases
