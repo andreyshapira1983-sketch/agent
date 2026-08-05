@@ -24,7 +24,7 @@ from core.budget_kill_switch import (
     evaluate_day_budget,
 )
 from core.budget_ledger import BudgetLedger
-from core.task_queue import TaskQueueStore
+from core.task_queue import DEFAULT_RUNTIME_TASKS_PATH, TaskQueueStore
 
 
 @pytest.fixture(autouse=True)
@@ -170,7 +170,7 @@ def test_daemon_skips_llm_work_when_day_budget_exhausted(tmp_path: Path, monkeyp
     _record_day_usage(workspace, "llm_calls", amount=2, limit=1)
 
     # A pending task exists; the daemon must NOT build an agent or process it.
-    queue = TaskQueueStore(workspace / "data" / "task_queue.jsonl")
+    queue = TaskQueueStore(workspace / DEFAULT_RUNTIME_TASKS_PATH)
     queue.add(goal="anything", dry_run=True, include_tests=False, limit=1)
 
     from app import bootstrap

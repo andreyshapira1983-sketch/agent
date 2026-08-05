@@ -44,9 +44,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from app.bootstrap import DEFAULT_RUNTIME_TASKS_PATH
 from core import heartbeat_io as _hb
 from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH
+from core.task_queue import DEFAULT_RUNTIME_TASKS_PATH
 
 if TYPE_CHECKING:
     from core.approval_inbox import ApprovalInbox

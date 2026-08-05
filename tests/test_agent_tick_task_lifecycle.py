@@ -19,8 +19,7 @@ from pathlib import Path
 
 import agent_tick
 from core.autonomous_runtime import AutonomousRunReport
-from core.task_queue import TaskQueueStore
-from app.bootstrap import DEFAULT_RUNTIME_TASKS_PATH
+from core.task_queue import DEFAULT_RUNTIME_TASKS_PATH, TaskQueueStore
 
 
 def _report(status: str, stop_reason: str = "") -> AutonomousRunReport:

@@ -22,6 +22,15 @@ from core.state_integrity import read_state_jsonl_unlocked, rewrite_state_jsonl_
 
 logger = logging.getLogger(__name__)
 
+#: Where the queue lives. Defined HERE, beside the store that owns it,
+#: rather than in `app/bootstrap.py`: the daemon needs the path and must
+#: not pay for the agent graph to learn it — importing `app.bootstrap`
+#: costs 365 ms and 404 modules, against 73 ms for this module, and
+#: `agent_tick.py` lazily imports `build_agent` in three places precisely
+#: to keep `--status` cheap. `app.bootstrap` re-exports this name, so the
+#: block of default paths there still reads as one list.
+DEFAULT_RUNTIME_TASKS_PATH = Path("data") / "runtime_tasks.jsonl"
+
 RuntimeTaskKind = Literal["auto_run", "resume_checkpoint"]
 RuntimeTaskStatus = Literal[
     "pending", "running", "done", "failed", "cancelled", "paused", "blocked"
