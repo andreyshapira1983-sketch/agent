@@ -1,163 +1,171 @@
-# Очередь починок по итогам переписи
+# Fix queue from the architecture census
 
-Рабочий список. Идём **сверху вниз**, по одному пункту, ничего не пропуская.
-Каждый пункт закрывается тремя вещами: правка, тест, который **падает на старом
-коде**, и отметка здесь.
+A working list. Worked **top to bottom**, one item at a time, nothing skipped.
 
-Когда все пункты закрыты — **`ARCHITECTURE_FILE_INVENTORY.md` удаляется**, а
-находки, которые обязаны пережить перепись, переезжают в
-`docs/MISTAKE_NOTEBOOK.md` и `docs/audit/MASTER_ISSUE_REGISTRY.md`. Держать
-перепись после её исполнения незачем: два документа об одном — это то, что она
-сама и нашла в коде.
+An item closes on three things: the change, a test that **fails on the old
+code**, and the box ticked here. A test that was never red proves nothing —
+that is the operator's standard and it applies to every item below.
 
----
-
-## Часть А. Действующие дефекты — не структура, переживут любой перенос
-
-Эти правки НЕ требуют переносить файлы. Делаются первыми.
-
-### А1. Ворота `require_verified` не доходят до пути хода (Л8)
-
-- **Где:** `core/loop_evidence_chain.py:257`, `core/loop_verify_replan.py:452`.
-- **Что не так:** необслуживаемый прогон идёт через обычный цикл
-  (`core/autonomous_runtime.py:947` зовёт `agent.run`), а эти два вызова
-  конвейера знаний не передают `require_verified`. Второй стоит **внутри цикла**
-  добычи цитат — то есть срабатывает на каждой итерации.
-- **Почему сторож не поймал:** `tests/test_unattended_memory_writes.py`
-  разбирает AST **только** модуля `core.autonomous_runtime`.
-- **Порядок:** сначала расширить сторожа на все вызовы `knowledge_pipeline.run`
-  в `core/` — он должен **покраснеть** на сегодняшнем коде. Только потом решать,
-  какое значение верно для пути хода.
-- [ ] сделано
-
-### А2. Молчащий отказ на пути усечения ответа
-
-- **Где:** `core/loop_response_deciders.py:302-306` — голый `except: pass`.
-- **Что не так:** это обёртка вокруг структурного принуждения, которое **усекает
-  ответ при нехватке улик**. Если оно бросит, пользователь получит неусечённый
-  ответ, и ничто не скажет, что принуждение не отработало.
-- **Рядом в том же файле** три обработчика пишут своё событие и ссылаются на
-  правило MIR-077 в комментарии. Достаточно применить тот же приём.
-- [ ] сделано
-
-### А3. Два молчащих отказа в контексте хода
-
-- **Где:** `core/loop_context.py:215-217` (разрешение референта),
-  `core/loop_context.py:268-269` (извлечение допущений).
-- **Что не так:** оба гасят сбой без следа. У слоя есть `_sensor_failed` ровно
-  для этого, но в контракте хоста этого файла он **не объявлен**, поэтому файл
-  его и не может вызвать. Объявить и использовать.
-- [ ] сделано
-
-### А4. Молчащий откат контракта синтеза
-
-- **Где:** `core/loop_synthesis.py:227-231`.
-- **Что не так:** сбой реестра промптов молча возвращает встроенный контракт,
-  хотя комментарий над вызовом говорит, что реестр читается именно затем, чтобы
-  переопределение «не игнорировалось молча». Оператор со своим контрактом
-  получит чужой и не узнает.
-- **Там же `:572`:** сбой выбора дешёвого яруса молча оставляет обычную модель —
-  дешёвый путь тихо перестаёт быть дешёвым.
-- [ ] сделано
-
-### А5. N перезаписей файла памяти вместо одной (Л10)
-
-- **Где:** `core/loop_memory_read.py:165`, `core/loop_memory_write.py:451` —
-  `persistent_store.update(...)` **в цикле**.
-- **Что не так:** `update` это полная перезапись файла под замком
-  (`core/persistent_memory.py:58-65`). Выборка пяти записей перезаписывает файл
-  пять раз.
-- **Образец правки уже есть:** `core/loop_response_deciders.py:147-164` —
-  «одна загрузка, все правки в памяти, ОДНА перезапись», ревью #294.
-- [ ] сделано
-
-### А6. Скрытые связи через `getattr` с умолчанием (Л6)
-
-- **Где:** `_synthesis_expects_contract_headers` читается в
-  `core/loop_verification.py:102` и `core/loop_verify_replan.py:402`;
-  `assumption_store` — в `core/loop_hygiene.py:175`.
-- **Что не так:** поле ставит третий файл, читающие его не объявляют, а умолчание
-  превращает «связи нет» в тихое поведение по чужому правилу. Для
-  `_synthesis_expects_contract_headers` умолчание `True` ещё и смещает вердикт в
-  сторону ложного «ответ неоформлен».
-- **Проверка:** тест, требующий, чтобы атрибут соседней примеси был объявлен в
-  контракте хоста, а `getattr` с умолчанием на таких полях был запрещён.
-- [ ] сделано
-
-### А7. Двадцать восемь молчащих обработчиков (Л9)
-
-- **Что не так:** из 59 `except` в слое **32 молчат**, из них 4 — законная
-  «последняя страховка» вокруг журналирования. Остаётся 28. MIR-077 закрыт по
-  счётчику, который считал **широкие `except`**, а не **молчащие тела**.
-- **Порядок:** сначала починить счётчик (`scripts/except_audit.py` +
-  `tests/test_except_audit_ratchet.py`) так, чтобы он считал молчание. Он должен
-  **покраснеть на 28**. Потом закрывать по одному.
-- **А2, А3, А4 — это шесть из этих 28**, и их правки закроют часть счёта.
-- [ ] сделано
+When every box is ticked, `ARCHITECTURE_FILE_INVENTORY.md` is **deleted**, and
+the findings that must outlive it move to `docs/MISTAKE_NOTEBOOK.md` and
+`docs/audit/MASTER_ISSUE_REGISTRY.md`. Keeping the census after it has been
+executed would leave two documents about one thing — which is exactly what it
+found wrong in the code.
 
 ---
 
-## Часть Б. Структура — только после подтверждения по каждому пункту
+## Part A. Live defects — not structure, and they survive any reorganisation
 
-### Б1. Вынести из слоя то, что цикл не вызывает
+These need no file moved. They go first.
 
-- `core/loop_repair.py` — зовут `cli/`, `core/self_repair.py`. Ни одной
-  вызывающей стороны в `_run_inner`.
-- `core/loop_hygiene.py` — зовут `agent_tick.py:1146`, `cli/commands_memory.py`.
-- `forget` / `list_persistent` из `core/loop_memory_commands.py` — только CLI.
-- **Блокировано:** `tests/test_repair_routes_by_complexity.py` пинит правило
-  чтением **исходного текста** файла. Перенос покрасит тест, не тронув
-  поведение. Сначала переписать его на поведение.
-- [ ] сделано
+### A1. The `require_verified` gate never reaches the turn path (Л8)
 
-### Б2. Один дом для состояния прогона (Л3)
+- **Where:** `core/loop_evidence_chain.py:257`, `core/loop_verify_replan.py:452`.
+- **Wrong how:** an unattended run drives the ordinary cycle
+  (`core/autonomous_runtime.py:947` calls `agent.run`), and neither of these
+  knowledge-pipeline calls passes `require_verified`. The second sits **inside**
+  the citation-fetch loop, so it fires once per iteration.
+- **Why the guard missed it:** `tests/test_unattended_memory_writes.py` parsed
+  the AST of `core.autonomous_runtime` alone.
+- **Order:** widen the guard to every `knowledge_pipeline.run` in `core/` and
+  make it **go red on today's code** — done. Only then decide what the value
+  should be for the turn path, and decide it on "who drives the run", never on
+  "which file the call sits in".
+- [x] step 1 — guard widened, red, defect marked `xfail(strict=True)`
+- [ ] step 2 — the value chosen and justified
 
-- **Сейчас пять:** `AttemptState` (21/8), `SynthesisState` (13/2),
-  `VerifyState` (18/4), ~25 полей на экземпляре агента, обычные локали
+### A2. Silent failure on the answer-truncation path
+
+- **Where:** `core/loop_response_deciders.py:302-306`, a bare `except: pass`.
+- **Wrong how:** it wraps the enforcement layer that **truncates an answer when
+  the evidence does not support it**. If that throws, the user is handed the
+  untruncated answer and nothing records that enforcement never ran.
+- **The fix is already modelled in the same file:** three handlers write their
+  own event and name the MIR-077 rule in the comment.
+- [ ] done
+
+### A3. Two silent failures in the turn context
+
+- **Where:** `core/loop_context.py:215-217` (referent resolution),
+  `core/loop_context.py:268-269` (assumption extraction).
+- **Wrong how:** both swallow without a trace. The layer has `_sensor_failed`
+  for exactly this, but it is **not declared** in this file's host contract, so
+  the file cannot call it. Declare it and use it.
+- [ ] done
+
+### A4. Silent fallback of the synthesis contract
+
+- **Where:** `core/loop_synthesis.py:227-231`.
+- **Wrong how:** a prompt-registry failure silently returns the built-in
+  contract, directly under a comment saying the registry is read precisely so an
+  override is not "silently ignored". An operator with a task-specific contract
+  gets someone else's and never learns.
+- **Same file, `:572`:** a failure to select the cheap model tier silently keeps
+  the normal one, so the cheap path quietly stops being cheap.
+- [ ] done
+
+### A5. N full-file rewrites where one would do (Л10)
+
+- **Where:** `core/loop_memory_read.py:165`, `core/loop_memory_write.py:451` —
+  `persistent_store.update(...)` **inside a loop**.
+- **Wrong how:** `update` is a full file rewrite under a lock
+  (`core/persistent_memory.py:58-65`). Retrieving five records rewrites the file
+  five times.
+- **The corrected form already exists:** `core/loop_response_deciders.py:147-164`
+  — "one load, all increments in memory, ONE rewrite", review round #294.
+- [ ] done
+
+### A6. Hidden couplings through `getattr` with a default (Л6)
+
+- **Where:** `_synthesis_expects_contract_headers` is read at
+  `core/loop_verification.py:102` and `core/loop_verify_replan.py:402`;
+  `assumption_store` at `core/loop_hygiene.py:175`.
+- **Wrong how:** a third file sets the field, the readers do not declare it, and
+  the default turns "no connection" into quiet behaviour under someone else's
+  rule. For `_synthesis_expects_contract_headers` the default `True` also biases
+  the verdict toward a false "malformed answer".
+- **Check:** a test requiring every attribute read from a neighbouring mixin to
+  be declared in the host contract, and forbidding `getattr` with a default on
+  such fields.
+- [ ] done
+
+### A7. Twenty-eight silent handlers (Л9)
+
+- **Wrong how:** of 59 `except` handlers in the layer **32 are silent**; four
+  are the legitimate last-resort guard around logging itself. That leaves 28.
+  MIR-077 is closed by a counter that measured **broad excepts**, not **silent
+  bodies**.
+- **Order:** fix the counter first (`scripts/except_audit.py` +
+  `tests/test_except_audit_ratchet.py`) so it counts silence. It must **go red
+  at 28**. Then close them one at a time.
+- **A2, A3 and A4 are six of these 28**, so their fixes take part of the count.
+- [ ] done
+
+---
+
+## Part B. Structure — each item needs its own confirmation first
+
+### B1. Move out what the cycle never calls
+
+- `core/loop_repair.py` — called by `cli/`, `core/self_repair.py`. No caller in
+  `_run_inner` or any of its phases.
+- `core/loop_hygiene.py` — called by `agent_tick.py:1146`,
+  `cli/commands_memory.py`.
+- `forget` / `list_persistent` from `core/loop_memory_commands.py` — CLI only.
+- **Blocked by:** `tests/test_repair_routes_by_complexity.py` pins its rule by
+  reading the file's **source text**. Moving the file reddens the test without
+  touching behaviour. Rewrite it against behaviour first.
+- [ ] done
+
+### B2. One home for run state (Л3)
+
+- **Five today:** `AttemptState` (21 in / 8 out), `SynthesisState` (13/2),
+  `VerifyState` (18/4), ~25 fields on the agent instance, and plain locals in
   `_run_inner`.
-- ~90 строк `_run_inner` заняты только перекладыванием между ними.
-- **Порядок обязателен:** это делается **до** любых новых извлечений, иначе
-  каждое следующее стоит шестого объекта.
-- [ ] сделано
+- ~90 lines of `_run_inner` do nothing but move values between them.
+- **The order is not optional:** this happens **before** any further extraction,
+  or each new one costs a sixth state object.
+- [ ] done
 
-### Б3. Каталогизация записана дважды
+### B3. Cataloguing written twice
 
-- `core/loop_verify_replan.py:442-486` повторяет
-  `core/loop_evidence_chain.py:243-270` вместо вызова.
-- [ ] сделано
+- `core/loop_verify_replan.py:442-486` repeats
+  `core/loop_evidence_chain.py:243-270` instead of calling it.
+- [ ] done
 
 ---
 
-## Часть В. Тесты
+## Part C. Tests
 
-### В1. 96 файлов судят код по тексту исходника
+### C1. Ninety-six files judge code by its source TEXT
 
-- **Почему первым:** этот класс ломается от **любого** переноса, то есть
-  блокирует всю часть Б.
-- Один экземпляр назван: `tests/test_repair_routes_by_complexity.py`.
-- [ ] сделано
+- **Why first:** this class breaks on **any** file move, so it blocks all of
+  Part B.
+- One instance named: `tests/test_repair_routes_by_complexity.py`.
+- [ ] done
 
-### В2. Мутационная проверка как метод
+### C2. Mutation testing as the standing method
 
-- Не «тест выглядит правильным», а «тест поймал вот эту поломку такого-то
-  числа». Прогонять по классу и хранить результат рядом с тестом.
-- **Показано, что работает:** тест без единого `assert` покраснел на нарочно
-  сломанном страже пути и позеленел после отката.
-- [ ] сделано
+- Not "this test looks right" but "this test caught this break on this date".
+  Run per class and keep the result beside the test.
+- **Shown to work:** a test with no assertion at all went red on a deliberately
+  broken path guard and green again after the revert.
+- [ ] done
 
-### В3. 52 файла с 25+ тестами
+### C3. Fifty-two files carrying 25+ tests
 
 - `test_cli.py` 121, `test_assumption_registry.py` 107, `test_planner.py` 85 —
-  проверить, не лежит ли в одном файле несколько несвязанных предметов.
-- [ ] сделано
+  check whether one file holds several unrelated subjects.
+- [ ] done
 
 ---
 
-## Что удаляем в конце
+## Deleted at the end
 
-- `ARCHITECTURE_FILE_INVENTORY.md` — исполнил назначение, держать незачем.
-- Этот файл — тоже, когда все отметки проставлены.
-- **Переезжает и остаётся:** в `docs/MISTAKE_NOTEBOOK.md` — правило «область
-  проверки выбирают по тому, где смотрели, а не по тому, где может быть дефект»
-  (три подтверждения: Л8, Л9, Л10) и правило «проверять не перечитыванием, а
-  сменой способа проверки» (восемнадцать пойманных ошибок за сессию).
+- `ARCHITECTURE_FILE_INVENTORY.md` — it will have done its job.
+- This file, once every box is ticked.
+- **Moving out and staying:** into `docs/MISTAKE_NOTEBOOK.md` — the rule that a
+  check's scope gets chosen by where someone looked rather than by where the
+  defect can be (three confirmations: Л8, Л9, Л10), and the rule that a doubtful
+  conclusion is tested by changing the method of checking, never by reading it
+  again (eighteen of my own errors caught that way in one session).
