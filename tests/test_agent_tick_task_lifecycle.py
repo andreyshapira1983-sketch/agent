@@ -19,7 +19,7 @@ from pathlib import Path
 
 import agent_tick
 from core.autonomous_runtime import AutonomousRunReport
-from core.task_queue import TaskQueueStore
+from core.task_queue import DEFAULT_RUNTIME_TASKS_PATH, TaskQueueStore
 
 
 def _report(status: str, stop_reason: str = "") -> AutonomousRunReport:
@@ -47,7 +47,7 @@ def _tick_with_runtime(workspace: Path, monkeypatch, run_impl) -> TaskQueueStore
     monkeypatch.setattr(ar.AutonomousRuntime, "run", run_impl)
     monkeypatch.setenv("AGENT_TEST_TIMEOUT_SECONDS", "300")
 
-    queue = TaskQueueStore(workspace / "data" / "task_queue.jsonl")
+    queue = TaskQueueStore(workspace / DEFAULT_RUNTIME_TASKS_PATH)
     queue.add(goal="project health", dry_run=True, include_tests=False, limit=1)
 
     agent_tick.run_tick(workspace, dry_run=True)
@@ -126,7 +126,7 @@ def test_tick_recovers_a_task_orphaned_by_a_dead_process(workspace: Path, monkey
     )
 
     (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
-    path = workspace / "data" / "task_queue.jsonl"
+    path = workspace / DEFAULT_RUNTIME_TASKS_PATH
     queue = TaskQueueStore(path)
     orphan = queue.add(goal="was killed mid-run", max_attempts=3)
     queue.mark_running(orphan.id)
@@ -163,7 +163,7 @@ def test_tick_skips_the_drain_when_another_consumer_holds_the_lock(
     from app.single_instance import SingleInstanceLock
 
     (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
-    queue = TaskQueueStore(workspace / "data" / "task_queue.jsonl")
+    queue = TaskQueueStore(workspace / DEFAULT_RUNTIME_TASKS_PATH)
     queue.add(goal="project health", dry_run=True, include_tests=False, limit=1)
 
     ran = {"count": 0}

@@ -143,38 +143,30 @@ def agent_status() -> str:
 def task_queue() -> dict:
     """Runtime tasks with their status, attempts and last error.
 
-    The queue is how the daemon is told to do anything, so what is pending here
-    is what the agent believes it has been asked for.
+    One store. Until 2026-08-05 there were two and this returned both, because
+    the daemon read `data/task_queue.jsonl` while everything an operator
+    touched wrote `data/runtime_tasks.jsonl` -- a task could be pending in one
+    and invisible to the process meant to run it. That is fixed; the second
+    store is gone, and so is the two-headed view of it.
     """
-    # BOTH stores, named, because this repository has two and they are not the
-    # same queue: `agent_tick.py` writes `task_queue.jsonl` while `app/bootstrap`
-    # and the health commands read `runtime_tasks.jsonl`. Returning one would
-    # let a reader conclude "nothing queued" while the other side is busy.
-    # Found while writing this server, 2026-08-05; not fixed here — a merge is
-    # a decision about which side is authoritative, not a display detail.
-    out: dict[str, Any] = {}
-    for label, name in (("daemon", "task_queue.jsonl"),
-                        ("repl_and_health", "runtime_tasks.jsonl")):
-        result = _read_jsonl(_DATA / name)
-        if "rows" not in result:
-            out[label] = result
-            continue
-        tasks = [_payload(r) for r in result["rows"]]
-        by_status: dict[str, int] = {}
-        for task in tasks:
-            key = str(task.get("status", "?"))
-            by_status[key] = by_status.get(key, 0) + 1
-        out[label] = {
-            "store": name,
-            "by_status": by_status,
-            "unreadable_rows": result["unreadable_rows"],
-            "tasks": [
-                {k: t.get(k) for k in ("id", "kind", "goal", "status",
-                                       "attempts", "last_error", "updated_at")}
-                for t in tasks[-20:]
-            ],
-        }
-    return out
+    result = _read_jsonl(_DATA / "runtime_tasks.jsonl")
+    if "rows" not in result:
+        return result
+    tasks = [_payload(r) for r in result["rows"]]
+    by_status: dict[str, int] = {}
+    for task in tasks:
+        key = str(task.get("status", "?"))
+        by_status[key] = by_status.get(key, 0) + 1
+    return {
+        "store": "runtime_tasks.jsonl",
+        "by_status": by_status,
+        "unreadable_rows": result["unreadable_rows"],
+        "tasks": [
+            {k: t.get(k) for k in ("id", "kind", "goal", "status",
+                                   "attempts", "last_error", "updated_at")}
+            for t in tasks[-20:]
+        ],
+    }
 
 
 def approval_inbox() -> dict:
