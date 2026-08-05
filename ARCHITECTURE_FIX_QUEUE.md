@@ -70,11 +70,36 @@ like one that passed.
 episode carries no trace either. A run whose structural layer silently failed
 banks as an ordinary one.
 
-*Not yet proven, and not to be claimed until it is:* that a USER receives an
-over-claiming answer. The constructed case did not truncate even on the healthy
-path, so the damage is demonstrated for the journal and for the episode, and
-**not** for the answer text. Closing that needs a case where enforcement really
-truncates — the `insufficient_evidence` outcome with `applied=True`.
+**Investigation, step 2 — the user-visible half, now measured.**
+
+The first case did not truncate because `_DEFAULT_MIN_TOTAL = 8`
+(`core/low_evidence_policy.py:57`) and it carried three chunks. With ten
+unverified chunks and a long answer, enforcement fires for real:
+
+```
+                       healthy                     broken
+body                   1291 -> 460 chars           1291, unchanged
+events                 verification_explained      verification_explained
+                       answer_enforcement
+                       low_evidence_truncation
+first line to the user "Conclusion: no claim        "Conclusion: the API returns
+                        could be backed by          42 on every call and has
+                        the sources gathered        done since 2019
+                        this cycle."                [general-knowledge]."
+```
+
+**So the damage to the answer is real and is the worst shape available.** The
+honest refusal the enforcement wrote is replaced by a confident factual claim
+the evidence does not support — and the user has no way to tell, because the
+two events that would have said so are the ones that went missing.
+
+The original draft is returned whole: nothing is partially rewritten, so the
+failure is not visible as corruption either. It looks like an ordinary answer.
+
+*Still to do before any fix:* the handler covers six operations, so the test
+must be parameterised over each failure point. Fixing the exception in
+`apply_answer_enforcement` alone would leave `draft.set_body()` free to keep
+turning a break into a success.
 
 *Why the exception was thought acceptable:* the comment says truncation must
 never take down the loop, and the fallback is "the original answer the user
