@@ -64,6 +64,17 @@ def propose_repair(
     except OSError:
         # Unreadable target is the generator's error to report, not ours;
         # size 0 simply means "no case for the expensive model".
+        #
+        # Journal-silent on purpose, and A7 checked that rather than assuming
+        # it. Measured: a missing target reaches `_select_llm` and does lower
+        # the tier — a 20k file that would ask DEEP asks STANDARD instead — so
+        # the silence is not free. But the generator cannot read the file
+        # either, and it says so: `repair_proposal_result` carries
+        # `warnings: ['file_read failed: FileNotFoundError: ...']` and
+        # `status: tool_error`. The operator is not left with two causes and
+        # one picture, which is the test this item applies. Reporting here
+        # would duplicate that, and the cheaper tier is moot on a run that
+        # produced no proposal at all.
         _target_chars = 0
 
     def _select_llm(failing_tests: int):
