@@ -1386,7 +1386,7 @@ rewrite** — an answer crediting N records must not trigger N full-file rewrite
   `core.knowledge_pipeline` — локально.
 - **Побочные эффекты:** запись эпизодов, процедур, отчётов уплотнения;
   обновление записей постоянной памяти (`:451`); заморозка источника в политике
-  записи; 12 точек журнала.
+  записи; **16** точек журнала (в первой редакции стояло 12 — счёт глазами, исправлено пересчётом).
 - **Связанные тесты:** `tests/test_loop_memory_split.py`,
   `tests/test_durable_write_policy.py`, `tests/test_audit_read_only.py`.
 - **Архитектурные нарушения:**
