@@ -244,18 +244,40 @@ def test_only_the_last_rows_are_held_when_a_limit_is_given(tmp_path: Path):
     assert [r["i"] for r in result["rows"]] == [497, 498, 499]
 
 
-def test_the_journal_reports_matches_and_the_raw_total_separately():
+def test_the_journal_reports_matches_and_the_raw_total_separately(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
     """A filtered view must not present the file's size as its match count.
 
     `events_total` used to be the row count of the whole log whatever the
     filter, so a caller asking for errors saw a large number beside three
     events and could not tell an empty filter from an empty run.
+
+    Runs against a journal it writes itself. The first version read the
+    developer's `logs/` and passed here while failing in CI, which has no such
+    directory — notebook §32, a test that passes because of where you ran it.
     """
     module = _module()
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "run_probe.jsonl").write_text(
+        "".join(
+            json.dumps({"event": name, "payload": {}}) + chr(10)
+            for name in ("plan", "act", "plan", "respond")
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "_LOGS", logs)
 
     everything = module.run_journal(limit=5)
-    filtered = module.run_journal(limit=5, event_filter="no_such_event_exists")
+    only_plans = module.run_journal(limit=5, event_filter="plan")
+    nothing = module.run_journal(limit=5, event_filter="no_such_event")
 
-    assert everything["rows_in_log"] == filtered["rows_in_log"]
-    assert filtered["events_matched"] == 0, filtered["events_matched"]
-    assert everything["events_matched"] > 0
+    assert everything["rows_in_log"] == 4
+    assert everything["events_matched"] == 4
+    assert only_plans["events_matched"] == 2, "фильтр не сузил счёт"
+    assert only_plans["rows_in_log"] == 4, "сырое число должно остаться сырым"
+    assert nothing["events_matched"] == 0
+    assert nothing["rows_in_log"] == 4, (
+        "пустой фильтр и пустой журнал стали неотличимы"
+    )
