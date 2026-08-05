@@ -148,7 +148,32 @@ assume must stay silent, or one indistinguishable pair is traded for another.
   gets someone else's and never learns.
 - **Same file, `:572`:** a failure to select the cheap model tier silently keeps
   the normal one, so the cheap path quietly stops being cheap.
-- [ ] done
+
+**Done 2026-08-05.** Both fallbacks are correct and stay; only the silence went.
+
+*Contract registry.* Measured mechanism, not a worry: `SYSTEM_ANSWER` requires
+section headers, a task-specific contract need not, so a registry failure makes
+`_synthesis_expects_contract_headers` read True where it should read False —
+and the verifier then marks the answer `malformed_output` for headers that
+contract never asked for. **A wrong verdict about the answer, caused by a
+swallowed error about the prompt.** One correction on the way: a first
+measurement ran without importing `core.loop`, found an empty registry and
+briefly suggested the fallback fires every turn. It does not — `core/loop.py:127`
+registers the key on import.
+
+*Cheap tier.* The only trace was the ABSENCE of `cheap_path_synth_model`, which
+reads exactly like a turn that never took the cheap path. `cheap_path_active`
+stayed True while the run used the normal model.
+
+Both now report through `_sensor_failed`, which needed declaring in the host
+contract first — the same root cause as A3. The length ratchet then pushed the
+registry branch out into `_resolve_synthesis_contract`, which let the test drop
+its copy of the branch and call the shipped code instead.
+
+Cover: `tests/test_synthesis_fallbacks_are_reported.py`, 9 tests, **3 red on the
+old code**. Both reverse cases included: a healthy registry and a turn that
+never took the cheap path must stay silent.
+- [x] done
 
 ### A5. N full-file rewrites where one would do (Л10)
 
@@ -185,6 +210,11 @@ assume must stay silent, or one indistinguishable pair is traded for another.
   `tests/test_except_audit_ratchet.py`) so it counts silence. It must **go red
   at 28**. Then close them one at a time.
 - **A2, A3 and A4 are six of these 28**, so their fixes take part of the count.
+- **Found while doing A4:** the audit does not recognise `_sensor_failed` as a
+  report. It looks for a literal `.log(` call, so a handler that reports through
+  the layer's own helper is scored silent and has to carry a justifying comment
+  instead. That is the same "scope chosen by where someone looked" shape the
+  counter itself is being fixed for, and it belongs to this item.
 - [ ] done
 
 ---

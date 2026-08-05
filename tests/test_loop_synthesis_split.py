@@ -71,23 +71,6 @@ def _new() -> dict[str, ast.AST]:
     return _methods(ast.parse(Path(synthesis_mod.__file__).read_text(encoding="utf-8")))
 
 
-def test_logic_moved_symbol_for_symbol():
-    """Дословность ЛОГИКИ: тело метода совпадает с историей символ в символ."""
-    old_src = _history()
-    if not old_src.strip():  # pragma: no cover — поверхностный клон без истории
-        pytest.skip("история недоступна (shallow clone) — сверку дословности не выполнить")
-    old = _methods(ast.parse(old_src), "AgentLoop")
-    new = _new()
-    for name in MOVED:
-        if name not in old:  # pragma: no cover — история уже без метода
-            continue
-        old_body = "".join(ast.dump(s, include_attributes=False) for s in old[name].body)
-        new_body = "".join(ast.dump(s, include_attributes=False) for s in new[name].body)
-        assert old_body == new_body, (
-            f"тело {name} изменилось при переносе — это уже не перенос"
-        )
-
-
 def test_signatures_moved_unchanged():
     """Сигнатура не тронута: те же аргументы, значения по умолчанию и тип."""
     old_src = _history()
@@ -170,6 +153,29 @@ LADDER_SUBSTITUTED = frozenset({
     "replan_exhausted", "user_question",
 })
 
+# ---------------------------------------------------------------------------
+# RETIRED: test_logic_moved_symbol_for_symbol
+#          test_the_ladder_moved_under_one_declared_substitution
+#
+# Migration equivalence was verified when `_synthesize` and the resilience
+# ladder moved out of `_run_inner`. That event is over and its proof stands.
+#
+# Retired 2026-08-05 by the operator's decision, the fourth of the same class
+# after test_loop_verify_replan_split, test_loop_context_split (narrowed) and
+# test_loop_response_deciders_split. A finished migration must not be frozen
+# into a git snapshot that forbids lawful change. The change these blocked is
+# census item A4: two handlers here fell back correctly and said nothing about
+# it — the prompt-registry fallback silently replaced an operator's
+# task-specific contract with the generic one, and the cheap-tier fallback left
+# `cheap_path_active` True while the turn ran on the normal model.
+#
+# What guards these methods now, and must not be weakened:
+#   * tests/test_synthesis_fallbacks_are_reported.py — the behaviour.
+#   * tests/test_loop_split_wiring.py::test_the_mixin_declares_everything_it_borrows
+#   * the import, prefix and declared-output checks in this file, which are
+#     about shape rather than about a snapshot.
+# ---------------------------------------------------------------------------
+
 
 class _LadderSubstitute(ast.NodeTransformer):
     def visit_Name(self, node: ast.Name) -> ast.AST:
@@ -212,38 +218,6 @@ def _ladder_slice(fn: ast.AST) -> list[ast.stmt]:
     if start is None or end is None:  # pragma: no cover — история уже другая
         return []
     return fn.body[start:end + 1]
-
-
-def test_the_ladder_moved_under_one_declared_substitution():
-    """История + объявленная подстановка = то, что лежит в модуле синтеза."""
-    old_src = _history()
-    if not old_src.strip():  # pragma: no cover — поверхностный клон без истории
-        pytest.skip("история недоступна (shallow clone) — сверку не выполнить")
-    old_run_inner = next(
-        (n for n in ast.walk(ast.parse(old_src))
-         if isinstance(n, ast.FunctionDef) and n.name == "_run_inner"), None,
-    )
-    assert old_run_inner is not None, "в истории нет `_run_inner`"
-    old = _ladder_slice(old_run_inner)
-    if not old:  # pragma: no cover — история уже без участка
-        pytest.skip("участок в истории не найден — раскол уже зафиксирован")
-
-    new_method = next(
-        (n for n in ast.walk(ast.parse(
-            Path(synthesis_mod.__file__).read_text(encoding="utf-8")))
-         if isinstance(n, ast.FunctionDef) and n.name == LADDER), None,
-    )
-    assert new_method is not None, f"`{LADDER}` пропал из модуля синтеза"
-    new = _ladder_slice(new_method)
-    assert new, "в новом методе не нашли перенесённый участок"
-
-    expected = ast.fix_missing_locations(
-        _LadderSubstitute().visit(ast.parse(ast.unparse(ast.Module(body=old, type_ignores=[]))))
-    )
-    got = ast.Module(body=new, type_ignores=[])
-    assert _norm(expected) == _norm(got), (
-        "тело лестницы отличается от истории СВЕРХ объявленной подстановки"
-    )
 
 
 def test_the_ladder_substitution_matches_its_state():
