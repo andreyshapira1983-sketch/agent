@@ -240,12 +240,20 @@ class EpisodeRecord:
     #     `assemble_completion_verdict`) and so withholds procedure credit.
     #     S3's ruling was "keep the requirement, replace the detector" — the
     #     requirement is what carries the authority.
+    #   * `action_without_stated_reason` IS authoritative (MIR-015). It reads a
+    #     field the planner is REQUIRED to fill — one sentence per step saying
+    #     why the step is needed — so "unjustified" is a structural fact, not a
+    #     guess about prose. It lowers `achieved` the same way, and it also
+    #     refuses admission to the usable pool.
     #   * every other member decides nothing today, `reasoning_action_mismatch`
-    #     included: S4's ruling was "keep as an observer, keep measuring", and a
-    #     test pins that it changes neither the state nor procedure credit.
+    #     included, and that one on measured grounds rather than caution: over
+    #     108 real planner turns it fires on 44, and the accusations do not
+    #     survive reading (`file_write` has no entry in its keyword table at
+    #     all). Same requirement, worse detector — S4's ruling stands.
     # Adding a member does NOT grant it power; power is granted only by naming
-    # it in the verdict rule table, which is the operator's call and wants
-    # measured numbers first (`docs/audit/SENSOR_SIGNAL_MEASUREMENT.md`).
+    # it in the verdict rule table AND in `AUTHORITATIVE_DEFECT_SIGNALS`, which
+    # is the operator's call and wants measured numbers first
+    # (`docs/audit/SENSOR_SIGNAL_MEASUREMENT.md`).
     defect_signals: tuple[str, ...] | None = None
     # The authoritative fact that displaced this run's own claim, when one did.
     # None = the claim stood (or there was no claim). `declared_completion` is
@@ -1299,6 +1307,19 @@ def assemble_completion_state(
     ).state
 
 
+#: Signals that DECIDE rather than merely record. Membership here and a row in
+#: `assemble_completion_verdict` are the same grant of power, written twice on
+#: purpose: the rule table says what a signal does to the verdict, this set says
+#: it may also refuse admission to the usable pool. Every other member of
+#: `EpisodeRecord.defect_signals` is an observer — `reasoning_action_mismatch`
+#: above all, which fires on 41 % of real planner turns and whose accusations do
+#: not survive reading (`docs/audit/SENSOR_SIGNAL_MEASUREMENT.md`, S4).
+AUTHORITATIVE_DEFECT_SIGNALS: frozenset[str] = frozenset({
+    "obligation_silently_missing",
+    "action_without_stated_reason",
+})
+
+
 @dataclass(frozen=True)
 class CompletionVerdict:
     """The operational verdict plus the divergence that produced it.
@@ -1327,6 +1348,7 @@ def assemble_completion_verdict(
     replan_exhausted: bool,
     declared: str | None,
     obligation_unmet: bool = False,
+    actions_unjustified: bool = False,
 ) -> CompletionVerdict:
     """The single rule table. :func:`assemble_completion_state` delegates here.
 
@@ -1345,6 +1367,16 @@ def assemble_completion_verdict(
     if obligation_unmet and declared == "achieved":
         return _displaced(
             "partially_achieved", declared, "obligation_silently_missing"
+        )
+    # MIR-015, same one-directional rule. A run that reached for tools it could
+    # not say why it needed did not do the job cleanly, whatever it claimed —
+    # and unlike the keyword sensor next to it, this one reads a field the
+    # planner was required to fill, so there is no phrasing it can miss and
+    # nothing to tune. A run that already reported `blocked` or `failed` is not
+    # made worse: honesty was never the fault.
+    if actions_unjustified and declared == "achieved":
+        return _displaced(
+            "partially_achieved", declared, "action_without_stated_reason"
         )
     if declared in _COMPLETION_DECLARATIONS:
         return CompletionVerdict(declared)  # type: ignore[arg-type]
@@ -1412,6 +1444,20 @@ def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
     No threshold constant appears here on purpose — every rule reads a fact
     the verifier measured, so there is no number to tune or to justify.
     """
+    # ABOVE the `lesson` exemption, and the order is the point. That exemption
+    # exists so a failure can still teach — an honest `failed` run carrying a
+    # curated lesson is exactly what it is for, and that stays. What it must
+    # not cover is a run whose own PROCESS was defective: an episode that
+    # reached for actions it could not say why it needed is not evidence about
+    # anything, and a tag cannot make it so.
+    #
+    # The order matters because the tag is not always curated. Measured on the
+    # live store 2026-08-05: 31 of 108 episodes were admitted by this exemption
+    # alone, 25 of them self-build runs that `core/self_build_memory.py` tags
+    # `lesson` unconditionally. Below the exemption this gate would never run
+    # for any of them.
+    if AUTHORITATIVE_DEFECT_SIGNALS & set(episode.defect_signals or ()):
+        return False
     if "lesson" in episode.tags:
         return True
     if episode.outcome != "success":
@@ -1608,6 +1654,7 @@ def episode_from_agent_cycle(
         replan_exhausted=bool(replan_exhausted),
         declared=declared_completion,
         obligation_unmet="obligation_silently_missing" in (signals or ()),
+        actions_unjustified="action_without_stated_reason" in (signals or ()),
     )
     return EpisodeRecord(
         goal=_clean_text(goal, max_chars=300),

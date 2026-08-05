@@ -1,17 +1,34 @@
-"""Reasoning ↔ action consistency check — MAST FM-2.6 (13.2%).
+"""Reasoning ↔ action consistency — MAST FM-2.6 (13.2%).
 
-Pure-Python heuristic comparing the planner's free-text ``reasoning`` field
-against the chosen ``steps``. Two failure shapes are surfaced:
+Two detectors of the same requirement, and only one of them may decide.
+
+:func:`check_step_justification` reads the reason the planner STATED for each
+step. That is a structural fact, so it can block: a step whose author gave no
+reason for it does not run.
+
+:func:`check_reasoning_actions` guesses the same thing by matching keywords
+against the free-text ``reasoning`` blob. Measured over every ``planner`` event
+in ``logs/`` on 2026-08-05 — 108 real turns — it fires on 44 of them, and the
+accusations do not survive reading: ``file_write`` has no entry in the keyword
+table at all, ``list_dir`` demands the literal phrase "list files" while the
+prose says "listing actual directory contents", ``file_read`` keys on ``"read "``
+with a trailing space so "reading core/loop.py" cannot match. It stays an
+observer for that reason (``docs/audit/SENSOR_SIGNAL_MEASUREMENT.md``, S4).
+
+The one-line version: the planner is already required to state a rationale per
+step, the code threw it away, and a keyword table was left guessing at what had
+been discarded.
+
+The lexical half, kept for the record — two failure shapes:
 
 * ``unjustified_action``: a step uses a tool that has no recognisable
   mention (or alias) in the reasoning text — the agent acts without
   having argued for it.
 * ``mentioned_but_not_planned``: the reasoning explicitly names a tool /
   action class that the plan does not contain — the agent argues for one
-  thing and does another.
-
-This is observational only: it produces a report; it does not block the
-plan. Down the line a stricter mode could replan or demote confidence.
+  thing and does another. This direction can also name a tool that is in no
+  registry (``self_repair``, demanded 5 times in the logs), so it accuses the
+  planner of omitting a step it had no way to produce.
 """
 
 from __future__ import annotations
@@ -81,6 +98,83 @@ class MismatchReport:
             "mentioned_but_not_planned": list(self.mentioned_but_not_planned),
             "matched_tools": list(self.matched_tools),
         }
+
+
+@dataclass(frozen=True)
+class JustificationReport:
+    """Which planner steps arrived without the reason the contract demands."""
+
+    unjustified_labels: tuple[str, ...] = ()  # step labels with no stated reason
+    unjustified_tools: tuple[str, ...] = ()  # their tools, deduplicated
+    justified_tools: tuple[str, ...] = ()  # tools whose step stated a reason
+    exempt_tools: tuple[str, ...] = ()  # steps the planner did not author
+
+    @property
+    def has_unjustified(self) -> bool:
+        return bool(self.unjustified_labels)
+
+    def to_log_payload(self) -> dict:
+        return {
+            "unjustified_labels": list(self.unjustified_labels),
+            "unjustified_tools": list(self.unjustified_tools),
+            "justified_tools": list(self.justified_tools),
+            "exempt_tools": list(self.exempt_tools),
+        }
+
+
+def check_step_justification(
+    sources: Iterable[dict],
+) -> JustificationReport:
+    """Which steps the planner chose without saying why.
+
+    Reads ``rationale``, which `LLMPlanner._validate_steps` attaches to every
+    step it produces, and which the output contract has always demanded
+    ("<one sentence explaining WHY this step is needed>").
+
+    A MISSING key and an EMPTY one are not the same and must not be merged.
+    Steps injected by the system — a forced plan, the explicit-file-hint
+    read — never pass through the planner and so carry no key at all; holding
+    them to a contract they were never shown would block the very paths that
+    exist to rescue a turn. Only ``""`` is an accusation, and it accuses the
+    one author who was asked.
+
+    Deliberately not a judgement of the reason's QUALITY. A model required to
+    fill a field will fill it, so this cannot detect a hollow rationale — it
+    detects the absence of one, which is the part that can be checked without
+    guessing. The lexical detector above is what a quality judgement would
+    look like, and its measured cost is in this module's docstring.
+    """
+    unjustified: list[str] = []
+    unjustified_tools: list[str] = []
+    justified: list[str] = []
+    exempt: list[str] = []
+
+    for step in sources:
+        if not isinstance(step, dict):
+            continue
+        tool = str(step.get("tool") or "")
+        if "rationale" not in step:
+            exempt.append(tool)
+            continue
+        if str(step.get("rationale") or "").strip():
+            justified.append(tool)
+            continue
+        # The label identifies WHICH step, because a plan may hold four
+        # `file_read`s of which one is unreasoned; naming only the tool would
+        # send the whole group back.
+        unjustified.append(str(step.get("label") or tool))
+        unjustified_tools.append(tool)
+
+    return JustificationReport(
+        unjustified_labels=tuple(unjustified),
+        unjustified_tools=_dedupe(unjustified_tools),
+        justified_tools=_dedupe(justified),
+        exempt_tools=_dedupe(exempt),
+    )
+
+
+def _dedupe(seq: Iterable[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(x for x in seq if x))
 
 
 def _keyword_in_text(text: str, kw: str) -> bool:

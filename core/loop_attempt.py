@@ -36,7 +36,10 @@ from core.file_request_intent import force_file_hint_read_when_explicit
 from core.model_usage import ModelBudgetExceeded
 from core.models import ErrorObject, Goal, Plan, PlanStep
 from core.planner import PlannerOutput
-from core.reasoning_action_check import check_reasoning_actions
+from core.reasoning_action_check import (
+    check_reasoning_actions,
+    check_step_justification,
+)
 from core.replan import ReplanTrigger, count_failures, format_replan_context
 from core.task_complexity import can_skip_planner
 
@@ -359,6 +362,48 @@ class AgentLoopAttempt:
             except Exception:
                 pass  # Observational only — must never abort the loop.
 
+            # MIR-015 — the control signal, and the reason it is a DIFFERENT
+            # check from the one above. The planner is required to give one
+            # sentence per step saying why that step is needed; until now the
+            # answer was collected and discarded by `sanitize_step`, leaving
+            # the keyword heuristic to guess at it. Reading the stated reason
+            # makes "unjustified" a structural fact, and a structural fact may
+            # block. No number to tune, no phrasing to miss.
+            _unjustified_trigger: ReplanTrigger | None = None
+            _just = check_step_justification(st.planner_out.sources)
+            if _just.has_unjustified:
+                self.log.log(
+                    "unjustified_action_blocked",
+                    {**_just.to_log_payload(), "attempt": st.attempt},
+                )
+                self._defect_signals.append("action_without_stated_reason")
+                # Dropped BEFORE the plan is built, so an unreasoned step is
+                # never executed — not executed and then regretted.
+                st.planner_out.sources = [
+                    s for s in st.planner_out.sources
+                    if "rationale" not in s
+                    or str(s.get("rationale") or "").strip()
+                ]
+                # A replan even when steps survive. Dropping alone would let
+                # the turn proceed on a plan the agent half-argued for, and
+                # the operator's instruction is that the run must be sent back
+                # to plan again — not quietly trimmed.
+                _unjustified_trigger = ReplanTrigger(
+                    code="action_without_stated_reason",
+                    step_id="planner",
+                    tool_name=None,
+                    arguments={},
+                    reason=(
+                        "These steps were dropped because the plan gave no "
+                        "reason for them: "
+                        f"{', '.join(_just.unjustified_labels)}. "
+                        "Every step needs a 'rationale' saying why it is "
+                        "needed; re-plan and either justify each step or "
+                        "choose different ones."
+                    ),
+                    attempt=st.attempt,
+                )
+
             st.plan = self._build_plan(st.goal, st.planner_out.sources)
             self.log.log("plan", st.plan, steps=len(st.plan.steps), attempt=st.attempt)
             st._cp.save_plan(attempt=st.attempt, step_ids=[s.id for s in st.plan.steps])
@@ -386,6 +431,16 @@ class AgentLoopAttempt:
             attempt_artifacts: dict[str, dict[str, Any]] = {}
             attempt_failures: list[ReplanTrigger] = []
             attempt_chain = ProvenanceChain()
+
+            # Raised above, banked here — `attempt_failures` does not exist
+            # yet at the point the plan is inspected. Registering it as a
+            # failure is what turns the drop into a replan: `replan_policy`
+            # either gets a better plan or trips `replan_exhausted`, and the
+            # synthesiser then writes an honest "I could not plan" instead of
+            # a confident answer built on nothing (the same road
+            # `plan_parse_failed` takes, for the same reason).
+            if _unjustified_trigger is not None:
+                attempt_failures.append(_unjustified_trigger)
 
             # Planner JSON parse failure: empty `sources` here is NOT an
             # intentional general-knowledge plan, it's a contract break.
@@ -462,7 +517,25 @@ class AgentLoopAttempt:
             # answer is intentional) or at least one artifact came through.
             # `plan_parse_failed` is NOT success — empty `sources` came from
             # a JSON parse failure, not from the planner choosing zero tools.
-            if (not st.plan.steps and not plan_parse_failed) or attempt_artifacts:
+            # An empty plan means success only when the planner CHOSE zero
+            # tools. Two ways it can be empty against that intent, and each
+            # had to be added after the fall-through swallowed it: JSON that
+            # did not parse, and steps this loop removed for carrying no
+            # stated reason. A third will want naming here too.
+            plan_emptied_by_gate = (
+                _unjustified_trigger is not None and not st.plan.steps
+            )
+            # Note what this does NOT do: when some steps survived the drop,
+            # their artifacts end the attempt normally and no replan is spent.
+            # The unjustified action has already been prevented, which was the
+            # risk; re-planning a turn whose remaining steps were justified and
+            # worked would buy nothing and pay a model round for it. The
+            # episode still carries the signal, so it cannot bank as clean.
+            if (
+                (not st.plan.steps and not plan_parse_failed
+                 and not plan_emptied_by_gate)
+                or attempt_artifacts
+            ):
                 st.artifacts = attempt_artifacts
                 st.chain = attempt_chain
                 break

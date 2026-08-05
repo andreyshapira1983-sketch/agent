@@ -512,6 +512,22 @@ class LLMPlanner:
             )
             if spec is None:
                 continue
+            # The planner was ALREADY asked for this, one sentence per step
+            # ("rationale": "<one sentence explaining WHY this step is
+            # needed>" in the output contract) — and every `sanitize_step`
+            # return site builds a fresh dict, so the answer was collected and
+            # dropped on the floor. A lexical sensor then tried to re-derive
+            # it by matching keywords against the free-text `reasoning` blob,
+            # and fired on 41 % of real turns doing so.
+            #
+            # Three states, the same convention `defect_signals` uses:
+            #   key absent  -> this step did not come from the planner (a hint
+            #                  injection, a forced plan) and claims nothing;
+            #   ""          -> the planner produced it and gave no reason;
+            #   "..."       -> the reason it gave.
+            # Absent must never read as empty: a system-injected step has no
+            # author to hold to the contract.
+            spec["rationale"] = str(step.get("rationale") or "").strip()
             sources.append(spec)
 
         return sources, warnings, dropped_tools

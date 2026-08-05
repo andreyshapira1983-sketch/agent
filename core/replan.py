@@ -55,6 +55,7 @@ FailureType = Literal[
     "policy_blocked",        # PolicyGate refused (unknown tool, missing reg)
     "unresolved_citation",   # MVP-14.5: Verifier saw [web:URL] but no web_fetch ran
     "claim_refuted",         # MIR-060 (b): arithmetic over the cited excerpt says NO
+    "action_without_stated_reason",  # MIR-015: a step the plan gave no rationale for
     "injection_blocked",     # §2 Adversarial Defence: tool output contained injection
     "plan_parse_failed",     # planner LLM output was not valid JSON
     "unknown",               # safety net for any code path the audit missed
@@ -72,6 +73,7 @@ ALL_FAILURE_TYPES: tuple[FailureType, ...] = (
     "policy_blocked",
     "unresolved_citation",
     "claim_refuted",
+    "action_without_stated_reason",
     "injection_blocked",
     "plan_parse_failed",
     "unknown",
@@ -290,6 +292,22 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
             "and does not follow from it. The correct value is stated in the "
             "failure reason above. Use that value, or drop the claim — do not "
             "restate the same number."
+        ),
+        requires_different_action=True,
+    ),
+    # MIR-015. Two, which in this table means exactly ONE retry — the operator
+    # asked for the run to be sent back to plan again, and a budget of 1 would
+    # abort instead of replanning, delivering the opposite. One retry is also
+    # the right number on its merits: the fix costs the planner a sentence it
+    # was already asked for, so a second identical omission is not a model
+    # having trouble but a model ignoring the contract.
+    "action_without_stated_reason": FailureBudget(
+        max_occurrences=2,
+        advice=(
+            "Steps were REMOVED from your plan because you gave no reason for "
+            "them. Every step needs a 'rationale' field with one sentence "
+            "saying why that step is needed. Re-plan: either state the reason "
+            "for each step you want, or choose steps you can justify."
         ),
         requires_different_action=True,
     ),
