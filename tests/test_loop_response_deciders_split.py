@@ -84,29 +84,27 @@ def _dump(stmts: list[ast.stmt]) -> str:
     return "".join(ast.dump(s, include_attributes=False) for s in stmts)
 
 
-def test_logic_moved_symbol_for_symbol():
-    """Дословность ЛОГИКИ: срез истории совпадает с телом нового метода."""
-    old_src = _history()
-    if not old_src.strip():  # pragma: no cover — поверхностный клон без истории
-        pytest.skip("история недоступна (shallow clone) — сверку дословности не выполнить")
-    old_run_inner = _func(ast.parse(old_src), "_run_inner")
-    assert old_run_inner is not None, "в истории нет `_run_inner` — сверять не с чем"
-    old_stmts = _moved_slice(old_run_inner.body)
-    if not old_stmts:  # pragma: no cover — история уже без этого участка
-        pytest.skip("участок в истории не найден — раскол уже зафиксирован")
-
-    new = _func(ast.parse(Path(deciders_mod.__file__).read_text(encoding="utf-8")),
-                "_build_response_draft")
-    assert new is not None, "`_build_response_draft` пропал из нового модуля"
-    # Тело нового метода = docstring + перенесённые операторы + `return draft`.
-    assert isinstance(new.body[0], ast.Expr), "первым в теле ждём docstring"
-    assert isinstance(new.body[-1], ast.Return), "последним в теле ждём `return draft`"
-    new_stmts = new.body[1:-1]
-
-    assert _dump(old_stmts) == _dump(new_stmts), (
-        "тело решателей изменилось при переносе — это уже не перенос"
-    )
-
+# ---------------------------------------------------------------------------
+# RETIRED: test_logic_moved_symbol_for_symbol
+#
+# Migration equivalence was verified when the deciders moved out of
+# `_run_inner`. That event is over and its proof stands.
+#
+# Retired 2026-08-05 by the operator's decision, for the same reason as the
+# guards in test_loop_verify_replan_split.py and test_loop_context_split.py: a
+# finished migration must not be frozen into a git snapshot that forbids lawful
+# change. The change it blocked is census item A2 — the answer-enforcement
+# handler no longer swallows, and returning the original draft is now forbidden
+# by measurement (a reproduced case handed the user a confident unsupported
+# claim where the healthy path had written an honest refusal).
+#
+# What guards this method now, and must not be weakened:
+#   * tests/test_answer_enforcement_failure.py — the contract for all six
+#     failure points plus the seventh case where the fallback itself breaks.
+#   * tests/test_loop_split_wiring.py::test_the_mixin_declares_everything_it_borrows
+#   * the import and structure checks below, which are about shape rather than
+#     about a snapshot.
+# ---------------------------------------------------------------------------
 
 def test_the_loop_no_longer_defines_it():
     """Дубля нет: решатели живут в одном месте, а не в двух."""
