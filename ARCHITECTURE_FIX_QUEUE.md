@@ -42,6 +42,50 @@ These need no file moved. They go first.
   untruncated answer and nothing records that enforcement never ran.
 - **The fix is already modelled in the same file:** three handlers write their
   own event and name the MIR-077 rule in the comment.
+
+**Investigation, step 1 (2026-08-05) — nothing changed, findings only.**
+
+The operator's instruction: find the exact handler, reproduce the exception, and
+prove what the system loses — before touching anything.
+
+*What the handler covers.* Six operations, not one: reading `last_source_ranking`
+and `last_verification`, the `is_evidence_expected` policy call,
+`apply_answer_enforcement` itself, the `answer_enforcement` journal write, the
+conditional `low_evidence_truncation` write, and **`draft.set_body(...)` — the
+truncation itself**. An exception in any of them lands in the same `pass`.
+
+*Reproduced.* `apply_answer_enforcement` patched to raise, same input otherwise:
+
+```
+healthy : events = ['verification_explained', 'answer_enforcement']
+broken  : events = ['verification_explained']
+```
+
+**The journal loses the only event that says enforcement ran.** So "enforcement
+ran and decided no truncation was due" and "enforcement never ran" are the same
+picture to any reader — the §21 shape, a check that did not run looking exactly
+like one that passed.
+
+*What is NOT recorded:* `_defect_signals` is never touched on this path, so the
+episode carries no trace either. A run whose structural layer silently failed
+banks as an ordinary one.
+
+*Not yet proven, and not to be claimed until it is:* that a USER receives an
+over-claiming answer. The constructed case did not truncate even on the healthy
+path, so the damage is demonstrated for the journal and for the episode, and
+**not** for the answer text. Closing that needs a case where enforcement really
+truncates — the `insufficient_evidence` outcome with `applied=True`.
+
+*Why the exception was thought acceptable:* the comment says truncation must
+never take down the loop, and the fallback is "the original answer the user
+would otherwise have got". That reasoning is sound about not crashing and silent
+about not reporting — the same split MIR-077 was closed for.
+
+**The decision this must feed, still open:** should this path fail closed, keep
+the original answer, return the truncated answer with a defect signal, or end
+the attempt as recovered/defective? Not to be answered before the user-visible
+half is measured.
+
 - [ ] done
 
 ### A3. Two silent failures in the turn context
