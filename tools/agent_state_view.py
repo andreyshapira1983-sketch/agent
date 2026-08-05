@@ -37,6 +37,7 @@ reading lives here, testable with nothing installed.
 """
 from __future__ import annotations
 
+import collections
 import json
 import sys
 from pathlib import Path
@@ -51,28 +52,44 @@ _LOGS = REPO / "logs"
 
 
 def _read_jsonl(path: Path, *, last: int = 0) -> Any:
-    """Rows of a JSONL store, or a named error — never a silent empty list."""
+    """Rows of a JSONL store, or a named error -- never a silent empty list.
+
+    Streams line by line. `read_text().splitlines()` held the whole file plus
+    the whole list of lines in memory at once, and the largest journal in this
+    workspace is already 5 MB across 292 files -- a viewer that dies reading
+    the log is worse than no viewer, because it fails exactly when the run was
+    long enough to be worth looking at.
+
+    `last` is served by a bounded `deque`, so asking for the final 40 events of
+    a million-line journal costs 40 rows of memory rather than a million.
+    `total` still counts every row, because "the last 40 of 12 000" and "the
+    last 40 of 40" are different facts about the same answer.
+    """
     if not path.exists():
         return {"error": "missing", "store": path.name,
                 "detail": "the store has never been written"}
-    rows: list[dict] = []
+    kept: Any = collections.deque(maxlen=last) if last else []
+    total = 0
     unreadable = 0
     try:
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            if not line.strip():
-                continue
-            try:
-                rows.append(json.loads(line))
-            except ValueError:
-                # Counted, not hidden: a row that will not parse is a row the
-                # agent itself cannot read either, and the count is the only
-                # way a reader learns it existed.
-                unreadable += 1
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    # Counted, not hidden: a row that will not parse is a row
+                    # the agent itself cannot read either, and the count is the
+                    # only way a reader learns it existed.
+                    unreadable += 1
+                    continue
+                total += 1
+                kept.append(row)
     except OSError as exc:
         return {"error": type(exc).__name__, "store": path.name,
                 "detail": str(exc)[:200]}
-    out = rows[-last:] if last else rows
-    return {"rows": out, "total": len(rows), "unreadable_rows": unreadable}
+    return {"rows": list(kept), "total": total, "unreadable_rows": unreadable}
 
 
 def _payload(row: dict) -> dict:
@@ -222,7 +239,14 @@ def run_journal(limit: int = 40, event_filter: str = "") -> dict:
               if not wanted or str(r.get("event", "")) in wanted]
     return {
         "log_file": logs[-1].name,
-        "events_total": result["total"],
+        # Two counts, because one was misleading: `events_total` used to
+        # report the file's row count even when a filter was given, so a
+        # caller asking for `error` events saw "events_total: 12000" beside
+        # three of them and could not tell an empty filter from an empty
+        # run (review of #316). `rows_in_log` keeps the raw figure, which
+        # is what makes the match count meaningful at all.
+        "events_matched": len(events),
+        "rows_in_log": result["total"],
         "unreadable_rows": result["unreadable_rows"],
         "events": [
             {"event": e.get("event"), "ts": e.get("ts") or e.get("timestamp"),

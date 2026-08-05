@@ -40,6 +40,31 @@ _MUTATORS = (
 )
 
 
+
+def _opens_for_writing(call: ast.Call) -> bool:
+    """Is this `open(...)` a write?
+
+    The previous version flagged EVERY `open` while its own comment said "only
+    a write when a mode says so" — the check was stricter than its
+    documentation, which review round #316 caught. It also blocked the fix for
+    the real defect underneath: reading a 5 MB journal line by line needs
+    `open`, and a guard that forbids reading cannot tell a viewer from a
+    writer.
+
+    Absent or unreadable mode means read: `open(path)` is `"r"`, and a mode
+    computed at runtime is not something this guard can rule on — it says so
+    by returning False rather than by guessing.
+    """
+    mode = ""
+    for i, arg in enumerate(call.args):
+        if i == 1 and isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            mode = arg.value
+    for kw in call.keywords:
+        if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
+            mode = str(kw.value.value)
+    return any(ch in mode for ch in "wax+")
+
+
 def _module():
     spec = importlib.util.spec_from_file_location("agent_state_view", _VIEW)
     assert spec is not None and spec.loader is not None
@@ -71,9 +96,9 @@ def test_nothing_in_the_server_can_write():
         name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
         if name in _MUTATORS and name != "open":
             found.append(name)
-        # `open` is only a write when a mode says so; `read_text` is used here.
-        if name == "open":
-            found.append("open")
+            continue
+        if name == "open" and _opens_for_writing(node):
+            found.append("open(mode=write)")
     assert not found, f"в сервере появились изменяющие вызовы: {sorted(set(found))}"
 
 
@@ -151,3 +176,86 @@ def test_the_status_view_captures_the_stream_the_agent_actually_writes():
     status = module.agent_status()
     assert status != "(no output)"
     assert "Daemon:" in status, status[:200]
+
+
+def test_the_write_guard_still_catches_a_write():
+    """The relaxation must not have turned the guard off.
+
+    Proven by feeding it both shapes rather than trusting the loosened rule:
+    a read-mode `open` passes, every write mode is caught. Without this, "no
+    mutators found" would be indistinguishable from "the guard stopped
+    looking" — the shape of §21 in the notebook.
+    """
+    for source, expected in (
+        ('open(p)', False),
+        ('open(p, "r")', False),
+        ('open(p, encoding="utf-8")', False),
+        ('open(p, "w")', True),
+        ('open(p, "a")', True),
+        ('open(p, "r+")', True),
+        ('open(p, mode="wb")', True),
+    ):
+        call = ast.parse(source).body[0].value
+        assert _opens_for_writing(call) is expected, source
+
+
+def test_a_large_journal_is_not_loaded_whole():
+    """Reading is line by line: the biggest log here is 5 MB and growing.
+
+    Checked structurally, because a functional test on a small file passes
+    either way — `read_text().splitlines()` is the defect, and it is invisible
+    until the file is large enough to hurt.
+
+    By AST, not by searching the source text: the first version of this test
+    matched `read_text(` and went red on the DOCSTRING that explains why
+    `read_text` was removed. Judging code by resemblance to a string is the
+    same mistake as an audit that cannot see through a name.
+    """
+    tree = ast.parse(_VIEW.read_text(encoding="utf-8"))
+    reader = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "_read_jsonl")
+    whole_file = [
+        node.func.attr for node in ast.walk(reader)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and node.func.attr in ("read_text", "read_bytes", "readlines")
+    ]
+    assert not whole_file, (
+        f"хранилище снова читается целиком в память: {whole_file}"
+    )
+
+
+def test_only_the_last_rows_are_held_when_a_limit_is_given(tmp_path: Path):
+    """`last=N` must cost N rows of memory, not the whole file.
+
+    Behavioural half of the guard above: a bounded `deque` returns exactly the
+    tail, and `total` still counts every row — "the last 3 of 500" and "the
+    last 3 of 3" are different facts about the same answer.
+    """
+    store = tmp_path / "big.jsonl"
+    store.write_text(
+        "".join(json.dumps({"i": i}) + chr(10) for i in range(500)),
+        encoding="utf-8",
+    )
+    module = _module()
+
+    result = module._read_jsonl(store, last=3)
+
+    assert result["total"] == 500
+    assert [r["i"] for r in result["rows"]] == [497, 498, 499]
+
+
+def test_the_journal_reports_matches_and_the_raw_total_separately():
+    """A filtered view must not present the file's size as its match count.
+
+    `events_total` used to be the row count of the whole log whatever the
+    filter, so a caller asking for errors saw a large number beside three
+    events and could not tell an empty filter from an empty run.
+    """
+    module = _module()
+
+    everything = module.run_journal(limit=5)
+    filtered = module.run_journal(limit=5, event_filter="no_such_event_exists")
+
+    assert everything["rows_in_log"] == filtered["rows_in_log"]
+    assert filtered["events_matched"] == 0, filtered["events_matched"]
+    assert everything["events_matched"] > 0
