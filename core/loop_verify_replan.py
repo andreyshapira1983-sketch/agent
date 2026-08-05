@@ -116,6 +116,46 @@ class AgentLoopVerifyReplan:
         _save_budget_pause_checkpoint: Any
         _verification_receipt_kwargs: Any
 
+    def _replan_on_refuted_claims(self, report: Any, st: VerifyState) -> None:
+        """Rung 4 of the ladder — carry the WHY into the next attempt.
+
+        A refuted claim knows `expected`, `actual` and the numbers behind them.
+        Unless that reaches the next attempt it is a correct diagnosis in a
+        chart the patient never reads, which is the failure mode the operator
+        named when direction (b) was chosen.
+
+        It travels the road `unresolved_citation` already uses: a
+        `ReplanTrigger` whose `reason` is copied into `<replan_context>`
+        verbatim, and a budget carrying `requires_different_action`, so the
+        sanitiser REFUSES a repeat rather than merely advising against one —
+        the `web_empty` lesson, where prose advice was never enforcement.
+
+        One trigger for the whole draft, not one per claim: the next attempt
+        needs the corrections, not a flood of them.
+        """
+        refuted = [c for c in report.chunks if getattr(c, "reason", None)]
+        if not refuted:
+            return
+        corrections = "; ".join(
+            f"{c.reason.explanation} (from {c.reason.computed_from})"
+            for c in refuted[:5]
+        )
+        st.failure_history.append(ReplanTrigger(
+            code="claim_refuted",
+            step_id=f"verify-claims-{st.attempt}",
+            tool_name=None,
+            arguments={"codes": sorted({c.reason.code for c in refuted})},
+            reason=(
+                f"{len(refuted)} claim(s) were checked against the source they "
+                f"cited and do not follow from it: {corrections}"
+            ),
+            attempt=st.attempt,
+        ))
+        self.log.log("claims_refuted_by_arithmetic", {
+            "count": len(refuted),
+            "reasons": [c.reason.to_log_payload() for c in refuted[:5]],
+        })
+
     def _verify_and_settle_answer(self, st: VerifyState) -> None:
         """Довести черновик до текста, который увидят решатели.
 
@@ -144,6 +184,8 @@ class AgentLoopVerifyReplan:
                 failure_history=st.failure_history,
                 _disagreement_shadow=st._disagreement_shadow,
             )
+
+            self._replan_on_refuted_claims(report, st)
 
             verify_replan_attempt = 0
             VERIFY_REPLAN_HARD_CAP = 2  # belt + braces over ReplanPolicy

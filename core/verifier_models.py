@@ -18,12 +18,46 @@ class Citation:
 
 
 @dataclass(frozen=True)
+class ClaimReason:
+    """WHY a claim did not survive its check — structured, not a sentence.
+
+    A verdict is a stamp: it tells the agent it was wrong. This tells it what
+    to change. The distinction is the operator's criterion for MIR-060 — a
+    label that flips means the instrument got honest; only a usable reason can
+    make the next attempt better, and only if it reaches the next attempt.
+
+    Fields are separate rather than one string because the consumers differ:
+    the replan context wants `explanation`, a future gate may branch on `code`,
+    and a human reading the journal wants `expected`/`actual` side by side.
+    """
+
+    code: str                 # `sum_mismatch`, `count_mismatch`, ...
+    expected: str = ""        # what the source implies
+    actual: str = ""          # what the claim asserted
+    explanation: str = ""     # one sentence, written for the next attempt
+    computed_from: str = ""   # the values the computation used
+
+    def to_log_payload(self) -> dict[str, str]:
+        return {
+            "code": self.code,
+            "expected": self.expected,
+            "actual": self.actual,
+            "explanation": self.explanation,
+            "computed_from": self.computed_from,
+        }
+
+
+@dataclass(frozen=True)
 class ClaimChunk:
     """One sentence-or-paragraph claim from the answer."""
     text: str
     citations: tuple[Citation, ...]
     matched_evidence_ids: tuple[str, ...]
     verdict: str
+    #: Present only when a check REFUTED the claim and could say why. A
+    #: verdict without one is a stamp; the point of MIR-060 direction (b) is
+    #: that arithmetic refutations always carry their working.
+    reason: ClaimReason | None = None
 
 
 @dataclass(frozen=True)

@@ -45,7 +45,12 @@ WATCH: dict[str, int] = {
     "core/campaign.py:run_campaign": 350,
     "cli/command_dispatch.py:handle_meta_command": 349,
     "core/evidence.py:evidence_from_tool_result": 321,
-    "core/verifier_core.py:verify": 283,
+    # 2026-08-05, MIR-060 (b): 283 -> 298. The third content gate — the one
+    # that COMPUTES rather than asking whose evidence this is — sits beside
+    # the other two, where `strict_ok` is decided, because that is the only
+    # place a citation and its excerpt are both in hand. Extracting it would
+    # move the gate away from the decision it feeds.
+    "core/verifier_core.py:verify": 300,
     "app/bootstrap.py:build_agent": 246,
     "core/loop_memory_write.py:AgentLoopMemoryWrite._record_experience_memory": 246,
     "core/referent_resolver.py:ReferentResolver.resolve": 240,
