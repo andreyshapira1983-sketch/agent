@@ -521,9 +521,50 @@ interned, so `_current_attempt` and `audit_read_only` read as "untouched" no
 matter what happened. Five of the six fields it flagged were artefacts. The
 mistake is written at `_Marker` in the test rather than quietly fixed.
 
+**Step two, 2026-08-05: CLOSED WITHOUT A REFACTOR, on the operator's ruling
+once the measurements were in. There is nothing here that costs correctness.**
+
+Two more checks before deciding, because "spread over five homes" is a
+complaint about style and style is not worth paying for on its own.
+
+*Does the hand-off lose anything?* Four fields are written back into a state
+object and never taken out again by `_run_inner`: `advice_for_planner` and
+`forbidden_actions` on `AttemptState`, `source_ranking` and `source_registry`
+on `VerifyState`. That looks exactly like a forgotten unpack. It is not —
+**nothing reads them after the phase returns.** The first two are carried
+between attempts inside the loop; the second two are written straight onto the
+agent by the verify phase (`core/loop_verify_replan.py:457` and `:469`), which
+is where every consumer reads them. Measured by walking `_run_inner` for loads
+after the call site, not by reading it.
+
+*What does the plumbing cost?* 75 of 421 lines (17%) — 61 packing three state
+objects, 14 unpacking. The entry above guessed ~90.
+
+**Why nothing is being changed.** The three states already share one mechanism:
+a dataclass, mutated in place, unpacked after. There is no second style to
+unify with. The 75 lines are the explicit list of what crosses into each phase
+— the only place the boundary is visible at all — so removing them buys
+brevity and pays with the thing that makes the split legible. And a single
+`RunContext` was ruled out by the operator at the start, correctly: it would
+erase the boundaries rather than declare them.
+
+The item was opened on the hypothesis that run state leaks between turns.
+Step one measured that and the hypothesis is false. What remains is style, and
+trading visible boundaries for fewer lines is a bad exchange.
+
+**Left deliberately, with the reason recorded here rather than in the code:**
+those four write-back fields. They cannot be deleted — inside their phase they
+do real work — but a later reader may reasonably assume the caller collects
+them and build on a local that never updates. That trap is now written down;
+it was not before.
+
+Guarding what was learned: `tests/test_run_state_lifetime.py` keeps the
+inventory honest — a new mutable field goes red until someone classifies its
+lifetime.
+
 - [x] step one — characterization test and lifetime classification
-- [ ] step two — scope decided against the measurement above, not against the
-      original framing
+- [x] step two — closed by measurement; no refactor, reasons above
+- [x] done
 
 ### B3. Cataloguing written twice
 
