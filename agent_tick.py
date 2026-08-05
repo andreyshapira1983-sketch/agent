@@ -44,6 +44,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from app.bootstrap import DEFAULT_RUNTIME_TASKS_PATH
 from core import heartbeat_io as _hb
 from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH
 
@@ -60,7 +61,18 @@ LOGS_DIR           = "logs"
 TICK_LOG_FILE      = "daemon_tick.jsonl"
 APPROVAL_INBOX_PATH = DEFAULT_APPROVAL_INBOX_PATH
 SCHEDULES_PATH     = "data/runtime_schedules.jsonl"
-TASK_QUEUE_PATH    = "data/task_queue.jsonl"
+# ONE queue, and it is the one the operator writes to. Until 2026-08-05 the
+# daemon read `data/task_queue.jsonl`, which no other module mentions, while
+# `:task-add`, the scheduler CLI and the health command all used
+# `data/runtime_tasks.jsonl` (`app/bootstrap.py`, `app/task_scheduler_cli.py`,
+# `cli/commands_health.py`). A task queued by hand was therefore invisible
+# here — measured on the live workspace: 27 consecutive ticks logged
+# `no_pending_tasks` while an `auto_run` task sat `pending` in the other
+# store. The daemon was not refusing the work; it could not see it.
+#
+# Imported rather than re-declared, so a third path cannot appear the same
+# quiet way. `tests/test_one_task_store.py` fails if it does.
+TASK_QUEUE_PATH    = str(DEFAULT_RUNTIME_TASKS_PATH)
 INCIDENT_LOG_PATH  = "data/incidents.jsonl"
 HEARTBEAT_PATH     = _hb.HEARTBEAT_PATH
 # The single-instance lock every queue consumer must hold while draining. Same

@@ -290,7 +290,7 @@ def test_tick_marks_timed_out_run_inconclusive_not_healthy(workspace: Path, monk
     monkeypatch.setenv("AGENT_TEST_TIMEOUT_SECONDS", "300")
 
     # Enqueue a pending auto_run task that includes the tests health check.
-    queue = TaskQueueStore(workspace / "data" / "task_queue.jsonl")
+    queue = TaskQueueStore(workspace / agent_tick.TASK_QUEUE_PATH)
     queue.add(goal="project health", dry_run=True, include_tests=True, limit=3)
 
     exit_code = agent_tick.run_tick(workspace, dry_run=True)
@@ -409,7 +409,7 @@ def test_tick_failed_tests_drive_a_repair_proposal_into_the_inbox(
     monkeypatch.setattr(bootstrap, "build_agent", lambda *a, **k: agent)
     monkeypatch.setenv("AGENT_TEST_TIMEOUT_SECONDS", "300")
 
-    queue = TaskQueueStore(workspace / "data" / "task_queue.jsonl")
+    queue = TaskQueueStore(workspace / agent_tick.TASK_QUEUE_PATH)
     queue.add(goal="project health", dry_run=True, include_tests=True, limit=3)
 
     exit_code = agent_tick.run_tick(workspace, dry_run=True)
