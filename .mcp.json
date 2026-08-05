@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "agent-state": {
+      "command": "python",
+      "args": ["tools/agent_mcp_server.py"],
+      "env": {}
+    }
+  }
+}
