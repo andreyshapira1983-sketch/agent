@@ -516,7 +516,26 @@ class KnowledgePipeline:
             result.source_store = source_store.save_registry(registry)
 
         if not auto_write_memory or remember is None:
-            result.memory_skipped = len(registry.claims)
+            # A row per claim here too. The `require_verified` skip below
+            # got one and this one did not, so a live run reported
+            # `memory_skipped=45, decisions=[]` — the counter said 45
+            # claims went nowhere and nothing said why. Fixing one of two
+            # silent paths is not fixing the class.
+            reason = (
+                "auto_write_memory is off" if not auto_write_memory
+                else "no memory writer is wired"
+            )
+            for claim in registry.claims:
+                result.memory_skipped += 1
+                result.decisions.append({
+                    "claim_id": claim.id,
+                    "source_id": claim.source_id,
+                    "knowledge_decision": {
+                        "decision": "skip",
+                        "reasons": [reason],
+                        "policy_id": "auto_write_memory",
+                    },
+                })
             return result
 
         for claim in registry.claims:
