@@ -75,7 +75,7 @@ def test_the_flag_is_off_by_default():
     assert AutonomousRuntimeConfig().learning_writes_memory is False
 
 
-def test_without_the_flag_nothing_is_written(monkeypatch):
+def test_without_the_flag_nothing_is_written():
     """The default path must not reach `remember` at all — not even to reject.
 
     Checked by counting calls rather than by reading counters: a pipeline that
@@ -192,8 +192,6 @@ def test_a_code_source_is_refused_even_when_verified():
     because a change that replaced one with the other would leave each hole the
     other used to cover.
     """
-    from dataclasses import replace
-
     pipeline = KnowledgePipeline()
     chain = ProvenanceChain()
     chain.add(make_evidence(
@@ -212,3 +210,30 @@ def test_a_code_source_is_refused_even_when_verified():
             "код перестал отвергаться, хотя это отдельное правило: "
             f"{list(getattr(decision, 'reasons', []))[:1]}"
         )
+
+
+def test_a_skipped_claim_leaves_a_reason_not_just_a_counter():
+    """The gate must say why it refused, in the same channel as every other decision.
+
+    A claim that vanishes leaving only `memory_skipped += 1` gives the reader a
+    number and no cause — the invisible-failure shape MIR-077 was closed for.
+    A new gate is the worst possible place to reintroduce it, so the skip
+    writes a `decisions` row like the reject path does.
+    """
+    pipeline = KnowledgePipeline()
+
+    result = pipeline.run(
+        _chain_with("The gate refuses an unsigned request.\n"),
+        remember=_RecordingRemember(),
+        auto_write_memory=True,
+        require_verified=True,
+    )
+
+    assert result.memory_skipped > 0
+    assert len(result.decisions) == result.memory_skipped, (
+        "пропущенные claim'ы не оставили строк решения"
+    )
+    decision = result.decisions[0]["knowledge_decision"]
+    assert decision["decision"] == "skip"
+    assert decision["policy_id"] == "require_verified"
+    assert "verified" in decision["reasons"][0], decision["reasons"]

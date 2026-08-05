@@ -531,7 +531,26 @@ class KnowledgePipeline:
                 # `:ingest` is present and can judge; a campaign running
                 # overnight cannot, and a single file asserting something
                 # about itself is not evidence that it is true.
+                #
+                # A decision row all the same. A claim that vanishes
+                # without one leaves the reader a counter and no reason —
+                # the invisible-failure shape MIR-077 was closed for, and
+                # a gate that cannot say why it refused is the worst place
+                # to reintroduce it.
                 result.memory_skipped += 1
+                result.decisions.append({
+                    "claim_id": claim.id,
+                    "source_id": claim.source_id,
+                    "knowledge_decision": {
+                        "decision": "skip",
+                        "reasons": [
+                            (f"claim status is {claim.status!r}, not "
+                             "'verified': an unattended run writes only "
+                             "what a second source corroborated"),
+                        ],
+                        "policy_id": "require_verified",
+                    },
+                })
                 continue
             source = registry.get_source(claim.source_id)
             decision = self.write_policy.decide(claim, source=source)
