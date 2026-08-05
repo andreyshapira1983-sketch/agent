@@ -273,7 +273,40 @@ into flagging everything and stop being read.
   the layer's own helper is scored silent and has to carry a justifying comment
   instead. That is the same "scope chosen by where someone looked" shape the
   counter itself is being fixed for, and it belongs to this item.
-- [ ] done
+
+**Counter fixed 2026-08-05. The closing of the 17 that remain is NOT done.**
+
+Two corrections, and the second is the point of the item.
+
+*`_sensor_failed` now counts as reporting.* Fifteen handlers across `core/` were
+scored silent while reporting correctly — which is how, in A4, a handler that
+did report had to carry a justifying comment to satisfy the tool meant to find
+silence.
+
+*A second question, asked separately.* The existing ratchet asks whether a silent
+handler carries a COMMENT, and stands at zero. All three defects the census
+traced — A2, A3, A4 — satisfied it. **Every one was commented.** A comment helps
+whoever reads the code and does nothing for an operator reading logs at three in
+the morning. `journal_silent_in` asks the other question: how many handlers
+write nothing to the journal? Two structural exclusions — a handler that
+re-raises has reported by the strongest means there is, and one nested inside a
+reporting handler is the guard around reporting itself.
+
+**17 in the loop layer**, banked as a budget that may only shrink
+(`tests/test_journal_silence_ratchet.py`). Not 28: A2–A4 closed six, and the
+counting rule is stricter than the census's hand count. Verified red by adding
+a silent handler — it names the address.
+
+The number lives in the TOOL because two throwaway passes over the same layer
+gave 22 and 18. One implementation, one number.
+
+**Scope is the loop layer on purpose.** The same counter reports **281** across
+all of `core/`, and calling those defects would be claiming past the
+measurement — the exact mistake this exercise is about. Widening wants its own
+evidence, one handler at a time, as the census did.
+
+- [x] counter fixed and ratcheted
+- [ ] the 17 closed one at a time
 
 ---
 
