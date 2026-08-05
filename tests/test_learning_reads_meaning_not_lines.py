@@ -197,8 +197,13 @@ def test_the_python_budget_is_derived_from_the_prose_one():
     from core.ingestion import CHUNK_CHARS, PROJECT_MAX_CHUNKS_PER_FILE, PYTHON_MAX_CHUNKS_PER_FILE
 
     budget = PROJECT_MAX_CHUNKS_PER_FILE * CHUNK_CHARS
-    assert PYTHON_MAX_CHUNKS_PER_FILE * 462 <= budget * 1.6, (
-        "питоновский потолок вышел за бюджет, из которого выведен"
+    #: The longest average measured across the five modules the run picked.
+    longest_average_docstring = 462
+    worst_case = PYTHON_MAX_CHUNKS_PER_FILE * longest_average_docstring
+
+    assert worst_case <= budget * 1.6, (
+        f"питоновский потолок берёт до {worst_case} символов при бюджете "
+        f"{budget}, из которого он выведен"
     )
     assert PYTHON_MAX_CHUNKS_PER_FILE > PROJECT_MAX_CHUNKS_PER_FILE, (
         "докстрока много легче прозаического куска — потолок обязан быть выше"
