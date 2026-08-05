@@ -19,6 +19,7 @@ so a future call site cannot quietly reintroduce a per-site decision.
 from __future__ import annotations
 
 import ast
+import inspect
 import pathlib
 
 import pytest
@@ -91,16 +92,24 @@ def _pipeline_calls() -> list[tuple[str, ast.Call]]:
     return out
 
 
-def test_all_five_write_sites_are_accounted_for():
+def test_all_four_write_sites_are_accounted_for():
     """A count, so a NEW site cannot arrive unnoticed under a green suite.
 
-    Two in the loop layer (`loop_evidence_chain`, `loop_verify_replan`) and
-    three in `core/ingestion.py`. If this number changes, the change is either a
-    new write site that needs the gate or a removed one — both want a human
-    look, which is why the number is pinned rather than left implicit.
+    Four now, not the five this test first pinned. B3 merged the two loop-layer
+    sites into one shared core (`_catalogue_chain` in `loop_evidence_chain.py`),
+    so `loop_verify_replan` calls it instead of running the pipeline itself.
+    That is the gate getting HARDER to lose, not easier: one place to get it
+    wrong in the loop layer rather than two.
+
+    Three remain in `core/ingestion.py`, which catalogues a document set on an
+    operator command — a different caller with a different lifetime, and no
+    business sharing the turn's core.
+
+    If this number changes, the change is either a new write site that needs the
+    gate or a removed one. Both want a human look, which is why it is pinned.
     """
     calls = _pipeline_calls()
-    assert len(calls) == 5, [f for f, _ in calls]
+    assert len(calls) == 4, [f for f, _ in calls]
 
 
 def test_no_write_site_decides_the_gate_by_itself():
@@ -117,22 +126,40 @@ def test_no_write_site_decides_the_gate_by_itself():
         )
 
 
-def test_both_loop_sites_use_the_shared_policy():
-    """Named explicitly, because the second one hides inside a loop.
+def test_the_loop_layer_asks_the_question_in_exactly_one_place():
+    """Was "both loop sites use the shared policy" — there is one site now.
 
-    `core/loop_verify_replan.py`'s call sits inside the citation-fetch loop, so
-    it runs once per iteration. A per-site decision there is not one open door
-    but one per round.
+    The verify path used to run the pipeline itself, inside the citation-fetch
+    loop, so a per-site decision there was not one open door but one per round.
+    B3 gave both callers a shared core, and the question is asked there.
+
+    Checked as "exactly one", not "at least one": a second site reappearing is
+    how this defect returns.
     """
-    seen = {
-        filename
+    asking = [
+        f"{filename}:{call.lineno}"
         for filename, call in _pipeline_calls()
-        if any(
+        if filename.startswith("loop")
+        and any(
             kw.arg == "require_verified" and "_unattended_run" in ast.unparse(kw.value)
             for kw in call.keywords
         )
-    }
-    assert {"loop_evidence_chain.py", "loop_verify_replan.py"} <= seen, seen
+    ]
+    assert asking == ["loop_evidence_chain.py:" + asking[0].split(":")[1]], asking
+    assert len(asking) == 1, asking
+
+
+def test_the_verify_path_still_gets_the_gate_through_the_core():
+    """It no longer runs the pipeline, so the gate must arrive another way.
+
+    Losing the gate by delegating would be a silent regression of A1 dressed as
+    a tidy-up, which is exactly the trade B3 must not make.
+    """
+    src = inspect.getsource(
+        __import__("core.loop_verify_replan", fromlist=["x"])
+    )
+    assert "_catalogue_chain(" in src
+    assert "knowledge_pipeline.run(" not in src
 
 
 def test_the_three_ingestion_paths_resolve_it_through_the_agent():

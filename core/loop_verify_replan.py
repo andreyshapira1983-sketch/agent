@@ -30,7 +30,7 @@ from core.model_usage import ModelBudgetExceeded
 from core.models import Goal, Plan
 from core.planner import PlannerOutput
 from core.replan import ReplanTrigger, count_failures, format_replan_context
-from core.source_ranker import SourceRankingReport, rank_chain
+from core.source_ranker import SourceRankingReport
 
 
 @dataclass
@@ -92,9 +92,6 @@ class AgentLoopVerifyReplan:
         planner: Any
         replan_policy: Any
         verifier_enabled: Any
-        knowledge_pipeline: Any
-        knowledge_auto_write: Any
-        source_registry_store: Any
         last_verification: Any
         last_provenance: Any
         last_source_registry: Any
@@ -106,7 +103,6 @@ class AgentLoopVerifyReplan:
         # ложно помечается E1111.
         _verify_draft: Any
         _build_plan: Any
-        _knowledge_remember_batch: Any
         _quarantine_conflicted_memory: Any
 
         # Берётся у соседней примеси: работает через MRO, но связь между
@@ -119,7 +115,12 @@ class AgentLoopVerifyReplan:
         # Читалось через `getattr` с умолчанием, и умолчание превращало
         # отсутствие связи в тихий вердикт по чужому правилу (A6).
         _synthesis_expects_contract_headers: Any
-        _unattended_run: Any
+        # Пять объявлений отсюда ушли вместе с выносом сердцевины
+        # каталогизации (B3): `knowledge_pipeline`, `knowledge_auto_write`,
+        # `source_registry_store`, `_knowledge_remember_batch` и
+        # `_unattended_run` теперь нужны только ей. Сторож проводки это и
+        # показал — вынос убрал связь, а не переставил вызов.
+        _catalogue_chain: Any
 
     def _replan_on_refuted_claims(self, report: Any, st: VerifyState) -> None:
         """Rung 4 of the ladder — carry the WHY into the next attempt.
@@ -442,7 +443,17 @@ class AgentLoopVerifyReplan:
                         "chain": st.chain.to_log_payload(),
                     },
                 )
-                st.source_ranking = rank_chain(st.chain, question=st.user_question)
+                # The shared core (census B3). Everything below it is this
+                # caller's own: the run state it writes into, the `phase` and
+                # `iteration` stamps, and the quarantine — none of which the
+                # other caller does.
+                catalogued = self._catalogue_chain(
+                    st.chain,
+                    question=st.user_question,
+                    may_knowledge=st.may_knowledge,
+                    may_source_registry=st.may_source_registry,
+                )
+                st.source_ranking = catalogued.ranking
                 self.last_source_ranking = st.source_ranking
                 self.log.log(
                     "source_ranking",
@@ -452,22 +463,7 @@ class AgentLoopVerifyReplan:
                         "iteration": verify_replan_attempt,
                     },
                 )
-                knowledge_result = self.knowledge_pipeline.run(
-                    st.chain,
-                    ranking=st.source_ranking,
-                    source_store=(
-                        self.source_registry_store if st.may_source_registry else None
-                    ),
-                    remember=(
-                        self._knowledge_remember_batch()
-                        if st.may_knowledge
-                        else None
-                    ),
-                    auto_write_memory=(
-                        self.knowledge_auto_write if st.may_knowledge else False
-                    ),
-                    require_verified=self._unattended_run(),
-                )
+                knowledge_result = catalogued.knowledge
                 st.source_registry = knowledge_result.registry
                 self._quarantine_conflicted_memory(knowledge_result)
                 self.last_source_registry = st.source_registry
