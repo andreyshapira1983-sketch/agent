@@ -62,7 +62,11 @@ def _read_jsonl(path: Path, *, last: int = 0) -> Any:
 
     `last` is served by a bounded `deque`, so asking for the final 40 events of
     a million-line journal costs 40 rows of memory rather than a million.
-    `total` still counts every row, because "the last 40 of 12 000" and "the
+    `total` counts every row the reader could PARSE; the rest are in
+    `unreadable_rows`, and the two never overlap. The docstring used to say
+    "every row", which contradicted the test one screen away asserting
+    `total == 2, unreadable_rows == 1` for a three-line file (review of
+    #317). Both numbers are kept because "the last 40 of 12 000" and "the
     last 40 of 40" are different facts about the same answer.
     """
     if not path.exists():
@@ -222,8 +226,15 @@ def run_journal(limit: int = 40, event_filter: str = "") -> dict:
     """Events from the most recent run log, newest last.
 
     `event_filter` is a comma-separated list of event names; empty means all.
-    This is where a failure now leaves a trace — before MIR-077 closed, 46
+    This is where a failure now leaves a trace -- before MIR-077 closed, 46
     handlers in `core/` swallowed one without writing anything here.
+
+    Streams the file and keeps only the last N MATCHED events in a bounded
+    deque. The first version made `_read_jsonl` stream and then called it with
+    `last=0`, materialising every row and filtering into a second list -- the
+    plumbing was fixed and the one tap that pours 5 MB was left open (review
+    of #317). Filtering has to happen DURING the walk, because `last` counts
+    matches and the reader cannot know which rows match.
     """
     try:
         logs = sorted(_LOGS.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
@@ -232,27 +243,44 @@ def run_journal(limit: int = 40, event_filter: str = "") -> dict:
     if not logs:
         return {"error": "missing", "store": "logs/", "detail": "no run logs yet"}
     wanted = {name.strip() for name in event_filter.split(",") if name.strip()}
-    result = _read_jsonl(logs[-1])
-    if "rows" not in result:
-        return result
-    events = [r for r in result["rows"]
-              if not wanted or str(r.get("event", "")) in wanted]
+    keep = max(1, min(limit, 200))
+    newest = logs[-1]
+
+    events: collections.deque = collections.deque(maxlen=keep)
+    rows = matched = unreadable = 0
+    try:
+        with newest.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    unreadable += 1
+                    continue
+                rows += 1
+                if wanted and str(row.get("event", "")) not in wanted:
+                    continue
+                matched += 1
+                events.append({
+                    "event": row.get("event"),
+                    "ts": row.get("ts") or row.get("timestamp"),
+                    "payload": row.get("payload"),
+                })
+    except OSError as exc:
+        return {"error": type(exc).__name__, "store": newest.name,
+                "detail": str(exc)[:200]}
+
     return {
-        "log_file": logs[-1].name,
-        # Two counts, because one was misleading: `events_total` used to
-        # report the file's row count even when a filter was given, so a
-        # caller asking for `error` events saw "events_total: 12000" beside
-        # three of them and could not tell an empty filter from an empty
-        # run (review of #316). `rows_in_log` keeps the raw figure, which
-        # is what makes the match count meaningful at all.
-        "events_matched": len(events),
-        "rows_in_log": result["total"],
-        "unreadable_rows": result["unreadable_rows"],
-        "events": [
-            {"event": e.get("event"), "ts": e.get("ts") or e.get("timestamp"),
-             "payload": e.get("payload")}
-            for e in events[-max(1, min(limit, 200)):]
-        ],
+        "log_file": newest.name,
+        # Two counts, because one was misleading: the total used to be the
+        # row count of the whole log whatever the filter, so a caller asking
+        # for `error` events saw a large number beside three of them and could
+        # not tell an empty filter from an empty run.
+        "events_matched": matched,
+        "rows_in_log": rows,
+        "unreadable_rows": unreadable,
+        "events": list(events),
     }
 
 

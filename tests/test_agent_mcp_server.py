@@ -42,27 +42,39 @@ _MUTATORS = (
 
 
 def _opens_for_writing(call: ast.Call) -> bool:
-    """Is this `open(...)` a write?
+    """Is this `open(...)` a write? Fails CLOSED on anything it cannot read.
 
-    The previous version flagged EVERY `open` while its own comment said "only
-    a write when a mode says so" — the check was stricter than its
-    documentation, which review round #316 caught. It also blocked the fix for
-    the real defect underneath: reading a 5 MB journal line by line needs
-    `open`, and a guard that forbids reading cannot tell a viewer from a
-    writer.
+    Three ways this was wrong before review round #317, all in the direction
+    that lets a write through — the only direction that matters in a guard:
 
-    Absent or unreadable mode means read: `open(path)` is `"r"`, and a mode
-    computed at runtime is not something this guard can rule on — it says so
-    by returning False rather than by guessing.
+    * It flagged EVERY `open`, contradicting its own comment. Fixed first,
+      because streaming a 5 MB journal needs `open`.
+    * It read the mode from argument 1, which is right for the builtin
+      `open(path, mode)` and WRONG for `path.open(mode)`, where the mode is
+      argument 0. Since this file's own reader uses `path.open`, a
+      `path.open("w")` would have passed unseen.
+    * A mode it could not evaluate — `open(p, mode=chosen)` — counted as
+      read. A gate that shrugs at what it does not understand is not a gate.
+
+    Now: the mode position follows the call shape, and a present-but-unreadable
+    mode is treated as a write. A caller who means read can pass the literal
+    `"r"` and say so.
     """
-    mode = ""
-    for i, arg in enumerate(call.args):
-        if i == 1 and isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-            mode = arg.value
-    for kw in call.keywords:
-        if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
-            mode = str(kw.value.value)
-    return any(ch in mode for ch in "wax+")
+    # `path.open(mode)` vs `open(path, mode)` — an attribute call puts the
+    # mode first because the path is the receiver.
+    mode_index = 0 if isinstance(call.func, ast.Attribute) else 1
+    candidates: list[ast.expr] = []
+    if len(call.args) > mode_index:
+        candidates.append(call.args[mode_index])
+    candidates.extend(kw.value for kw in call.keywords if kw.arg == "mode")
+    if not candidates:
+        return False              # no mode at all is "r"
+    for node in candidates:
+        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+            return True          # unreadable mode: fail closed
+        if any(ch in node.value for ch in "wax+"):
+            return True
+    return False
 
 
 def _module():
@@ -181,19 +193,26 @@ def test_the_status_view_captures_the_stream_the_agent_actually_writes():
 def test_the_write_guard_still_catches_a_write():
     """The relaxation must not have turned the guard off.
 
-    Proven by feeding it both shapes rather than trusting the loosened rule:
-    a read-mode `open` passes, every write mode is caught. Without this, "no
-    mutators found" would be indistinguishable from "the guard stopped
-    looking" — the shape of §21 in the notebook.
+    Both call shapes, because they put the mode in different places, and the
+    method form is the one this file's own reader uses: an earlier version
+    read argument 1 only, so `path.open("w")` passed unseen. And an
+    unevaluable mode counts as a write — a gate that shrugs at what it cannot
+    read is not a gate.
     """
     for source, expected in (
-        ('open(p)', False),
+        ("open(p)", False),
         ('open(p, "r")', False),
         ('open(p, encoding="utf-8")', False),
         ('open(p, "w")', True),
         ('open(p, "a")', True),
         ('open(p, "r+")', True),
         ('open(p, mode="wb")', True),
+        ("open(p, mode=chosen_at_runtime)", True),
+        ("path.open()", False),
+        ('path.open("r")', False),
+        ('path.open(encoding="utf-8")', False),
+        ('path.open("w")', True),
+        ("path.open(mode_from_a_variable)", True),
     ):
         call = ast.parse(source).body[0].value
         assert _opens_for_writing(call) is expected, source
@@ -281,3 +300,49 @@ def test_the_journal_reports_matches_and_the_raw_total_separately(
     assert nothing["rows_in_log"] == 4, (
         "пустой фильтр и пустой журнал стали неотличимы"
     )
+
+
+def test_the_journal_streams_instead_of_materialising_the_log():
+    """The consumer must stream too, not only the reader beneath it.
+
+    The first fix made `_read_jsonl` stream and then called it with `last=0`
+    from `run_journal`, which kept every row and filtered into a second list:
+    the plumbing was fixed and the one tap that pours 5 MB was left open.
+    Checked by AST, since a small fixture behaves identically either way.
+    """
+    tree = ast.parse(_VIEW.read_text(encoding="utf-8"))
+    journal = next(n for n in ast.walk(tree)
+                   if isinstance(n, ast.FunctionDef) and n.name == "run_journal")
+    calls = [n.func.id for n in ast.walk(journal)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
+    assert "_read_jsonl" not in calls, (
+        "run_journal снова читает через материализующий вызов"
+    )
+    assert any(
+        isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "open"
+        for n in ast.walk(journal)
+    ), "run_journal перестал читать файл потоком"
+
+
+def test_the_journal_tail_is_bounded_by_matches_not_by_rows(tmp_path: Path,
+                                                            monkeypatch):
+    """`limit` counts MATCHED events, so a filter cannot be starved by noise."""
+    module = _module()
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    lines = []
+    for i in range(300):
+        lines.append(json.dumps({"event": "noise", "payload": {"i": i}}))
+        if i % 100 == 0:
+            lines.append(json.dumps({"event": "plan", "payload": {"i": i}}))
+    (logs / "run_probe.jsonl").write_text(chr(10).join(lines) + chr(10),
+                                          encoding="utf-8")
+    monkeypatch.setattr(module, "_LOGS", logs)
+
+    plans = module.run_journal(limit=2, event_filter="plan")
+
+    assert plans["rows_in_log"] == 303
+    assert plans["events_matched"] == 3
+    assert len(plans["events"]) == 2, "хвост должен считать совпадения, а не строки"
+    assert [e["payload"]["i"] for e in plans["events"]] == [100, 200]
