@@ -126,6 +126,89 @@ class AgentLoopResponseDeciders:
                 "could not be built; the unverified draft is not returned"
             ) from build_exc
 
+    def _credit_memory_records_used_in_the_answer(self) -> None:
+        """Strong causal credit for memory that actually held up.
+
+        Lifted out of `_build_response_draft` because it is not about
+        building a draft at all: it is memory accounting, and it landed
+        there only because the verifier verdict and the evidence chain
+        happen to both be in scope at that point (census entry for this
+        file). The length ratchet asked for the same cut independently.
+        """
+        # MIR-074 phase 1 (operator ruling): STRONG causal credit. A record
+        # cited [memory:<id>] in a chunk the verifier marked `verified` has
+        # completed the full chain — retrieved → changed the answer →
+        # independently checked. Injection alone stays a near-zero signal
+        # (access_count); this is the one that counts.
+        if (
+            self.last_verification is not None
+            and self.last_provenance is not None
+            and self.persistent_store is not None
+            and not self._durable_learning_suppressed("access_stats")
+        ):
+            try:
+                _ev_by_id = {
+                    ev.id: ev for ev in self.last_provenance.evidences
+                }
+                _credited: list[str] = []
+                _seen_rids: set[str] = set()
+                for _chunk in self.last_verification.chunks:
+                    if _chunk.verdict != "verified":
+                        continue
+                    for _mid in _chunk.matched_evidence_ids:
+                        _ev = _ev_by_id.get(_mid)
+                        if (
+                            _ev is not None
+                            and _ev.obtained_via == "memory"
+                            and _ev.source_id.startswith("memory:mem")
+                        ):
+                            _rid = _ev.source_id.removeprefix("memory:")
+                            if _rid not in _seen_rids:
+                                _seen_rids.add(_rid)
+                                _credited.append(_rid)
+                if _credited:
+                    # One load, all increments in memory, ONE rewrite — an
+                    # answer crediting N records must not trigger N full-file
+                    # rewrites (review round #294).
+                    _records = self.persistent_store.load()
+                    _updated: list[str] = []
+                    _new_records = []
+                    for _rec in _records:
+                        if _rec.id in _seen_rids:
+                            _new_records.append(
+                                _rec.model_copy(
+                                    update={"causal_use": _rec.causal_use + 1}
+                                )
+                            )
+                            _updated.append(_rec.id)
+                        else:
+                            _new_records.append(_rec)
+                    if _updated:
+                        # Through the public bulk operation now. This site had
+                        # the right idea first — "one load, all increments in
+                        # memory, ONE rewrite" (review #294) — but reached past
+                        # the API to get it, because none existed. It does now.
+                        self.persistent_store.update_many(
+                            r for r in _new_records if r.id in _seen_rids
+                        )
+                        self.log.log(
+                            "memory_causal_credit",
+                            {"record_ids": _updated, "count": len(_updated)},
+                        )
+            except Exception as _cc_exc:
+                # Credit must never break the answer — and its failure must
+                # not be invisible (the MIR-077 rule).
+                try:
+                    self.log.log(
+                        "memory_causal_credit_failed",
+                        {
+                            "error_type": type(_cc_exc).__name__,
+                            "error": str(_cc_exc)[:300],
+                        },
+                    )
+                except Exception:
+                    pass
+
     def _enforce_answer_safety(
         self,
         draft: ResponseDraft,
@@ -269,73 +352,7 @@ class AgentLoopResponseDeciders:
                 except Exception:
                     pass
 
-        # MIR-074 phase 1 (operator ruling): STRONG causal credit. A record
-        # cited [memory:<id>] in a chunk the verifier marked `verified` has
-        # completed the full chain — retrieved → changed the answer →
-        # independently checked. Injection alone stays a near-zero signal
-        # (access_count); this is the one that counts.
-        if (
-            self.last_verification is not None
-            and self.last_provenance is not None
-            and self.persistent_store is not None
-            and not self._durable_learning_suppressed("access_stats")
-        ):
-            try:
-                _ev_by_id = {
-                    ev.id: ev for ev in self.last_provenance.evidences
-                }
-                _credited: list[str] = []
-                _seen_rids: set[str] = set()
-                for _chunk in self.last_verification.chunks:
-                    if _chunk.verdict != "verified":
-                        continue
-                    for _mid in _chunk.matched_evidence_ids:
-                        _ev = _ev_by_id.get(_mid)
-                        if (
-                            _ev is not None
-                            and _ev.obtained_via == "memory"
-                            and _ev.source_id.startswith("memory:mem")
-                        ):
-                            _rid = _ev.source_id.removeprefix("memory:")
-                            if _rid not in _seen_rids:
-                                _seen_rids.add(_rid)
-                                _credited.append(_rid)
-                if _credited:
-                    # One load, all increments in memory, ONE rewrite — an
-                    # answer crediting N records must not trigger N full-file
-                    # rewrites (review round #294).
-                    _records = self.persistent_store.load()
-                    _updated: list[str] = []
-                    _new_records = []
-                    for _rec in _records:
-                        if _rec.id in _seen_rids:
-                            _new_records.append(
-                                _rec.model_copy(
-                                    update={"causal_use": _rec.causal_use + 1}
-                                )
-                            )
-                            _updated.append(_rec.id)
-                        else:
-                            _new_records.append(_rec)
-                    if _updated:
-                        self.persistent_store._rewrite(_new_records)
-                        self.log.log(
-                            "memory_causal_credit",
-                            {"record_ids": _updated, "count": len(_updated)},
-                        )
-            except Exception as _cc_exc:
-                # Credit must never break the answer — and its failure must
-                # not be invisible (the MIR-077 rule).
-                try:
-                    self.log.log(
-                        "memory_causal_credit_failed",
-                        {
-                            "error_type": type(_cc_exc).__name__,
-                            "error": str(_cc_exc)[:300],
-                        },
-                    )
-                except Exception:
-                    pass
+        self._credit_memory_records_used_in_the_answer()
 
         # MIR-075: ask back instead of only philosophising unsupported. Fires
         # ONLY when the self-analysis sensor marked this turn AND the answer's
