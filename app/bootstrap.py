@@ -23,6 +23,7 @@ from core.smart_memory import (
     ProceduralMemoryStore,
 )
 from core.source_registry_store import SourceRegistryStore
+from core.task_queue import DEFAULT_RUNTIME_TASKS_PATH as _DEFAULT_RUNTIME_TASKS_PATH
 from core.user_profile import UserProfileStore
 from tools.base import ToolRegistry
 from tools.current_time import CurrentTimeTool
@@ -40,7 +41,9 @@ from tools.web_search import WebSearchTool
 
 DEFAULT_PERSISTENT_PATH = Path("data") / "persistent_memory.jsonl"
 DEFAULT_SOURCE_REGISTRY_PATH = Path("data") / "source_registry.jsonl"
-DEFAULT_RUNTIME_TASKS_PATH = Path("data") / "runtime_tasks.jsonl"
+# Re-exported from `core.task_queue`, which owns the store: one definition,
+# and the daemon can read it without importing this module.
+DEFAULT_RUNTIME_TASKS_PATH = _DEFAULT_RUNTIME_TASKS_PATH
 DEFAULT_RUNTIME_SCHEDULES_PATH = Path("data") / "runtime_schedules.jsonl"
 DEFAULT_MODEL_USAGE_PATH = Path("data") / "model_usage.jsonl"
 DEFAULT_BUDGET_LEDGER_PATH = Path("data") / "budget_ledger.jsonl"

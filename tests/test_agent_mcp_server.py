@@ -138,17 +138,22 @@ def test_an_unparseable_row_is_counted_not_dropped(tmp_path: Path):
     )
 
 
-def test_the_task_view_shows_both_queues():
-    """This repository has two, and they are not the same one.
+def test_the_task_view_reads_the_one_store():
+    """There is one queue now, and the view must not invent a second.
 
-    `agent_tick.py` writes `data/task_queue.jsonl`; `app/bootstrap.py` and the
-    health commands read `data/runtime_tasks.jsonl`. Showing one would let a
-    reader conclude "nothing queued" while the other side is busy — so both are
-    returned, labelled by who writes them.
+    This test used to assert the opposite — that BOTH stores were returned —
+    because `agent_tick.py` read `data/task_queue.jsonl` while everything an
+    operator touched wrote `data/runtime_tasks.jsonl`. Showing one would have
+    let a reader conclude "nothing queued" while the other side was busy.
+
+    The stores were merged on 2026-08-05 and the second file deleted, so a
+    two-headed view would now report a permanent `missing` error about a store
+    that is gone on purpose — a viewer crying wolf is worse than no viewer.
     """
     module = _module()
     view = module.task_queue()
-    assert set(view) == {"daemon", "repl_and_health"}, sorted(view)
+    assert "daemon" not in view and "repl_and_health" not in view, sorted(view)
+    assert view.get("store") == "runtime_tasks.jsonl" or "error" in view, view
 
 
 @pytest.mark.parametrize("tool", ["task_queue", "approval_inbox",
