@@ -47,13 +47,16 @@ from core.source_ranker import SourceRankingReport, rank_chain
 
 @dataclass(frozen=True)
 class CatalogueResult:
-    """What cataloguing a chain produces, before anyone decides what to do with it.
+    """What cataloguing a chain produces, for the caller to act on.
 
-    Two values and no side effects. Both callers used to compute these inline
-    and then diverge — one skips the pipeline on the cheap path, the other runs
-    inside the citation-fetch loop, quarantines conflicted records and stamps
-    every event with its iteration. Those differences are real, so they stay
-    with the callers; what was duplicated is only the computation above them.
+    Two values. NOT a pure result: producing them runs the knowledge pipeline,
+    which may write to long-term memory — see `_catalogue_chain`.
+
+    Both callers used to compute these inline and then diverge: one skips the
+    pipeline on the cheap path, the other runs inside the citation-fetch loop,
+    quarantines conflicted records and stamps every event with its iteration.
+    Those differences are real, so they stay with the callers; what was
+    duplicated is the sequence above them.
     """
 
     ranking: SourceRankingReport
@@ -98,16 +101,27 @@ class AgentLoopEvidenceChain:
         may_knowledge: bool,
         may_source_registry: bool,
     ) -> CatalogueResult:
-        """Rank the chain and run the knowledge pipeline over it. Nothing else.
+        """Rank the chain and run the knowledge pipeline over it.
 
-        The sequence was written twice — here and in
-        `core/loop_verify_replan.py`, which repeated it rather than calling it
-        (census B3). It deliberately does NOT log and does NOT store: the two
+        **This is not a pure computation and must not be described as one.**
+        `knowledge_pipeline.run` catalogues sources and, when
+        `auto_write_memory` is on and the claim passes `require_verified`,
+        **writes to long-term memory**. It also persists the source registry
+        when `source_store` is supplied. Both are governed by the two
+        permissions this method takes and by `_unattended_run()`, and both
+        happen inside this call.
+
+        What it does NOT do is the caller's part: it writes no journal event and
+        assigns no field on the agent or the run state. Those differ — the two
         callers log different payloads (the verify path stamps `phase` and
         `iteration` on every event) and store into different places (`self` here,
-        the run state there). Folding those in would need a mode flag, and a
+        the run state there) — so folding them in would need a mode flag, and a
         function that behaves two ways by argument is two functions wearing one
         name.
+
+        The sequence was written twice before this: here and in
+        `core/loop_verify_replan.py`, which repeated it rather than calling it
+        (census B3).
         """
         ranking = rank_chain(chain, question=question)
         knowledge = self.knowledge_pipeline.run(
