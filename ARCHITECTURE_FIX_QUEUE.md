@@ -321,8 +321,57 @@ evidence, one handler at a time, as the census did.
 - `forget` / `list_persistent` from `core/loop_memory_commands.py` — CLI only.
 - **Blocked by:** `tests/test_repair_routes_by_complexity.py` pins its rule by
   reading the file's **source text**. Moving the file reddens the test without
-  touching behaviour. Rewrite it against behaviour first.
-- [ ] done
+  touching behaviour. Rewrite it against behaviour first. **Unblocked by C1**,
+  which replaced the literal path with `inspect.getsource` — the guard then
+  followed the logic to its new home for the cost of one line.
+
+**Done 2026-08-05, per the operator's decision: neither a bare file move nor a
+CLI rewrite. `agent` stays the single operator entry point; the mixin stops
+being the home of the logic.**
+
+`core/repair_commands.py` and `core/memory_hygiene_commands.py` hold the
+decisions. Both take their dependencies as ARGUMENTS: a function accepting
+`agent` and reaching into it with `getattr` would have moved the coupling
+instead of removing it, which is the duck-typed seam this census already
+recorded at `core/ingestion.py`. Not one call site in `cli/` or `agent_tick.py`
+changed.
+
+**The permission question deliberately did not move.** Whether a durable write
+is allowed — the audit brake, the dry-run brake, the sink allowlist — is the
+agent's policy. Answering it inside the subsystem would put a second copy of
+that decision in a second place, the exact defect class this census exists for.
+`_hygiene_suppressed_reason()` stays on the mixin and passes a finished verdict
+down as `suppressed_reason`.
+
+Two methods stayed put and the reason is the same test in both cases — is there
+a decision to move?
+
+- `repair()`: the controller takes the AGENT itself, so routing it through the
+  subsystem adds a hop and moves nothing.
+- `forget` / `list_persistent`: twelve lines, one branch, two journal events. No
+  decision comparable to the tier selection or rollback's three empty cases. A
+  third module for them would add a file to a project already carrying too many.
+  Their misplacement is a property of the **file** that contains them — which
+  also holds `remember`, and `remember` IS loop-reachable — so it is a naming
+  decision, not an extraction. **Left open deliberately, not overlooked.**
+
+Three of the repository's own guards did real work here. The architecture
+invariant called both new modules orphans and was right to: `from core import
+repair_commands` yields the module name `core`, so `architecture_invariants.py`
+cannot see it. Ten such imports exist in production and eight predate this
+change — the blind spot is real but latent, since every other module is also
+imported the dotted way somewhere. Imports changed to the dotted form with the
+reason written at the import. The anatomy map needed both modules grouped and
+regenerated; the docs-conformance guard caught a stale line anchor in this very
+file.
+
+Cover: `tests/test_repair_routes_by_complexity.py` gained two guards — the mixin
+must delegate and must not hold the decision (judged by AST call, not by the
+alias string, so renaming the alias cannot fake a pass), and the subsystem must
+take its dependencies as parameters rather than an agent.
+
+Full suite 7071 passed, 1 xfailed. Except-audit target 0.
+- [x] done
 
 ### B2. One home for run state (Л3)
 
