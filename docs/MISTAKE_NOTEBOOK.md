@@ -863,7 +863,7 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 4 | [core/plan_parsing.py:242](../core/plan_parsing.py#L242) | rescuing JSON from a lone `\` — an example of how to fix this class | assistant, 2026-08-04 | PR #303 |
 | 5 | [core/builder_reply_diagnosis.py:17](../core/builder_reply_diagnosis.py#L17) | a rejection now names the cause, the position and the fragment (moved out of the producer by MIR-084) | assistant, 2026-08-04 | PR #303 |
 | 6 | [core/code_state.py:97](../core/code_state.py#L97) | fingerprint of the checked code — commit, branch, divergence | assistant, 2026-08-04 | PR #301 |
-| 6 | [core/autonomous_runtime.py:684](../core/autonomous_runtime.py#L684) | the autonomous test report carries the fingerprint | assistant, 2026-08-04 | PR #302 |
+| 6 | [core/autonomous_runtime.py:765](../core/autonomous_runtime.py#L765) | the autonomous test report carries the fingerprint | assistant, 2026-08-04 | PR #302 |
 | 11 | [core/self_build_producer.py:391](../core/self_build_producer.py#L391) | ~~"the result never reaches the verifier"~~ — **wrong as written**: the patch does get checked (critic's structural vetoes, then targeted + full tests on apply, red ⇒ rollback). What is model self-report is `confidence`, and 3 of the live proposals passed that gate and still failed the tests | assistant, 2026-08-04 | claim corrected; the real defect is row 29 |
 | 12 | [core/task_complexity.py:108](../core/task_complexity.py#L108) | a ~180-character threshold decides which model answers | assistant, 2026-08-04 | PR #301, partly |
 | 15 | [core/llm.py:302](../core/llm.py#L302) | three replies broke at 32 326 / 32 440 / 37 678 — continuation stitched a JSON string it could not resume | assistant, 2026-08-04 | MIR-084 |

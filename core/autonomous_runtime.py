@@ -167,6 +167,16 @@ class AutonomousRuntimeConfig:
     include_tests: bool = True
     include_goal: bool = False
     learning_limit: int = 5
+    #: May an unattended run write what it learned into long-term memory?
+    #: OFF by default; until 2026-08-05 `auto_write_memory=False` was
+    #: hardcoded at both learning call sites and the operator could not say
+    #: yes at all. Turning it on does not open the door: both sites also
+    #: pass `require_verified=True`, so a claim enters memory only when a
+    #: SECOND source corroborated it. Measured — a single `.md` or web page
+    #: is otherwise saved at confidence 0.90 and nobody is watching an
+    #: overnight run. (Code sources were already refused by
+    #: `KnowledgeWritePolicy`: programs do not assert facts.)
+    learning_writes_memory: bool = False
     budgets: BudgetLimits = field(default_factory=BudgetLimits)
     circuit: CircuitBreakerConfig = field(default_factory=CircuitBreakerConfig)
     # Run ReflectionEngine after the health pass to persist lessons from logs.
@@ -698,7 +708,8 @@ class AutonomousRuntime:
             workspace=self.workspace,
             paths=plan.source_paths,
             dry_run=config.dry_run,
-            auto_write_memory=False,
+            auto_write_memory=config.learning_writes_memory,
+            require_verified=True,
         )
         return AutonomousTaskReport(
             task,
@@ -1322,7 +1333,8 @@ class AutonomousRuntime:
                         workspace=self.workspace,
                         paths=result.learning_plan.source_paths,
                         dry_run=config.dry_run,
-                        auto_write_memory=False,
+                        auto_write_memory=config.learning_writes_memory,
+                        require_verified=True,
                     )
                     self._log(
                         "reflection_learning_ingest",

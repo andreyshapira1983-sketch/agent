@@ -382,6 +382,7 @@ def ingest_files(
     paths: Iterable[str],
     dry_run: bool = False,
     auto_write_memory: bool | None = None,
+    require_verified: bool = False,
 ) -> IngestReport:
     resolved = [_resolve_inside_workspace(workspace, path) for path in paths]
     return _ingest_paths(
@@ -392,6 +393,7 @@ def ingest_files(
         requested_path="; ".join(paths),
         dry_run=dry_run,
         auto_write_memory=auto_write_memory,
+        require_verified=require_verified,
         max_chunks_per_file=PROJECT_MAX_CHUNKS_PER_FILE,
     )
 
@@ -406,6 +408,7 @@ def _ingest_paths(
     dry_run: bool,
     auto_write_memory: bool | None,
     max_chunks_per_file: int,
+    require_verified: bool = False,
 ) -> IngestReport:
     workspace = workspace.resolve()
     write_memory = bool(getattr(agent, "knowledge_auto_write", False))
@@ -494,6 +497,7 @@ def _ingest_paths(
         source_store=None if dry_run else getattr(agent, "source_registry_store", None),
         remember=getattr(agent, "_remember_from_knowledge", None),
         auto_write_memory=write_memory,
+        require_verified=require_verified,
     )
 
     registry: SourceRegistry = knowledge_result.registry

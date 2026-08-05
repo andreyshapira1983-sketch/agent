@@ -507,6 +507,7 @@ class KnowledgePipeline:
         source_store: SourceRegistryStore | None = None,
         remember: RememberFn | None = None,
         auto_write_memory: bool = False,
+        require_verified: bool = False,
     ) -> KnowledgePipelineResult:
         registry, conflicts = self.build_registry(chain, ranking=ranking)
         result = KnowledgePipelineResult(registry=registry, conflicts=conflicts)
@@ -519,6 +520,19 @@ class KnowledgePipeline:
             return result
 
         for claim in registry.claims:
+            if require_verified and claim.status != "verified":
+                # SKIPPED, not rejected: the claim was not judged bad, it
+                # was never corroborated. `verified` is set in
+                # `build_registry` only when a second source says the same
+                # thing AND the claim was normally extracted, so this gate
+                # means "one source is not enough to become a memory".
+                #
+                # It exists for the UNATTENDED path. A human running
+                # `:ingest` is present and can judge; a campaign running
+                # overnight cannot, and a single file asserting something
+                # about itself is not evidence that it is true.
+                result.memory_skipped += 1
+                continue
             source = registry.get_source(claim.source_id)
             decision = self.write_policy.decide(claim, source=source)
             row: dict[str, Any] = {
