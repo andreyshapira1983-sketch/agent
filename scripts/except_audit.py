@@ -233,9 +233,26 @@ def journal_silent_handlers(src: str, rel_file: str) -> list[dict]:
                 return True
         return False
 
+    # A `try` whose body is nothing but journal writes: the handler guards the
+    # act of reporting, and reporting a failed report is a recursion. Identical
+    # in kind to the nested-handler exclusion below and to `try_only_logs` in
+    # `classify_source` — which is where this rule already lived. It was written
+    # once and not carried across, so `core/loop_run_tail.py:155` counted as a
+    # silence the layer had no way to remove.
+    guards_a_write: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        if node.body and all(
+            isinstance(s, ast.Expr) and _is_reporting_call(s.value) for s in node.body
+        ):
+            guards_a_write.update(h.lineno for h in node.handlers)
+
     out: list[dict] = []
     for handler in handlers:
         if _reports(handler):
+            continue
+        if handler.lineno in guards_a_write:
             continue
         if any(isinstance(n, ast.Raise) for n in ast.walk(handler)):
             continue
