@@ -305,16 +305,47 @@ all of `core/`, and calling those defects would be claiming past the
 measurement — the exact mistake this exercise is about. Widening wants its own
 evidence, one handler at a time, as the census did.
 
-**Closing them, 2026-08-05: 17 -> 13. Three of the four reductions were the
-COUNTER being wrong, and saying which is which is the whole discipline here.**
+**Closing them, 2026-08-05: 17 -> 13, which is TWO measurement corrections and
+TWO repairs. Saying which is which is the whole discipline here, and the first
+attempt at saying it was wrong — see the correction directly below.**
 
-Measurement corrections (no code was repaired):
+> **Correction, same day.** This entry first read "three of the four reductions
+> were the COUNTER being wrong", and the body of commit `116bfeb` says the same.
+> Both are false, in two ways.
+>
+> The scope fix was counted as one of the reductions. It was not a reduction at
+> all: the count had already fallen 17 -> 16 when B1 carried a handler out of
+> the layer, and widening the scope put it back to 17. It corrected a
+> CONCEALMENT, and the arithmetic below never had four reductions to divide.
+>
+> And there were two repairs, not one — `core/loop_run_tail.py:246` and `:258`
+> are separate handlers with separate failures.
+>
+> Reconstructed by running each version of the auditor against each revision of
+> the code and diffing the address lists, rather than from memory:
+>
+> | step | change | address | count |
+> |---|---|---|---|
+> | — | budget stood at | | 17 |
+> | 0 | old auditor, code after B1 | `repair_commands.py:64` **left the scope** | 16 |
+> | 1 | scope widened | same address **returned** | 17 |
+> | 2 | transitive reporter | `loop_response_deciders.py:293` left | 16 |
+> | 3 | guard around a pure write | `loop_run_tail.py:155` left | 15 |
+> | 4 | **two production repairs** | `loop_run_tail.py:246`, `:258` left | 13 |
+>
+> **17 -> 13 = −2 counter, −2 repairs.** The commit message is not rewritten;
+> history stays as it was written and the correction lives here.
 
-- The scope was spelled `loop*`, so when B1 moved `propose_repair` out it
-  carried a silent handler past the edge of the measurement. 17 -> 16 with
-  nothing fixed. `loop_layer_files` now follows the dotted-alias import a
-  facade uses, and **the budget must equal the measurement exactly** — the old
-  slack of two is what let that pass in silence.
+Before either of those, a CONCEALMENT was undone — no change to the count, and
+the reason it is listed separately. The scope was spelled `loop*`, so when B1
+moved `propose_repair` out it carried a silent handler past the edge of the
+measurement: 17 -> 16 with nothing fixed. `loop_layer_files` now follows the
+dotted-alias import a facade uses, which put the handler back and the count
+back to 17. **The budget must equal the measurement exactly** — the old slack of
+two is what let a silent 17-against-16 sit in a green suite.
+
+Measurement corrections (no code was repaired) — two of them:
+
 - The counter matched a literal `.log(` in the handler's own body, so
   `_enforce_answer_safety` scored silent while delegating to
   `_safe_answer_after_enforcement_failure`, whose first statement writes.
@@ -324,6 +355,24 @@ Measurement corrections (no code was repaired):
 - `core/loop_run_tail.py:155` guards a `try` containing nothing but a journal
   write. `classify_source` already excluded that shape as `try_only_logs`; the
   rule had never been carried across.
+
+**Known hole in the new reporter rule, raised by the operator and confirmed.**
+`_unconditional_reporters` asks whether a helper ALWAYS writes to the journal.
+It does not ask whether the write says anything about the caught exception. A
+helper whose unconditional write is a generic start-event is accepted, and the
+handler delegating to it stops being counted:
+
+```python
+def _begin(self, exc):
+    self.log.log("operation_start", {})   # unconditional, says nothing of exc
+    return Fallback()
+```
+
+Measured, not argued: the handler above is reported as NOT silent. No live
+instance in `core/` today — all four handlers the new rules excluded do carry
+the exception (`exception_type`, or `f"file_read failed: {type(exc).__name__}"`)
+— but that is a property of the current code, not of the rule. Left open on
+purpose rather than patched in passing; there is no test pinning it yet.
 
 Repairs (two handlers, `core/loop_run_tail.py:246` and `:258`):
 
