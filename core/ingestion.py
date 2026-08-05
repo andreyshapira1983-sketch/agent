@@ -47,6 +47,10 @@ MAX_FILE_BYTES = 1_000_000
 DEFAULT_PROJECT_LIMIT = 80
 SOURCE_MAX_CHUNKS = 16
 PROJECT_MAX_CHUNKS_PER_FILE = 3
+
+#: Documented definitions per `.py` file. Derived, not picked: see the
+#: comment at the call site — same character budget as the prose cap.
+PYTHON_MAX_CHUNKS_PER_FILE = 8
 CHUNK_CHARS = 800
 
 
@@ -469,8 +473,19 @@ def _ingest_paths(
         # being `_touch(tmp_path / "core" / ...)` — scaffolding, not
         # knowledge, and only `auto_write_memory=False` kept it out of
         # long-term memory.
-        chunker = _chunk_python if path.suffix.lower() == ".py" else _chunk_text
-        chunks = chunker(text, max_chunks=max_chunks_per_file)
+        # Same byte budget, different unit. The cap counts CHUNKS, and a
+        # prose chunk is up to CHUNK_CHARS while a docstring averages a
+        # few hundred characters — so `3` meant ~2400 characters for
+        # prose and 'three docstrings' for source, which is a much
+        # tighter rule that nobody chose. Measured on the five modules a
+        # live learning run actually picked: they document 31 definitions
+        # and the cap took 11. At 215-462 characters each, 2400 fits
+        # 5-11 of them, so 8 keeps the cost the cap was defending.
+        is_python = path.suffix.lower() == ".py"
+        chunker = _chunk_python if is_python else _chunk_text
+        chunks = chunker(text, max_chunks=(
+            PYTHON_MAX_CHUNKS_PER_FILE if is_python else max_chunks_per_file
+        ))
         if not chunks:
             # An undocumented source explains nothing about itself, and a
             # claim per code block would be worse than none.

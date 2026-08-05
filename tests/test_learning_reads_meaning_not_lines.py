@@ -179,3 +179,27 @@ def test_a_block_is_not_a_namespace():
 
     assert any(c.startswith("Store.load: ") for c in chunks), chunks
     assert not any("True" in c.split(":")[0] for c in chunks), chunks
+
+
+def test_the_python_budget_is_derived_from_the_prose_one():
+    """The cap counts chunks, and the change altered what a chunk weighs.
+
+    `PROJECT_MAX_CHUNKS_PER_FILE = 3` meant ~2400 characters for prose, since a
+    prose chunk runs to `CHUNK_CHARS`. Applied to docstrings it silently became
+    "three definitions per module" — a far tighter rule nobody chose. Measured
+    on the five modules a live learning run picked: they document 31
+    definitions and the cap took 11.
+
+    Docstrings there averaged 215-462 characters, so the same 2400 fits 5-11 of
+    them. Eight sits inside that range, which is why it is that and not a round
+    number someone liked.
+    """
+    from core.ingestion import CHUNK_CHARS, PROJECT_MAX_CHUNKS_PER_FILE, PYTHON_MAX_CHUNKS_PER_FILE
+
+    budget = PROJECT_MAX_CHUNKS_PER_FILE * CHUNK_CHARS
+    assert PYTHON_MAX_CHUNKS_PER_FILE * 462 <= budget * 1.6, (
+        "питоновский потолок вышел за бюджет, из которого выведен"
+    )
+    assert PYTHON_MAX_CHUNKS_PER_FILE > PROJECT_MAX_CHUNKS_PER_FILE, (
+        "докстрока много легче прозаического куска — потолок обязан быть выше"
+    )
