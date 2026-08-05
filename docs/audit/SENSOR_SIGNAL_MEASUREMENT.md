@@ -123,6 +123,52 @@ On 10 correct, ordinary planner rationales covering nine different tools, S4
 fired **0 times**. The historical over-firing noted in its own source comments
 (the old "≥ 6 characters" rule) does not reproduce.
 
+### S4 — re-measured on real traffic, 2026-08-05
+
+**The probe above is wrong about real prose, and the reason is the probe.** Ten
+rationales written to exercise the sensor are not ten rationales the planner
+wrote. Re-run over every `planner` event in `logs/` — the sensor's own input,
+logged one row per attempt immediately before it runs — the picture inverts:
+
+| | probe (2026-08-02) | real traffic (2026-08-05) |
+|---|---|---|
+| turns examined | 10 constructed | **108 logged** |
+| S4 fires | 0 | **44 (41 %)** |
+
+Accused tools: `list_dir` 19, `file_read` 18, `shell_exec` 6, `run_tests` 6,
+`file_write` 5, `read_logs` 2, `web_search` 1, `web_fetch` 1.
+
+Four defects, all in `_TOOL_KEYWORDS`, all provable from the logged text:
+
+1. **`file_write` has no entry at all.** It can only match the literal token
+   `file_write`, so all 5 accusations are false. The rationales say
+   *"User wants a new module and test file created"*, *"This follows rule 4
+   (write files)"*, *"explicitly asked to create two named files"*.
+2. **`list_dir` demands exact phrases** (`"list the dir"`, `"list files"`) that
+   real prose does not use: *"this requires listing actual directory contents"*,
+   *"I'll list core/ modules"*.
+3. **`file_read`'s stems carry a trailing space** (`"read "`, `"reads "`), so
+   substring matching is used and *"reading core/loop.py"* cannot match.
+4. **`self_repair` is in the table and in no registry.** Measured across every
+   `session_start` row, the agent has 13 tools and `self_repair` is not one of
+   them; the sensor demanded it 5 times — a step the planner could not produce.
+
+One mechanism underneath all four: the table is a list of literal phrases, and
+"no phrase matched" is read as "the agent did not argue for this action". That
+is the same shape already named for S3 above — the #172 routing defect — and it
+was invisible here because the probe supplied the phrases the table contains.
+
+**Consequence for the promotion question.** S4 cannot be given blocking power in
+this form: forbidding unjustified actions would forbid `file_write` on nearly
+every run that creates a file. The ruling recorded for S3 applies unchanged —
+*keep the requirement, replace the detector*. A detector that reads a per-step
+rationale supplied by the planner would make "unjustified" a structural fact
+rather than a lexical guess; `PlannerOutput.sources` is `list[dict[str, Any]]`,
+so that is a contract change, not a redesign.
+
+Reproduce: `logs/run_*.jsonl`, event `planner`, re-run
+`check_reasoning_actions(reasoning, tools_chosen)` per row.
+
 ## 3. Signal uniqueness
 
 Across 8 constructed turn-shapes, computing all sensors on the same input:
