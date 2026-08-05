@@ -71,6 +71,7 @@ class AgentLoopEvidenceChain:
         # ложно помечается E1111.
         _sensor_failed: Any
         _knowledge_remember_batch: Any
+        _unattended_run: Any
 
     def _fold_evidence_chain(
         self,
@@ -262,6 +263,9 @@ class AgentLoopEvidenceChain:
                 auto_write_memory=(
                     self.knowledge_auto_write if may_knowledge else False
                 ),
+                # Unattended runs demand corroboration; a human at the REPL
+                # can judge a single source themselves.
+                require_verified=self._unattended_run(),
             )
             source_registry = knowledge_result.registry
             self.last_source_registry = source_registry

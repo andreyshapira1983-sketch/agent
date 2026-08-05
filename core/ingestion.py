@@ -209,6 +209,7 @@ def ingest_web_topic(
         source_store=None if dry_run else getattr(agent, "source_registry_store", None),
         remember=getattr(agent, "_remember_from_knowledge", None),
         auto_write_memory=write_memory,
+        require_verified=_require_verified_for(agent, None),
     )
 
     registry_out: SourceRegistry = knowledge_result.registry
@@ -334,6 +335,7 @@ def ingest_rss_feed(
         source_store=None if dry_run else getattr(agent, "source_registry_store", None),
         remember=getattr(agent, "_remember_from_knowledge", None),
         auto_write_memory=write_memory,
+        require_verified=_require_verified_for(agent, None),
     )
 
     registry_out: SourceRegistry = knowledge_result.registry
@@ -382,7 +384,7 @@ def ingest_files(
     paths: Iterable[str],
     dry_run: bool = False,
     auto_write_memory: bool | None = None,
-    require_verified: bool = False,
+    require_verified: bool | None = None,
 ) -> IngestReport:
     resolved = [_resolve_inside_workspace(workspace, path) for path in paths]
     return _ingest_paths(
@@ -393,9 +395,27 @@ def ingest_files(
         requested_path="; ".join(paths),
         dry_run=dry_run,
         auto_write_memory=auto_write_memory,
-        require_verified=require_verified,
+        require_verified=_require_verified_for(agent, require_verified),
         max_chunks_per_file=PROJECT_MAX_CHUNKS_PER_FILE,
     )
+
+
+def _require_verified_for(agent: Any, explicit: bool | None) -> bool:
+    """Whether a claim needs a second source before it may enter memory.
+
+    Answered from WHO DRIVES THE RUN, never from which entry point was used.
+    `agent._unattended_run()` reads `gateway_path`: `repl` is a human who can
+    judge a single source, `daemon` and `runtime` are nobody.
+
+    An explicit argument still wins, for a caller that genuinely knows better.
+    `None` means "not stated" and is resolved here — a default of `False` in a
+    signature is a decision made by whoever typed the signature, on behalf of
+    every caller, without knowing who would be running.
+    """
+    if explicit is not None:
+        return bool(explicit)
+    resolver = getattr(agent, "_unattended_run", None)
+    return bool(resolver()) if callable(resolver) else False
 
 
 def _chunks_for(text: str, *, is_python: bool, max_chunks_per_file: int) -> list[str]:
@@ -431,7 +451,7 @@ def _ingest_paths(
     dry_run: bool,
     auto_write_memory: bool | None,
     max_chunks_per_file: int,
-    require_verified: bool = False,
+    require_verified: bool | None = None,
 ) -> IngestReport:
     workspace = workspace.resolve()
     write_memory = bool(getattr(agent, "knowledge_auto_write", False))
@@ -515,7 +535,7 @@ def _ingest_paths(
         source_store=None if dry_run else getattr(agent, "source_registry_store", None),
         remember=getattr(agent, "_remember_from_knowledge", None),
         auto_write_memory=write_memory,
-        require_verified=require_verified,
+        require_verified=_require_verified_for(agent, require_verified),
     )
 
     registry: SourceRegistry = knowledge_result.registry

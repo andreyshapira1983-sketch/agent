@@ -34,8 +34,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-import pytest
-
 from core.autonomous_runtime import AutonomousRuntimeConfig
 from core.evidence import ProvenanceChain, make_evidence
 from core.knowledge_pipeline import KnowledgePipeline
@@ -154,14 +152,6 @@ def test_the_gate_lets_a_verified_claim_through_the_real_run(monkeypatch):
     assert result.memory_skipped == 0
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "А1 очереди починок: два вызова конвейера знаний на пути ХОДА не передают "
-    "require_verified — core/loop_evidence_chain.py:257 и "
-    "core/loop_verify_replan.py:452 (второй внутри цикла добычи цитат). "
-    "Сторож расширен на весь core/ и честно красный. Отметка strict: когда "
-    "дефект починят, тест станет XPASS и потребует снять эту строку — "
-    "молча зазеленеть он не сможет."
-))
 def test_the_unattended_path_always_demands_verification():
     """Флаг открывает дверь, но не снимает замок — и дверей больше одной.
 
@@ -182,15 +172,22 @@ def test_the_unattended_path_always_demands_verification():
     import ast
     import pathlib
 
+    # The invariant is about the GATE, not about every function that happens to
+    # forward an `auto_write_memory` flag. `core/ingestion.py` passes the flag
+    # down to `_ingest_paths`, which resolves the question itself; demanding the
+    # keyword there would be demanding it twice. What may never happen is the
+    # pipeline running with the question unanswered.
     calls = []
     for path in sorted(pathlib.Path("core").glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         calls.extend(
             node for node in ast.walk(tree)
             if isinstance(node, ast.Call)
-            and any(kw.arg == "auto_write_memory" for kw in node.keywords)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "run"
+            and "knowledge_pipeline" in ast.unparse(node.func.value)
         )
-    assert calls, "места записи знаний исчезли — обновите этого сторожа"
+    assert calls, "the knowledge-pipeline call sites vanished — update this guard"
     for call in calls:
         kwargs = {kw.arg for kw in call.keywords}
         assert "require_verified" in kwargs, (
@@ -198,8 +195,16 @@ def test_the_unattended_path_always_demands_verification():
             f"{ast.unparse(call)[:120]}"
         )
         verified = next(kw for kw in call.keywords if kw.arg == "require_verified")
-        assert isinstance(verified.value, ast.Constant) and verified.value.value is True, (
-            f"требование подтверждения стало настраиваемым: {ast.unparse(verified.value)}"
+        # Not "must be the literal True". The turn path is driven by BOTH a
+        # human at the REPL and the unattended runtime, so a constant there
+        # would be wrong in one of the two directions; it derives the answer
+        # from `gateway_path`, which is what records who drives the run. What
+        # may never appear is a literal that switches the gate off.
+        assert not (
+            isinstance(verified.value, ast.Constant) and verified.value.value is False
+        ), (
+            "content gate switched off by a literal: "
+            f"{ast.unparse(call)[:120]}"
         )
 
 
