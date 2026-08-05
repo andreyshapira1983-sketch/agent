@@ -28,7 +28,12 @@ import textwrap
 # `tests/test_ingestion_helpers.py` берёт эти же швы оттуда, и это тот
 # слой, который тесты поддерживают. Заодно проверка, что шов реэкспорта
 # жив — его уже однажды снесла автоправка ruff (§24).
-from core.ingestion import _chunk_python, _chunk_text
+from core.ingestion import CHUNK_CHARS, _chunk_python, _chunk_text
+
+#: More than the fixtures below can spend, so these tests measure what the
+#: chunker CHOOSES rather than where a budget cut it off. The budget itself is
+#: pinned separately, at the bottom of the file.
+_AMPLE = 100_000
 
 _SOURCE = textwrap.dedent('''
     """The module explains itself in one sentence."""
@@ -57,7 +62,7 @@ _SOURCE = textwrap.dedent('''
 
 def test_a_setup_line_never_becomes_a_claim():
     """The exact shape the agent found, pinned by its own example."""
-    chunks = _chunk_python(_SOURCE, max_chunks=20)
+    chunks = _chunk_python(_SOURCE, max_chars=_AMPLE)
 
     assert not any("_touch(" in c for c in chunks), chunks
     assert not any("CONSTANT" in c for c in chunks), chunks
@@ -66,7 +71,7 @@ def test_a_setup_line_never_becomes_a_claim():
 
 def test_the_behaviour_a_test_pins_survives():
     """Refusing scaffolding must not throw away what the test is FOR."""
-    chunks = _chunk_python(_SOURCE, max_chunks=20)
+    chunks = _chunk_python(_SOURCE, max_chars=_AMPLE)
     named = [c for c in chunks if c.startswith("test_the_gate_refuses_an_unsigned_request")]
 
     assert len(named) == 1, chunks
@@ -75,14 +80,14 @@ def test_the_behaviour_a_test_pins_survives():
 
 def test_a_claim_says_whose_behaviour_it_describes():
     """`load` alone is meaningless; `Store.load` is a fact about something."""
-    chunks = _chunk_python(_SOURCE, max_chunks=20)
+    chunks = _chunk_python(_SOURCE, max_chars=_AMPLE)
 
     assert any(c.startswith("Store.load: ") for c in chunks), chunks
     assert any(c.startswith("Store: ") for c in chunks), chunks
 
 
 def test_the_module_docstring_is_kept():
-    chunks = _chunk_python(_SOURCE, max_chunks=20)
+    chunks = _chunk_python(_SOURCE, max_chars=_AMPLE)
     assert chunks[0] == "The module explains itself in one sentence."
 
 
@@ -95,7 +100,7 @@ def test_an_undocumented_source_yields_nothing_rather_than_fragments():
     """
     bare = "import os\n\nX = 1\n\ndef f(a):\n    return a + 1\n"
 
-    assert _chunk_python(bare, max_chunks=20) == []
+    assert _chunk_python(bare, max_chars=_AMPLE) == []
     # The prose chunker keeps it: one chunk of raw code, which is exactly the
     # kind of "claim" this change exists to stop producing. (It accumulates
     # short paragraphs up to CHUNK_CHARS rather than emitting one per blank
@@ -113,7 +118,12 @@ def test_a_file_that_will_not_parse_falls_back_to_prose():
     """
     broken = '"""Doc."""\n\ndef f(\n'
 
-    assert _chunk_python(broken, max_chunks=20) == _chunk_text(broken, max_chunks=20)
+    # Also pins the conversion between the two budgets: a prose chunk runs to
+    # CHUNK_CHARS, so `n` of them IS `n * CHUNK_CHARS` characters. Handing the
+    # fallback a different allowance than the caller granted would make an
+    # unparseable file quietly cheaper or dearer than a parseable one.
+    assert (_chunk_python(broken, max_chars=20 * CHUNK_CHARS)
+            == _chunk_text(broken, max_chunks=20))
 
 
 def test_prose_files_are_untouched_by_this():
@@ -153,7 +163,7 @@ def test_a_documented_definition_inside_a_block_is_not_lost():
                 """Defined inside a with-block, documented all the same."""
     ''').lstrip()
 
-    chunks = _chunk_python(source, max_chunks=20)
+    chunks = _chunk_python(source, max_chars=_AMPLE)
 
     assert any(c.startswith("modern: ") for c in chunks), chunks
     assert any(c.startswith("fallback: ") for c in chunks), chunks
@@ -175,36 +185,70 @@ def test_a_block_is_not_a_namespace():
                     """Every row that parsed."""
     ''').lstrip()
 
-    chunks = _chunk_python(source, max_chunks=20)
+    chunks = _chunk_python(source, max_chars=_AMPLE)
 
     assert any(c.startswith("Store.load: ") for c in chunks), chunks
     assert not any("True" in c.split(":")[0] for c in chunks), chunks
 
 
-def test_the_python_budget_is_derived_from_the_prose_one():
-    """The cap counts chunks, and the change altered what a chunk weighs.
+def _module_of(docstring_lengths: list[int]) -> str:
+    """A module documenting one function per requested docstring length."""
+    parts = ['"""M."""']
+    for i, length in enumerate(docstring_lengths):
+        parts.append(f'def f{i}():\n    """{"x" * length}"""')
+    return "\n\n".join(parts) + "\n"
 
-    `PROJECT_MAX_CHUNKS_PER_FILE = 3` meant ~2400 characters for prose, since a
-    prose chunk runs to `CHUNK_CHARS`. Applied to docstrings it silently became
-    "three definitions per module" — a far tighter rule nobody chose. Measured
-    on the five modules a live learning run picked: they document 31
-    definitions and the cap took 11.
 
-    Docstrings there averaged 215-462 characters, so the same 2400 fits 5-11 of
-    them. Eight sits inside that range, which is why it is that and not a round
-    number someone liked.
+def test_the_budget_holds_however_heavy_the_docstrings_are():
+    """A count cannot express a budget when the items have no size.
+
+    The first version of this cap was a flat `8` definitions for `.py`, chosen
+    to match `3 * CHUNK_CHARS` on an assumed docstring of a few hundred
+    characters. Measured afterwards across `core/*.py`, it OVERSHOT that budget
+    on 69 of 181 files: `core/completion_contract.py` documents one thing in
+    3788 characters, nearly five prose chunks in a single item.
+
+    So the guard is on the quantity that was always meant — characters — and
+    it is checked with docstrings far past the assumed size, which is the case
+    the counting version got wrong.
     """
-    from core.ingestion import CHUNK_CHARS, PROJECT_MAX_CHUNKS_PER_FILE, PYTHON_MAX_CHUNKS_PER_FILE
+    fat = _module_of([1500, 1500, 1500, 1500])
 
-    budget = PROJECT_MAX_CHUNKS_PER_FILE * CHUNK_CHARS
-    #: The longest average measured across the five modules the run picked.
-    longest_average_docstring = 462
-    worst_case = PYTHON_MAX_CHUNKS_PER_FILE * longest_average_docstring
+    chunks = _chunk_python(fat, max_chars=2400)
 
-    assert worst_case <= budget * 1.6, (
-        f"питоновский потолок берёт до {worst_case} символов при бюджете "
-        f"{budget}, из которого он выведен"
+    assert sum(len(c) for c in chunks) <= 2400, [len(c) for c in chunks]
+    assert len(chunks) < 4, "потолок в символах не остановил тяжёлые докстроки"
+
+
+def test_the_caller_s_budget_is_the_one_that_applies():
+    """`:ingest-source` asks for more than `:ingest-project` and must get it.
+
+    The constant ignored both callers: `ingest_source` passes
+    `SOURCE_MAX_CHUNKS = 16` and Python files were held to 8 regardless, so the
+    mode's whole point — read this ONE file properly — was overridden by a
+    number meant for bulk project sweeps.
+    """
+    source = _module_of([400] * 12)
+
+    small = _chunk_python(source, max_chars=3 * CHUNK_CHARS)
+    large = _chunk_python(source, max_chars=16 * CHUNK_CHARS)
+
+    assert len(large) > len(small), (
+        f"больший бюджет не дал большего: {len(large)} против {len(small)}"
     )
-    assert PYTHON_MAX_CHUNKS_PER_FILE > PROJECT_MAX_CHUNKS_PER_FILE, (
-        "докстрока много легче прозаического куска — потолок обязан быть выше"
-    )
+    assert len(small) < 12, "маленький бюджет обязан ограничивать"
+
+
+def test_one_huge_docstring_is_kept_rather_than_making_the_file_invisible():
+    """Returning nothing means "documents nothing" to the caller, which skips it.
+
+    A module whose single docstring outweighs the entire budget would then be
+    dropped from learning for explaining itself at length — the opposite of
+    what the budget defends. The first item is taken whatever it weighs.
+    """
+    huge = '"""' + "x" * 5000 + '"""\n'
+
+    chunks = _chunk_python(huge, max_chars=2400)
+
+    assert len(chunks) == 1
+    assert len(chunks[0]) == 5000
