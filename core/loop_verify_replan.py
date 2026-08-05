@@ -115,6 +115,7 @@ class AgentLoopVerifyReplan:
         _executed_tools: Any
         _save_budget_pause_checkpoint: Any
         _verification_receipt_kwargs: Any
+        _unattended_run: Any
 
     def _replan_on_refuted_claims(self, report: Any, st: VerifyState) -> None:
         """Rung 4 of the ladder — carry the WHY into the next attempt.
@@ -463,6 +464,7 @@ class AgentLoopVerifyReplan:
                     auto_write_memory=(
                         self.knowledge_auto_write if st.may_knowledge else False
                     ),
+                    require_verified=self._unattended_run(),
                 )
                 st.source_registry = knowledge_result.registry
                 self._quarantine_conflicted_memory(knowledge_result)
