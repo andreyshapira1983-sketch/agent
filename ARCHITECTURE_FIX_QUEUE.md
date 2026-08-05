@@ -401,8 +401,37 @@ move and since meant "the run tail may never change" — it did not catch these
 two defects, it protected them from being fixed. The five substantive checks in
 that file stay; the reason is written where it stood.
 
+**Second pass, same day: 13 -> 11. Both were repairs; the counter needed
+nothing this time.**
+
+`core/loop_step_execution.py:130` and `:135`, both inside `_step_only_reads`.
+The probe asks each tool whether this step with these arguments can change the
+workspace, and three situations produced the same `False` and the same empty
+journal:
+
+    the step genuinely writes        normal — must stay silent
+    the tool is not in the registry  a fault
+    the tool's `risk_for` raised     a fault
+
+Only the first is ordinary. The other two cost the whole batch its parallel
+path — `_execute_steps_parallel` drops to plan order the moment one step is not
+read-only — and `_execute_steps_parallel` logs nothing about which path it
+took, so a tool whose `risk_for` always raises would never run in parallel
+again and no line anywhere would say why.
+
+Both now report through `_risk_probe_failed`, with distinct reasons
+(`unknown_tool`, `risk_for_raised`) so the two faults stay apart. **The
+ordinary case is still silent on purpose** — most plans contain effect steps,
+and an event for each would be a stream rather than a signal, the same trap A3
+avoided by not reporting an empty assumption registry as a failure. The verdict
+did not change for any of the four cases: an unresolvable step still must not
+buy concurrency.
+
+Cover: `tests/test_step_risk_probe_reports.py`, 7 tests, **3 red on the old
+code**.
+
 - [x] counter fixed and ratcheted
-- [ ] the remaining 13, one at a time
+- [ ] the remaining 11, one at a time
 
 ---
 
