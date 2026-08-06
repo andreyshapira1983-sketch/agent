@@ -388,6 +388,61 @@ This also makes one distinction measurable that would otherwise be an argument.
 after spending the budget on detours is a planning defect — and both are visible
 in the same ledger, without anyone's opinion.
 
+### Three outcomes, and a lie about oneself is the worst of them
+
+The question "could this sub-agent have run this check when it reported?" has
+exactly three answers, and they are not degrees of the same thing:
+
+| answer | classification |
+|---|---|
+| could have, did not | `avoidable_uncertainty` — the mirrored penalty |
+| could not, and named the reason precisely | honest `missing_evidence` — no penalty |
+| claimed it could not, and the reason does not hold | **`unsupported_excuse`** |
+
+The third deserves its own name because it is a different defect. The sub-agent
+made an ADDITIONAL claim — about its own constraints — and that claim was false.
+
+Being wrong about the world can be honest: the source lied, the code moved, the
+model did not know. Being wrong about *oneself* — "I lacked the permission", "I
+did not have that check" — is a statement the sub-agent is required to have
+right, because it is about itself. A lie about oneself is graver than an error
+about the world, and the two must be counted separately, because they are
+treated differently:
+
+* poor calibration is fixed with more context, a better task contract, training;
+* unsupported excuses are fixed by narrowing authority, and on repetition by
+  not using that sub-agent.
+
+The first is a tuning problem. The second is a trust problem, and tuning does
+not fix trust.
+
+`unknown_check` is the special case. The arbiter cannot verify what a sub-agent
+did or did not know — an internal state is not observable. What it CAN verify is
+whether the knowledge was available: was the check id passed in, was it visible
+in the sub-agent's interface, was it listed in the contract. Available and
+visible → `unknown_check` is a planning or search defect. Never disclosed → no
+penalty is possible. The claim about the mind is not checked; the conditions for
+knowing are.
+
+### Budget stops being a yes/no fact
+
+With the ledger in hand the arbiter sees five quantities — granted, spent,
+spending categories, the cost of the required verification, and what remained at
+the moment of the decision — which separates four situations that
+`budget_exhausted` used to blur into one:
+
+* the budget was genuinely insufficient — not a defect;
+* the budget was sufficient and was spent badly — a planning defect;
+* the check was disproportionately expensive for the task — a contract defect,
+  not the child's;
+* the sub-agent deliberately chose a different, useful path.
+
+The fourth cannot be established after the fact: any spending can be narrated as
+a deliberate choice once it has happened. It counts only if the decision was
+recorded BEFORE the spend — the same discipline that fixes checks in the task
+contract in advance. An explanation after the event is a rationalisation, not a
+choice.
+
 ### Documents are claims too
 
 The same machinery answers a question this repository keeps hitting: how do you
