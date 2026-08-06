@@ -352,12 +352,20 @@ def run_repl(
                     print()
                     return 0
                 stripped = bline.strip()
-                if stripped == ">>>":
-                    break
-                # Tolerate the terminator glued to the end of a paste:
-                # "...last sentence.>>>" should also end the block, otherwise
-                # users get stuck in `... ` prompt forever after a single
-                # Ctrl+V whose buffer ended with ">>>" without a newline.
+                # One check, not two. The terminator on its own line and the
+                # terminator glued to the end of a paste ("...last sentence.>>>",
+                # which is what a single Ctrl+V without a trailing newline
+                # delivers — without this the operator sits at `... ` forever)
+                # are the same case: keep what precedes the marker, then stop.
+                #
+                # A separate `stripped == ">>>"` branch stood here first and was
+                # unobservable: measured 2026-08-06, replacing it with a marker
+                # that can never match left every test green, because a bare
+                # ">>>" falls through to this branch, contributes an empty part,
+                # and the `.strip()` below removes it. A branch that cannot be
+                # broken cannot be trusted either — the one below carries the
+                # behaviour, and `test_block_mode_terminator_may_carry_spaces`
+                # now pins the bare form through it.
                 if stripped.endswith(">>>"):
                     block_parts.append(bline.rstrip()[:-3].rstrip())
                     break

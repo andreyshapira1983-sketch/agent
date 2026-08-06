@@ -78,6 +78,19 @@ def test_block_mode_accepts_a_glued_terminator(tmp_path, monkeypatch):
     assert runs[0]["user_question"] == "line one\nline two."
 
 
+def test_block_mode_terminator_may_carry_spaces(tmp_path, monkeypatch):
+    """`>>>` on its own line ends the block, with or without surrounding space.
+
+    Pinned here because the code no longer has a branch of its own for the bare
+    form: it goes through the glued-terminator check, and the empty remainder it
+    leaves is removed by the join's `.strip()`. That equivalence is the contract
+    this test holds — break the strip or the glued branch and it fails.
+    """
+    runs = _run_repl(monkeypatch, tmp_path, ["<<<", "one", "   >>>   "])
+    assert len(runs) == 1
+    assert runs[0]["user_question"] == "one"
+
+
 def test_empty_block_is_discarded_without_running_the_agent(tmp_path, monkeypatch):
     runs = _run_repl(monkeypatch, tmp_path, ["<<<", "   ", ">>>"])
     assert runs == []
