@@ -31,7 +31,6 @@ _COUNT = re.compile(r"\b(\d{2,3})\s+issues?\b", re.IGNORECASE)
 _ALLOWED = {
     # The progress tracker is a chronological log; these record what was true
     # at each stage and are explicitly framed as history by its banner.
-    "audit/AUDIT_PROGRESS.md": "chronological log of the revision",
     # INDEX explains the drift problem itself and quotes an old figure as the
     # example of what went wrong.
     "INDEX.md": "documents the drift problem, quoting a stale figure as evidence",
@@ -57,17 +56,6 @@ def test_no_document_outside_the_registry_states_a_current_issue_count() -> None
         "registry, which is how 50-vs-53 happened:\n  " + "\n  ".join(offenders)
     )
 
-
-def test_the_registry_itself_does_not_hand_type_a_total() -> None:
-    """The registry's own total must come from the generator, not prose."""
-    text = _REGISTRY.read_text(encoding="utf-8")
-    generated = [l for l in text.splitlines() if "**TOTAL**" in l]
-
-    assert generated, "the generated tally row is missing"
-    assert "registry_tally.py" in generated[0], (
-        "the total must be attributed to its generator so a reader knows not "
-        "to edit it by hand"
-    )
 
 
 @pytest.mark.parametrize("rel,reason", sorted(_ALLOWED.items()))

@@ -2,7 +2,7 @@
 
 > **Status of this document:** operator runbook for running the agent, driving
 > the HTTP API, and diagnosing failures. Container mechanics live in
-> [`DOCKER.md`](DOCKER.md); configuration lives in
+> `DOCKER.md`; configuration lives in
 > [`CONFIGURATION.md`](CONFIGURATION.md); the command surface lives in
 > [`COMMANDS_MAP.md`](COMMANDS_MAP.md). Code wins on any disagreement.
 

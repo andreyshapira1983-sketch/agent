@@ -207,7 +207,7 @@ Recorded so this audit cannot be accused of only listing suspicions.
 > **⚠️ STATUS LEDGER SUPERSEDED (2026-07-20).** This document's own claim below
 > — "None is yet fixed in code" — was true when written and is false now. Do
 > **not** read any open/closed judgement from this file: statuses live only in
-> [`audit/MASTER_ISSUE_REGISTRY.md`](audit/MASTER_ISSUE_REGISTRY.md), where each
+> `audit/MASTER_ISSUE_REGISTRY.md`, where each
 > of these findings carries its canonical `MIR-` id, its resolution and the
 > commit that made it.
 >

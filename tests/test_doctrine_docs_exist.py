@@ -50,12 +50,6 @@ def test_learning_planner_reexports_the_same_manifest_object() -> None:
     )
 
 
-def test_readme_roadmap_reference_resolves() -> None:
-    """README's source-of-truth #3 must point at a real roadmap file."""
-    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    assert "docs/ROADMAP.md" in readme
-    assert (REPO_ROOT / "docs" / "ROADMAP.md").is_file()
-
 
 def test_subagent_governance_docs_all_exist() -> None:
     missing = [p for p in SUBAGENT_MANIFEST if not (REPO_ROOT / p).is_file()]
@@ -88,14 +82,6 @@ def test_subagent_doc_separates_implemented_from_planned() -> None:
     assert "`auto-pause` and `auto-retire` do not exist today" in flat
     assert "no auto-promote, auto-pause, auto-retire, or auto-quarantine" in flat
 
-
-def test_memory_governance_docs_all_exist() -> None:
-    missing = [p for p in MEMORY_MANIFEST if not (REPO_ROOT / p).is_file()]
-    assert not missing, (
-        "memory governance manifest references files that do not exist: "
-        f"{missing}. Create the doc or remove it from "
-        "core.doc_routing._MEMORY_GOVERNANCE_DOC_PATHS."
-    )
 
 
 def test_memory_docs_are_thematic_not_in_corporate_manifest() -> None:

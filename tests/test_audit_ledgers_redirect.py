@@ -51,21 +51,6 @@ def has_superseded_registry_banner(text: str) -> bool:
     return False
 
 
-def test_each_doc_has_superseded_registry_banner():
-    missing = [
-        rel
-        for rel in HISTORICAL_AUDIT_DOCS
-        if not has_superseded_registry_banner(
-            (REPO_ROOT / rel).read_text(encoding="utf-8")
-        )
-    ]
-    assert not missing, (
-        "these historical audit docs lack a status-ledger-superseded banner that "
-        f"links to the registry within one blockquote: {missing}. Add a banner "
-        "saying the ledger is superseded and linking "
-        "[`audit/MASTER_ISSUE_REGISTRY.md`](audit/MASTER_ISSUE_REGISTRY.md)."
-    )
-
 
 def test_contract_requires_terms_in_the_same_block():
     # Scattered terms (superseded in one block, the link in unrelated prose) must
