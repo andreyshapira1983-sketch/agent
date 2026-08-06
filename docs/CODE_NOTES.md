@@ -1,11 +1,21 @@
 # Code notes — what was done to these files and why
 
+> **Оператору, по-русски — прочтите эти пять строк, дальше можно не читать.**
+> Этот файл — память агента, а не документация программы. Нужен он одному
+> читателю: агенту в следующей сессии, который откроет код, не помня прошлого
+> разговора. **Программа от его удаления не сломается**: ни один тест, ни одна
+> проверка на него не завязаны — потеряется только время на повторное
+> разбирательство. Заведён 2026-08-06 по вашей просьбе, взамен длинных
+> пояснений внутри файлов кода. Удалять можно молча.
+
 Working notes kept by the agent, for the agent. A session starts with no memory
 of the last one: everything known about a file is what is written down. This is
 where the *why* lives so the code itself can stay short.
 
-**Not for the operator.** The operator does not read code. Anything the operator
-must know belongs in the conversation or in an operational doc, not here.
+**Not documentation of the program.** Nothing here is a requirement, a spec or
+an interface. Deleting this file breaks nothing — say so at the top of any file
+like it, because a document whose purpose nobody stated is a document that gets
+deleted, and rightly so.
 
 **Rules for this file**
 
