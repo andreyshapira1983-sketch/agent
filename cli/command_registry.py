@@ -7,8 +7,7 @@ is what switches those consumers over to this table.
 
 Why it exists: the same command surface is currently spelled out in four
 hand-maintained places (the dispatch chain in ``main.py``, the ``:help`` page,
-the startup banner, and ``docs/COMMANDS_MAP.md``) and they already disagree --
-see ``docs/refactor/CLI_BASELINE.md`` section 3.1.
+the startup banner, and ``docs/COMMANDS_MAP.md``) and they already disagree.
 
 Purity contract: this module imports **nothing** from ``core``, ``app``,
 ``cli.commands_*`` or any runtime module, and holds no behaviour. It must stay
@@ -35,7 +34,7 @@ Field meanings (all recorded from the code at commit 72fc7a8):
 - ``handler_key`` -- a stable slug for the dispatch branch. Phase 3 maps these
   to the real handlers; nothing resolves them today.
 
-Not modelled here on purpose (see CLI_BASELINE.md sections 3.1-3.2):
+Not modelled here on purpose:
 
 - REPL block/control tokens ``:task-begin``/``:task-end``/``:task-abort``/``:end``
   -- intercepted by the REPL loop, never dispatched through the head chain;

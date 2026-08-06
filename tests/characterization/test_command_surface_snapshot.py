@@ -46,7 +46,7 @@ BRIDGE_SOURCE = (REPO_ROOT / "cli" / "intent_bridge.py").read_text(encoding="utf
 _REAL_STDIN_READER = repl_module._StdinLineReader
 
 # Frozen snapshot at 9daa9bf. A diff here means a surface moved — update this
-# table together with docs/refactor/CLI_BASELINE.md.
+# table to match.
 FROZEN = {
     "dispatched": 141,
     "pre_dotenv_fast_paths": 2,

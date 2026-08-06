@@ -359,8 +359,8 @@ def test_in_startup_summary_matches_the_banner():
 
 
 def test_the_help_page_lists_every_command():
-    """Regression guard for the two gaps CLI_BASELINE.md 3.1 recorded and this
-    branch fixed: ``:refresh-models`` was dispatched but absent from ``:help``
+    """Regression guard for the two gaps this branch fixed:
+    ``:refresh-models`` was dispatched but absent from ``:help``
     entirely, and ``:help`` did not list itself. Every command is now listed."""
     missing = sorted(spec.canonical for spec in reg.COMMANDS if not spec.in_help)
     assert missing == [], f"these commands are dispatched but undocumented in :help: {missing}"

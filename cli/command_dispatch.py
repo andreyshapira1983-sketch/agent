@@ -10,8 +10,7 @@ It owns *routing only*. Every command's behaviour lives in the module the branch
 calls -- ``cli/commands_*.py``, ``app/*_cli.py``, ``app/operator_status.py``,
 ``cli/help.py``. Nothing here reads or writes agent state directly.
 
-Two things deliberately do **not** live here, and both are documented in
-``docs/refactor/CLI_BASELINE.md``:
+Two things deliberately do **not** live here:
 
 * the REPL's own block tokens (``:task-begin``/``:task-end``/``:task-abort``,
   ``:operator-task``/``:end``) are intercepted by the REPL loop before dispatch;

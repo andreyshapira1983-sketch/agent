@@ -1,7 +1,6 @@
 """``--ask <question>``: the one-shot, memory-free run.
 
-One question in, one answer out, then exit. The contract recorded in
-``docs/refactor/CLI_BASELINE.md`` section 2.4 and frozen by
+One question in, one answer out, then exit. The contract frozen by
 ``tests/characterization/test_cli_one_shot_policy.py``:
 
 * the agent is built with ``with_memory=False`` **and**
@@ -11,7 +10,7 @@ One question in, one answer out, then exit. The contract recorded in
   means *no provider wired at all*, so escalated tools stay blocked;
 * an explicit ``:command`` is dispatched before any fuzzy intent routing, and
   the agent is built **before** dispatch even for a local, no-LLM command
-  (frozen for extraction, not endorsed -- see CLI_BASELINE section 3);
+  (frozen for extraction, not endorsed);
 * deep/Opus escalation is opt-in: without ``--reason`` / ``--expect`` the
   escalation object stays ``None`` and a deep request downgrades;
 * ``stream=False``, because the ``format_human_response`` print below is the
@@ -32,8 +31,8 @@ non-behavioural fixes: the ``approval_provider`` annotation now admits ``None``
 line number that drifts. Every message string and every call is untouched.
 
 **How the collaborators are reached, and why it matters for tests.** A
-``monkeypatch.setattr`` is observed only where the *call site* resolves the name
-(``docs/refactor/CLI_BASELINE.md`` section 2.5). The three collaborator modules
+``monkeypatch.setattr`` is observed only where the *call site* resolves the
+name. The three collaborator modules
 below are therefore imported as **modules** and called through the attribute --
 ``command_dispatch.handle_meta_command(...)`` -- so one patch on the module that
 *defines* the function is seen from here and from ``cli/repl.py`` alike. Binding

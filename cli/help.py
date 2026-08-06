@@ -11,8 +11,7 @@ put their description on a continuation line or separate it with a single space
 instead of the usual two, two lines document things that are not dispatchable
 commands at all (``:task-begin``, and ``:learn-project`` which is an alias with
 its own line), and seven are prose. Those are carried as ``Raw`` entries so the
-rendered page stays **byte-identical** to what operators see today; see
-``docs/refactor/CLI_BASELINE.md`` section 3.1 for the divergence record.
+rendered page stays **byte-identical** to what operators see today.
 
 ``tests/test_help_render.py`` holds the contract: the rendered page must equal a
 frozen fixture captured from the pre-extraction code, and every command in the

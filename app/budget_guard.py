@@ -3,7 +3,7 @@
 Wraps ``agent.run()`` so that a :class:`ModelBudgetExceeded` raised mid-cycle
 does not just surface as an error string: the run's state is persisted as a
 ``paused`` checkpoint and queued as a paused task, so ``--resume <trace_id>``
-can pick it up later (see ``docs/refactor/CLI_BASELINE.md`` §1.5).
+can pick it up later.
 
 Extracted verbatim from ``main.py`` as part of the incremental CLI decomposition.
 It lives under ``app/`` rather than ``cli/`` because it is about *running the

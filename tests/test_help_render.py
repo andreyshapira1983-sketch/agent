@@ -100,8 +100,7 @@ def test_banner_tokens_agree_with_the_registry_flag():
 
     One banner entry is not a command at all: ``:task-begin`` is intercepted by
     the REPL loop, never dispatched through the head chain. That quirk is
-    recorded in ``docs/refactor/CLI_BASELINE.md`` section 3.1 and preserved here
-    rather than quietly cleaned up.
+    preserved here rather than quietly cleaned up.
     """
     non_commands = {token for token in help_module.BANNER_TOKENS if reg.lookup(token) is None}
     assert non_commands == {":task-begin"}

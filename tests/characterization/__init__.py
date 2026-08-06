@@ -3,9 +3,8 @@
 These tests freeze *currently observed* `main.py` behavior so the incremental
 extraction into `cli/` cannot change it by accident. They are a safety net for a
 refactor, **not** a statement that every behavior recorded here is desirable
-permanent design — see `docs/refactor/CLI_BASELINE.md`, which labels each
-observation as a public contract, an implementation detail frozen only for the
-extraction, or a known divergence.
+permanent design. Each test says for itself which it is: a public contract, an
+implementation detail frozen only for the extraction, or a known divergence.
 
 Rules for this package:
 
