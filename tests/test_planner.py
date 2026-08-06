@@ -398,7 +398,7 @@ def test_corporate_doctrine_question_forces_docs_first_over_core_defaults(
         if src["tool"] == "file_read"
     ]
     assert paths == [
-        "docs/future/CORPORATE_MODEL.md",
+        "knowledge/doctrine/future/CORPORATE_MODEL.md",
         "docs/CENTRAL_AGENT_GOVERNANCE.md",
         "docs/AGENT_ANATOMY.md",
         "docs/ROADMAP.md",
@@ -441,7 +441,7 @@ def test_corporate_doctrine_implementation_question_keeps_code_after_docs(
         if src["tool"] == "file_read"
     ]
     assert paths[:5] == [
-        "docs/future/CORPORATE_MODEL.md",
+        "knowledge/doctrine/future/CORPORATE_MODEL.md",
         "docs/CENTRAL_AGENT_GOVERNANCE.md",
         "docs/AGENT_ANATOMY.md",
         "docs/ROADMAP.md",
@@ -529,7 +529,7 @@ def test_mixed_doctrine_confidence_question_selects_docs_and_verifier_sources(
         if src["tool"] == "file_read"
     ]
     assert paths[:5] == [
-        "docs/future/CORPORATE_MODEL.md",
+        "knowledge/doctrine/future/CORPORATE_MODEL.md",
         "docs/CENTRAL_AGENT_GOVERNANCE.md",
         "docs/AGENT_ANATOMY.md",
         "docs/ROADMAP.md",

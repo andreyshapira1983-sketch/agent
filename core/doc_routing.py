@@ -227,7 +227,7 @@ DOCTRINE_CORPORATE_CONTEXT_TERMS = (
     "архитектур",
 )
 DOCTRINE_CORPORATE_DOC_PATHS = (
-    "docs/future/CORPORATE_MODEL.md",
+    "knowledge/doctrine/future/CORPORATE_MODEL.md",
     "docs/CENTRAL_AGENT_GOVERNANCE.md",
     "docs/AGENT_ANATOMY.md",
     "docs/ROADMAP.md",

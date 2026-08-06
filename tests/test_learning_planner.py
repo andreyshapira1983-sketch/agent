@@ -41,8 +41,8 @@ def test_learning_planner_corporate_goal_prefers_doctrine_docs(workspace: Path):
     (workspace / "core" / "architecture_audit.py").write_text("audit", encoding="utf-8")
     (workspace / "core" / "loop.py").write_text("loop", encoding="utf-8")
     (workspace / "docs").mkdir()
-    (workspace / "docs" / "future").mkdir()
-    (workspace / "docs" / "future" / "CORPORATE_MODEL.md").write_text("corp", encoding="utf-8")
+    (workspace / "knowledge" / "doctrine" / "future").mkdir(parents=True)
+    (workspace / "knowledge" / "doctrine" / "future" / "CORPORATE_MODEL.md").write_text("corp", encoding="utf-8")
     (workspace / "docs" / "CENTRAL_AGENT_GOVERNANCE.md").write_text("gov", encoding="utf-8")
     (workspace / "docs" / "AGENT_ANATOMY.md").write_text("anatomy", encoding="utf-8")
     (workspace / "docs" / "ROADMAP.md").write_text("roadmap", encoding="utf-8")
@@ -58,7 +58,7 @@ def test_learning_planner_corporate_goal_prefers_doctrine_docs(workspace: Path):
     )
 
     assert plan.source_paths == (
-        "docs/future/CORPORATE_MODEL.md",
+        "knowledge/doctrine/future/CORPORATE_MODEL.md",
         "docs/CENTRAL_AGENT_GOVERNANCE.md",
         "docs/AGENT_ANATOMY.md",
         "docs/ROADMAP.md",
@@ -103,8 +103,8 @@ def test_learning_planner_mixed_doctrine_confidence_selects_both_layers(
     (workspace / "tools").mkdir()
     (workspace / "tests").mkdir()
     (workspace / "docs").mkdir()
-    (workspace / "docs" / "future").mkdir()
-    (workspace / "docs" / "future" / "CORPORATE_MODEL.md").write_text("corp", encoding="utf-8")
+    (workspace / "knowledge" / "doctrine" / "future").mkdir(parents=True)
+    (workspace / "knowledge" / "doctrine" / "future" / "CORPORATE_MODEL.md").write_text("corp", encoding="utf-8")
     (workspace / "docs" / "CENTRAL_AGENT_GOVERNANCE.md").write_text("gov", encoding="utf-8")
     (workspace / "docs" / "AGENT_ANATOMY.md").write_text("anatomy", encoding="utf-8")
     (workspace / "docs" / "ROADMAP.md").write_text("roadmap", encoding="utf-8")
@@ -129,7 +129,7 @@ def test_learning_planner_mixed_doctrine_confidence_selects_both_layers(
         "tests/test_verifier.py",
         "tests/test_evidence_support.py",
         "tests/test_confidence_vector.py",
-        "docs/future/CORPORATE_MODEL.md",
+        "knowledge/doctrine/future/CORPORATE_MODEL.md",
         "docs/CENTRAL_AGENT_GOVERNANCE.md",
         "docs/AGENT_ANATOMY.md",
     }

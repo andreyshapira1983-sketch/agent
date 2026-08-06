@@ -293,7 +293,7 @@ Decision rules:
     night observation, safe autonomy, or the intended multi-agent doctrine.
 
     MANDATORY docs-first plan:
-      -> [file_read docs/future/CORPORATE_MODEL.md,
+      -> [file_read knowledge/doctrine/future/CORPORATE_MODEL.md,
           file_read docs/CENTRAL_AGENT_GOVERNANCE.md,
           file_read docs/AGENT_ANATOMY.md,
           file_read docs/ROADMAP.md,
