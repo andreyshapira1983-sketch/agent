@@ -26,7 +26,7 @@ Read these rules before reading anything below.
 4. **Absence of proof is not a fix.** "A module with the right name exists" does
    not close an item. Closing requires a regression or integration test that
    fails on the broken behaviour and passes on the fix (repo convention — see
-   `docs/self-audit-lessons.md`).
+   `knowledge/doctrine/self-audit-lessons.md`).
 5. **Stable IDs.** Every failure class has a stable `OFM-NNN` id so tests,
    commits, and cross-references can point at it without ambiguity.
 

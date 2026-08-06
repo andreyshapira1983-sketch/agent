@@ -263,7 +263,7 @@ _MEMORY_GOVERNANCE_DOC_PATHS = (
     # arrived. Its replacement is to be built by walking the code, not by
     # restoring a document written from static reading alone.
     "docs/MEMORY_SYSTEM_AUDIT.md",
-    "docs/self-audit-lessons.md",
+    "knowledge/doctrine/self-audit-lessons.md",
 )
 # Thematic (conditional) doc group for self-diagnosis / self-repair reasoning:
 # how to prove a defect, separate symptom from cause, refuse guess-based data
@@ -272,7 +272,7 @@ _MEMORY_GOVERNANCE_DOC_PATHS = (
 # the universal corporate manifest, because an ordinary "fix this bug" turn must
 # not pay for a reasoning protocol it is not going to use.
 #
-# docs/self-audit-lessons.md is deliberately NOT duplicated here: it is the
+# knowledge/doctrine/self-audit-lessons.md is deliberately NOT duplicated here: it is the
 # historical record of defect classes already found and already belongs to the
 # memory group. This group carries the protocol, not the history.
 _SELF_REPAIR_DOCTRINE_DOC_PATHS = (

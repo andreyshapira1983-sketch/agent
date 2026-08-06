@@ -1,7 +1,7 @@
 """The loop must actually collect defect signals, not merely be able to store them.
 
 `tests/test_episode_defect_signals.py` pins the record. This file pins the
-*wiring*, because the repo's recurring anti-pattern (`docs/self-audit-lessons.md`
+*wiring*, because the repo's recurring anti-pattern (`knowledge/doctrine/self-audit-lessons.md`
 #6) is a mechanism that exists, is unit-tested, and is never reached in
 production — which is precisely what the sensors themselves were doing: each
 logged its verdict and dropped it.

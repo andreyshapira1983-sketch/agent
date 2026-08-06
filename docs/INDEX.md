@@ -36,7 +36,7 @@ question, which single file is authoritative.
 | Daemon build state, item by item | [daemon-progress.md](daemon-progress.md) | per-sub-item implementation/PR/hotfix/acceptance | anything outside the daemon plan |
 | How to run, operate, drive the HTTP API, and diagnose failures | [OPERATIONS.md](OPERATIONS.md) | run modes, API operator guide, troubleshooting, recovery | container mechanics (→ DOCKER.md); config values (→ CONFIGURATION.md) |
 | How the agent is configured, and where it keeps state | [CONFIGURATION.md](CONFIGURATION.md) | env vars, `config/` files, `data/` state layout | issue status; runtime behaviour |
-| Problem *classes* already fixed, and how to run the next audit | [self-audit-lessons.md](self-audit-lessons.md) | the 6 recurring anti-patterns + audit procedure. **History of regressions — never delete** | current defect status |
+| Problem *classes* already fixed, and how to run the next audit | [self-audit-lessons.md](../knowledge/doctrine/self-audit-lessons.md) | the 6 recurring anti-patterns + audit procedure. **History of regressions — never delete** | current defect status |
 | Failure classes seen in *someone else's* system, as a checklist | [OPERATIONAL_FAILURE_MODES.md](OPERATIONAL_FAILURE_MODES.md) | the external OFM taxonomy — **no number in it measures this repo** | our defect status (see §4) |
 | Long-horizon multi-agent org model | [CORPORATE_MODEL.md](../knowledge/doctrine/future/CORPORATE_MODEL.md) | explicitly future/aspirational target | anything present-tense |
 | Behavioural doctrine / repo working rules | [AGENT_DOCTRINE.md](AGENT_DOCTRINE.md), [AGENTS.md](AGENTS.md) | correctness-first priority order; change discipline | technical facts |

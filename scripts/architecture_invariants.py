@@ -20,7 +20,7 @@ one: `core/campaign_io.py` reached into `agent_tick._read_heartbeat`.)
 
 **INV-2 — no orphaned deciders.**
 Every module under `core/` must be imported by some non-test module. The repo's
-own recurring anti-pattern (`docs/self-audit-lessons.md` #6) is "a module written
+own recurring anti-pattern (`knowledge/doctrine/self-audit-lessons.md` #6) is "a module written
 to fix a live failure mode, never wired into its entry point" — a mechanism that
 exists, is unit-tested, and cannot run in production. `recover_stuck` was exactly
 that for months.

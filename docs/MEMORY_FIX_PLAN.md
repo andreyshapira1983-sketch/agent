@@ -18,7 +18,7 @@ plan and code disagree, code wins and this plan must be corrected.
 ## 0. Governing invariants (repo discipline, not optional)
 
 1. **Test-first.** Every fix ships with a regression test that FAILS on the old
-   code (verify by reverting) and passes on the new — `docs/self-audit-lessons.md`
+   code (verify by reverting) and passes on the new — `knowledge/doctrine/self-audit-lessons.md`
    step 4.
 2. **Human gate.** No unattended self-modification of behaviour; any automatic
    memory-lifecycle decision rolls out shadow → counterfactual → human-approved
@@ -235,5 +235,5 @@ scope).
 
 *Provenance: anchors verified against code on `main`. Source-of-truth precedence:
 code > this plan. Companion documents: `docs/MEMORY_SYSTEM_AUDIT.md` (findings),
-`docs/self-audit-lessons.md` (fixed classes), `knowledge/doctrine/SUBAGENT_LIFECYCLE.md` and
+`knowledge/doctrine/self-audit-lessons.md` (fixed classes), `knowledge/doctrine/SUBAGENT_LIFECYCLE.md` and
 `docs/MULTI_AGENT_COORDINATION_LAYER.md` (sub-agent memory topology).*
