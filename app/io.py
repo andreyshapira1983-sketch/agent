@@ -28,9 +28,13 @@ def _force_utf8_io() -> None:
             continue
         try:
             reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            # Best-effort: if a stream refuses (e.g. piped from a process
-            # that already mangled bytes upstream) we keep going rather
-            # than crash the REPL. The audit log will still capture the
-            # raw bytes for forensics.
+        except Exception:  # noqa: BLE001 — see below; nothing here can report
+            # A stream that refuses must not stop startup, so the failure is
+            # swallowed. Nothing records it, and nothing can: this runs as the
+            # very first statement of `run_cli`, long before the agent and its
+            # journal exist — and it cannot depend on them, because it is what
+            # prepares the streams the journal will later print through.
+            #
+            # The caller can see WHICH streams were reconfigured from the
+            # return value; that is the only signal available at this point.
             pass

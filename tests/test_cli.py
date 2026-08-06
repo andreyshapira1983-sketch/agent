@@ -2469,3 +2469,53 @@ class TestPrintPersistent:
         # the printed line includes the bracketed id + tags. So just check
         # the ellipsis marker is present.
         assert "…" in out.out
+
+
+class TestForceUtf8IoCannotJournal:
+    """The comment used to promise "the audit log will still capture the raw
+    bytes for forensics". It cannot: this function is the first statement of
+    `run_cli`, and the logger is built much later, inside `build_agent`.
+
+    Pinned structurally rather than by reading the comment: the module has no
+    way to reach a journal, and the promise cannot quietly come back without
+    an import appearing here.
+    """
+
+    def test_the_module_imports_nothing_that_could_log(self):
+        import ast
+        from pathlib import Path
+
+        import app.io as io_module
+
+        tree = ast.parse(Path(io_module.__file__).read_text(encoding="utf-8"))
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported |= {a.name.split(".")[0] for a in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.split(".")[0])
+
+        assert imported <= {"__future__", "os", "sys"}, (
+            "app/io.py gained an import; if it is a journal, the swallowed "
+            f"reconfigure failure must start reporting. Found: {sorted(imported)}"
+        )
+
+    def test_it_runs_before_any_logger_exists(self):
+        """`_force_utf8_io` is the first call in `run_cli`, so no journal is
+        available to it even in principle."""
+        import ast
+        from pathlib import Path
+
+        import cli.app as app_module
+
+        fn = next(
+            n for n in ast.walk(ast.parse(Path(app_module.__file__).read_text(encoding="utf-8")))
+            if isinstance(n, ast.FunctionDef) and n.name == "run_cli"
+        )
+        calls = sorted(
+            (n.lineno, n.func.id if isinstance(n.func, ast.Name) else getattr(n.func, "attr", ""))
+            for n in ast.walk(fn) if isinstance(n, ast.Call)
+        )
+        assert calls[0][1] == "_force_utf8_io", (
+            f"something now runs before the encoding fix: {calls[:2]}"
+        )
