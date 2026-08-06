@@ -278,6 +278,84 @@ handed something false and must refuse it:
 An arbiter that accepts any of these does not verify evidence. It validates
 formatting.
 
+## The missing layer: a sub-agent's report contract
+
+This repository already has a normative document for sub-agents
+([SUBAGENT_LIFECYCLE.md](../knowledge/doctrine/SUBAGENT_LIFECYCLE.md)), written
+independently of this one, and the two turn out to be halves of the same thing:
+
+```
+Subagent Lifecycle    who exists, what rights they have, which stages they pass
+Evidence Protocol     how claims are stated and re-verified
+Report Contract       the mandatory bridge — MISSING TODAY
+```
+
+The lifecycle document governs the SUBJECT: how a sub-agent is created,
+bounded, judged, retired. It requires the verifier to check "evidentiality", and
+it already orders the checks correctly — deterministic tests, then real tool
+receipts, then file and source checks, then an independent verifier, and only
+then a model's judgement. What it never says is **what counts as evidence having
+been presented.** Without that, "check that the tests ran" is answered by a
+sentence in prose claiming they ran.
+
+So a sub-agent's result must not be free text. It returns records:
+
+```
+claim_id
+claim
+evidence_type
+evidence_reference
+verification_check_id
+world_commit_hash
+verification_registry_version
+status
+missing_evidence
+```
+
+Prose may accompany a record as explanation. It may never be the grounds for
+acceptance. A sub-agent that returns text without records has not delivered a
+poor report — it has delivered **no report**, and the task is unfinished.
+
+### The parent is not independent
+
+A parent agent chose this child, configured it, scoped its task and sent it out.
+That is a conflict of interest by construction: the parent is disposed to
+believe the child because the parent built it, not because the child proved
+anything. Hence:
+
+> **The parent may route a report. It may never mark it verified.**
+
+The parent may accept the result, hand it to the arbiter, ask for more, or stop
+the child. Only the code arbiter changes an evidence status.
+
+And one step further, because the conflict does not stop at the verdict: **the
+parent must not choose which check runs.** A parent free to pick the check picks
+a convenient one. Either the check follows from the claim's type by the
+arbiter's policy, or it was fixed in the task contract before the child started.
+
+### Documents are claims too
+
+The same machinery answers a question this repository keeps hitting: how do you
+keep a document honest? Not by testing that it contains the word "PLANNED" —
+that is a test of text, and it stays green while the text turns into a lie. The
+lifecycle document says "verified today" three times with no date, no commit and
+no instrument; by this protocol's own rule that is evidence without coordinates.
+
+Instead, a document is decomposed into checkable claims:
+
+```
+claim: persistent sub-agent identity is not implemented
+check: lifecycle_capability_matrix
+```
+
+The arbiter runs the named check against the code and returns a fact. Implement
+persistent identity and the check goes red, the claim becomes `verified_false`,
+and the document is stale — loudly, on the commit that changed the world rather
+than months later during an audit.
+
+Which makes the documentation a client of the same registry as the models. Same
+types, same freshness rules, same negative tests.
+
 ## Deliberately out of scope
 
 * Consensus. The protocol records disagreement; it does not resolve it.
@@ -297,7 +375,13 @@ Suggested order, each stage useful alone:
 3. the check registry with `read_only`, `timeout`, `allowed_paths`;
 4. freshness (commit hash + registry version) and the stale transition;
 5. cost accounting and sampled re-verification;
-6. only then a second model in the exchange.
+6. the sub-agent report contract — the bridge above, which makes the existing
+   lifecycle document enforceable rather than aspirational;
+7. only then a second model in the exchange.
+
+Note the order: sub-agents come **before** a second external model. The conflict of
+interest is already inside this system — a parent trusting its own child — so
+the arbiter earns its keep long before anyone talks to another vendor.
 
 Building the arbiter without a threat model and the negative tests above would
 be exactly the kind of new floor this project has spent a week taking apart.
