@@ -225,6 +225,47 @@ class _StdinLineReader:
         return _coalesce_burst(self.read_line, _next)
 
 
+def _ask_the_agent(
+    agent: object,
+    question: str,
+    *,
+    rate_limiter: CLIRateLimiter,
+    workspace: Path,
+    file_hint: str | None,
+) -> None:
+    """Spend one rate-limit token, run the agent, print the answer.
+
+    Two paths reach the agent — a plain message and the `:task-begin` buffer —
+    and they carried fifteen identical lines each, differing only in which
+    variable held the question. A change to one would have silently left the
+    other on the old behaviour.
+
+    `budget_guard` stays addressed through the MODULE: the suites patch
+    `budget_guard._run_agent_with_budget_guard`, and a name bound at import
+    time here would not see that patch.
+
+    Returns nothing: a refused token and a delivered answer both mean "this
+    message is done", and both callers continue their loop either way.
+    """
+    rl = rate_limiter.consume()
+    if not rl.allowed:
+        print(
+            f"(rate limit: too many requests — "
+            f"retry in {rl.retry_after_seconds:.1f}s, "
+            f"tokens remaining: {rl.tokens_remaining:.2f})",
+            file=sys.stderr,
+        )
+        return
+    answer = budget_guard._run_agent_with_budget_guard(
+        agent,
+        user_question=question,
+        file_hint=file_hint,
+        workspace=workspace,
+        stream=False,
+    )
+    print("\n" + format_human_response(answer) + "\n")
+
+
 def _stdin_is_interactive() -> bool:
     try:
         return bool(sys.stdin.isatty())
@@ -363,23 +404,10 @@ def run_repl(
                 continue
             if intent_bridge._handle_local_operator_reply(buffered, agent):
                 continue
-            rl = rate_limiter.consume()
-            if not rl.allowed:
-                print(
-                    f"(rate limit: too many requests — "
-                    f"retry in {rl.retry_after_seconds:.1f}s, "
-                    f"tokens remaining: {rl.tokens_remaining:.2f})",
-                    file=sys.stderr,
-                )
-                continue
-            answer = budget_guard._run_agent_with_budget_guard(
-                agent,
-                user_question=buffered,
-                file_hint=file_hint,
-                workspace=workspace,
-                stream=False,
+            _ask_the_agent(
+                agent, buffered,
+                rate_limiter=rate_limiter, workspace=workspace, file_hint=file_hint,
             )
-            print("\n" + format_human_response(answer) + "\n")
             continue
         if q.startswith(":") or q == "?":
             if command_dispatch.handle_meta_command(q, agent, workspace):
@@ -390,21 +418,8 @@ def run_repl(
             continue
         if intent_bridge.handle_conversational_operator_input(q, agent, workspace):
             continue
-        # ── Rate-limit check ─────────────────────────────────────────────────
-        rl = rate_limiter.consume()
-        if not rl.allowed:
-            print(
-                f"(rate limit: too many requests — "
-                f"retry in {rl.retry_after_seconds:.1f}s, "
-                f"tokens remaining: {rl.tokens_remaining:.2f})",
-                file=sys.stderr,
-            )
-            continue
-        answer = budget_guard._run_agent_with_budget_guard(
-            agent,
-            user_question=q,
-            file_hint=file_hint,
-            workspace=workspace,
-            stream=False,
+        # ── Rate-limit check, then the agent ─────────────────────────────────
+        _ask_the_agent(
+            agent, q,
+            rate_limiter=rate_limiter, workspace=workspace, file_hint=file_hint,
         )
-        print("\n" + format_human_response(answer) + "\n")
