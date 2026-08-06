@@ -26,8 +26,11 @@ Usage:
     python scripts/mutation_probe.py core/low_evidence_policy.py \\
         tests/test_low_evidence_policy.py
 
-Exit code is 1 when any mutation survived, so it can gate a change the way the
-ratchets do.
+Exit codes, and the difference between the last two matters: 0 when every
+mutation was caught, 1 when any survived — so it can gate a change the way the
+ratchets do — and 2 when the probe REFUSED to run at all, either because the
+target has uncommitted changes or because the selected tests were already red.
+A refusal is not a finding, and a caller must be able to tell them apart.
 """
 from __future__ import annotations
 
@@ -218,7 +221,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     survived = probe(args.target, args.tests, limit=args.limit)
-    return 1 if survived != 0 else 0
+    if survived < 0:
+        # `probe` refused: the selection was already red, so a survivor would
+        # prove nothing. That is not the same answer as "mutations survived",
+        # and collapsing both into 1 would let a caller read a refusal as a
+        # finding. Shares exit 2 with the uncommitted-changes refusal above:
+        # both mean "the probe did not run", which is what a caller must act on.
+        return 2
+    return 1 if survived else 0
 
 
 if __name__ == "__main__":
