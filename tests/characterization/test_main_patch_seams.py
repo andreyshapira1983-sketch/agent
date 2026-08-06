@@ -168,8 +168,10 @@ def test_the_launcher_performs_no_wiring_of_its_own():
     """`main.py` is a launcher: it hands off to `cli/app.py` and nothing else.
 
     `load_dotenv`, `_StdinLineReader`, `CLIApprovalProvider` and friends are
-    still *re-exported* (pinned by `test_main_public_surface.py`) but no longer
-    *called* here, so their fakes belong on `cli.app`.
+    neither called nor re-exported here any more, so their fakes belong on
+    `cli.app`. The earlier wording said they were "still re-exported (pinned by
+    `test_main_public_surface.py`)" — that test pins the opposite, that no
+    re-export block may grow back, and it allows exactly two imports.
     """
     tree = ast.parse((REPO_ROOT / "main.py").read_text(encoding="utf-8"))
     called = {
