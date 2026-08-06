@@ -23,6 +23,7 @@ import cli.app as app_module
 import cli.intent_bridge as bridge_module
 import cli.repl as repl_module
 import main as main_module
+from tests.conftest import call_without_blocking
 
 _REAL_STDIN_READER = repl_module._StdinLineReader
 
@@ -210,9 +211,9 @@ def test_repl_creates_exactly_one_reader(tmp_path, monkeypatch):
 
 def test_reader_prompts_go_to_stdout_and_eof_raises(capsys):
     reader = _scripted_reader(["only line"])
-    assert reader.prompt_line("... ") == "only line"
+    assert call_without_blocking(reader.prompt_line, "... ") == "only line"
     with pytest.raises(EOFError):
-        reader.read_line()
+        reader.read_line(timeout=5)
     assert capsys.readouterr().out == "... "
 
 

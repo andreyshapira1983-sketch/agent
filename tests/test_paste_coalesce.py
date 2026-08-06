@@ -11,11 +11,14 @@ from __future__ import annotations
 import io
 import queue
 import sys
+import threading
 import time
 
 import pytest
 
+import cli.repl as repl_module
 from cli.repl import _coalesce_burst, _StdinLineReader
+from tests.conftest import call_without_blocking
 
 # ---------- pure burst-coalescing policy ----------
 
@@ -65,20 +68,21 @@ def test_reader_coalesces_paste_when_interactive() -> None:
     # All three lines are available near-instantly (like a paste), so the drain
     # collects them into one message.
     time.sleep(0.02)  # let the pump enqueue
-    msg = reader.read_message("> ")
+    # `read_message` has no timeout of its own — see `call_without_blocking`.
+    msg = call_without_blocking(reader.read_message, "> ")
     assert msg == "spec title\n* bullet a\n* bullet b"
 
 
 def test_reader_reads_one_line_at_a_time_when_not_interactive() -> None:
     reader = _reader_over(["cmd one", "cmd two"], interactive=False)
     # Non-interactive (piped/scripted) input must keep line-by-line semantics.
-    assert reader.read_message("> ") == "cmd one"
-    assert reader.read_message("> ") == "cmd two"
+    assert call_without_blocking(reader.read_message, "> ") == "cmd one"
+    assert call_without_blocking(reader.read_message, "> ") == "cmd two"
 
 
 def test_reader_prompt_line_is_blocking_single_line() -> None:
     reader = _reader_over(["only line"], interactive=True)
-    assert reader.prompt_line("... ") == "only line"
+    assert call_without_blocking(reader.prompt_line, "... ") == "only line"
 
 
 def test_reader_raises_eof_at_end_of_input() -> None:
@@ -89,16 +93,54 @@ def test_reader_raises_eof_at_end_of_input() -> None:
 
 def test_reader_read_line_times_out_when_nothing_available() -> None:
     # A reader whose source blocks forever: read_line(timeout) must raise Empty.
-    ev = queue.Queue()  # never fed
+    ev = queue.Queue()  # fed once, at the end, to let the pump finish
 
     reader = _StdinLineReader(
         interactive=True,
-        readline=ev.get,  # blocks until something is put (never)
+        readline=ev.get,  # blocks until something is put
         out=io.StringIO(),
         gap_seconds=0.05,
     )
-    with pytest.raises(queue.Empty):
-        reader.read_line(timeout=0.05)
+    try:
+        with pytest.raises(queue.Empty):
+            reader.read_line(timeout=0.05)
+    finally:
+        # Release the pump. A thread parked on stdin for the rest of the run
+        # is harmless only while it is a daemon; the moment that flag is wrong
+        # the interpreter cannot exit, and the whole suite hangs AFTER passing.
+        # The test that guards the flag is below; this keeps the two
+        # independent, so a broken flag fails there and nowhere else.
+        ev.put("")
+
+
+def test_the_pump_runs_on_a_daemon_thread(monkeypatch) -> None:
+    """The reader thread must be a daemon, and no test can observe it late.
+
+    A non-daemon pump parked on `stdin.readline()` keeps the interpreter alive
+    at exit: every test passes and then the process never returns. Mutation
+    testing measured exactly that — `daemon=True` -> `False` produced a green
+    run that hung on the way out, which is the one failure shape that names
+    nothing at all.
+
+    So the flag is read where it is set, before the thread starts, rather than
+    from a live thread — an assertion that needs the thread to still be running
+    would have to keep one parked, which is the very thing being guarded.
+    """
+    reader = _reader_over([], interactive=False)  # built with the real threading
+    daemon_flags: list[object] = []
+    real_thread = threading.Thread
+
+    def _spy(*args, **kwargs):
+        daemon_flags.append(kwargs.get("daemon"))
+        return real_thread(*args, **kwargs)
+
+    class _ThreadFactory:
+        Thread = staticmethod(_spy)
+
+    monkeypatch.setattr(repl_module, "threading", _ThreadFactory)
+    reader._ensure_started()
+
+    assert daemon_flags == [True]
 
 
 # ---------- a failed read is not the same as end of input ----------
@@ -205,7 +247,7 @@ def test_prompt_failures_are_swallowed_but_bugs_are_not():
         # into a hanging one.
         src = iter(["hello" + chr(10), ""])
         reader = _StdinLineReader(interactive=False, readline=lambda _s=src: next(_s), out=out)
-        assert reader.prompt_line("> ") == "hello"
+        assert call_without_blocking(reader.prompt_line, "> ") == "hello"
 
     class _Buggy:
         def write(self, s):
@@ -220,4 +262,4 @@ def test_prompt_failures_are_swallowed_but_bugs_are_not():
     src = iter(["hello" + chr(10), ""])
     reader = _StdinLineReader(interactive=False, readline=lambda _s=src: next(_s), out=_Buggy())
     with pytest.raises(AttributeError):
-        reader.prompt_line("> ")
+        call_without_blocking(reader.prompt_line, "> ")
