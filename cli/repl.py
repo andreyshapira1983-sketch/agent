@@ -73,6 +73,25 @@ def _collect_pasted_block(read_line: Callable[[], str]) -> str:
 PASTE_COALESCE_GAP_SECONDS = 0.05
 
 
+def _collect_continuation(first_line: str, read_line: Callable[[], str]) -> str:
+    """Join a line ending in ``\\`` with the ones that continue it.
+
+    ``first_line`` still carries its trailing backslash. Reads on until a line
+    that does not end in one; the backslashes go, the parts are stripped and
+    joined with single spaces, and blank parts drop out — so the result may be
+    "", which the caller judges. ``EOFError``/``KeyboardInterrupt`` propagate.
+    """
+    parts: list[str] = [first_line[:-1]]
+    while True:
+        line = read_line()
+        if line.endswith("\\"):
+            parts.append(line[:-1])
+        else:
+            parts.append(line)
+            break
+    return " ".join(part.strip() for part in parts if part.strip())
+
+
 def _coalesce_burst(
     read_first: Callable[[], str],
     read_next: Callable[[], str | None],
@@ -296,19 +315,11 @@ def run_repl(
                 continue
         # Mode 2: a line ending in \ is joined with the next, backslash removed.
         elif q.endswith("\\"):
-            continuation_parts: list[str] = [q[:-1]]
-            while True:
-                try:
-                    cline = reader.prompt_line("... ")
-                except (EOFError, KeyboardInterrupt):
-                    print()
-                    return 0
-                if cline.endswith("\\"):
-                    continuation_parts.append(cline[:-1])
-                else:
-                    continuation_parts.append(cline)
-                    break
-            q = " ".join(p.strip() for p in continuation_parts if p.strip())
+            try:
+                q = _collect_continuation(q, lambda: reader.prompt_line("... "))
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return 0
             if not q:
                 # The same refusal the other two paths make: an empty message
                 # costs a rate-limit token and asks the agent nothing.
