@@ -84,7 +84,7 @@ def run_cli() -> int:
     ask_head = args.ask.lstrip() if args.ask else ""
     head, _, rest = ask_head.partition(" ")
     if head.lower() == ":self-build-propose":
-        _handle_self_build_propose(rest.strip(), None, workspace)  # type: ignore[arg-type]
+        _handle_self_build_propose(rest.strip(), None, workspace)
         return 0
     if head.lower() == ":schedule-disable":
         print(_schedule_disable_message(rest.strip(), workspace), file=sys.stderr)
