@@ -3,7 +3,7 @@
 Formerly `core/confidence_gate.py`, and the rename is the point. The old
 module computed a single scalar it called *confidence* and, below a threshold,
 logged `low_confidence_gate`. Measurement showed the scalar was not measuring
-confidence at all (`docs/audit/SENSOR_SIGNAL_MEASUREMENT.md`): it collapsed
+confidence at all: it collapsed
 three different situations into almost the same zero.
 
 | situation | old score | what it actually means |

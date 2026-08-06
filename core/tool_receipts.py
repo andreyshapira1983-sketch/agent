@@ -28,7 +28,7 @@ ReceiptPath = Literal["repl", "runtime", "daemon", "unknown"]
 ReceiptKind = Literal["tool", "approval", "gateway"]
 ReceiptStatus = Literal["success", "error", "blocked", "skipped"]
 
-# Slice 1a — filesystem / shell / test / network only (see docs/proposals/tool-receipts-proposal.md).
+# Slice 1a — filesystem / shell / test / network only.
 SLICE_1A_RECEIPT_TOOLS: frozenset[str] = frozenset(
     {
         "file_read",

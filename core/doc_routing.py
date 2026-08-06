@@ -250,15 +250,11 @@ _SUBAGENT_GOVERNANCE_DOC_PATHS = (
 # (MEMORY_FIX_PLAN B.3), which is failure mode OFM-015 — a record written and
 # never read changes nothing.
 #
-# Membership is deliberately small, and three obvious candidates are left OUT:
-#   * docs/audit/MEMORY_LIFECYCLE_CONTRACT.md — v5-draft, not yet approved, no
-#     code implements it. Injecting it as doctrine would teach the agent that
-#     unimplemented rules are current behaviour.
-#   * docs/MEMORY_FIX_PLAN.md — partly superseded; its A3 prescription was
-#     never applied as written, so it would teach a rule that does not hold.
-#   * docs/audit/MASTER_ISSUE_REGISTRY.md — the authoritative status owner, but
-#     far too large to inject per turn. Reach it by name when a status is
-#     actually needed.
+# Membership is deliberately small. docs/MEMORY_FIX_PLAN.md is left OUT: it is
+# partly superseded — its A3 prescription was never applied as written, so
+# injecting it would teach a rule that does not hold. (Two further exclusions
+# were listed here until 2026-08-07 and named documents that no longer exist;
+# an exclusion for a deleted file explains nothing.)
 _MEMORY_GOVERNANCE_DOC_PATHS = (
     # A memory-map document under the deleted `docs/audit/` tree stood first
     # here until 2026-08-07. Nothing noticed it was gone: the router injects a
