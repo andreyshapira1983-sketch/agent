@@ -29,7 +29,10 @@ def _force_utf8_io() -> tuple[str, ...]:
     for stream_name in ("stdin", "stdout", "stderr"):
         stream = getattr(sys, stream_name, None)
         # `reconfigure` is missing on some embedded interpreters and on
-        # already-replaced streams (e.g. when pytest captures them).
+        # already-replaced streams (e.g. when pytest captures them). This
+        # guard is load-bearing on its own: the handler below is narrow, so a
+        # call on `None` would raise TypeError and reach the caller rather
+        # than being absorbed.
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is None:
             continue
@@ -37,7 +40,13 @@ def _force_utf8_io() -> tuple[str, ...]:
             reconfigure(encoding="utf-8", errors="replace")
             if str(getattr(stream, "encoding", "")).lower().replace("-", "") == "utf8":
                 confirmed.append(stream_name)
-        except Exception:  # noqa: BLE001, S110 — see below; nothing here can report
+        except (OSError, ValueError, LookupError):
+            # Narrow on purpose. A dead stream raises OSError, a closed one
+            # ValueError, an unknown codec LookupError — measured, not assumed.
+            # A blanket `except Exception` also absorbed the TypeError from
+            # calling a missing `reconfigure`, which made the guard above
+            # untestable: removing it changed nothing observable.
+            #
             # A stream that refuses must not stop startup, so the failure is
             # swallowed. Nothing records it, and nothing can: this runs as the
             # very first statement of `run_cli`, long before the agent and its
