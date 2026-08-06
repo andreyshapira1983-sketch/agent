@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import queue
+import sys
 import time
 
 import pytest
@@ -98,3 +99,79 @@ def test_reader_read_line_times_out_when_nothing_available() -> None:
     )
     with pytest.raises(queue.Empty):
         reader.read_line(timeout=0.05)
+
+
+# ---------- a failed read is not the same as end of input ----------
+
+def test_end_of_input_leaves_no_error_and_says_nothing(capsys):
+    """The honest case: stdin ended, nothing went wrong."""
+    reader = _StdinLineReader(interactive=False, readline=lambda: "", out=io.StringIO())
+
+    with pytest.raises(EOFError):
+        reader.read_line()
+
+    assert reader.read_error is None
+    assert capsys.readouterr().err == ""
+
+
+def test_a_failed_read_records_the_cause_and_reports_it(capsys):
+    """Both a broken read and a real EOF stop the reader and surface as
+    EOFError. Before this, that was the whole story: a decode error, a closed
+    pipe and an honest Ctrl+D ended the session identically, with nothing
+    written anywhere.
+    """
+    def _broken() -> str:
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    reader = _StdinLineReader(interactive=False, readline=_broken, out=io.StringIO())
+
+    with pytest.raises(EOFError):
+        reader.read_line()
+
+    assert isinstance(reader.read_error, UnicodeDecodeError)
+    err = capsys.readouterr().err
+    assert "stdin read failed" in err
+    assert "UnicodeDecodeError" in err
+
+
+def test_a_failure_while_reporting_still_delivers_the_eof():
+    """The notice is best effort; ending the session is not.
+
+    A reader thread that raised while printing would leave the queue without
+    its EOF marker and hang the REPL on the next read.
+    """
+    class _AngryStderr:
+        def write(self, *a, **k):
+            raise OSError("stderr is gone")
+
+        def flush(self, *a, **k):
+            raise OSError("stderr is gone")
+
+        def isatty(self):
+            return False
+
+    def _broken() -> str:
+        raise OSError("pipe closed")
+
+    reader = _StdinLineReader(interactive=False, readline=_broken, out=io.StringIO())
+    real_stderr, sys.stderr = sys.stderr, _AngryStderr()
+    try:
+        with pytest.raises(EOFError):
+            reader.read_line(timeout=5)
+    finally:
+        sys.stderr = real_stderr
+
+    assert isinstance(reader.read_error, OSError)
+
+
+def test_the_reader_keeps_signalling_eof_after_a_failure():
+    """Every later read must also raise, not block."""
+    reader = _StdinLineReader(
+        interactive=False,
+        readline=lambda: (_ for _ in ()).throw(OSError("gone")),
+        out=io.StringIO(),
+    )
+
+    for _ in range(3):
+        with pytest.raises(EOFError):
+            reader.read_line(timeout=5)
