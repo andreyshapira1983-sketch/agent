@@ -43,7 +43,7 @@ def test_learning_planner_corporate_goal_prefers_doctrine_docs(workspace: Path):
     (workspace / "docs").mkdir()
     (workspace / "knowledge" / "doctrine" / "future").mkdir(parents=True)
     (workspace / "knowledge" / "doctrine" / "future" / "CORPORATE_MODEL.md").write_text("corp", encoding="utf-8")
-    (workspace / "docs" / "CENTRAL_AGENT_GOVERNANCE.md").write_text("gov", encoding="utf-8")
+    (workspace / "knowledge" / "doctrine" / "CENTRAL_AGENT_GOVERNANCE.md").write_text("gov", encoding="utf-8")
     (workspace / "docs" / "AGENT_ANATOMY.md").write_text("anatomy", encoding="utf-8")
     (workspace / "docs" / "ROADMAP.md").write_text("roadmap", encoding="utf-8")
     (workspace / "docs" / "COMMANDS_MAP.md").write_text("commands", encoding="utf-8")
@@ -59,7 +59,7 @@ def test_learning_planner_corporate_goal_prefers_doctrine_docs(workspace: Path):
 
     assert plan.source_paths == (
         "knowledge/doctrine/future/CORPORATE_MODEL.md",
-        "docs/CENTRAL_AGENT_GOVERNANCE.md",
+        "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md",
         "docs/AGENT_ANATOMY.md",
         "docs/ROADMAP.md",
         "docs/COMMANDS_MAP.md",
@@ -105,7 +105,7 @@ def test_learning_planner_mixed_doctrine_confidence_selects_both_layers(
     (workspace / "docs").mkdir()
     (workspace / "knowledge" / "doctrine" / "future").mkdir(parents=True)
     (workspace / "knowledge" / "doctrine" / "future" / "CORPORATE_MODEL.md").write_text("corp", encoding="utf-8")
-    (workspace / "docs" / "CENTRAL_AGENT_GOVERNANCE.md").write_text("gov", encoding="utf-8")
+    (workspace / "knowledge" / "doctrine" / "CENTRAL_AGENT_GOVERNANCE.md").write_text("gov", encoding="utf-8")
     (workspace / "docs" / "AGENT_ANATOMY.md").write_text("anatomy", encoding="utf-8")
     (workspace / "docs" / "ROADMAP.md").write_text("roadmap", encoding="utf-8")
     (workspace / "docs" / "COMMANDS_MAP.md").write_text("commands", encoding="utf-8")
@@ -130,7 +130,7 @@ def test_learning_planner_mixed_doctrine_confidence_selects_both_layers(
         "tests/test_evidence_support.py",
         "tests/test_confidence_vector.py",
         "knowledge/doctrine/future/CORPORATE_MODEL.md",
-        "docs/CENTRAL_AGENT_GOVERNANCE.md",
+        "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md",
         "docs/AGENT_ANATOMY.md",
     }
     assert "README.md" not in plan.source_paths

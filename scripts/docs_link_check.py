@@ -34,16 +34,22 @@ _LINE_ANCHOR_RE = re.compile(r":\d+(?:-\d+)?$")
 
 
 def _doc_files() -> list[str]:
-    """Human-facing Markdown set: root README + everything under ``docs/``."""
+    """Every Markdown the repository owns: root README, ``docs/``, ``knowledge/``.
+
+    ``knowledge/`` is included since 2026-08-07, when what the agent reads moved
+    out of ``docs/``. A broken link there is worse than in prose: those files are
+    injected into the agent's context, so a pointer that no longer resolves
+    becomes a wasted step at runtime, not a nuisance for a reader.
+    """
     files: list[str] = []
     readme = os.path.join(_ROOT, "README.md")
     if os.path.isfile(readme):
         files.append(readme)
-    docs_dir = os.path.join(_ROOT, "docs")
-    for base, _dirs, names in os.walk(docs_dir):
-        for name in names:
-            if name.endswith(".md"):
-                files.append(os.path.join(base, name))
+    for tree in ("docs", "knowledge"):
+        for base, _dirs, names in os.walk(os.path.join(_ROOT, tree)):
+            for name in names:
+                if name.endswith(".md"):
+                    files.append(os.path.join(base, name))
     return files
 
 

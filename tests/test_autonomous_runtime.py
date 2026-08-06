@@ -126,7 +126,7 @@ def test_auto_runtime_corporate_learning_uses_doctrine_docs_even_when_rotation_h
     (workspace / "docs").mkdir()
     (workspace / "knowledge" / "doctrine" / "future").mkdir(parents=True)
     (workspace / "knowledge" / "doctrine" / "future" / "CORPORATE_MODEL.md").write_text("corp", encoding="utf-8")
-    (workspace / "docs" / "CENTRAL_AGENT_GOVERNANCE.md").write_text("gov", encoding="utf-8")
+    (workspace / "knowledge" / "doctrine" / "CENTRAL_AGENT_GOVERNANCE.md").write_text("gov", encoding="utf-8")
     (workspace / "docs" / "AGENT_ANATOMY.md").write_text("anatomy", encoding="utf-8")
     (workspace / "docs" / "ROADMAP.md").write_text("roadmap", encoding="utf-8")
     (workspace / "docs" / "COMMANDS_MAP.md").write_text("commands", encoding="utf-8")
@@ -152,7 +152,7 @@ def test_auto_runtime_corporate_learning_uses_doctrine_docs_even_when_rotation_h
     assert learning.details["learning_plan"]["root"] == "."
     assert learning.details["learning_plan"]["source_paths"] == [
         "knowledge/doctrine/future/CORPORATE_MODEL.md",
-        "docs/CENTRAL_AGENT_GOVERNANCE.md",
+        "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md",
         "docs/AGENT_ANATOMY.md",
         "docs/ROADMAP.md",
         "docs/COMMANDS_MAP.md",

@@ -69,7 +69,7 @@ Observe → Interpret → Plan → Act → Verify → Respond, driven by an LLM 
   `core/approval_triage` (REPL: `:inbox`, `:approve`, `:deny`, `:approval-run`).
 - Deep/Opus escalation is reason-gated — the agent never opens Opus for itself:
   `core/deep_escalation` (`main.py --reason`).
-- See `docs/CENTRAL_AGENT_GOVERNANCE.md` for the full authority contract.
+- See `knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md` for the full authority contract.
 
 ## Track D — Budgets, durability & long-running work
 

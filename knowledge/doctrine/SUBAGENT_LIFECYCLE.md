@@ -2,7 +2,7 @@
 
 > **Authority.** This is a *normative specification* for how the central agent
 > creates, trusts, evaluates, restricts, and retires sub-agents. It is
-> **subordinate to `docs/CENTRAL_AGENT_GOVERNANCE.md`** (which owns the general
+> **subordinate to `CENTRAL_AGENT_GOVERNANCE.md`** (which owns the general
 > Policy Gate / approval / budget contract): where the two overlap, the
 > governance doc wins and this file only refines the sub-agent specifics. Where
 > this file and code disagree, **code wins and this file must be corrected**.
@@ -158,7 +158,7 @@ Not the sub-agent itself.
    completeness, sufficient context, scope limits, choice of verifier, and final
    acceptance.
 2. **Policy Gate — authority.** Decides whether the action is *permitted*; it
-   does not judge intellectual quality. See `docs/CENTRAL_AGENT_GOVERNANCE.md`.
+   does not judge intellectual quality. See `CENTRAL_AGENT_GOVERNANCE.md`.
 3. **Verifier — evidentiality.** Checks the result matches the task, claimed
    files/facts exist, sources support specific claims, tests ran, receipts
    exist, and confident prose did not replace evidence. **Verification
