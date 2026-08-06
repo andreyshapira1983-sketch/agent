@@ -73,7 +73,7 @@ def test_subagent_doc_is_thematic_not_in_corporate_manifest() -> None:
 
 
 def test_subagent_doc_separates_implemented_from_planned() -> None:
-    text = (REPO_ROOT / "docs" / "SUBAGENT_LIFECYCLE.md").read_text(encoding="utf-8")
+    text = (REPO_ROOT / "knowledge" / "doctrine" / "SUBAGENT_LIFECYCLE.md").read_text(encoding="utf-8")
     assert "IMPLEMENTED" in text
     assert "PLANNED" in text
     # honest boundary: must not claim auto-pause/auto-retire already work.

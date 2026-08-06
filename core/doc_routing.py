@@ -240,7 +240,7 @@ DOCTRINE_CORPORATE_DOC_PATHS = (
 # central agent from reading a growing pile of files on unrelated architecture
 # questions. SUBAGENT_LIFECYCLE.md is the normative sub-agent lifecycle contract.
 _SUBAGENT_GOVERNANCE_DOC_PATHS = (
-    "docs/SUBAGENT_LIFECYCLE.md",
+    "knowledge/doctrine/SUBAGENT_LIFECYCLE.md",
 )
 # Thematic (conditional) doc group for memory / durable-learning questions,
 # same discipline as the sub-agent group above: never in the universal

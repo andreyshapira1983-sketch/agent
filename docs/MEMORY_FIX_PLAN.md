@@ -235,5 +235,5 @@ scope).
 
 *Provenance: anchors verified against code on `main`. Source-of-truth precedence:
 code > this plan. Companion documents: `docs/MEMORY_SYSTEM_AUDIT.md` (findings),
-`docs/self-audit-lessons.md` (fixed classes), `docs/SUBAGENT_LIFECYCLE.md` and
+`docs/self-audit-lessons.md` (fixed classes), `knowledge/doctrine/SUBAGENT_LIFECYCLE.md` and
 `docs/MULTI_AGENT_COORDINATION_LAYER.md` (sub-agent memory topology).*
