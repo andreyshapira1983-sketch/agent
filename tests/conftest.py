@@ -4,6 +4,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import socket
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -318,6 +319,48 @@ def run_git(root: Path, *args: str) -> None:
         ["git", "-c", "user.name=T", "-c", "user.email=t@localhost", *args],  # noqa: S607
         cwd=str(root), check=True, capture_output=True, text=True,
     )
+
+
+# ── A blocked call must name itself instead of stopping the clock ────────────
+#
+# `_StdinLineReader.read_message` and `.prompt_line` wait for the operator
+# forever. That is right for the program and wrong for a test: a break in the
+# reader's start-up turns the suite from red into HUNG, and a hang arrives as a
+# CI timeout with no test named — the cause has to be hunted rather than read.
+#
+# Measured, not assumed: mutation testing over cli/repl.py on 2026-08-06 found
+# three such breaks — `self._started = True` in the constructor, `while True`
+# -> `while False` in the pump, and a lost EOF marker after a failed read.
+# Each cost 90s of silence apiece instead of one named failure.
+
+def call_without_blocking(call, *args: Any, seconds: float = 5.0, **kwargs: Any) -> Any:
+    """Run ``call`` on a side thread; fail if it is still running after
+    ``seconds``. Returns what it returned and re-raises what it raised, so a
+    wrapped call reads like the direct one.
+
+    The side thread is a daemon deliberately: when the call really is stuck
+    there is nothing left to wait for, and the run must still be able to end.
+    """
+    outcome: dict[str, Any] = {}
+
+    def _run() -> None:
+        try:
+            outcome["value"] = call(*args, **kwargs)
+        except BaseException as exc:  # noqa: BLE001 — re-raised on the test thread
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    thread.join(seconds)
+    if thread.is_alive():
+        name = getattr(call, "__qualname__", repr(call))
+        raise AssertionError(
+            f"{name} was still blocked after {seconds}s — it is waiting for "
+            "input that will never arrive"
+        )
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome.get("value")
 
 
 @pytest.fixture
