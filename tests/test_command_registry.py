@@ -6,7 +6,7 @@ every fact in it is re-derived here from the real sources and compared:
 
 - the accepted tokens and their grouping come from the ``head`` dispatch chain in
   ``main.py``;
-- ``usage`` comes from ``docs/COMMANDS_MAP.md``;
+- ``usage`` comes from ``knowledge/maps/COMMANDS_MAP.md``;
 - ``in_help`` comes from the live ``:help`` page;
 - ``in_startup_summary`` comes from the REPL banner literal;
 - ``phase`` comes from the two pre-``load_dotenv`` fast paths in ``main()``.
@@ -38,7 +38,7 @@ APP_SOURCE = (REPO_ROOT / "cli" / "app.py").read_text(encoding="utf-8")
 # pre-load_dotenv() fast paths, the REPL block tokens and the intent bridge are
 # still in main.py, so both sources are read here.
 DISPATCH_SOURCE = (REPO_ROOT / "cli" / "command_dispatch.py").read_text(encoding="utf-8")
-CMAP_SOURCE = (REPO_ROOT / "docs" / "COMMANDS_MAP.md").read_text(encoding="utf-8")
+CMAP_SOURCE = (REPO_ROOT / "knowledge" / "maps" / "COMMANDS_MAP.md").read_text(encoding="utf-8")
 
 _CMD = r":[a-z0-9][a-z0-9-]*"
 _STANDALONE = re.compile(r"(?<![\w-])(" + _CMD + r")(?![\w-])")

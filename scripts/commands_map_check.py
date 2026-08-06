@@ -1,6 +1,6 @@
-"""Read-only guard: the command registry and docs/COMMANDS_MAP.md must agree.
+"""Read-only guard: the command registry and knowledge/maps/COMMANDS_MAP.md must agree.
 
-``docs/COMMANDS_MAP.md`` claims to be the authoritative map of the real operator
+``knowledge/maps/COMMANDS_MAP.md`` claims to be the authoritative map of the real operator
 command surface ("if a command is not here, it does not exist"). This guard holds
 it to that claim by comparing it against ``cli/command_registry.py`` in **both**
 directions: every command in the registry must be documented, and the document
@@ -16,7 +16,7 @@ to the running code by ``tests/test_command_registry.py``, which re-derives the
 dispatch chain and requires an exact match. So the chain of custody is:
 
     dispatch chain in main.py  --(tests/test_command_registry.py)-->  registry
-    registry  --(this script)-->  docs/COMMANDS_MAP.md
+    registry  --(this script)-->  knowledge/maps/COMMANDS_MAP.md
 
 ``dispatched_commands()`` below is still the shared parser for the first link and
 is used by those tests; this script's own verdict no longer depends on it.
@@ -45,7 +45,7 @@ import re
 import sys
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_MAP = os.path.join(_ROOT, "docs", "COMMANDS_MAP.md")
+_MAP = os.path.join(_ROOT, "knowledge", "maps", "COMMANDS_MAP.md")
 
 if _ROOT not in sys.path:  # allow `python scripts/commands_map_check.py`
     sys.path.insert(0, _ROOT)

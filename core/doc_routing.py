@@ -231,7 +231,7 @@ DOCTRINE_CORPORATE_DOC_PATHS = (
     "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md",
     "docs/AGENT_ANATOMY.md",
     "knowledge/doctrine/ROADMAP.md",
-    "docs/COMMANDS_MAP.md",
+    "knowledge/maps/COMMANDS_MAP.md",
 )
 # Thematic (conditional) doc group. Unlike the corporate manifest above, this is
 # NOT injected on every doctrine question — only when the question is actually
