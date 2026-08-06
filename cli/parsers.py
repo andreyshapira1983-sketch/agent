@@ -36,7 +36,14 @@ def _parse_remember(rest: str) -> tuple[list[str], str]:
     rest = rest.strip()
     if not rest:
         return [], ""
-    head, _, tail = rest.partition(" ")
+    # Split on the first WHITESPACE, not the first space. A `<<<` block whose
+    # text starts with ':' is dispatched as a command, so this receives newlines,
+    # and partitioning on " " swallowed the first word of the note into the tag
+    # list — where the ASCII filter then dropped it, silently shortening what the
+    # operator asked to remember.
+    parts = rest.split(maxsplit=1)
+    head = parts[0]
+    tail = parts[1] if len(parts) > 1 else ""
     tag_candidates = {
         "preference", "fact", "decision", "insight",
         "user-approved", "project",

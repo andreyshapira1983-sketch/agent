@@ -390,6 +390,31 @@ class TestParseRemember:
         assert tags == ["preference"]
         assert content == "I like Python"
 
+    def test_tags_end_at_the_first_whitespace_including_a_newline(self):
+        """Multi-line `:remember` reaches here whole — the tags stop at line one.
+
+        A `<<<` block is dispatched as a command when its text starts with ':',
+        so this parser receives newlines. Splitting on the first SPACE put the
+        first word of the note into the tag list, and the note lost it:
+
+            in:      "preference,fact\\nмногострочная заметка"
+            tags:    ['preference']          <- 'fact\\nмногострочная' dropped,
+                                                the ASCII filter ate it
+            content: 'заметка'               <- one word of two survived
+
+        The operator asked to remember a note and half of it disappeared with
+        nothing said.
+        """
+        tags, content = _parse_remember("preference,fact\nмногострочная заметка")
+        assert tags == ["preference", "fact"]
+        assert content == "многострочная заметка"
+
+    def test_a_multi_line_note_keeps_its_lines(self):
+        """The body is human text: its newlines and indentation survive."""
+        tags, content = _parse_remember("fact def f():\n    return 1\n\nsecond block")
+        assert tags == ["fact"]
+        assert content == "def f():\n    return 1\n\nsecond block"
+
     def test_comma_separated_tags(self):
         tags, content = _parse_remember("fact,decision I shipped v1")
         assert tags == ["fact", "decision"]
