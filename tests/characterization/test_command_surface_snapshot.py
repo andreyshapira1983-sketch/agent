@@ -74,14 +74,31 @@ def _dispatched() -> set[str]:
     return mod.dispatched_commands(DISPATCH_SOURCE)
 
 
+def _pre_dotenv_source_prefix(app_source: str) -> str:
+    """Everything in `run_cli` that runs BEFORE `load_dotenv` is called.
+
+    Located through the AST, not by matching a literal load_dotenv() line.
+    That literal broke the moment the call gained an argument -- the CLI now
+    reads the workspace's .env instead of the launch directory's -- so the
+    guard failed on a FIX, not on a regression. A boundary defined by the text
+    of one line is not a boundary.
+    """
+    import ast
+
+    for node in ast.walk(ast.parse(app_source)):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "load_dotenv"):
+            return chr(10).join(app_source.splitlines()[: node.lineno - 1])
+    raise AssertionError("no load_dotenv() call found in cli/app.py")
+
+
 def _pre_dotenv_fast_paths() -> set[str]:
     """Commands matched with `head.lower() == …` before `load_dotenv()` runs."""
     # The startup sequence moved to cli/app.py with the rest of `main()`;
     # scanning main.py here would silently freeze an empty set.
     app_source = (REPO_ROOT / "cli" / "app.py").read_text(encoding="utf-8")
     marker = "\n    load_dotenv()"
-    assert marker in app_source, "load_dotenv() call site moved"
-    prefix = app_source.split(marker, 1)[0]
+    prefix = _pre_dotenv_source_prefix(app_source)
     return set(re.findall(r'head\.lower\(\)\s*==\s*"(:[a-z0-9-]+)"', prefix))
 
 

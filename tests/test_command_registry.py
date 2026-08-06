@@ -71,12 +71,29 @@ def _dispatch_branches() -> list[tuple[str, ...]]:
     return branches
 
 
+def _pre_dotenv_source_prefix(app_source: str) -> str:
+    """Everything in `run_cli` that runs BEFORE `load_dotenv` is called.
+
+    Located through the AST, not by matching a literal load_dotenv() line.
+    That literal broke the moment the call gained an argument -- the CLI now
+    reads the workspace's .env instead of the launch directory's -- so the
+    guard failed on a FIX, not on a regression. A boundary defined by the text
+    of one line is not a boundary.
+    """
+    import ast
+
+    for node in ast.walk(ast.parse(app_source)):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "load_dotenv"):
+            return chr(10).join(app_source.splitlines()[: node.lineno - 1])
+    raise AssertionError("no load_dotenv() call found in cli/app.py")
+
+
 def _pre_dotenv_tokens() -> set[str]:
     # The startup sequence lives in cli/app.py since the launcher split; reading
     # main.py here would match nothing and freeze an empty set.
     marker = "\n    load_dotenv()"
-    assert marker in APP_SOURCE, "load_dotenv() call site moved"
-    prefix = APP_SOURCE.split(marker, 1)[0]
+    prefix = _pre_dotenv_source_prefix(APP_SOURCE)
     return set(re.findall(r'head\.lower\(\)\s*==\s*"(' + _CMD + r')"', prefix))
 
 
