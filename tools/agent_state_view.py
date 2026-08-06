@@ -279,9 +279,15 @@ def run_journal(limit: int = 40, event_filter: str = "") -> dict:
 def open_defects() -> dict:
     """Registered defects that are still open, from the agent's own registry.
 
-    `docs/audit/MASTER_ISSUE_REGISTRY.md` is the single owner of defect status
-    in this repository. Reading it here means an assistant and the agent argue
-    from the same list instead of each keeping its own.
+    The registry it reads was the single owner of defect status, so that an
+    assistant and the agent argued from the same list instead of each keeping
+    its own.
+
+    That file was deleted from the repository on 2026-08-06, and this function
+    has returned `{"error": "missing"}` on every call since — verified, not
+    assumed. It is left in place rather than removed because the contract still
+    holds the day a registry comes back; until then the error IS the honest
+    answer, and it says which store is absent.
     """
     path = REPO / "docs" / "audit" / "MASTER_ISSUE_REGISTRY.md"
     if not path.exists():

@@ -95,8 +95,7 @@ _PLANNED_MARKERS = ("proposed", "missing test", "planned", "should be added", "t
 _RENAMED_PATHS: dict[str, str] = {
     # Renamed 2026-07-27: the module stopped computing "confidence" and started
     # reporting evidence support with an explicit applicability flag, after
-    # measurement showed the old scalar conflated three different situations
-    # (docs/audit/SENSOR_SIGNAL_MEASUREMENT.md).
+    # measurement showed the old scalar conflated three different situations.
     "core/confidence_gate.py": "core/evidence_support.py",
     "tests/test_confidence_gate.py": "tests/test_evidence_support.py",
     # Dissolved 2026-08-04. `loop_methods2` was never a module: it was the

@@ -245,7 +245,7 @@ class EpisodeRecord:
     #     test pins that it changes neither the state nor procedure credit.
     # Adding a member does NOT grant it power; power is granted only by naming
     # it in the verdict rule table, which is the operator's call and wants
-    # measured numbers first (`docs/audit/SENSOR_SIGNAL_MEASUREMENT.md`).
+    # measured numbers first.
     defect_signals: tuple[str, ...] | None = None
     # The authoritative fact that displaced this run's own claim, when one did.
     # None = the claim stood (or there was no claim). `declared_completion` is

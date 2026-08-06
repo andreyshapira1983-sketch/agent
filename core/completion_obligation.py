@@ -2,8 +2,8 @@
 
 Replaces the keyword detector in :mod:`core.termination_guard` as the *source of
 truth* for premature completion. That detector asked "does the user's wording
-contain a tool-ish word?", and measurement showed what that costs
-(`docs/audit/SENSOR_SIGNAL_MEASUREMENT.md`): it recognised **1 of 12** phrasings
+contain a tool-ish word?", and measurement showed what that costs: it
+recognised **1 of 12** phrasings
 that unambiguously demand a tool, and it fired on *«объясни разницу между REST и
 GraphQL»* because `"разниц"` is a keyword for the diff tool. Wording is not the
 obligation; it is one weak proxy for it.
