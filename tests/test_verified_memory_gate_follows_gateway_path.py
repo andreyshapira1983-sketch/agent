@@ -145,8 +145,11 @@ def test_the_loop_layer_asks_the_question_in_exactly_one_place():
             for kw in call.keywords
         )
     ]
-    assert asking == ["loop_evidence_chain.py:" + asking[0].split(":")[1]], asking
+    # Length first: the next line indexes `asking[0]`, and on an empty list
+    # that is an IndexError rather than a readable failure — the guard would
+    # crash instead of saying "no call site asks for the gate any more".
     assert len(asking) == 1, asking
+    assert asking == ["loop_evidence_chain.py:" + asking[0].split(":")[1]], asking
 
 
 def test_the_verify_path_still_gets_the_gate_through_the_core():

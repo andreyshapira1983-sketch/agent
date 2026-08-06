@@ -155,3 +155,50 @@ def test_the_skip_set_is_built_from_the_tree_that_is_walked():
     assert any(id(node) in skip for node in ast.walk(tree)), (
         "the skip set does not refer to nodes of the tree it was built from"
     )
+
+
+# ---------------------------------------------------------------------------
+# A refusal is not a finding
+# ---------------------------------------------------------------------------
+
+def test_a_refusal_and_a_survivor_get_different_exit_codes(monkeypatch, capsys):
+    """`probe` returns -1 when it refuses: the selection was already red, so a
+    survivor would prove nothing. `main` used to map every non-zero value to 1,
+    which is the exit code for "mutations survived" — a caller could not tell a
+    refusal from a finding.
+    """
+    import mutation_probe as mp
+
+    monkeypatch.setattr(mp.subprocess, "run", lambda *a, **k: _CleanGit())
+
+    codes = {}
+    for label, value in (("refused", -1), ("all caught", 0), ("survivors", 3)):
+        monkeypatch.setattr(mp, "probe", lambda *a, _v=value, **k: _v)
+        codes[label] = mp.main(["core/loop.py", "tests/test_cli.py"])
+    capsys.readouterr()
+
+    assert codes == {"refused": 2, "all caught": 0, "survivors": 1}, codes
+
+
+def test_the_two_refusals_share_one_code(monkeypatch, capsys):
+    """Uncommitted changes and an already-red selection are both "the probe did
+    not run", which is the single thing a caller acts on."""
+    import mutation_probe as mp
+
+    monkeypatch.setattr(mp.subprocess, "run", lambda *a, **k: _DirtyGit())
+    dirty = mp.main(["core/loop.py", "tests/test_cli.py"])
+
+    monkeypatch.setattr(mp.subprocess, "run", lambda *a, **k: _CleanGit())
+    monkeypatch.setattr(mp, "probe", lambda *a, **k: -1)
+    already_red = mp.main(["core/loop.py", "tests/test_cli.py"])
+    capsys.readouterr()
+
+    assert dirty == already_red == 2
+
+
+class _CleanGit:
+    stdout = ""
+
+
+class _DirtyGit:
+    stdout = " M core/loop.py"
