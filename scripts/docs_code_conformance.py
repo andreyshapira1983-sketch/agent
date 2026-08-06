@@ -255,6 +255,34 @@ def _registry_commands() -> set[str]:
     return tokens
 
 
+def _scan_targets(docs_root: Path) -> list[tuple[Path, str]]:
+    """Every Markdown this check owns, paired with the name the allowlists use.
+
+    Three trees when running against the real `docs/`: the docs tree itself,
+    repo-root files, and `knowledge/` — what the AGENT reads. The last one needs
+    this check more than prose does: a stale code path there is injected into
+    the agent's context as current fact. It moved out of `docs/` on 2026-08-07
+    and left this checker's field of view; the document-count guard is what
+    noticed. Root and knowledge entries are named with a leading `../` so the
+    allowlists can address them unambiguously.
+
+    A custom `--docs` root scans only itself, which is what lets the tests point
+    the script at an isolated tree.
+    """
+    targets = [
+        (doc, doc.relative_to(docs_root).as_posix())
+        for doc in sorted(docs_root.rglob("*.md"))
+    ]
+    if docs_root != DOCS:
+        return targets
+    targets += [(doc, f"../{doc.name}") for doc in sorted(REPO.glob("*.md"))]
+    targets += [
+        (doc, f"../{doc.relative_to(REPO).as_posix()}")
+        for doc in sorted((REPO / "knowledge").rglob("*.md"))
+    ]
+    return targets
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     docs_root = DOCS
@@ -286,15 +314,7 @@ def main(argv: list[str] | None = None) -> int:
     # guard reported success — found by the 2026-08 documentation audit.
     # Root files are named with a leading "../" relative to the docs root so
     # the allowlists can address them unambiguously.
-    scan_targets = [
-        (doc, doc.relative_to(docs_root).as_posix())
-        for doc in sorted(docs_root.rglob("*.md"))
-    ]
-    if docs_root == DOCS:
-        scan_targets += [
-            (doc, f"../{doc.name}")
-            for doc in sorted(REPO.glob("*.md"))
-        ]
+    scan_targets = _scan_targets(docs_root)
     for doc, rel_doc in scan_targets:
         docs_scanned += 1
         historical = rel_doc in _HISTORICAL_ANCHOR_DOCS

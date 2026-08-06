@@ -2,7 +2,7 @@
 
 > **Authority.** This is a *normative specification* for how the agent reasons
 > when the broken thing is **its own code, its own stored data, or its own
-> invariant**. It is **subordinate to `docs/CENTRAL_AGENT_GOVERNANCE.md`**
+> invariant**. It is **subordinate to `CENTRAL_AGENT_GOVERNANCE.md`**
 > (which owns the Policy Gate / approval / budget contract): where the two
 > overlap, the governance doc wins and this file only refines the repair
 > specifics. Where this file and code disagree, **code wins and this file must

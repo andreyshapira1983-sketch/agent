@@ -380,7 +380,7 @@ class LLMPlanner:
                 "[DOCTRINE_DOCS=required — for corporate model, central agent "
                 "governance, subagents, self-build, night observation, and "
                 "safe autonomy questions, start with knowledge/doctrine/future/CORPORATE_MODEL.md, "
-                "docs/CENTRAL_AGENT_GOVERNANCE.md, docs/AGENT_ANATOMY.md, "
+                "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md, docs/AGENT_ANATOMY.md, "
                 "docs/ROADMAP.md, and docs/COMMANDS_MAP.md before central "
                 "core/*.py mechanics.]\n"
             )
