@@ -115,6 +115,15 @@ def test_multiple_continuation_lines_are_joined(tmp_path, monkeypatch):
     assert runs[0]["user_question"] == "a b c"
 
 
+def test_continuation_eof_exits_the_repl(tmp_path, monkeypatch):
+    """Input ending mid-continuation leaves the REPL with 0, like every other
+    way out. The `<<<` block has had this test since it was written; this mode
+    did not, and returning 1 from here changed nothing in the suite.
+    """
+    runs = _run_repl(monkeypatch, tmp_path, ["first \\"])
+    assert runs == []
+
+
 def test_an_empty_continuation_is_discarded_without_running_the_agent(tmp_path, monkeypatch):
     """A continuation that joins to nothing must not reach the agent.
 
