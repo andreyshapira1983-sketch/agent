@@ -845,37 +845,54 @@ only in the direction that keeps flagging: an emitter like `_emit` was
 deliberately NOT added, because a false "journaled" hides a real silence, while
 a false "silent" only costs a reading.
 
-## 34. The child process speaks a different encoding than the parent reads
+## 34. A non-Python child writes cp866; the reader decodes strict UTF-8
 
-**Symptom.** A Python subprocess launched from this repository writes Cyrillic
-to stdout; the parent reads it and gets `������` instead of words. Reproduced
-repeatedly on 2026-08-05 while running measurement scripts: every diagnostic
-that printed a Russian label came back unreadable, including the ones written
-to prove other findings.
+**Symptom.** `tools/shell_exec.py` runs a Windows command, the command reports
+an error in the localised console code page, and the agent receives replacement
+characters instead of the message. The agent then tells the operator it cannot
+determine what went wrong — while the answer was in the bytes it just threw
+away.
 
-**Cost, in numbers.** Not measured in money. Measured in wrong conclusions: on
-2026-08-05 the agent ran `where python`, Windows answered with a localised
-error on stderr, `tools/shell_exec.py` decoded those bytes as strict UTF-8,
-and the reply came back as replacement characters. The agent then wrote, in an
-answer to the operator, that it could not determine why the interpreter was
-not found — "не подтверждена содержимым stderr из-за повреждённой кодировки
-вывода". The system had the answer and could not read it.
+**Reproduced 2026-08-06, exactly.**
 
-**How to check yourself.** Run any script that prints a non-ASCII string
-through a subprocess and read the parent's captured bytes, not the terminal.
-If `sum(1 for b in out if b > 127)` is non-zero and the text is unreadable,
-the two ends disagree. `app/io._force_utf8_io` fixes the CLI's own three
-streams and exports `PYTHONIOENCODING`; it does NOT govern how
-`tools/shell_exec.py` decodes what a child wrote, and it cannot govern a
-non-Python child such as `where` at all.
+    >>> r = subprocess.run(["cmd", "/c", "dir", "нет_такого_файла"],
+    ...                    capture_output=True)
+    >>> r.stdout[:20]
+    b' \x92\xae\xac \xa2 \xe3\xe1\xe2\xe0\xae\xa9\xe1\xe2\xa2\xa5 C'
+    >>> _.decode("utf-8", errors="replace")[:25]
+    ' \ufffd\ufffd\ufffd \ufffd \ufffd\ufffd\ufffd...'      # garbage
+    >>> _.decode("cp866")[:25]
+    ' Том в устройстве C имеет'          # the actual message
 
-**What to do.** Not investigated yet — recorded on the operator's instruction
-(2026-08-05) so the reproduction is not lost, and deliberately left open. When
-it is taken up, the two ends are `tools/shell_exec.py:900` (`_cap_and_decode`,
-strict UTF-8 with a replacement fallback) and whatever code page the console
-is actually in. Do not "fix" it by widening the fallback: replacement
-characters are how `core/knowledge_pipeline._is_broken_encoding` recognises
-garbage and refuses to store it, and that guard is correct.
+**Where the two ends are.** `tools/shell_exec.py:900` (`_cap_and_decode`)
+decodes strict UTF-8 with a replacement fallback. The child is `cmd`, `where`,
+`git` — not Python — so `PYTHONIOENCODING=utf-8`, which `app/io._force_utf8_io`
+exports, has no effect on it whatsoever.
+
+**What is NOT the cause, checked and ruled out 2026-08-06.**
+
+* Not the console and not the language. A Python child inherits
+  `PYTHONIOENCODING` and returns valid UTF-8: measured
+  `b'\xd0\xbf\xd1\x80\xd0\xb8\xd0\xb2\xd0\xb5\xd1\x82'` for `привет`.
+* Not `app/io._force_utf8_io`'s `errors="replace"`. That function is the first
+  statement of `run_cli` and does not run at all in a plain `python -c`
+  invocation, which is where the assistant's own mojibake came from — there
+  `sys.stdout.encoding` is cp1251 and `PYTHONIOENCODING` is unset.
+* Not file reading. An AST sweep of `core/ cli/ app/ tools/ api/ scripts/`
+  found four textual `open()` calls without `encoding=`; two are network
+  openers, two are the PID lock file in `app/single_instance.py:151,153`.
+
+**How to check yourself.** Run a localised Windows command through
+`shell_exec` and look at the raw bytes, not the rendered string. If
+`bytes.decode("cp866")` reads as words and `decode("utf-8", "replace")` does
+not, the two ends disagree and the reader is the one that is wrong.
+
+**What to do.** Registered against `tools/shell_exec.py`, not yet fixed
+(operator's instruction, 2026-08-06). Do NOT widen the replacement fallback:
+`\ufffd` is how `core/knowledge_pipeline._is_broken_encoding` recognises
+garbage and refuses to store it, and that guard is correct. The fix belongs at
+the decode, which must try the console code page for non-Python children
+before falling back.
 
 ## Findings journal — the exact address of each mistake
 
