@@ -20,6 +20,7 @@ import pytest
 import app.budget_guard as budget_guard_module
 import app.operator_task as operator_task_module
 import cli.app as app_module
+import cli.command_dispatch as dispatch_module
 import cli.intent_bridge as bridge_module
 import cli.repl as repl_module
 import main as main_module
@@ -220,6 +221,71 @@ def test_operator_task_block_ends_on_end_and_calls_its_handler(tmp_path, monkeyp
 
     assert seen == ["step one\nstep two"]
     assert "(operator task block started; finish with :end)" in capsys.readouterr().err
+
+
+def _run_repl_watching_operator_task(monkeypatch, tmp_path, lines):
+    """Run the REPL over `lines`; return (operator-task blocks, agent questions)."""
+    seen: list[str] = []
+    asked: list[str] = []
+    monkeypatch.setattr(app_module, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(app_module, "build_agent", lambda *a, **k: _fake_agent())
+    monkeypatch.setattr(app_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
+    monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda *a, **k: False)
+    monkeypatch.setattr(
+        bridge_module, "handle_conversational_operator_input", lambda *a, **k: False
+    )
+    monkeypatch.setattr(
+        operator_task_module, "_handle_operator_task",
+        lambda text, agent, workspace: seen.append(text) or True,
+    )
+    monkeypatch.setattr(
+        budget_guard_module, "_run_agent_with_budget_guard",
+        lambda agent, **kw: asked.append(kw["user_question"]) or "ANSWER",
+    )
+    monkeypatch.setattr(app_module, "_StdinLineReader", lambda **k: _scripted_reader(lines))
+    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
+    assert main_module.main() == 0
+    return seen, asked
+
+
+def test_operator_task_terminator_is_case_insensitive_and_trimmed(tmp_path, monkeypatch):
+    """`:end` ends the block however it is typed — the block modes agree on this."""
+    seen, _ = _run_repl_watching_operator_task(
+        monkeypatch, tmp_path, [":operator-task", "body", "   :END   "]
+    )
+    assert seen == ["body"]
+
+
+def test_operator_task_block_eof_exits_the_repl(tmp_path, monkeypatch):
+    """Input ending mid-block leaves with 0 and hands the handler nothing."""
+    seen, asked = _run_repl_watching_operator_task(
+        monkeypatch, tmp_path, [":operator-task", "half a block"]
+    )
+    assert (seen, asked) == ([], [])
+
+
+def test_the_operator_task_block_never_reaches_the_dispatcher(tmp_path, monkeypatch):
+    """The block must not fall through to the rest of the loop.
+
+    `:operator-task` is BOTH intercepted here and dispatched by
+    `handle_meta_command` (pinned in test_command_surface_snapshot), so without
+    the `continue` the token is handled twice — once as a block, then again as a
+    command, which answers the operator with a usage line for a block they just
+    finished. Watching the handler is not enough to see it: the dispatcher
+    imports `_handle_operator_task` by name, so a patch on the module is
+    invisible there. The dispatcher itself is what must not be reached.
+    """
+    dispatched: list[str] = []
+    monkeypatch.setattr(
+        dispatch_module, "handle_meta_command",
+        lambda q, agent, workspace: dispatched.append(q) or True,
+    )
+    seen, asked = _run_repl_watching_operator_task(
+        monkeypatch, tmp_path, [":operator-task", "body", ":end", "an ordinary question"]
+    )
+    assert seen == ["body"]
+    assert asked == ["an ordinary question"]
+    assert dispatched == []
 
 
 # ── stdin ownership ───────────────────────────────────────────────────────────
