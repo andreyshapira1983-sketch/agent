@@ -152,6 +152,26 @@ def test_block_mode_prompt_also_goes_to_stdout(tmp_path, monkeypatch, capsys):
     assert "(multi-line mode: paste text, finish with >>> on its own line)" in out.err
 
 
+def test_continuation_prompt_also_goes_to_stdout(tmp_path, monkeypatch, capsys):
+    """The `... ` prompt belongs to every multi-line mode, not just `<<<`.
+
+    Measured before this test existed: reading the continuation with the bare
+    `read_line()` — no prompt written at all — left the whole suite green.
+    """
+    _patch(monkeypatch)
+    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", lambda *a, **k: "A")
+    monkeypatch.setattr(
+        app_module, "_StdinLineReader", lambda **k: _scripted_reader(["first \\", "second"])
+    )
+    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
+
+    assert main_module.main() == 0
+
+    out = capsys.readouterr()
+    assert "> " in out.out
+    assert "... " in out.out
+
+
 def test_approval_prompt_is_written_to_stderr_and_reads_the_repl_reader(
     tmp_path, monkeypatch, capsys
 ):
