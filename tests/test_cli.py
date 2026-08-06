@@ -57,7 +57,7 @@ from core.policy import PolicyGate
 from core.scheduler import SchedulerStore
 from core.source_registry import SourceRegistry
 from core.source_registry_store import SourceRegistryStore
-from tests.conftest import FakeLLM
+from tests.conftest import FakeLLM, run_git
 from tools.base import Tool, ToolRegistry
 from tools.file_read import FileReadTool
 from tools.file_write import FileWriteTool
@@ -153,17 +153,13 @@ def test_local_operator_reply_bypasses_agent_run(
 
     monkeypatch.setattr(agent, "run", fail_if_called)
 
-    handled = _handle_local_operator_reply(
-        "\n".join(
-            [
-                "TD-001 stop condition.",
-                "Do not call Planner or Synthesizer for this instruction.",
-                "Do not use Claude.",
-                'Reply only with: "TD-001 evidence recorded; waiting for explicit patch approval."',
-            ]
-        ),
-        agent,
+    instruction = (
+        "TD-001 stop condition.\n"
+        "Do not call Planner or Synthesizer for this instruction.\n"
+        "Do not use Claude.\n"
+        'Reply only with: "TD-001 evidence recorded; waiting for explicit patch approval."'
     )
+    handled = _handle_local_operator_reply(instruction, agent)
 
     assert handled is True
     out = capsys.readouterr()
@@ -624,15 +620,9 @@ class TestHandleMetaCommand:
         # end (a safety gate may short-circuit in the tmp workspace). The
         # grounded-default wiring itself is asserted in
         # test_self_build_produce_uses_grounded_default below.
-        import subprocess
-
-        for args in (["init", "-q"], ["add", "-A"]):
-            subprocess.run(["git", *args], cwd=workspace, check=True)
-        subprocess.run(
-            ["git", "-c", "user.name=t", "-c", "user.email=t@e",
-             "commit", "-q", "--allow-empty", "-m", "init"],
-            cwd=workspace, check=True,
-        )
+        for args in (("init", "-q"), ("add", "-A"),
+                     ("commit", "-q", "--allow-empty", "-m", "init")):
+            run_git(workspace, *args)
         agent = _build_agent(workspace)
         assert handle_meta_command(":self-build-produce", agent, workspace) is True
         out = capsys.readouterr()
@@ -681,15 +671,9 @@ class TestHandleMetaCommand:
         # Dispatcher recognizes :self-task-propose and runs the Stage-A producer
         # end to end (a gate short-circuits to no_task in the tmp workspace, which
         # has no code TODO/FIXME backlog).
-        import subprocess
-
-        for args in (["init", "-q"], ["add", "-A"]):
-            subprocess.run(["git", *args], cwd=workspace, check=True)
-        subprocess.run(
-            ["git", "-c", "user.name=t", "-c", "user.email=t@e",
-             "commit", "-q", "--allow-empty", "-m", "init"],
-            cwd=workspace, check=True,
-        )
+        for args in (("init", "-q"), ("add", "-A"),
+                     ("commit", "-q", "--allow-empty", "-m", "init")):
+            run_git(workspace, *args)
         agent = _build_agent(workspace)
         assert handle_meta_command(":self-task-propose", agent, workspace) is True
         out = capsys.readouterr()
@@ -709,15 +693,9 @@ class TestHandleMetaCommand:
         # Dispatcher recognizes :self-task-build and routes to the Stage-B builder
         # (a deterministic gate short-circuits before any LLM call in a bare tmp
         # workspace), proving the command is wired end to end.
-        import subprocess
-
-        for args in (["init", "-q"], ["add", "-A"]):
-            subprocess.run(["git", *args], cwd=workspace, check=True)
-        subprocess.run(
-            ["git", "-c", "user.name=t", "-c", "user.email=t@e",
-             "commit", "-q", "--allow-empty", "-m", "init"],
-            cwd=workspace, check=True,
-        )
+        for args in (("init", "-q"), ("add", "-A"),
+                     ("commit", "-q", "--allow-empty", "-m", "init")):
+            run_git(workspace, *args)
         agent = _build_agent(workspace)
         assert (
             handle_meta_command(":self-task-build ain_missing", agent, workspace)
