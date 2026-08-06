@@ -1,6 +1,6 @@
 """Read-only tests for scripts/commands_map_check.py (registry <-> doc parity).
 
-The guard compares ``cli/command_registry.py`` against ``docs/COMMANDS_MAP.md`` in
+The guard compares ``cli/command_registry.py`` against ``knowledge/maps/COMMANDS_MAP.md`` in
 both directions. It deliberately no longer derives its verdict from ``main.py``:
 the old whole-file scan would have kept passing once dispatch moved out of that
 file. The code-to-registry link is asserted separately by

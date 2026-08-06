@@ -4,7 +4,7 @@
 > the HTTP API, and diagnosing failures. Container mechanics live in
 > `DOCKER.md`; configuration lives in
 > [`CONFIGURATION.md`](CONFIGURATION.md); the command surface lives in
-> [`COMMANDS_MAP.md`](COMMANDS_MAP.md). Code wins on any disagreement.
+> [`COMMANDS_MAP.md`](../knowledge/maps/COMMANDS_MAP.md). Code wins on any disagreement.
 
 ## 1. Run modes
 

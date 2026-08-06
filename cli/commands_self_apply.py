@@ -90,7 +90,7 @@ def _handle_self_apply_run(rest: str, agent: AgentLoop, workspace: Path) -> bool
         pass
 
     # No `--json` mode here on purpose. The documented surface of this command is
-    # `<inbox_id>` and nothing else (cli/command_registry.py, docs/COMMANDS_MAP.md,
+    # `<inbox_id>` and nothing else (cli/command_registry.py, knowledge/maps/COMMANDS_MAP.md,
     # the :help page all agree), and the one-argument guard above means a
     # `--json` token could only ever arrive *as* the id — so the branch that used
     # to live here could only pretty-print a refusal, never a real run.

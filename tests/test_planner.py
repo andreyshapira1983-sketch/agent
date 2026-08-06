@@ -402,7 +402,7 @@ def test_corporate_doctrine_question_forces_docs_first_over_core_defaults(
         "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md",
         "docs/AGENT_ANATOMY.md",
         "knowledge/doctrine/ROADMAP.md",
-        "docs/COMMANDS_MAP.md",
+        "knowledge/maps/COMMANDS_MAP.md",
         "knowledge/doctrine/SUBAGENT_LIFECYCLE.md",
     ]
     assert "README.md" not in paths
@@ -445,7 +445,7 @@ def test_corporate_doctrine_implementation_question_keeps_code_after_docs(
         "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md",
         "docs/AGENT_ANATOMY.md",
         "knowledge/doctrine/ROADMAP.md",
-        "docs/COMMANDS_MAP.md",
+        "knowledge/maps/COMMANDS_MAP.md",
     ]
     assert paths[5:] == ["core/autonomous_runtime.py"]
     assert "knowledge/doctrine/SUBAGENT_LIFECYCLE.md" not in paths
@@ -533,7 +533,7 @@ def test_mixed_doctrine_confidence_question_selects_docs_and_verifier_sources(
         "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md",
         "docs/AGENT_ANATOMY.md",
         "knowledge/doctrine/ROADMAP.md",
-        "docs/COMMANDS_MAP.md",
+        "knowledge/maps/COMMANDS_MAP.md",
     ]
     for path in (
         "core/verifier.py",

@@ -7,7 +7,7 @@ is what switches those consumers over to this table.
 
 Why it exists: the same command surface is currently spelled out in four
 hand-maintained places (the dispatch chain in ``main.py``, the ``:help`` page,
-the startup banner, and ``docs/COMMANDS_MAP.md``) and they already disagree.
+the startup banner, and ``knowledge/maps/COMMANDS_MAP.md``) and they already disagree.
 
 Purity contract: this module imports **nothing** from ``core``, ``app``,
 ``cli.commands_*`` or any runtime module, and holds no behaviour. It must stay
@@ -18,7 +18,7 @@ Field meanings (all recorded from the code at commit 72fc7a8):
 
 - ``canonical`` -- the primary ``:token``. Chosen as the first token of the
   dispatch branch, which at this commit always matches the first token listed
-  in ``:help`` and in ``docs/COMMANDS_MAP.md``.
+  in ``:help`` and in ``knowledge/maps/COMMANDS_MAP.md``.
 - ``aliases`` -- the other tokens the same dispatch branch accepts.
 - ``description`` -- taken from the live ``:help`` line for the canonical token,
   falling back to the ``COMMANDS_MAP`` row when ``:help`` omits it.
