@@ -6,7 +6,7 @@ finding records the **root location in code**, not just the surface symptom, and
 whether that root spans multiple files.
 
 This is an *observation log from live runs*, distinct from
-`docs/MEMORY_SYSTEM_AUDIT.md` (static code audit) and
+`knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md` (static code audit) and
 `knowledge/doctrine/self-audit-lessons.md` (already-fixed defects).
 
 > **⚠️ STATUS LEDGER SUPERSEDED (2026-07-25).** The `confirmed-defect` / FIXED marks on
@@ -137,7 +137,7 @@ local self-check.
 
 **Root.** `core/operator_intent.py` — `OperatorIntentKind` has no self-diagnostic
 kind; `route_operator_intent("check yourself and find problems")` returns `None`
-(confirmed in `docs/MEMORY_SYSTEM_AUDIT.md`, MGA-08).
+(confirmed in `knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md`, MGA-08).
 
 **Fix direction.** A self-diagnostic intent + a locally-scoped strategy (read own
 code/logs/tests, no web), not the generic question path.

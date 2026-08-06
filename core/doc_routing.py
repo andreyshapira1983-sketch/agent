@@ -262,7 +262,7 @@ _MEMORY_GOVERNANCE_DOC_PATHS = (
     # a step that raised FileNotFoundError and a third of this doctrine never
     # arrived. Its replacement is to be built by walking the code, not by
     # restoring a document written from static reading alone.
-    "docs/MEMORY_SYSTEM_AUDIT.md",
+    "knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md",
     "knowledge/doctrine/self-audit-lessons.md",
 )
 # Thematic (conditional) doc group for self-diagnosis / self-repair reasoning:
