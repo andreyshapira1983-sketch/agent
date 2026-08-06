@@ -130,6 +130,10 @@ class _StdinLineReader:
         self._q: queue.Queue[object] = queue.Queue()
         self._started = False
         self._lock = threading.Lock()
+        #: The exception that ended the pump, or None if input ended normally.
+        #: A read failure and a real end-of-input both stop the reader, and
+        #: both surface as EOFError — this is what tells them apart afterwards.
+        self.read_error: BaseException | None = None
 
     def _ensure_started(self) -> None:
         with self._lock:
@@ -142,13 +146,41 @@ class _StdinLineReader:
         while True:
             try:
                 line = self._readline()
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 — a reader thread may not die loudly
+                # Control flow is deliberately UNCHANGED: a failed read still
+                # ends the reader, because a thread that cannot read stdin has
+                # nothing left to do and must not spin. What changes is that
+                # the reason survives. Before, a decode error, a closed pipe
+                # and an honest Ctrl+D all produced the same EOFError with
+                # nothing to distinguish them, and the session simply ended.
+                self.read_error = exc
+                self._report_read_failure(exc)
                 self._q.put(self._EOF)
                 return
             if line == "":  # EOF (Ctrl+Z / Ctrl+D / closed pipe)
                 self._q.put(self._EOF)
                 return
             self._q.put(line.rstrip("\n").rstrip("\r"))
+
+    def _report_read_failure(self, exc: BaseException) -> None:
+        """Say once, on stderr, that input ended by failure and not by EOF.
+
+        stderr rather than the prompt stream: this runs on the reader thread
+        while the main thread may be mid-print, and stderr is where every other
+        diagnostic in the REPL already goes. Guarded, because a reader thread
+        that raises while reporting would leave the queue without its EOF and
+        hang the session — the failure must reach the caller even if the notice
+        does not.
+        """
+        try:
+            print(
+                f"(stdin read failed: {type(exc).__name__}: {exc}; "
+                "ending the session)",
+                file=sys.stderr,
+                flush=True,
+            )
+        except Exception:  # noqa: BLE001, S110 — the EOF below matters more
+            pass  # nosec B110 — see docstring: the queue must still get its EOF
 
     def read_line(self, timeout: float | None = None) -> str:
         """Return the next line. Raises EOFError at end of input, or
