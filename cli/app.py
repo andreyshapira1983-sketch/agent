@@ -1,12 +1,17 @@
 """The CLI itself: parse, decide the mode, wire the session, hand off.
 
 ``run_cli`` is the whole of what ``main()`` used to be, moved here in the last
-extraction step. It performs, in this exact order (the order is a contract --
-``tests/characterization/test_cli_mode_selection.py`` and
-``test_cli_one_shot_policy.py`` freeze it):
+extraction step. It performs the steps below in this order. Parts of that
+order are frozen by tests and parts are not, and the difference matters:
+``test_cli_one_shot_policy.py`` pins ``load_dotenv`` before ``build_agent``
+and pins both fast paths ahead of either; ``test_cli_mode_selection.py``
+pins which mode is chosen, not the sequence. Steps 1-2 went unguarded until
+2026-08-05, and that is exactly where they had drifted apart -- see the
+comment at ``_force_utf8_io``.
 
-1. parse the seven flags (``cli/args.py``);
-2. ``_force_utf8_io()`` -- before any non-ASCII byte can flow through stdio;
+1. ``_force_utf8_io()`` -- before argparse can print anything, because
+   ``--help`` is written and exited from *inside* ``parse_args``;
+2. parse the seven flags (``cli/args.py``);
 3. the two pre-``load_dotenv()`` fast paths, ``:self-build-propose`` and
    ``:schedule-disable``, which must not build an agent or touch ``.env``;
 4. ``load_dotenv()``;
@@ -17,8 +22,8 @@ extraction step. It performs, in this exact order (the order is a contract --
    limiter, daemon notice, banner, then the loop in ``cli/repl.py``.
 
 ``main.py`` is now nothing but a launcher over this module -- 47 lines, with no
-re-export block left (``docs/refactor/MAIN_SURFACE_AUDIT.md`` records how that
-surface was retired).
+re-export block left; ``tests/characterization/test_main_public_surface.py``
+is what keeps it that way.
 
 **Where to patch in tests.** Steps 1-8 are performed *here*, so a fake for
 ``build_agent``, ``load_dotenv``, ``_StdinLineReader``, ``CLIApprovalProvider``,
@@ -67,10 +72,14 @@ def _preflight_file_hint(file_hint: str | None, workspace: Path) -> tuple[bool, 
 
 
 def run_cli() -> int:
-    args = build_parser().parse_args()
-
-    # Must run BEFORE any non-ASCII input flows through stdin / out.
+    # BEFORE `parse_args`, not after. argparse prints `--help` and raises
+    # SystemExit from inside `parse_args`, so a call placed after it never
+    # runs on that path: measured 2026-08-05, zero invocations on `--help`,
+    # and the em dash in the parser's own description reached a cp1251
+    # console as a replacement char. Nothing here depends on the parsed
+    # arguments, so there is no reason for it to wait.
     _force_utf8_io()
+    args = build_parser().parse_args()
     workspace = Path(args.workspace).resolve()
     ask_head = args.ask.lstrip() if args.ask else ""
     head, _, rest = ask_head.partition(" ")
