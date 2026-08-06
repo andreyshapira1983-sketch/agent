@@ -1,29 +1,31 @@
 """The CLI itself: parse, decide the mode, wire the session, hand off.
 
-``run_cli`` is the whole of what ``main()`` used to be, moved here in the last
-extraction step. It performs the steps below in this order. Parts of that
-order are frozen by tests and parts are not, and the difference matters:
-``test_cli_one_shot_policy.py`` pins ``load_dotenv`` before ``build_agent``
-and pins both fast paths ahead of either; ``test_cli_mode_selection.py``
-pins which mode is chosen, not the sequence. Steps 1-2 went unguarded until
-2026-08-05, and that is exactly where they had drifted apart -- see the
-comment at ``_force_utf8_io``.
+``run_cli`` is the whole startup sequence. The order below is the route, and
+several places in it are load-bearing rather than incidental:
 
-1. ``_force_utf8_io()`` -- before argparse can print anything, because
-   ``--help`` is written and exited from *inside* ``parse_args``;
-2. parse the seven flags (``cli/args.py``);
+1. ``_force_utf8_io()`` -- must precede ``parse_args``, which writes ``--help``
+   and raises ``SystemExit`` from inside itself;
+2. parse the flags (``cli/args.py``);
 3. the two pre-``load_dotenv()`` fast paths, ``:self-build-propose`` and
-   ``:schedule-disable``, which must not build an agent or touch ``.env``;
-4. ``load_dotenv()``;
-5. ``--resume`` (``cli/resume.py``), which can exit before an agent exists;
-6. the file-hint preflight, the only path that exits ``2`` after startup;
+   ``:schedule-disable`` -- neither may build an agent or read ``.env``;
+4. ``load_dotenv(workspace / ".env")`` -- the workspace's file, not the launch
+   directory's;
+5. ``--resume`` (``cli/resume.py``), which can exit before an agent exists and
+   may replace ``ask`` / ``file_hint`` with the checkpoint's;
+6. reject an empty ``--ask``, then the file-hint preflight -- the two paths
+   that exit ``2`` without spending anything;
 7. one-shot ``--ask`` (``cli/one_shot.py``) -- or
 8. the interactive session: stdin reader, approval provider, agent, rate
    limiter, daemon notice, banner, then the loop in ``cli/repl.py``.
 
-``main.py`` is now nothing but a launcher over this module -- 47 lines, with no
-re-export block left; ``tests/characterization/test_main_public_surface.py``
-is what keeps it that way.
+What the tests fix: ``test_cli_one_shot_policy.py`` pins step 1 before 2,
+``load_dotenv`` before ``build_agent``, and both fast paths ahead of either;
+``test_cli_mode_selection.py`` pins which mode is chosen and the exit codes of
+step 6; ``test_cli_command_precedence.py`` pins that both dispatch paths split
+a command on any whitespace, not on a literal space.
+
+``main.py`` is a launcher over this module and nothing else;
+``tests/characterization/test_main_public_surface.py`` keeps it that way.
 
 **Where to patch in tests.** Steps 1-8 are performed *here*, so a fake for
 ``build_agent``, ``load_dotenv``, ``_StdinLineReader``, ``CLIApprovalProvider``,
@@ -57,15 +59,16 @@ from core.approval import ApprovalProvider, AutoApprover, CLIApprovalProvider
 def _preflight_file_hint(file_hint: str | None, workspace: Path) -> tuple[bool, str | None]:
     """`--file` must name an existing FILE. Three ways it may not, each named.
 
-    Measured 2026-08-05, before this was tightened: `--file ""`, `--file "   "`
-    and a directory all passed. The first two never reached the check at all —
-    `if not file_hint` is true for an empty string, so the function returned
-    "fine" for a flag the operator did give. The third passed because
-    `path.exists()` is true for a directory.
+    `None` means the flag was absent — the one legitimate way to have no hint.
+    An empty or whitespace-only value is a flag the operator DID give, and is
+    refused: falsiness cannot tell those two apart, so the check is `is None`.
 
-    `None` still means the flag was absent, which is the one legitimate way to
-    have no hint. Path is NOT constrained to the workspace: that is a separate
-    decision and is deliberately not taken here.
+    The three refusals carry different messages on purpose. "empty path", "is a
+    directory" and "does not exist" are different faults, and an operator
+    reading stderr must not have to guess which one happened.
+
+    The path is NOT constrained to the workspace. That is a separate decision,
+    deliberately not taken here.
     """
     if file_hint is None:
         return True, None
@@ -101,22 +104,16 @@ def _preflight_file_hint(file_hint: str | None, workspace: Path) -> tuple[bool, 
 
 
 def run_cli() -> int:
-    # BEFORE `parse_args`, not after. argparse prints `--help` and raises
-    # SystemExit from inside `parse_args`, so a call placed after it never
-    # runs on that path: measured 2026-08-05, zero invocations on `--help`,
-    # and the em dash in the parser's own description reached a cp1251
-    # console as a replacement char. Nothing here depends on the parsed
-    # arguments, so there is no reason for it to wait.
+    # Before `parse_args`: argparse writes `--help` and raises SystemExit from
+    # inside it, so anything placed after would never run on that path — and
+    # the help text is where a non-ASCII byte first meets the console.
     _force_utf8_io()
     args = build_parser().parse_args()
     workspace = Path(args.workspace).resolve()
     ask_head = args.ask.lstrip() if args.ask else ""
-    # Split on ANY whitespace, not on a literal space. A tab between the
-    # command and its argument left `head` as the whole string, so a real
-    # command reached the user as "(unknown command: ...)". Measured
-    # 2026-08-05. `cli/command_dispatch.py` is changed the same way in the
-    # same commit: fixing one path alone would make two of the 95 commands
-    # behave differently from the other 93.
+    # Any whitespace, not a literal space: a pasted command can arrive with a
+    # tab. `cli/command_dispatch.py` splits the same way, and must — these two
+    # fast paths and the other 93 commands have to agree on what a command is.
     _parts = ask_head.split(maxsplit=1)
     head = _parts[0] if _parts else ""
     rest = _parts[1] if len(_parts) > 1 else ""
@@ -127,23 +124,18 @@ def run_cli() -> int:
         print(_schedule_disable_message(rest.strip(), workspace), file=sys.stderr)
         return 0
 
-    # From the WORKSPACE, not from wherever the process was launched.
-    # Measured 2026-08-05: with a bare `load_dotenv()`, running from folder A
-    # with `--workspace B` loaded A's `.env` — code and data from one project,
-    # keys and settings from another. `agent_tick.py` already passes the path
-    # (twice); the CLI had not caught up. Default `--workspace` is ".", so an
-    # ordinary launch resolves to the same file it always did.
+    # The workspace's file, named explicitly. A bare `load_dotenv()` reads the
+    # launch directory, which lets keys come from one project while code and
+    # data come from another. `agent_tick.py` names the path for the same
+    # reason. Default `--workspace` is ".", so an ordinary launch is unchanged.
     load_dotenv(workspace / ".env")
 
-    # §3.5 Resume: if --resume is given, look up the checkpoint file and
-    # short-circuit before building the full agent stack when possible.
+    # §3.5 Resume: look up the checkpoint and short-circuit before the full
+    # agent stack is built, when possible.
     #
-    # `is not None`, а НЕ проверка истинности: argparse ставит `None`, когда
-    # флага не было, и пустую строку, когда его дали пустым. При проверке
-    # истинности `--resume ""` проваливался мимо всей ветки — оператор просил
-    # возобновить, молча получал новый прогон с кодом 0, тогда как остальные
-    # четыре негодных значения честно падали с кодом 2. Проверка в
-    # `resolve_resume` пустую строку отвергает; до неё просто не доходило.
+    # `is not None`, not truthiness: argparse gives `None` for an absent flag
+    # and "" for an empty one. Falsiness merges those, and the empty case must
+    # reach `resolve_resume`, which is what rejects it.
     if args.resume is not None:
         decision = resolve_resume(
             args.resume,
@@ -156,10 +148,10 @@ def run_cli() -> int:
         args.ask = decision.ask
         args.file = decision.file_hint
 
-    # Same truthiness trap the `--resume` comment above describes, left standing
-    # twelve lines below it. `--ask ""` made `if args.ask:` false, so the
-    # operator asked for a one-shot answer and silently got an interactive REPL
-    # instead — while `--resume ""` honestly exits 2. Measured 2026-08-05.
+    # Same distinction as `--resume` above, and for the same reason: falsiness
+    # would send an empty `--ask` into the interactive branch, answering a
+    # request for one-shot output with a prompt. Checked AFTER resume, so a
+    # checkpoint may supply the question.
     if args.ask is not None and not args.ask.strip():
         print(
             "ERROR: --ask was given an empty question.\n\n"
