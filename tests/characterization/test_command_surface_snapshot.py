@@ -97,7 +97,6 @@ def _pre_dotenv_fast_paths() -> set[str]:
     # The startup sequence moved to cli/app.py with the rest of `main()`;
     # scanning main.py here would silently freeze an empty set.
     app_source = (REPO_ROOT / "cli" / "app.py").read_text(encoding="utf-8")
-    marker = "\n    load_dotenv()"
     prefix = _pre_dotenv_source_prefix(app_source)
     return set(re.findall(r'head\.lower\(\)\s*==\s*"(:[a-z0-9-]+)"', prefix))
 

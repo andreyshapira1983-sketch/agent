@@ -92,7 +92,6 @@ def _pre_dotenv_source_prefix(app_source: str) -> str:
 def _pre_dotenv_tokens() -> set[str]:
     # The startup sequence lives in cli/app.py since the launcher split; reading
     # main.py here would match nothing and freeze an empty set.
-    marker = "\n    load_dotenv()"
     prefix = _pre_dotenv_source_prefix(APP_SOURCE)
     return set(re.findall(r'head\.lower\(\)\s*==\s*"(' + _CMD + r')"', prefix))
 
