@@ -122,3 +122,38 @@ def test_main_is_callable_and_returns_an_int(tmp_path, monkeypatch):
     result = main_module.main()
     assert isinstance(result, int)
     assert result == 0
+
+
+def test_the_process_really_exits_with_the_code_main_returned(tmp_path):
+    """The launcher checked as a PROCESS, with nothing patched.
+
+    Every other guard here reaches `main()` by calling it, and the one that
+    covers the `raise SystemExit(main())` tail compares the text of the last
+    two lines. Neither observes what a shell actually receives.
+
+    Measured why it matters: drop the `return` from `main()` — leaving the
+    tail untouched, so the text guard stays green — and a run that should
+    report failure exits 0. A caller gating on the exit code would read the
+    error as success.
+
+    `--file` naming a missing path is used because it fails in preflight, so
+    no model is called and the run costs nothing.
+    """
+    import subprocess
+
+    missing = tmp_path / "definitely-not-here.txt"
+    result = subprocess.run(  # noqa: S603 - argv is built here, not from input
+        [sys.executable, str(REPO_ROOT / "main.py"),
+         "--workspace", str(tmp_path),
+         "--file", str(missing),
+         "--ask", "q"],
+        capture_output=True, text=True, timeout=120, cwd=str(REPO_ROOT),
+        check=False,  # a non-zero code is the point of this test
+    )
+
+    assert result.returncode == 2, (
+        "the process must hand the shell the code main() returned; got "
+        f"{result.returncode}\nstdout: {result.stdout[-400:]}\n"
+        f"stderr: {result.stderr[-400:]}"
+    )
+    assert "No model calls were made" in result.stderr
