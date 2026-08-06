@@ -1,29 +1,12 @@
-"""Interactive REPL input: one owner for stdin, paste-safe.
+"""Interactive REPL input: one owner for stdin, and the dialogue loop.
 
-The REPL reads with line-buffered input, so a pasted multi-line block used to
-arrive as many separate prompts -- each executed as its own question. The fix
-does not depend on terminal features (Windows cooked-mode input does not surface
-bracketed-paste markers): a single background thread drains stdin into a queue,
-and a top-level read *coalesces* the burst of lines a paste delivers back-to-back
-into ONE message. A human typing pauses between lines, so their lines are not
-merged.
+:class:`_StdinLineReader` is the ONLY consumer of stdin — the top-level prompt,
+the block modes and the approval prompt all pull from its queue, so they cannot
+race. :func:`run_repl` is the loop: input modes, ``:command`` dispatch, the
+intent router, the rate-limit check, the agent call. Startup wiring lives in
+``cli/app.py``, which calls this.
 
-Making :class:`_StdinLineReader` the ONLY consumer of stdin is what keeps the
-top-level prompt, the block modes and the approval prompt from racing each other
--- they all pull from the same queue.
-
-Extracted verbatim from ``main.py``, which re-exported these names until
-Phase 7 removed the compatibility block; ``_StdinLineReader`` and
-``PASTE_COALESCE_GAP_SECONDS`` are imported from here now.
-
-:func:`run_repl` at the bottom of this file is the dialogue loop itself, moved
-here from ``main()`` in a later step. It owns everything that happens *per
-message*: the two multi-line input modes (``<<< … >>>`` and trailing ``\\``),
-the ``:operator-task``/``:end`` and ``:task-begin``/``:task-end`` blocks,
-``:command`` dispatch, the plain-language intent router, the rate-limit check
-and the agent call. What stays in ``main()`` is the one-time *wiring* around it
-(reader, approval provider, agent, rate limiter, daemon notice, banner), because
-that is startup ordering and several suites freeze it by patching ``main``.
+Design notes and the measurements behind them: docs/CODE_NOTES.md.
 """
 from __future__ import annotations
 
@@ -84,20 +67,9 @@ def _collect_pasted_block(read_line: Callable[[], str]) -> str:
     return "\n".join(parts).strip()
 
 
-# ── Paste-safe stdin reading ──────────────────────────────────────────────
-# The REPL reads with line-buffered input, so pasting a multi-line block used
-# to arrive as many separate prompts — each executed as its own question
-# (observed: one pasted spec became 12 fragmentary "questions"). We fix this
-# without depending on terminal features (Windows cooked-mode input does not
-# surface bracketed-paste markers): a single background thread drains stdin
-# into a queue, and a top-level read "coalesces" the burst of lines that a
-# paste delivers back-to-back into ONE message. A human typing pauses between
-# lines, so their lines are NOT merged.
-
-# Max wait for the *next* line before deciding a burst has ended. A paste
-# delivers its lines within microseconds; a human takes far longer. Small
-# enough to never merge separate human submissions, large enough to catch a
-# paste even on a slightly laggy terminal.
+#: Max wait for the NEXT line before a burst counts as over. A paste delivers
+#: its lines in microseconds, a human takes far longer — that gap is the whole
+#: mechanism, so this value is a contract, not a tuning knob.
 PASTE_COALESCE_GAP_SECONDS = 0.05
 
 
@@ -107,11 +79,8 @@ def _coalesce_burst(
 ) -> str:
     """Join a back-to-back burst of input lines into one message.
 
-    ``read_first`` blocks for the first line (and may raise
-    ``EOFError``/``KeyboardInterrupt``, which propagate). ``read_next``
-    returns the next line if one is already waiting, or ``None`` when the
-    burst has ended (nothing arrived within the grace window). Lines are
-    joined with ``\\n`` so a pasted block keeps its structure.
+    ``read_first`` blocks and may raise ``EOFError``/``KeyboardInterrupt``, which
+    propagate; ``read_next`` returns ``None`` once the burst is over.
     """
     parts = [read_first()]
     while True:
@@ -125,10 +94,8 @@ def _coalesce_burst(
 class _StdinLineReader:
     """Single-owner, thread-backed line reader for the interactive REPL.
 
-    A daemon thread performs the blocking reads so the main thread can pull
-    lines with a timeout (needed for paste coalescing). Making this the ONLY
-    consumer of stdin avoids races between the top-level prompt, the block
-    modes, and the approval prompt — they all pull from the same queue.
+    A daemon thread does the blocking reads so the main thread can pull lines
+    with a timeout, which is what makes paste coalescing possible.
     """
 
     _EOF = object()
@@ -148,9 +115,8 @@ class _StdinLineReader:
         self._q: queue.Queue[object] = queue.Queue()
         self._started = False
         self._lock = threading.Lock()
-        #: The exception that ended the pump, or None if input ended normally.
-        #: A read failure and a real end-of-input both stop the reader, and
-        #: both surface as EOFError — this is what tells them apart afterwards.
+        #: What ended the pump, or None if input simply ran out. Both surface as
+        #: EOFError to the caller; this is what tells them apart.
         self.read_error: BaseException | None = None
 
     def _ensure_started(self) -> None:
@@ -165,12 +131,8 @@ class _StdinLineReader:
             try:
                 line = self._readline()
             except Exception as exc:  # noqa: BLE001 — a reader thread may not die loudly
-                # Control flow is deliberately UNCHANGED: a failed read still
-                # ends the reader, because a thread that cannot read stdin has
-                # nothing left to do and must not spin. What changes is that
-                # the reason survives. Before, a decode error, a closed pipe
-                # and an honest Ctrl+D all produced the same EOFError with
-                # nothing to distinguish them, and the session simply ended.
+                # A thread that cannot read stdin has nothing left to do, so it
+                # ends here; the reason survives in `read_error`.
                 self.read_error = exc
                 self._report_read_failure(exc)
                 self._q.put(self._EOF)
@@ -183,12 +145,8 @@ class _StdinLineReader:
     def _report_read_failure(self, exc: BaseException) -> None:
         """Say once, on stderr, that input ended by failure and not by EOF.
 
-        stderr rather than the prompt stream: this runs on the reader thread
-        while the main thread may be mid-print, and stderr is where every other
-        diagnostic in the REPL already goes. Guarded, because a reader thread
-        that raises while reporting would leave the queue without its EOF and
-        hang the session — the failure must reach the caller even if the notice
-        does not.
+        Guarded: a reader thread that raises while reporting would leave the
+        queue without its EOF and hang the session.
         """
         try:
             print(
@@ -215,11 +173,9 @@ class _StdinLineReader:
             self._out.write(prompt)
             self._out.flush()
         except (OSError, ValueError):
-            # Prompt output is best-effort; a broken stdout must not prevent
-            # reading input. Narrow on purpose: a closed stream and an
-            # unencodable prompt raise ValueError (UnicodeEncodeError is one),
-            # a dead pipe raises OSError, and anything else is a bug here
-            # rather than a broken console.
+            # A broken stdout must not stop input from being read. Narrow on
+            # purpose: those two are a broken console, anything else is a bug
+            # here and belongs to the caller.
             pass
 
     def prompt_line(self, prompt: str) -> str:
@@ -258,17 +214,9 @@ def _ask_the_agent(
 ) -> None:
     """Spend one rate-limit token, run the agent, print the answer.
 
-    Two paths reach the agent — a plain message and the `:task-begin` buffer —
-    and they carried fifteen identical lines each, differing only in which
-    variable held the question. A change to one would have silently left the
-    other on the old behaviour.
-
-    `budget_guard` stays addressed through the MODULE: the suites patch
-    `budget_guard._run_agent_with_budget_guard`, and a name bound at import
-    time here would not see that patch.
-
     Returns nothing: a refused token and a delivered answer both mean "this
-    message is done", and both callers continue their loop either way.
+    message is done". `budget_guard` is addressed through the MODULE because the
+    suites patch it there, and a name bound at import time would not see that.
     """
     rl = rate_limiter.consume()
     if not rl.allowed:
@@ -292,15 +240,9 @@ def _ask_the_agent(
 def _stdin_is_interactive() -> bool:
     """True when stdin is a terminal — the condition for paste coalescing.
 
-    Narrow on purpose, the same rule `_write_prompt` above already follows: a
-    closed stream raises ValueError, a dead descriptor raises OSError, and a
-    process started without stdin at all (``pythonw.exe``, a detached service)
-    has ``sys.stdin is None``. Those three are one answer — no terminal here.
-
-    Anything else is a defect in this module rather than a missing console, and
-    it must reach the caller. The broad `except Exception` this replaces
-    answered "not interactive" to a typo as readily as to a closed pipe, and
-    the REPL would have dropped to line-by-line reading with nothing said.
+    No stdin at all (``pythonw.exe``), a closed stream and a dead descriptor are
+    one answer: no console. Anything else is a bug here and must reach the
+    caller, not be answered with a quiet "not interactive".
     """
     stream = sys.stdin
     if stream is None:
@@ -311,21 +253,9 @@ def _stdin_is_interactive() -> bool:
         return False
 
 
-# ── The dialogue loop ─────────────────────────────────────────────────────────
-# Moved out of ``main()``; the body below is the original ``while True:`` block
-# dedented one level, with the locals it used renamed to parameters
-# (``_reader`` -> ``reader``, ``_rate_limiter`` -> ``rate_limiter``,
-# ``args.file`` -> ``file_hint``). Every printed string, every branch and the
-# order of the checks are untouched, and that order is what
-# ``tests/characterization/test_repl_input_modes.py``,
-# ``test_cli_command_precedence.py`` and ``test_repl_rate_limit_paths.py`` pin.
-#
-# The four collaborator modules are imported as *modules* and called through
-# the attribute, for the reason spelled out in ``cli/one_shot.py``: a
-# ``monkeypatch.setattr`` is observed only where the call site resolves the
-# name. One patch on the module that
-# defines the function is therefore seen from the REPL and from one-shot alike;
-# binding the names here at import time would silently ignore it.
+# The order of the checks in the loop below is pinned by the characterization
+# suites; the collaborators are called through their MODULE so one
+# monkeypatch is seen from here and from cli/one_shot.py alike.
 
 
 def run_repl(
@@ -349,16 +279,11 @@ def run_repl(
             print()
             return 0
         if not q:
-            # An empty Enter must NOT exit — otherwise pasting a long
-            # multi-line block whose first line is blank (or pressing
-            # Enter to clear the prompt) drops the user back into the
-            # parent shell, which then tries to interpret the rest of
-            # the paste as commands. Use :quit / :exit / Ctrl+C / EOF.
+            # An empty Enter must NOT exit: a paste whose first line is blank
+            # would drop the operator into the parent shell, which then runs the
+            # rest of the paste as commands. Leave with :quit / Ctrl+C / EOF.
             continue
-        # ── Multi-line input modes ────────────────────────────────────────────
-        # Mode 1: explicit block  <<<  … >>>
-        #   Start a line with <<< to enter block mode; finish with >>>
-        #   Useful when pasting text that contains newlines.
+        # Mode 1: an explicit block, <<< … >>>, for pasting text with newlines.
         if q == "<<<":
             print("(multi-line mode: paste text, finish with >>> on its own line)",
                   file=sys.stderr)
@@ -369,8 +294,7 @@ def run_repl(
                 return 0
             if not q:
                 continue
-        # Mode 2: line continuation with trailing backslash
-        #   Each line ending in \ is joined with the next (backslash removed).
+        # Mode 2: a line ending in \ is joined with the next, backslash removed.
         elif q.endswith("\\"):
             continuation_parts: list[str] = [q[:-1]]
             while True:
@@ -386,13 +310,9 @@ def run_repl(
                     break
             q = " ".join(p.strip() for p in continuation_parts if p.strip())
             if not q:
-                # Same refusal as the two paths around it: the top of the loop
-                # discards an empty message, and so does the `<<<` block. A
-                # lone backslash followed by a blank line joins to nothing, and
-                # without this the empty string reached the agent and spent a
-                # rate-limit token on a question nobody asked.
+                # The same refusal the other two paths make: an empty message
+                # costs a rate-limit token and asks the agent nothing.
                 continue
-        # ─────────────────────────────────────────────────────────────────────
         if q == ":operator-task":
             block_lines: list[str] = []
             print("(operator task block started; finish with :end)", file=sys.stderr)
@@ -407,13 +327,9 @@ def run_repl(
                 block_lines.append(line)
             operator_task._handle_operator_task("\n".join(block_lines), agent, workspace)
             continue
-        # ── CLI instruction buffer ────────────────────────────────────────────
-        # :task-begin … :task-end lets the operator compose a complex,
-        # multi-line instruction that is sent straight to the agent, bypassing
-        # the operator keyword router. This is the reliable way to give an
-        # instruction whose wording would otherwise be hijacked by a shortcut
-        # (e.g. text that merely *mentions* budget / approval / implementation).
-        # :task-abort discards the buffer.
+        # :task-begin … :task-end goes STRAIGHT to the agent, bypassing the
+        # keyword router — the reliable way to send wording that a shortcut
+        # would otherwise hijack (text merely mentioning budget or approval).
         if q == ":task-begin":
             print(
                 "(instruction buffer started; finish with :task-end, "
