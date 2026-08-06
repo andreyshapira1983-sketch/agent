@@ -76,7 +76,6 @@ WATCH: dict[str, int] = {
     "core/autonomous_runtime.py:AutonomousRuntime._task_propose": 167,
     "core/memory_policy.py:MemoryWritePolicy.decide": 167,
     "core/self_task_producer.py:produce_coding_task": 167,
-    "cli/repl.py:run_repl": 166,
     "core/role_router.py:RoleRouter.route": 163,
     "core/low_evidence_policy.py:evaluate_low_evidence_policy": 161,
     "core/planner.py:LLMPlanner.plan": 159,
