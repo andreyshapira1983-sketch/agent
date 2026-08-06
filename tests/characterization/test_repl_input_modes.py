@@ -102,6 +102,20 @@ def test_multiple_continuation_lines_are_joined(tmp_path, monkeypatch):
     assert runs[0]["user_question"] == "a b c"
 
 
+def test_an_empty_continuation_is_discarded_without_running_the_agent(tmp_path, monkeypatch):
+    """A continuation that joins to nothing must not reach the agent.
+
+    The other two ways into this loop already refuse an empty message: the top
+    of the loop (`if not q: continue`, with the paste accident it prevents
+    written beside it) and the `<<<` block above, pinned by
+    `test_empty_block_is_discarded_without_running_the_agent`. This path had no
+    such check, so a lone backslash followed by a blank line sent the empty
+    string to the agent AND spent a rate-limit token on it.
+    """
+    runs = _run_repl(monkeypatch, tmp_path, ["\\", "   "])
+    assert runs == []
+
+
 # ── empty input ───────────────────────────────────────────────────────────────
 
 def test_empty_line_does_not_exit_and_does_not_run_the_agent(tmp_path, monkeypatch):
