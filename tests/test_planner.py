@@ -1291,7 +1291,7 @@ def test_memory_question_injects_memory_governance_docs(workspace: Path) -> None
         if src["tool"] == "file_read"
     ]
     assert "docs/MEMORY_SYSTEM_AUDIT.md" in paths
-    assert "docs/self-audit-lessons.md" in paths
+    assert "knowledge/doctrine/self-audit-lessons.md" in paths
     # a pure memory question (not a broad doctrine question) → the thematic
     # docs lead the source list.
     assert paths[0] == "docs/MEMORY_SYSTEM_AUDIT.md"

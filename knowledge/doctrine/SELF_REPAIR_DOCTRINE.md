@@ -20,7 +20,7 @@
 > `scripts/completion_legacy_report.py`, `scripts/completion_backfill.py`,
 > `scripts/migrate_completion_backfill.py`.
 >
-> **Relationship to `docs/self-audit-lessons.md`:** that file is a *historical
+> **Relationship to `knowledge/doctrine/self-audit-lessons.md`:** that file is a *historical
 > record* of defect classes already found and the procedure for the next audit.
 > This file is the *reasoning protocol* to apply when a new one appears. Neither
 > replaces the other.

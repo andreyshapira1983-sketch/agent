@@ -48,7 +48,7 @@ _HISTORICAL_ANCHOR_DOCS = {
     "LIVE_PROBE_FINDINGS.md",
     "MEMORY_SYSTEM_AUDIT.md",
     "MEMORY_FIX_PLAN.md",
-    "self-audit-lessons.md",
+    "../knowledge/doctrine/self-audit-lessons.md",
     "CORE_AUDIT_2026-07-18.md",
     "daemon-progress.md",
 }
@@ -154,7 +154,7 @@ _HISTORICAL_RENAME_DOCS = {
     "MEMORY_FIX_PLAN.md",
     "MEMORY_SYSTEM_AUDIT.md",
     "Технический_анализ_автономного_агента_и_функций_мозга.md",
-    "self-audit-lessons.md",
+    "../knowledge/doctrine/self-audit-lessons.md",
 }
 
 #: Inline escape hatch for a **mixed** document — a current-facing page that

@@ -6,7 +6,7 @@ reading current code versus what still needs an end-to-end run to confirm.
 
 This document is the corrected, authoritative version of the audit. It exists
 separately from `docs/OPERATIONAL_FAILURE_MODES.md` (external operational failure
-classes) and from `docs/self-audit-lessons.md` (already-fixed repo defects with
+classes) and from `knowledge/doctrine/self-audit-lessons.md` (already-fixed repo defects with
 passing regression tests).
 
 > **⚠️ STATUS LEDGER SUPERSEDED (2026-07-25).** The open / needs-e2e judgements on
@@ -198,7 +198,7 @@ These correct two overstatements in the earlier draft.
 ### Historical fixes still holding (regression-tested)
 - Project-ingestion pollution (evidence-only + fragment/mojibake rejection),
   curated-memory archive protection, episodic-hygiene wiring — all pass their
-  regression tests on this commit (see `docs/self-audit-lessons.md`).
+  regression tests on this commit (see `knowledge/doctrine/self-audit-lessons.md`).
 
 ---
 

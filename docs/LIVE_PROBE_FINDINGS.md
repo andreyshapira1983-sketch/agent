@@ -7,7 +7,7 @@ whether that root spans multiple files.
 
 This is an *observation log from live runs*, distinct from
 `docs/MEMORY_SYSTEM_AUDIT.md` (static code audit) and
-`docs/self-audit-lessons.md` (already-fixed defects).
+`knowledge/doctrine/self-audit-lessons.md` (already-fixed defects).
 
 > **⚠️ STATUS LEDGER SUPERSEDED (2026-07-25).** The `confirmed-defect` / FIXED marks on
 > the LPF-* findings below are historical (as of each finding's own date). Read **no**
