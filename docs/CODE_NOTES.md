@@ -1,12 +1,8 @@
 # Code notes — what was done to these files and why
 
-> **Оператору, по-русски — прочтите эти пять строк, дальше можно не читать.**
-> Этот файл — память агента, а не документация программы. Нужен он одному
-> читателю: агенту в следующей сессии, который откроет код, не помня прошлого
-> разговора. **Программа от его удаления не сломается**: ни один тест, ни одна
-> проверка на него не завязаны — потеряется только время на повторное
-> разбирательство. Заведён 2026-08-06 по вашей просьбе, взамен длинных
-> пояснений внутри файлов кода. Удалять можно молча.
+> Audience: the agent. Deleting this file breaks nothing — no test and no check
+> reads it. The operator-facing index of these documents, in Russian, is
+> [OPERATOR_NOTES.ru.md](OPERATOR_NOTES.ru.md).
 
 Working notes kept by the agent, for the agent. A session starts with no memory
 of the last one: everything known about a file is what is written down. This is
@@ -136,6 +132,48 @@ would catch that.
   exclusion list. Being removed, not restored — the doc was deleted on purpose.
 - `run_repl` is 104 lines with one input mode still inline. Next:
   `_collect_operator_task_block`.
+
+---
+
+## Memory tags — contract change, 2026-08-07
+
+The contract, as the operator stated it:
+
+1. `:remember` always keeps the operator's labels verbatim.
+2. Reserved tags are recognised only by exact match against the known set
+   (case-insensitively — the policy lowercases before comparing).
+3. An unknown label does not affect the write-policy decision, in either
+   direction.
+4. `source="user-explicit"` is by itself sufficient to admit a write.
+
+**Why the old rule existed and why it does not apply.** ASCII-only is a real
+policy in this codebase for identifiers — write paths, shell argv, URLs, trace
+ids — where a non-ASCII value is a genuine hazard. A tag is none of those: it
+never becomes a filename, an argument or a URL; it lives in
+[core/models.py](../core/models.py) as a plain `list[str]` and is persisted to
+JSONL written with `ensure_ascii=False`. The filter sat in exactly one place,
+[cli/parsers.py](../cli/parsers.py), and it dropped a non-ASCII tag in silence,
+substituting `user-approved` — handing the write policy a *consent tag the
+operator never typed*.
+
+**What is still reserved**, in [core/memory_policy.py](../core/memory_policy.py):
+the consent set (`preference`, `fact`, `decision`, `insight`, `user-approved`,
+`project`) and the blocking set (`transient`, `temporary`, `do-not-save`,
+`ephemeral`). These are rule names, not English words that could be translated:
+renaming them means migrating every record already written with them.
+
+**Migration.** None is possible for records already on disk. A label dropped
+before this change was never stored, so there is nothing to restore; those
+records simply carry `user-approved` where the operator wrote something else.
+Records written from now on carry what was typed. No schema change: the field
+always allowed any string.
+
+**Boundaries pinned** (`TestUserLabelsVersusReservedTags`): an explicit write
+needs no tag; a reserved consent tag still admits an agent write; a label does
+not; a reserved blocking tag still blocks even an explicit write; a label that
+resembles one does not block; reserved words match whole, not as substrings,
+and in any case. The last one was added after breaking the policy's
+`.lower()` and finding nothing went red.
 
 ---
 
