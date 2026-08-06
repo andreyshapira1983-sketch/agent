@@ -366,6 +366,13 @@ def run_repl(
                     continuation_parts.append(cline)
                     break
             q = " ".join(p.strip() for p in continuation_parts if p.strip())
+            if not q:
+                # Same refusal as the two paths around it: the top of the loop
+                # discards an empty message, and so does the `<<<` block. A
+                # lone backslash followed by a blank line joins to nothing, and
+                # without this the empty string reached the agent and spent a
+                # rate-limit token on a question nobody asked.
+                continue
         # ─────────────────────────────────────────────────────────────────────
         if q == ":operator-task":
             block_lines: list[str] = []
