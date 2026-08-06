@@ -398,8 +398,7 @@ class LLMPlanner:
             memory_docs_block = (
                 "[MEMORY_DOCS=required — this question is about memory / "
                 "episodic / procedural / consolidation / forgetting / retrieval "
-                "/ durable learning. Read docs/audit/MEMORY_MAP.md (how memory "
-                "actually flows today), docs/MEMORY_SYSTEM_AUDIT.md and "
+                "/ durable learning. Read docs/MEMORY_SYSTEM_AUDIT.md and "
                 "docs/self-audit-lessons.md first, before core/*.py mechanics. "
                 "These record known defects and their causes — do not "
                 "re-derive them from the code.]\n"

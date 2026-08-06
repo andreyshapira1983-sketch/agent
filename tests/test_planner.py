@@ -1290,12 +1290,11 @@ def test_memory_question_injects_memory_governance_docs(workspace: Path) -> None
         for src in out.sources
         if src["tool"] == "file_read"
     ]
-    assert "docs/audit/MEMORY_MAP.md" in paths
     assert "docs/MEMORY_SYSTEM_AUDIT.md" in paths
     assert "docs/self-audit-lessons.md" in paths
     # a pure memory question (not a broad doctrine question) → the thematic
     # docs lead the source list.
-    assert paths[0] == "docs/audit/MEMORY_MAP.md"
+    assert paths[0] == "docs/MEMORY_SYSTEM_AUDIT.md"
 
 
 def test_non_memory_doctrine_question_omits_memory_docs(workspace: Path) -> None:
@@ -1321,7 +1320,6 @@ def test_non_memory_doctrine_question_omits_memory_docs(workspace: Path) -> None
         for src in out.sources
         if src["tool"] == "file_read"
     ]
-    assert "docs/audit/MEMORY_MAP.md" not in paths
     assert "docs/MEMORY_SYSTEM_AUDIT.md" not in paths
 
 
@@ -1399,7 +1397,7 @@ def test_question_touching_both_themes_keeps_stable_order(workspace: Path) -> No
         if src["tool"] == "file_read"
     ]
     assert paths[0] == "docs/SUBAGENT_LIFECYCLE.md"
-    assert paths[1] == "docs/audit/MEMORY_MAP.md"
+    assert paths[1] == "docs/MEMORY_SYSTEM_AUDIT.md"
     # no duplicates from the two injectors touching the same list
     assert len(paths) == len(set(paths)), paths
 
@@ -1597,9 +1595,9 @@ def test_question_touching_three_themes_keeps_stable_order(workspace: Path) -> N
         if src["tool"] == "file_read"
     ]
     assert paths.index("docs/SUBAGENT_LIFECYCLE.md") < paths.index(
-        "docs/audit/MEMORY_MAP.md"
+        "docs/MEMORY_SYSTEM_AUDIT.md"
     )
-    assert paths.index("docs/audit/MEMORY_MAP.md") < paths.index(
+    assert paths.index("docs/MEMORY_SYSTEM_AUDIT.md") < paths.index(
         "docs/SELF_REPAIR_DOCTRINE.md"
     )
     assert len(paths) == len(set(paths)), paths

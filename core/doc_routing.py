@@ -260,7 +260,12 @@ _SUBAGENT_GOVERNANCE_DOC_PATHS = (
 #     far too large to inject per turn. Reach it by name when a status is
 #     actually needed.
 _MEMORY_GOVERNANCE_DOC_PATHS = (
-    "docs/audit/MEMORY_MAP.md",
+    # A memory-map document under the deleted `docs/audit/` tree stood first
+    # here until 2026-08-07. Nothing noticed it was gone: the router injects a
+    # file_read per path without checking, so every memory question opened with
+    # a step that raised FileNotFoundError and a third of this doctrine never
+    # arrived. Its replacement is to be built by walking the code, not by
+    # restoring a document written from static reading alone.
     "docs/MEMORY_SYSTEM_AUDIT.md",
     "docs/self-audit-lessons.md",
 )
