@@ -135,6 +135,35 @@ would catch that.
 
 ---
 
+## [cli/one_shot.py](../cli/one_shot.py) — walked 2026-08-07
+
+The other branch of the `--ask` fork: one question in, one answer out, exit 0.
+No memory of either kind, approval per `--auto-approve` (where `off` means *no
+provider wired*, so escalated tools stay blocked), explicit `:commands` ahead of
+intent routing, deep escalation only with `--reason`/`--expect`, `stream=False`
+because the formatted print is the sole output.
+
+**Fourteen breaks, fourteen named.** The only file walked on this branch where
+the measurement found nothing: memory flags, all three approval branches,
+command precedence, the bare `?`, the unknown-command message, both intent-router
+short-circuits, escalation, streaming, the question passed through, and the
+`lstrip()` before the `:` check. It is also the only one with a test file
+written *for it as a contract*
+([test_cli_one_shot_policy.py](../tests/characterization/test_cli_one_shot_policy.py))
+rather than copied from a neighbour — which is the same pattern seen from the
+other side in [cli/repl.py](../cli/repl.py).
+
+What was wrong was the docstring: it claimed `build_agent` is patched "on `main`
+in 22 places" and that startup "moves in the next Phase 7 step". Measured: zero
+patches on `main`, 21 on `cli/app.py`, and the move happened long ago. The seam
+itself is real and stays; only its account of the world was stale.
+
+**A harness lesson, paid for here.** The first break run reported all fourteen
+as held with *zero* failing tests — the selection named a file that does not
+exist, pytest exited non-zero before collecting anything, and the script read
+"non-zero" as "a test caught it". Fourteen meaningless green ticks. The script
+now separates "caught", "not caught" and "the run never happened".
+
 ## Memory tags — contract change, 2026-08-07
 
 The contract, as the operator stated it:

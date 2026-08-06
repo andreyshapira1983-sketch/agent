@@ -20,27 +20,16 @@ Every exit here is ``0``, including the unknown-command one -- the exit ``2``
 cases (bad file hint, bad ``--resume``) are decided by the caller before this
 runs.
 
-Extracted from ``main()``. Like ``cli/resume.py`` this could not be a verbatim
-move, because the code lived *inside* ``main()``. The body is the original block
-with the ``args.*`` reads replaced by parameters (``args.ask`` -> ``ask``,
-``args.file`` -> ``file_hint``, ``args.auto_approve`` -> ``auto_approve``,
-``args.reason`` -> ``reason``, ``args.expect`` -> ``expect``), plus two
-non-behavioural fixes: the ``approval_provider`` annotation now admits ``None``
-(the ``off`` branch always assigned it), and a comment that pointed at
-"the docstring at line 9" now names ``main.py``'s module docstring instead of a
-line number that drifts. Every message string and every call is untouched.
-
 **How the collaborators are reached, and why it matters for tests.** A
 ``monkeypatch.setattr`` is observed only where the *call site* resolves the
-name. The three collaborator modules
-below are therefore imported as **modules** and called through the attribute --
-``command_dispatch.handle_meta_command(...)`` -- so one patch on the module that
-*defines* the function is seen from here and from ``cli/repl.py`` alike. Binding
-the names at import time instead would silently ignore such a patch.
+name, so the collaborator modules are imported as **modules** and called through
+the attribute -- ``command_dispatch.handle_meta_command(...)``. One patch on the
+module that defines the function is then seen from here and from ``cli/repl.py``
+alike; binding the names at import time would silently ignore it.
 
-``build_agent`` is the exception still passed in by ``main()``: it is wiring, it
-is patched on ``main`` in 22 places, and it moves in the next Phase 7 step
-together with the rest of the startup sequence.
+``build_agent`` is the exception, passed in as a parameter: it is startup wiring
+and belongs to ``cli/app.py``, which owns the startup sequence and is where the
+suites patch it.
 """
 from __future__ import annotations
 
@@ -66,8 +55,8 @@ def run_one_shot(
     auto_approve: str = "off",
     reason: str | None = None,
     expect: str | None = None,
-    # Wiring seam — main() passes its own binding so patches on `main` stay
-    # observable until the startup sequence moves (Phase 7, next step).
+    # Wiring seam: cli/app.py passes its own binding, so a patch there is
+    # observed here too. Default keeps this function runnable on its own.
     build_agent: Callable[..., object] = _build_agent,
 ) -> int:
     """Run a single question end-to-end and return the process exit code."""
