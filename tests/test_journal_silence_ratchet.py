@@ -72,10 +72,7 @@ from except_audit import journal_silent_in, loop_layer_files  # noqa: E402
 #: way to remove.
 #:
 #: 15 -> 13, and THESE two were repairs. `core/loop_run_tail.py:246` and `:258`
-#: now report through `_sensor_failed`. See
-#: tests/test_run_tail_failures_are_reported.py for what each failure looked
-#: like before — the assumption-store one produced a journal identical to a
-#: healthy run.
+#: now report through `_sensor_failed`.
 #:
 #: 13 -> 11, two more repairs. `core/loop_step_execution.py:130` and `:135`
 #: both answered "not read-only" without a word, so a missing tool and a
@@ -83,8 +80,7 @@ from except_audit import journal_silent_in, loop_layer_files  # noqa: E402
 #: writes — and each cost the whole batch its parallel path. They report
 #: through `_risk_probe_failed` now; the ordinary "this step writes" case is
 #: still silent, because an event per effect step would be a stream rather
-#: than a signal. Cover: tests/test_step_risk_probe_reports.py, 3 red on the
-#: old code.
+#: than a signal.
 JOURNAL_SILENT_BASELINE = 11
 
 _LAYER = Path("core")
