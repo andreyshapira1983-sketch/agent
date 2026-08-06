@@ -460,6 +460,39 @@ class TestCollectInstructionBuffer:
         with pytest.raises(EOFError):
             _collect_instruction_buffer(reader)
 
+    def test_lines_are_kept_verbatim_between_the_markers(self):
+        """Indentation, tabs, inner blank lines and trailing spaces survive.
+
+        Only the ends of the whole buffer are stripped. An instruction to the
+        agent is often code or a list, and normalising it here would arrive as
+        a mangled question with nothing said.
+        """
+        reader = self._reader([
+            "def f():",
+            "    return 1",
+            "\tafter a tab",
+            "",
+            "trailing spaces kept   ",
+            "last line",
+            ":task-end",
+        ])
+        text, cancelled = _collect_instruction_buffer(reader)
+        assert cancelled is False
+        assert text == (
+            "def f():\n"
+            "    return 1\n"
+            "\tafter a tab\n"
+            "\n"
+            "trailing spaces kept   \n"
+            "last line"
+        )
+
+    def test_only_the_ends_of_the_whole_buffer_are_stripped(self):
+        """The one normalisation this collector does, pinned so it stays one."""
+        reader = self._reader(["   ", "  body  ", "   ", ":task-end"])
+        text, _ = _collect_instruction_buffer(reader)
+        assert text == "body"
+
 
 # ============================================================
 # _collect_pasted_block — <<< ... >>>
@@ -493,6 +526,28 @@ class TestCollectPastedBlock:
         """Empty is returned, not refused — that judgement is the caller's."""
         reader = self._reader(["   ", ">>>"])
         assert _collect_pasted_block(reader) == ""
+
+    def test_lines_are_kept_verbatim_between_the_markers(self):
+        """A paste is text, not code to be tidied: indentation, tabs, inner
+        blank lines and trailing spaces all survive. Only the ends of the whole
+        block are stripped."""
+        reader = self._reader([
+            "def f():",
+            "    return 1",
+            "\tafter a tab",
+            "",
+            "trailing spaces kept   ",
+            "last line",
+            ">>>",
+        ])
+        assert _collect_pasted_block(reader) == (
+            "def f():\n"
+            "    return 1\n"
+            "\tafter a tab\n"
+            "\n"
+            "trailing spaces kept   \n"
+            "last line"
+        )
 
     def test_eof_propagates_to_caller(self):
         def reader() -> str:
@@ -530,6 +585,18 @@ class TestCollectContinuation:
     def test_a_continuation_that_joins_to_nothing_returns_the_empty_string(self):
         """Returned, not refused — that judgement is the caller's."""
         assert _collect_continuation("\\", self._reader(["   "])) == ""
+
+    def test_whitespace_is_normalised_on_purpose_here(self):
+        """The one collector that does NOT keep its lines verbatim.
+
+        A continuation is one sentence the operator broke across lines, so the
+        parts are stripped and joined with single spaces and blank parts drop
+        out. Pinned deliberately: the verbatim rule the other three follow must
+        not be "fixed" into this one. Tabs and inner spacing inside a part are
+        untouched — only the joins are normalised.
+        """
+        reader = self._reader(["\tindented continuation   \\", "   \\", "  tail  "])
+        assert _collect_continuation("head   \\", reader) == "head indented continuation tail"
 
     def test_eof_propagates_to_caller(self):
         def reader() -> str:
