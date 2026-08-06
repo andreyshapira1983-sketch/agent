@@ -521,9 +521,18 @@ class KnowledgePipeline:
             # `memory_skipped=45, decisions=[]` — the counter said 45
             # claims went nowhere and nothing said why. Fixing one of two
             # silent paths is not fixing the class.
-            reason = (
-                "auto_write_memory is off" if not auto_write_memory
-                else "no memory writer is wired"
+            #
+            # The rule that refused is named too, not just described. Both
+            # branches once reported `policy_id="auto_write_memory"`, so a
+            # reader filtering decisions by rule — the machine-readable half
+            # of the row — saw the operator blamed for a run where the
+            # operator had opted in and nothing was wired to write. The two
+            # facts were distinguishable in prose and identical in metadata,
+            # which is the same invisible failure one field further down.
+            reason, policy_id = (
+                ("auto_write_memory is off", "auto_write_memory")
+                if not auto_write_memory
+                else ("no memory writer is wired", "memory_writer_missing")
             )
             for claim in registry.claims:
                 result.memory_skipped += 1
@@ -533,7 +542,7 @@ class KnowledgePipeline:
                     "knowledge_decision": {
                         "decision": "skip",
                         "reasons": [reason],
-                        "policy_id": "auto_write_memory",
+                        "policy_id": policy_id,
                     },
                 })
             return result

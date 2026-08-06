@@ -73,6 +73,10 @@ class AgentLoopContext:
         # Берётся у соседней примеси: работает через MRO, но связь между
         # модулями обязана быть записана, иначе её видно только на прогоне.
         _file_read_workspace_root: Any
+        # `core/loop_sensor.py`. Объявлен здесь, потому что до сих пор не был:
+        # два обработчика ниже гасили сбой без следа именно из-за этого —
+        # средство у слоя было, а вызвать его файл не мог.
+        _sensor_failed: Any
 
     def _retrieve_turn_context(
         self,
@@ -212,9 +216,18 @@ class AgentLoopContext:
             # True when enabling ``on`` would change the answer path (PR2).
             payload["would_change_answer"] = eligible
             self.log.log("referent_decision", payload)
-        except Exception:
-            # Observability must never abort the run.
+        except Exception as exc:
+            # Observability must never abort the run — and its failure must not
+            # be invisible either. Measured before this line existed: a healthy
+            # turn logs `referent_decision`, a broken one logged NOTHING and
+            # left the decision `None`. The local-critique path then never
+            # engaged, and no reader could tell that from a turn where no
+            # referent resolved.
+            #
+            # The `None` stays: it is the fail-safe half, and it is what keeps
+            # a broken resolver from enabling a path it cannot support.
             self.last_referent_decision = None
+            self._sensor_failed("referent_resolution", exc)
 
 
     def _open_run(self, user_question: str) -> tuple[Any, Any]:
@@ -265,8 +278,14 @@ class AgentLoopContext:
                 known_language=_known_lang,
             )
             _run_assumptions.register_many(_q_assumptions)
-        except Exception:
-            pass  # Assumption extraction must never abort the run.
+        except Exception as exc:
+            # Reported, not swallowed. This one hid better than the referent
+            # above: `assumptions_registered` fires later (loop_attempt) and
+            # ONLY when the registry is non-empty, so a crash here produced the
+            # same silence as a question with nothing to assume. Measured: 2
+            # assumptions on the healthy path, 0 on the broken one, and no
+            # event in either case.
+            self._sensor_failed("assumption_extraction", exc)
 
         # §3.5 Checkpoint writer — one file per trace, append-only.
         # Falls back to a no-op sentinel when the logger is a test spy that

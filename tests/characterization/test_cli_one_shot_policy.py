@@ -256,3 +256,72 @@ def test_fast_path_only_applies_to_the_head_token(tmp_path, monkeypatch):
 
     assert main_module.main() == 0
     assert order == ["load_dotenv", "build_agent"]
+
+
+def test_the_encoding_fix_runs_before_argparse_can_print(tmp_path, monkeypatch):
+    """`--help` is printed and exited from INSIDE `parse_args`.
+
+    Measured 2026-08-05: with `_force_utf8_io()` placed after the parse it was
+    invoked zero times on that path, and the em dash in the parser's own
+    description reached a cp1251 console as a replacement char — a broken
+    glyph in the first line the operator ever sees. Nothing in the call
+    depends on the parsed arguments, so the only thing keeping it late was
+    that no test asked.
+
+    Guarding the ORDER, not the call: a test that merely asserts the function
+    runs somewhere would stay green with the defect back in place.
+    """
+    calls: list[str] = []
+    monkeypatch.setattr(app_module, "_force_utf8_io", lambda: calls.append("utf8"))
+
+    real_parser = app_module.build_parser
+
+    def _recording_parser():
+        calls.append("parse")
+        return real_parser()
+
+    monkeypatch.setattr(app_module, "build_parser", _recording_parser)
+    monkeypatch.setattr(sys, "argv", ["main.py", "--help"])
+
+    with pytest.raises(SystemExit):
+        app_module.run_cli()
+
+    assert calls == ["utf8", "parse"], (
+        "the encoding fix must run before the parser is even built; "
+        f"got {calls}"
+    )
+
+
+def test_dotenv_is_read_from_the_workspace_not_the_launch_directory(tmp_path, monkeypatch):
+    """Keys must come from the same project as the code and the data.
+
+    Measured 2026-08-05 with a bare `load_dotenv()`: launched from folder A
+    with `--workspace B`, the process loaded A's `.env`. Code and data from one
+    project, credentials from another. `agent_tick.py` had passed the explicit
+    path since it was written; the CLI had not.
+
+    The default `--workspace` is ".", so an ordinary launch is unaffected —
+    this only pins WHICH file is chosen when the two differ.
+    """
+    launched_from = tmp_path / "elsewhere"
+    workspace = tmp_path / "project"
+    launched_from.mkdir()
+    workspace.mkdir()
+
+    seen: list[str] = []
+    monkeypatch.setattr(
+        app_module, "load_dotenv", lambda path=None: seen.append(str(path))
+    )
+    monkeypatch.setattr(app_module, "build_agent", lambda *a, **k: object())
+    monkeypatch.setattr(app_module, "run_one_shot", lambda *a, **k: 0)
+    monkeypatch.chdir(launched_from)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["main.py", "--workspace", str(workspace), "--ask", "hello"],
+    )
+
+    assert app_module.run_cli() == 0
+    assert seen == [str(workspace / ".env")], (
+        "the CLI must name the workspace's .env explicitly; a bare "
+        f"load_dotenv() would read the launch directory. Got {seen}"
+    )

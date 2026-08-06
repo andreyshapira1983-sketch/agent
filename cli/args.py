@@ -25,7 +25,11 @@ def build_parser() -> argparse.ArgumentParser:
     """Return the CLI parser. Pure construction -- no parsing, no I/O."""
     parser = argparse.ArgumentParser(
         description=(
-            "Autonomous agent MVP-4 — LLM picks tools, sessions have working memory."
+            # ASCII only: the console this ships on is cp1251, and an em
+            # dash here printed as a replacement char in the FIRST line of
+            # --help on every run. No version number either - it was MVP-4
+            # here and MVP-5 in main.py, and both were years behind.
+            "Autonomous agent - the LLM picks tools; sessions keep working memory."
         )
     )
     parser.add_argument(
@@ -71,7 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Deep/Opus escalation reason (one-shot --ask only). Without it, a "
-            "deep request downgrades to the standard model — the agent never "
+            "deep request downgrades to the standard model - the agent never "
             "opens Opus for itself. Valid: operator_explicitly_requested_opus, "
             "planner_multi_file_architecture_change."
         ),

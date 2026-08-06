@@ -123,10 +123,38 @@ class AgentLoopSynthesis:
 
         # Берётся у соседней примеси: работает через MRO, но связь между
         # модулями обязана быть записана, иначе её видно только на прогоне.
+        _sensor_failed: Any
         _cycle_findings: Any
         _save_budget_pause_checkpoint: Any
         last_referent_decision: Any
         model_router: Any
+
+    def _resolve_synthesis_contract(self) -> str:
+        """The active output contract, and a fallback that admits itself.
+
+        Read from the prompt registry so an env/registry override actually takes
+        effect instead of being silently ignored — which is exactly what the old
+        handler here did. Measured (census A4): the built-in `SYSTEM_ANSWER`
+        requires section headers and a task-specific contract need not, so on a
+        registry failure `_synthesis_expects_contract_headers` reads True where
+        it should read False, and the verifier then marks the answer
+        `malformed_output` for headers that contract never asked for. A wrong
+        verdict about the ANSWER, caused by a swallowed error about the PROMPT.
+
+        The fallback stays: a missing registry is no reason to fail a turn. Its
+        silence does not.
+        """
+        try:
+            from core.prompt_registry import get_prompt as _get_prompt
+            return _get_prompt("synthesizer.system")
+        except Exception as exc:
+            # Reported through `_sensor_failed`, which journals it — the audit
+            # in `scripts/except_audit.py` looks for a literal `.log(` call and
+            # does not recognise the layer's own reporting helper, so the
+            # comment carries the justification it asks for. Teaching the audit
+            # about `_sensor_failed` belongs to queue item A7, not here.
+            self._sensor_failed("synthesis_contract_registry", exc)
+            return SYSTEM_ANSWER
 
     def _synthesize(
         self,
@@ -224,11 +252,7 @@ class AgentLoopSynthesis:
         # Read the active synthesis contract from the prompt registry so an
         # env/registry override (e.g. a task-specific table-only contract)
         # actually takes effect here instead of being silently ignored.
-        try:
-            from core.prompt_registry import get_prompt as _get_prompt
-            system_prompt = _get_prompt("synthesizer.system")
-        except Exception:  # реестр промптов недоступен — берём встроенный контракт синтеза
-            system_prompt = SYSTEM_ANSWER
+        system_prompt = self._resolve_synthesis_contract()
         if completion_nonce:
             # Appended to the system prompt rather than to one of the three
             # user-prompt branches, so every synthesis shape carries it.
@@ -569,8 +593,16 @@ class AgentLoopSynthesis:
                     "cheap_path_synth_model",
                     {"model": getattr(_synth_llm, "model", None)},
                 )
-            except Exception:  # выбор дешёвой модели не удался — работаем на обычной, это не сбой хода
+            except Exception as _tier_exc:
+                # Falling back to the normal model is correct — a tier that
+                # cannot be selected is not a reason to fail the turn. Being
+                # quiet about it is not: the cheap path exists to cut cost, and
+                # its whole point disappears while `cheap_path_active` stays
+                # True and the journal shows a cheap turn. The absent
+                # `cheap_path_synth_model` event was the only difference, and
+                # absence reads the same as "no cheap path was taken".
                 _synth_llm = st._task_synth_llm
+                self._sensor_failed("cheap_path_model_tier", _tier_exc)
         _saved_on_token = getattr(self, "_stream_on_token", None)
 
         # Run-local, deliberately NOT an instance attribute. A `self._last_*`

@@ -100,7 +100,7 @@ def _iter_project_files(root: Path, *, limit: int) -> Iterable[Path]:
         yielded += 1
 
 
-def _chunk_python(text: str, *, max_chunks: int) -> list[str]:
+def _chunk_python(text: str, *, max_chars: int) -> list[str]:
     """Knowledge from a Python file: what it SAYS about itself, not its lines.
 
     `_chunk_text` walks paragraphs and accumulates them up to `CHUNK_CHARS`,
@@ -124,11 +124,22 @@ def _chunk_python(text: str, *, max_chunks: int) -> list[str]:
     * The file parses and documents nothing -> `[]`, and the caller skips it
       with the reason recorded. A file that explains nothing about itself is
       not made informative by extracting its lines.
+
+    The budget is CHARACTERS, not chunks, because a chunk here has no fixed
+    weight. `_chunk_text` splits anything longer than `CHUNK_CHARS`, so for
+    prose `n` chunks really is `n * CHUNK_CHARS` at worst; a docstring is
+    whatever its author wrote, and `core/completion_contract.py` has one of
+    3788 — nearly five prose chunks in a single item. Counting them measured
+    nothing: across `core/*.py` a flat cap of 8 exceeded the budget it was
+    derived from on 69 of 181 files while starving the callers that asked for
+    more. One unit both chunkers can honour, and it is the caller's.
     """
     try:
         tree = ast.parse(text)
     except SyntaxError:
-        return _chunk_text(text, max_chunks=max_chunks)
+        # The same budget said in the other chunker's unit — which is exactly
+        # what `max_chunks * CHUNK_CHARS` means over there.
+        return _chunk_text(text, max_chunks=max(1, max_chars // CHUNK_CHARS))
 
     out: list[str] = []
     module_doc = ast.get_docstring(tree)
@@ -148,8 +159,6 @@ def _chunk_python(text: str, *, max_chunks: int) -> list[str]:
         namespace, so `Inline` inside a `with` is still `Inline`.
         """
         for node in body:
-            if len(out) >= max_chunks:
-                return
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 name = f"{prefix}{node.name}"
                 doc = ast.get_docstring(node)
@@ -166,7 +175,24 @@ def _chunk_python(text: str, *, max_chunks: int) -> list[str]:
                             walk(handler.body, prefix)
 
     walk(tree.body, "")
-    return out[:max_chunks]
+
+    # Trimmed after the walk rather than during it: the AST is already parsed,
+    # so visiting every definition costs nothing worth saving, and the budget
+    # then reads as one rule in one place instead of a stop condition threaded
+    # through the recursion.
+    kept: list[str] = []
+    used = 0
+    for chunk in out:
+        if kept and used + len(chunk) > max_chars:
+            break
+        # The FIRST is taken whatever it weighs. A module whose one docstring
+        # is longer than the whole budget would otherwise come back empty, and
+        # the caller reads empty as "documents nothing" and skips the file —
+        # a long explanation is the last thing that should make a file
+        # invisible to learning.
+        kept.append(chunk)
+        used += len(chunk)
+    return kept
 
 
 def _chunk_text(text: str, *, max_chunks: int) -> list[str]:

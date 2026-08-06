@@ -60,6 +60,22 @@ class AgentLoopMemoryWrite:
         consolidation_store: Any
         write_policy: Any
 
+    def _unattended_run(self) -> bool:
+        """True when nobody is at the keyboard for this run.
+
+        Read from `gateway_path`, which is what actually records who drives the
+        cycle: `repl` is a human typing, `daemon` and `runtime` are not.
+        `AutonomousRuntime` sets it before a goal and restores it after, so it
+        is per-run rather than a property of the agent object.
+
+        This exists because `require_verified` used to be decided per CALL SITE
+        — true where the learning path called the knowledge pipeline, absent
+        where the turn path did. The unattended runtime drives the ordinary
+        cycle, so it reached the sites that had no gate. Deciding it here means
+        one answer to one question, asked in the only place that knows it.
+        """
+        return str(getattr(self, "gateway_path", "repl")) != "repl"
+
     def _durable_learning_suppressed(self, sink: str | None = None) -> bool:
         """True when a durable learning write must be skipped.
 
@@ -446,9 +462,13 @@ class AgentLoopMemoryWrite:
                 records, conflicted_claim_ids=conflicted_ids
             )
             if report["quarantined"]:
-                for record in updated:
-                    if "conflicted" in (record.tags or []):
-                        self.persistent_store.update(record)
+                # ONE rewrite for the whole quarantine, for the same reason as
+                # the retrieval path (census A5): `update` rewrites the file per
+                # record, so marking N contradicted records cost N rewrites.
+                self.persistent_store.update_many(
+                    record for record in updated
+                    if "conflicted" in (record.tags or [])
+                )
             self.log.log("conflict_quarantine", {"claims": len(conflicted_ids), **report})
         except Exception as exc:  # noqa: BLE001
             self.log.log(

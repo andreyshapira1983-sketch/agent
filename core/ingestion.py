@@ -47,10 +47,6 @@ MAX_FILE_BYTES = 1_000_000
 DEFAULT_PROJECT_LIMIT = 80
 SOURCE_MAX_CHUNKS = 16
 PROJECT_MAX_CHUNKS_PER_FILE = 3
-
-#: Documented definitions per `.py` file. Derived, not picked: see the
-#: comment at the call site — same character budget as the prose cap.
-PYTHON_MAX_CHUNKS_PER_FILE = 8
 CHUNK_CHARS = 800
 
 
@@ -213,6 +209,7 @@ def ingest_web_topic(
         source_store=None if dry_run else getattr(agent, "source_registry_store", None),
         remember=getattr(agent, "_remember_from_knowledge", None),
         auto_write_memory=write_memory,
+        require_verified=_require_verified_for(agent, None),
     )
 
     registry_out: SourceRegistry = knowledge_result.registry
@@ -338,6 +335,7 @@ def ingest_rss_feed(
         source_store=None if dry_run else getattr(agent, "source_registry_store", None),
         remember=getattr(agent, "_remember_from_knowledge", None),
         auto_write_memory=write_memory,
+        require_verified=_require_verified_for(agent, None),
     )
 
     registry_out: SourceRegistry = knowledge_result.registry
@@ -386,7 +384,7 @@ def ingest_files(
     paths: Iterable[str],
     dry_run: bool = False,
     auto_write_memory: bool | None = None,
-    require_verified: bool = False,
+    require_verified: bool | None = None,
 ) -> IngestReport:
     resolved = [_resolve_inside_workspace(workspace, path) for path in paths]
     return _ingest_paths(
@@ -397,9 +395,50 @@ def ingest_files(
         requested_path="; ".join(paths),
         dry_run=dry_run,
         auto_write_memory=auto_write_memory,
-        require_verified=require_verified,
+        require_verified=_require_verified_for(agent, require_verified),
         max_chunks_per_file=PROJECT_MAX_CHUNKS_PER_FILE,
     )
+
+
+def _require_verified_for(agent: Any, explicit: bool | None) -> bool:
+    """Whether a claim needs a second source before it may enter memory.
+
+    Answered from WHO DRIVES THE RUN, never from which entry point was used.
+    `agent._unattended_run()` reads `gateway_path`: `repl` is a human who can
+    judge a single source, `daemon` and `runtime` are nobody.
+
+    An explicit argument still wins, for a caller that genuinely knows better.
+    `None` means "not stated" and is resolved here — a default of `False` in a
+    signature is a decision made by whoever typed the signature, on behalf of
+    every caller, without knowing who would be running.
+    """
+    if explicit is not None:
+        return bool(explicit)
+    resolver = getattr(agent, "_unattended_run", None)
+    return bool(resolver()) if callable(resolver) else False
+
+
+def _chunks_for(text: str, *, is_python: bool, max_chunks_per_file: int) -> list[str]:
+    """One file's worth of claims, under one budget said in two units.
+
+    Source files are read for what they SAY about themselves, not sliced by
+    blank line like prose. A live learning run on 2026-08-05 turned five test
+    files into 34 "claims", the first being `_touch(tmp_path / "core" / ...)`
+    — scaffolding, not knowledge, and only `auto_write_memory=False` kept it
+    out of long-term memory.
+
+    The caller's number counts PROSE chunks, and `_chunk_text` splits anything
+    past `CHUNK_CHARS`, so `n` there is `n * CHUNK_CHARS` characters at worst.
+    A docstring has no such ceiling, which is why the first attempt at this —
+    a flat `8` for `.py` — measured nothing: across `core/*.py` it OVERSHOT
+    the project budget on 69 of 181 files (one docstring runs to 3788
+    characters) while holding `:ingest-source` to half of the 16 chunks that
+    mode asks for. Counting items cannot express a budget when the items have
+    no size, so the Python side is given the budget itself.
+    """
+    if is_python:
+        return _chunk_python(text, max_chars=max_chunks_per_file * CHUNK_CHARS)
+    return _chunk_text(text, max_chunks=max_chunks_per_file)
 
 
 def _ingest_paths(
@@ -412,7 +451,7 @@ def _ingest_paths(
     dry_run: bool,
     auto_write_memory: bool | None,
     max_chunks_per_file: int,
-    require_verified: bool = False,
+    require_verified: bool | None = None,
 ) -> IngestReport:
     workspace = workspace.resolve()
     write_memory = bool(getattr(agent, "knowledge_auto_write", False))
@@ -467,30 +506,14 @@ def _ingest_paths(
             continue
 
         rel = _relative_label(workspace, path)
-        # Source files are read for what they SAY about themselves, not
-        # sliced by blank line like prose. A live learning run on
-        # 2026-08-05 turned five test files into 34 "claims", the first
-        # being `_touch(tmp_path / "core" / ...)` — scaffolding, not
-        # knowledge, and only `auto_write_memory=False` kept it out of
-        # long-term memory.
-        # Same byte budget, different unit. The cap counts CHUNKS, and a
-        # prose chunk is up to CHUNK_CHARS while a docstring averages a
-        # few hundred characters — so `3` meant ~2400 characters for
-        # prose and 'three docstrings' for source, which is a much
-        # tighter rule that nobody chose. Measured on the five modules a
-        # live learning run actually picked: they document 31 definitions
-        # and the cap took 11. At 215-462 characters each, 2400 fits
-        # 5-11 of them, so 8 keeps the cost the cap was defending.
         is_python = path.suffix.lower() == ".py"
-        chunker = _chunk_python if is_python else _chunk_text
-        chunks = chunker(text, max_chunks=(
-            PYTHON_MAX_CHUNKS_PER_FILE if is_python else max_chunks_per_file
-        ))
+        chunks = _chunks_for(text, is_python=is_python,
+                             max_chunks_per_file=max_chunks_per_file)
         if not chunks:
             # An undocumented source explains nothing about itself, and a
             # claim per code block would be worse than none.
-            _skip(report, path, workspace, "no documented definitions"
-                  if path.suffix.lower() == ".py" else "no text chunks")
+            _skip(report, path, workspace,
+                  "no documented definitions" if is_python else "no text chunks")
             continue
         report.files_ingested += 1
         report.bytes_read += path.stat().st_size
@@ -512,7 +535,7 @@ def _ingest_paths(
         source_store=None if dry_run else getattr(agent, "source_registry_store", None),
         remember=getattr(agent, "_remember_from_knowledge", None),
         auto_write_memory=write_memory,
-        require_verified=require_verified,
+        require_verified=_require_verified_for(agent, require_verified),
     )
 
     registry: SourceRegistry = knowledge_result.registry

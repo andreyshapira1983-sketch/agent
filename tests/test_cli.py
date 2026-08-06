@@ -2469,3 +2469,127 @@ class TestPrintPersistent:
         # the printed line includes the bracketed id + tags. So just check
         # the ellipsis marker is present.
         assert "…" in out.out
+
+
+class TestForceUtf8IoCannotJournal:
+    """The comment used to promise "the audit log will still capture the raw
+    bytes for forensics". It cannot: this function is the first statement of
+    `run_cli`, and the logger is built much later, inside `build_agent`.
+
+    Pinned structurally rather than by reading the comment: the module has no
+    way to reach a journal, and the promise cannot quietly come back without
+    an import appearing here.
+    """
+
+    def test_the_module_imports_nothing_that_could_log(self):
+        import ast
+        from pathlib import Path
+
+        import app.io as io_module
+
+        tree = ast.parse(Path(io_module.__file__).read_text(encoding="utf-8"))
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported |= {a.name.split(".")[0] for a in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.split(".")[0])
+
+        assert imported <= {"__future__", "os", "sys"}, (
+            "app/io.py gained an import; if it is a journal, the swallowed "
+            f"reconfigure failure must start reporting. Found: {sorted(imported)}"
+        )
+
+    def test_it_runs_before_any_logger_exists(self):
+        """`_force_utf8_io` is the first call in `run_cli`, so no journal is
+        available to it even in principle."""
+        import ast
+        from pathlib import Path
+
+        import cli.app as app_module
+
+        fn = next(
+            n for n in ast.walk(ast.parse(Path(app_module.__file__).read_text(encoding="utf-8")))
+            if isinstance(n, ast.FunctionDef) and n.name == "run_cli"
+        )
+        calls = sorted(
+            (n.lineno, n.func.id if isinstance(n.func, ast.Name) else getattr(n.func, "attr", ""))
+            for n in ast.walk(fn) if isinstance(n, ast.Call)
+        )
+        assert calls[0][1] == "_force_utf8_io", (
+            f"something now runs before the encoding fix: {calls[:2]}"
+        )
+
+
+class TestForceUtf8IoReportsWhatItAchieved:
+    """The call used to return None, so "reconfigure was attempted" and
+    "the stream is now utf-8" were indistinguishable from outside.
+
+    Three ways it can fail to take effect, and none of them raises:
+    the stream has no `reconfigure`, it refuses, or it accepts and stays on
+    the old codec. The return value is read back from `stream.encoding`, so
+    it reports the achieved state rather than the attempted one.
+    """
+
+    def test_confirms_streams_it_actually_switched(self, monkeypatch):
+        class _Stream:
+            encoding = "cp1251"
+
+            def reconfigure(self, **kw):
+                self.encoding = kw["encoding"]
+
+        for name in ("stdin", "stdout", "stderr"):
+            monkeypatch.setattr(sys, name, _Stream())
+
+        assert _force_utf8_io() == ("stdin", "stdout", "stderr")
+
+    def test_a_stream_that_silently_ignores_reconfigure_is_not_claimed(self, monkeypatch):
+        """Accepting the call and staying on cp1251 is the case that used to
+        be invisible: no exception, no change, and the old code said nothing."""
+        class _Deaf:
+            encoding = "cp1251"
+
+            def reconfigure(self, **kw):
+                pass  # accepts, changes nothing
+
+        class _Working:
+            encoding = "cp1251"
+
+            def reconfigure(self, **kw):
+                self.encoding = kw["encoding"]
+
+        monkeypatch.setattr(sys, "stdin", _Deaf())
+        monkeypatch.setattr(sys, "stdout", _Working())
+        monkeypatch.setattr(sys, "stderr", _Deaf())
+
+        assert _force_utf8_io() == ("stdout",)
+
+    def test_a_stream_that_raises_is_not_claimed_and_does_not_stop_the_others(
+        self, monkeypatch
+    ):
+        class _Angry:
+            encoding = "cp1251"
+
+            def reconfigure(self, **kw):
+                raise OSError("stream refuses")
+
+        class _Working:
+            encoding = "cp1251"
+
+            def reconfigure(self, **kw):
+                self.encoding = kw["encoding"]
+
+        monkeypatch.setattr(sys, "stdin", _Angry())
+        monkeypatch.setattr(sys, "stdout", _Working())
+        monkeypatch.setattr(sys, "stderr", _Working())
+
+        assert _force_utf8_io() == ("stdout", "stderr")
+
+    def test_streams_without_reconfigure_are_reported_as_not_switched(self, monkeypatch):
+        class _Bare:
+            pass
+
+        for name in ("stdin", "stdout", "stderr"):
+            monkeypatch.setattr(sys, name, _Bare())
+
+        assert _force_utf8_io() == ()

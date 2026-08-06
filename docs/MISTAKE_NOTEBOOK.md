@@ -845,6 +845,55 @@ only in the direction that keeps flagging: an emitter like `_emit` was
 deliberately NOT added, because a false "journaled" hides a real silence, while
 a false "silent" only costs a reading.
 
+## 34. A non-Python child writes cp866; the reader decodes strict UTF-8
+
+**Symptom.** `tools/shell_exec.py` runs a Windows command, the command reports
+an error in the localised console code page, and the agent receives replacement
+characters instead of the message. The agent then tells the operator it cannot
+determine what went wrong — while the answer was in the bytes it just threw
+away.
+
+**Reproduced 2026-08-06, exactly.**
+
+    >>> r = subprocess.run(["cmd", "/c", "dir", "нет_такого_файла"],
+    ...                    capture_output=True)
+    >>> r.stdout[:20]
+    b' \x92\xae\xac \xa2 \xe3\xe1\xe2\xe0\xae\xa9\xe1\xe2\xa2\xa5 C'
+    >>> _.decode("utf-8", errors="replace")[:25]
+    ' \ufffd\ufffd\ufffd \ufffd \ufffd\ufffd\ufffd...'      # garbage
+    >>> _.decode("cp866")[:25]
+    ' Том в устройстве C имеет'          # the actual message
+
+**Where the two ends are.** `tools/shell_exec.py:900` (`_cap_and_decode`)
+decodes strict UTF-8 with a replacement fallback. The child is `cmd`, `where`,
+`git` — not Python — so `PYTHONIOENCODING=utf-8`, which `app/io._force_utf8_io`
+exports, has no effect on it whatsoever.
+
+**What is NOT the cause, checked and ruled out 2026-08-06.**
+
+* Not the console and not the language. A Python child inherits
+  `PYTHONIOENCODING` and returns valid UTF-8: measured
+  `b'\xd0\xbf\xd1\x80\xd0\xb8\xd0\xb2\xd0\xb5\xd1\x82'` for `привет`.
+* Not `app/io._force_utf8_io`'s `errors="replace"`. That function is the first
+  statement of `run_cli` and does not run at all in a plain `python -c`
+  invocation, which is where the assistant's own mojibake came from — there
+  `sys.stdout.encoding` is cp1251 and `PYTHONIOENCODING` is unset.
+* Not file reading. An AST sweep of `core/ cli/ app/ tools/ api/ scripts/`
+  found four textual `open()` calls without `encoding=`; two are network
+  openers, two are the PID lock file in `app/single_instance.py:151,153`.
+
+**How to check yourself.** Run a localised Windows command through
+`shell_exec` and look at the raw bytes, not the rendered string. If
+`bytes.decode("cp866")` reads as words and `decode("utf-8", "replace")` does
+not, the two ends disagree and the reader is the one that is wrong.
+
+**What to do.** Registered against `tools/shell_exec.py`, not yet fixed
+(operator's instruction, 2026-08-06). Do NOT widen the replacement fallback:
+`\ufffd` is how `core/knowledge_pipeline._is_broken_encoding` recognises
+garbage and refuses to store it, and that guard is correct. The fix belongs at
+the decode, which must try the console code page for non-Python children
+before falling back.
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED

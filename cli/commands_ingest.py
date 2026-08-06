@@ -34,6 +34,35 @@ if TYPE_CHECKING:
     from core.loop import AgentLoop
 
 
+def _report_ingest_failure(
+    agent: AgentLoop, kind: str, exc: BaseException, target: str
+) -> None:
+    """A failed ingest must survive in the journal, not only on the screen.
+
+    All four ingest handlers printed the exception to stderr and returned
+    `True` — the same value a success returns. So the failure existed for
+    exactly as long as the operator was watching the console: an hour later,
+    reading `logs/*.jsonl`, there was nothing to find. Three other handlers in
+    this same file already journal through `agent.log`; these four did not.
+
+    Wrapped, because the report is best effort and the REPL is not: a logger
+    that raises must not turn a failed ingest into a crashed session. The
+    print below still happens either way.
+    """
+    try:
+        agent.log.log(
+            "ingest_failed",
+            {
+                "kind": kind,
+                "target": target,
+                "exception_type": type(exc).__name__,
+                "error": str(exc)[:300],
+            },
+        )
+    except Exception:  # noqa: BLE001, S110 - last resort around the write itself
+        pass  # nosec B110 - the command's own report below is what the user sees
+
+
 def _handle_ingest_source(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     path, dry_run, auto_write, _limit, error = _parse_ingest_options(
         rest,
@@ -50,7 +79,9 @@ def _handle_ingest_source(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             dry_run=dry_run,
             auto_write_memory=auto_write,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI boundary: any ingest
+        # failure is reported and journalled, never allowed to kill the REPL
+        _report_ingest_failure(agent, "source", exc, str(path))
         print(f"(ingest failed: {type(exc).__name__}: {exc})", file=sys.stderr)
         return True
     print(report.user_summary(), file=sys.stderr)
@@ -74,7 +105,9 @@ def _handle_ingest_project(rest: str, agent: AgentLoop, workspace: Path) -> bool
             dry_run=dry_run,
             auto_write_memory=auto_write,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI boundary: any ingest
+        # failure is reported and journalled, never allowed to kill the REPL
+        _report_ingest_failure(agent, "project", exc, str(path))
         print(f"(ingest failed: {type(exc).__name__}: {exc})", file=sys.stderr)
         return True
     print(report.user_summary(), file=sys.stderr)
@@ -325,7 +358,21 @@ UNSAFE_SCAN_DIRS = {
 }
 
 
-def _handle_self_build_propose(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+def _handle_self_build_propose(
+    rest: str, agent: AgentLoop | None, workspace: Path
+) -> bool:
+    """Propose a self-build target. Reachable by TWO paths, hence the `| None`.
+
+    `cli/command_dispatch.py` calls it like every other handler, with a live
+    agent. `cli/app.py` calls it as a fast path BEFORE an agent exists, so that
+    `:self-build-propose` costs no `.env` load and no agent build — and passed
+    `None` behind a `# type: ignore[arg-type]`, which silenced the checker
+    instead of admitting the second caller. The annotation says it now.
+
+    The parameter stays in the signature: 61 dispatcher call sites share the
+    `(rest, agent, workspace)` shape, and breaking that for the one handler
+    that ignores its agent would cost more than it buys.
+    """
     del agent
     tokens = _split_meta_args(rest)
     if "--large-files" in tokens:
@@ -1165,7 +1212,9 @@ def _handle_ingest_web(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             dry_run=dry_run,
             auto_write_memory=auto_write,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI boundary: any ingest
+        # failure is reported and journalled, never allowed to kill the REPL
+        _report_ingest_failure(agent, "web", exc, topic)
         print(f"(ingest web failed: {type(exc).__name__}: {exc})", file=sys.stderr)
         return True
     print(report.user_summary(), file=sys.stderr)
@@ -1226,7 +1275,9 @@ def _handle_ingest_rss(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             dry_run=dry_run,
             auto_write_memory=auto_write,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI boundary: any ingest
+        # failure is reported and journalled, never allowed to kill the REPL
+        _report_ingest_failure(agent, "rss", exc, url)
         print(f"(ingest rss failed: {type(exc).__name__}: {exc})", file=sys.stderr)
         return True
     print(report.user_summary(), file=sys.stderr)

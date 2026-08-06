@@ -60,8 +60,31 @@ def _is_log_call(n: ast.AST) -> bool:
     return any(k in parts for k in _LOGGY) or any(p.startswith("log_") for p in parts)
 
 
+#: Helpers that journal on the caller's behalf. A handler calling one of these
+#: DOES report; scoring it silent sends a reader to fix what is not broken.
+#:
+#: `_sensor_failed` is the loop layer's own answer to "an observer must not
+#: break the turn, and must not vanish either" — it delegates to
+#: `core/sensor_journal.py`. The audit matched a literal `.log(` call and so
+#: counted 15 reporting handlers as silent (measured 2026-08-05), which is how
+#: a handler that reports correctly ended up having to carry a justifying
+#: comment to satisfy this very tool.
+_REPORTING_HELPERS = frozenset({"_sensor_failed"})
+
+
+def _is_reporting_call(n: ast.AST) -> bool:
+    """A journal write, or a helper that performs one."""
+    if _is_log_call(n):
+        return True
+    return (
+        isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr in _REPORTING_HELPERS
+    )
+
+
 def _has_log_call(node: ast.AST) -> bool:
-    return any(_is_log_call(n) for n in ast.walk(node))
+    return any(_is_reporting_call(n) for n in ast.walk(node))
 
 
 def _broad(handler_type: ast.expr | None) -> bool:
@@ -99,7 +122,7 @@ def classify_source(src: str, rel_file: str) -> list[dict]:
         if not isinstance(node, try_types):
             continue
         try_only_logs = len(node.body) >= 1 and all(
-            isinstance(s, ast.Expr) and _is_log_call(s.value) for s in node.body
+            isinstance(s, ast.Expr) and _is_reporting_call(s.value) for s in node.body
         )
         for h in node.handlers:
             if not _broad(h.type):
@@ -131,6 +154,177 @@ def classify_source(src: str, rel_file: str) -> list[dict]:
                 "commented": commented,
             })
     return out
+
+
+def _unconditional_reporters(tree: ast.AST) -> frozenset[str]:
+    """Functions in this file that ALWAYS write to the journal when called.
+
+    "Always" is doing the work. A helper that logs only inside an `if` reports
+    on some paths and not others, so a handler delegating to it has not
+    necessarily reported anything — counting it would let a real silence hide
+    behind a conditional. A write inside a `try` body still counts: `try` is not
+    a branch, it runs.
+
+    Nested function definitions are skipped: a closure's log call belongs to the
+    closure, and the outer function may never call it.
+    """
+    out: set[str] = set()
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+
+        def _always_logs(body: list[ast.stmt]) -> bool:
+            for stmt in body:
+                if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                if isinstance(stmt, ast.Expr) and _is_reporting_call(stmt.value):
+                    return True
+                if isinstance(stmt, ast.Try) and _always_logs(stmt.body):
+                    return True
+                if isinstance(stmt, ast.With) and _always_logs(stmt.body):
+                    return True
+            return False
+
+        if _always_logs(fn.body):
+            out.add(fn.name)
+    return frozenset(out)
+
+
+def journal_silent_handlers(src: str, rel_file: str) -> list[dict]:
+    """Handlers that write NOTHING to the journal, per file.
+
+    A different question from `classify_source`, which asks whether a silent
+    handler carries a COMMENT. A comment helps whoever reads the code; it does
+    nothing for an operator reading logs while the agent runs unattended. The
+    census (2026-08-05) traced three consequences of that gap — an answer-safety
+    check whose failure looked like success, a referent resolver that could stop
+    working unnoticed, a task contract silently replaced — and none of the three
+    handlers was uncommented.
+
+    Two exclusions, both structural rather than a matter of taste:
+
+    * a handler that RE-RAISES has reported by the strongest means available;
+    * a handler nested inside another handler that reports is the last-resort
+      guard around reporting itself, and reporting from inside a failed report
+      is a recursion, not a fix.
+
+    Counted here rather than in a throwaway script because two ad-hoc passes
+    over the same layer produced 22 and 18. One implementation, one number.
+    """
+    tree = ast.parse(src)
+    handlers = [n for n in ast.walk(tree) if isinstance(n, ast.ExceptHandler)]
+    local_reporters = _unconditional_reporters(tree)
+
+    def _reports(handler: ast.ExceptHandler) -> bool:
+        for n in ast.walk(handler):
+            if _is_reporting_call(n):
+                return True
+            # A handler that delegates its report to a helper HAS reported. The
+            # rule used to be a literal `.log(` inside the handler, which scored
+            # `_enforce_answer_safety` silent while it was calling
+            # `_safe_answer_after_enforcement_failure`, whose first statement is
+            # the `answer_enforcement_failed` write. Punishing code for moving a
+            # report into a helper is the counter's error, not the code's.
+            if (
+                isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Attribute)
+                and n.func.attr in local_reporters
+            ):
+                return True
+        return False
+
+    # A `try` whose body is nothing but journal writes: the handler guards the
+    # act of reporting, and reporting a failed report is a recursion. Identical
+    # in kind to the nested-handler exclusion below and to `try_only_logs` in
+    # `classify_source` — which is where this rule already lived. It was written
+    # once and not carried across, so `core/loop_run_tail.py:155` counted as a
+    # silence the layer had no way to remove.
+    guards_a_write: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        if node.body and all(
+            isinstance(s, ast.Expr) and _is_reporting_call(s.value) for s in node.body
+        ):
+            guards_a_write.update(h.lineno for h in node.handlers)
+
+    out: list[dict] = []
+    for handler in handlers:
+        if _reports(handler):
+            continue
+        if handler.lineno in guards_a_write:
+            continue
+        if any(isinstance(n, ast.Raise) for n in ast.walk(handler)):
+            continue
+        span_start, span_end = handler.lineno, handler.end_lineno or handler.lineno
+        nested_in_reporting = any(
+            other is not handler
+            and other.lineno <= span_start
+            and (other.end_lineno or other.lineno) >= span_end
+            and _reports(other)
+            for other in handlers
+        )
+        if nested_in_reporting:
+            continue
+        out.append({"file": rel_file, "line": span_start})
+    return out
+
+
+def loop_layer_files(root: Path) -> list[Path]:
+    """The loop layer, INCLUDING subsystems extracted out of it.
+
+    A scope written as "files named ``loop*``" measures where someone looked
+    rather than where the defect can be, and census item B1 proved that costs
+    something real: moving `propose_repair` into `core/repair_commands.py` moved
+    one journal-silent handler with it, the budget read one lower, and nothing
+    had been fixed. A refactor must never be able to look like a repair.
+
+    So the scope follows the code. A mixin that keeps a thin facade and delegates
+    to its subsystem imports it as ``import core.X as Y`` — the dotted form the
+    architecture invariant can see — and that import is what pulls X back into
+    the measurement. Anything the layer extracts this way stays counted.
+
+    Not a general import walk on purpose: `from core.X import f` pulls in
+    helpers the layer merely USES, and counting those would claim past what the
+    census measured. The dotted-alias form is what the facade pattern uses, and
+    a future extraction that hides from this by choosing the other form still
+    has to get past `test_the_budget_matches_the_measurement`, which goes red on
+    a count that drops for any reason at all.
+    """
+    files = sorted(p for p in root.glob("loop*.py") if "__pycache__" not in p.parts)
+    extracted: set[Path] = set()
+    for path in files:
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Import):
+                continue
+            for alias in node.names:
+                if alias.asname is None or not alias.name.startswith(f"{root.name}."):
+                    continue
+                candidate = root / f"{alias.name.split('.', 1)[1]}.py"
+                if candidate.exists():
+                    extracted.add(candidate)
+    return sorted(set(files) | extracted)
+
+
+def journal_silent_in(root: Path, pattern: str = "*.py") -> list[dict]:
+    """Every journal-silent handler under ``root``, sorted for stable output."""
+    rows: list[dict] = []
+    for path in sorted(root.rglob(pattern)):
+        if "__pycache__" in path.parts:
+            continue
+        try:
+            rows.extend(
+                journal_silent_handlers(
+                    path.read_text(encoding="utf-8"), path.as_posix()
+                )
+            )
+        except SyntaxError:
+            continue
+    return sorted(rows, key=lambda r: (r["file"], r["line"]))
 
 
 def classify_file(path: Path) -> list[dict]:

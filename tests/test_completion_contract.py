@@ -415,7 +415,14 @@ class TestReviewRoundOn258:
         and the obligation sensor stopped importing each other."""
         import ast
 
-        source = pathlib.Path("core/completion_contract.py").read_text(encoding="utf-8")
+        # Through the module, not a literal path: the check is about what
+        # THIS module imports, and reading it by name survives a relocation
+        # (census C1). `pathlib` stays imported above for the rest of the file.
+        import inspect
+
+        from core import completion_contract as _cc_mod
+
+        source = inspect.getsource(_cc_mod)
         imported = {
             node.module
             for node in ast.walk(ast.parse(source))

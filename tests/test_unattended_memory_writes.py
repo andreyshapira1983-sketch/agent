@@ -153,25 +153,41 @@ def test_the_gate_lets_a_verified_claim_through_the_real_run(monkeypatch):
 
 
 def test_the_unattended_path_always_demands_verification():
-    """The runtime hardcodes `require_verified=True` — the flag opens the door,
-    it does not remove the lock.
+    """Флаг открывает дверь, но не снимает замок — и дверей больше одной.
 
-    Read from the source rather than exercised, because reaching that line needs
-    a whole configured runtime; what matters is that no configuration can turn
-    the content gate off while turning writing on.
+    Область сторожа — ВЕСЬ `core/`, а не один модуль. Первая редакция разбирала
+    только `core.autonomous_runtime`, и это было не осторожностью, а догадкой о
+    том, где может быть дефект. Перепись 2026-08-05 показала, чего догадка не
+    видела: необслуживаемый прогон идёт через обычный цикл
+    (`core/autonomous_runtime.py` зовёт `agent.run`), а конвейер знаний хода
+    вызывается ещё из `core/loop_evidence_chain.py` и
+    `core/loop_verify_replan.py` — причём второй внутри цикла добычи цитат, то
+    есть на каждой итерации. Сторож был честен внутри своей области и не знал,
+    что область выбрана заранее.
+
+    Читается из исходника, а не исполняется: чтобы дойти до этих строк, нужен
+    целиком собранный прогон, а проверить надо простое — что ни одна настройка
+    не может включить запись, не включив содержательные ворота.
     """
     import ast
-    import inspect
+    import pathlib
 
-    from core import autonomous_runtime
-
-    tree = ast.parse(inspect.getsource(autonomous_runtime))
-    calls = [
-        node for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and any(kw.arg == "auto_write_memory" for kw in node.keywords)
-    ]
-    assert calls, "the learning call sites disappeared — update this guard"
+    # The invariant is about the GATE, not about every function that happens to
+    # forward an `auto_write_memory` flag. `core/ingestion.py` passes the flag
+    # down to `_ingest_paths`, which resolves the question itself; demanding the
+    # keyword there would be demanding it twice. What may never happen is the
+    # pipeline running with the question unanswered.
+    calls = []
+    for path in sorted(pathlib.Path("core").glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        calls.extend(
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "run"
+            and "knowledge_pipeline" in ast.unparse(node.func.value)
+        )
+    assert calls, "the knowledge-pipeline call sites vanished — update this guard"
     for call in calls:
         kwargs = {kw.arg for kw in call.keywords}
         assert "require_verified" in kwargs, (
@@ -179,8 +195,16 @@ def test_the_unattended_path_always_demands_verification():
             f"{ast.unparse(call)[:120]}"
         )
         verified = next(kw for kw in call.keywords if kw.arg == "require_verified")
-        assert isinstance(verified.value, ast.Constant) and verified.value.value is True, (
-            f"требование подтверждения стало настраиваемым: {ast.unparse(verified.value)}"
+        # Not "must be the literal True". The turn path is driven by BOTH a
+        # human at the REPL and the unattended runtime, so a constant there
+        # would be wrong in one of the two directions; it derives the answer
+        # from `gateway_path`, which is what records who drives the run. What
+        # may never appear is a literal that switches the gate off.
+        assert not (
+            isinstance(verified.value, ast.Constant) and verified.value.value is False
+        ), (
+            "content gate switched off by a literal: "
+            f"{ast.unparse(call)[:120]}"
         )
 
 
@@ -267,3 +291,18 @@ def test_every_skip_path_says_why_not_only_the_new_one():
     assert "auto_write_memory" in off_reason, off_reason
     assert "writer" in unwired_reason, unwired_reason
     assert off_reason != unwired_reason, "две разные причины слились в одну"
+
+    # And in the machine-readable half of the row. The prose differed while
+    # `policy_id` said `auto_write_memory` for both, so anyone filtering
+    # decisions by rule saw the operator blamed for a run where the operator
+    # had opted in and no writer was wired. Two facts, one label, and the
+    # label is what a filter reads — the same invisible failure one field
+    # further down than the one this test was written for.
+    off_rule = off.decisions[0]["knowledge_decision"]["policy_id"]
+    unwired_rule = unwired.decisions[0]["knowledge_decision"]["policy_id"]
+    assert off_rule != unwired_rule, (
+        f"обе причины помечены одним правилом {off_rule!r}: "
+        "по метаданным их уже не различить"
+    )
+    assert off_rule == "auto_write_memory", off_rule
+    assert "writer" in unwired_rule, unwired_rule

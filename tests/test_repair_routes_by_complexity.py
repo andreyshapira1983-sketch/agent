@@ -157,12 +157,90 @@ def test_the_generator_asks_for_its_model_after_the_baseline(tmp_path):
     )
 
 
+def _propose_repair_source() -> str:
+    """The body that DECIDES, found through the object rather than a path.
+
+    Two moves brought it here. C1 replaced `Path("core/loop_repair.py")` with
+    `inspect.getsource`, because reading shipped code by path reddens a test
+    about something else the moment the file moves. B1 then moved the logic out
+    of the mixin into `core/repair_commands.py` — and because the lookup already
+    followed the object, following it was a one-line change of WHICH object,
+    not a path edit. That is the whole value C1 bought.
+
+    Slicing between `def propose_repair(` and `def repair(` is gone with it: a
+    method added between those two `def`s would have silently widened what these
+    guards read.
+    """
+    import inspect
+
+    from core.repair_commands import propose_repair
+
+    return inspect.getsource(propose_repair)
+
+
+def _facade_source() -> str:
+    """The mixin method, which must stay thin."""
+    import inspect
+
+    from core.loop_repair import AgentLoopRepair
+
+    return inspect.getsource(AgentLoopRepair.propose_repair)
+
+
+def test_the_mixin_is_a_facade_and_not_the_home_of_the_decision():
+    """B1's invariant: `agent.` stays the entry point, not the owner.
+
+    The operator's ruling was neither "move the file" nor "rewrite the CLI":
+    `agent.propose_repair(...)` still works and no call site changed, but the
+    mixin must stop being where the decision lives. Checking both halves,
+    because either alone would pass while the point was lost.
+    """
+    facade = _facade_source()
+
+    # By CALL, not by the alias spelling: the import alias is an implementation
+    # detail (`repair_ops` today, because the dotted form is what the
+    # architecture invariant can see), and a guard keyed on it would redden on a
+    # rename that changes nothing.
+    import ast
+
+    calls = {
+        node.func.attr
+        for node in ast.walk(ast.parse(facade.strip()))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    }
+    assert "propose_repair" in calls, (
+        "the facade no longer delegates — the entry point has been broken"
+    )
+    for owned_elsewhere in ("for_task", "force_tier", "repair_complexity",
+                            "OperatorEscalation", "llm_selector"):
+        assert owned_elsewhere not in facade, (
+            f"{owned_elsewhere!r} came back into the mixin; the decision belongs "
+            "to core/repair_commands.py"
+        )
+
+
+def test_the_subsystem_takes_its_dependencies_as_arguments():
+    """Not an agent it reaches into.
+
+    A function taking `agent` and pulling `model_router` off it with `getattr`
+    would have moved the coupling rather than removed it — the duck-typed seam
+    the census already found where `core/ingestion.py` looks up
+    `_remember_from_knowledge` by name.
+    """
+    import inspect
+
+    from core.repair_commands import propose_repair
+
+    params = set(inspect.signature(propose_repair).parameters)
+
+    assert {"model_router", "log"} <= params
+    assert "agent" not in params
+    assert "self" not in params
+
+
 def test_the_wiring_does_not_hardcode_the_failing_count():
     """Source-level guard: the literal that made this unreachable is banned."""
-    source = Path("core/loop_repair.py").read_text(encoding="utf-8")
-    start = source.index("def propose_repair(")
-    end = source.index("def repair(", start)
-    body = source[start:end]
+    body = _propose_repair_source()
 
     assert "failing_tests=0" not in body, (
         "the failing-test signal is pinned to zero again, so the count can "
@@ -174,10 +252,7 @@ def test_the_wiring_does_not_hardcode_the_failing_count():
 
 def test_propose_repair_no_longer_uses_the_unescalatable_path():
     """`for_role` cannot reach deep at all — repair must not be built on it."""
-    source = Path("core/loop_repair.py").read_text(encoding="utf-8")
-    start = source.index("def propose_repair(")
-    end = source.index("def repair(", start)
-    body = source[start:end]
+    body = _propose_repair_source()
 
     # The model that answers the request must come from `for_task`, chosen by a
     # selector once the baseline is known. A `for_role` call may still appear as
@@ -196,10 +271,7 @@ def test_propose_repair_no_longer_uses_the_unescalatable_path():
 
 def test_propose_repair_asks_with_a_concrete_deliverable():
     """A vague ask downgrades by design, so the wiring must name what it wants."""
-    source = Path("core/loop_repair.py").read_text(encoding="utf-8")
-    start = source.index("def propose_repair(")
-    end = source.index("def repair(", start)
-    body = source[start:end]
+    body = _propose_repair_source()
 
     assert "high_value_repair" in body
     assert "minimal_patch_plan" in body

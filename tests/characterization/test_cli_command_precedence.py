@@ -11,6 +11,7 @@ Both collaborators are replaced with recorders, so the assertion is purely about
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -180,3 +181,49 @@ def test_real_dispatcher_raises_system_exit_for_quit_and_exit(tmp_path):
         with pytest.raises(SystemExit) as excinfo:
             dispatch_module.handle_meta_command(cmd, SimpleNamespace(), tmp_path)
         assert excinfo.value.code == 0, cmd
+
+
+# ── a tab between a command and its argument ─────────────────────────────────
+# Measured 2026-08-05: `partition(" ")` left `head` as the WHOLE string, so a
+# real command reached the operator as "(unknown command: ...)". Both paths
+# split on any whitespace now, and both are pinned here — fixing one alone
+# would make the two pre-dotenv fast paths behave differently from the other 93
+# commands.
+
+@pytest.mark.parametrize("sep", [" ", "\t", "\n", "  ", " \t "])
+def test_fast_path_matches_across_any_whitespace(sep, tmp_path, monkeypatch):
+    """The launcher's fast path, for every separator a paste can carry."""
+    seen: list[str] = []
+    monkeypatch.setattr(
+        app_module, "_handle_self_build_propose",
+        lambda rest, agent, workspace: seen.append(rest) or True,
+    )
+    monkeypatch.setattr(
+        app_module, "load_dotenv",
+        lambda *a, **k: pytest.fail("the fast path must not load .env"),
+    )
+    monkeypatch.setattr(
+        sys, "argv",
+        ["main.py", "--workspace", str(tmp_path),
+         "--ask", f":self-build-propose{sep}--large-files"],
+    )
+
+    assert main_module.main() == 0
+    assert seen == ["--large-files"], f"separator {sep!r} lost the argument: {seen}"
+
+
+@pytest.mark.parametrize("sep", [" ", "\t", "\n", "  ", " \t "])
+def test_dispatcher_matches_across_any_whitespace(sep):
+    """The other 93 commands, through `handle_meta_command`."""
+    agent = SimpleNamespace(memory=None)
+    handled = dispatch_module.handle_meta_command(
+        f":help{sep}extra", agent, Path(".")
+    )
+
+    assert handled is True, f"separator {sep!r} left the command unrecognised"
+
+
+def test_a_bare_command_with_no_argument_still_works():
+    """The split must not require an argument to exist."""
+    agent = SimpleNamespace(memory=None)
+    assert dispatch_module.handle_meta_command(":help", agent, Path(".")) is True

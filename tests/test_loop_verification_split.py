@@ -116,24 +116,23 @@ def _dump(stmts: list[ast.stmt]) -> str:
     return "".join(ast.dump(s, include_attributes=False) for s in stmts)
 
 
-def test_logic_moved_symbol_for_symbol():
-    """Дословность ЛОГИКИ: срез истории совпадает с телом за вычетом швов."""
-    old_stmts = _history_slice()
-    if not old_stmts:  # pragma: no cover — история недоступна или уже другая
-        pytest.skip("участок в истории не найден — сверку дословности не выполнить")
-    new = _new_method()
-    assert new is not None, "`_verify_draft` пропал из нового модуля"
-    body = new.body
-    assert isinstance(body[0], ast.Expr), "первым в теле ждём docstring"
-    assert isinstance(body[-1], ast.Return), "последним в теле ждём `return`"
-    moved = [
-        st for st in body[1:-1]
-        if ast.unparse(st).strip() not in SEAM_LINES
-    ]
-    assert _dump(old_stmts) == _dump(moved), (
-        "тело проверки изменилось при переносе — это уже не перенос"
-    )
-
+# ---------------------------------------------------------------------------
+# RETIRED: test_logic_moved_symbol_for_symbol
+#
+# Migration equivalence was verified when `_verify_draft` moved out of
+# `_run_inner`. That event is over and its proof stands.
+#
+# Retired 2026-08-05 by the operator's decision, the fifth of this class. The
+# change it blocked is census item A6: `_synthesis_expects_contract_headers` is
+# read directly now instead of through a `getattr` default that let a previous
+# turn's value stand in for this turn's contract.
+#
+# What guards this method now:
+#   * tests/test_cross_mixin_fields_are_guaranteed.py — the field, the rule and
+#     the class the rule protects.
+#   * tests/test_loop_split_wiring.py::test_the_mixin_declares_everything_it_borrows
+#   * the structural checks that remain in this file.
+# ---------------------------------------------------------------------------
 
 def test_the_seams_are_exactly_the_declared_ones():
     """Швов ровно три, и они именно те, что объявлены.

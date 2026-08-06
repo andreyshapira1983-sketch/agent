@@ -483,7 +483,7 @@ nothing, spend nothing, and remember nothing on its own.*
 > **MEASURED AND ACTED ON (2026-07-27).** "Parameterised for the day the switch
 > is flipped" turned out to be the wrong frame for this sensor: the problem was
 > never the threshold. Measurement
-> ([audit/SENSOR_SIGNAL_MEASUREMENT.md](audit/SENSOR_SIGNAL_MEASUREMENT.md))
+> (audit/SENSOR_SIGNAL_MEASUREMENT.md)
 > showed the scalar gave almost the same zero to three different situations —
 > evidence never required, evidence required and absent, and citations that
 > resolve to nothing — and that **11 of its 12 firings on real traffic were the
@@ -628,7 +628,7 @@ nothing, spend nothing, and remember nothing on its own.*
 
    **Still true after 2026-07-27, but two of the five were rebuilt rather than
    connected** (PR #177; measurement in
-   [audit/SENSOR_SIGNAL_MEASUREMENT.md](audit/SENSOR_SIGNAL_MEASUREMENT.md)).
+   audit/SENSOR_SIGNAL_MEASUREMENT.md).
    ~~None of the five enforces anything today.~~ **Corrected 2026-08-02:**
    four of the five still enforce nothing; S3 became the exception *at
    banking time* under the operator's ruling (see the row below and §8.5).
@@ -753,7 +753,7 @@ becomes a replan trigger (**no** — it is evidence-support telemetry now,
 (**no** — replaced by `core/completion_obligation.py`). S2 and S5 were not
 decided; they were given shadow accounting so that deciding them later rests on
 numbers. The addendum in
-[audit/SENSOR_SIGNAL_MEASUREMENT.md](audit/SENSOR_SIGNAL_MEASUREMENT.md) records
+audit/SENSOR_SIGNAL_MEASUREMENT.md records
 the ruling per sensor.
 
 1. ~~**Fix `_has_any` recall at the primitive, or keep patching phrase lists?**

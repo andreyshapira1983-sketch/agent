@@ -17,8 +17,6 @@ import subprocess  # nosec B404 — читаем историю через git s
 from dataclasses import fields as dataclass_fields
 from pathlib import Path
 
-import pytest
-
 import core.loop as loop_mod
 import core.loop_verify_replan as verify_mod
 from core.loop import AgentLoop
@@ -109,36 +107,31 @@ class _Substitute(ast.NodeTransformer):
         return node
 
 
-def test_the_block_moved_under_one_declared_substitution():
-    """История + объявленная подстановка = то, что лежит в новом модуле."""
-    old_src = _history()
-    if not old_src.strip():  # pragma: no cover — поверхностный клон без истории
-        pytest.skip("история недоступна (shallow clone) — сверку не выполнить")
-    old_run_inner = _func(ast.parse(old_src), "_run_inner")
-    assert old_run_inner is not None, "в истории нет `_run_inner` — сверять не с чем"
-    old_block = _the_block(old_run_inner)
-    if old_block is None:  # pragma: no cover — история уже без блока
-        pytest.skip("блок в истории не найден — раскол уже зафиксирован")
-
-    new_method = _func(
-        ast.parse(Path(verify_mod.__file__).read_text(encoding="utf-8")), METHOD
-    )
-    assert new_method is not None, f"`{METHOD}` пропал из нового модуля"
-    new_block = _the_block(new_method)
-    assert new_block is not None, "в новом методе должен быть ровно один такой `if`"
-
-    def _dump(stmts: list[ast.stmt]) -> str:
-        return "".join(ast.dump(s, include_attributes=False) for s in stmts)
-
-    expected = [
-        ast.fix_missing_locations(_Substitute().visit(ast.parse(ast.unparse(s))))
-        for s in _owned(old_block)
-    ]
-    got = [ast.parse(ast.unparse(s)) for s in _owned(new_block)]
-    assert "".join(ast.dump(m) for m in expected) == "".join(ast.dump(m) for m in got), (
-        "тело отличается от истории СВЕРХ объявленной подстановки — это уже не перенос"
-    )
-
+# ---------------------------------------------------------------------------
+# RETIRED: test_the_block_moved_under_one_declared_substitution
+#
+# Migration equivalence was verified during the loop split: the block moved out
+# of `_run_inner` under one declared substitution and the AST matched history.
+# That event is over and its proof stands.
+#
+# The historical body-equivalence guard is retired because the migrated method
+# is now allowed to evolve under behavioural and host-contract tests. Keeping it
+# would freeze a finished migration into a museum exhibit — any lawful change to
+# the method would fail a check about the past rather than about the code.
+#
+# What replaced it, and what must NOT be weakened:
+#   * `tests/test_loop_split_wiring.py::test_the_mixin_declares_everything_it_borrows`
+#     — a standing contract, and it proved its worth immediately: it caught
+#     `_unattended_run` being borrowed by two mixins without being declared.
+#   * `test_the_prefix_is_the_earlier_piece_and_nothing_else` below, and the
+#     output contracts further down, which are about structure rather than about
+#     a git snapshot.
+#   * `tests/test_verified_memory_gate_follows_gateway_path.py` — the behaviour
+#     the edit that broke this guard was making.
+#
+# Retired 2026-08-05, by the operator's decision, when the A1 fix derived the
+# verified-memory gate from `gateway_path`.
+# ---------------------------------------------------------------------------
 
 def test_the_prefix_is_the_earlier_piece_and_nothing_else():
     """Пропущенная часть блока — ровно вызов куска 5, а не тихая правка.
