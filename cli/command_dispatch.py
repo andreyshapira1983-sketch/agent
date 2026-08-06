@@ -141,7 +141,12 @@ if TYPE_CHECKING:  # annotations only
 
 def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
     """Returns True if the command was handled (so the REPL should skip the LLM)."""
-    head, _, rest = cmd.partition(" ")
+    # Any whitespace, not a literal space -- see the comment at the same
+    # split in `cli/app.py`. Both paths change together so the two
+    # pre-dotenv fast paths cannot diverge from the other 93 commands.
+    _parts = cmd.split(maxsplit=1)
+    head = _parts[0] if _parts else ""
+    rest = _parts[1] if len(_parts) > 1 else ""
     head = head.lower()
 
     if head in {":mem", ":memory"}:

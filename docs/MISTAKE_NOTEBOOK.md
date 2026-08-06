@@ -845,6 +845,38 @@ only in the direction that keeps flagging: an emitter like `_emit` was
 deliberately NOT added, because a false "journaled" hides a real silence, while
 a false "silent" only costs a reading.
 
+## 34. The child process speaks a different encoding than the parent reads
+
+**Symptom.** A Python subprocess launched from this repository writes Cyrillic
+to stdout; the parent reads it and gets `������` instead of words. Reproduced
+repeatedly on 2026-08-05 while running measurement scripts: every diagnostic
+that printed a Russian label came back unreadable, including the ones written
+to prove other findings.
+
+**Cost, in numbers.** Not measured in money. Measured in wrong conclusions: on
+2026-08-05 the agent ran `where python`, Windows answered with a localised
+error on stderr, `tools/shell_exec.py` decoded those bytes as strict UTF-8,
+and the reply came back as replacement characters. The agent then wrote, in an
+answer to the operator, that it could not determine why the interpreter was
+not found — "не подтверждена содержимым stderr из-за повреждённой кодировки
+вывода". The system had the answer and could not read it.
+
+**How to check yourself.** Run any script that prints a non-ASCII string
+through a subprocess and read the parent's captured bytes, not the terminal.
+If `sum(1 for b in out if b > 127)` is non-zero and the text is unreadable,
+the two ends disagree. `app/io._force_utf8_io` fixes the CLI's own three
+streams and exports `PYTHONIOENCODING`; it does NOT govern how
+`tools/shell_exec.py` decodes what a child wrote, and it cannot govern a
+non-Python child such as `where` at all.
+
+**What to do.** Not investigated yet — recorded on the operator's instruction
+(2026-08-05) so the reproduction is not lost, and deliberately left open. When
+it is taken up, the two ends are `tools/shell_exec.py:900` (`_cap_and_decode`,
+strict UTF-8 with a replacement fallback) and whatever code page the console
+is actually in. Do not "fix" it by widening the fallback: replacement
+characters are how `core/knowledge_pipeline._is_broken_encoding` recognises
+garbage and refuses to store it, and that guard is correct.
+
 ## Findings journal — the exact address of each mistake
 
 The table below removes the search: file and line are named. This is a SHARED

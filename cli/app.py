@@ -111,7 +111,15 @@ def run_cli() -> int:
     args = build_parser().parse_args()
     workspace = Path(args.workspace).resolve()
     ask_head = args.ask.lstrip() if args.ask else ""
-    head, _, rest = ask_head.partition(" ")
+    # Split on ANY whitespace, not on a literal space. A tab between the
+    # command and its argument left `head` as the whole string, so a real
+    # command reached the user as "(unknown command: ...)". Measured
+    # 2026-08-05. `cli/command_dispatch.py` is changed the same way in the
+    # same commit: fixing one path alone would make two of the 95 commands
+    # behave differently from the other 93.
+    _parts = ask_head.split(maxsplit=1)
+    head = _parts[0] if _parts else ""
+    rest = _parts[1] if len(_parts) > 1 else ""
     if head.lower() == ":self-build-propose":
         _handle_self_build_propose(rest.strip(), None, workspace)
         return 0
