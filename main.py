@@ -1,4 +1,4 @@
-"""CLI entry point for the agent MVP-5.
+"""CLI entry point for the agent.
 
 Interactive sessions have Working Memory (session-scoped turns) AND
 Persistent Memory (long-term records on disk, gated by a Write Policy).
@@ -14,7 +14,7 @@ Usage examples:
     > What is DuckDuckGo?
     > And who founded it?                 # follow-up; planner reuses turn 1
     > :remember preference,fact I prefer concise answers in Russian
-    > :ingest-source "docs/архитектура автономного Агента.txt"
+    > :ingest-source docs/ROADMAP.md
     > :ingest-project . --limit 40 --dry-run
     > :source-library books
     > :ingest-web "autonomous agent" --sources wikis,science --limit 3 --dry-run
@@ -28,9 +28,9 @@ Usage examples:
     > :quit
 
     # Interactive with a file hint
-    python main.py --file "docs/архитектура автономного Агента.txt"
-    > How many domains are in the file?   # file_read runs
-    > And what is in section 12.4?        # planner can reuse cached file artifact
+    python main.py --file docs/ROADMAP.md
+    > How many sections does the file have?   # file_read runs
+    > And what is in the last one?           # planner reuses the cached artifact
 """
 
 from __future__ import annotations
