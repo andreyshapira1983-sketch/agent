@@ -278,3 +278,66 @@ def test_whitespace_only_ask_is_treated_the_same(tmp_path, monkeypatch, capsys):
 
     assert main_module.main() == 2
     assert "empty question" in capsys.readouterr().err
+
+
+def test_empty_file_hint_exits_two_before_building_an_agent(tmp_path, monkeypatch, capsys):
+    """`--file ""` never reached the check: `if not file_hint` returned "fine".
+
+    Measured 2026-08-05 before the fix: passed preflight, agent built, run
+    proceeded with a hint that named nothing.
+    """
+    monkeypatch.setattr(
+        app_module, "build_agent",
+        lambda *a, **k: pytest.fail("an empty --file must not build an agent"),
+    )
+    monkeypatch.setattr(
+        app_module, "run_one_shot",
+        lambda *a, **k: pytest.fail("an empty --file must not reach one-shot"),
+    )
+    monkeypatch.setattr(
+        sys, "argv",
+        ["main.py", "--workspace", str(tmp_path), "--file", "", "--ask", "q"],
+    )
+
+    assert main_module.main() == 2
+    assert "empty path" in capsys.readouterr().err
+
+
+def test_whitespace_file_hint_exits_two(tmp_path, monkeypatch, capsys):
+    """`--file "   "` stripped to "", and `Path("")` resolves to the workspace,
+    which exists — so it passed as a valid file hint."""
+    monkeypatch.setattr(
+        app_module, "build_agent",
+        lambda *a, **k: pytest.fail("whitespace --file must not build an agent"),
+    )
+    monkeypatch.setattr(
+        sys, "argv",
+        ["main.py", "--workspace", str(tmp_path), "--file", "   ", "--ask", "q"],
+    )
+
+    assert main_module.main() == 2
+    assert "empty path" in capsys.readouterr().err
+
+
+def test_directory_file_hint_exits_two_and_says_it_is_a_directory(
+    tmp_path, monkeypatch, capsys
+):
+    """A directory passed because the check asked `exists()`, not `is_file()`.
+
+    The message names the reason: "is a directory" and "does not exist" are
+    different faults and must not read the same.
+    """
+    (tmp_path / "adir").mkdir()
+    monkeypatch.setattr(
+        app_module, "build_agent",
+        lambda *a, **k: pytest.fail("a directory --file must not build an agent"),
+    )
+    monkeypatch.setattr(
+        sys, "argv",
+        ["main.py", "--workspace", str(tmp_path), "--file", "adir", "--ask", "q"],
+    )
+
+    assert main_module.main() == 2
+    err = capsys.readouterr().err
+    assert "is a directory" in err
+    assert "does not exist" not in err
