@@ -153,3 +153,47 @@ def test_self_repair_doc_separates_implemented_from_planned() -> None:
     # sold as a closed self-evolution loop.
     assert "governs **self-diagnosis and self-repair only**".lower() in flat
     assert "it is *not* a self-evolution mechanism".lower() in flat
+
+
+def test_every_doc_manifest_names_files_that_exist() -> None:
+    """Sweep, not a list: EVERY `*_DOC_PATHS` manifest, not the three someone
+    remembered to name.
+
+    The guards above cover the corporate, sub-agent and self-repair groups.
+    Memory never got one — and that is where the dead path was found on
+    2026-08-07: `docs/audit/MEMORY_MAP.md`, deleted with the rest of
+    `docs/audit/`, still first in the memory doctrine.
+
+    The cost is not cosmetic. The router injects a `file_read` step per path
+    without asking whether the file exists, so every memory question opened with
+    a step that raises FileNotFoundError, and a third of the doctrine the code
+    believed it was supplying never arrived.
+
+    Scope is `*_DOC_PATHS` on purpose. The `*_DEFAULT_PATHS` tuples next to them
+    are not documents to read but PATTERNS to recognise — a plan whose only
+    source is `README.md` or `tools/` is a low-signal plan, and that stays true
+    whether or not the file exists. Requiring them to exist would delete a
+    working signal in the name of tidiness.
+
+    Written as a sweep so a new manifest is covered the day it is added rather
+    than the day someone remembers this file exists.
+    """
+    from core import doc_routing
+
+    missing: list[str] = []
+    for name in sorted(dir(doc_routing)):
+        if not name.endswith("_DOC_PATHS"):
+            continue
+        value = getattr(doc_routing, name)
+        if not isinstance(value, tuple):
+            continue
+        missing.extend(
+            f"{name}: {path}"
+            for path in value
+            if isinstance(path, str) and not (REPO_ROOT / path).exists()
+        )
+
+    assert not missing, (
+        "core.doc_routing declares documents with no backing file — the agent "
+        f"is told to read them at runtime: {missing}"
+    )
