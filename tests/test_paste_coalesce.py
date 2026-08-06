@@ -108,7 +108,7 @@ def test_end_of_input_leaves_no_error_and_says_nothing(capsys):
     reader = _StdinLineReader(interactive=False, readline=lambda: "", out=io.StringIO())
 
     with pytest.raises(EOFError):
-        reader.read_line()
+        reader.read_line(timeout=5)
 
     assert reader.read_error is None
     assert capsys.readouterr().err == ""
@@ -126,7 +126,7 @@ def test_a_failed_read_records_the_cause_and_reports_it(capsys):
     reader = _StdinLineReader(interactive=False, readline=_broken, out=io.StringIO())
 
     with pytest.raises(EOFError):
-        reader.read_line()
+        reader.read_line(timeout=5)
 
     assert isinstance(reader.read_error, UnicodeDecodeError)
     err = capsys.readouterr().err
