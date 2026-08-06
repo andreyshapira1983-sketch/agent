@@ -14,7 +14,7 @@ Usage examples:
     > What is DuckDuckGo?
     > And who founded it?                 # follow-up; planner reuses turn 1
     > :remember preference,fact I prefer concise answers in Russian
-    > :ingest-source docs/ROADMAP.md
+    > :ingest-source knowledge/doctrine/ROADMAP.md
     > :ingest-project . --limit 40 --dry-run
     > :source-library books
     > :ingest-web "autonomous agent" --sources wikis,science --limit 3 --dry-run
@@ -28,7 +28,7 @@ Usage examples:
     > :quit
 
     # Interactive with a file hint
-    python main.py --file docs/ROADMAP.md
+    python main.py --file knowledge/doctrine/ROADMAP.md
     > How many sections does the file have?   # file_read runs
     > And what is in the last one?           # planner reuses the cached artifact
 """

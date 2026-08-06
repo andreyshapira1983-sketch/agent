@@ -381,7 +381,7 @@ class LLMPlanner:
                 "governance, subagents, self-build, night observation, and "
                 "safe autonomy questions, start with knowledge/doctrine/future/CORPORATE_MODEL.md, "
                 "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md, docs/AGENT_ANATOMY.md, "
-                "docs/ROADMAP.md, and docs/COMMANDS_MAP.md before central "
+                "knowledge/doctrine/ROADMAP.md, and docs/COMMANDS_MAP.md before central "
                 "core/*.py mechanics.]\n"
             )
         subagent_docs_block = ""

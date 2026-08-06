@@ -3,7 +3,7 @@
 > **⚠️ STATUS: FUTURE / ASPIRATIONAL. This document describes a TARGET model,
 > NOT what the code does today.** Nothing here should be read as an implemented
 > capability. It lives under `docs/future/` on purpose. For what actually
-> exists today, read `docs/ROADMAP.md` and `CENTRAL_AGENT_GOVERNANCE.md`;
+> exists today, read `ROADMAP.md` and `CENTRAL_AGENT_GOVERNANCE.md`;
 > when those and this document disagree about the present, they win.
 
 This document is the logical home for the long-horizon "autonomous organisation"

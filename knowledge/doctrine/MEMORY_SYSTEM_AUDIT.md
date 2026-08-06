@@ -79,7 +79,7 @@ passing regression tests).
   `answer_quality_score`. Then `_smoothed_confidence` (Beta(1,1)) makes one
   success `(1+1)/(1+2) = 0.667`, and `status = "active" if confidence >= 0.6`
   → **active immediately** (`core/smart_memory.py:60–62, 221–222`).
-- **Doc/code nuance:** `docs/ROADMAP.md` Track B says smoothing means "a single
+- **Doc/code nuance:** `ROADMAP.md` Track B says smoothing means "a single
   success is not treated as certainty." True for *certainty* (never reaches
   1.0) — but a single success **does** reach `active` (0.667 ≥ 0.6). The
   reassurance is incomplete.
