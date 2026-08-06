@@ -44,6 +44,7 @@ from cli.parsers import _parse_remember
 from cli.repl import (
     _collect_continuation,
     _collect_instruction_buffer,
+    _collect_operator_task_block,
     _collect_pasted_block,
 )
 from core.approval import AutoApprover
@@ -536,6 +537,44 @@ class TestCollectContinuation:
 
         with pytest.raises(EOFError):
             _collect_continuation("first \\", reader)
+
+
+# ============================================================
+# _collect_operator_task_block — :operator-task ... :end
+# ============================================================
+
+class TestCollectOperatorTaskBlock:
+    """The collector alone. Its `... ` prompt, the notice, the handler call and
+    the fact that the token never reaches the dispatcher belong to `run_repl`
+    and are held by tests/characterization/."""
+
+    @staticmethod
+    def _reader(lines: list[str]):
+        it = iter(lines)
+        return lambda: next(it)
+
+    def test_joins_the_block_with_newlines(self):
+        reader = self._reader(["step one", "step two", ":end"])
+        assert _collect_operator_task_block(reader) == "step one\nstep two"
+
+    def test_the_terminator_is_trimmed_and_case_insensitive(self):
+        reader = self._reader(["body", "   :END   "])
+        assert _collect_operator_task_block(reader) == "body"
+
+    def test_an_empty_block_returns_the_empty_string(self):
+        """Returned as typed; refusing it is the handler's job, not this one's."""
+        assert _collect_operator_task_block(self._reader([":end"])) == ""
+
+    def test_lines_are_kept_verbatim_including_indentation(self):
+        reader = self._reader(["    indented", ":end"])
+        assert _collect_operator_task_block(reader) == "    indented"
+
+    def test_eof_propagates_to_caller(self):
+        def reader() -> str:
+            raise EOFError
+
+        with pytest.raises(EOFError):
+            _collect_operator_task_block(reader)
 
 
 # ============================================================

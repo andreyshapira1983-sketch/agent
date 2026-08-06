@@ -73,6 +73,21 @@ def _collect_pasted_block(read_line: Callable[[], str]) -> str:
 PASTE_COALESCE_GAP_SECONDS = 0.05
 
 
+def _collect_operator_task_block(read_line: Callable[[], str]) -> str:
+    """Collect an ``:operator-task`` block, joined with newlines.
+
+    Ends on a line that is ``:end`` once stripped and lowercased. Returns the
+    block as typed — the handler judges an empty one itself.
+    ``EOFError``/``KeyboardInterrupt`` propagate.
+    """
+    lines: list[str] = []
+    while True:
+        line = read_line()
+        if line.strip().lower() == ":end":
+            return "\n".join(lines)
+        lines.append(line)
+
+
 def _collect_continuation(first_line: str, read_line: Callable[[], str]) -> str:
     """Join a line ending in ``\\`` with the ones that continue it.
 
@@ -325,18 +340,13 @@ def run_repl(
                 # costs a rate-limit token and asks the agent nothing.
                 continue
         if q == ":operator-task":
-            block_lines: list[str] = []
             print("(operator task block started; finish with :end)", file=sys.stderr)
-            while True:
-                try:
-                    line = reader.prompt_line("... ")
-                except (EOFError, KeyboardInterrupt):
-                    print()
-                    return 0
-                if line.strip().lower() == ":end":
-                    break
-                block_lines.append(line)
-            operator_task._handle_operator_task("\n".join(block_lines), agent, workspace)
+            try:
+                block = _collect_operator_task_block(lambda: reader.prompt_line("... "))
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return 0
+            operator_task._handle_operator_task(block, agent, workspace)
             continue
         # :task-begin … :task-end goes STRAIGHT to the agent, bypassing the
         # keyword router — the reliable way to send wording that a shortcut

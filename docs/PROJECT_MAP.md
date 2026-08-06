@@ -64,7 +64,7 @@ run_repl()  — цикл: одна итерация = одно сообщени�
    ├─ режимы ввода:
    │     ├─ <<< … >>>          →  _collect_pasted_block()        ✔ вынесен
    │     ├─ строка с \ в конце →  _collect_continuation()        ✔ вынесен
-   │     ├─ :operator-task…:end →  разбирается внутри цикла      ✘ ещё не вынесен
+   │     ├─ :operator-task…:end →  _collect_operator_task_block() ✔ вынесен
    │     └─ :task-begin…:task-end → _collect_instruction_buffer() ✔ был вынесен ранее
    │
    ├─ команды на двоеточие  →  cli/command_dispatch.py           ○
