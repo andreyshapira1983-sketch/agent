@@ -66,6 +66,24 @@ def _collect_instruction_buffer(
         lines.append(line)
 
 
+def _collect_pasted_block(read_line: Callable[[], str]) -> str:
+    """Collect a ``<<< … >>>`` block, joined with newlines and stripped.
+
+    Ends on the first line ending in ``>>>``, whether alone or glued to a paste
+    ("...text>>>"), keeping what precedes it. May return ""; what that means is
+    the caller's call. ``EOFError``/``KeyboardInterrupt`` propagate.
+    """
+    parts: list[str] = []
+    while True:
+        line = read_line()
+        stripped = line.strip()
+        if stripped.endswith(">>>"):
+            parts.append(line.rstrip()[:-3].rstrip())
+            break
+        parts.append(line)
+    return "\n".join(parts).strip()
+
+
 # ── Paste-safe stdin reading ──────────────────────────────────────────────
 # The REPL reads with line-buffered input, so pasting a multi-line block used
 # to arrive as many separate prompts — each executed as its own question
@@ -342,35 +360,13 @@ def run_repl(
         #   Start a line with <<< to enter block mode; finish with >>>
         #   Useful when pasting text that contains newlines.
         if q == "<<<":
-            block_parts: list[str] = []
             print("(multi-line mode: paste text, finish with >>> on its own line)",
                   file=sys.stderr)
-            while True:
-                try:
-                    bline = reader.prompt_line("... ")
-                except (EOFError, KeyboardInterrupt):
-                    print()
-                    return 0
-                stripped = bline.strip()
-                # One check, not two. The terminator on its own line and the
-                # terminator glued to the end of a paste ("...last sentence.>>>",
-                # which is what a single Ctrl+V without a trailing newline
-                # delivers — without this the operator sits at `... ` forever)
-                # are the same case: keep what precedes the marker, then stop.
-                #
-                # A separate `stripped == ">>>"` branch stood here first and was
-                # unobservable: measured 2026-08-06, replacing it with a marker
-                # that can never match left every test green, because a bare
-                # ">>>" falls through to this branch, contributes an empty part,
-                # and the `.strip()` below removes it. A branch that cannot be
-                # broken cannot be trusted either — the one below carries the
-                # behaviour, and `test_block_mode_terminator_may_carry_spaces`
-                # now pins the bare form through it.
-                if stripped.endswith(">>>"):
-                    block_parts.append(bline.rstrip()[:-3].rstrip())
-                    break
-                block_parts.append(bline)
-            q = "\n".join(block_parts).strip()
+            try:
+                q = _collect_pasted_block(lambda: reader.prompt_line("... "))
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return 0
             if not q:
                 continue
         # Mode 2: line continuation with trailing backslash

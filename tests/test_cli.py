@@ -41,7 +41,7 @@ from cli.intent_bridge import (
     handle_conversational_operator_input,
 )
 from cli.parsers import _parse_remember
-from cli.repl import _collect_instruction_buffer
+from cli.repl import _collect_instruction_buffer, _collect_pasted_block
 from core.approval import AutoApprover
 from core.budget_ledger import BudgetLedger, BudgetWindow
 from core.logger import TraceLogger
@@ -458,6 +458,47 @@ class TestCollectInstructionBuffer:
 
         with pytest.raises(EOFError):
             _collect_instruction_buffer(reader)
+
+
+# ============================================================
+# _collect_pasted_block — <<< ... >>>
+# ============================================================
+
+class TestCollectPastedBlock:
+    """The collector alone. How `run_repl` wires it in — the prompt it reads
+    with, the empty-block refusal, the EOF exit — is held by
+    tests/characterization/test_repl_input_modes.py, because a collector can be
+    perfect and still be connected wrongly."""
+
+    @staticmethod
+    def _reader(lines: list[str]):
+        it = iter(lines)
+        return lambda: next(it)
+
+    def test_joins_lines_with_newlines(self):
+        reader = self._reader(["line one", "line two", ">>>"])
+        assert _collect_pasted_block(reader) == "line one\nline two"
+
+    def test_a_glued_terminator_ends_the_block_and_keeps_its_text(self):
+        """A paste whose buffer ended `...text>>>` without a newline."""
+        reader = self._reader(["line one", "line two.>>>"])
+        assert _collect_pasted_block(reader) == "line one\nline two."
+
+    def test_the_bare_terminator_may_carry_spaces(self):
+        reader = self._reader(["payload", "   >>>   "])
+        assert _collect_pasted_block(reader) == "payload"
+
+    def test_a_block_with_nothing_in_it_returns_the_empty_string(self):
+        """Empty is returned, not refused — that judgement is the caller's."""
+        reader = self._reader(["   ", ">>>"])
+        assert _collect_pasted_block(reader) == ""
+
+    def test_eof_propagates_to_caller(self):
+        def reader() -> str:
+            raise EOFError
+
+        with pytest.raises(EOFError):
+            _collect_pasted_block(reader)
 
 
 # ============================================================
