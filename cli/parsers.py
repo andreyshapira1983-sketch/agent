@@ -49,14 +49,16 @@ def _parse_remember(rest: str) -> tuple[list[str], str]:
         "user-approved", "project",
     }
     if "," in head or head.lower() in tag_candidates:
-        raw_tags = [t.strip().lower() for t in head.split(",") if t.strip()]
-        # Silently drop non-ASCII tags so the user gets the obvious
-        # fallback (`user-approved`) instead of a stack trace. Tags are
-        # programming identifiers in this codebase; Russian / other
-        # unicode belongs in the content body.
-        tags = [t for t in raw_tags if t.isascii()]
-        if not tags:
-            tags = ["user-approved"]
+        # A tag is a LABEL, not an identifier: it never becomes a path, an argv
+        # entry or a URL, and it is stored in JSONL written with
+        # ensure_ascii=False. So it is kept exactly as typed, in any script.
+        # Only the reserved words — the ones that switch the write policy — are
+        # canonicalised to lower case, because the policy matches them by name.
+        # Before 2026-08-07 a non-ASCII tag was dropped in silence and replaced
+        # with `user-approved`, turning a label into a consent the operator
+        # never gave.
+        raw_tags = [t.strip() for t in head.split(",") if t.strip()]
+        tags = [t.lower() if t.lower() in tag_candidates else t for t in raw_tags]
         return tags, tail.strip()
     return ["user-approved"], rest
 

@@ -1,16 +1,22 @@
 """ASCII-only identifier policy — defence in depth across the stack.
 
-Programming identifiers in this codebase (write paths, shell argv, memory
-tags) MUST be ASCII. Human content (file body, memory note body, web
-search query, user question) may use any unicode. Read-only `file_read`
-may also target user-supplied Unicode filenames inside the workspace.
+Programming identifiers in this codebase (write paths, shell argv) MUST be
+ASCII. Human content (file body, memory note body, web search query, user
+question) may use any unicode. Read-only `file_read` may also target
+user-supplied Unicode filenames inside the workspace.
+
+Memory tags left this policy on 2026-08-07. A tag is a LABEL, not an
+identifier: it never becomes a path, an argv entry or a URL, and it is stored
+in JSONL written with `ensure_ascii=False`. Only the reserved words that switch
+the write policy are matched by name; everything else is kept as typed, in any
+script. See `TestRememberTagsAreLabelsNotIdentifiers` below and
+`TestUserLabelsVersusReservedTags` in tests/test_memory_policy.py.
 
 Tests pin this contract at every layer:
   1. `tools.base.require_ascii_identifier` — the shared utility
   2. `FileWriteTool` / `ShellExecTool` — tool-level guard
      (`FileReadTool` is read-only and allows Unicode workspace filenames)
   3. `LLMPlanner` sanitiser — planner-level guard
-  4. `main._parse_remember` — REPL-level guard for memory tags
 """
 from __future__ import annotations
 
@@ -202,28 +208,51 @@ class TestPlannerSanitizerAscii:
 # Layer 4 — REPL `:remember` tag policy
 # ============================================================
 
-class TestRememberTagAscii:
-    def test_cyrillic_tag_token_is_not_a_tag(self):
-        """A first-token like `предпочтение` doesn't match the whitelist
-        AND isn't a comma-list, so it stays as content with default tag."""
-        tags, content = _parse_remember("предпочтение я люблю краткие ответы")
-        assert tags == ["user-approved"]
-        assert "предпочтение" in content
+class TestRememberTagsAreLabelsNotIdentifiers:
+    """A memory tag is a LABEL the operator writes, not a programming
+    identifier — so the ASCII rule that governs paths, argv and URLs does not
+    reach it. Tags are never used as a filename, an argument or a URL; they are
+    stored in JSONL written with `ensure_ascii=False` and compared as strings.
 
-    def test_cyrillic_tag_in_comma_list_dropped(self):
-        """Commas trigger the tag path. A non-ASCII entry inside the list
-        is dropped silently, ASCII entries remain. If nothing survives,
-        fallback to default."""
-        tags, content = _parse_remember("предпочтение,fact текст заметки")
-        assert tags == ["fact"]
+    What stays reserved is a short set of WORDS that switch the write policy
+    (`preference`, `fact`, … and the blocking `transient`, `temporary`, …).
+    Those are rule names, matched exactly (case-insensitively, as the policy
+    lowercases before comparing). Everything else the operator types is kept
+    verbatim and simply matches no rule.
+
+    Until 2026-08-07 a non-ASCII tag was dropped in silence and replaced with
+    `user-approved`, so a Russian label became a consent tag the operator never
+    typed.
+    """
+
+    def test_a_cyrillic_tag_is_kept_verbatim(self):
+        tags, content = _parse_remember("важное,факт текст заметки")
+        assert tags == ["важное", "факт"]
         assert content == "текст заметки"
 
-    def test_all_cyrillic_comma_tags_fallback_to_default(self):
-        tags, content = _parse_remember("один,два текст")
-        assert tags == ["user-approved"]
+    def test_mixed_unicode_labels_are_kept(self):
+        tags, content = _parse_remember("проект-α,naïve,数据 тело")
+        assert tags == ["проект-α", "naïve", "数据"]
+        assert content == "тело"
+
+    def test_a_reserved_word_is_still_recognised_beside_a_label(self):
+        tags, content = _parse_remember("важное,fact текст")
+        assert tags == ["важное", "fact"]
         assert content == "текст"
 
-    def test_cyrillic_content_with_ascii_tags_preserved(self):
+    def test_a_single_cyrillic_first_token_is_still_content(self):
+        """No comma and no reserved word: nothing here says "these are tags"."""
+        tags, content = _parse_remember("предпочтение я люблю краткие ответы")
+        assert tags == ["user-approved"]
+        assert content == "предпочтение я люблю краткие ответы"
+
+    def test_the_silent_fallback_to_user_approved_is_gone(self):
+        """The regression this class exists for: labels are not consent."""
+        tags, _ = _parse_remember("один,два текст")
+        assert tags == ["один", "два"]
+        assert "user-approved" not in tags
+
+    def test_cyrillic_content_with_reserved_tags_preserved(self):
         tags, content = _parse_remember("preference,fact Я предпочитаю краткие ответы")
         assert tags == ["preference", "fact"]
         assert content == "Я предпочитаю краткие ответы"

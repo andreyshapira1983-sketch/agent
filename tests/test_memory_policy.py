@@ -712,3 +712,105 @@ class TestRetrievalPolicy:
 
     def test_format_for_prompt_empty(self):
         assert MemoryRetrievalPolicy().format_for_prompt([]) == ""
+
+
+# ============================================================
+# Tags are labels; only reserved words switch the policy
+# ============================================================
+
+class TestUserLabelsVersusReservedTags:
+    """The contract for what a tag IS, from the write policy's side.
+
+    An operator writes labels in their own language. The policy reserves a
+    short set of words -- the consent tags and the blocking tags -- and matches
+    them by name after lowercasing. A label that is not one of those words must
+    not act like one, in either direction: it neither grants consent nor blocks
+    a write.
+
+    Before 2026-08-07 the `:remember` parser dropped non-ASCII tags and
+    substituted `user-approved`, which handed the policy a consent tag the
+    operator never typed. The parser now keeps labels verbatim, so these are
+    the boundaries that matter here.
+    """
+
+    def test_an_explicit_operator_write_needs_no_tag_at_all(self):
+        """`source="user-explicit"` is sufficient on its own — the operator
+        asked, in person, and no label can be required to confirm that."""
+        d = MemoryWritePolicy().decide(
+            content="Заметка оператора, помеченная по-русски.",
+            tags=["важное", "проект-альфа"],
+            source="user-explicit",
+        )
+        assert d.decision == "save"
+
+    def test_a_reserved_consent_tag_still_admits_an_agent_write(self):
+        d = MemoryWritePolicy().decide(
+            content="User stack: Python 3.12 and Pydantic v2.",
+            tags=["fact"],
+            source="agent-auto",
+        )
+        assert d.decision == "save"
+
+    def test_a_label_is_not_consent_for_an_agent_write(self):
+        """The mirror of the test above: a label that merely looks important
+        does not let the agent persist on its own."""
+        d = MemoryWritePolicy().decide(
+            content="User stack: Python 3.12 and Pydantic v2.",
+            tags=["важное", "факт"],
+            source="agent-auto",
+        )
+        assert d.decision == "reject"
+
+    def test_a_reserved_blocking_tag_still_blocks_an_explicit_write(self):
+        """Blocking outranks even the operator's own request."""
+        d = MemoryWritePolicy().decide(
+            content="Temporary scratch note that must not be persisted.",
+            tags=["transient"],
+            source="user-explicit",
+        )
+        assert d.decision == "reject"
+
+    def test_a_label_that_merely_resembles_a_blocking_tag_does_not_block(self):
+        d = MemoryWritePolicy().decide(
+            content="Заметка, которую оператор просит сохранить.",
+            tags=["временное"],
+            source="user-explicit",
+        )
+        assert d.decision == "save"
+
+    def test_reserved_words_are_matched_whole_not_as_substrings(self):
+        """`factual` is not `fact`; `transiently` is not `transient`."""
+        admitted = MemoryWritePolicy().decide(
+            content="User stack: Python 3.12 and Pydantic v2.",
+            tags=["factual"],
+            source="agent-auto",
+        )
+        assert admitted.decision == "reject"
+
+        not_blocked = MemoryWritePolicy().decide(
+            content="A note the operator asked to keep, tagged loosely.",
+            tags=["transiently"],
+            source="user-explicit",
+        )
+        assert not_blocked.decision == "save"
+
+    def test_reserved_words_are_recognised_whatever_the_case(self):
+        """Matching is by name, and the policy lowercases before comparing.
+
+        Measured: removing that lowercase left every test green, so a note
+        tagged `TRANSIENT` would have been persisted and one tagged `Fact`
+        would have lost its consent — both in silence.
+        """
+        blocked = MemoryWritePolicy().decide(
+            content="Temporary scratch note that must not be persisted.",
+            tags=["TRANSIENT"],
+            source="user-explicit",
+        )
+        assert blocked.decision == "reject"
+
+        admitted = MemoryWritePolicy().decide(
+            content="User stack: Python 3.12 and Pydantic v2.",
+            tags=["Fact"],
+            source="agent-auto",
+        )
+        assert admitted.decision == "save"
