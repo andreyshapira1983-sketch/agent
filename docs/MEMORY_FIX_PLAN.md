@@ -228,7 +228,7 @@ test-first / human-gate / shadow-rollout discipline. The self-knowledge componen
 
 **What the plan deliberately does NOT do.** It does not touch `user-explicit
 :remember` (kept allowed even in audit mode — MEMORY_SYSTEM_AUDIT §C); it does not
-give sub-agents identity/budget (that is `docs/future/CORPORATE_MODEL.md`, out of
+give sub-agents identity/budget (that is `knowledge/doctrine/future/CORPORATE_MODEL.md`, out of
 scope).
 
 ---

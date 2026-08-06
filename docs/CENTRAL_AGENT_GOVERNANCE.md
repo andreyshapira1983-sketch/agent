@@ -135,7 +135,7 @@ The following are **not** delegated to the agent and require a human:
 
 - No unattended self-modification — every applied change is human-approved.
 - Sub-agents are bounded child loops, **not** isolated agents with their own
-  memory/identity/budget (see `docs/future/CORPORATE_MODEL.md`).
+  memory/identity/budget (see `knowledge/doctrine/future/CORPORATE_MODEL.md`).
 - Governance verdicts are enforced in the modes/operations enumerated in
   `core/governance`; operations outside that enum are not governed by this
   module and fall back to the Policy Gate default.

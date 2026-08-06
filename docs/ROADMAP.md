@@ -125,7 +125,7 @@ What exists (`core/subagent_runner`, `core/team_executor`,
 
 Not yet built: per-agent persistent memory, independent identity, independent
 budget, and self-directed multi-agent coordination. See
-`docs/future/CORPORATE_MODEL.md` for that target (explicitly future).
+`knowledge/doctrine/future/CORPORATE_MODEL.md` for that target (explicitly future).
 
 ## Track G — Operator surface & observability
 
