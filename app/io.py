@@ -1,4 +1,4 @@
-"""CLI/console I/O helpers (encoding, startup notices)."""
+"""Helpers for configuring CLI and subprocess I/O as UTF-8."""
 from __future__ import annotations
 
 import os
