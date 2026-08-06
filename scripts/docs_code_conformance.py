@@ -45,24 +45,12 @@ DOCS = REPO / "docs"
 #: Documents that deliberately keep line anchors from an older commit as
 #: provenance. They say so in their own text; a stale anchor there is expected.
 _HISTORICAL_ANCHOR_DOCS = {
-    "refactor/CLI_BASELINE.md",
-    "audit/MASTER_ISSUE_REGISTRY.md",
-    "audit/MEMORY_MAP.md",
-    "audit/MEMORY_LIFECYCLE_CONTRACT.md",
     "LIVE_PROBE_FINDINGS.md",
     "MEMORY_SYSTEM_AUDIT.md",
     "MEMORY_FIX_PLAN.md",
-    "audit/PROVIDER_STRUCTURED_OUTPUT_AUDIT.md",
-    "audit/PROVIDER_AUDIT_CHECKPOINT.md",
-    "audit/AUDIT_PROGRESS.md",
     "self-audit-lessons.md",
     "CORE_AUDIT_2026-07-18.md",
     "daemon-progress.md",
-    # Root-level (addressed as ../<name> per the scan-loop note): a forensic
-    # audit whose anchors are provenance for its own date — loop.py alone has
-    # moved by hundreds of lines since (the guard caught anchor :4077 against a
-    # 4047-line file the moment the scan reached it).
-    "../FABLE_AUDIT.md",
 }
 
 #: Top-level code directories a documented path may start with.
@@ -160,23 +148,13 @@ _RENAMED_PATHS: dict[str, str] = {
 _HISTORICAL_RENAME_DOCS = {
     "CORE_AUDIT_2026-07-18.md",
     "LIVE_PROBE_FINDINGS.md",
-    "audit/AUDIT_PROGRESS.md",
-    "audit/DOCUMENT_INVENTORY.md",
-    "audit/MASTER_ISSUE_REGISTRY.md",
-    "audit/MEMORY_MAP.md",
-    "audit/PROVIDER_STRUCTURED_OUTPUT_AUDIT.md",
     # Added 2026-08-04 with the `loop_methods2` dissolution: dated audits and
     # fix plans whose job is to say what was true when they were written. The
     # old module name is the CORRECT word there — the finding was made against
     # that file, and rewriting it would falsify the record.
-    "../FABLE_AUDIT.md",
     "MEMORY_FIX_PLAN.md",
     "MEMORY_SYSTEM_AUDIT.md",
     "Технический_анализ_автономного_агента_и_функций_мозга.md",
-    # Добавлены с роспуском `cli/commands_misc.py`: датированный снимок
-    # поверхности CLI и разбор уроков аудита — оба говорят о том, что было
-    # верно на момент написания.
-    "refactor/CLI_BASELINE.md",
     "self-audit-lessons.md",
 }
 

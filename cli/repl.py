@@ -322,8 +322,8 @@ def _stdin_is_interactive() -> bool:
 #
 # The four collaborator modules are imported as *modules* and called through
 # the attribute, for the reason spelled out in ``cli/one_shot.py``: a
-# ``monkeypatch.setattr`` is observed only where the call site resolves the name
-# (``docs/refactor/CLI_BASELINE.md`` section 2.5). One patch on the module that
+# ``monkeypatch.setattr`` is observed only where the call site resolves the
+# name. One patch on the module that
 # defines the function is therefore seen from the REPL and from one-shot alike;
 # binding the names here at import time would silently ignore it.
 

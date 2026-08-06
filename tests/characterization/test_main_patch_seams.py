@@ -1,7 +1,6 @@
 """C13 — every `monkeypatch.setattr(main, "…")` in the suite must still bite.
 
-The extraction's one silent failure mode, documented in
-`docs/refactor/CLI_BASELINE.md` section 2.5: a suite fakes a collaborator by
+The extraction's one silent failure mode: a suite fakes a collaborator by
 patching it **on `main`**, the call site later moves into `cli/…`, and the patch
 becomes a no-op. Nothing turns red — the test keeps passing while quietly
 running the real thing. That is how a `:models` dispatch and a real agent build
@@ -41,7 +40,7 @@ def _names_main_resolves() -> set[str]:
     * a non-test module does `from main import NAME` **inside a function**, so
       the binding is looked up on `main` at call time. `agent_tick.py` and
       `api/server.py` do exactly that with `build_agent`, which is why faking it
-      on `main` still works for their paths (CLI_BASELINE.md §2.5).
+      on `main` still works for their paths.
     """
     names: set[str] = set()
     tree = ast.parse((REPO_ROOT / "main.py").read_text(encoding="utf-8"))

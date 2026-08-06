@@ -114,7 +114,7 @@ def test_dotenv_is_loaded_before_the_agent_is_built(tmp_path, monkeypatch):
 
 def test_ordinary_meta_command_builds_the_agent_before_dispatch(tmp_path, monkeypatch):
     """Frozen for extraction — NOT an endorsement of building an agent for a
-    local command. See docs/refactor/CLI_BASELINE.md §3."""
+    local command."""
     order: list[str] = []
     _patch(monkeypatch, order)
 

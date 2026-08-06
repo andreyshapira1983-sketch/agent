@@ -340,9 +340,16 @@ def test_root_level_markdown_is_scanned():
     )
 
 
-def test_fable_audit_is_historical_not_exempt():
-    """FABLE's anchors pass ONLY through the historical declaration — if the
-    allowlist entry vanishes, the guard must fail on its stale anchors rather
-    than silently skipping the file (the pre-audit behaviour)."""
+def test_the_historical_declarations_name_only_documents_that_exist():
+    """An allowlist entry for a deleted document can never fire.
+
+    Both declarations carried more dead entries than live ones after the 2026-08
+    documentation cleanup — an exclusion nobody can reach makes the guard look
+    like it accounts for a case it no longer has. Existence is the whole
+    contract: what the entries mean is asserted by the tests above.
+    """
     mod = _load_guard()
-    assert "../FABLE_AUDIT.md" in mod._HISTORICAL_ANCHOR_DOCS
+    docs = REPO_ROOT / "docs"
+    for declaration in (mod._HISTORICAL_ANCHOR_DOCS, mod._HISTORICAL_RENAME_DOCS):
+        missing = [name for name in declaration if not (docs / name).resolve().exists()]
+        assert missing == [], missing

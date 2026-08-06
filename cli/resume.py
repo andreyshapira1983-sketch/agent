@@ -1,7 +1,6 @@
 """``--resume <trace_id>``: decide what a previous run leaves us to do.
 
-Four outcomes, in the order the checks run (see
-``docs/refactor/CLI_BASELINE.md`` section 1.5):
+Four outcomes, in the order the checks run:
 
 1. the trace id fails the allowlist -> exit **2**, nothing is read;
 2. no usable checkpoint -> say so, run fresh;

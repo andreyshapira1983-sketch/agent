@@ -5,8 +5,7 @@ limiter is consumed only on the two paths that reach the agent loop; explicit
 `:commands`, local operator replies and intent-routed messages are never
 counted, even though the last of those can run an expensive handler. Extraction
 must preserve this asymmetry so a refactor is not silently a policy change;
-correcting the policy is a separate, explicit decision (see
-docs/refactor/CLI_BASELINE.md §3).
+correcting the policy is a separate, explicit decision.
 
 `main()` constructs the limiter itself (`from core.rate_limiter import
 CLIRateLimiter` inside the function), so the class is patched at its source
