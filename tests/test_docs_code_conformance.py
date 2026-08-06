@@ -142,7 +142,7 @@ def test_the_checker_actually_checked_something():
                    "line anchors checked", ":command tokens"):
         assert marker in out, out
 
-    assert _count(out, "documents scanned") >= 25
+    assert _count(out, "documents scanned") >= 23
     assert _count(out, "code paths referenced") >= 400
     assert _count(out, ":command tokens") >= 200
 

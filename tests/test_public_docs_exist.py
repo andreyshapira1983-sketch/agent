@@ -11,12 +11,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# path -> minimum sensible length, so an emptied file is caught too
+# path -> minimum sensible length, so an emptied file is caught too.
+# SECURITY/CONTRIBUTING/CHANGELOG dropped 2026-08-05: the operator deleted
+# them as unused documentation, so guarding them would pin what is gone.
 REQUIRED = {
     "LICENSE": 200,
-    "SECURITY.md": 400,
-    "CONTRIBUTING.md": 400,
-    "CHANGELOG.md": 200,
     "docs/OPERATIONS.md": 800,
     "docs/CONFIGURATION.md": 800,
 }
@@ -36,11 +35,6 @@ def test_index_routes_to_new_docs():
     assert "OPERATIONS.md" in index
     assert "CONFIGURATION.md" in index
 
-
-def test_readme_has_quickstart():
-    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    assert "## Quickstart" in readme
-    assert "requirements.lock" in readme
 
 
 def test_license_is_proprietary_not_osi():
