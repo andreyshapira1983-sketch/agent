@@ -276,7 +276,7 @@ _MEMORY_GOVERNANCE_DOC_PATHS = (
 # historical record of defect classes already found and already belongs to the
 # memory group. This group carries the protocol, not the history.
 _SELF_REPAIR_DOCTRINE_DOC_PATHS = (
-    "docs/SELF_REPAIR_DOCTRINE.md",
+    "knowledge/doctrine/SELF_REPAIR_DOCTRINE.md",
 )
 _DOCTRINE_LOW_SIGNAL_DEFAULT_PATHS = (
     "README.md",

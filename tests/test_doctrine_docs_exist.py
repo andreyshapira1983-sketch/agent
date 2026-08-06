@@ -142,7 +142,7 @@ def test_self_repair_doc_is_thematic_not_in_other_manifests() -> None:
 
 
 def test_self_repair_doc_separates_implemented_from_planned() -> None:
-    text = (REPO_ROOT / "docs" / "SELF_REPAIR_DOCTRINE.md").read_text(
+    text = (REPO_ROOT / "knowledge" / "doctrine" / "SELF_REPAIR_DOCTRINE.md").read_text(
         encoding="utf-8"
     )
     assert "NORMATIVE" in text
