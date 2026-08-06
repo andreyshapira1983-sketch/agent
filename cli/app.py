@@ -55,14 +55,43 @@ from core.approval import ApprovalProvider, AutoApprover, CLIApprovalProvider
 
 
 def _preflight_file_hint(file_hint: str | None, workspace: Path) -> tuple[bool, str | None]:
-    if not file_hint:
+    """`--file` must name an existing FILE. Three ways it may not, each named.
+
+    Measured 2026-08-05, before this was tightened: `--file ""`, `--file "   "`
+    and a directory all passed. The first two never reached the check at all —
+    `if not file_hint` is true for an empty string, so the function returned
+    "fine" for a flag the operator did give. The third passed because
+    `path.exists()` is true for a directory.
+
+    `None` still means the flag was absent, which is the one legitimate way to
+    have no hint. Path is NOT constrained to the workspace: that is a separate
+    decision and is deliberately not taken here.
+    """
+    if file_hint is None:
         return True, None
-    path = Path(file_hint.strip().replace("\\", "/"))
+
+    stripped = file_hint.strip()
+    if not stripped:
+        return (
+            False,
+            ("ERROR: --file was given an empty path.\n\n"
+             "No model calls were made."),
+        )
+
+    path = Path(stripped.replace("\\", "/"))
     if not path.is_absolute():
         path = workspace / path
     path = path.resolve()
-    if path.exists():
+
+    if path.is_file():
         return True, None
+    if path.is_dir():
+        return (
+            False,
+            ("ERROR: file hint is a directory, not a file:\n"
+             f"{path}\n\n"
+             "No model calls were made."),
+        )
     return (
         False,
         ("ERROR: file hint does not exist:\n"
