@@ -196,7 +196,12 @@ class _StdinLineReader:
         try:
             self._out.write(prompt)
             self._out.flush()
-        except Exception:
+        except (OSError, ValueError):
+            # Prompt output is best-effort; a broken stdout must not prevent
+            # reading input. Narrow on purpose: a closed stream and an
+            # unencodable prompt raise ValueError (UnicodeEncodeError is one),
+            # a dead pipe raises OSError, and anything else is a bug here
+            # rather than a broken console.
             pass
 
     def prompt_line(self, prompt: str) -> str:

@@ -175,3 +175,49 @@ def test_the_reader_keeps_signalling_eof_after_a_failure():
     for _ in range(3):
         with pytest.raises(EOFError):
             reader.read_line(timeout=5)
+
+
+def test_prompt_failures_are_swallowed_but_bugs_are_not():
+    """`_write_prompt` catches only what a broken console raises.
+
+    A closed stream and an unencodable prompt raise ValueError
+    (UnicodeEncodeError is one); a dead pipe raises OSError. Anything else —
+    an AttributeError from a typo, for instance — is a defect here and must
+    reach the caller instead of hiding behind a lost prompt.
+    """
+    class _DeadPipe:
+        def write(self, s):
+            raise OSError("pipe closed")
+
+        def flush(self):
+            raise OSError("pipe closed")
+
+    class _ClosedStream:
+        def write(self, s):
+            raise ValueError("I/O operation on closed file")
+
+        def flush(self):
+            pass
+
+    for out in (_DeadPipe(), _ClosedStream()):
+        # Finite: one line then EOF. An endless lambda leaves the pump
+        # thread filling the queue forever, which turns a failing run
+        # into a hanging one.
+        src = iter(["hello" + chr(10), ""])
+        reader = _StdinLineReader(interactive=False, readline=lambda _s=src: next(_s), out=out)
+        assert reader.prompt_line("> ") == "hello"
+
+    class _Buggy:
+        def write(self, s):
+            raise AttributeError("a typo in this module, not a broken console")
+
+        def flush(self):
+            pass
+
+    # Finite: one line then EOF. An endless lambda leaves the pump
+    # thread filling the queue forever, which turns a failing run
+    # into a hanging one.
+    src = iter(["hello" + chr(10), ""])
+    reader = _StdinLineReader(interactive=False, readline=lambda _s=src: next(_s), out=_Buggy())
+    with pytest.raises(AttributeError):
+        reader.prompt_line("> ")
