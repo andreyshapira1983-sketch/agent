@@ -272,9 +272,24 @@ def _ask_the_agent(
 
 
 def _stdin_is_interactive() -> bool:
+    """True when stdin is a terminal — the condition for paste coalescing.
+
+    Narrow on purpose, the same rule `_write_prompt` above already follows: a
+    closed stream raises ValueError, a dead descriptor raises OSError, and a
+    process started without stdin at all (``pythonw.exe``, a detached service)
+    has ``sys.stdin is None``. Those three are one answer — no terminal here.
+
+    Anything else is a defect in this module rather than a missing console, and
+    it must reach the caller. The broad `except Exception` this replaces
+    answered "not interactive" to a typo as readily as to a closed pipe, and
+    the REPL would have dropped to line-by-line reading with nothing said.
+    """
+    stream = sys.stdin
+    if stream is None:
+        return False
     try:
-        return bool(sys.stdin.isatty())
-    except Exception:
+        return bool(stream.isatty())
+    except (OSError, ValueError):
         return False
 
 

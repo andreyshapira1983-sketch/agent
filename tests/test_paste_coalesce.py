@@ -263,3 +263,42 @@ def test_prompt_failures_are_swallowed_but_bugs_are_not():
     reader = _StdinLineReader(interactive=False, readline=lambda _s=src: next(_s), out=_Buggy())
     with pytest.raises(AttributeError):
         call_without_blocking(reader.prompt_line, "> ")
+
+
+# ---------- the same rule, one level down: is stdin a console? ----------
+
+def test_a_missing_or_broken_stdin_is_not_interactive(monkeypatch) -> None:
+    """Every state a real stdin can be in must answer "not a console".
+
+    `pythonw.exe` and a detached service give `sys.stdin is None`; a closed
+    stream raises ValueError from `isatty()`; a dead descriptor raises OSError.
+    All three are the same answer to the caller: there is no terminal here.
+    """
+    class _ClosedLike:
+        def isatty(self):
+            raise ValueError("I/O operation on closed file")
+
+    class _DeadDescriptor:
+        def isatty(self):
+            raise OSError("bad file descriptor")
+
+    for stream in (None, _ClosedLike(), _DeadDescriptor()):
+        monkeypatch.setattr(sys, "stdin", stream)
+        assert repl_module._stdin_is_interactive() is False
+
+
+def test_a_bug_in_this_module_is_not_reported_as_a_missing_console(monkeypatch) -> None:
+    """The narrowing that `_write_prompt` already had (commit 64a31af).
+
+    A broad `except Exception` here answered "not interactive" to everything,
+    including a typo in this module: the REPL would quietly switch to
+    line-by-line mode and the defect would never be seen. Anything that is not
+    a broken or absent stdin belongs to the caller.
+    """
+    class _Buggy:
+        def isatty(self):
+            raise AttributeError("a typo in this module, not a broken console")
+
+    monkeypatch.setattr(sys, "stdin", _Buggy())
+    with pytest.raises(AttributeError):
+        repl_module._stdin_is_interactive()
