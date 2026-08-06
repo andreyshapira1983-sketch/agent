@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 import app.budget_guard as budget_guard_module
+import app.operator_task as operator_task_module
 import cli.app as app_module
 import cli.command_dispatch as dispatch_module
 import cli.intent_bridge as bridge_module
@@ -170,6 +171,28 @@ def test_continuation_prompt_also_goes_to_stdout(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr()
     assert "> " in out.out
     assert "... " in out.out
+
+
+def test_operator_task_prompt_also_goes_to_stdout(tmp_path, monkeypatch, capsys):
+    """The third multi-line mode writes the same `... ` prompt as the other two."""
+    _patch(monkeypatch)
+    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", lambda *a, **k: "A")
+    # The real handler reaches into a live agent; this test is about the prompt.
+    monkeypatch.setattr(
+        operator_task_module, "_handle_operator_task", lambda *a, **k: True
+    )
+    monkeypatch.setattr(
+        app_module, "_StdinLineReader",
+        lambda **k: _scripted_reader([":operator-task", "body", ":end"]),
+    )
+    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
+
+    assert main_module.main() == 0
+
+    out = capsys.readouterr()
+    assert "> " in out.out
+    assert "... " in out.out
+    assert "(operator task block started; finish with :end)" in out.err
 
 
 def test_approval_prompt_is_written_to_stderr_and_reads_the_repl_reader(
