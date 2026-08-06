@@ -333,6 +333,61 @@ parent must not choose which check runs.** A parent free to pick the check picks
 a convenient one. Either the check follows from the claim's type by the
 arbiter's policy, or it was fixed in the task contract before the child started.
 
+### Calibration becomes four numbers instead of a tone
+
+The lifecycle document already lists Calibration — "can it say *I don't know*,
+*unconfirmed*, *need more data*" — as an axis of quality. With free text that
+axis cannot be measured: the same sentence covers an honest boundary of
+knowledge, a cautious writing style, an evasion, and a cover for work not done.
+
+The report contract makes the four distinguishable, and the symmetry matters as
+much as the strictness:
+
+| behaviour | how it is counted | verdict |
+|---|---|---|
+| confident claim the arbiter cannot reproduce | `unsupported_confidence_rate` | penalty |
+| `missing_evidence` naming the gap AND how to close it | `honest_uncertainty_rate` | neutral |
+| `missing_evidence` the arbiter then closed with a cheap registered check | `avoidable_uncertainty_rate` | mirrored penalty |
+| a proposed next verification step that actually produced the fact | `useful_next_step_rate` | credit |
+
+**A sub-agent is never penalised for `missing_evidence` when it names precisely
+what is absent and how it could be checked. It is penalised for asserting
+without evidence.** Without that rule the field exists and no one uses it: a
+reputation system that scores "unproven" as failure teaches the model to write
+something convincing instead.
+
+The third row is what stops the opposite abuse — answering `missing_evidence` to
+everything, which is formally impeccable and useless. But the mirrored penalty
+applies **only** if the sub-agent could actually have run the check when it
+reported. One question decides it: *was this check available to this sub-agent at
+that moment?* It is not, if any of these hold — the check is outside its
+registry, outside its permissions, above its cost ceiling, needs context it was
+never given, or the infrastructure was down. Otherwise a child is punished for
+what it was not allowed to do.
+
+### A refusal to prove is itself a claim
+
+`missing_evidence` carries a reason, and the reasons are not interchangeable:
+
+| reason | what the arbiter checks to confirm it |
+|---|---|
+| `missing_source` | tries to fetch the source itself |
+| `check_unavailable` | the check is genuinely absent from the registry |
+| `unknown_check` | nothing — not knowing cannot be proven, so this never excuses |
+| `insufficient_permissions` | the rights granted to this sub-agent in its contract |
+| `budget_exhausted` | the spend journal — including WHAT the budget went on |
+| `infrastructure_failure` | its own logs of the failed launch |
+| `insufficient_context` | what the task contract actually handed over |
+
+A reason the arbiter cannot confirm grants no protection: it takes the same
+status as any unverifiable claim. The protocol applies to itself — declining to
+prove something is still an assertion about the world.
+
+This also makes one distinction measurable that would otherwise be an argument.
+`budget_exhausted` after spending on the task is not a defect; the same status
+after spending the budget on detours is a planning defect — and both are visible
+in the same ledger, without anyone's opinion.
+
 ### Documents are claims too
 
 The same machinery answers a question this repository keeps hitting: how do you
