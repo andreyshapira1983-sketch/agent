@@ -301,7 +301,7 @@ Decision rules:
 
     SUB-AGENT SUB-TOPIC — if (and only if) the question is specifically about
     sub-agents, delegation, the team executor, role trust, quarantine, pausing,
-    retiring, or the sub-agent lifecycle, ALSO read docs/SUBAGENT_LIFECYCLE.md
+    retiring, or the sub-agent lifecycle, ALSO read knowledge/doctrine/SUBAGENT_LIFECYCLE.md
     (the normative sub-agent lifecycle contract). Do NOT read it for unrelated
     corporate-model / roadmap / governance questions.
 

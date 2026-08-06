@@ -389,7 +389,7 @@ class LLMPlanner:
             subagent_docs_block = (
                 "[SUBAGENT_DOCS=required — this question is about sub-agents / "
                 "delegation / team executor / role trust / quarantine / pause / "
-                "retire / lifecycle. Read docs/SUBAGENT_LIFECYCLE.md first (the "
+                "retire / lifecycle. Read knowledge/doctrine/SUBAGENT_LIFECYCLE.md first (the "
                 "normative sub-agent lifecycle contract) before core/*.py "
                 "mechanics.]\n"
             )

@@ -403,7 +403,7 @@ def test_corporate_doctrine_question_forces_docs_first_over_core_defaults(
         "docs/AGENT_ANATOMY.md",
         "docs/ROADMAP.md",
         "docs/COMMANDS_MAP.md",
-        "docs/SUBAGENT_LIFECYCLE.md",
+        "knowledge/doctrine/SUBAGENT_LIFECYCLE.md",
     ]
     assert "README.md" not in paths
     assert "core/planner.py" not in paths
@@ -448,7 +448,7 @@ def test_corporate_doctrine_implementation_question_keeps_code_after_docs(
         "docs/COMMANDS_MAP.md",
     ]
     assert paths[5:] == ["core/autonomous_runtime.py"]
-    assert "docs/SUBAGENT_LIFECYCLE.md" not in paths
+    assert "knowledge/doctrine/SUBAGENT_LIFECYCLE.md" not in paths
 
 
 def test_confidence_evidence_question_forces_verifier_confidence_sources(
@@ -1227,10 +1227,10 @@ def test_subagent_question_injects_lifecycle_doc(workspace: Path) -> None:
         for src in out.sources
         if src["tool"] == "file_read"
     ]
-    assert "docs/SUBAGENT_LIFECYCLE.md" in paths
+    assert "knowledge/doctrine/SUBAGENT_LIFECYCLE.md" in paths
     # a pure sub-agent question (not a broad doctrine question) → the thematic
     # doc leads the source list.
-    assert paths[0] == "docs/SUBAGENT_LIFECYCLE.md"
+    assert paths[0] == "knowledge/doctrine/SUBAGENT_LIFECYCLE.md"
 
 
 def test_non_subagent_doctrine_question_omits_lifecycle_doc(workspace: Path) -> None:
@@ -1256,7 +1256,7 @@ def test_non_subagent_doctrine_question_omits_lifecycle_doc(workspace: Path) -> 
         for src in out.sources
         if src["tool"] == "file_read"
     ]
-    assert "docs/SUBAGENT_LIFECYCLE.md" not in paths
+    assert "knowledge/doctrine/SUBAGENT_LIFECYCLE.md" not in paths
 
 
 # ---------- thematic memory governance doc routing (conditional) ----------
@@ -1396,7 +1396,7 @@ def test_question_touching_both_themes_keeps_stable_order(workspace: Path) -> No
         for src in out.sources
         if src["tool"] == "file_read"
     ]
-    assert paths[0] == "docs/SUBAGENT_LIFECYCLE.md"
+    assert paths[0] == "knowledge/doctrine/SUBAGENT_LIFECYCLE.md"
     assert paths[1] == "docs/MEMORY_SYSTEM_AUDIT.md"
     # no duplicates from the two injectors touching the same list
     assert len(paths) == len(set(paths)), paths
@@ -1594,7 +1594,7 @@ def test_question_touching_three_themes_keeps_stable_order(workspace: Path) -> N
         for src in out.sources
         if src["tool"] == "file_read"
     ]
-    assert paths.index("docs/SUBAGENT_LIFECYCLE.md") < paths.index(
+    assert paths.index("knowledge/doctrine/SUBAGENT_LIFECYCLE.md") < paths.index(
         "docs/MEMORY_SYSTEM_AUDIT.md"
     )
     assert paths.index("docs/MEMORY_SYSTEM_AUDIT.md") < paths.index(
@@ -1606,7 +1606,7 @@ def test_question_touching_three_themes_keeps_stable_order(workspace: Path) -> N
 @pytest.mark.parametrize(
     ("injector", "doc_path"),
     (
-        (_ensure_subagent_governance_docs_first, "docs/SUBAGENT_LIFECYCLE.md"),
+        (_ensure_subagent_governance_docs_first, "knowledge/doctrine/SUBAGENT_LIFECYCLE.md"),
         (_ensure_memory_governance_docs_first, "docs/MEMORY_SYSTEM_AUDIT.md"),
         (_ensure_self_repair_doctrine_docs_first, "knowledge/doctrine/SELF_REPAIR_DOCTRINE.md"),
     ),
