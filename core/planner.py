@@ -408,7 +408,7 @@ class LLMPlanner:
             self_repair_docs_block = (
                 "[SELF_REPAIR_DOCS=required — this question is about "
                 "self-diagnosis / self-repair / root cause / regression / "
-                "backfill / data migration. Read docs/SELF_REPAIR_DOCTRINE.md "
+                "backfill / data migration. Read knowledge/doctrine/SELF_REPAIR_DOCTRINE.md "
                 "first (the normative repair protocol: prove the defect, "
                 "separate symptom from cause, never reconstruct data by guess, "
                 "fail closed, migrate safely, bank the lesson only after the "

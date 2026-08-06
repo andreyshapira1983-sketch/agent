@@ -1441,7 +1441,7 @@ def test_self_repair_question_injects_doctrine_doc(workspace: Path) -> None:
         for src in out.sources
         if src["tool"] == "file_read"
     ]
-    assert paths[0] == "docs/SELF_REPAIR_DOCTRINE.md"
+    assert paths[0] == "knowledge/doctrine/SELF_REPAIR_DOCTRINE.md"
     assert any(
         "self-repair doctrine docs injected" in w for w in out.warnings
     ), out.warnings
@@ -1474,7 +1474,7 @@ def test_ordinary_bug_fix_task_omits_self_repair_doctrine_doc(workspace: Path) -
         for src in out.sources
         if src["tool"] == "file_read"
     ]
-    assert "docs/SELF_REPAIR_DOCTRINE.md" not in paths
+    assert "knowledge/doctrine/SELF_REPAIR_DOCTRINE.md" not in paths
 
 
 def test_non_self_repair_doctrine_question_omits_self_repair_doc(
@@ -1502,7 +1502,7 @@ def test_non_self_repair_doctrine_question_omits_self_repair_doc(
         for src in out.sources
         if src["tool"] == "file_read"
     ]
-    assert "docs/SELF_REPAIR_DOCTRINE.md" not in paths
+    assert "knowledge/doctrine/SELF_REPAIR_DOCTRINE.md" not in paths
 
 
 def test_self_repair_doctrine_detector_strong_terms() -> None:
@@ -1598,7 +1598,7 @@ def test_question_touching_three_themes_keeps_stable_order(workspace: Path) -> N
         "docs/MEMORY_SYSTEM_AUDIT.md"
     )
     assert paths.index("docs/MEMORY_SYSTEM_AUDIT.md") < paths.index(
-        "docs/SELF_REPAIR_DOCTRINE.md"
+        "knowledge/doctrine/SELF_REPAIR_DOCTRINE.md"
     )
     assert len(paths) == len(set(paths)), paths
 
@@ -1608,7 +1608,7 @@ def test_question_touching_three_themes_keeps_stable_order(workspace: Path) -> N
     (
         (_ensure_subagent_governance_docs_first, "docs/SUBAGENT_LIFECYCLE.md"),
         (_ensure_memory_governance_docs_first, "docs/MEMORY_SYSTEM_AUDIT.md"),
-        (_ensure_self_repair_doctrine_docs_first, "docs/SELF_REPAIR_DOCTRINE.md"),
+        (_ensure_self_repair_doctrine_docs_first, "knowledge/doctrine/SELF_REPAIR_DOCTRINE.md"),
     ),
 )
 def test_thematic_injector_collapses_repeated_doc_request(injector, doc_path) -> None:
