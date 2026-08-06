@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 HISTORICAL_AUDIT_DOCS = (
     "docs/CORE_AUDIT_2026-07-18.md",
     "docs/OPERATIONAL_FAILURE_MODES.md",
-    "docs/MEMORY_SYSTEM_AUDIT.md",
+    "knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md",
     "docs/LIVE_PROBE_FINDINGS.md",
 )
 

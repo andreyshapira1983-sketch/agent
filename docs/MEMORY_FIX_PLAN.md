@@ -1,7 +1,7 @@
 # Memory Fix Plan — concrete, code-anchored
 
 Working implementation plan for repairing the agent's memory system. It sits
-next to `docs/MEMORY_SYSTEM_AUDIT.md` (the audit that found the defects) and
+next to `knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md` (the audit that found the defects) and
 consumes its Section D/E. **Code on `main` is the source of truth**; where this
 plan and code disagree, code wins and this plan must be corrected.
 
@@ -234,6 +234,6 @@ scope).
 ---
 
 *Provenance: anchors verified against code on `main`. Source-of-truth precedence:
-code > this plan. Companion documents: `docs/MEMORY_SYSTEM_AUDIT.md` (findings),
+code > this plan. Companion documents: `knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md` (findings),
 `knowledge/doctrine/self-audit-lessons.md` (fixed classes), `knowledge/doctrine/SUBAGENT_LIFECYCLE.md` and
 `docs/MULTI_AGENT_COORDINATION_LAYER.md` (sub-agent memory topology).*

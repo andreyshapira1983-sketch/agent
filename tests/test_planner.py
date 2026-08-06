@@ -1290,11 +1290,11 @@ def test_memory_question_injects_memory_governance_docs(workspace: Path) -> None
         for src in out.sources
         if src["tool"] == "file_read"
     ]
-    assert "docs/MEMORY_SYSTEM_AUDIT.md" in paths
+    assert "knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md" in paths
     assert "knowledge/doctrine/self-audit-lessons.md" in paths
     # a pure memory question (not a broad doctrine question) → the thematic
     # docs lead the source list.
-    assert paths[0] == "docs/MEMORY_SYSTEM_AUDIT.md"
+    assert paths[0] == "knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md"
 
 
 def test_non_memory_doctrine_question_omits_memory_docs(workspace: Path) -> None:
@@ -1320,7 +1320,7 @@ def test_non_memory_doctrine_question_omits_memory_docs(workspace: Path) -> None
         for src in out.sources
         if src["tool"] == "file_read"
     ]
-    assert "docs/MEMORY_SYSTEM_AUDIT.md" not in paths
+    assert "knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md" not in paths
 
 
 from core.doc_routing import _is_memory_governance_question
@@ -1397,7 +1397,7 @@ def test_question_touching_both_themes_keeps_stable_order(workspace: Path) -> No
         if src["tool"] == "file_read"
     ]
     assert paths[0] == "knowledge/doctrine/SUBAGENT_LIFECYCLE.md"
-    assert paths[1] == "docs/MEMORY_SYSTEM_AUDIT.md"
+    assert paths[1] == "knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md"
     # no duplicates from the two injectors touching the same list
     assert len(paths) == len(set(paths)), paths
 
@@ -1595,9 +1595,9 @@ def test_question_touching_three_themes_keeps_stable_order(workspace: Path) -> N
         if src["tool"] == "file_read"
     ]
     assert paths.index("knowledge/doctrine/SUBAGENT_LIFECYCLE.md") < paths.index(
-        "docs/MEMORY_SYSTEM_AUDIT.md"
+        "knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md"
     )
-    assert paths.index("docs/MEMORY_SYSTEM_AUDIT.md") < paths.index(
+    assert paths.index("knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md") < paths.index(
         "knowledge/doctrine/SELF_REPAIR_DOCTRINE.md"
     )
     assert len(paths) == len(set(paths)), paths
@@ -1607,7 +1607,7 @@ def test_question_touching_three_themes_keeps_stable_order(workspace: Path) -> N
     ("injector", "doc_path"),
     (
         (_ensure_subagent_governance_docs_first, "knowledge/doctrine/SUBAGENT_LIFECYCLE.md"),
-        (_ensure_memory_governance_docs_first, "docs/MEMORY_SYSTEM_AUDIT.md"),
+        (_ensure_memory_governance_docs_first, "knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md"),
         (_ensure_self_repair_doctrine_docs_first, "knowledge/doctrine/SELF_REPAIR_DOCTRINE.md"),
     ),
 )

@@ -46,7 +46,7 @@ DOCS = REPO / "docs"
 #: provenance. They say so in their own text; a stale anchor there is expected.
 _HISTORICAL_ANCHOR_DOCS = {
     "LIVE_PROBE_FINDINGS.md",
-    "MEMORY_SYSTEM_AUDIT.md",
+    "../knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md",
     "MEMORY_FIX_PLAN.md",
     "../knowledge/doctrine/self-audit-lessons.md",
     "CORE_AUDIT_2026-07-18.md",
@@ -152,7 +152,7 @@ _HISTORICAL_RENAME_DOCS = {
     # old module name is the CORRECT word there — the finding was made against
     # that file, and rewriting it would falsify the record.
     "MEMORY_FIX_PLAN.md",
-    "MEMORY_SYSTEM_AUDIT.md",
+    "../knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md",
     "Технический_анализ_автономного_агента_и_функций_мозга.md",
     "../knowledge/doctrine/self-audit-lessons.md",
 }

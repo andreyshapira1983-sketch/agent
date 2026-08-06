@@ -49,7 +49,7 @@ These four found the defects and remain valuable as evidence and reasoning. Thei
 **status ledgers are superseded** by the registry — see §4.
 
 - [CORE_AUDIT_2026-07-18.md](CORE_AUDIT_2026-07-18.md) — execution-verified core defects (CORE-01…12), plus honest negatives.
-- [MEMORY_SYSTEM_AUDIT.md](MEMORY_SYSTEM_AUDIT.md) — memory-governance audit (MGA-01…09) + refined fix proposals (§D).
+- [MEMORY_SYSTEM_AUDIT.md](../knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md) — memory-governance audit (MGA-01…09) + refined fix proposals (§D).
 - [LIVE_PROBE_FINDINGS.md](LIVE_PROBE_FINDINGS.md) — the only log grounded in *live runs* (LPF-001…018).
 - [MEMORY_FIX_PLAN.md](MEMORY_FIX_PLAN.md) — the A1–A8 plan; partly executed, partly superseded by the M1 contract.
 
