@@ -256,3 +256,37 @@ def test_fast_path_only_applies_to_the_head_token(tmp_path, monkeypatch):
 
     assert main_module.main() == 0
     assert order == ["load_dotenv", "build_agent"]
+
+
+def test_the_encoding_fix_runs_before_argparse_can_print(tmp_path, monkeypatch):
+    """`--help` is printed and exited from INSIDE `parse_args`.
+
+    Measured 2026-08-05: with `_force_utf8_io()` placed after the parse it was
+    invoked zero times on that path, and the em dash in the parser's own
+    description reached a cp1251 console as a replacement char — a broken
+    glyph in the first line the operator ever sees. Nothing in the call
+    depends on the parsed arguments, so the only thing keeping it late was
+    that no test asked.
+
+    Guarding the ORDER, not the call: a test that merely asserts the function
+    runs somewhere would stay green with the defect back in place.
+    """
+    calls: list[str] = []
+    monkeypatch.setattr(app_module, "_force_utf8_io", lambda: calls.append("utf8"))
+
+    real_parser = app_module.build_parser
+
+    def _recording_parser():
+        calls.append("parse")
+        return real_parser()
+
+    monkeypatch.setattr(app_module, "build_parser", _recording_parser)
+    monkeypatch.setattr(sys, "argv", ["main.py", "--help"])
+
+    with pytest.raises(SystemExit):
+        app_module.run_cli()
+
+    assert calls == ["utf8", "parse"], (
+        "the encoding fix must run before the parser is even built; "
+        f"got {calls}"
+    )
