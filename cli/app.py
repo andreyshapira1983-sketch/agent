@@ -90,7 +90,13 @@ def run_cli() -> int:
         print(_schedule_disable_message(rest.strip(), workspace), file=sys.stderr)
         return 0
 
-    load_dotenv()
+    # From the WORKSPACE, not from wherever the process was launched.
+    # Measured 2026-08-05: with a bare `load_dotenv()`, running from folder A
+    # with `--workspace B` loaded A's `.env` — code and data from one project,
+    # keys and settings from another. `agent_tick.py` already passes the path
+    # (twice); the CLI had not caught up. Default `--workspace` is ".", so an
+    # ordinary launch resolves to the same file it always did.
+    load_dotenv(workspace / ".env")
 
     # §3.5 Resume: if --resume is given, look up the checkpoint file and
     # short-circuit before building the full agent stack when possible.
