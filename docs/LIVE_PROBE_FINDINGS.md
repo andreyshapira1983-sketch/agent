@@ -12,7 +12,7 @@ This is an *observation log from live runs*, distinct from
 > **⚠️ STATUS LEDGER SUPERSEDED (2026-07-25).** The `confirmed-defect` / FIXED marks on
 > the LPF-* findings below are historical (as of each finding's own date). Read **no**
 > current open/closed status from this file — statuses live only in
-> [`audit/MASTER_ISSUE_REGISTRY.md`](audit/MASTER_ISSUE_REGISTRY.md), which holds each
+> `audit/MASTER_ISSUE_REGISTRY.md`, which holds each
 > LPF-* finding's canonical `MIR-` id and resolution. This log's enduring value is its
 > live-run observations and root-location analysis, which stand unchanged.
 

@@ -127,13 +127,41 @@ class AgentLoopStepExecution:
             return False
         try:
             tool = self.registry.get(tool_name)
-        except Exception:  # noqa: BLE001 — инструмента нет в реестре: считаем НЕ read_only (безопасная сторона)
+        except Exception as exc:  # noqa: BLE001 — считаем НЕ read_only (безопасная сторона)
+            self._risk_probe_failed(tool_name, "unknown_tool", exc)
             return False
         arguments = spec.get("arguments")
         try:
             return tool.risk_for(arguments if isinstance(arguments, dict) else {}) == "read_only"
-        except Exception:  # noqa: BLE001 — инструмент не умеет оценить риск: считаем НЕ read_only (безопасная сторона)
+        except Exception as exc:  # noqa: BLE001 — считаем НЕ read_only (безопасная сторона)
+            self._risk_probe_failed(tool_name, "risk_for_raised", exc)
             return False
+
+    def _risk_probe_failed(self, tool_name: str, reason: str, exc: BaseException) -> None:
+        """A7: fail safe AND say so — they are different jobs.
+
+        Measured before this existed: three different situations produced the
+        same `False` and the same empty journal — the step genuinely writes, the
+        tool is missing from the registry, or its `risk_for` raised. Only the
+        first is normal, and it stays silent here on purpose: an event per
+        effect step would be a stream, not a signal.
+
+        The other two are faults that cost concurrency for the whole batch and
+        were invisible for as long as they lasted. A tool whose `risk_for`
+        always raises never gets the parallel path and nothing says why.
+        """
+        try:
+            self.log.log(
+                "step_risk_probe_failed",
+                {
+                    "tool": tool_name,
+                    "reason": reason,
+                    "exception_type": type(exc).__name__,
+                    "effect": "step treated as writing; batch runs sequentially",
+                },
+            )
+        except Exception:  # noqa: BLE001, S110 — последний рубеж вокруг записи
+            pass  # nosec B110 — безопасный вывод важнее записи о нём
 
     def _execute_steps_parallel(
         self, steps: list[PlanStep]

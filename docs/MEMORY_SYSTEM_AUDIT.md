@@ -13,7 +13,7 @@ passing regression tests).
 > the MGA-* findings below were current when written (audited `3f4f8fa`, older than
 > `main`); several have since been fixed with regression tests. Read **no** open/closed
 > status from this file — statuses live only in
-> [`audit/MASTER_ISSUE_REGISTRY.md`](audit/MASTER_ISSUE_REGISTRY.md), which holds each
+> `audit/MASTER_ISSUE_REGISTRY.md`, which holds each
 > MGA-* finding's canonical `MIR-` id, its resolution and the guarding test. The audit's
 > method, evidence and reasoning below remain valuable and are unchanged.
 

@@ -80,6 +80,46 @@ class PersistentMemoryStore:
                 )
         return updated
 
+    def update_many(self, records: Iterable[MemoryRecord]) -> int:
+        """Replace several records in ONE rewrite. Returns how many landed.
+
+        `update` rewrites the whole file per record, and calling it in a loop is
+        therefore quadratic: measured on five records it performed 5 rewrites
+        and wrote 25 rows, where this performs 1 and writes 5. Two callers were
+        doing exactly that (census A5) and a third had reached past the API into
+        `_rewrite` to avoid it — three improvisations because the store offered
+        no bulk update. `save_many` is not one: it APPENDS.
+
+        Same lock discipline as `update`, and for the same reason: read and
+        rewrite happen under one lock, because between them the file is a stale
+        copy and anything another writer appends in that window would be
+        overwritten with no error and no log line.
+
+        Unknown ids are skipped rather than raising — a caller updating what it
+        just retrieved should not fail because hygiene archived a record in
+        between. The return value is how a caller learns that happened.
+        """
+        by_id = {r.id: r for r in records}
+        if not by_id:
+            return 0
+        with state_file_lock(self.path):
+            current = self._active_unlocked()
+            merged: list[MemoryRecord] = []
+            landed = 0
+            for existing in current:
+                replacement = by_id.get(existing.id)
+                if replacement is None:
+                    merged.append(existing)
+                else:
+                    merged.append(replacement)
+                    landed += 1
+            if landed:
+                rewrite_state_jsonl_unlocked(
+                    self.path,
+                    [r.model_dump(mode="json") for r in merged],
+                )
+        return landed
+
     def archive_record(self, record_id: str) -> bool:
         """Move a record from active store to archive. Returns True if moved."""
         # The active file stays locked across read, archive-append and rewrite:

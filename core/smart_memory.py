@@ -1327,6 +1327,7 @@ def assemble_completion_verdict(
     replan_exhausted: bool,
     declared: str | None,
     obligation_unmet: bool = False,
+    enforcement_failed: bool = False,
 ) -> CompletionVerdict:
     """The single rule table. :func:`assemble_completion_state` delegates here.
 
@@ -1345,6 +1346,17 @@ def assemble_completion_verdict(
     if obligation_unmet and declared == "achieved":
         return _displaced(
             "partially_achieved", declared, "obligation_silently_missing"
+        )
+    # Census A2, and authoritative on measured grounds rather than caution. The
+    # answer-safety check raised, so the run delivered a safe refusal instead of
+    # the draft it had written: work happened, the honest outcome reached the
+    # user, and the process was defective. `partially_achieved` is exactly that
+    # — and it also withholds procedure credit and usage eligibility, because a
+    # run whose structural layer failed is not experience anything should be
+    # steered by.
+    if enforcement_failed and declared == "achieved":
+        return _displaced(
+            "partially_achieved", declared, "answer_enforcement_failed"
         )
     if declared in _COMPLETION_DECLARATIONS:
         return CompletionVerdict(declared)  # type: ignore[arg-type]
@@ -1608,6 +1620,7 @@ def episode_from_agent_cycle(
         replan_exhausted=bool(replan_exhausted),
         declared=declared_completion,
         obligation_unmet="obligation_silently_missing" in (signals or ()),
+        enforcement_failed="answer_enforcement_failed" in (signals or ()),
     )
     return EpisodeRecord(
         goal=_clean_text(goal, max_chars=300),

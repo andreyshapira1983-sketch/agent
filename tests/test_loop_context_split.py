@@ -91,7 +91,24 @@ def _dump(stmts: list[ast.stmt]) -> str:
     return "".join(ast.dump(s, include_attributes=False) for s in stmts)
 
 
-@pytest.mark.parametrize("piece", sorted(PIECES))
+#: Pieces whose body-equivalence check is RETIRED, with the reason.
+#:
+#: 8 — `_rank_and_catalog_evidence`. Migration equivalence was verified when the
+#: block moved out of `_run_inner`, and that proof stands. The method has since
+#: been changed on purpose (census finding Л8): the knowledge pipeline now gets
+#: `require_verified=self._unattended_run()`, so the verified-memory gate
+#: follows who drives the run instead of being decided per call site. Comparing
+#: the body to a git snapshot would freeze a finished migration and forbid the
+#: fix. What guards it now is behaviour and structure, not history:
+#: `tests/test_verified_memory_gate_follows_gateway_path.py` and
+#: `tests/test_loop_split_wiring.py::test_the_mixin_declares_everything_it_borrows`.
+#: The other checks below (imports, prefix, declared outputs) still cover 8.
+_RETIRED_BODY_EQUIVALENCE = {8}
+
+
+@pytest.mark.parametrize("piece", sorted(PIECES - _RETIRED_BODY_EQUIVALENCE
+                                          if isinstance(PIECES, set)
+                                          else set(PIECES) - _RETIRED_BODY_EQUIVALENCE))
 def test_logic_moved_symbol_for_symbol(piece: int):
     """Дословность ЛОГИКИ: срез истории совпадает с телом нового метода."""
     module, method, first, last = PIECES[piece]

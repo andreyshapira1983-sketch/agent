@@ -372,7 +372,7 @@ Verified against code on the audited `main` (source of truth):
 
 > **⚠️ SUPERSEDED (2026-07-20).** The single `confirmed-gap` recorded below —
 > OFM-010, retry without backoff — **is fixed**: it is MIR-017 in
-> [`audit/MASTER_ISSUE_REGISTRY.md`](audit/MASTER_ISSUE_REGISTRY.md), closed
+> `audit/MASTER_ISSUE_REGISTRY.md`, closed
 > with a runtime-reproduced regression test. Read no open/closed status from
 > this section; the registry owns them.
 >

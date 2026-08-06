@@ -36,6 +36,33 @@ from core.response_draft import ResponseDraft
 from core.unsupported_claims import apply_answer_enforcement
 from core.verification_summary import build_verification_summary
 
+#: What the user gets when the answer-safety check itself broke. Deterministic
+#: and free of factual claims on purpose: the draft it replaces is the one
+#: enforcement was about to remove, so repeating any of it would defeat the
+#: refusal. No traceback reaches the reader — the stage and the exception type
+#: go to the journal, where they belong.
+ENFORCEMENT_FAILURE_ANSWER = (
+    "Conclusion: I could not verify the claims in the draft, and the "
+    "answer-safety check failed [general-knowledge].\n"
+    "Facts: the check that removes unsupported claims raised an error, so the "
+    "original response is withheld rather than presented as reliable "
+    "[general-knowledge].\n"
+    "Sources: none\n"
+    "Confidence: low\n"
+    "Unverified: everything the draft asserted\n"
+    "Safety: the unverified draft was not delivered"
+)
+
+
+class EnforcementFallbackUnavailable(RuntimeError):
+    """The safe refusal could not be built either — a controlled failure.
+
+    Raised rather than returning the original draft. The measured damage is
+    that the original carries a confident unsupported claim; handing it over
+    because the recovery path also broke would deliver exactly what the whole
+    mechanism exists to withhold.
+    """
+
 
 class AgentLoopResponseDeciders:
     """Сборка черновика ответа: кто и что вправе о нём сказать.
@@ -60,6 +87,219 @@ class AgentLoopResponseDeciders:
         # ложно помечается E1111.
         _durable_learning_suppressed: Any
         _sensor_failed: Any
+
+    def _safe_answer_after_enforcement_failure(
+        self, *, stage: str, exc: BaseException,
+    ) -> ResponseDraft:
+        """A refusal built on a FRESH object, never through the broken one.
+
+        Order matters and is the reason this is a separate method: the failure
+        is recorded first, then the replacement is built independently. Writing
+        the safe text through `draft.set_body` would be calling the mechanism
+        that may have just raised — and on a `set_body` failure that recursion
+        ends with the dangerous original going out anyway.
+        """
+        # One guard, not two: recording the failure is best effort, and the
+        # refusal must leave even if nothing could be written about it. Both
+        # steps live under the same `except` because they share that rule and
+        # splitting them only doubles the suppression.
+        try:
+            self.log.log(
+                "answer_enforcement_failed",
+                {
+                    "stage": stage,
+                    "exception_type": type(exc).__name__,
+                    "fallback_applied": True,
+                    "original_withheld": True,
+                },
+            )
+            signals = getattr(self, "_defect_signals", None)
+            if signals is not None:
+                signals.append("answer_enforcement_failed")
+        except Exception:  # noqa: BLE001, S110 — последний рубеж вокруг записи
+            pass  # nosec B110 — безопасный отказ важнее записи о нём
+        try:
+            return ResponseDraft(body=ENFORCEMENT_FAILURE_ANSWER)
+        except Exception as build_exc:
+            raise EnforcementFallbackUnavailable(
+                f"answer-safety check failed at {stage} and the safe refusal "
+                "could not be built; the unverified draft is not returned"
+            ) from build_exc
+
+    def _credit_memory_records_used_in_the_answer(self) -> None:
+        """Strong causal credit for memory that actually held up.
+
+        Lifted out of `_build_response_draft` because it is not about
+        building a draft at all: it is memory accounting, and it landed
+        there only because the verifier verdict and the evidence chain
+        happen to both be in scope at that point (census entry for this
+        file). The length ratchet asked for the same cut independently.
+        """
+        # MIR-074 phase 1 (operator ruling): STRONG causal credit. A record
+        # cited [memory:<id>] in a chunk the verifier marked `verified` has
+        # completed the full chain — retrieved → changed the answer →
+        # independently checked. Injection alone stays a near-zero signal
+        # (access_count); this is the one that counts.
+        if (
+            self.last_verification is not None
+            and self.last_provenance is not None
+            and self.persistent_store is not None
+            and not self._durable_learning_suppressed("access_stats")
+        ):
+            try:
+                _ev_by_id = {
+                    ev.id: ev for ev in self.last_provenance.evidences
+                }
+                _credited: list[str] = []
+                _seen_rids: set[str] = set()
+                for _chunk in self.last_verification.chunks:
+                    if _chunk.verdict != "verified":
+                        continue
+                    for _mid in _chunk.matched_evidence_ids:
+                        _ev = _ev_by_id.get(_mid)
+                        if (
+                            _ev is not None
+                            and _ev.obtained_via == "memory"
+                            and _ev.source_id.startswith("memory:mem")
+                        ):
+                            _rid = _ev.source_id.removeprefix("memory:")
+                            if _rid not in _seen_rids:
+                                _seen_rids.add(_rid)
+                                _credited.append(_rid)
+                if _credited:
+                    # One load, all increments in memory, ONE rewrite — an
+                    # answer crediting N records must not trigger N full-file
+                    # rewrites (review round #294).
+                    _records = self.persistent_store.load()
+                    _updated: list[str] = []
+                    _new_records = []
+                    for _rec in _records:
+                        if _rec.id in _seen_rids:
+                            _new_records.append(
+                                _rec.model_copy(
+                                    update={"causal_use": _rec.causal_use + 1}
+                                )
+                            )
+                            _updated.append(_rec.id)
+                        else:
+                            _new_records.append(_rec)
+                    if _updated:
+                        # Through the public bulk operation now. This site had
+                        # the right idea first — "one load, all increments in
+                        # memory, ONE rewrite" (review #294) — but reached past
+                        # the API to get it, because none existed. It does now.
+                        self.persistent_store.update_many(
+                            r for r in _new_records if r.id in _seen_rids
+                        )
+                        self.log.log(
+                            "memory_causal_credit",
+                            {"record_ids": _updated, "count": len(_updated)},
+                        )
+            except Exception as _cc_exc:
+                # Credit must never break the answer — and its failure must
+                # not be invisible (the MIR-077 rule).
+                try:
+                    self.log.log(
+                        "memory_causal_credit_failed",
+                        {
+                            "error_type": type(_cc_exc).__name__,
+                            "error": str(_cc_exc)[:300],
+                        },
+                    )
+                except Exception:
+                    pass
+
+    def _enforce_answer_safety(
+        self,
+        draft: ResponseDraft,
+        *,
+        user_question: str,
+        local_critique_active: bool,
+        verifier_failure: bool,
+    ) -> ResponseDraft:
+        """The structural layer, and its failure path.
+
+        Lifted out of `_build_response_draft` because it is one
+        responsibility with one failure contract — and because the
+        function-length ratchet said so when the failure path was added.
+        Returns the draft to use: the same object when enforcement
+        succeeded, a fresh safe refusal when it did not.
+        """
+        # Answer enforcement (PR3): low-evidence truncation, local-critique
+        # empty-rewrite skip, verifier soft-fail, claim-level short path.
+        # Evidence support stays observational; this is the structural layer.
+        #
+        # The handler below used to be a bare `except: pass`, and measuring what
+        # that cost settled the design (census A2, 2026-08-05). Reproduced on a
+        # draft the policy really truncates: healthy, 1291 chars became 460 and
+        # the answer opened "no claim could be backed by the sources gathered
+        # this cycle"; with an exception injected, the user received the whole
+        # 1291 chars opening "the API returns 42 on every call" — a confident
+        # factual claim the evidence did not support. Both events that would
+        # have said so were the ones that vanished.
+        #
+        # So returning the original draft is FORBIDDEN by measurement: it is
+        # precisely the text enforcement existed to remove. Failing closed on
+        # CONTENT without taking the cycle down is the only option the evidence
+        # leaves.
+        #
+        # `_stage` names which of the six operations broke. Six, not one — and
+        # `set_body` is among them, which is why the safe answer below is built
+        # on an independent object rather than written through the mechanism
+        # that may have just failed.
+        _stage = "read_state"
+        try:
+            _ranking = self.last_source_ranking
+            _report = self.last_verification
+            _chain_empty = bool(
+                getattr(_report, "chain_was_empty", False)
+            ) if _report is not None else True
+            _realtime = (
+                bool(getattr(_ranking, "realtime_required", True))
+                if _ranking is not None
+                else True
+            )
+            _stage = "evidence_expected"
+            _evidence_expected = is_evidence_expected(
+                role=getattr(self.last_role_context, "role", ""),
+                chain_was_empty=_chain_empty,
+                realtime_required=_realtime,
+                answer=draft.body,
+            )
+            # Enforcement judges the CLAIMS, so it is handed the body alone.
+            # Handing it the composed text would let it measure — and delete —
+            # notices that are not claims and that no verdict about the evidence
+            # can make untrue.
+            _stage = "apply_enforcement"
+            _enf = apply_answer_enforcement(
+                answer=draft.body,
+                report=_report,
+                question=user_question,
+                evidence_expected=_evidence_expected,
+                local_critique_active=local_critique_active,
+                verifier_failure=verifier_failure,
+            )
+            _stage = "log_enforcement"
+            self.log.log("answer_enforcement", _enf.to_log_payload())
+            _stage = "log_truncation"
+            if _enf.outcome == "insufficient_evidence" and _enf.applied:
+                self.log.log(
+                    "low_evidence_truncation",
+                    _enf.low_evidence_payload or _enf.to_log_payload(),
+                )
+            _stage = "set_body"
+            if _enf.applied:
+                draft.set_body(_enf.answer, by="answer_enforcement")
+        except Exception as _enf_exc:  # noqa: BLE001 — отчёт в помощнике ниже
+            # Reported, not swallowed: `_safe_answer_after_enforcement_failure`
+            # writes `answer_enforcement_failed` and banks the defect signal
+            # before building the refusal. The report is one call away rather
+            # than inline because the refusal must be built on a FRESH object.
+            draft = self._safe_answer_after_enforcement_failure(
+                stage=_stage, exc=_enf_exc,
+            )
+
+        return draft
 
     def _build_response_draft(
         self,
@@ -112,73 +352,7 @@ class AgentLoopResponseDeciders:
                 except Exception:
                     pass
 
-        # MIR-074 phase 1 (operator ruling): STRONG causal credit. A record
-        # cited [memory:<id>] in a chunk the verifier marked `verified` has
-        # completed the full chain — retrieved → changed the answer →
-        # independently checked. Injection alone stays a near-zero signal
-        # (access_count); this is the one that counts.
-        if (
-            self.last_verification is not None
-            and self.last_provenance is not None
-            and self.persistent_store is not None
-            and not self._durable_learning_suppressed("access_stats")
-        ):
-            try:
-                _ev_by_id = {
-                    ev.id: ev for ev in self.last_provenance.evidences
-                }
-                _credited: list[str] = []
-                _seen_rids: set[str] = set()
-                for _chunk in self.last_verification.chunks:
-                    if _chunk.verdict != "verified":
-                        continue
-                    for _mid in _chunk.matched_evidence_ids:
-                        _ev = _ev_by_id.get(_mid)
-                        if (
-                            _ev is not None
-                            and _ev.obtained_via == "memory"
-                            and _ev.source_id.startswith("memory:mem")
-                        ):
-                            _rid = _ev.source_id.removeprefix("memory:")
-                            if _rid not in _seen_rids:
-                                _seen_rids.add(_rid)
-                                _credited.append(_rid)
-                if _credited:
-                    # One load, all increments in memory, ONE rewrite — an
-                    # answer crediting N records must not trigger N full-file
-                    # rewrites (review round #294).
-                    _records = self.persistent_store.load()
-                    _updated: list[str] = []
-                    _new_records = []
-                    for _rec in _records:
-                        if _rec.id in _seen_rids:
-                            _new_records.append(
-                                _rec.model_copy(
-                                    update={"causal_use": _rec.causal_use + 1}
-                                )
-                            )
-                            _updated.append(_rec.id)
-                        else:
-                            _new_records.append(_rec)
-                    if _updated:
-                        self.persistent_store._rewrite(_new_records)
-                        self.log.log(
-                            "memory_causal_credit",
-                            {"record_ids": _updated, "count": len(_updated)},
-                        )
-            except Exception as _cc_exc:
-                # Credit must never break the answer — and its failure must
-                # not be invisible (the MIR-077 rule).
-                try:
-                    self.log.log(
-                        "memory_causal_credit_failed",
-                        {
-                            "error_type": type(_cc_exc).__name__,
-                            "error": str(_cc_exc)[:300],
-                        },
-                    )
-                except Exception:
-                    pass
+        self._credit_memory_records_used_in_the_answer()
 
         # MIR-075: ask back instead of only philosophising unsupported. Fires
         # ONLY when the self-analysis sensor marked this turn AND the answer's
@@ -259,51 +433,12 @@ class AgentLoopResponseDeciders:
             except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
                 self._sensor_failed("clarification_gate", exc)
 
-        # Answer enforcement (PR3): low-evidence truncation, local-critique
-        # empty-rewrite skip, verifier soft-fail, claim-level short path.
-        # Evidence support stays observational; this is the structural layer.
-        try:
-            _ranking = self.last_source_ranking
-            _report = self.last_verification
-            _chain_empty = bool(
-                getattr(_report, "chain_was_empty", False)
-            ) if _report is not None else True
-            _realtime = (
-                bool(getattr(_ranking, "realtime_required", True))
-                if _ranking is not None
-                else True
-            )
-            _evidence_expected = is_evidence_expected(
-                role=getattr(self.last_role_context, "role", ""),
-                chain_was_empty=_chain_empty,
-                realtime_required=_realtime,
-                answer=draft.body,
-            )
-            # Enforcement judges the CLAIMS, so it is handed the body alone.
-            # Handing it the composed text would let it measure — and delete —
-            # notices that are not claims and that no verdict about the evidence
-            # can make untrue.
-            _enf = apply_answer_enforcement(
-                answer=draft.body,
-                report=_report,
-                question=user_question,
-                evidence_expected=_evidence_expected,
-                local_critique_active=local_critique_active,
-                verifier_failure=verifier_failure,
-            )
-            self.log.log("answer_enforcement", _enf.to_log_payload())
-            if _enf.outcome == "insufficient_evidence" and _enf.applied:
-                self.log.log(
-                    "low_evidence_truncation",
-                    _enf.low_evidence_payload or _enf.to_log_payload(),
-                )
-            if _enf.applied:
-                draft.set_body(_enf.answer, by="answer_enforcement")
-        except Exception:
-            # Defence-in-depth: truncation must NEVER take down
-            # the loop. A failed evaluation falls back to the
-            # original answer the user would otherwise have got.
-            pass
+        draft = self._enforce_answer_safety(
+            draft,
+            user_question=user_question,
+            local_critique_active=local_critique_active,
+            verifier_failure=verifier_failure,
+        )
 
         scope_notice = file_scope_notice(user_question, artifacts)
         if draft.add_notice(

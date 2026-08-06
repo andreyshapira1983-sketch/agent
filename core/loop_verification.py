@@ -63,6 +63,10 @@ class AgentLoopVerification:
         # Берётся у соседней примеси: работает через MRO, но связь между
         # модулями обязана быть записана, иначе её видно только на прогоне.
         _file_read_workspace_root: Any
+        # Ставит `core/loop_synthesis.py`, сбрасывает за ход `core/loop.py`.
+        # Читалось через `getattr` с умолчанием, и умолчание превращало
+        # отсутствие связи в тихий вердикт по чужому правилу (A6).
+        _synthesis_expects_contract_headers: Any
 
     def _verify_draft(
         self,
@@ -98,9 +102,7 @@ class AgentLoopVerification:
                 answer=draft_answer,
                 chain=chain,
                 user_question=user_question,
-                expects_contract_headers=getattr(
-                    self, "_synthesis_expects_contract_headers", True
-                ),
+                expects_contract_headers=self._synthesis_expects_contract_headers,
                 **self._verification_receipt_kwargs(),
             )
         except Exception as _ver_exc:

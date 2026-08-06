@@ -298,6 +298,10 @@ class AgentLoop(
         # reason `_executed_tools` is: instance state outlives a run, and an
         # inherited fault would be banked against the wrong episode.
         self._defect_signals = []
+        # Per-cycle, or a turn whose synthesis broke early inherits the
+        # previous turn's contract verdict — wrong both ways (census A6, see
+        # `tests/test_cross_mixin_fields_are_guaranteed.py`).
+        self._synthesis_expects_contract_headers = True
         self.last_replan_exhausted = False
         self.last_source_ranking = None
         self.last_source_registry = SourceRegistry()
