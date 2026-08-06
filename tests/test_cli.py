@@ -41,7 +41,11 @@ from cli.intent_bridge import (
     handle_conversational_operator_input,
 )
 from cli.parsers import _parse_remember
-from cli.repl import _collect_instruction_buffer, _collect_pasted_block
+from cli.repl import (
+    _collect_continuation,
+    _collect_instruction_buffer,
+    _collect_pasted_block,
+)
 from core.approval import AutoApprover
 from core.budget_ledger import BudgetLedger, BudgetWindow
 from core.logger import TraceLogger
@@ -495,6 +499,43 @@ class TestCollectPastedBlock:
 
         with pytest.raises(EOFError):
             _collect_pasted_block(reader)
+
+
+# ============================================================
+# _collect_continuation — a line ending in a backslash
+# ============================================================
+
+class TestCollectContinuation:
+    """The collector alone. The `... ` prompt it reads with, the refusal of an
+    empty result and the EOF exit belong to `run_repl` and are held by
+    tests/characterization/."""
+
+    @staticmethod
+    def _reader(lines: list[str]):
+        it = iter(lines)
+        return lambda: next(it)
+
+    def test_joins_with_single_spaces_and_drops_the_backslashes(self):
+        assert _collect_continuation("first \\", self._reader(["second"])) == "first second"
+
+    def test_continues_while_lines_keep_ending_in_a_backslash(self):
+        reader = self._reader(["b \\", "c"])
+        assert _collect_continuation("a \\", reader) == "a b c"
+
+    def test_blank_parts_do_not_become_extra_spaces(self):
+        reader = self._reader(["   \\", "tail"])
+        assert _collect_continuation("head \\", reader) == "head tail"
+
+    def test_a_continuation_that_joins_to_nothing_returns_the_empty_string(self):
+        """Returned, not refused — that judgement is the caller's."""
+        assert _collect_continuation("\\", self._reader(["   "])) == ""
+
+    def test_eof_propagates_to_caller(self):
+        def reader() -> str:
+            raise EOFError
+
+        with pytest.raises(EOFError):
+            _collect_continuation("first \\", reader)
 
 
 # ============================================================

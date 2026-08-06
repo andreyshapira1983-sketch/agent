@@ -134,8 +134,8 @@ would catch that.
 - One comment still points at a doc deleted in `f6d071a`; nineteen more such
   pointers sit in fourteen other files, two of them as entries in a checker's
   exclusion list. Being removed, not restored — the doc was deleted on purpose.
-- `run_repl` is still 126 lines with three input modes inline. Next:
-  `_collect_continuation`, then `_collect_operator_task_block`.
+- `run_repl` is 104 lines with one input mode still inline. Next:
+  `_collect_operator_task_block`.
 
 ---
 
