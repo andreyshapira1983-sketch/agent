@@ -375,7 +375,7 @@ def test_corporate_doctrine_question_forces_docs_first_over_core_defaults(
                 },
                 {
                     "tool": "file_read",
-                    "arguments": {"path": "docs/ROADMAP.md"},
+                    "arguments": {"path": "knowledge/doctrine/ROADMAP.md"},
                     "rationale": "one relevant doc",
                 },
             ],
@@ -401,7 +401,7 @@ def test_corporate_doctrine_question_forces_docs_first_over_core_defaults(
         "knowledge/doctrine/future/CORPORATE_MODEL.md",
         "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md",
         "docs/AGENT_ANATOMY.md",
-        "docs/ROADMAP.md",
+        "knowledge/doctrine/ROADMAP.md",
         "docs/COMMANDS_MAP.md",
         "knowledge/doctrine/SUBAGENT_LIFECYCLE.md",
     ]
@@ -444,7 +444,7 @@ def test_corporate_doctrine_implementation_question_keeps_code_after_docs(
         "knowledge/doctrine/future/CORPORATE_MODEL.md",
         "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md",
         "docs/AGENT_ANATOMY.md",
-        "docs/ROADMAP.md",
+        "knowledge/doctrine/ROADMAP.md",
         "docs/COMMANDS_MAP.md",
     ]
     assert paths[5:] == ["core/autonomous_runtime.py"]
@@ -532,7 +532,7 @@ def test_mixed_doctrine_confidence_question_selects_docs_and_verifier_sources(
         "knowledge/doctrine/future/CORPORATE_MODEL.md",
         "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md",
         "docs/AGENT_ANATOMY.md",
-        "docs/ROADMAP.md",
+        "knowledge/doctrine/ROADMAP.md",
         "docs/COMMANDS_MAP.md",
     ]
     for path in (
@@ -1240,7 +1240,7 @@ def test_non_subagent_doctrine_question_omits_lifecycle_doc(workspace: Path) -> 
             "steps": [
                 {
                     "tool": "file_read",
-                    "arguments": {"path": "docs/ROADMAP.md"},
+                    "arguments": {"path": "knowledge/doctrine/ROADMAP.md"},
                     "rationale": "roadmap",
                 }
             ],
@@ -1304,7 +1304,7 @@ def test_non_memory_doctrine_question_omits_memory_docs(workspace: Path) -> None
             "steps": [
                 {
                     "tool": "file_read",
-                    "arguments": {"path": "docs/ROADMAP.md"},
+                    "arguments": {"path": "knowledge/doctrine/ROADMAP.md"},
                     "rationale": "roadmap",
                 }
             ],
@@ -1486,7 +1486,7 @@ def test_non_self_repair_doctrine_question_omits_self_repair_doc(
             "steps": [
                 {
                     "tool": "file_read",
-                    "arguments": {"path": "docs/ROADMAP.md"},
+                    "arguments": {"path": "knowledge/doctrine/ROADMAP.md"},
                     "rationale": "roadmap",
                 }
             ],

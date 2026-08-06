@@ -88,7 +88,7 @@ grep -rn "AGENT_MAX_TOKENS\|AGENT_MAX_CONTINUATIONS\|AGENT_AUTO_CONTINUE\|AGENT_
 ```
 
 `AGENT_SERVICE_*` variables belong to the Windows-service shell contract
-(`app/windows_service.py`); per `docs/ROADMAP.md` that service is not
+(`app/windows_service.py`); per `knowledge/doctrine/ROADMAP.md` that service is not
 implemented, so they configure a contract only.
 
 ## 3. Config files (`config/`)
