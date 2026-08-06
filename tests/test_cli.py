@@ -2519,3 +2519,77 @@ class TestForceUtf8IoCannotJournal:
         assert calls[0][1] == "_force_utf8_io", (
             f"something now runs before the encoding fix: {calls[:2]}"
         )
+
+
+class TestForceUtf8IoReportsWhatItAchieved:
+    """The call used to return None, so "reconfigure was attempted" and
+    "the stream is now utf-8" were indistinguishable from outside.
+
+    Three ways it can fail to take effect, and none of them raises:
+    the stream has no `reconfigure`, it refuses, or it accepts and stays on
+    the old codec. The return value is read back from `stream.encoding`, so
+    it reports the achieved state rather than the attempted one.
+    """
+
+    def test_confirms_streams_it_actually_switched(self, monkeypatch):
+        class _Stream:
+            encoding = "cp1251"
+
+            def reconfigure(self, **kw):
+                self.encoding = kw["encoding"]
+
+        for name in ("stdin", "stdout", "stderr"):
+            monkeypatch.setattr(sys, name, _Stream())
+
+        assert _force_utf8_io() == ("stdin", "stdout", "stderr")
+
+    def test_a_stream_that_silently_ignores_reconfigure_is_not_claimed(self, monkeypatch):
+        """Accepting the call and staying on cp1251 is the case that used to
+        be invisible: no exception, no change, and the old code said nothing."""
+        class _Deaf:
+            encoding = "cp1251"
+
+            def reconfigure(self, **kw):
+                pass  # accepts, changes nothing
+
+        class _Working:
+            encoding = "cp1251"
+
+            def reconfigure(self, **kw):
+                self.encoding = kw["encoding"]
+
+        monkeypatch.setattr(sys, "stdin", _Deaf())
+        monkeypatch.setattr(sys, "stdout", _Working())
+        monkeypatch.setattr(sys, "stderr", _Deaf())
+
+        assert _force_utf8_io() == ("stdout",)
+
+    def test_a_stream_that_raises_is_not_claimed_and_does_not_stop_the_others(
+        self, monkeypatch
+    ):
+        class _Angry:
+            encoding = "cp1251"
+
+            def reconfigure(self, **kw):
+                raise OSError("stream refuses")
+
+        class _Working:
+            encoding = "cp1251"
+
+            def reconfigure(self, **kw):
+                self.encoding = kw["encoding"]
+
+        monkeypatch.setattr(sys, "stdin", _Angry())
+        monkeypatch.setattr(sys, "stdout", _Working())
+        monkeypatch.setattr(sys, "stderr", _Working())
+
+        assert _force_utf8_io() == ("stdout", "stderr")
+
+    def test_streams_without_reconfigure_are_reported_as_not_switched(self, monkeypatch):
+        class _Bare:
+            pass
+
+        for name in ("stdin", "stdout", "stderr"):
+            monkeypatch.setattr(sys, name, _Bare())
+
+        assert _force_utf8_io() == ()
