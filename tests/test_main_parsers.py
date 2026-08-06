@@ -66,10 +66,16 @@ class TestParseRemember:
         assert tags == ["fact", "decision"]
         assert content == "shipped v2"
 
-    def test_non_ascii_tags_fall_back_to_user_approved(self):
-        # A comma triggers tag-parsing, but the cyrillic tag is dropped.
+    def test_non_ascii_tags_are_kept_as_typed(self):
+        """Contract changed 2026-08-07: a tag is a label, not an identifier.
+
+        The comma still starts tag parsing and still ends at the first
+        whitespace, so `мнение` here is content — but `факт` is now stored as
+        written instead of being dropped for `user-approved`, which used to
+        hand the write policy a consent the operator never gave.
+        """
         tags, content = _parse_remember("факт, мнение тело заметки")
-        assert tags == ["user-approved"]
+        assert tags == ["факт"]
         assert content == "мнение тело заметки"
 
     def test_unicode_content_is_preserved(self):
