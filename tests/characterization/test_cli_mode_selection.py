@@ -242,3 +242,39 @@ def test_one_shot_run_writes_only_inside_the_tmp_workspace(tmp_path, monkeypatch
     assert main_module.main() == 0
 
     assert violations == [], f"suite wrote into the repository runtime paths: {violations}"
+
+
+def test_empty_ask_exits_two_instead_of_silently_opening_the_repl(tmp_path, monkeypatch, capsys):
+    """`--ask ""` asked for a one-shot answer and got an interactive session.
+
+    The same truthiness trap the `--resume` comment in cli/app.py describes at
+    length, left standing twelve lines below it: `if args.ask:` is false for an
+    empty string, so the branch was skipped and the REPL opened. `--resume ""`
+    exits 2 and says why; `--ask ""` did neither.
+
+    Measured 2026-08-05 before the fix: exit 0, interactive mode, no message.
+    """
+    monkeypatch.setattr(
+        app_module, "run_one_shot",
+        lambda *a, **k: pytest.fail("an empty question must not reach one-shot"),
+    )
+    monkeypatch.setattr(
+        app_module, "build_agent",
+        lambda *a, **k: pytest.fail("an empty question must not build an agent"),
+    )
+    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", ""])
+
+    assert main_module.main() == 2
+    assert "empty question" in capsys.readouterr().err
+
+
+def test_whitespace_only_ask_is_treated_the_same(tmp_path, monkeypatch, capsys):
+    """A question of spaces is not a question, and `.strip()` is what says so."""
+    monkeypatch.setattr(
+        app_module, "run_one_shot",
+        lambda *a, **k: pytest.fail("whitespace must not reach one-shot"),
+    )
+    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", "   "])
+
+    assert main_module.main() == 2
+    assert "empty question" in capsys.readouterr().err

@@ -119,6 +119,18 @@ def run_cli() -> int:
         args.ask = decision.ask
         args.file = decision.file_hint
 
+    # Same truthiness trap the `--resume` comment above describes, left standing
+    # twelve lines below it. `--ask ""` made `if args.ask:` false, so the
+    # operator asked for a one-shot answer and silently got an interactive REPL
+    # instead — while `--resume ""` honestly exits 2. Measured 2026-08-05.
+    if args.ask is not None and not args.ask.strip():
+        print(
+            "ERROR: --ask was given an empty question.\n\n"
+            "No model calls were made.",
+            file=sys.stderr,
+        )
+        return 2
+
     file_hint_ok, file_hint_error = _preflight_file_hint(args.file, workspace)
     if not file_hint_ok:
         print(file_hint_error, file=sys.stderr)
@@ -128,7 +140,7 @@ def run_cli() -> int:
     # precedence and deep escalation all live in cli/one_shot.py, which reaches
     # its collaborators through their own modules. `build_agent` is handed over
     # from here so that one fake on `cli.app` covers both modes.
-    if args.ask:
+    if args.ask is not None:
         return run_one_shot(
             args.ask,
             workspace=workspace,
