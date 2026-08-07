@@ -145,7 +145,45 @@
       "self_fields": 64,
       "note": "Invisible to the node census: the discovery rule skips dunders as plumbing, so the single place where the nervous system's state is created is outside the map. Per the operator's map (model error 4), an assignment proves the initialization site, not ownership.",
       "proven": ["initialization_site"],
-      "unproven": ["owner", "lifetime", "reset semantics"]
-    }
+      "unproven": ["owner", "reset semantics"]
+    },
+    "_discovery_rule": "Fields = `self.X = ...` and `self.X: T = ...` inside AgentLoopInit.__init__. Use = `self.X` anywhere in core/loop*.py, PLUS getattr/setattr/hasattr(self, 'X') with a literal name. Outside use = the same attribute name reached on any object anywhere in the repo — a candidate, not proof, since another class may carry the same name.",
+    "_rule_blind_to": [
+      "attribute names built at runtime (getattr(self, prefix + name))",
+      "serialisation / vars(self) / __dict__ traversal",
+      "access through a collaborator holding a reference to the loop"
+    ],
+    "_rule_history": "Two false results were produced and corrected before this snapshot was written. The first pass counted `self.X` in every class, so fields named llm/log/policy/registry looked per-run because OTHER classes assign their own. The second missed getattr access and declared `durable_writes` and `experience_retrieval` dead — both are live, read at core/loop_memory_write.py:114 and core/loop_memory_read.py:200 through getattr with a literal name.",
+    "by_lifetime": {
+      "per_run": {
+        "count": 25,
+        "meaning": "written somewhere in the perimeter during a run, so the value does not survive as constructed"
+      },
+      "read_only_in_perimeter": {
+        "count": 36,
+        "meaning": "organs and configuration: the loop reads them, never reassigns"
+      },
+      "outside_only": {
+        "count": 1,
+        "fields": ["max_replan_attempts"],
+        "meaning": "mirror of replan_policy.max_total_replans; nothing in the perimeter reads it"
+      },
+      "dead": {
+        "count": 2,
+        "fields": ["_CompensationPlanCls", "_last_step_failure"],
+        "meaning": "assigned at construction, never read or written by anyone, getattr included"
+      }
+    },
+    "by_origin": {
+      "injected": 19,
+      "literal": 19,
+      "constructed_here": 13,
+      "derived": 8,
+      "empty_container": 5,
+      "other": 1,
+      "note": "Origin classifies where the VALUE came from, not who owns it. `injected` means the constructor received it — the strongest argument that the loop is NOT its owner."
+    },
+    "owner": "UNPROVEN for all 64",
+    "owner_note": "Protocol item 6: initialization site, lifetime and type are provable; ownership is a separate claim and is not derived from `self.X = ...`."
   }
 }
