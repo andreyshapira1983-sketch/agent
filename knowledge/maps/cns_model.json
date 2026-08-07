@@ -1,0 +1,151 @@
+{
+  "_comment": "The four entities the node/edge census cannot hold. Entities and their names come from the operator's map (autonomous_agent_nervous_system_ru, slide 05); statuses come from docs/NERVE_PROTOCOL.ru.md. Nodes and call_edges stay in cns_census.json and are referenced by id from here. An empty list or the literal UNPROVEN means not proven; there is no N/A.",
+  "taken": "2026-08-07",
+  "_status_vocabulary": {
+    "effect_scale": [
+      "L1 signal exists",
+      "L2 delivery to consumer proven",
+      "L3 consumer input or state changed",
+      "L4 consumer decision changed",
+      "L5 downstream path changed",
+      "L6 externally observable outcome changed"
+    ],
+    "certified_conditions": ["REACHABILITY", "CAUSALITY", "SEMANTICS", "PROTECTION"],
+    "verdicts": ["PROVEN", "UNPROVEN", "NEGATIVE", "UNDER_QUESTION"]
+  },
+
+  "state_carriers": {
+    "failure_history": {
+      "_acceptance_case": "The operator's test of this schema: if this carrier cannot be described here without smearing facts across nodes, the schema is wrong again.",
+      "kind": "accumulator",
+      "type": "list[ReplanTrigger]",
+      "created_at": "core/loop.py:415",
+      "created_by": "loop.py::AgentLoop._run_inner",
+      "transport": "shared reference, passed as a parameter to four call sites (loop.py:459,542,583,639); mutated in place by callees",
+      "mutation_mode": "append / extend by reference; never returned",
+      "declared_as_output": false,
+      "declared_output_note": "AttemptState.OUTPUTS names eight fields and a test guards exactly that set; this is the ninth channel and it is typed as an input ('does not change during the section') while loop_attempt.py:472 extends it. The OUTPUTS test therefore looks like a complete interface contract and is not.",
+      "writers": [
+        {"site": "core/loop_attempt.py:472", "node": "loop_attempt.py::AgentLoopAttempt._run_attempt_loop", "puts": "failures of an ATTEMPT", "call": "extend"},
+        {"site": "core/loop_verify_replan.py:149", "node": "loop_verify_replan.py::AgentLoopVerifyReplan._replan_on_refuted_claims", "puts": "claim_refuted", "call": "append"},
+        {"site": "core/loop_verify_replan.py:228", "node": "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer", "puts": "unresolved_citation", "call": "append"},
+        {"site": "core/loop_verify_replan.py:379", "node": "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer", "puts": "failure of a step executed INSIDE the verify loop — a different kind from the other three", "call": "append"}
+      ],
+      "readers": [
+        {"site": "core/replan.py:496", "role": "control", "uses": "decide(): global cap and per-type budget"},
+        {"site": "core/replan.py:132", "role": "control", "uses": "format_replan_context(): whole list becomes planner prompt text"},
+        {"site": "core/loop_synthesis.py:235", "role": "control", "uses": "<failure_context> block in the synthesis prompt", "gated_by": "core/loop_synthesis.py:637 — receives None unless st.replan_exhausted"},
+        {"site": "core/loop_run_tail.py:301", "role": "control", "uses": "policy_blocked triggers -> denied_tools for the obligation arbiter"},
+        {"site": "core/loop_run_tail.py:315", "role": "control", "uses": "failure codes -> obligation arbiter"},
+        {"site": "core/subsystem_disagreement.py:87", "role": "dead_end", "uses": "codes into a journal event; loop_verification.py:154 states it is recorded and never acted on"},
+        {"site": "core/loop_attempt.py:539", "role": "dead_end", "uses": "log line"},
+        {"site": "core/loop_attempt.py:549", "role": "dead_end", "uses": "log line"}
+      ],
+      "lifetime": "one run(); created in _run_inner, never reset inside it, discarded with the frame",
+      "owner": "UNPROVEN",
+      "owner_note": "Creation site is proven; ownership is not derived from it (operator's map, model error 4).",
+      "properties": {
+        "carrier": "PROVEN",
+        "writers": "PROVEN",
+        "readers": "PROVEN",
+        "delivery_non_empty": "PROVEN",
+        "delivery_evidence": "probe, 10 runs, codes plan_parse_failed / approval_deny / approval_abort / approval_unavailable",
+        "effect": "UNPROVEN",
+        "effect_evidence": "three mutations against three consumers, three times zero",
+        "effect_explanation": "UNDER_QUESTION",
+        "effect_explanation_note": "Two rivals, neither measured. (a) The value goes into a model prompt and the mock returns the same text regardless (protocol item 25). (b) Synthesis receives None entirely unless replanning was exhausted (loop_synthesis.py:637), so the prompt is never reached. Distinguishing them needs a probe on the consumer input BEFORE the mock.",
+        "non_control": "UNPROVEN",
+        "semantic_integrity": "NEGATIVE"
+      },
+      "semantic_defects": [
+        {"defect": "two different kinds of failure share one list", "detail": "attempt failures and verify-loop step failures are counted by one budget and printed as one list; the planner prompt says 'Previous attempts produced N failed step(s)' where N includes what was never an attempt"},
+        {"defect": "synthetic attempt number", "detail": "core/loop_verify_replan.py:226 sets attempt = st.attempt + verify_replan_attempt; that number reaches the planner and the synthesis block as if it were a real attempt"},
+        {"defect": "duplication per verify iteration", "detail": "the same unresolved URL is appended again on each iteration: twice into the type budget, twice into the planner prompt"}
+      ]
+    },
+
+    "_step_trigger_tls": {
+      "kind": "scratch slot",
+      "type": "threading.local",
+      "created_at": "core/loop_step_execution.py:43",
+      "transport": "module-level thread-local; read via getattr (core/loop_step_execution.py:110)",
+      "note": "Every step failure travels through this carrier. It is invisible to the node/edge discovery rule and absent from the operator's map — found by reconciliation on 2026-08-07.",
+      "writers": ["core/loop_step_execution.py:362", "core/loop_step_execution.py:385", "core/loop_step_execution.py:416"],
+      "readers": ["core/loop_step_execution.py:110 (consume)"],
+      "lifetime": "per step, per worker thread; set to None on read",
+      "owner": "UNPROVEN",
+      "properties": {"carrier": "PROVEN", "writers": "PROVEN", "readers": "PROVEN", "delivery_non_empty": "UNPROVEN", "effect": "UNPROVEN"}
+    },
+
+    "_last_step_failure": {
+      "kind": "dead field",
+      "created_at": "core/loop_init.py:221",
+      "note": "Assigned once at construction and never read or written anywhere else. The docstring at core/replan.py:97 still declares it the scratch slot where every step failure lives — documentation describing a carrier that no longer carries.",
+      "writers": [],
+      "readers": [],
+      "owner": "N/A — nothing owns a channel with no traffic",
+      "properties": {"carrier": "NEGATIVE"}
+    }
+  },
+
+  "signal_flows": {
+    "unresolved_citation": {
+      "producer": "core/verifier.py::extract_unresolved_web_urls (detector)",
+      "carrier": "failure_history + local unresolved_urls list",
+      "consumer": "core/replan.py::ReplanPolicy.decide",
+      "path": "report -> unresolved_urls -> eligibility gate -> ReplanTrigger -> decide() -> branch",
+      "effect_level": "L5",
+      "evidence": {
+        "L1_L2": "probe on the consumer: decide() is called on this path",
+        "L4_L5": "two poles on one stimulus (tests/test_unresolved_citation_replan.py::TestPolicyVerdictTravelsBack); obeying the verdict ends the run at 2 planner calls, ignoring it runs on to VERIFY_REPLAN_HARD_CAP with 3",
+        "protection": "mutation of `if decision.action != \"continue\":` reddens the target test; before it the same mutation left 7165 passing"
+      },
+      "certified": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "UNPROVEN",
+        "PROTECTION": "PROVEN",
+        "verdict": "NOT CERTIFIED — three of four"
+      },
+      "open_items": [
+        "protocol 12: of three verdict states only continue and abort_exhausted ever occur; abort_no_retry never fired",
+        "protocol 26: decide() has two independent conditions (global cap, per-type budget); independent influence not shown",
+        "protocol 11: the two poles were reached by different scenario paths, not by forcing two verdicts on identical state"
+      ]
+    }
+  },
+
+  "decision_boundaries": {
+    "verify_replan_authority": {
+      "site": "core/loop_verify_replan.py:235",
+      "reads": "decision.action from ReplanPolicy",
+      "consequence_class": "LOOP",
+      "second_belt": "VERIFY_REPLAN_HARD_CAP = 2 (core/loop_verify_replan.py:197) stops the loop when the verdict is ignored — which is why breaking the wiring changes where the run stops rather than whether it stops",
+      "protection": "PROVEN (10240f8)"
+    },
+    "unresolved_citation_eligibility_gate": {
+      "site": "core/loop_verify_replan.py:201",
+      "reads": "unresolved_urls emptiness",
+      "consequence_class": "PHASE",
+      "protection": "composition proven (detector+gate together, 4 red); isolated gate bite UNPROVEN"
+    },
+    "post_tool_trust_boundary": {
+      "site": "core/loop_step_execution.py:652",
+      "reads": "InjectionGuard verdict is_blocked",
+      "consequence_class": "WORLD",
+      "hole": "core/loop_step_execution.py:48 — five tools (file_read, list_dir, diff_file, run_tests, read_logs) bypass scanning by design; the operator's map draws this boundary solid",
+      "protection": "PROVEN (08c29cf)"
+    }
+  },
+
+  "state_initialization": {
+    "_root": {
+      "site": "core/loop_init.py::AgentLoopInit.__init__",
+      "size_lines": 231,
+      "self_fields": 64,
+      "note": "Invisible to the node census: the discovery rule skips dunders as plumbing, so the single place where the nervous system's state is created is outside the map. Per the operator's map (model error 4), an assignment proves the initialization site, not ownership.",
+      "proven": ["initialization_site"],
+      "unproven": ["owner", "lifetime", "reset semantics"]
+    }
+  }
+}
