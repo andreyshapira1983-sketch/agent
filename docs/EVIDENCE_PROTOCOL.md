@@ -505,11 +505,57 @@ removed it. The sub-agent lifecycle document already lists `requalification`
 among its unimplemented capabilities — the intent existed, the mechanism did
 not. This is that mechanism's contract:
 
-* removal is recorded with the defect class and the evidence that proved it;
-* restoration requires N consecutive claims accepted as `verified_true`, with no
-  `unsupported_excuse` in the window;
-* both transitions are journal entries, so a fleet's trust history is readable
-  rather than remembered.
+Restoration is symmetric to the loss — earned by new verified work, never by
+elapsed time, and never in one jump:
+
+```
+normal ──repeated violations──> restricted ──more──> quarantined ──> retired
+
+restricted ──N verified reports──> probation ──M verified reports──> normal
+```
+
+`probation` is the part that matters: limited rights plus a raised sampling
+rate, not a return to full authority. And the bar for a qualifying report is
+higher than for ordinary work — the run counts only while every one of these
+holds:
+
+* no `unsupported_claim`;
+* no `unsupported_excuse`;
+* every `missing_evidence` reason confirmed by the arbiter;
+* every deviation declared before the spend;
+* every required check completed;
+* no infrastructure ambiguity.
+
+A break in the run resets or decrements the counter by a rule fixed in advance —
+except when the break is infrastructural. A flaky environment must not lock a
+sub-agent out forever, and the protocol already refuses to treat a failed run as
+a refutation.
+
+### Trust is a vector, and rights come back one at a time
+
+One number makes a single failure mean "bad in general". Trust is held per axis,
+and each axis maps to exactly one defect class, so nothing needs judging:
+
+| defect | axis it lowers |
+|---|---|
+| `unsupported_claim` | evidence reliability |
+| `unsupported_excuse` | permission honesty |
+| `avoidable_uncertainty` | calibration |
+| spending without a declared deviation | planning quality |
+| budget consumed on unrelated work | budget discipline |
+
+Restoration returns a **specific right**, not a reputation. A sub-agent that
+mismanaged budget may regain cheap checks well before it regains the right to
+start expensive ones; one that misreported permissions regains file access on
+its own schedule.
+
+Probation is not free for the system either: a raised sampling rate is arbiter
+spend. So the number of sub-agents on probation at once is bounded by the
+verification budget — otherwise spawning children becomes a way to drown the
+arbiter.
+
+Every transition, in both directions, is a journal entry: a fleet's trust
+history is read, not remembered.
 
 ### Documents are claims too
 
