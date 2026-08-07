@@ -162,7 +162,7 @@
         "CAUSALITY": "PROVEN — five mutations (M5-M9), each reddening exactly its own arc",
         "SEMANTICS": "PROVEN — pause phase fidelity per site, resume precedence, and the closing half both poles: success retires the task, a repeated stop retires nothing",
         "PROTECTION": "PROVEN — M5/M6/M7 plus M8 (synthesis catch dropped -> its test red) and M9 (verify catch dropped -> its test red); retirement wiring proven fail-before (both new tests red until the join existed)",
-        "verdict": "PROVEN on all four conditions — second certified CNS arc. Note the designed asymmetry: a resume that pauses again leaves TWO paused tasks (old truthful, new under the fresh trace); tested, not accidental. Scope limit found 2026-08-08: in STREAMED mode the synthesis catch site is unreachable — the streamed call bypasses the budget wrapper entirely (see on_token_streaming defect); this certification holds for the non-streamed path."
+        "verdict": "PROVEN on all four conditions — second certified CNS arc. Note the designed asymmetry: a resume that pauses again leaves TWO paused tasks (old truthful, new under the fresh trace); tested, not accidental. The streamed-mode scope limit found 2026-08-08 is closed the same day: with the wrapper's stream_complete in place the synthesis pause fires in streamed mode too (test_streamed_cycle_is_blocked_and_paused_on_an_exhausted_budget)."
       },
       "semantic_defects": [
         {"defect": "a successfully resumed task never retires", "status": "RESOLVED 2026-08-08 with the operator's verdict", "detail": "probe: pause -> resume -> success left the task paused and resumable forever; no code path wrote paused->done and the fresh trace_id joined to nothing. Fixed by carrying the join explicitly: ResumeDecision.resumed_paused_trace -> run_one_shot -> guard -> _retire_resumed_pause on the no-exception path; retired task keeps its report plus resumed_by. Both poles tested; design note in docs/CODE_NOTES.md."}
@@ -178,14 +178,14 @@
         "unit_layer": "tests/test_llm.py pins stream_complete chunk callbacks per provider; nothing drives run(on_token) end-to-end"
       },
       "certified": {
-        "REACHABILITY": "PROVEN — probe",
-        "CAUSALITY": "UNPROVEN — no bite: nothing reds if the entry edge stops carrying the callback",
-        "SEMANTICS": "NEGATIVE — see semantic_defects: the streamed call escapes the usage wrapper",
-        "PROTECTION": "UNPROVEN",
-        "verdict": "NOT CERTIFIED — billing defect first, then the bite"
+        "REACHABILITY": "PROVEN — probe, then six tests (four wrapper-level, two end-to-end)",
+        "CAUSALITY": "PROVEN — fail-before witnessed: all six tests red before the wrapper method existed, green after",
+        "SEMANTICS": "PROVEN — billing parity with complete; pre-flight blocks BEFORE the first token; a dead stream leaves an error record; a non-streaming provider falls back to the billed complete; designed no-failover for streamed calls (chunks may already be on screen) recorded in docs/CODE_NOTES.md",
+        "PROTECTION": "PROVEN — the six tests are the bite; deleting the wrapper method reproduces the measured defect and reds them all",
+        "verdict": "PROVEN on all four conditions — third certified CNS arc (entry edge -> _stream_on_token -> streamed synthesis -> billed wrapper)"
       },
       "semantic_defects": [
-        {"defect": "streamed synthesis bypasses the usage ledger and its budget", "detail": "UsageTrackedLLM defines only complete; __getattr__ (core/model_router.py:483) hands stream_complete to the RAW provider LLM, skipping assert_can_start, log_start and record. Measured: a streamed cycle leaves only the planner record (synthesis spend invisible); with max_calls=1 the streamed run COMPLETES where the non-streamed one is blocked, pauses and queues a resumable task. Streaming is the REPL default, so the primary interactive mode under-bills every turn, enforces no cap at synthesis, and cannot reach the synthesis pause arc certified in budget_stop_resume.", "minimal_fix_proposal": "give UsageTrackedLLM its own stream_complete mirroring complete (assert_can_start -> log_start -> raw stream_complete -> record); decide separately whether provider failover applies to streamed calls; then add the end-to-end bite: streamed cycle must bill synthesizer AND be blocked/paused on an exhausted budget"}
+        {"defect": "streamed synthesis bypassed the usage ledger and its budget", "status": "RESOLVED 2026-08-08 on the operator's verdict", "detail": "UsageTrackedLLM defined only complete; __getattr__ handed stream_complete to the RAW provider LLM, skipping assert_can_start, log_start and record. Measured: streamed cycle billed only the planner; max_calls=1 did not stop a streamed run. Fixed with a real stream_complete on the wrapper mirroring complete's billing; no provider failover for streamed calls by design. Six fail-before tests pin it; ratchet ceiling 1800->1860 with justification."}
       ]
     },
     "unresolved_citation": {
@@ -296,7 +296,7 @@
       "app/daemon.py, app/worker_pool.py (scheduler contour over the same loop)"
     ],
     "clusters": [
-      {"id": "C00", "scope": "entry edges -> run identity -> abort/cancel exits", "status": "UNPROVEN", "opened": "2026-08-08", "proven_arcs": ["run_identity — CERTIFIED, all four conditions (M3, M4, join test)", "abort_episode_banking (M1+M2)", "budget_stop_resume — CERTIFIED for the non-streamed path (M5-M9, both retirement poles, all three catch sites); back-arc defect fixed on the operator's verdict", "on_token delivery — PROVEN by probe (L6), NOT CERTIFIED: streamed-billing defect open, no bite yet"], "open": ["streamed synthesis bypasses the usage wrapper — defect awaiting the operator's verdict", "deep_escalation delivery", "silent-skip branches of abort banking"]},
+      {"id": "C00", "scope": "entry edges -> run identity -> abort/cancel exits", "status": "UNPROVEN", "opened": "2026-08-08", "proven_arcs": ["run_identity — CERTIFIED, all four conditions (M3, M4, join test)", "abort_episode_banking (M1+M2)", "budget_stop_resume — CERTIFIED, all four conditions, streamed and plain (M5-M9, both retirement poles, all three catch sites)", "on_token_streaming — CERTIFIED, all four conditions; billing-bypass defect fixed on the operator's verdict, six fail-before tests"], "open": ["deep_escalation delivery", "silent-skip branches of abort banking"]},
       {"id": "C01", "scope": "_open_run: profile, assumptions registry, checkpoint writer (core/loop_context.py)", "status": "UNPROVEN"},
       {"id": "C02", "scope": "_observe_and_route: goal, question class, role route, model tier choice, deep escalation (core/loop_observe.py)", "status": "UNPROVEN"},
       {"id": "C03", "scope": "derive_completion_contract before any tool runs; ordering claim; consumed in C13", "status": "UNPROVEN"},

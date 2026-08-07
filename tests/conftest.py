@@ -137,6 +137,36 @@ class FakeLLM:
         return "{}"
 
 
+class StreamingFakeLLM(FakeLLM):
+    """A FakeLLM that also streams: emits the response word by word.
+
+    Exists because `UsageTrackedLLM.stream_complete` is a separate billed
+    path from `complete`, and plain FakeLLM (no `stream_complete`) exercises
+    only the wrapper's fallback branch. Chunking by words is arbitrary; the
+    contract under test is "every chunk reaches on_token and the concatenation
+    equals the returned text", not the chunk boundaries.
+    """
+
+    def __init__(self, responses: list[str] | None = None):
+        super().__init__(responses)
+        self.stream_calls: list[dict[str, Any]] = []
+
+    def stream_complete(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 2048,
+        temperature: float = 0.7,
+        on_token: Any | None = None,
+    ) -> str:
+        self.stream_calls.append({"system": system, "user": user})
+        text = self.responses.pop(0) if self.responses else "{}"
+        if on_token is not None:
+            for word in text.split(" "):
+                on_token(word + " ")
+        return text
+
+
 class FakePlanner:
     """A Planner stand-in that emits whatever sources the test gives it.
 

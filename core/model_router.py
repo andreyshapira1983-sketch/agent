@@ -543,6 +543,99 @@ class UsageTrackedLLM:
                 max_tokens=max_tokens, temperature=temperature,
             )
 
+    def stream_complete(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 2048,
+        temperature: float = 0.7,
+        on_token: Any | None = None,
+    ) -> str:
+        """Route one STREAMED completion through the same billing as `complete`.
+
+        Must exist on this wrapper: without it `__getattr__` hands the name to
+        the raw provider LLM and the call escapes assert_can_start / record
+        entirely — measured 2026-08-08 as unbilled synthesis spend and an
+        unenforceable budget in the REPL's default streamed mode.
+
+        No provider failover here, deliberately: by the time a stream dies,
+        chunks may already have reached the user's screen, and replaying them
+        from a substitute provider would emit the answer twice. The error is
+        recorded and re-raised; the caller's ladder decides what happens next.
+        A provider without `stream_complete` (test doubles; see core/llm.py:384
+        for the same rule inside LLM) falls back to the billed `complete`.
+        """
+        raw_stream = getattr(self._llm, "stream_complete", None)
+        if raw_stream is None:
+            return self.complete(
+                system=system, user=user,
+                max_tokens=max_tokens, temperature=temperature,
+            )
+        provider = str(getattr(self._llm, "provider", self.route.provider) or "")
+        model = str(getattr(self._llm, "model", self.route.model) or "")
+        self.ledger.assert_can_start(
+            role=self.role,
+            provider=provider,
+            model=model,
+            system=system,
+            user=user,
+            max_output_tokens=max_tokens,
+            cost_tier=self.cost_tier,
+        )
+        self.ledger.log_start(
+            role=self.role,
+            provider=provider,
+            model=model,
+            route_reason=self.route.reason,
+            cost_tier=self.cost_tier,
+        )
+        started_at = utc_now_iso()
+        started = time.perf_counter()
+        try:
+            output = raw_stream(
+                system=system, user=user,
+                max_tokens=max_tokens, temperature=temperature,
+                on_token=on_token,
+            )
+        except Exception as exc:
+            self.ledger.record(
+                role=self.role,
+                provider=provider,
+                model=model,
+                route_reason=self.route.reason,
+                cost_tier=self.cost_tier,
+                status="error",
+                input_tokens=0,
+                output_tokens=0,
+                estimated=True,
+                started_at=started_at,
+                completed_at=utc_now_iso(),
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+        input_tokens, output_tokens, estimated = usage_from_llm_or_estimate(
+            self._llm,
+            system=system,
+            user=user,
+            output=output,
+        )
+        self.ledger.record(
+            role=self.role,
+            provider=provider,
+            model=model,
+            route_reason=self.route.reason,
+            cost_tier=self.cost_tier,
+            status="success",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            estimated=estimated,
+            started_at=started_at,
+            completed_at=utc_now_iso(),
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+        return output
+
     def complete(
         self,
         system: str,

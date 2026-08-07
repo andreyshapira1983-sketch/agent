@@ -283,3 +283,27 @@ Retirement is best-effort (`except: pass`) like the rest of the module: queue
 trouble must not eat the answer the user is owed. The retired task keeps its
 report and gains `resumed_by=<new trace_id>`, so the audit trail shows which
 run closed it (`resumable_task_retired` in the journal).
+
+---
+
+## [core/model_router.py](../core/model_router.py) — `UsageTrackedLLM.stream_complete`
+
+**2026-08-08.** The wrapper defined only `complete`; `__getattr__` handed
+`stream_complete` to the raw provider LLM, so every streamed synthesis call
+skipped `assert_can_start`, `log_start` and `record`. Streaming is the REPL
+default: the primary interactive mode under-billed every turn, enforced no cap
+at synthesis, and the synthesis pause checkpoint was unreachable there.
+Measured by probe before fixing (ledger showed only the planner record; a
+budget of one call did not stop a streamed run).
+
+The fix is a real `stream_complete` on the wrapper mirroring `complete`'s
+billing. One deliberate difference, decided at review: **no provider failover
+for streamed calls.** By the time a stream dies, chunks may already be on the
+user's screen; replaying from a substitute provider would emit the answer
+twice. The error is recorded (`status=error`) and re-raised — the synthesis
+ladder owns what happens next. A provider double without `stream_complete`
+falls back to the billed `complete`, the same rule `core/llm.py:384` applies
+inside `LLM` for non-streaming providers.
+
+The file-size ratchet ceiling moved 1800 → 1860 for this: the billed method
+must live on the wrapper, so the growth is the fix, not drift.
