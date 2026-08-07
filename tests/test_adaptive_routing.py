@@ -210,6 +210,50 @@ def _run_with_mock_router(
     return events, for_task_calls
 
 
+class TestChosenTierModelsAreUsed:
+    """The power wire of adaptive routing: the CHOSEN models do the work.
+
+    Measured 2026-08-08: cutting `llm=st._task_planner_llm` (loop_attempt:288)
+    AND `llm=_synth_llm` (loop_synthesis:638) left 221 routing tests green —
+    for_task was still called, its verdict still logged, and its RESULT
+    silently discarded: every run would execute on the default model. One
+    wire past M11: the operator's escalation reached the router, the router
+    picked the deep model, and the loop threw the choice away.
+    """
+
+    def test_planner_and_synthesizer_run_on_the_routed_models(
+        self, tmp_path: Path
+    ) -> None:
+        default_llm = FakeLLM(responses=[])
+        planner_llm = FakeLLM(responses=['{"reasoning":"no tools","sources":[]}'])
+        synth_llm = FakeLLM(responses=[_make_answer("tiered answer")])
+
+        def routed(role, task, *, escalation=None, task_role=None):
+            key = role.value if hasattr(role, "value") else str(role)
+            return planner_llm if key == "planner" else synth_llm
+
+        registry = _make_registry(tmp_path)
+        loop = AgentLoop(
+            registry=registry,
+            policy=PolicyGate(registry),
+            llm=default_llm,
+            logger=TraceLogger(
+                trace_id=new_trace_id(), log_dir=tmp_path / "logs", verbose=False
+            ),
+        )
+        loop.model_router.for_task = routed  # type: ignore[method-assign]
+
+        answer = loop.run("какой статус системы")
+
+        assert planner_llm.calls, "the routed planner model must plan"
+        assert synth_llm.calls, "the routed synthesizer model must synthesize"
+        assert "tiered answer" in answer
+        assert default_llm.calls == [], (
+            "the default model may not be consulted when the router chose "
+            "tier models — a call here means the choice was discarded"
+        )
+
+
 class TestRunAdaptiveRoute:
     def _run_with_mock_router(self, tmp_path: Path, question: str, **kwargs):
         return _run_with_mock_router(tmp_path, question, **kwargs)
