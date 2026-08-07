@@ -102,17 +102,17 @@
       "evidence": {
         "carrier_lifecycle": "tests/test_run_context_and_episode_identity.py — empty outside a run, restored after exit and after an exception, nested restore, no cross-thread clobber",
         "delivery_and_bite": "mutation M3 (2026-08-08): mint run_id without binding run_scope -> 4 red (episode carries no run_id, distinct-run and retry identity tests, autonomous run_id) -> restored green",
-        "usage_ledger_bite": "same mutation left every model_usage test green: spend silently falls back to trace_id; attribution contract is observable and unprotected"
+        "usage_ledger_bite": "closed same day. M3 originally left every model_usage test green (unit tests enter run_scope themselves, so the entry edge was outside their reach). New test test_cycle_spend_is_billed_to_the_run_that_banked_the_episode drives one real cycle and joins the spend to the banked episode by run_id. Fail-before proven: red under M3 (entry edge unbound) AND under M4 (_run_id_for_record ignores the active run -> unit + integration red). Both restored green.",
+        "fallback_semantics": "two poles unit-tested: inside a run -> run_id; outside any run -> session trace_id (test_outside_any_run_the_session_id_is_still_recorded); a pinned sub-agent ledger is not overridden by a surrounding scope (test_an_explicit_ledger_run_id_is_not_overridden_by_a_run_scope)"
       },
       "certified": {
-        "REACHABILITY": "PROVEN",
-        "CAUSALITY": "PROVEN for the episode consumer (M3 both ways)",
-        "SEMANTICS": "UNPROVEN for the usage-ledger consumer — fallback-to-session is designed (model_usage.py:193 docstring) but per-run attribution has no bite",
-        "PROTECTION": "PROVEN for the episode consumer, UNPROVEN for the usage ledger",
-        "verdict": "NOT CERTIFIED — usage-ledger arc open"
+        "REACHABILITY": "PROVEN — probe 2026-08-08: offline cycle writes planner+synthesizer records through the ledger, both consumers reached",
+        "CAUSALITY": "PROVEN — M3 and M4, each both ways, at both consumers",
+        "SEMANTICS": "PROVEN — fallback and pinning both two-pole tested; run_id vs task_id vs trace_id distinction pinned by the identity suite",
+        "PROTECTION": "PROVEN — entry-edge break reddens 5 (4 identity + 1 join), consumer break reddens 2 (unit + join)",
+        "verdict": "PROVEN on all four conditions — first certified CNS arc (scope: entry edge -> ContextVar -> episode + usage-ledger consumers; on_token/deep_escalation travel the same edge but are separate signals with their own open records)"
       },
       "open_items": [
-        "per-run spend attribution: build the bite (a run whose spend lands on trace_id instead of run_id must redden something)",
         "on_token and deep_escalation travel this same entry edge; their delivery is unproven",
         "budget_guard wrapper (app/budget_guard.py:53,75) converts ModelBudgetExceeded into an answer — semantics not yet walked"
       ]
@@ -243,7 +243,7 @@
       "app/daemon.py, app/worker_pool.py (scheduler contour over the same loop)"
     ],
     "clusters": [
-      {"id": "C00", "scope": "entry edges -> run identity -> abort/cancel exits", "status": "UNPROVEN", "opened": "2026-08-08", "proven_arcs": ["run_identity (episode consumer, M3)", "abort_episode_banking (M1+M2)"], "open": ["usage-ledger attribution bite", "on_token / deep_escalation delivery", "budget_guard wrapper semantics", "silent-skip branches of abort banking"]},
+      {"id": "C00", "scope": "entry edges -> run identity -> abort/cancel exits", "status": "UNPROVEN", "opened": "2026-08-08", "proven_arcs": ["run_identity — CERTIFIED, all four conditions (M3, M4, join test)", "abort_episode_banking (M1+M2)"], "open": ["on_token / deep_escalation delivery", "budget_guard wrapper semantics", "silent-skip branches of abort banking"]},
       {"id": "C01", "scope": "_open_run: profile, assumptions registry, checkpoint writer (core/loop_context.py)", "status": "UNPROVEN"},
       {"id": "C02", "scope": "_observe_and_route: goal, question class, role route, model tier choice, deep escalation (core/loop_observe.py)", "status": "UNPROVEN"},
       {"id": "C03", "scope": "derive_completion_contract before any tool runs; ordering claim; consumed in C13", "status": "UNPROVEN"},
@@ -264,6 +264,6 @@
       {"id": "C18", "scope": "future subagent lifecycle ports: mark the boundary so current architecture does not block it; nothing to implement now", "status": "UNPROVEN"}
     ],
     "carriers_not_in_clusters": "state_carriers section above holds failure_history, _step_trigger_tls, _last_step_failure (DEAD); artifacts and chain still owe carrier records",
-    "next_edge": "C00 open item 1: per-run spend attribution bite (run_identity -> model_usage), then close C00 and move to C01"
+    "next_edge": "C00 remaining: budget_guard wrapper semantics and on_token/deep_escalation delivery, then close C00 and move to C01"
   }
 }

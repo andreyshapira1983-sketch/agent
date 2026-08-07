@@ -30,8 +30,13 @@ from pathlib import Path
 
 import pytest
 
-from app.bootstrap import DEFAULT_EPISODIC_MEMORY_PATH, build_agent
+from app.bootstrap import (
+    DEFAULT_EPISODIC_MEMORY_PATH,
+    DEFAULT_MODEL_USAGE_PATH,
+    build_agent,
+)
 from core.loop import AgentLoop
+from core.model_usage import ModelUsageLedger
 from core.run_context import RunContext, current_run, run_scope
 from core.smart_memory import (
     EpisodicMemoryStore,
@@ -151,6 +156,35 @@ def test_retry_keeps_task_id_and_takes_a_fresh_run_id(tmp_path: Path) -> None:
     assert {e.task_id for e in banked} == {"T-7"}
     assert banked[0].run_id != banked[1].run_id, (
         "idempotency keys on run_id, so a retry must not be suppressed"
+    )
+
+
+def test_cycle_spend_is_billed_to_the_run_that_banked_the_episode(tmp_path: Path) -> None:
+    """The join the usage ledger exists for: spend <-> episode, via run_id.
+
+    The unit tests in test_model_usage.py pin `current_run() -> record.run_id`
+    through an explicit `run_scope`, so they stay green when `AgentLoop.run`
+    stops binding identity at the real entry edge — measured 2026-08-08:
+    unbinding the scope in `run()` reddened four episode-identity tests and
+    zero ledger tests, because every record silently fell back to the session
+    `trace_id`. This test closes that hole from the entry edge itself: one
+    real cycle, then the spend it wrote must join to the episode it banked.
+    """
+    agent = _interactive(tmp_path)
+    _drive_one_cycle(agent, "how much is two plus two", task_id="T-55")
+
+    banked = _episodes(tmp_path)
+    assert len(banked) == 1 and banked[0].run_id, "the cycle must bank an identified episode"
+
+    records = ModelUsageLedger(path=tmp_path / DEFAULT_MODEL_USAGE_PATH).load_records()
+    assert records, "even the offline cycle routes planner+synthesizer through the ledger"
+    billed_to = {r.run_id for r in records}
+    assert billed_to == {banked[0].run_id}, (
+        f"spend written during the cycle must be billed to its run, "
+        f"got {billed_to} vs episode {banked[0].run_id!r}"
+    )
+    assert agent.log.trace_id not in billed_to, (
+        "session fallback fired inside a run: the record is unjoinable to its episode"
     )
 
 
