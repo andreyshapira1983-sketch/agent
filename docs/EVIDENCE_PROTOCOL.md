@@ -18,7 +18,7 @@ now rather than rediscovering later.
 | section | on implementation it belongs to |
 |---|---|
 | roles, message shape, evidence types, the check registry, statuses, freshness, chains, rounds, journal | **this document** — mechanics shared by any participant |
-| the sub-agent report contract, the four calibration rates, `unsupported_excuse`, `planned_deviation`, requalification | **[SUBAGENT_LIFECYCLE.md](../knowledge/doctrine/SUBAGENT_LIFECYCLE.md)** — the lifecycle of one subject |
+| task admissibility, the delegator's vector, the report contract, the four calibration rates, `unsupported_excuse`, `planned_deviation`, the stop snapshot, requalification | **[SUBAGENT_LIFECYCLE.md](../knowledge/doctrine/SUBAGENT_LIFECYCLE.md)** — the lifecycle of one subject |
 
 That second document is normative and the agent reads it as doctrine, so nothing
 moves there until it is built. A specification living inside doctrine would be
@@ -353,6 +353,68 @@ parent must not choose which check runs.** A parent free to pick the check picks
 a convenient one. Either the check follows from the claim's type by the
 arbiter's policy, or it was fixed in the task contract before the child started.
 
+### First gate: a task with no acceptance criterion is not delegable
+
+Before any of the machinery below applies, the task itself has to qualify:
+
+> **If a checkable acceptance criterion cannot be stated in advance, the task is
+> not delegated.**
+
+Not "try and see". Not "let the child work out what is wanted". A task must
+first be converted into a form where the arbiter knows what would settle it —
+otherwise what gets delegated is not a task but a vague intention, the child
+returns prose, there is nothing to reproduce, and the whole thing collapses back
+into the parent's judgement.
+
+```
+"improve the code"                                          not delegable
+"reduce the cyclomatic complexity of X below N without
+ changing behaviour; acceptance: named_test A + metric_check B"   delegable
+```
+
+This is a filter on the quality of the request, not on the child. It belongs at
+the gate: the arbiter refuses a task contract with no named check **before** a
+child is started. A task that got through anyway is recorded as
+`undelegatable_task_sent` — and it is a defect of the DELEGATOR.
+
+### Second gate: the parent is accountable too
+
+Everything above measures the executor. Measure only the executor and the
+delegator gets a bad incentive: delegate everything cheaply, blame the failures
+downward. So the parent carries its own vector, kept separate from any child's
+reputation:
+
+```
+delegation_contract_quality    was an acceptance check named up front
+context_sufficiency            was the child given what it needed
+delegation_economics           did delegating cost less than doing it
+verifier_selection_compliance  was the check chosen by policy, not convenience
+unnecessary_delegation_rate    how often a child was called for nothing
+```
+
+The crucial part is **where a failure is charged**. A confirmed
+`insufficient_context` is not "the child could not manage". It is
+`parent_context_failure` — one incident that may leave the child's trust
+untouched and lower the delegator's. Same for `undelegatable_task_sent`.
+
+And the escalation is symmetric to the child's: a parent that repeatedly sends
+unprovable tasks loses **its own right to delegate** before anyone touches its
+children.
+
+Economics need not be exact to be useful:
+
+```
+delegation_total_cost = child_cost
+                      + verification_cost
+                      + parent_coordination_cost
+                      + retry_cost
+```
+
+compared against the estimated or historical cost of doing it centrally. If
+delegation is consistently dearer and buys no extra quality, that role of
+sub-agent is economically pointless — which is a fact about the design, not
+about any child.
+
 ### Calibration becomes four numbers instead of a tone
 
 The lifecycle document already lists Calibration — "can it say *I don't know*,
@@ -556,6 +618,39 @@ arbiter.
 
 Every transition, in both directions, is a journal entry: a fleet's trust
 history is read, not remembered.
+
+### Stopping a child yields a snapshot, not a loss
+
+A timeout or an exhausted budget must not turn evidence already produced into
+rubbish. On being stopped, a child submits:
+
+```
+verified_claims        what the arbiter already accepted
+submitted_unverified   produced, queued, not yet reproduced
+missing_evidence       gaps, with reasons
+next_checks            what to run to continue
+spent_budget           where the money went
+remaining_work         what is left
+```
+
+Facts already confirmed by the arbiter must not depend on whether the child got
+to write a tidy final answer. This is what makes stopping cheap — and a stop
+that is cheap gets used in time, while an expensive one gets postponed exactly
+when postponing is dangerous.
+
+### Two structural limits
+
+**Delegation depth = 1.** The sub-agent lifecycle document already forbids
+recursion structurally; in this protocol's terms the reason is sharper than
+complexity: every additional level of parenthood adds another conflict of
+interest and dilutes accountability, while the arbiter stays single.
+
+**Memory is private; verified facts are shared.** A child works without the
+parent's memory — otherwise it inherits the parent's assumptions and clutter
+along with its knowledge. But a fact the arbiter has reproduced belongs to the
+system: it goes into the journal and any later child may cite it through
+`accepted_log_reference`. Without that, multi-agent work degenerates into paying
+repeatedly for the rediscovery of the same truth.
 
 ### Documents are claims too
 
