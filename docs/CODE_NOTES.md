@@ -260,3 +260,26 @@ suppressions and captures output. File is now clean.
 The rest of the test tree still holds 66 findings of the same family —
 `tests/test_shell_exec.py` (10), `tests/test_learning_planner.py` (9) and a long
 tail. Untouched: unrelated to this work.
+
+---
+
+## [app/budget_guard.py](../app/budget_guard.py) — retiring a resumed pause
+
+**2026-08-08.** A successfully resumed run used to leave its pause record
+behind forever: nothing wrote `paused -> done` for `resume_checkpoint` tasks,
+and the resumed run carries a fresh trace_id that joined to nothing. Measured
+by probe before fixing (pause -> resume -> success -> still listed resumable).
+
+The join is now carried explicitly and in one direction only:
+`ResumeDecision.resumed_paused_trace` (set solely by the paused branch of
+`resolve_resume`) -> `run_one_shot(resumed_from=...)` ->
+`_run_agent_with_budget_guard` -> `_retire_resumed_pause` on the no-exception
+path. Design decision, tested on both poles: retirement happens only when the
+resumed run completes without a new budget stop; a resume that pauses again
+retires nothing — the work is still not done, so the old record stays truthful
+and the second stop queues its own task under the fresh trace.
+
+Retirement is best-effort (`except: pass`) like the rest of the module: queue
+trouble must not eat the answer the user is owed. The retired task keeps its
+report and gains `resumed_by=<new trace_id>`, so the audit trail shows which
+run closed it (`resumable_task_retired` in the journal).

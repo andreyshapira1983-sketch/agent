@@ -32,12 +32,18 @@ def _run_agent_with_budget_guard(
     workspace: Path | None = None,
     stream: bool = True,
     deep_escalation=None,
+    resumed_from: str | None = None,
 ) -> str:
     """Run the agent, optionally streaming synthesis tokens to stdout.
 
     When *stream* is True (default), synthesis tokens are printed to stdout
     as they arrive so the user sees a progressive response.  The full answer
     is still returned for post-processing (memory writes, formatting, etc.).
+
+    *resumed_from* names the paused trace this run resumes (from
+    ``ResumeDecision.resumed_paused_trace``). When the run completes without
+    a new budget stop, the paused task that trace queued is retired; a run
+    that pauses again retires nothing — the work is still not done.
     """
     if stream:
         # Print a blank line before streaming starts so the answer is visually
@@ -56,6 +62,7 @@ def _run_agent_with_budget_guard(
                 on_token=_on_token,
                 deep_escalation=deep_escalation,
             )
+            _retire_resumed_pause(agent, workspace=workspace, resumed_from=resumed_from)
         except ModelBudgetExceeded as exc:
             answer = f"Model budget exceeded: {exc}"
             agent.log.log("model_budget_blocked", {"error": str(exc)})
@@ -72,7 +79,9 @@ def _run_agent_with_budget_guard(
             print()  # newline after streamed tokens
         return answer
     try:
-        return agent.run(user_question=user_question, file_hint=file_hint, deep_escalation=deep_escalation)
+        answer = agent.run(user_question=user_question, file_hint=file_hint, deep_escalation=deep_escalation)
+        _retire_resumed_pause(agent, workspace=workspace, resumed_from=resumed_from)
+        return answer
     except ModelBudgetExceeded as exc:
         message = f"Model budget exceeded: {exc}"
         agent.log.log("model_budget_blocked", {"error": str(exc)})
@@ -84,6 +93,46 @@ def _run_agent_with_budget_guard(
             blocked=exc,
         )
         return message
+
+
+def _retire_resumed_pause(
+    agent: AgentLoop,
+    *,
+    workspace: Path | None,
+    resumed_from: str | None,
+) -> None:
+    """Close the pause record a completed resume run has just made obsolete.
+
+    The resumed run carries a fresh trace_id, so the join to the old paused
+    task goes through ``resumed_from`` — the trace ``resolve_resume`` restored.
+    Best-effort like the rest of this module: queue trouble must not eat the
+    answer the user is owed.
+    """
+    if not resumed_from:
+        return
+    resolved_workspace = _workspace_from_agent(agent, workspace)
+    if resolved_workspace is None:
+        return
+    try:
+        queue = _task_queue_for(agent, resolved_workspace)
+        for task in queue.list(status="paused"):
+            if task.kind != "resume_checkpoint":
+                continue
+            if (task.last_report or {}).get("trace_id") != resumed_from:
+                continue
+            report = dict(task.last_report or {})
+            report["resumed_by"] = getattr(getattr(agent, "log", None), "trace_id", "")
+            queue.mark_done(task.id, report=report)
+            agent.log.log(
+                "resumable_task_retired",
+                {
+                    "task_id": task.id,
+                    "trace_id": resumed_from,
+                    "resumed_by": report["resumed_by"],
+                },
+            )
+    except Exception:
+        pass
 
 
 def _workspace_from_agent(agent: AgentLoop, workspace: Path | None) -> Path | None:

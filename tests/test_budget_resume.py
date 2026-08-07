@@ -16,34 +16,42 @@ from tests.conftest import FakeLLM
 from tools.base import ToolRegistry
 
 
-def _agent_with_exhausted_model_budget(workspace: Path) -> tuple[AgentLoop, FakeLLM]:
+def _build_guarded_agent(
+    workspace: Path,
+    llm: FakeLLM,
+    limits: ModelUsageLimits,
+    *,
+    preused_calls: int = 0,
+    verifier_enabled: bool = False,
+    max_replan_attempts: int = 1,
+) -> AgentLoop:
     registry = ToolRegistry()
-    llm = FakeLLM(responses=['{"reasoning":"no tools","sources":[]}'])
     ledger = ModelUsageLedger(
         path=workspace / "data" / "model_usage.jsonl",
-        limits=ModelUsageLimits(max_calls=1),
+        limits=limits,
     )
-    ledger.record(
-        role="bootstrap",
-        provider="fake",
-        model="fake-1",
-        route_reason="test",
-        cost_tier="low",
-        status="success",
-        input_tokens=1,
-        output_tokens=1,
-        estimated=True,
-        started_at="2026-06-29T00:00:00+00:00",
-        completed_at="2026-06-29T00:00:00+00:00",
-        duration_ms=1,
-    )
+    for _ in range(preused_calls):
+        ledger.record(
+            role="bootstrap",
+            provider="fake",
+            model="fake-1",
+            route_reason="test",
+            cost_tier="low",
+            status="success",
+            input_tokens=1,
+            output_tokens=1,
+            estimated=True,
+            started_at="2026-06-29T00:00:00+00:00",
+            completed_at="2026-06-29T00:00:00+00:00",
+            duration_ms=1,
+        )
     router = ModelRouter(
         default_provider="fake",
         default_model="fake-1",
         llm_factory=lambda _provider, _model: llm,
         usage_ledger=ledger,
     )
-    agent = AgentLoop(
+    return AgentLoop(
         registry=registry,
         policy=PolicyGate(registry),
         llm=llm,
@@ -52,12 +60,27 @@ def _agent_with_exhausted_model_budget(workspace: Path) -> tuple[AgentLoop, Fake
         memory=None,
         persistent_store=None,
         source_registry_store=None,
-        max_replan_attempts=1,
-        verifier_enabled=False,
+        max_replan_attempts=max_replan_attempts,
+        verifier_enabled=verifier_enabled,
         clarification_enabled=False,
         odd_enabled=False,
     )
+
+
+def _agent_with_exhausted_model_budget(workspace: Path) -> tuple[AgentLoop, FakeLLM]:
+    llm = FakeLLM(responses=['{"reasoning":"no tools","sources":[]}'])
+    agent = _build_guarded_agent(
+        workspace, llm, ModelUsageLimits(max_calls=1), preused_calls=1
+    )
     return agent, llm
+
+
+def _agent_with_free_budget(workspace: Path) -> AgentLoop:
+    """A fresh agent whose run can complete: planner + synthesizer both fit."""
+    llm = FakeLLM(
+        responses=['{"reasoning":"no tools","sources":[]}', "resumed answer text"]
+    )
+    return _build_guarded_agent(workspace, llm, ModelUsageLimits())
 
 
 def test_budget_denial_before_planner_persists_resumable_checkpoint_and_task(
@@ -131,6 +154,155 @@ def test_successful_budget_guard_creates_no_resumable_item(
     assert not (workspace / "data" / "runtime_tasks.jsonl").exists()
     checkpoint_path = workspace / "logs" / f"checkpoints_{agent.log.trace_id}.jsonl"
     assert not checkpoint_path.exists()
+
+
+def test_budget_stop_in_synthesis_saves_the_synthesis_phase(workspace: Path):
+    """The catch site at loop_synthesis:684, reached for the first time.
+
+    Budget of one call: the planner spends it, the synthesizer is denied
+    before its LLM call. The rich in-cycle checkpoint must name the phase —
+    without the catch site the guard's thin fallback would say budget_guard.
+    """
+    from core.checkpoint import CheckpointLoader
+
+    llm = FakeLLM(responses=['{"reasoning":"no tools","sources":[]}'])
+    agent = _build_guarded_agent(workspace, llm, ModelUsageLimits(max_calls=1))
+
+    answer = _run_agent_with_budget_guard(
+        agent, user_question="Explain the repository status",
+        workspace=workspace, stream=False,
+    )
+
+    assert answer.startswith("Model budget exceeded")
+    ctx = CheckpointLoader(workspace / "logs").load(agent.log.trace_id)
+    assert ctx is not None and ctx.last_phase == "paused"
+    assert ctx.paused["current_phase"] == "synthesis"
+    assert ctx.paused["blocked_model"]["role"] == "synthesizer"
+    queue = TaskQueueStore(workspace / "data" / "runtime_tasks.jsonl")
+    assert len(queue.list(status="paused")) == 1
+
+
+def test_budget_stop_in_verify_replan_saves_the_verification_phase(workspace: Path):
+    """The catch site at loop_verify_replan:328, reached for the first time.
+
+    Two calls fit (planner, synthesizer); the synthesized answer cites a web
+    URL with no matching evidence, so the verify loop asks the planner for a
+    fetch plan — and that third call is denied.
+    """
+    from core.checkpoint import CheckpointLoader
+
+    llm = FakeLLM(
+        responses=[
+            '{"reasoning":"no tools","sources":[]}',
+            "The fact [web:http://example.com/a] holds.",
+        ]
+    )
+    agent = _build_guarded_agent(
+        workspace,
+        llm,
+        ModelUsageLimits(max_calls=2),
+        verifier_enabled=True,
+        # Room to replan: with a budget of 1 the policy aborts the verify loop
+        # (abort_exhausted) before the planner call this test needs to reach.
+        max_replan_attempts=3,
+    )
+
+    answer = _run_agent_with_budget_guard(
+        agent, user_question="Explain the repository status",
+        workspace=workspace, stream=False,
+    )
+
+    assert answer.startswith("Model budget exceeded")
+    ctx = CheckpointLoader(workspace / "logs").load(agent.log.trace_id)
+    assert ctx is not None and ctx.last_phase == "paused"
+    assert ctx.paused["current_phase"] == "verification_replan"
+    assert ctx.paused["blocked_model"]["role"] == "planner"
+
+
+def test_successful_resume_retires_the_paused_task(workspace: Path):
+    """The back half of the pause arc: success must close what the stop opened.
+
+    Measured 2026-08-08 before this test existed: pause -> resume -> success
+    left the task `paused` forever, because nothing wrote paused->done and the
+    resumed run carries a fresh trace_id that joins to nothing. The join is
+    therefore carried explicitly: `resolve_resume` names the paused trace it
+    restored, and the guard retires that task once the resumed run completes
+    without a new budget stop.
+    """
+    from cli.resume import resolve_resume
+
+    agent, _llm = _agent_with_exhausted_model_budget(workspace)
+    _run_agent_with_budget_guard(
+        agent,
+        user_question="Explain the repository status",
+        workspace=workspace,
+        stream=False,
+    )
+    queue = TaskQueueStore(workspace / "data" / "runtime_tasks.jsonl")
+    assert queue.list(status="paused"), "precondition: the stop queued a paused task"
+
+    decision = resolve_resume(
+        agent.log.trace_id, workspace=workspace, ask=None, file_hint=None
+    )
+    assert decision.ask and "Resume the interrupted task" in decision.ask
+    assert decision.resumed_paused_trace == agent.log.trace_id, (
+        "the decision must name the paused trace it restored — "
+        "this is the only join between the old task and the new run"
+    )
+
+    resumed = _agent_with_free_budget(workspace)
+    answer = _run_agent_with_budget_guard(
+        resumed,
+        user_question=decision.ask,
+        workspace=workspace,
+        stream=False,
+        resumed_from=decision.resumed_paused_trace,
+    )
+    assert not answer.startswith("Model budget exceeded")
+
+    assert queue.list(status="paused") == [], (
+        "the resumed run completed; its pause record may not stay resumable"
+    )
+    done = queue.list(status="done")
+    assert len(done) == 1 and done[0].kind == "resume_checkpoint"
+    assert done[0].last_report["resumed_by"] == resumed.log.trace_id
+
+
+def test_resume_that_pauses_again_keeps_the_old_task(workspace: Path):
+    """The other pole: a resume that hits the budget again retires nothing.
+
+    The work is still not done, so the old pause record must stay truthful —
+    and the second stop queues its own task under the fresh trace.
+    """
+    from cli.resume import resolve_resume
+
+    agent, _llm = _agent_with_exhausted_model_budget(workspace)
+    _run_agent_with_budget_guard(
+        agent,
+        user_question="Explain the repository status",
+        workspace=workspace,
+        stream=False,
+    )
+    queue = TaskQueueStore(workspace / "data" / "runtime_tasks.jsonl")
+    old_ids = {t.id for t in queue.list(status="paused")}
+    assert old_ids
+
+    decision = resolve_resume(
+        agent.log.trace_id, workspace=workspace, ask=None, file_hint=None
+    )
+    resumed, _llm2 = _agent_with_exhausted_model_budget(workspace)
+    answer = _run_agent_with_budget_guard(
+        resumed,
+        user_question=decision.ask,
+        workspace=workspace,
+        stream=False,
+        resumed_from=decision.resumed_paused_trace,
+    )
+    assert answer.startswith("Model budget exceeded")
+
+    paused_now = {t.id for t in queue.list(status="paused")}
+    assert old_ids <= paused_now, "an unfinished pause may not be retired"
+    assert queue.list(status="done") == []
 
 
 def test_resume_prompt_includes_saved_budget_context(workspace: Path):
