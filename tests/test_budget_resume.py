@@ -279,6 +279,31 @@ def test_streamed_cycle_is_blocked_and_paused_on_an_exhausted_budget(workspace: 
     assert ctx.paused["blocked_model"]["role"] == "synthesizer"
 
 
+def test_completed_cycle_checkpoints_the_answer_it_returned(workspace: Path):
+    """The respond checkpoint must carry the REAL answer, not a shape of one.
+
+    `--resume <trace>` of a completed run replays `ctx.answer` verbatim
+    (cli/resume.py branch 4). Measured 2026-08-08: blanking the answer at the
+    loop's save_respond call left 242 checkpoint/resume/cli tests green —
+    every replay test wrote its checkpoint by hand, never through the loop.
+    """
+    from core.checkpoint import CheckpointLoader
+
+    llm = FakeLLM(
+        responses=['{"reasoning":"no tools","sources":[]}', "checkpointed answer body"]
+    )
+    agent = _build_guarded_agent(workspace, llm, ModelUsageLimits())
+
+    answer = agent.run(user_question="Explain the repository status")
+
+    ctx = CheckpointLoader(workspace / "logs").load(agent.log.trace_id)
+    assert ctx is not None, "a completed cycle must leave a loadable checkpoint"
+    assert answer.strip() and ctx.answer == answer, (
+        "the replay contract: what --resume would print must be what run() returned"
+    )
+    assert ctx.question == "Explain the repository status"
+
+
 def test_successful_resume_retires_the_paused_task(workspace: Path):
     """The back half of the pause arc: success must close what the stop opened.
 

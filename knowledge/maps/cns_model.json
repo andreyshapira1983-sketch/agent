@@ -210,6 +210,70 @@
         "verdict": "PROVEN on all four conditions — scope: entry edge to router, both roles"
       }
     },
+    "user_profile_load": {
+      "producer": "_open_run (core/loop_context.py:247): store.load_or_default -> last_user_profile + user_profile_load event",
+      "carrier": "instance field last_user_profile; refreshed per run at open, overwritten by the tail after the update write",
+      "consumers": [
+        "synthesis prompt <user_profile> block (loop_synthesis.py:192,204) — style only",
+        "language bridge into assumption extraction (loop_context.py:274)",
+        "tail update base (loop_run_tail.py:231) — closes the learning loop"
+      ],
+      "evidence": {
+        "immunity_measured": "M13 (cut the load): interaction counts kept accumulating everywhere — the store reloads itself when base=None (user_profile.py:392) and the tail refreshes the field within one instance. The load's ONLY non-redundant consumer is the FIRST turn of a restarted agent: its prompt block and language bridge",
+        "bites": "existing test_profile_load_event_emitted (the event); new test_restarted_loop_first_turn_reads_the_stored_profile — a fresh loop over an existing profile must show the stored style to the very first synthesis call; red under M13, green restored"
+      },
+      "certified": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN — M13 both ways against the restart bite",
+        "SEMANTICS": "PROVEN — the redundancy is now written down instead of assumed: accumulation does not depend on this arc, turn-one style does",
+        "PROTECTION": "PROVEN",
+        "verdict": "PROVEN on all four conditions"
+      },
+      "bite_classes": "M13 — Behavioral (the stored style text reaches the first model call); the event test — Behavioral for observability only, it cannot see delivery"
+    },
+    "assumption_seeding": {
+      "producer": "_open_run: fresh AssumptionRegistry per run (MIR-027 — the store is an archive, not an input) seeded by extract_from_question with the profile's language as a higher-confidence signal",
+      "carrier": "_run_assumptions handed to AttemptState, _run_assumptions_current for synthesis, _run_assumptions into the tail",
+      "consumers": [
+        "attempt loop adds plan assumptions and logs assumptions_registered when non-empty (loop_attempt.py:374-380)",
+        "synthesis <assumptions> block (loop_synthesis.py:209)",
+        "tail: last_assumptions + archive write under may_assumptions (loop_run_tail.py:251)"
+      ],
+      "evidence": {
+        "M14": "2026-08-08: seed the registry with [] -> 5 red across the existing suite: the current goal's assumptions stop reaching the LLM prompt, the archive loses the first goal's rows, an unrelated second goal no longer provably starts clean, plus two in memory wiring — the arc was already held end-to-end",
+        "failure_semantics": "extraction crash -> _sensor_failed('assumption_extraction') — reported, not swallowed; the comment carries the measurement that silence used to be indistinguishable from nothing-to-assume"
+      },
+      "certified": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN — M14",
+        "SEMANTICS": "PROVEN for freshness, prompt delivery and archive; UNPROVEN for the language-bridge sub-wire alone (no test distinguishes profile-informed extraction from heuristic extraction)",
+        "PROTECTION": "PROVEN",
+        "verdict": "PROVEN on all four conditions, one named sub-wire open"
+      },
+      "bite_classes": "M14 — Behavioral throughout: prompt content, archive rows, cross-goal cleanliness"
+    },
+    "checkpoint_phases": {
+      "producer": "_open_run builds CheckpointWriter (or a NoOp sentinel for loggers without trace_id/log_dir — production loggers always have both, PERIPHERAL)",
+      "carrier": "_cp threaded through AttemptState / SynthesisState / VerifyState and the tail",
+      "writers": [
+        "save_observe (loop_observe.py:83)", "save_plan (loop_attempt.py:364)",
+        "save_act (loop_attempt.py:454)", "save_respond (loop_run_tail.py:168)",
+        "save_paused (three catch sites, certified in budget_stop_resume)"
+      ],
+      "consumer": "cli/resume.py: observe feeds the question, respond feeds the cached-answer replay, paused feeds the budget restore; act records surface only as an artifact list in a stderr notice",
+      "evidence": {
+        "M15": "2026-08-08: blank the answer at the loop's save_respond -> 242 checkpoint/resume/cli tests stayed green — every replay test wrote its checkpoint BY HAND, never through the loop. New bite: a completed cycle's loadable checkpoint must carry the exact answer run() returned; red under M15, green restored",
+        "observe_paused": "bitten through the loop by tests/test_budget_resume.py (rows ['observe','paused'], phase fidelity M7-M9)"
+      },
+      "certified": {
+        "REACHABILITY": "PROVEN for observe, respond, paused through the real loop; UNPROVEN for plan and act (no consumer-side assertion exists)",
+        "CAUSALITY": "PROVEN — M15 both ways on the replay wire",
+        "SEMANTICS": "PROVEN for the replay contract (what --resume prints is what run() returned); plan/act row content UNPROVEN",
+        "PROTECTION": "PROVEN for observe/respond/paused wires",
+        "verdict": "NOT CERTIFIED — plan/act wires open (thin consumers: an artifact list in a notice), the rest proven"
+      },
+      "bite_classes": "M15 — Behavioral: ctx.answer equality against the returned answer"
+    },
     "unresolved_citation": {
       "producer": "core/verifier.py::extract_unresolved_web_urls (detector)",
       "carrier": "failure_history + local unresolved_urls list",
@@ -319,7 +383,7 @@
     ],
     "clusters": [
       {"id": "C00", "scope": "entry edges -> run identity -> abort/cancel exits", "status": "PROVEN", "opened": "2026-08-08", "closed": "2026-08-08", "proven_arcs": ["run_identity — CERTIFIED (M3, M4, join test)", "abort_episode_banking — CERTIFIED (M1, M2, M12, both silent-skip poles)", "budget_stop_resume — CERTIFIED, streamed and plain (M5-M9, both retirement poles, all three catch sites)", "on_token_streaming — CERTIFIED; billing-bypass defect fixed on the operator's verdict, six fail-before tests", "deep_escalation_delivery — CERTIFIED (M11, identity-preserving delivery to both roles)"], "closure_note": "Five arcs; eleven numbered mutations (M1-M9, M11, M12 — the count was once written as twelve, corrected 2026-08-08) plus the streaming fail-before (the wrapper method absent IS the mutant state). Every bite retro-classified per the map's protection scale: all Behavioral, two with stated caveats (M6 reads the branch through the operator-facing notice; M11's consumer is a recorder). Two defects found by measurement and fixed on the operator's verdict (a resumed pause never retired; streamed synthesis escaped the budget wrapper). PROVEN means every arc this walk found is certified — not that no sixth arc exists; the discovery rule for entry-edge arcs was reading run()'s signature and exception paths."},
-      {"id": "C01", "scope": "_open_run: profile, assumptions registry, checkpoint writer (core/loop_context.py)", "status": "UNPROVEN"},
+      {"id": "C01", "scope": "_open_run: profile, assumptions registry, checkpoint writer (core/loop_context.py)", "status": "PROVEN", "opened": "2026-08-08", "closed": "2026-08-08", "proven_arcs": ["user_profile_load — CERTIFIED (M13; the load's real consumer turned out to be turn one after a restart — accumulation is provably immune to it)", "assumption_seeding — CERTIFIED, one named sub-wire open (M14 -> 5 red in the existing suite)", "checkpoint_phases — NOT CERTIFIED: observe/respond/paused wires proven (M15 found the respond wire naked under 242 green tests), plan/act wires open with thin consumers"], "closure_note": "Three mutations (M13-M15), two new bites, no defects requiring a fix: the one surprise (profile load redundant for accumulation) is a semantics correction now written down. plan/act checkpoint rows stay honestly UNPROVEN."},
       {"id": "C02", "scope": "_observe_and_route: goal, question class, role route, model tier choice, deep escalation (core/loop_observe.py)", "status": "UNPROVEN"},
       {"id": "C03", "scope": "derive_completion_contract before any tool runs; ordering claim; consumed in C13", "status": "UNPROVEN"},
       {"id": "C04", "scope": "admission gates: _odd_gate, _clarification_gate (core/loop_gates.py)", "status": "UNPROVEN"},
@@ -339,6 +403,6 @@
       {"id": "C18", "scope": "future subagent lifecycle ports: mark the boundary so current architecture does not block it; nothing to implement now", "status": "UNPROVEN"}
     ],
     "carriers_not_in_clusters": "state_carriers section above holds failure_history, _step_trigger_tls, _last_step_failure (DEAD); artifacts and chain still owe carrier records",
-    "next_edge": "C01: _open_run (core/loop_context.py) — profile, assumptions registry, checkpoint writer; what each hands the run and who downstream depends on it."
+    "next_edge": "C02: _observe_and_route (core/loop_observe.py) — goal, question class, role route, model tier choice; the adaptive_route event and the TypeError-propagates contract."
   }
 }
