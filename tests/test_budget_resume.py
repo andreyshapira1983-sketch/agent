@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from app.budget_guard import _run_agent_with_budget_guard
 from cli.command_dispatch import handle_meta_command
 from cli.resume import _resume_question_from_checkpoint
@@ -217,6 +219,64 @@ def test_budget_stop_in_verify_replan_saves_the_verification_phase(workspace: Pa
     assert ctx is not None and ctx.last_phase == "paused"
     assert ctx.paused["current_phase"] == "verification_replan"
     assert ctx.paused["blocked_model"]["role"] == "planner"
+
+
+def test_streamed_cycle_bills_the_synthesizer_too(workspace: Path):
+    """The streamed path wears the same budget wrapper as the plain one.
+
+    Measured 2026-08-08 before the fix: a streamed cycle left only the
+    planner record — stream_complete fell through __getattr__ to the raw
+    provider LLM, past assert_can_start and record. Streaming is the REPL
+    default, so this is the primary interactive mode's billing.
+    """
+    from tests.conftest import StreamingFakeLLM
+
+    llm = StreamingFakeLLM(
+        responses=['{"reasoning":"no tools","sources":[]}', "streamed answer body"]
+    )
+    agent = _build_guarded_agent(workspace, llm, ModelUsageLimits())
+    tokens: list[str] = []
+
+    answer = agent.run(
+        user_question="Explain the repository status", on_token=tokens.append
+    )
+
+    assert tokens and "".join(tokens).strip() == answer.strip()
+    ledger = ModelUsageLedger(path=workspace / "data" / "model_usage.jsonl")
+    roles = [r.role for r in ledger.load_records()]
+    assert roles == ["planner", "synthesizer"], (
+        f"streamed synthesis must be billed like plain synthesis, got {roles}"
+    )
+
+
+def test_streamed_cycle_is_blocked_and_paused_on_an_exhausted_budget(workspace: Path):
+    """The synthesis pause arc must exist in streamed mode too.
+
+    Before the fix the streamed run COMPLETED on a budget of one call —
+    no pre-flight ran, so no ModelBudgetExceeded, no pause checkpoint, no
+    resumable task, while the non-streamed run was blocked and paused.
+    """
+    from core.checkpoint import CheckpointLoader
+    from core.model_usage import ModelBudgetExceeded
+
+    from tests.conftest import StreamingFakeLLM
+
+    llm = StreamingFakeLLM(
+        responses=['{"reasoning":"no tools","sources":[]}', "never streamed"]
+    )
+    agent = _build_guarded_agent(workspace, llm, ModelUsageLimits(max_calls=1))
+    tokens: list[str] = []
+
+    with pytest.raises(ModelBudgetExceeded):
+        agent.run(
+            user_question="Explain the repository status", on_token=tokens.append
+        )
+
+    assert tokens == [], "no token may stream once the budget is exhausted"
+    ctx = CheckpointLoader(workspace / "logs").load(agent.log.trace_id)
+    assert ctx is not None and ctx.last_phase == "paused"
+    assert ctx.paused["current_phase"] == "synthesis"
+    assert ctx.paused["blocked_model"]["role"] == "synthesizer"
 
 
 def test_successful_resume_retires_the_paused_task(workspace: Path):

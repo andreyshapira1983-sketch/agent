@@ -8,7 +8,7 @@ from core.budget_ledger import BudgetLedger, BudgetWindow
 from core.model_router import ModelRole, ModelRouter
 from core.model_usage import ModelBudgetExceeded, ModelUsageLedger, ModelUsageLimits
 from core.state_integrity import decode_state_row
-from tests.conftest import FakeLLM
+from tests.conftest import FakeLLM, StreamingFakeLLM
 
 
 class UsageLLM(FakeLLM):
@@ -324,6 +324,99 @@ def test_router_complete_blocks_before_llm_call_when_estimate_exceeds_cap(tmp_pa
 
     assert exploding.completed is False
     assert ledger.snapshot()["totals"]["calls"] == 0
+
+
+# ---------------------------------------------------------------------------
+# The streamed path is billed exactly like the plain one.
+#
+# UsageTrackedLLM used to define only `complete`; `__getattr__` handed
+# `stream_complete` to the raw provider LLM, so every streamed call skipped
+# assert_can_start, log_start and record. Streaming is the REPL default, so
+# the primary interactive mode under-billed every turn and enforced no cap at
+# synthesis. Measured 2026-08-08 before these tests existed.
+# ---------------------------------------------------------------------------
+
+
+def _tracked(llm, ledger):
+    router = ModelRouter(
+        default_provider="fake",
+        default_model="fake-1",
+        llm_factory=lambda provider, model: llm,
+        usage_ledger=ledger,
+    )
+    return router.for_role(ModelRole.SYNTHESIZER)
+
+
+def test_stream_complete_records_usage_and_delivers_tokens(tmp_path: Path):
+    llm = StreamingFakeLLM(["streamed answer body"])
+    ledger = ModelUsageLedger(path=tmp_path / "usage.jsonl")
+    seen: list[str] = []
+
+    out = _tracked(llm, ledger).stream_complete(
+        system="s", user="u", on_token=seen.append
+    )
+
+    assert out == "streamed answer body"
+    assert "".join(seen).strip() == out, "every chunk must reach the callback"
+    assert [r.role for r in ledger.records] == ["synthesizer"], (
+        "the streamed call must leave a ledger record like any other call"
+    )
+    assert ledger.records[-1].status == "success"
+    assert ledger.records[-1].total_tokens > 0
+
+
+def test_stream_complete_blocks_before_streaming_when_budget_exhausted(tmp_path: Path):
+    class ExplodingStreamLLM(StreamingFakeLLM):
+        def stream_complete(self, *args, **kwargs) -> str:
+            raise AssertionError("stream must not start when pre-flight blocks")
+
+    llm = ExplodingStreamLLM(["nope"])
+    ledger = ModelUsageLedger(
+        path=tmp_path / "usage.jsonl", limits=ModelUsageLimits(max_cost_units=5)
+    )
+
+    with pytest.raises(ModelBudgetExceeded, match="would exhaust"):
+        _tracked(llm, ledger).stream_complete(system="s", user="u", max_tokens=4096)
+
+    assert ledger.snapshot()["totals"]["calls"] == 0
+
+
+def test_stream_complete_records_the_error_when_the_stream_dies(tmp_path: Path):
+    class DyingStreamLLM(StreamingFakeLLM):
+        def stream_complete(self, *args, **kwargs) -> str:
+            raise RuntimeError("connection torn mid-stream")
+
+    llm = DyingStreamLLM(["nope"])
+    ledger = ModelUsageLedger(path=tmp_path / "usage.jsonl")
+
+    with pytest.raises(RuntimeError, match="torn mid-stream"):
+        _tracked(llm, ledger).stream_complete(system="s", user="u")
+
+    assert [r.status for r in ledger.records] == ["error"], (
+        "a stream that died after the pre-flight still spent tokens; "
+        "the ledger must carry the error record"
+    )
+
+
+def test_stream_complete_falls_back_to_billed_complete_without_provider_streaming(
+    tmp_path: Path,
+):
+    """A provider double with no stream_complete still answers AND still bills.
+
+    Mirrors core/llm.py:384 — providers that cannot stream fall back to
+    complete. The wrapper must do the same instead of raising AttributeError,
+    and the fallback call must go through its own billed path.
+    """
+    llm = FakeLLM(["plain answer"])  # no stream_complete at all
+    ledger = ModelUsageLedger(path=tmp_path / "usage.jsonl")
+    seen: list[str] = []
+
+    out = _tracked(llm, ledger).stream_complete(
+        system="s", user="u", on_token=seen.append
+    )
+
+    assert out == "plain answer"
+    assert [r.role for r in ledger.records] == ["synthesizer"]
 
 
 # ---------------------------------------------------------------------------

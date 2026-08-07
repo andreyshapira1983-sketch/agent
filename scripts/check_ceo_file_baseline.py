@@ -41,7 +41,7 @@ WATCH: dict[str, int] = {
     "core/autonomous_runtime.py": 1500,    # measured 1495; aspiration 1150
     "core/smart_memory.py": 1900,          # measured 1861 after the causal-credit split + outcome extraction
     "core/self_build_producer.py": 1841,   # 1860 → 1841: reply diagnosis moved out to core/builder_reply_diagnosis.py (MIR-084)
-    "core/model_router.py": 1800,          # measured 1719 — new watch
+    "core/model_router.py": 1860,          # 1800 → 1860: UsageTrackedLLM.stream_complete added (2026-08-08) — the streamed path used to escape billing via __getattr__; the billed method must live on the wrapper, so the growth is the fix, not drift
 }
 
 
