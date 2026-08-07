@@ -26,7 +26,7 @@ import pytest
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SCRIPT = os.path.join(_ROOT, "scripts", "agent_anatomy_check.py")
 _GENERATOR = os.path.join(_ROOT, "scripts", "gen_anatomy.py")
-_DOC = os.path.join(_ROOT, "docs", "AGENT_ANATOMY.md")
+_DOC = os.path.join(_ROOT, "knowledge", "generated", "AGENT_ANATOMY.md")
 
 
 def _load_module():
@@ -91,7 +91,7 @@ def test_the_committed_map_is_exactly_what_the_generator_emits():
     with open(_DOC, encoding="utf-8") as handle:
         committed = handle.read()
     assert gen.build_document() == committed, (
-        "docs/AGENT_ANATOMY.md differs from `python scripts/gen_anatomy.py`. "
+        "knowledge/generated/AGENT_ANATOMY.md differs from `python scripts/gen_anatomy.py`. "
         "Either regenerate it, or — if a new core/ module needs a home — add it "
         "to GROUPS in scripts/gen_anatomy.py first."
     )

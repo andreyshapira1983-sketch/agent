@@ -174,5 +174,5 @@ budget, and self-directed multi-agent coordination. See
 - Project Intelligence scanners, graph UI, or agent integration (Track H).
 
 _Source of facts: repository code as of the referencing commit + module index
-in `docs/AGENT_ANATOMY.md`. When this file and code disagree, code wins and this
+in `AGENT_ANATOMY.md`. When this file and code disagree, code wins and this
 file should be corrected._

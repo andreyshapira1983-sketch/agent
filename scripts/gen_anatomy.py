@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate docs/AGENT_ANATOMY.md as a grouped module index.
+"""Generate knowledge/generated/AGENT_ANATOMY.md as a grouped module index.
 
 Groups the flat core/*.py modules under the architecture sections (see
 "архитектура автономного Агента.txt" / AGENT_DOCTRINE) so the anatomy map is
@@ -23,7 +23,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: asserts the two agree. Measured 2026-08-07: moving the writer alone left the
 #: whole suite green — the checker went on reading a file nobody updated any
 #: more, and both halves looked healthy on their own.
-DOC_PATH = os.path.join(ROOT, "docs", "AGENT_ANATOMY.md")
+DOC_PATH = os.path.join(ROOT, "knowledge", "generated", "AGENT_ANATOMY.md")
 CORE = os.path.join(ROOT, "core")
 
 # Ordered logical groups. Each module name may appear in exactly one group.
@@ -221,7 +221,7 @@ def main() -> int:
     with open(DOC_PATH, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
     print(
-        f"Wrote docs/AGENT_ANATOMY.md: {len(_actual_modules())} modules, "
+        f"Wrote knowledge/generated/AGENT_ANATOMY.md: {len(_actual_modules())} modules, "
         f"{len(GROUPS)} groups."
     )
     return 0

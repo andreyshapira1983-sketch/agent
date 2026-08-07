@@ -310,7 +310,7 @@ def test_new_core_module_stems_lists_only_core_py_files():
     files = [
         {"path": "core/x.py", "content": ""},
         {"path": "core/x_helpers.py", "content": ""},
-        {"path": "docs/AGENT_ANATOMY.md", "content": ""},
+        {"path": "knowledge/generated/AGENT_ANATOMY.md", "content": ""},
         {"path": "cli/thing.py", "content": ""},
         {"path": "core/sub/pkg.py", "content": ""},
     ]
@@ -325,10 +325,10 @@ def test_sync_anatomy_index_appends_row_for_new_module():
             {"path": "core/sample_big_helpers.py", "content": "def a():\n    return 1\n"},
         ],
     }
-    reader = lambda p: _ANATOMY_DOC if p == "docs/AGENT_ANATOMY.md" else None
+    reader = lambda p: _ANATOMY_DOC if p == "knowledge/generated/AGENT_ANATOMY.md" else None
     _sync_anatomy_index(build, "core/sample_big.py", reader)
     doc = next(
-        f["content"] for f in build["files"] if f["path"] == "docs/AGENT_ANATOMY.md"
+        f["content"] for f in build["files"] if f["path"] == "knowledge/generated/AGENT_ANATOMY.md"
     )
     import re
 
@@ -347,10 +347,10 @@ def test_sync_anatomy_index_noop_when_already_documented():
             {"path": "core/sample_big_helpers.py", "content": "x = 1\n"},
         ],
     }
-    reader = lambda p: doc if p == "docs/AGENT_ANATOMY.md" else None
+    reader = lambda p: doc if p == "knowledge/generated/AGENT_ANATOMY.md" else None
     _sync_anatomy_index(build, "core/sample_big.py", reader)
     # no anatomy doc added to the proposal (already in sync)
-    assert all(f["path"] != "docs/AGENT_ANATOMY.md" for f in build["files"])
+    assert all(f["path"] != "knowledge/generated/AGENT_ANATOMY.md" for f in build["files"])
 
 
 def test_sync_anatomy_index_skips_when_doc_unavailable():
@@ -362,7 +362,7 @@ def test_sync_anatomy_index_skips_when_doc_unavailable():
         ],
     }
     _sync_anatomy_index(build, "core/sample_big.py", lambda p: None)
-    assert all(f["path"] != "docs/AGENT_ANATOMY.md" for f in build["files"])
+    assert all(f["path"] != "knowledge/generated/AGENT_ANATOMY.md" for f in build["files"])
 
 
 def test_split_registers_new_core_module_in_anatomy_index_end_to_end(workspace: Path):
@@ -391,7 +391,7 @@ def test_split_registers_new_core_module_in_anatomy_index_end_to_end(workspace: 
     def reader(p: str):
         if p == target_rel:
             return current
-        if p == "docs/AGENT_ANATOMY.md":
+        if p == "knowledge/generated/AGENT_ANATOMY.md":
             return _ANATOMY_DOC
         return None
 
@@ -412,7 +412,7 @@ def test_split_registers_new_core_module_in_anatomy_index_end_to_end(workspace: 
     assert paths == [
         "core/sample_big.py",
         "core/sample_big_helpers.py",
-        "docs/AGENT_ANATOMY.md",
+        "knowledge/generated/AGENT_ANATOMY.md",
     ]
-    doc = next(f["content"] for f in files if f["path"] == "docs/AGENT_ANATOMY.md")
+    doc = next(f["content"] for f in files if f["path"] == "knowledge/generated/AGENT_ANATOMY.md")
     assert "core/sample_big_helpers" in doc

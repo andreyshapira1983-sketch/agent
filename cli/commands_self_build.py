@@ -6,7 +6,7 @@ at most one validated low-risk full-content proposal and drops it into the
 approval inbox as an ``operation="self_apply_lane.run"`` item.
 
 The Manager picks its target + diagnosis from a *grounded* backlog candidate
-(TECH_DEBT.md / docs/AGENT_ANATOMY.md) by default — it never invents a diagnosis
+(TECH_DEBT.md / knowledge/generated/AGENT_ANATOMY.md) by default — it never invents a diagnosis
 via the LLM. When the grounded path yields no publishable target (empty backlog,
 or a candidate that is off-allowlist / critical) the command returns ``no_patch``
 with the precise grounded reason instead of falling back to the LLM.

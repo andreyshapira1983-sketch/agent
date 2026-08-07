@@ -590,7 +590,8 @@ def _write_self_build_docs_pilot_signal(
     proposal.parent.mkdir(parents=True)
     proposal.write_text(_SELF_BUILD_PROPOSAL, encoding="utf-8")
     if write_anatomy:
-        (workspace / "docs" / "AGENT_ANATOMY.md").write_text(
+        (workspace / "knowledge" / "generated").mkdir(parents=True, exist_ok=True)
+        (workspace / "knowledge" / "generated" / "AGENT_ANATOMY.md").write_text(
             "## Candidate follow-ups (TD-030+) -- advisory only\n\n"
             "1. **TD-030 (candidate): Unify the role mechanisms.** Later.\n",
             encoding="utf-8",
@@ -599,7 +600,8 @@ def _write_self_build_docs_pilot_signal(
 
 def _write_anatomy_candidate(workspace: Path) -> None:
     (workspace / "docs").mkdir(parents=True, exist_ok=True)
-    (workspace / "docs" / "AGENT_ANATOMY.md").write_text(
+    (workspace / "knowledge" / "generated").mkdir(parents=True, exist_ok=True)
+    (workspace / "knowledge" / "generated" / "AGENT_ANATOMY.md").write_text(
         "## Candidate follow-ups (TD-030+) -- advisory only\n\n"
         "1. **TD-030 (candidate): Unify the role mechanisms.** Later.\n",
         encoding="utf-8",

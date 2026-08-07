@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Read-only drift check for docs/AGENT_ANATOMY.md (TD-029).
+"""Read-only drift check for knowledge/generated/AGENT_ANATOMY.md (TD-029).
 
 This script is intentionally inert. It ONLY:
   * lists files under core/ (os.listdir),
-  * reads the text of docs/AGENT_ANATOMY.md,
+  * reads the text of knowledge/generated/AGENT_ANATOMY.md,
   * prints a report and returns an exit code.
 
 It deliberately does NOT, and must never:
@@ -12,7 +12,7 @@ It deliberately does NOT, and must never:
   * call git,
   * write, create, or modify any file.
 
-It verifies that the "Module index" in docs/AGENT_ANATOMY.md stays in sync with
+It verifies that the "Module index" in knowledge/generated/AGENT_ANATOMY.md stays in sync with
 the actual core/ package, so future drift is visible instead of silent.
 """
 from __future__ import annotations
@@ -22,7 +22,7 @@ import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORE_DIR = os.path.join(ROOT, "core")
-DOC_PATH = os.path.join(ROOT, "docs", "AGENT_ANATOMY.md")
+DOC_PATH = os.path.join(ROOT, "knowledge", "generated", "AGENT_ANATOMY.md")
 
 # Modules that live in core/ but are intentionally excluded from the map index.
 _EXCLUDED = {"__init__"}
@@ -65,16 +65,16 @@ def main() -> int:
     print(f"  documented modules: {len(documented & actual)}")
 
     if missing:
-        print(f"\nMISSING from docs/AGENT_ANATOMY.md ({len(missing)}):")
+        print(f"\nMISSING from knowledge/generated/AGENT_ANATOMY.md ({len(missing)}):")
         for name in missing:
             print(f"  - core/{name}")
     if stale:
-        print(f"\nSTALE in docs/AGENT_ANATOMY.md (no such core/ module) ({len(stale)}):")
+        print(f"\nSTALE in knowledge/generated/AGENT_ANATOMY.md (no such core/ module) ({len(stale)}):")
         for name in stale:
             print(f"  - core/{name}")
 
     if missing or stale:
-        print("\nRESULT: OUT OF SYNC - update docs/AGENT_ANATOMY.md.")
+        print("\nRESULT: OUT OF SYNC - update knowledge/generated/AGENT_ANATOMY.md.")
         return 1
 
     print("\nRESULT: in sync.")
