@@ -113,7 +113,7 @@ _BUILDER_MAX_TOKENS = 16_000
 # The repo enforces (scripts/agent_anatomy_check.py) that every core/*.py module
 # is referenced as a ``core/<name>`` token in this index. A module split creates
 # new core modules, so the head keeps this doc in sync automatically.
-_ANATOMY_DOC_PATH = "docs/AGENT_ANATOMY.md"
+_ANATOMY_DOC_PATH = "knowledge/generated/AGENT_ANATOMY.md"
 
 _DEFAULT_CONFIDENCE_THRESHOLD = 0.6
 
@@ -709,7 +709,7 @@ def _default_grounded_selector(
 
     This is what makes the grounded path the default for the real callers
     (``:self-build-produce`` and the daemon) without them having to assemble a
-    selector themselves. It reads ``TECH_DEBT.md``, ``docs/AGENT_ANATOMY.md``,
+    selector themselves. It reads ``TECH_DEBT.md``, ``knowledge/generated/AGENT_ANATOMY.md``,
     the TD-038 slice 2 proposal doc, and the value-review ledger strictly
     read-only and returns a zero-arg
     callable yielding the top-ranked backlog candidate, or ``None`` when the
@@ -885,7 +885,7 @@ def _builder_generate(
             "you move out of the target, keep it importable FROM the target by "
             "re-exporting it (e.g. `from .<new_module> import <name>`), so existing "
             "importers and tests that do `from core.<target> import <name>` keep "
-            "working. Do NOT modify docs/AGENT_ANATOMY.md — the self-build head "
+            "working. Do NOT modify knowledge/generated/AGENT_ANATOMY.md — the self-build head "
             "registers new core modules in that index automatically."
         )
     else:
@@ -1162,7 +1162,7 @@ def _new_core_module_stems(files: list[dict[str, Any]]) -> list[str]:
 def _sync_anatomy_index(
     build: dict[str, Any], target: str, reader: Callable[[str], str | None]
 ) -> None:
-    """Keep ``docs/AGENT_ANATOMY.md`` in sync when the proposal adds NEW core modules.
+    """Keep ``knowledge/generated/AGENT_ANATOMY.md`` in sync when the proposal adds NEW core modules.
 
     The repo enforces (``scripts/agent_anatomy_check.py``) that every core/*.py
     module is referenced as a ``core/<name>`` token in the anatomy index. A module
@@ -1310,7 +1310,7 @@ def publish_incremental_split_step(
             {"path": step.new_module, "content": step.new_content},
         ],
     }
-    # Keep docs/AGENT_ANATOMY.md in sync (its drift check would fail otherwise).
+    # Keep knowledge/generated/AGENT_ANATOMY.md in sync (its drift check would fail otherwise).
     try:
         _sync_anatomy_index(build, step.target, reader or _default_file_reader(workspace))
     except Exception:  # noqa: BLE001 — doc sync is best-effort; lane catches drift
@@ -1505,7 +1505,7 @@ def produce_self_apply_proposal(
 
     Manager target selection (TD-036 follow-up): by default the Manager takes its
     target + diagnosis from a *grounded* backlog candidate (TECH_DEBT.md /
-    docs/AGENT_ANATOMY.md / TD-038 slice 2 proposal doc), never inventing one
+    knowledge/generated/AGENT_ANATOMY.md / TD-038 slice 2 proposal doc), never inventing one
     via the LLM. Pass an explicit
     ``grounded_selector`` (a zero-arg callable returning a candidate or ``None``)
     to override the default workspace-backed selector. An empty backlog yields
@@ -1743,7 +1743,7 @@ def produce_self_apply_proposal(
                 pass
 
         # Self-build head keeps the anatomy index in sync: a split that adds new
-        # core/*.py modules must also register them in docs/AGENT_ANATOMY.md, or
+        # core/*.py modules must also register them in knowledge/generated/AGENT_ANATOMY.md, or
         # the repo's anatomy-sync test fails and the lane rolls the apply back.
         if builder.decision == "built":
             try:

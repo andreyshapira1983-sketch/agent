@@ -400,7 +400,7 @@ def test_corporate_doctrine_question_forces_docs_first_over_core_defaults(
     assert paths == [
         "knowledge/doctrine/future/CORPORATE_MODEL.md",
         "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md",
-        "docs/AGENT_ANATOMY.md",
+        "knowledge/generated/AGENT_ANATOMY.md",
         "knowledge/doctrine/ROADMAP.md",
         "knowledge/maps/COMMANDS_MAP.md",
         "knowledge/doctrine/SUBAGENT_LIFECYCLE.md",
@@ -443,7 +443,7 @@ def test_corporate_doctrine_implementation_question_keeps_code_after_docs(
     assert paths[:5] == [
         "knowledge/doctrine/future/CORPORATE_MODEL.md",
         "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md",
-        "docs/AGENT_ANATOMY.md",
+        "knowledge/generated/AGENT_ANATOMY.md",
         "knowledge/doctrine/ROADMAP.md",
         "knowledge/maps/COMMANDS_MAP.md",
     ]
@@ -531,7 +531,7 @@ def test_mixed_doctrine_confidence_question_selects_docs_and_verifier_sources(
     assert paths[:5] == [
         "knowledge/doctrine/future/CORPORATE_MODEL.md",
         "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md",
-        "docs/AGENT_ANATOMY.md",
+        "knowledge/generated/AGENT_ANATOMY.md",
         "knowledge/doctrine/ROADMAP.md",
         "knowledge/maps/COMMANDS_MAP.md",
     ]

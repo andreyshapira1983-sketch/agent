@@ -99,7 +99,7 @@ def test_anatomy_candidates_quote_traceable_and_targets_namespaced():
         assert r.problem_quote in _ANATOMY
         assert r.target_path.startswith("anatomy:")
         assert r.signal_source == "anatomy"
-        assert r.evidence_ref.startswith("docs/AGENT_ANATOMY.md:")
+        assert r.evidence_ref.startswith("knowledge/generated/AGENT_ANATOMY.md:")
 
 
 def test_anatomy_candidates_missing_section_is_empty():

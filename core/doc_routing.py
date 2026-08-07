@@ -229,7 +229,7 @@ DOCTRINE_CORPORATE_CONTEXT_TERMS = (
 DOCTRINE_CORPORATE_DOC_PATHS = (
     "knowledge/doctrine/future/CORPORATE_MODEL.md",
     "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md",
-    "docs/AGENT_ANATOMY.md",
+    "knowledge/generated/AGENT_ANATOMY.md",
     "knowledge/doctrine/ROADMAP.md",
     "knowledge/maps/COMMANDS_MAP.md",
 )

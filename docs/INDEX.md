@@ -26,7 +26,7 @@ question, which single file is authoritative.
 |---|---|---|---|
 | What capabilities exist, and in what order they were built | [ROADMAP.md](../knowledge/doctrine/ROADMAP.md) | intended order + per-track IMPLEMENTED/PARTIAL/PLANNED | defect status; per-PR daemon state |
 | Project Intelligence package status (standalone vs wired) | [ROADMAP.md](../knowledge/doctrine/ROADMAP.md) (Track H) | whether the package exists and is integrated | scan/extractor/API/UI design details |
-| Which module does what | [AGENT_ANATOMY.md](AGENT_ANATOMY.md) | the `core/` module index (script-guarded) | whether a module is *wired* into a live path |
+| Which module does what | [AGENT_ANATOMY.md](../knowledge/generated/AGENT_ANATOMY.md) | the `core/` module index (script-guarded) | whether a module is *wired* into a live path |
 | **What the cognitive core is, which decisions only it makes, and which of its defences actually bite** | [COGNITIVE_CORE.md](COGNITIVE_CORE.md) | the boundary (core vs memory / runtime / tools / interfaces), the twenty-gate sequence, and each defence marked ENFORCING / OBSERVING / ABSENT **plus its measured recall** where one exists | issue status (registry owns it); the target memory design |
 | Which operator commands exist | [COMMANDS_MAP.md](../knowledge/maps/COMMANDS_MAP.md) | the `:command` surface + NL-routing parity | anything `main.py` added after this file's last sync |
 | What the agent may do on its own vs. needs a human | [CENTRAL_AGENT_GOVERNANCE.md](../knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md) | the authority contract (Policy Gate, modes, approval, budget, human-reserved rights) | sub-agent specifics (→ next row) |

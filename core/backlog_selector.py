@@ -311,7 +311,7 @@ def load_backlog(
     """
     root = Path(workspace)
     tech_debt_text = _read_text(root / "TECH_DEBT.md")
-    anatomy_text = _read_text(root / "docs" / "AGENT_ANATOMY.md")
+    anatomy_text = _read_text(root / "knowledge" / "generated" / "AGENT_ANATOMY.md")
     self_build_proposal_text = _read_text(
         root / "docs" / "proposals" / "self-build-grounded-target-coverage-proposal.md"
     )

@@ -379,7 +379,7 @@ def _path_exists(path: Path) -> bool:
 
 def _grounded_target_payload(workspace: Path) -> dict[str, Any]:
     tech_debt, td_status = _read_text_or_status(workspace / "TECH_DEBT.md")
-    anatomy, anatomy_status = _read_text_or_status(workspace / "docs" / "AGENT_ANATOMY.md")
+    anatomy, anatomy_status = _read_text_or_status(workspace / "knowledge" / "generated" / "AGENT_ANATOMY.md")
     proposal, proposal_status = _read_text_or_status(
         workspace / "docs" / "proposals" / "self-build-grounded-target-coverage-proposal.md"
     )

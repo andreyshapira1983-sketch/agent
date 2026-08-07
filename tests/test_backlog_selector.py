@@ -188,7 +188,8 @@ def test_penalized_target_ranks_lower():
 def test_load_backlog_reads_workspace_files(tmp_path: Path):
     (tmp_path / "TECH_DEBT.md").write_text(_TECH_DEBT, encoding="utf-8")
     (tmp_path / "docs").mkdir()
-    (tmp_path / "docs" / "AGENT_ANATOMY.md").write_text(_ANATOMY, encoding="utf-8")
+    (tmp_path / "knowledge" / "generated").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "knowledge" / "generated" / "AGENT_ANATOMY.md").write_text(_ANATOMY, encoding="utf-8")
     _write_self_build_proposal(tmp_path)
     backlog = load_backlog(tmp_path)
     assert any(c.signal_source == "tech_debt" for c in backlog)

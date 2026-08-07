@@ -11,7 +11,7 @@ Phase 1 sources (closed set):
 * **TECH_DEBT.md** — entries whose status is not Done (``Partial`` / deferred /
   empty status). The entry *title* is human-authored, so it is used verbatim as
   the grounded ``problem_quote``.
-* **docs/AGENT_ANATOMY.md** — the "Candidate follow-ups (TD-030+)" advisory list.
+* **knowledge/generated/AGENT_ANATOMY.md** — the "Candidate follow-ups (TD-030+)" advisory list.
   The bold heading of each numbered item is used verbatim as the quote. These
   numbers are advisory text only, never treated as executable TD ids.
 * **docs/proposals/self-build-grounded-target-coverage-proposal.md** — the
@@ -178,7 +178,7 @@ def anatomy_candidates(anatomy_text: str) -> list[SignalRecord]:
             SignalRecord(
                 signal_source="anatomy",
                 target_path=target,
-                evidence_ref=f"docs/AGENT_ANATOMY.md:{i + 1}",
+                evidence_ref=f"knowledge/generated/AGENT_ANATOMY.md:{i + 1}",
                 # The heading is a substring of the raw line (which includes the
                 # surrounding ``**``), so it is trivially traceable to source.
                 problem_quote=heading,

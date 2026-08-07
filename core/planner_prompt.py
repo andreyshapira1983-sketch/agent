@@ -295,7 +295,7 @@ Decision rules:
     MANDATORY docs-first plan:
       -> [file_read knowledge/doctrine/future/CORPORATE_MODEL.md,
           file_read knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md,
-          file_read docs/AGENT_ANATOMY.md,
+          file_read knowledge/generated/AGENT_ANATOMY.md,
           file_read knowledge/doctrine/ROADMAP.md,
           file_read knowledge/maps/COMMANDS_MAP.md]
 

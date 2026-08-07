@@ -72,7 +72,7 @@ _NO_TESTS_BLOCKED_TOOLS: frozenset[str] = frozenset({"run_tests"})
 #     auto-run / daemon goal must not spawn child agents.
 #   - network egress (web_search / web_fetch / rss_fetch /
 #     semantic_scholar_search): external perception is operator/CLI-gated and
-#     not on the autonomous path (see docs/AGENT_ANATOMY.md). Keeps unattended
+#     not on the autonomous path (see knowledge/generated/AGENT_ANATOMY.md). Keeps unattended
 #     goals repo-local instead of silently reaching the web.
 # Applied via PolicyGate.blocked_tools exactly like _NO_TESTS_BLOCKED_TOOLS:
 # run-scoped and always restored. The interactive REPL path is unaffected.
