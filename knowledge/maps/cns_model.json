@@ -51,11 +51,11 @@
         "readers": "PROVEN",
         "delivery_non_empty": "PROVEN",
         "delivery_evidence": "probe, 10 runs, codes plan_parse_failed / approval_deny / approval_abort / approval_unavailable",
-        "effect": "UNPROVEN",
-        "effect_evidence": "three mutations against three consumers, three times zero",
-        "effect_explanation": "UNDER_QUESTION",
-        "effect_explanation_note": "Two rivals, neither measured. (a) The value goes into a model prompt and the mock returns the same text regardless (protocol item 25). (b) Synthesis receives None entirely unless replanning was exhausted (loop_synthesis.py:637), so the prompt is never reached. Distinguishing them needs a probe on the consumer input BEFORE the mock.",
-        "non_control": "UNPROVEN",
+        "effect": "PROVEN for the arbitration consumer through the real call site (2026-08-08, M19: codes emptied at loop_run_tail -> a disclosing run's obligation verdict flips failed_but_reported -> silently_missing, red). The verdict is authoritative at banking (achieved lowered to partially_achieved, procedure credit withheld) — L5. Prompt-level effect on a REAL model (synthesis/verification consumers) remains UNPROVEN: the mock cannot show it",
+        "effect_evidence": "was: three mutations, three times zero — measured before the arbitration call-site bite existed; the unit-level arbiter bite (0ecc4dd) pinned the recipient's decision but stated openly it could not see the wire",
+        "effect_explanation": "PROVEN — resolved 2026-08-08, both rivals were true in their own regimes",
+        "effect_explanation_note": "Settled by two tests on the real loop: replanning EXHAUSTED -> the synthesis prompt carries <failure_context> (hypothesis a — the mock then ignores it); NOT exhausted -> the gate at loop_synthesis.py:637 hands synthesis None and no block exists to ignore (hypothesis b). tests/test_failure_history_reaches_arbitration.py",
+        "non_control": "NEGATIVE — the channel is proven CONTROL: its codes change the banked verdict (M19)",
         "semantic_integrity": "NEGATIVE"
       },
       "semantic_defects": [
@@ -246,11 +246,11 @@
       "certified": {
         "REACHABILITY": "PROVEN",
         "CAUSALITY": "PROVEN — M14",
-        "SEMANTICS": "PROVEN for freshness, prompt delivery and archive; UNPROVEN for the language-bridge sub-wire alone (no test distinguishes profile-informed extraction from heuristic extraction)",
-        "PROTECTION": "PROVEN",
-        "verdict": "PROVEN on all four conditions, one named sub-wire open"
+        "SEMANTICS": "PROVEN — freshness, prompt delivery, archive, and (closed 2026-08-08) the language bridge: a profile that knows Russian outranks the heuristic on an English-looking question, source='profile', through the real loop",
+        "PROTECTION": "PROVEN — M14 and M18 both redden their own bites",
+        "verdict": "PROVEN on all four conditions — certified 2026-08-08"
       },
-      "bite_classes": "M14 — Behavioral throughout: prompt content, archive rows, cross-goal cleanliness"
+      "bite_classes": "M14 — Behavioral throughout: prompt content, archive rows, cross-goal cleanliness. M18 — Behavioral: assumption source through a real run"
     },
     "checkpoint_phases": {
       "producer": "_open_run builds CheckpointWriter (or a NoOp sentinel for loggers without trace_id/log_dir — production loggers always have both, PERIPHERAL)",
@@ -266,13 +266,13 @@
         "observe_paused": "bitten through the loop by tests/test_budget_resume.py (rows ['observe','paused'], phase fidelity M7-M9)"
       },
       "certified": {
-        "REACHABILITY": "PROVEN for observe, respond, paused through the real loop; UNPROVEN for plan and act (no consumer-side assertion exists)",
-        "CAUSALITY": "PROVEN — M15 both ways on the replay wire",
-        "SEMANTICS": "PROVEN for the replay contract (what --resume prints is what run() returned); plan/act row content UNPROVEN",
-        "PROTECTION": "PROVEN for observe/respond/paused wires",
-        "verdict": "NOT CERTIFIED — plan/act wires open (thin consumers: an artifact list in a notice), the rest proven"
+        "REACHABILITY": "PROVEN for all five phase writers through the real loop (plan/act closed 2026-08-08: a cycle with a real file_read step leaves rows that CheckpointLoader reads back as ctx.attempt and ctx.artifacts)",
+        "CAUSALITY": "PROVEN — M15 on the replay wire; M16+M17 on plan/act (both cut -> 73 tests stayed green -> the new bite reds)",
+        "SEMANTICS": "PROVEN for the replay contract and for plan/act row content (attempt number, executed step label->tool)",
+        "PROTECTION": "PROVEN for all five wires",
+        "verdict": "PROVEN on all four conditions — certified 2026-08-08"
       },
-      "bite_classes": "M15 — Behavioral: ctx.answer equality against the returned answer"
+      "bite_classes": "M15 — Behavioral: ctx.answer equality against the returned answer. M16+M17 — Behavioral: rows read back through the loader, the same door --resume uses"
     },
     "unresolved_citation": {
       "producer": "core/verifier.py::extract_unresolved_web_urls (detector)",
@@ -288,15 +288,16 @@
       "certified": {
         "REACHABILITY": "PROVEN",
         "CAUSALITY": "PROVEN",
-        "SEMANTICS": "UNPROVEN",
+        "SEMANTICS": "PROVEN — closed 2026-08-08: all three verdict states observed with proven consequence. abort_no_retry stops the verify loop exactly like abort_exhausted BY CONSTRUCTION (one non-continue branch); the distinction survives only as decision_action in the journal, and that is asserted, not lamented",
         "PROTECTION": "PROVEN",
-        "verdict": "NOT CERTIFIED — three of four"
+        "verdict": "PROVEN on all four conditions — certified 2026-08-08 (tests/test_policy_verdict_differential.py)"
       },
-      "open_items": [
-        "protocol 12: of three verdict states only continue and abort_exhausted ever occur; abort_no_retry never fired",
-        "protocol 26: decide() has two independent conditions (global cap, per-type budget); independent influence not shown",
-        "protocol 11: the two poles were reached by different scenario paths, not by forcing two verdicts on identical state"
-      ]
+      "open_items_closed_2026_08_08": [
+        "protocol 11 strict form: two verdicts FORCED onto identical state (only the verdict varies) take different paths — an obeyed abort ends at 2 LLM calls, an obeyed continue walks to the hard cap; M21 (verdict wire disabled) reddens exactly these",
+        "protocol 12: abort_no_retry observed on the verify path with proven stopping consequence and journal-only distinction",
+        "protocol 26: both decide() conditions independently exercised at the unit level (test_global_cap_stops_before_per_type_budgets; per-type tests return abort_no_retry)"
+      ],
+      "bite_classes": "M20 — Behavioral at the seam (a recorder wraps the REAL decide, so admission is observed, not re-derived); M21 — Behavioral (path length + journal event). Forced-verdict tests substitute the producer and observe the real consumer — the inverse of M11's recorder, stated openly."
     }
   },
 
@@ -312,7 +313,7 @@
       "site": "core/loop_verify_replan.py:201",
       "reads": "unresolved_urls emptiness",
       "consequence_class": "PHASE",
-      "protection": "composition proven (detector+gate together, 4 red); isolated gate bite UNPROVEN"
+      "protection": "PROVEN in isolation 2026-08-08: both poles (no citation -> decide never consulted; citation -> consulted), and M20 breaks the GATE, not the detector — 3 red"
     },
     "post_tool_trust_boundary": {
       "site": "core/loop_step_execution.py:652",
@@ -383,7 +384,7 @@
     ],
     "clusters": [
       {"id": "C00", "scope": "entry edges -> run identity -> abort/cancel exits", "status": "PROVEN", "opened": "2026-08-08", "closed": "2026-08-08", "proven_arcs": ["run_identity — CERTIFIED (M3, M4, join test)", "abort_episode_banking — CERTIFIED (M1, M2, M12, both silent-skip poles)", "budget_stop_resume — CERTIFIED, streamed and plain (M5-M9, both retirement poles, all three catch sites)", "on_token_streaming — CERTIFIED; billing-bypass defect fixed on the operator's verdict, six fail-before tests", "deep_escalation_delivery — CERTIFIED (M11, identity-preserving delivery to both roles)"], "closure_note": "Five arcs; eleven numbered mutations (M1-M9, M11, M12 — the count was once written as twelve, corrected 2026-08-08) plus the streaming fail-before (the wrapper method absent IS the mutant state). Every bite retro-classified per the map's protection scale: all Behavioral, two with stated caveats (M6 reads the branch through the operator-facing notice; M11's consumer is a recorder). Two defects found by measurement and fixed on the operator's verdict (a resumed pause never retired; streamed synthesis escaped the budget wrapper). PROVEN means every arc this walk found is certified — not that no sixth arc exists; the discovery rule for entry-edge arcs was reading run()'s signature and exception paths."},
-      {"id": "C01", "scope": "_open_run: profile, assumptions registry, checkpoint writer (core/loop_context.py)", "status": "PROVEN", "opened": "2026-08-08", "walked": "2026-08-08", "proven_arcs": ["user_profile_load — CERTIFIED (M13; the load's only BEHAVIORALLY PROVEN consumer is turn one after a restart — accumulation is provably immune to it; the language bridge is also a consumer but uncertified)", "assumption_seeding — CERTIFIED, one named sub-wire open (M14 -> 5 red in the existing suite)", "checkpoint_phases — NOT CERTIFIED: observe/respond/paused wires proven (M15 found the respond wire naked under 242 green tests)"], "open": ["checkpoint plan/act wires — thin consumers (an artifact list in a stderr notice), unproven through the loop", "profile->extraction language bridge — nothing distinguishes profile-informed extraction from heuristic extraction"], "closure_note": "Walked, not sealed: the operator's review (2026-08-08) ruled 'closed' too strong a word while open sub-wires remain — they are listed in `open`, and the cluster is PROVEN in the sense that every arc found was worked to a verdict. Three mutations (M13-M15), two new bites, no defects requiring a fix; the one surprise (profile load redundant for accumulation) is a semantics correction written down."},
+      {"id": "C01", "scope": "_open_run: profile, assumptions registry, checkpoint writer (core/loop_context.py)", "status": "PROVEN", "opened": "2026-08-08", "walked": "2026-08-08", "proven_arcs": ["user_profile_load — CERTIFIED (M13; the load's only BEHAVIORALLY PROVEN consumer is turn one after a restart — accumulation is provably immune to it; the language bridge is also a consumer but uncertified)", "assumption_seeding — CERTIFIED, one named sub-wire open (M14 -> 5 red in the existing suite)", "checkpoint_phases — NOT CERTIFIED: observe/respond/paused wires proven (M15 found the respond wire naked under 242 green tests)"], "open": [], "closure_note": "Walked 2026-08-08; the operator ruled 'closed' too strong while sub-wires stayed open, and the debt was paid the same day on the operator's finish-first order: plan/act wires bitten through the real loop (M16+M17 — 73 tests had stayed green with both cut; new test reads the rows back via CheckpointLoader), and the language bridge bitten end-to-end (M18 — a profile that knows Russian must outrank the heuristic on an English-looking question, source='profile'). Six mutations total (M13-M18), four new bites, no code defects; the one surprise (profile load redundant for accumulation) is a semantics correction written down."},
       {"id": "C02", "scope": "_observe_and_route: goal, question class, role route, model tier choice, deep escalation (core/loop_observe.py)", "status": "UNPROVEN"},
       {"id": "C03", "scope": "derive_completion_contract before any tool runs; ordering claim; consumed in C13", "status": "UNPROVEN"},
       {"id": "C04", "scope": "admission gates: _odd_gate, _clarification_gate (core/loop_gates.py)", "status": "UNPROVEN"},

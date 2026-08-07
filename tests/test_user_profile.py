@@ -601,6 +601,33 @@ class TestAgentLoopUserProfileIntegration:
         )
         assert "expertise: expert" in joined and "verbosity: brief" in joined
 
+    def test_profile_language_outranks_the_heuristic_in_assumption_extraction(
+        self, tmp_path: Path
+    ) -> None:
+        """The Layer 4->5 bridge, bitten through the real loop.
+
+        A profile that already knows the language must replace the regex
+        heuristic with a profile-backed assumption (source='profile',
+        confidence 0.95). The question is deliberately English-looking, so
+        the heuristic alone would never say Russian — only the bridge can.
+        """
+        from core.user_profile import UserProfile
+
+        loop, store = self._make_loop(tmp_path)
+        store.save(UserProfile(language="ru", interaction_count=3))
+
+        loop.run("summarize the project status please")
+
+        registry = loop.last_assumptions
+        assert registry is not None
+        lang = [a for a in registry.assumptions if a.category == "language"]
+        assert lang, "a language assumption must be seeded from the question"
+        assert lang[0].source == "profile", (
+            f"the profile's language must outrank the heuristic, got "
+            f"source={lang[0].source!r}: the bridge is cut"
+        )
+        assert "Russian" in lang[0].text
+
     def test_profile_load_event_emitted(self, tmp_path: Path) -> None:
         loop, _ = self._make_loop(tmp_path)
         loop.log._handlers = []  # type: ignore[attr-defined]
