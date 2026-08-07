@@ -86,14 +86,40 @@ def _collect_nodes() -> dict[str, int]:
     return found
 
 
+def _method_owners() -> dict[str, set[str]]:
+    """Every node a bare method name could refer to, kept as a SET.
+
+    The set is the point. Resolving `self.foo()` needs one owner; when the
+    perimeter holds two `foo`, the rule has no way to tell which one the call
+    reaches, and picking either invents a transition that may not exist while
+    hiding one that does.
+    """
+    owners: dict[str, set[str]] = {}
+    for path in sorted(CORE.glob("loop*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                for member in node.body:
+                    if isinstance(member, ast.FunctionDef) and not member.name.startswith("__"):
+                        key = f"{path.name}::{node.name}.{member.name}"
+                        owners.setdefault(member.name, set()).add(key)
+    return owners
+
+
 def _collect_edges() -> set[tuple[str, str]]:
     """THE DISCOVERY RULE for edges: a `self.<name>` call inside a node body.
 
     Blind to dispatch through `getattr`, to callbacks handed to another
     object, and to anything reached via a collaborator rather than `self`.
     Same caveat: complete relative to the rule, not to reality.
+
+    FAIL-CLOSED ON AMBIGUITY. An ambiguous name yields NO edge here, and
+    `test_no_method_name_has_two_owners` reddens instead. Deciding between
+    two candidates needs MRO, override and mixin semantics this rule does not
+    have; a silently chosen owner would enter the snapshot as a proven
+    transition. Better a census that stops than a map that lies.
     """
-    owner: dict[str, str] = {}
+    owners = _method_owners()
     bodies: dict[str, ast.FunctionDef] = {}
     for path in sorted(CORE.glob("loop*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -103,17 +129,18 @@ def _collect_edges() -> set[tuple[str, str]]:
             elif isinstance(node, ast.ClassDef):
                 for member in node.body:
                     if isinstance(member, ast.FunctionDef) and not member.name.startswith("__"):
-                        key = f"{path.name}::{node.name}.{member.name}"
-                        bodies[key] = member
-                        owner.setdefault(member.name, key)
+                        bodies[f"{path.name}::{node.name}.{member.name}"] = member
     found: set[tuple[str, str]] = set()
     for name, body in bodies.items():
         for sub in ast.walk(body):
             if (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute)
                     and isinstance(sub.func.value, ast.Name)
                     and sub.func.value.id == "self"):
-                target = owner.get(sub.func.attr)
-                if target and target != name:
+                candidates = owners.get(sub.func.attr, set())
+                if len(candidates) != 1:
+                    continue
+                target = next(iter(candidates))
+                if target != name:
                     found.add((name, target))
     return found
 
@@ -143,6 +170,25 @@ def test_the_census_names_no_transition_that_is_gone() -> None:
     known = {tuple(e) for e in _load()["edges"]}
     stale = sorted(known - _collect_edges())
     assert not stale, f"in the census but no longer called: {stale}"
+
+
+def test_no_method_name_has_two_owners() -> None:
+    """The edge rule may not guess which of two same-named methods is called.
+
+    Today the perimeter has none, and one reason is invisible until you look:
+    hosts declare shared contracts under `if TYPE_CHECKING`, which the class
+    walk skips. Move one such declaration out of that block, or add a real
+    second `_sensor_failed`, and the name becomes ambiguous. That is the
+    moment to define resolution semantics — deliberately, in its own commit —
+    not the moment for the census to pick a winner.
+    """
+    ambiguous = {name: sorted(owners)
+                 for name, owners in _method_owners().items() if len(owners) > 1}
+    assert not ambiguous, (
+        f"a method name owned by more than one node: {ambiguous}. Edges for it "
+        "are NOT being recorded; define how `self.<name>` resolves before the "
+        "census claims to know where the signal goes."
+    )
 
 
 def test_every_listed_property_is_a_known_one() -> None:
