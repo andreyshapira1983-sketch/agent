@@ -135,6 +135,39 @@
         "verdict": "NOT CERTIFIED — silent-skip semantics open"
       }
     },
+    "budget_stop_resume": {
+      "producer": "ModelUsageLedger.assert_can_start raises ModelBudgetExceeded before the LLM call (core/model_usage.py:227); carrier: the exception itself, through router -> phase -> run() -> guard",
+      "in_cycle_catch_sites": [
+        {"site": "core/loop_attempt.py:290", "phase": "planning", "does": "saves rich paused checkpoint (goal, steps done/remaining, blocked counter) and re-raises"},
+        {"site": "core/loop_synthesis.py:684", "phase": "synthesis", "does": "same"},
+        {"site": "core/loop_verify_replan.py:328", "phase": "verification_replan", "does": "same"}
+      ],
+      "consumers": [
+        "checkpoint file -> resume prompt (cli/resume.py:51: question, goal, phase, steps, counter)",
+        "task queue paused entry -> operator visibility (:queue-status resumable list, task_queue.py:578)",
+        "journal: model_budget_blocked exactly once; resumable_checkpoint_paused; resumable_task_paused",
+        "user: clean 'Model budget exceeded' message instead of a traceback"
+      ],
+      "ownership_split": "proven by mutation: the rich checkpoint is written by the in-cycle catch site; the guard writes only the thin fallback (current_phase=budget_guard) and is the SOLE writer of the queue entry. Two writers, two arcs, independently bitten.",
+      "backward_path": "--resume <trace_id> -> resolve_resume: paused branch deliberately checked BEFORE cached answer (one session trace can hold both: run 1 answered, run 2 paused); restores question+file_hint; resumed run is a NEW run with a NEW trace_id",
+      "effect_level": "L6 forward (operator sees message, queue entry, can resume); backward arc L6 up to the resumed answer",
+      "evidence": {
+        "tests": "tests/test_budget_resume.py (checkpoint contents, queue entry, CLI surfacing, journal-once, success writes nothing; resume prompt carries context), tests/test_cli.py (stream branch message+journal), tests/characterization/test_cli_resume_branches.py (all five outcomes incl. precedence)",
+        "M5": "2026-08-08: guard stops persisting -> red at the queue assert ONLY (checkpoint still written by the in-cycle site) -> ownership split proven",
+        "M7": "2026-08-08: in-cycle planning writer dropped -> red at current_phase==planning (fallback degraded the state and the test saw it)",
+        "M6": "2026-08-08: cached-answer branch reordered above paused -> red exactly at test_paused_branch_wins_over_a_cached_answer"
+      },
+      "certified": {
+        "REACHABILITY": "PROVEN for the planning catch site (real ledger denial drives it); UNPROVEN for synthesis and verification_replan catch sites — no test reaches a budget stop in those phases",
+        "CAUSALITY": "PROVEN — three mutations, each reddening its own arc",
+        "SEMANTICS": "NEGATIVE — the backward arc has no closing half: nothing ever retires the paused task (see semantic_defects)",
+        "PROTECTION": "PROVEN for the three bitten wires; UNPROVEN for the two unreached catch sites",
+        "verdict": "NOT CERTIFIED — two catch sites unreached, back-arc defect open"
+      },
+      "semantic_defects": [
+        {"defect": "a successfully resumed task never retires", "detail": "probe 2026-08-08: budget stop -> paused task queued -> resolve_resume restores the question -> resumed run succeeds -> queue still lists the task paused and resumable. No code path writes paused->done for resume_checkpoint tasks (only manual :task-cancel / :task-unblock touch them); the resumed run cannot find the task because it runs under a fresh trace_id and nothing joins the two. The operator's resumable list grows and lies.", "minimal_fix_proposal": "after a resumed run completes successfully, mark paused resume_checkpoint tasks whose last_report.trace_id matches the RESUMED trace as done; decide separately what a resume-that-pauses-again does to the old task"}
+      ]
+    },
     "unresolved_citation": {
       "producer": "core/verifier.py::extract_unresolved_web_urls (detector)",
       "carrier": "failure_history + local unresolved_urls list",
@@ -243,7 +276,7 @@
       "app/daemon.py, app/worker_pool.py (scheduler contour over the same loop)"
     ],
     "clusters": [
-      {"id": "C00", "scope": "entry edges -> run identity -> abort/cancel exits", "status": "UNPROVEN", "opened": "2026-08-08", "proven_arcs": ["run_identity — CERTIFIED, all four conditions (M3, M4, join test)", "abort_episode_banking (M1+M2)"], "open": ["on_token / deep_escalation delivery", "budget_guard wrapper semantics", "silent-skip branches of abort banking"]},
+      {"id": "C00", "scope": "entry edges -> run identity -> abort/cancel exits", "status": "UNPROVEN", "opened": "2026-08-08", "proven_arcs": ["run_identity — CERTIFIED, all four conditions (M3, M4, join test)", "abort_episode_banking (M1+M2)", "budget_stop_resume — three wires bitten (M5, M6, M7), ownership split proven; NOT CERTIFIED: two catch sites unreached, back-arc defect (resumed task never retires) measured by probe"], "open": ["on_token / deep_escalation delivery", "silent-skip branches of abort banking", "budget stop in synthesis / verification_replan phases unreached by any test"]},
       {"id": "C01", "scope": "_open_run: profile, assumptions registry, checkpoint writer (core/loop_context.py)", "status": "UNPROVEN"},
       {"id": "C02", "scope": "_observe_and_route: goal, question class, role route, model tier choice, deep escalation (core/loop_observe.py)", "status": "UNPROVEN"},
       {"id": "C03", "scope": "derive_completion_contract before any tool runs; ordering claim; consumed in C13", "status": "UNPROVEN"},
@@ -264,6 +297,6 @@
       {"id": "C18", "scope": "future subagent lifecycle ports: mark the boundary so current architecture does not block it; nothing to implement now", "status": "UNPROVEN"}
     ],
     "carriers_not_in_clusters": "state_carriers section above holds failure_history, _step_trigger_tls, _last_step_failure (DEAD); artifacts and chain still owe carrier records",
-    "next_edge": "C00 remaining: budget_guard wrapper semantics and on_token/deep_escalation delivery, then close C00 and move to C01"
+    "next_edge": "C00 remaining: on_token / deep_escalation delivery through the entry edge, then close C00 and move to C01. Defect 'resumed task never retires' awaits the operator's verdict on the minimal fix."
   }
 }
