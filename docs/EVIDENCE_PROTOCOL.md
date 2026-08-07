@@ -47,19 +47,92 @@ Three specific failures to prevent:
 3. **Unilateral risky action** — a model decides something and the system does
    it, with no human between the decision and the world.
 
-## Roles, defined by what they may NOT do
+## Two contours, and the procedural layer comes first
+
+A design conversation is not one kind of talk. It has a factual layer and a
+deliberative one, and only the first can be settled by machinery:
+
+```
+Deliberation contour           Evidence contour
+principles, definitions,       claims about the world:
+trade-offs, policy choices,    "test X catches mutation Y"
+arguments from structure,      "this path resolves from the workspace"
+what counts as acceptable      "the command exited 0"
+        │                              │
+   adversarial review           deterministic arbiter
+        │                              │
+        └────────► testable claim ─────┘
+                          │
+                   Human decision
+```
+
+**The boundary must be dumb and mechanical**, or it becomes the next thing to
+game. A participant free to classify its own statement will call an inconvenient
+one "an architectural principle" and route it away from verification — or demand
+proof where none can exist and sink any proposal under "not established".
+
+So: a statement that names an object or a state which can be **opened, run,
+counted or reproduced** is a candidate for the evidence contour. Everything else
+stays in deliberation by default. Imperfect, and far better than letting the
+speaker decide whether it wants an arbiter.
+
+### Roles, defined by what they may NOT do
 
 Asymmetry is the whole design. Equal participants converge; unequal ones cannot.
 
 | role | may | may not |
 |---|---|---|
-| **Proposer** (model) | state one claim with evidence | execute anything |
-| **Challenger** (model) | confirm, refute, or name what is missing | offer its own solution in the same round |
-| **Executor** (the agent) | perform work that is already verified and approved | take part in the argument |
+| **Proposer** | state one claim or proposal | execute anything |
+| **Challenger** | build a counterexample, or declare none exists | offer its own solution in the same round |
+| **Executor** (the agent) | perform work already verified and approved | take part in the argument |
 | **Arbiter** (code, not a model) | reproduce evidence, count rounds, stop the exchange | reason, judge quality, be persuaded |
+| **Human** | choose between admissible options | replace the check or the challenger |
 
 The arbiter is a program. If a model arbitrates, the other two will eventually
 talk it round — that is what models are good at.
+
+### An objection has a form, exactly like evidence
+
+"Find at least one objection" creates an incentive to invent them. So an
+objection that counts has a shape:
+
+* the rule or proposal it addresses;
+* a concrete counterexample or failure scenario;
+* why it breaks **on that scenario**;
+* what would have to change for the objection to be withdrawn.
+
+"Too complicated" does not qualify. "On this input the policy selects an
+irrelevant check" does.
+
+Which makes the honest third outcome possible. A challenger that tried and
+found nothing reports **`no_material_objection`** — better than "agreed", and
+better than a manufactured argument. The obligation is to attempt a
+counterexample, never to disagree.
+
+### The challenger's duty does not depend on who proposed
+
+Explicitly: the participant assigned as challenger keeps that function whether
+the proposal came from another model, from a parent agent, or **from the human**.
+
+This is the rule the rest of the protocol cannot enforce, and the one most
+easily lost. Observed in the session that produced this document: once the
+exchange slipped into "I record your decisions", the quality of the discussion
+fell — not because the arguments had run out, but because the role stopped being
+performed. They reappeared the moment they were demanded, which means they were
+there all along and simply unrequested.
+
+A model is structurally inclined to agree with whoever holds the decision. So
+between a human and a model the challenger role is the most necessary and the
+least stable: it holds only while the human keeps asking for it, and a system
+that depends on the human having the energy to argue is not a system.
+
+### Human decision is not human validation
+
+The human chooses between admissible options — that is a judgement machinery
+cannot make, and it stays with the person. It does **not** substitute for the
+factual check, and it does not substitute for the challenger. Approval after an
+unopposed proposal is not a decision; it is the failure mode this whole document
+exists to prevent, wearing a signature.
 
 ## Message shape
 
@@ -831,6 +904,12 @@ on an unanswered question.
   is good.
 
 ## If this is ever built
+
+The procedural layer — two contours, the objection form, `no_material_objection`,
+the challenger's duty regardless of who proposed — requires NO code and can be
+practised immediately. It is also the part that worked in the session which
+produced this document. Everything below is machinery for keeping the factual
+half honest once the conversation is already structured.
 
 Not before B1 and B2 are answered. Suggested order after that, each stage
 useful alone:
