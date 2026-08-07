@@ -155,6 +155,27 @@ def _quality_ok(episode: EpisodeRecord) -> bool:
     return AgentLoop._quality_allows_replay(episode)
 
 
+def test_the_declared_threshold_gates_replay() -> None:
+    """That the declared threshold participates — NOT that it should be 0.85.
+
+    The number is read off the class instead of written here on purpose: no
+    justification for 0.85 exists anywhere in the repository, and pinning it
+    in a test would dress the absence of a rationale up as a contract. What
+    is asserted is the wiring — deleting the comparison from
+    `_fast_path_allows_replay` failed none of the 7139 tests (2026-08-07).
+    """
+    threshold = AgentLoop._REPLAY_MIN_SIMILARITY
+    episode = _episode()
+
+    assert AgentLoop._fast_path_allows_replay(episode, threshold), (
+        "control: at the declared threshold this episode must clear the gate, "
+        "or the refusal below says nothing about similarity"
+    )
+    assert not AgentLoop._fast_path_allows_replay(episode, threshold - 0.01), (
+        "a less similar question must not be answered with the stored answer"
+    )
+
+
 def _fast_path_pure(episode: EpisodeRecord) -> bool:
     """The real gate, asked without building an agent — never a copy of it.
 
