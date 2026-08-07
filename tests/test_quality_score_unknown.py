@@ -142,3 +142,33 @@ def test_measured_high_quality_episode_stays_fast_path_eligible() -> None:
     from core.loop import AgentLoop
 
     assert AgentLoop._quality_allows_replay(_ep("good", 9, 1))
+
+
+def test_the_gate_itself_refuses_an_unmeasured_answer() -> None:
+    """The docstring's contract is about the GATE, not one term inside it.
+
+    The two tests above ask `_quality_allows_replay` directly, so deleting its
+    call from `_fast_path_allows_replay` left all 7139 tests green (measured
+    2026-08-07). An episode is built that clears every OTHER condition, so the
+    quality term is the only thing left to refuse it — and the measured twin
+    is asserted to pass, which is what proves the refusal is not coming from
+    somewhere else.
+    """
+    from dataclasses import replace
+
+    from core.loop import AgentLoop
+
+    def _replayable(episode):
+        return replace(episode, full_answer="stored answer", completion_state="achieved")
+
+    measured = _replayable(_ep("measured", 9, 1))
+    groundless = _replayable(_ep("groundless", 0, 0))
+
+    assert AgentLoop._fast_path_allows_replay(measured, 1.0), (
+        "control: this episode must clear the gate, or the assertion below "
+        "proves nothing about the quality term"
+    )
+    assert groundless.answer_quality_score is None
+    assert not AgentLoop._fast_path_allows_replay(groundless, 1.0), (
+        "an answer whose quality was never established must not be replayed"
+    )
