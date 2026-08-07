@@ -36,6 +36,7 @@ from __future__ import annotations
 import ast
 import json
 import pathlib
+import re
 
 CORE = pathlib.Path(__file__).resolve().parent.parent / "core"
 SNAPSHOT = CORE.parent / "knowledge" / "maps" / "cns_census.json"
@@ -195,6 +196,51 @@ def test_every_listed_property_is_a_known_one() -> None:
     bad = {n: sorted(set(p) - PROPERTIES)
            for n, p in _load()["nodes"].items() if set(p) - PROPERTIES}
     assert not bad, f"unknown property names: {bad}"
+
+
+def test_the_map_states_the_numbers_the_census_computes() -> None:
+    """Counts in the map are DERIVED. Kept by hand, they rot within days.
+
+    They did: `46ba5ca` gave `_execute_step` its first properties, 14 became
+    15, and five later commits touched the map without noticing. Nothing was
+    red, because every ratchet guarded the snapshot and none guarded the prose
+    about it.
+
+    The numbers stay in the map on purpose — a person reading the map needs
+    them there — so the machine is given the job of not letting them go stale.
+    """
+    census = _load()
+    text = (CORE.parent / "docs" / "PROJECT_MAP.ru.md").read_text(encoding="utf-8")
+    with_properties = sum(1 for props in census["nodes"].values() if props)
+    expected = {
+        "nodes": len(census["nodes"]),
+        "edges": len(census["edges"]),
+        "with_properties": with_properties,
+        "without": len(census["nodes"]) - with_properties,
+    }
+    topology = re.search(r"находит \*\*(\d+) узла и (\d+) рёбер\*\*", text)
+    status = re.search(
+        r"\*\*(\d+) узлов из (\d+)\*\* имеют хотя бы одно доказанное свойство, "
+        r"\*\*(\d+)\*\* — ни одного", text)
+    assert topology and status, (
+        "the sentences carrying the census numbers are gone from "
+        "docs/PROJECT_MAP.ru.md; this ratchet reads them by shape, so rewording "
+        "them means updating it in the same commit"
+    )
+    stated = {
+        "nodes": int(topology.group(1)),
+        "edges": int(topology.group(2)),
+        "with_properties": int(status.group(1)),
+        "without": int(status.group(3)),
+    }
+    assert int(status.group(2)) == expected["nodes"], (
+        f"the map says {status.group(1)} of {status.group(2)} nodes; the census "
+        f"holds {expected['nodes']}"
+    )
+    assert stated == expected, (
+        f"docs/PROJECT_MAP.ru.md states {stated}, the census computes "
+        f"{expected}. The census is the source; correct the prose."
+    )
 
 
 def test_the_perimeter_has_not_quietly_moved() -> None:
