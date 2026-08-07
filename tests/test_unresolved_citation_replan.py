@@ -453,6 +453,108 @@ class TestVerifierDisabledNoReplan:
 
 
 # ===========================================================================
+# The return leg: the policy's verdict travels BACK and changes the run
+# ===========================================================================
+
+class TestPolicyVerdictTravelsBack:
+    """Delivery to the organ was already proven; the answer coming back was not.
+
+    A probe on this path (2026-08-07) showed the policy is consulted and says
+    `continue` 4 times and nothing else across the whole suite. Severing
+    `if decision.action != "continue":` therefore left 7165 tests passing — an
+    equivalent mutation, because the verdict that would take the branch never
+    occurs. Delivery proven, return leg absent, and no count of nodes or edges
+    shows the difference.
+
+    These two tests are the same stimulus with two different verdicts, so the
+    return leg is what separates them: same URL, same draft, same unresolved
+    citation, only `max_total_replans` differs.
+    """
+
+    def test_continue_verdict_comes_back_and_the_run_replans(
+        self, workspace: Path
+    ):
+        url = "https://example.com/pole-continue"
+        planner = ScriptedPlanner(scripts=[
+            [{"tool": "web_search", "arguments": {"query": "q"},
+              "label": "search:q"}],
+            [{"tool": "web_fetch", "arguments": {"url": url},
+              "label": "web:page"}],
+        ])
+        agent, log_path, _ = _build_agent(
+            workspace,
+            planner=planner,
+            llm_responses=[f"Conclusion: claim [web:{url}]. Sources: {url}"],
+            url_routes={url: b"<html>body</html>"},
+            max_replan_attempts=3,
+        )
+        agent.run("q")
+
+        events = _events(log_path)
+        assert [e for e in events
+                if e["event"] == "replan"
+                and e["payload"].get("phase") == "verify"]
+        assert not [e for e in events if e["event"] == "replan_exhausted"]
+        assert agent.last_replan_exhausted is False
+        assert len(planner.calls) == 2
+
+    def test_abort_verdict_comes_back_and_stops_the_replan(
+        self, workspace: Path
+    ):
+        """Same stimulus, DEFAULT budgets, and the planner simply fails to help.
+
+        The budget is not lowered to force the verdict — that would prove only
+        "if an abort arrives, the wire is intact", leaving open whether an
+        abort ever arrives at all. It does, unprompted: a planner that keeps
+        searching instead of fetching leaves the citation unresolved, the
+        second verify pass makes it `3/3`, and the policy answers
+        `abort_exhausted` on its own.
+
+        The assertion that matters is not the log line but WHERE THE RUN STOPS,
+        and there are two different stoppers to tell apart. Obeying the verdict
+        stops the loop at 2 planner calls; ignoring it lets the loop run on to
+        VERIFY_REPLAN_HARD_CAP — 3 planner calls and `verify_replan_capped`
+        instead. Measured under exactly that mutation (2026-08-07), so the two
+        outcomes are known to differ in the run, not only in the journal.
+        """
+        url = "https://example.com/pole-abort"
+        planner = ScriptedPlanner(scripts=[
+            [{"tool": "web_search", "arguments": {"query": "q"},
+              "label": "search:q"}],
+            # The planner never fetches, so the citation cannot resolve.
+            [{"tool": "web_search", "arguments": {"query": "q2"},
+              "label": "search:q2"}],
+            [{"tool": "web_search", "arguments": {"query": "q3"},
+              "label": "search:q3"}],
+        ])
+        agent, log_path, _ = _build_agent(
+            workspace,
+            planner=planner,
+            llm_responses=[f"Conclusion: claim [web:{url}]. Sources: {url}"],
+            url_routes={},
+        )  # no max_replan_attempts: the default cap of 3 is what runs here
+        answer = agent.run("q")
+
+        events = _events(log_path)
+        exhausted = [e for e in events if e["event"] == "replan_exhausted"
+                     and e["payload"].get("phase") == "verify"]
+        assert exhausted, (
+            "the policy refused to continue and the run carried on; "
+            "the verdict never came back"
+        )
+        assert exhausted[0]["payload"]["decision_action"] == "abort_exhausted"
+
+        # The consequence: the run stops HERE, not at the hard cap.
+        assert len(planner.calls) == 2, (
+            "a third plan means the loop ran past the policy's refusal and "
+            "was stopped by VERIFY_REPLAN_HARD_CAP instead"
+        )
+        assert not [e for e in events if e["event"] == "verify_replan_capped"]
+        assert agent.last_replan_exhausted is True
+        assert f"[verified:web:{url}]" not in answer
+
+
+# ===========================================================================
 # Helper coverage: extract_unresolved_web_urls is the gate
 # ===========================================================================
 
