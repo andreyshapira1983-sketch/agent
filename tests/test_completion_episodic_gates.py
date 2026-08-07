@@ -156,12 +156,15 @@ def _quality_ok(episode: EpisodeRecord) -> bool:
 
 
 def _fast_path_pure(episode: EpisodeRecord) -> bool:
-    return bool(
-        AgentLoop._quality_allows_replay(episode)
-        and episode.full_answer
-        and not episode.tools_used
-        and effective_completion(episode) == "achieved"
-    )
+    """The real gate, asked without building an agent — never a copy of it.
+
+    This used to restate the gate's conditions inline. Restating them makes
+    every assertion below true of the test's own copy rather than of the
+    code: deleting `not tools_used` from `_fast_path_allows_replay` left the
+    whole file green, including the case parametrised as "the answer depends
+    on world state". Measured 2026-08-07; the same deletion fails here now.
+    """
+    return AgentLoop._fast_path_allows_replay(episode, 1.0)
 
 
 # ==========================================================================
