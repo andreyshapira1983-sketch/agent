@@ -103,6 +103,7 @@
         "carrier_lifecycle": "tests/test_run_context_and_episode_identity.py — empty outside a run, restored after exit and after an exception, nested restore, no cross-thread clobber",
         "delivery_and_bite": "mutation M3 (2026-08-08): mint run_id without binding run_scope -> 4 red (episode carries no run_id, distinct-run and retry identity tests, autonomous run_id) -> restored green",
         "usage_ledger_bite": "closed same day. M3 originally left every model_usage test green (unit tests enter run_scope themselves, so the entry edge was outside their reach). New test test_cycle_spend_is_billed_to_the_run_that_banked_the_episode drives one real cycle and joins the spend to the banked episode by run_id. Fail-before proven: red under M3 (entry edge unbound) AND under M4 (_run_id_for_record ignores the active run -> unit + integration red). Both restored green.",
+        "bite_classes": "retro-classified 2026-08-08 per the map's protection scale. M3 — Behavioral: red at 'episode must record which attempt produced it' (run_id empty), the identity consequence itself. M4 — Behavioral: the billing list ['run-A','run-B'] wrong at the unit level AND the spend-episode join red. No structural, mirror or incidental reds found among them.",
         "fallback_semantics": "two poles unit-tested: inside a run -> run_id; outside any run -> session trace_id (test_outside_any_run_the_session_id_is_still_recorded); a pinned sub-agent ledger is not overridden by a surrounding scope (test_an_explicit_ledger_run_id_is_not_overridden_by_a_run_scope)"
       },
       "certified": {
@@ -125,7 +126,8 @@
       "evidence": {
         "M1": "2026-08-08: drop banking on the cancellation path -> 2 red (cancellation, keyboard-interrupt: banked non-success episode gone) -> restored green",
         "M2": "2026-08-08: swallow the exception (return instead of re-raise) -> 3 red (exception-not-banked-as-success, quarantine, one-abort-one-episode) -> restored green",
-        "tests": "tests/test_autonomous_episode_writeback.py — both poles: propagation AND banking asserted per exit path"
+        "tests": "tests/test_autonomous_episode_writeback.py — both poles: propagation AND banking asserted per exit path",
+        "bite_classes": "retro-classified 2026-08-08. M1 — Behavioral: red at 'a failed run must leave a trace, not vanish' (assert banked), the banking consequence. M2 — Behavioral: DID NOT RAISE — the propagation contract itself. M12 — Behavioral: the suppressed pole banked an episode (assert _episodes == [] red). Store-None guard: no bite claimed — redundant defence, recorded as such, not dressed up."
       },
       "certified": {
         "REACHABILITY": "PROVEN",
@@ -155,7 +157,8 @@
         "tests": "tests/test_budget_resume.py (checkpoint contents, queue entry, CLI surfacing, journal-once, success writes nothing; resume prompt carries context), tests/test_cli.py (stream branch message+journal), tests/characterization/test_cli_resume_branches.py (all five outcomes incl. precedence)",
         "M5": "2026-08-08: guard stops persisting -> red at the queue assert ONLY (checkpoint still written by the in-cycle site) -> ownership split proven",
         "M7": "2026-08-08: in-cycle planning writer dropped -> red at current_phase==planning (fallback degraded the state and the test saw it)",
-        "M6": "2026-08-08: cached-answer branch reordered above paused -> red exactly at test_paused_branch_wins_over_a_cached_answer"
+        "M6": "2026-08-08: cached-answer branch reordered above paused -> red exactly at test_paused_branch_wins_over_a_cached_answer",
+        "bite_classes": "retro-classified 2026-08-08. M5 — Behavioral: the paused-task count in the queue file, while the checkpoint half stayed green. M6 — Behavioral with a stated proxy: the branch is read through the operator-facing stderr notice ('Resuming budget-paused checkpoint' present, 'Replaying cached answer' absent, cached text absent from stdout); the notice is 1:1 with the branch, but the assert is on the message layer — noted, not hidden. M7/M8/M9 — Behavioral: paused checkpoint current_phase names the wrong phase when the in-cycle writer is gone. Retirement fail-before — Behavioral on both poles (queue contents, done record, resumed_by)."
       },
       "certified": {
         "REACHABILITY": "PROVEN — all three catch sites now driven by real ledger denials (planning, synthesis, verification_replan phase tests, 2026-08-08)",
@@ -175,7 +178,8 @@
       "effect_level": "L6 — probe 2026-08-08: tokens arrive at the callback and their concatenation equals the returned answer",
       "evidence": {
         "delivery_probe": "StreamingFakeLLM through the router: 3 chunks delivered, joined == answer",
-        "unit_layer": "tests/test_llm.py pins stream_complete chunk callbacks per provider; nothing drives run(on_token) end-to-end"
+        "unit_layer": "tests/test_llm.py pins stream_complete chunk callbacks per provider; nothing drives run(on_token) end-to-end",
+        "bite_classes": "retro-classified 2026-08-08. All six fail-before tests — Behavioral: ledger records present/absent by role, pre-flight raises before the first chunk (tokens == []), error record after a dead stream, billed fallback, token-join equals the answer, pause checkpoint phase. No mirror risk: the doubles RECORD what arrives, they re-derive nothing."
       },
       "certified": {
         "REACHABILITY": "PROVEN — probe, then six tests (four wrapper-level, two end-to-end)",
@@ -195,7 +199,8 @@
       "effect_level": "L4 at the router (model choice); tier semantics owned by core/deep_escalation.decide and its 20+ unit tests",
       "evidence": {
         "hole_measured": "M11 (2026-08-08): escalation=None forced at the forwarding site -> 253 escalation-adjacent tests stayed green. The mock for_task recorded role/task/task_role and DROPPED escalation — the only observer of this edge was blind to it",
-        "bite": "test_operator_escalation_reaches_the_router_for_both_roles: the SAME OperatorEscalation object (identity, not equality) must reach both role routes; red under M11, green restored"
+        "bite": "test_operator_escalation_reaches_the_router_for_both_roles: the SAME OperatorEscalation object (identity, not equality) must reach both role routes; red under M11, green restored",
+        "bite_classes": "retro-classified 2026-08-08. M11 — Behavioral at the seam, with the scope stated: the consumer is a RECORDER, so the red proves delivery to for_task and nothing beyond it; the tier decision past the seam belongs to the deep_escalation unit suite. Not a mirror — the recorder holds no logic to agree with."
       },
       "certified": {
         "REACHABILITY": "PROVEN",
@@ -313,7 +318,7 @@
       "app/daemon.py, app/worker_pool.py (scheduler contour over the same loop)"
     ],
     "clusters": [
-      {"id": "C00", "scope": "entry edges -> run identity -> abort/cancel exits", "status": "PROVEN", "opened": "2026-08-08", "closed": "2026-08-08", "proven_arcs": ["run_identity — CERTIFIED (M3, M4, join test)", "abort_episode_banking — CERTIFIED (M1, M2, M12, both silent-skip poles)", "budget_stop_resume — CERTIFIED, streamed and plain (M5-M9, both retirement poles, all three catch sites)", "on_token_streaming — CERTIFIED; billing-bypass defect fixed on the operator's verdict, six fail-before tests", "deep_escalation_delivery — CERTIFIED (M11, identity-preserving delivery to both roles)"], "closure_note": "Five arcs, twelve mutations, two defects found by measurement and fixed on the operator's verdict (a resumed pause never retired; streamed synthesis escaped the budget wrapper). PROVEN means every arc this walk found is certified — not that no sixth arc exists; the discovery rule for entry-edge arcs was reading run()'s signature and exception paths."},
+      {"id": "C00", "scope": "entry edges -> run identity -> abort/cancel exits", "status": "PROVEN", "opened": "2026-08-08", "closed": "2026-08-08", "proven_arcs": ["run_identity — CERTIFIED (M3, M4, join test)", "abort_episode_banking — CERTIFIED (M1, M2, M12, both silent-skip poles)", "budget_stop_resume — CERTIFIED, streamed and plain (M5-M9, both retirement poles, all three catch sites)", "on_token_streaming — CERTIFIED; billing-bypass defect fixed on the operator's verdict, six fail-before tests", "deep_escalation_delivery — CERTIFIED (M11, identity-preserving delivery to both roles)"], "closure_note": "Five arcs; eleven numbered mutations (M1-M9, M11, M12 — the count was once written as twelve, corrected 2026-08-08) plus the streaming fail-before (the wrapper method absent IS the mutant state). Every bite retro-classified per the map's protection scale: all Behavioral, two with stated caveats (M6 reads the branch through the operator-facing notice; M11's consumer is a recorder). Two defects found by measurement and fixed on the operator's verdict (a resumed pause never retired; streamed synthesis escaped the budget wrapper). PROVEN means every arc this walk found is certified — not that no sixth arc exists; the discovery rule for entry-edge arcs was reading run()'s signature and exception paths."},
       {"id": "C01", "scope": "_open_run: profile, assumptions registry, checkpoint writer (core/loop_context.py)", "status": "UNPROVEN"},
       {"id": "C02", "scope": "_observe_and_route: goal, question class, role route, model tier choice, deep escalation (core/loop_observe.py)", "status": "UNPROVEN"},
       {"id": "C03", "scope": "derive_completion_contract before any tool runs; ordering claim; consumed in C13", "status": "UNPROVEN"},
