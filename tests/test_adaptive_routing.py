@@ -254,6 +254,130 @@ class TestChosenTierModelsAreUsed:
         )
 
 
+class TestObserveOutputsReachConsumers:
+    """The three C02 sub-wires left open by the first walk, closed here."""
+
+    def test_verify_replan_planner_also_runs_on_the_routed_model(
+        self, tmp_path: Path
+    ) -> None:
+        """The same tier wire on the verify path (loop_verify_replan:326).
+
+        The main-path bite cannot see it: its scenario never enters the
+        verify loop. Here the synthesized answer cites an unresolvable web
+        URL, the verify loop consults the planner again — and that call too
+        must land on the ROUTED planner model, never the default.
+        """
+        default_llm = FakeLLM(responses=[])
+        planner_llm = FakeLLM(
+            responses=['{"reasoning":"no tools","sources":[]}', "{}", "{}"]
+        )
+        synth_llm = FakeLLM(
+            responses=["The fact [web:http://example.com/a] holds."]
+        )
+
+        def routed(role, task, *, escalation=None, task_role=None):
+            key = role.value if hasattr(role, "value") else str(role)
+            return planner_llm if key == "planner" else synth_llm
+
+        registry = _make_registry(tmp_path)
+        loop = AgentLoop(
+            registry=registry,
+            policy=PolicyGate(registry),
+            llm=default_llm,
+            logger=TraceLogger(
+                trace_id=new_trace_id(), log_dir=tmp_path / "logs", verbose=False
+            ),
+            verifier_enabled=True,
+        )
+        loop.model_router.for_task = routed  # type: ignore[method-assign]
+
+        loop.run("какой статус системы")
+
+        assert len(planner_llm.calls) >= 2, (
+            "the verify loop must have consulted the planner at least once "
+            "beyond the initial plan"
+        )
+        assert default_llm.calls == [], (
+            "a verify-replan planner call on the default model means the "
+            "routed choice is discarded exactly where budgets are tightest"
+        )
+
+    def test_the_role_context_reaches_the_synthesis_prompt(
+        self, tmp_path: Path
+    ) -> None:
+        """role_route -> last_role_context -> <role_context> block, delivered.
+
+        Delivery only: what the block changes in a LIVE model's answer is
+        mock-blind by nature and stays honestly unproven. The question is
+        deliberately non-trivial so the cheap path cannot trim the block.
+        """
+        question = (
+            "проанализируй архитектуру проекта и предложи план "
+            "рефакторинга слоя памяти с обоснованием"
+        )
+        fake_llm = FakeLLM(
+            responses=[
+                '{"reasoning":"no tools","sources":[]}',
+                _make_answer("role-aware answer"),
+            ]
+        )
+        registry = _make_registry(tmp_path)
+        loop = AgentLoop(
+            registry=registry,
+            policy=PolicyGate(registry),
+            llm=fake_llm,
+            logger=TraceLogger(
+                trace_id=new_trace_id(), log_dir=tmp_path / "logs", verbose=False
+            ),
+        )
+
+        loop.run(question)
+
+        joined = " || ".join(c["user"] for c in fake_llm.calls)
+        assert "<role_context>" in joined, (
+            "the routed role never reached the synthesis prompt"
+        )
+
+    def test_the_goal_carries_the_question_into_the_banked_episode(
+        self, tmp_path: Path
+    ) -> None:
+        """goal = _interpret(observation) -> episode.goal, with the question in it.
+
+        The goal is a constant-shaped string, so the bite pins the part that
+        matters: the operator's actual question must survive into the banked
+        episode's goal, or later retrieval ranks it against a blank.
+        """
+        from core.smart_memory import EpisodicMemoryStore
+
+        question = "how much is two plus two"
+        fake_llm = FakeLLM(
+            responses=[
+                '{"reasoning":"no tools","sources":[]}',
+                _make_answer("four"),
+            ]
+        )
+        registry = _make_registry(tmp_path)
+        store = EpisodicMemoryStore(tmp_path / "ep.jsonl")
+        loop = AgentLoop(
+            registry=registry,
+            policy=PolicyGate(registry),
+            llm=fake_llm,
+            logger=TraceLogger(
+                trace_id=new_trace_id(), log_dir=tmp_path / "logs", verbose=False
+            ),
+            episodic_store=store,
+        )
+
+        loop.run(question)
+
+        banked = store.load()
+        assert banked, "the cycle must bank an episode"
+        assert question in banked[0].goal, (
+            f"the question must survive into the episode's goal, "
+            f"got {banked[0].goal!r}"
+        )
+
+
 class TestRunAdaptiveRoute:
     def _run_with_mock_router(self, tmp_path: Path, question: str, **kwargs):
         return _run_with_mock_router(tmp_path, question, **kwargs)
