@@ -164,6 +164,44 @@ exist, pytest exited non-zero before collecting anything, and the script read
 "non-zero" as "a test caught it". Fourteen meaningless green ticks. The script
 now separates "caught", "not caught" and "the run never happened".
 
+## EpisodeRecord — route-dependent field semantics (schema debt, 2026-08-07)
+
+Found while walking the orchestrator, not while working on memory. Recorded and
+left alone: it is not a runtime defect, and fixing it is a migration, not a
+detail of the audit that surfaced it.
+
+`EpisodeRecord.goal` and `.question` mean different things depending on which
+producer wrote the row. Four producers, four conventions:
+
+| producer | `goal` | `question` |
+|---|---|---|
+| the question path (`loop_memory_write:205`) | `"Answer the question: {question}"` — derived | the question |
+| an aborted run (`loop_memory_write:404`) | `"(run aborted before completion)"` — a status marker | the question |
+| self-build (`self_build_memory:140`) | the REAL task goal, truncated to 500 | `kind` — a category |
+| self-repair (`self_repair:510`) | `"repair"` — a category | `"fix {path}"` — the object |
+
+In the third row the fields swap roles outright.
+
+**No behavioural dependency was found.** Episodic search compares only
+`question` (stated in `smart_memory`: "Only the stored `question` field is
+compared, not goal/summary/tags"), and every `.goal` read elsewhere belongs to
+an autonomous run's config, not to an episode. Breaking the question path's
+description to `"x"` left all 7139 tests green — correctly, since nothing
+decides on it.
+
+Two things follow, and they matter more than the redundancy:
+
+* the system already routes AROUND the pair. Provenance is recognised by TAGS
+  (`search_by_tags(["self-build", "failed"])`), because the two fields do not
+  carry enough meaning to tell writers apart;
+* the canonical facts survive regardless: `question` and `run_id` stay intact,
+  so a corrupted description degrades the presentation, never the recoverable
+  history.
+
+The risk is latent rather than active: the first person — human or agent — who
+reads `episode.goal` expecting "the goal" will step on a mine, because in three
+of four routes it is not one.
+
 ## Memory tags — contract change, 2026-08-07
 
 The contract, as the operator stated it:
