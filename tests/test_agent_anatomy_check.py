@@ -203,3 +203,19 @@ def test_script_does_not_import_core_or_git():
     assert "subprocess" not in src
     assert "urllib" not in src
     assert "requests" not in src
+
+
+def test_the_generator_writes_where_the_checker_reads():
+    """The writer and the reader must name the same file.
+
+    They are separate scripts with separate path constants, and nothing else
+    ties them together. Measured 2026-08-07 by breaking them apart: moving the
+    GENERATOR's output alone left the entire suite green — the checker went on
+    reading a file that nobody updated any more, and each half looked healthy
+    in isolation. The opposite break (moving the checker alone) did fail, so
+    the pair was guarded from one side only.
+
+    This is the shape the operator named before the documentation move: a
+    connection where both ends are green apart and broken together.
+    """
+    assert _load_generator().DOC_PATH == _load_module().DOC_PATH

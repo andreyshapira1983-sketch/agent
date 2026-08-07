@@ -17,6 +17,13 @@ import sys
 from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+#: Where the generated map is written. `scripts/agent_anatomy_check.py` declares
+#: the same path as the place it READS, and `tests/test_agent_anatomy_check.py`
+#: asserts the two agree. Measured 2026-08-07: moving the writer alone left the
+#: whole suite green — the checker went on reading a file nobody updated any
+#: more, and both halves looked healthy on their own.
+DOC_PATH = os.path.join(ROOT, "docs", "AGENT_ANATOMY.md")
 CORE = os.path.join(ROOT, "core")
 
 # Ordered logical groups. Each module name may appear in exactly one group.
@@ -210,9 +217,8 @@ def main() -> int:
         # the message on stderr, exit code 1.
         print(exc, file=sys.stderr)
         return 1
-    doc_dir = os.path.join(ROOT, "docs")
-    os.makedirs(doc_dir, exist_ok=True)
-    with open(os.path.join(doc_dir, "AGENT_ANATOMY.md"), "w", encoding="utf-8", newline="\n") as fh:
+    os.makedirs(os.path.dirname(DOC_PATH), exist_ok=True)
+    with open(DOC_PATH, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
     print(
         f"Wrote docs/AGENT_ANATOMY.md: {len(_actual_modules())} modules, "
