@@ -176,6 +176,38 @@ def test_the_declared_threshold_gates_replay() -> None:
     )
 
 
+def test_a_file_scoped_question_is_not_answered_from_memory(tmp_path: Path) -> None:
+    """A named file forbids replay — the stored answer is not about this file.
+
+    Deleting `and not file_hint` from `_episodic_fast_path` reddened only
+    `test_the_body_moved_symbol_for_symbol`, the guard that fires on ANY edit
+    to that body. Behavioural protection was therefore absent, and the whole
+    function was uncheckable through it (measured 2026-08-07).
+    """
+    from core.models import Goal
+
+    agent = _agent(tmp_path)
+    episode = _episode()
+    goal = Goal(description="d", success_criteria="c")
+
+    def _arm() -> None:
+        agent._last_best_similar_episode = episode
+        agent._last_best_similar_score = 0.99
+
+    _arm()
+    assert agent._episodic_fast_path(
+        QUESTION, file_hint=None, goal=goal, local_critique_active=False
+    ) == episode.full_answer, (
+        "control: with no hint this question IS served from memory, or the "
+        "refusal below says nothing about the hint"
+    )
+
+    _arm()
+    assert agent._episodic_fast_path(
+        QUESTION, file_hint="core/loop.py", goal=goal, local_critique_active=False
+    ) is None, "an answer tied to a named file must not be replayed verbatim"
+
+
 def _fast_path_pure(episode: EpisodeRecord) -> bool:
     """The real gate, asked without building an agent — never a copy of it.
 
