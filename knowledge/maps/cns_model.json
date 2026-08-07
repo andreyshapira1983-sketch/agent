@@ -130,9 +130,9 @@
       "certified": {
         "REACHABILITY": "PROVEN",
         "CAUSALITY": "PROVEN",
-        "SEMANTICS": "UNPROVEN — the two silent-skip branches (no episodic store, durable-learning suppressed, core/loop_memory_write.py:398-401) have no two-pole test",
-        "PROTECTION": "PROVEN (M1+M2 redden existing tests)",
-        "verdict": "NOT CERTIFIED — silent-skip semantics open"
+        "SEMANTICS": "PROVEN — both silent-skip branches two-pole tested 2026-08-08: a suppressed allowlist banks nothing yet the exception still propagates; an agent without a store aborts loudly and conjures no file. The store-None guard is redundant defence (its removal is absorbed by the best-effort catch; the observable contract holds either way) — recorded, not claimed as a bite",
+        "PROTECTION": "PROVEN — M1+M2 plus M12 (suppression check removed -> the suppressed-pole test reds)",
+        "verdict": "PROVEN on all four conditions — certified with the arc's own scope: the exits of run() and their banking discipline"
       }
     },
     "budget_stop_resume": {
@@ -187,6 +187,23 @@
       "semantic_defects": [
         {"defect": "streamed synthesis bypassed the usage ledger and its budget", "status": "RESOLVED 2026-08-08 on the operator's verdict", "detail": "UsageTrackedLLM defined only complete; __getattr__ handed stream_complete to the RAW provider LLM, skipping assert_can_start, log_start and record. Measured: streamed cycle billed only the planner; max_calls=1 did not stop a streamed run. Fixed with a real stream_complete on the wrapper mirroring complete's billing; no provider failover for streamed calls by design. Six fail-before tests pin it; ratchet ceiling 1800->1860 with justification."}
       ]
+    },
+    "deep_escalation_delivery": {
+      "producer": "run(deep_escalation=...) — operator-only: cli --reason/--expect builds OperatorEscalation (cli/one_shot.py:101-107)",
+      "carrier": "parameter chain run -> _run_inner -> _observe_and_route -> model_router.for_task(escalation=...) for BOTH roles (core/loop_observe.py:153,159)",
+      "consumer": "for_task tier decision: a DEEP request without a valid operator reason downgrades to standard — the agent can never open the deep tier for itself",
+      "effect_level": "L4 at the router (model choice); tier semantics owned by core/deep_escalation.decide and its 20+ unit tests",
+      "evidence": {
+        "hole_measured": "M11 (2026-08-08): escalation=None forced at the forwarding site -> 253 escalation-adjacent tests stayed green. The mock for_task recorded role/task/task_role and DROPPED escalation — the only observer of this edge was blind to it",
+        "bite": "test_operator_escalation_reaches_the_router_for_both_roles: the SAME OperatorEscalation object (identity, not equality) must reach both role routes; red under M11, green restored"
+      },
+      "certified": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN — M11 both ways",
+        "SEMANTICS": "PROVEN for the delivery arc (object arrives unmodified); tier-gating semantics live in the deep_escalation unit suite and are its scope, not this arc's",
+        "PROTECTION": "PROVEN",
+        "verdict": "PROVEN on all four conditions — scope: entry edge to router, both roles"
+      }
     },
     "unresolved_citation": {
       "producer": "core/verifier.py::extract_unresolved_web_urls (detector)",
@@ -296,7 +313,7 @@
       "app/daemon.py, app/worker_pool.py (scheduler contour over the same loop)"
     ],
     "clusters": [
-      {"id": "C00", "scope": "entry edges -> run identity -> abort/cancel exits", "status": "UNPROVEN", "opened": "2026-08-08", "proven_arcs": ["run_identity — CERTIFIED, all four conditions (M3, M4, join test)", "abort_episode_banking (M1+M2)", "budget_stop_resume — CERTIFIED, all four conditions, streamed and plain (M5-M9, both retirement poles, all three catch sites)", "on_token_streaming — CERTIFIED, all four conditions; billing-bypass defect fixed on the operator's verdict, six fail-before tests"], "open": ["deep_escalation delivery", "silent-skip branches of abort banking"]},
+      {"id": "C00", "scope": "entry edges -> run identity -> abort/cancel exits", "status": "PROVEN", "opened": "2026-08-08", "closed": "2026-08-08", "proven_arcs": ["run_identity — CERTIFIED (M3, M4, join test)", "abort_episode_banking — CERTIFIED (M1, M2, M12, both silent-skip poles)", "budget_stop_resume — CERTIFIED, streamed and plain (M5-M9, both retirement poles, all three catch sites)", "on_token_streaming — CERTIFIED; billing-bypass defect fixed on the operator's verdict, six fail-before tests", "deep_escalation_delivery — CERTIFIED (M11, identity-preserving delivery to both roles)"], "closure_note": "Five arcs, twelve mutations, two defects found by measurement and fixed on the operator's verdict (a resumed pause never retired; streamed synthesis escaped the budget wrapper). PROVEN means every arc this walk found is certified — not that no sixth arc exists; the discovery rule for entry-edge arcs was reading run()'s signature and exception paths."},
       {"id": "C01", "scope": "_open_run: profile, assumptions registry, checkpoint writer (core/loop_context.py)", "status": "UNPROVEN"},
       {"id": "C02", "scope": "_observe_and_route: goal, question class, role route, model tier choice, deep escalation (core/loop_observe.py)", "status": "UNPROVEN"},
       {"id": "C03", "scope": "derive_completion_contract before any tool runs; ordering claim; consumed in C13", "status": "UNPROVEN"},
@@ -317,6 +334,6 @@
       {"id": "C18", "scope": "future subagent lifecycle ports: mark the boundary so current architecture does not block it; nothing to implement now", "status": "UNPROVEN"}
     ],
     "carriers_not_in_clusters": "state_carriers section above holds failure_history, _step_trigger_tls, _last_step_failure (DEAD); artifacts and chain still owe carrier records",
-    "next_edge": "C00 remaining: on_token / deep_escalation delivery through the entry edge and the silent-skip branches of abort banking, then close C00 and move to C01."
+    "next_edge": "C01: _open_run (core/loop_context.py) — profile, assumptions registry, checkpoint writer; what each hands the run and who downstream depends on it."
   }
 }

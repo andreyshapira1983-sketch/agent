@@ -121,6 +121,49 @@ def test_banked_autonomous_episode_is_not_fed_back(tmp_path: Path) -> None:
 
 
 # ==========================================================================
+# The two silent-skip branches of abort banking (loop_memory_write:398-401).
+# Both must skip the WRITE while the exception still propagates: suppression
+# governs what may be persisted, never whether the caller learns of the crash.
+# ==========================================================================
+def test_suppressed_agent_aborts_loudly_but_banks_nothing(tmp_path: Path) -> None:
+    """Allowlist without the episode sink: the abort write obeys it too."""
+    agent = build_agent(
+        tmp_path,
+        with_memory=False,
+        with_experience=True,
+        episodic_replay=False,
+        durable_writes=frozenset(),   # nothing may be written durably
+        approval_provider=None,
+    )
+
+    with pytest.raises(RuntimeError):
+        _drive_until_it_raises(agent, RuntimeError("boom"))
+
+    assert _episodes(tmp_path) == [], (
+        "a suppressed sink stays suppressed on the abort path as well"
+    )
+
+
+def test_agent_without_episodic_store_aborts_loudly_and_writes_nothing(
+    tmp_path: Path,
+) -> None:
+    """No store at all: the abort path must not crash and must not create one."""
+    agent = build_agent(
+        tmp_path,
+        with_memory=False,
+        with_experience=False,
+        approval_provider=None,
+    )
+
+    with pytest.raises(RuntimeError):
+        _drive_until_it_raises(agent, RuntimeError("boom"))
+
+    assert not (tmp_path / DEFAULT_EPISODIC_MEMORY_PATH).exists(), (
+        "an agent built without experience memory may not conjure the file on abort"
+    )
+
+
+# ==========================================================================
 # Safety: an unfinished run is never a success.
 # ==========================================================================
 def test_exception_is_not_banked_as_success(tmp_path: Path) -> None:

@@ -154,6 +154,7 @@ def _run_with_mock_router(
     question: str,
     *,
     for_task_impl=None,
+    deep_escalation=None,
 ) -> tuple[list[dict], list[tuple]]:
     """Run the loop with a mock router, collect log events.
 
@@ -167,11 +168,15 @@ def _run_with_mock_router(
     fake_llm = FakeLLM(responses=[_make_answer("answer")])
     planner = FakePlanner(sources=[], reasoning="no tools needed")
 
-    # Patch model_router.for_task to return fake_llm and record calls
+    # Patch model_router.for_task to return fake_llm and record calls.
+    # `escalation` is recorded too: it used to be dropped here, and with it
+    # the only place that could notice run(deep_escalation=...) not reaching
+    # the router — measured 2026-08-08, 253 adjacent tests stayed green with
+    # the forwarding cut.
     for_task_calls: list[tuple] = []
 
     def fake_for_task(role, task, *, escalation=None, task_role=None):
-        for_task_calls.append((role, task, task_role))
+        for_task_calls.append((role, task, task_role, escalation))
         return fake_llm
 
     router_impl = for_task_impl or fake_for_task
@@ -200,7 +205,7 @@ def _run_with_mock_router(
     loop.model_router.for_task = router_impl  # type: ignore[method-assign]
     loop.log = SpyLogger()  # type: ignore[assignment]
 
-    loop.run(question)
+    loop.run(question, deep_escalation=deep_escalation)
 
     return events, for_task_calls
 
@@ -217,10 +222,39 @@ class TestRunAdaptiveRoute:
         # role may be ModelRole enum or plain string — normalise to value
         roles_called = [
             r.value if hasattr(r, "value") else str(r)
-            for r, _, _ in for_task_calls
+            for r, _, _, _ in for_task_calls
         ]
         assert "planner" in roles_called
         assert "synthesizer" in roles_called
+
+    def test_operator_escalation_reaches_the_router_for_both_roles(
+        self, tmp_path: Path
+    ):
+        """run(deep_escalation=...) must arrive at for_task() unmodified.
+
+        This is the only wire that lets --reason/--expect open the deep tier;
+        cut it and the operator's escalation is silently a no-op. Measured
+        2026-08-08: with `escalation=None` forced at the forwarding site,
+        253 escalation-adjacent tests stayed green — none of them watched
+        this edge.
+        """
+        from core.deep_escalation import OperatorEscalation
+
+        marker = OperatorEscalation(reason="operator_request", expected_output="plan")
+        _events, for_task_calls = self._run_with_mock_router(
+            tmp_path, "какой статус системы", deep_escalation=marker
+        )
+
+        escalations = {
+            (r.value if hasattr(r, "value") else str(r)): esc
+            for r, _, _, esc in for_task_calls
+        }
+        assert escalations.get("planner") is marker, (
+            "the planner route lost the operator's escalation"
+        )
+        assert escalations.get("synthesizer") is marker, (
+            "the synthesizer route lost the operator's escalation"
+        )
 
     def test_for_task_receives_task_role(self, tmp_path: Path):
         """run() must forward the RoleRouter verdict to for_task().
@@ -233,7 +267,7 @@ class TestRunAdaptiveRoute:
             tmp_path, "какой статус системы"
         )
         assert for_task_calls, "for_task() was never called"
-        task_roles = {tr for _, _, tr in for_task_calls}
+        task_roles = {tr for _, _, tr, _ in for_task_calls}
         # Every call carries the same, non-empty verdict.
         assert len(task_roles) == 1
         assert task_roles != {None}
@@ -251,7 +285,7 @@ class TestRunAdaptiveRoute:
         """for_task() must receive the full user question as the task string."""
         question = "сделай полный архитектурный аудит системы"
         _events, for_task_calls = self._run_with_mock_router(tmp_path, question)
-        questions_passed = [task for _, task, _ in for_task_calls]
+        questions_passed = [task for _, task, _, _ in for_task_calls]
         assert all(q == question for q in questions_passed)
 
 
