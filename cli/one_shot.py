@@ -55,6 +55,9 @@ def run_one_shot(
     auto_approve: str = "off",
     reason: str | None = None,
     expect: str | None = None,
+    # Set when this one-shot resumes a budget pause: the paused trace_id,
+    # passed through to the guard so a completed resume retires its task.
+    resumed_from: str | None = None,
     # Wiring seam: cli/app.py passes its own binding, so a patch there is
     # observed here too. Default keeps this function runnable on its own.
     build_agent: Callable[..., object] = _build_agent,
@@ -115,6 +118,7 @@ def run_one_shot(
         workspace=workspace,
         stream=False,
         deep_escalation=deep_escalation,
+        resumed_from=resumed_from,
     )
     print("\n" + format_human_response(answer) + "\n")
     return 0

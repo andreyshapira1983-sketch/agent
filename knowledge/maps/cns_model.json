@@ -158,14 +158,14 @@
         "M6": "2026-08-08: cached-answer branch reordered above paused -> red exactly at test_paused_branch_wins_over_a_cached_answer"
       },
       "certified": {
-        "REACHABILITY": "PROVEN for the planning catch site (real ledger denial drives it); UNPROVEN for synthesis and verification_replan catch sites — no test reaches a budget stop in those phases",
-        "CAUSALITY": "PROVEN — three mutations, each reddening its own arc",
-        "SEMANTICS": "NEGATIVE — the backward arc has no closing half: nothing ever retires the paused task (see semantic_defects)",
-        "PROTECTION": "PROVEN for the three bitten wires; UNPROVEN for the two unreached catch sites",
-        "verdict": "NOT CERTIFIED — two catch sites unreached, back-arc defect open"
+        "REACHABILITY": "PROVEN — all three catch sites now driven by real ledger denials (planning, synthesis, verification_replan phase tests, 2026-08-08)",
+        "CAUSALITY": "PROVEN — five mutations (M5-M9), each reddening exactly its own arc",
+        "SEMANTICS": "PROVEN — pause phase fidelity per site, resume precedence, and the closing half both poles: success retires the task, a repeated stop retires nothing",
+        "PROTECTION": "PROVEN — M5/M6/M7 plus M8 (synthesis catch dropped -> its test red) and M9 (verify catch dropped -> its test red); retirement wiring proven fail-before (both new tests red until the join existed)",
+        "verdict": "PROVEN on all four conditions — second certified CNS arc. Note the designed asymmetry: a resume that pauses again leaves TWO paused tasks (old truthful, new under the fresh trace); tested, not accidental."
       },
       "semantic_defects": [
-        {"defect": "a successfully resumed task never retires", "detail": "probe 2026-08-08: budget stop -> paused task queued -> resolve_resume restores the question -> resumed run succeeds -> queue still lists the task paused and resumable. No code path writes paused->done for resume_checkpoint tasks (only manual :task-cancel / :task-unblock touch them); the resumed run cannot find the task because it runs under a fresh trace_id and nothing joins the two. The operator's resumable list grows and lies.", "minimal_fix_proposal": "after a resumed run completes successfully, mark paused resume_checkpoint tasks whose last_report.trace_id matches the RESUMED trace as done; decide separately what a resume-that-pauses-again does to the old task"}
+        {"defect": "a successfully resumed task never retires", "status": "RESOLVED 2026-08-08 with the operator's verdict", "detail": "probe: pause -> resume -> success left the task paused and resumable forever; no code path wrote paused->done and the fresh trace_id joined to nothing. Fixed by carrying the join explicitly: ResumeDecision.resumed_paused_trace -> run_one_shot -> guard -> _retire_resumed_pause on the no-exception path; retired task keeps its report plus resumed_by. Both poles tested; design note in docs/CODE_NOTES.md."}
       ]
     },
     "unresolved_citation": {
@@ -276,7 +276,7 @@
       "app/daemon.py, app/worker_pool.py (scheduler contour over the same loop)"
     ],
     "clusters": [
-      {"id": "C00", "scope": "entry edges -> run identity -> abort/cancel exits", "status": "UNPROVEN", "opened": "2026-08-08", "proven_arcs": ["run_identity — CERTIFIED, all four conditions (M3, M4, join test)", "abort_episode_banking (M1+M2)", "budget_stop_resume — three wires bitten (M5, M6, M7), ownership split proven; NOT CERTIFIED: two catch sites unreached, back-arc defect (resumed task never retires) measured by probe"], "open": ["on_token / deep_escalation delivery", "silent-skip branches of abort banking", "budget stop in synthesis / verification_replan phases unreached by any test"]},
+      {"id": "C00", "scope": "entry edges -> run identity -> abort/cancel exits", "status": "UNPROVEN", "opened": "2026-08-08", "proven_arcs": ["run_identity — CERTIFIED, all four conditions (M3, M4, join test)", "abort_episode_banking (M1+M2)", "budget_stop_resume — CERTIFIED, all four conditions (M5-M9, both retirement poles, all three catch sites reached); back-arc defect found by probe and fixed on the operator's verdict"], "open": ["on_token / deep_escalation delivery", "silent-skip branches of abort banking"]},
       {"id": "C01", "scope": "_open_run: profile, assumptions registry, checkpoint writer (core/loop_context.py)", "status": "UNPROVEN"},
       {"id": "C02", "scope": "_observe_and_route: goal, question class, role route, model tier choice, deep escalation (core/loop_observe.py)", "status": "UNPROVEN"},
       {"id": "C03", "scope": "derive_completion_contract before any tool runs; ordering claim; consumed in C13", "status": "UNPROVEN"},
@@ -297,6 +297,6 @@
       {"id": "C18", "scope": "future subagent lifecycle ports: mark the boundary so current architecture does not block it; nothing to implement now", "status": "UNPROVEN"}
     ],
     "carriers_not_in_clusters": "state_carriers section above holds failure_history, _step_trigger_tls, _last_step_failure (DEAD); artifacts and chain still owe carrier records",
-    "next_edge": "C00 remaining: on_token / deep_escalation delivery through the entry edge, then close C00 and move to C01. Defect 'resumed task never retires' awaits the operator's verdict on the minimal fix."
+    "next_edge": "C00 remaining: on_token / deep_escalation delivery through the entry edge and the silent-skip branches of abort banking, then close C00 and move to C01."
   }
 }

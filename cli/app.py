@@ -147,6 +147,9 @@ def run_cli() -> int:
             return decision.exit_code
         args.ask = decision.ask
         args.file = decision.file_hint
+        resumed_from = decision.resumed_paused_trace
+    else:
+        resumed_from = None
 
     # Same distinction as `--resume` above, and for the same reason: falsiness
     # would send an empty `--ask` into the interactive branch, answering a
@@ -177,6 +180,7 @@ def run_cli() -> int:
             auto_approve=args.auto_approve,
             reason=args.reason,
             expect=args.expect,
+            resumed_from=resumed_from,
             build_agent=build_agent,
         )
 

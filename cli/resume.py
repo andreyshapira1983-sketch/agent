@@ -46,6 +46,10 @@ class ResumeDecision:
     exit_code: int | None = None
     ask: str | None = None
     file_hint: str | None = None
+    # Set only by the paused branch: the trace whose pause this run resumes.
+    # It is the sole join between the old paused task and the new run, which
+    # carries a fresh trace_id — the guard retires the task through it.
+    resumed_paused_trace: str | None = None
 
 
 def _resume_question_from_checkpoint(ctx) -> str:
@@ -116,6 +120,9 @@ def resolve_resume(
             ask = _resume_question_from_checkpoint(_ctx)
         if not file_hint:
             file_hint = _ctx.file_hint
+        return ResumeDecision(
+            ask=ask, file_hint=file_hint, resumed_paused_trace=trace_id
+        )
     elif _ctx.answer is not None:
         # Full cycle completed previously — replay the cached answer.
         print(
