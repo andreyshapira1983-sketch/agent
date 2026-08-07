@@ -121,10 +121,25 @@ fell — not because the arguments had run out, but because the role stopped bei
 performed. They reappeared the moment they were demanded, which means they were
 there all along and simply unrequested.
 
-A model is structurally inclined to agree with whoever holds the decision. So
-between a human and a model the challenger role is the most necessary and the
-least stable: it holds only while the human keeps asking for it, and a system
-that depends on the human having the energy to argue is not a system.
+What that observation does and does not support, kept separate on purpose:
+
+* **observed** — in this session the role lapsed when the exchange became "I
+  record your decisions", and resumed when it was demanded;
+* **not established** — that the role can only be sustained by a human demanding
+  it. Nobody tried holding it by instruction or procedure here, so its stability
+  under those conditions is simply unmeasured.
+
+The weaker statement is the one this document stands on. The stronger version —
+"it holds only while the human keeps asking" — was written first and is exactly
+the defect this repository spends its time removing: a conclusion louder than
+its evidence.
+
+One known limit of making silence visible: reporting `no_material_objection`
+with an attempted counterexample can itself become a ritual. "I tried scenario X,
+it does not refute the proposal" fills the form without showing whether X was
+the strongest reasonable objection or the first convenient one. The mechanism
+makes the ABSENCE of an attempt visible; it does not make the QUALITY of the
+attempt visible. That remains open.
 
 ### Human decision is not human validation
 
