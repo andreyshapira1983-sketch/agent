@@ -1,9 +1,11 @@
 # Evidence Protocol — how several models may argue without lying to each other
 
-> **Status: SPECIFICATION. Nothing here is built.** No module implements it, no
-> test pins it, no part of the running agent behaves this way. It exists so the
-> design is not re-derived from scratch later. Read every sentence below as
-> "this is what we would build", never as "this is what happens".
+> **Status: DESIGN DOCUMENT WITH OPEN BLOCKERS. Nothing here is built, and
+> implementation must not start.** Two questions in "Open blockers" below are
+> unresolved at the foundation — until they are answered this protocol can
+> verify irrelevant evidence flawlessly, which is an expensive machine for
+> confident error. No module implements any of this, no test pins it, no part of
+> the running agent behaves this way.
 >
 > Written 2026-08-07 from a working session between the operator and the agent.
 > Superseded only by a document that says so explicitly.
@@ -675,6 +677,101 @@ than months later during an audit.
 Which makes the documentation a client of the same registry as the models. Same
 types, same freshness rules, same negative tests.
 
+## Open blockers
+
+Four holes found by arguing with this document rather than extending it. The
+first two are load-bearing: **implementation does not start until they are
+answered.**
+
+### B1 — nothing proves the check is relevant to the claim (BLOCKING)
+
+A model states "claim X, verify with `named_test A`". The arbiter runs A, A is
+green, the claim is accepted. **Nobody established that A tests X.**
+
+This is not hypothetical. Every guard this repository broke on 2026-08-07 was
+green and meaningless: a doctrine guard covering three manifests out of four, a
+document test asserting the presence of the word "PLANNED", a generator and its
+checker never compared at all. Each passed; none verified what it claimed to.
+
+The arbiter's negative tests do not close this. They prove it rejects forgeries,
+not that the check has anything to do with the claim. The sub-agent path is
+accidentally protected — there the check is fixed by the task contract — but the
+core case, two models arguing, is wide open: the model proposes what will judge
+it, so a green irrelevant check manufactures a "proof".
+
+Direction, not yet a design:
+
+```
+claim_type              what kind of assertion this is
+verification_policy_id  which policy governs that kind
+allowed_check_ids       the only checks admissible for it
+coverage_relation       whether a check settles the claim wholly or partly
+```
+
+Two traps inside that direction:
+
+* **`claim_type` must not be self-declared.** A model free to name its own type
+  picks the one whose policy allows the weakest check — the same defect, one
+  storey up. The type is derived from the claim's form or assigned by the
+  arbiter, never accepted from the message.
+* **Partial coverage is not a status, it is a signal to split.** A check that
+  settles part of a claim ("faster and correct" — the test says nothing about
+  faster) means the claim must be broken into pieces. One claim, one check, one
+  status. Otherwise `verified_true` comes to mean "true in some respect", which
+  looks like a fact and behaves like a hint.
+
+The mapping `claim_type -> check_id` needs its own negative tests, or the
+problem simply moves into the registry.
+
+### B2 — shared facts and global invalidation contradict each other (BLOCKING)
+
+Two rules written here fight: *facts the arbiter confirmed belong to the system
+and may be cited later*, and *any new commit turns every `verified_true` into
+`verified_stale`*.
+
+In active development commits arrive by the dozen per day, so by the time
+another sub-agent consults the journal almost everything in it is stale. The
+shared resource that `accepted_log_reference` exists for is a warehouse of
+expired goods, and every child re-derives the same facts anyway — precisely what
+sharing was meant to prevent.
+
+Three honest options; the third is not available yet:
+
+1. code-dependent evidence is reusable **only within one commit** — crude,
+   honest, and correct today;
+2. a separate class of facts whose validity does not depend on the code at all
+   (external, structural) and therefore does not expire with it;
+3. a proven dependency graph enabling targeted invalidation — only after the
+   graph is computed or instrumentally confirmed, never from a hand-written list.
+
+Start with 1 and 2. Do not pretend a smart invalidation exists.
+
+### B3 — the metrics are noise at small sample sizes
+
+`unsupported_confidence_rate` means something across hundreds of claims. A
+sub-agent may have three. One failure in three is 33% or it is nothing.
+
+This repository has already paid for that lesson: procedure confidence is
+Beta(1,1)-smoothed precisely because one success used to read as certainty, and
+45 of 65 stored procedures sat at a raw 1.0 until they were recomputed.
+
+So: below N confirmed observations, **journal only, change nothing**. Above N,
+smoothing rather than raw percentages. Probation runs must respect sample size
+too, or one lucky report "cures" an agent.
+
+### B4 — the cost of building this may exceed its value today
+
+On 2026-08-07 roughly ten real defects were found with mutation probes, full
+suite runs, link resolution and path-role analysis — with no protocol at all.
+The protocol takes months and defends against a problem that does not exist yet:
+a second model in the system.
+
+Not an argument against building it. An argument about order: spreading today's
+audit method to `core/loop.py` almost certainly pays back sooner than an
+arbiter. The specification keeps its value as a design document with the
+blockers above stated — a plan that survives is worth more than a system built
+on an unanswered question.
+
 ## Deliberately out of scope
 
 * Consensus. The protocol records disagreement; it does not resolve it.
@@ -686,8 +783,11 @@ types, same freshness rules, same negative tests.
 
 ## If this is ever built
 
-Suggested order, each stage useful alone:
+Not before B1 and B2 are answered. Suggested order after that, each stage
+useful alone:
 
+0. relevance mapping (B1) and an invalidation rule that is honest about what it
+   cannot do (B2) — everything below is worthless without them;
 1. the journal and message shape, with no verification at all — just structure;
 2. two or three evidence types with their reproduction procedures and negative
    tests;
