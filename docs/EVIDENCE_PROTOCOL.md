@@ -8,6 +8,26 @@
 > Written 2026-08-07 from a working session between the operator and the agent.
 > Superseded only by a document that says so explicitly.
 
+## Where this belongs, and where its parts will end up
+
+Kept as one document on purpose: it is a plan, and a plan split across files
+before anyone builds it is a plan nobody reads whole. But the material here has
+two different homes once it becomes code, and the split is worth writing down
+now rather than rediscovering later.
+
+| section | on implementation it belongs to |
+|---|---|
+| roles, message shape, evidence types, the check registry, statuses, freshness, chains, rounds, journal | **this document** — mechanics shared by any participant |
+| the sub-agent report contract, the four calibration rates, `unsupported_excuse`, `planned_deviation`, requalification | **[SUBAGENT_LIFECYCLE.md](../knowledge/doctrine/SUBAGENT_LIFECYCLE.md)** — the lifecycle of one subject |
+
+That second document is normative and the agent reads it as doctrine, so nothing
+moves there until it is built. A specification living inside doctrine would be
+read as a description of the present — the exact failure this repository spent a
+week removing.
+
+Until then: mechanics here, and the lifecycle document keeps saying only what is
+true today.
+
 ## The problem
 
 Put two language models in a conversation and they converge. Not on truth — on
@@ -424,6 +444,21 @@ visible → `unknown_check` is a planning or search defect. Never disclosed → 
 penalty is possible. The claim about the mind is not checked; the conditions for
 knowing are.
 
+### The definition is operational, and it has to be
+
+`unsupported_excuse` is defined without reference to intent:
+
+> the sub-agent reported a constraint on itself, and the arbiter proved the
+> constraint was absent.
+
+No motive, no "lied". Not out of politeness — out of the protocol's own rule.
+Intent is unverifiable, and unverifiable statements carry no status. An arbiter
+announcing "the sub-agent lied" would be making a claim it cannot reproduce:
+`unsupported_claim`, committed by the arbiter. The protocol forbids its own
+judge from speaking about minds.
+
+What remains is provable and sufficient for every consequence that follows.
+
 ### Budget stops being a yes/no fact
 
 With the ledger in hand the arbiter sees five quantities — granted, spent,
@@ -439,9 +474,42 @@ the moment of the decision — which separates four situations that
 
 The fourth cannot be established after the fact: any spending can be narrated as
 a deliberate choice once it has happened. It counts only if the decision was
-recorded BEFORE the spend — the same discipline that fixes checks in the task
-contract in advance. An explanation after the event is a rationalisation, not a
-choice.
+recorded BEFORE the spend:
+
+```
+planned_deviation      what will be done instead
+reason                 why
+expected_value         what it should buy
+expected_cost          what it should cost
+verification_deferred  which checks are being postponed
+remaining_budget       what is left at the moment of deciding
+```
+
+The arbiter then compares the plan against the actual ledger. And it establishes
+"before" from **its own journal order**, never from a timestamp the sub-agent
+supplied — otherwise "recorded in advance" becomes a field filled in by the party
+being judged.
+
+An explanation after the event is a rationalisation, not a choice.
+
+### Consequences must have a way back
+
+The remedies escalate — correction, then narrowed authority, then withdrawal
+from service. Without a return path the system only ever ratchets tighter:
+everyone errs eventually, so every sub-agent drifts toward the ceiling of its
+restrictions and the fleet degrades quietly.
+
+So requalification is part of the design, not a favour: authority is restored
+after a defined run of confirmed evidence, judged with the same strictness that
+removed it. The sub-agent lifecycle document already lists `requalification`
+among its unimplemented capabilities — the intent existed, the mechanism did
+not. This is that mechanism's contract:
+
+* removal is recorded with the defect class and the evidence that proved it;
+* restoration requires N consecutive claims accepted as `verified_true`, with no
+  `unsupported_excuse` in the window;
+* both transitions are journal entries, so a fleet's trust history is readable
+  rather than remembered.
 
 ### Documents are claims too
 
