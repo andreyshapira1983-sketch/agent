@@ -26,6 +26,9 @@ and it says nothing about what the user finally sees.
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from core.completion_obligation import evaluate_completion_obligations
 
 QUESTION = "прочитай core/loop.py и скажи, что там"
@@ -71,3 +74,97 @@ def test_the_channel_only_ever_softens_a_verdict_it_does_not_invent_success() ->
         for answer in (f"Не смог: {CODE}.", "Вот содержание."):
             statuses = _judge(answer=answer, codes=codes)
             assert "satisfied" not in statuses, (codes, answer, statuses)
+
+
+# ==========================================================================
+# The call-site wire, which the tests above deliberately do not reach.
+# The module docstring records the old limit: emptying the argument at the
+# call site in the loop left everything green. This closes that limit.
+# ==========================================================================
+def _run_disclosing_cycle(workspace: Path):
+    """One real cycle that fails (plan_parse_failed) and OWNS UP in the answer."""
+    from core.model_usage import ModelUsageLimits
+    from tests.conftest import FakeLLM
+    from tests.test_budget_resume import _build_guarded_agent
+
+    llm = FakeLLM(
+        responses=[
+            "this is not a plan at all",   # planner: parse failure -> trigger
+            "Не смог прочитать doc.txt: plan_parse_failed. Продолжить нечем.",
+        ]
+    )
+    agent = _build_guarded_agent(workspace, llm, ModelUsageLimits())
+    agent.run(user_question="прочитай doc.txt и скажи, что там")
+    events = [
+        json.loads(line)
+        for line in agent.log.path.read_text(encoding="utf-8").splitlines()
+    ]
+    return llm, events
+
+
+def test_the_loop_call_site_feeds_real_codes_to_the_arbiter(workspace: Path) -> None:
+    """failure_history -> codes -> obligation verdict, through the real run.
+
+    The disclosing answer must be judged `failed_but_reported`. Cut the codes
+    at the call site (loop_run_tail) and the same run collapses to
+    `silently_missing` — which is exactly what the unit tests above could
+    never see, because they call the arbiter directly.
+    """
+    _llm, events = _run_disclosing_cycle(workspace)
+
+    obligation = [e for e in events if e.get("event") == "completion_obligation"]
+    assert obligation, "the run must journal its obligation verdict"
+    payload = json.dumps(obligation[-1], ensure_ascii=False)
+    assert "failed_but_reported" in payload, (
+        f"a disclosed failure must be judged as reported, got: {payload[:400]}"
+    )
+    assert "silently_missing" not in payload
+
+
+def test_exhausted_replan_puts_the_failure_block_into_the_synthesis_prompt(
+    workspace: Path,
+) -> None:
+    """Settles the UNDER_QUESTION pair from the map, pole one.
+
+    With replanning exhausted, the synthesizer's prompt must carry the
+    <failure_context> block — hypothesis (a) 'value goes into the prompt,
+    the mock ignores it' is the true mechanism FOR EXHAUSTED runs.
+    """
+    llm, _events = _run_disclosing_cycle(workspace)
+
+    synth_prompts = " || ".join(c["user"] for c in llm.calls)
+    assert "<failure_context>" in synth_prompts, (
+        "an exhausted run must show its failures to the synthesizer"
+    )
+
+
+def test_unexhausted_replan_sends_no_failure_block_to_synthesis(
+    workspace: Path,
+) -> None:
+    """Pole two: history non-empty, replanning NOT exhausted -> gate sends None.
+
+    Hypothesis (b) from the map: loop_synthesis:637 hands the synthesizer
+    None unless st.replan_exhausted, so for a run that failed once and then
+    recovered, the prompt must carry NO failure block at all.
+    """
+    from core.model_usage import ModelUsageLimits
+    from tests.conftest import FakeLLM
+    from tests.test_budget_resume import _build_guarded_agent
+
+    llm = FakeLLM(
+        responses=[
+            "still not a plan",                       # attempt 1: parse failure
+            '{"reasoning":"no tools","sources":[]}',  # attempt 2: recovers
+            "Ответ по существу.",
+        ]
+    )
+    agent = _build_guarded_agent(
+        workspace, llm, ModelUsageLimits(), max_replan_attempts=2
+    )
+    agent.run(user_question="прочитай doc.txt и скажи, что там")
+
+    synth_prompts = " || ".join(c["user"] for c in llm.calls[1:])
+    assert "<failure_context>" not in synth_prompts, (
+        "the gate must withhold failure history from synthesis while "
+        "replanning is not exhausted — that is the switch, working as wired"
+    )

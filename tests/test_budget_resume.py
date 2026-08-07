@@ -26,8 +26,11 @@ def _build_guarded_agent(
     preused_calls: int = 0,
     verifier_enabled: bool = False,
     max_replan_attempts: int = 1,
+    extra_tools: list | None = None,
 ) -> AgentLoop:
     registry = ToolRegistry()
+    for tool in extra_tools or []:
+        registry.register(tool)
     ledger = ModelUsageLedger(
         path=workspace / "data" / "model_usage.jsonl",
         limits=limits,
@@ -66,6 +69,57 @@ def _build_guarded_agent(
         verifier_enabled=verifier_enabled,
         clarification_enabled=False,
         odd_enabled=False,
+    )
+
+
+def test_completed_cycle_checkpoints_its_plan_and_executed_steps(workspace: Path):
+    """The plan/act checkpoint wires through the real loop, bitten at last.
+
+    Their reader is thin but real: the act rows become `ctx.artifacts`, which
+    the `--resume` replay notice prints; the plan rows become `ctx.attempt`.
+    Measured 2026-08-08: with BOTH save calls cut, 73 checkpoint/resume/
+    integration tests stayed green — nothing had ever driven these rows
+    through the loop and read them back.
+    """
+    import json as _json
+
+    from core.checkpoint import CheckpointLoader
+    from tools.file_read import FileReadTool
+
+    (workspace / "doc.txt").write_text("alpha beta gamma\n", encoding="utf-8")
+    plan_json = _json.dumps(
+        {
+            "reasoning": "read the named file",
+            "steps": [
+                {
+                    "tool": "file_read",
+                    "arguments": {"path": "doc.txt"},
+                    "rationale": "the question names it",
+                }
+            ],
+        }
+    )
+    llm = FakeLLM(
+        responses=[
+            plan_json,
+            "Conclusion: file read. [file:doc.txt]\nFacts:\n- alpha [file:doc.txt]\n"
+            "Sources:\n1. file:doc.txt\nConfidence: high\n",
+        ]
+    )
+    agent = _build_guarded_agent(
+        workspace, llm, ModelUsageLimits(), extra_tools=[FileReadTool(workspace_root=workspace)]
+    )
+
+    agent.run(user_question="прочитай doc.txt и перескажи")
+
+    ctx = CheckpointLoader(workspace / "logs").load(agent.log.trace_id)
+    assert ctx is not None
+    assert ctx.attempt >= 1, "the plan row must carry the attempt number"
+    assert any(
+        (v or {}).get("tool") == "file_read" for v in ctx.artifacts.values()
+    ), (
+        f"the executed step must survive as an act row -> ctx.artifacts, "
+        f"got {ctx.artifacts!r}"
     )
 
 
