@@ -31,6 +31,7 @@
     "loop_attempt.py::AgentLoopAttempt._run_attempt_loop": [
       "discovery",
       "callers",
+      "inputs",
       "outputs",
       "control_semantics",
       "failure_semantics"
@@ -122,7 +123,8 @@
       "discovery",
       "callers",
       "inputs",
-      "control_semantics"
+      "control_semantics",
+      "behavioral_test"
     ],
     "loop_run_tail.py::AgentLoopRunTail._finalize_run_tail": [],
     "loop_sensor.py::AgentLoopSensor._sensor_failed": [
@@ -132,7 +134,13 @@
     ],
     "loop_step_execution.py::AgentLoopStepExecution._call_tool": [],
     "loop_step_execution.py::AgentLoopStepExecution._capture_compensation_plan": [],
-    "loop_step_execution.py::AgentLoopStepExecution._execute_step": [],
+    "loop_step_execution.py::AgentLoopStepExecution._execute_step": [
+      "discovery",
+      "callers",
+      "outputs",
+      "control_semantics",
+      "failure_semantics"
+    ],
     "loop_step_execution.py::AgentLoopStepExecution._execute_steps_parallel": [],
     "loop_step_execution.py::AgentLoopStepExecution._request_approval": [],
     "loop_step_execution.py::AgentLoopStepExecution._risk_probe_failed": [],
