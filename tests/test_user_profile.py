@@ -561,6 +561,46 @@ class TestAgentLoopUserProfileIntegration:
         assert loaded is not None
         assert loaded.interaction_count == 3
 
+    def test_restarted_loop_first_turn_reads_the_stored_profile(
+        self, tmp_path: Path
+    ) -> None:
+        """The open-run load exists for exactly one consumer set: turn one.
+
+        Accumulation does NOT need it — the store reloads itself when
+        ``base=None`` (update_from_interaction), and within one instance the
+        tail refreshes the field. Measured 2026-08-08: cutting the load left
+        interaction counts intact everywhere. What the cut actually breaks is
+        a restarted agent's FIRST turn: the stored style profile never reaches
+        the synthesizer prompt (and the language bridge gets None). This test
+        pins that consumer: a fresh loop over an existing profile must show
+        the stored style to the very first synthesis call.
+        """
+        from core.user_profile import UserProfile
+
+        loop1, store = self._make_loop(tmp_path)
+        store.save(
+            UserProfile(
+                expertise="expert",
+                technical=True,
+                verbosity="brief",
+                language="ru",
+                interaction_count=7,
+            )
+        )
+        del loop1  # the restart: a NEW loop instance over the same disk
+
+        loop2, _ = self._make_loop(tmp_path)
+        loop2.run("hello world")
+
+        joined = " || ".join(
+            str(call) for call in loop2.llm.complete.call_args_list
+        )
+        assert "<user_profile>" in joined, (
+            "the first turn after a restart never showed the stored profile "
+            "to the model — the open-run load is the only thing that feeds it"
+        )
+        assert "expertise: expert" in joined and "verbosity: brief" in joined
+
     def test_profile_load_event_emitted(self, tmp_path: Path) -> None:
         loop, _ = self._make_loop(tmp_path)
         loop.log._handlers = []  # type: ignore[attr-defined]
