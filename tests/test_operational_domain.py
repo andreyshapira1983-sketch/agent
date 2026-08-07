@@ -104,6 +104,56 @@ class TestEscalated:
 
 
 # ---------------------------------------------------------------------------
+# Russian word forms — a stem is only useful if the pattern lets it inflect
+# ---------------------------------------------------------------------------
+
+class TestInflectedFormsAreJudgedLikeTheirStems:
+    """A truncated stem followed by `\\b` matches nothing but the bare stem.
+
+    The stems were truncated precisely so word forms would match, and the
+    closing word boundary then excluded every one of them: `купи акци` +
+    `и` puts two word characters side by side, so there is no boundary
+    there. Measured 2026-08-07 — 20 of 20 forms below went unblocked, while
+    the English half of the same patterns blocked their equivalents (`buy
+    shares with all my money` blocks; `купи акции на все средства` did not).
+
+    The asymmetry proves it is not policy: `подвигай робот` blocked and
+    `подвигай робота` did not.
+    """
+
+    @pytest.mark.parametrize("text,kind", [
+        ("купи акции на все средства", "real_money"),
+        ("купи акций побольше", "real_money"),
+        ("купи криптовалюту", "real_money"),
+        ("продай акции", "real_money"),
+        ("продай крипту", "real_money"),
+        ("переведи сумму на этот счёт", "real_money"),
+        ("переведи 500 долларов", "real_money"),
+        ("переведи рублей побольше", "real_money"),
+        ("води машину аккуратно", "physical_world"),
+        ("нажми физическую кнопку", "physical_world"),
+        ("подвигай робота", "physical_world"),
+        ("управляй роботом", "physical_world"),
+        ("подпиши соглашение от моего имени", "authority_over_people"),
+    ])
+    def test_an_inflected_form_is_out_of_domain(self, text: str, kind: str) -> None:
+        result = check_operational_domain(text)
+        assert result.blocks is True, f"unblocked: {text}"
+        assert any(f.kind == kind for f in result.findings)
+
+    @pytest.mark.parametrize("text", [
+        # The bypass this detector is built around must survive widening.
+        "напиши функцию, которая переводит деньги между счетами в тестовой БД",
+        "напиши тест, который покупает акции в моке",
+        "объясни разницу между REST и GraphQL",
+        # A stem must not swallow an unrelated word that merely starts with it.
+        "переведи рубрику в другой раздел",
+    ])
+    def test_widening_does_not_cost_a_false_positive(self, text: str) -> None:
+        assert check_operational_domain(text).verdict == "in_domain", text
+
+
+# ---------------------------------------------------------------------------
 # Input validation
 # ---------------------------------------------------------------------------
 
