@@ -679,7 +679,7 @@ types, same freshness rules, same negative tests.
 
 ## Open blockers
 
-Four holes found by arguing with this document rather than extending it. The
+Six holes found by arguing with this document rather than extending it. The
 first two are load-bearing: **implementation does not start until they are
 answered.**
 
@@ -705,23 +705,72 @@ Direction, not yet a design:
 claim_type              what kind of assertion this is
 verification_policy_id  which policy governs that kind
 allowed_check_ids       the only checks admissible for it
-coverage_relation       whether a check settles the claim wholly or partly
 ```
 
-Two traps inside that direction:
+`claim_type` is **not** a field of the message. A model free to name its own
+type picks the one whose policy allows the weakest check — the same defect, one
+storey up. The type is derived deterministically from the claim's SHAPE by a
+classifier, not by the arbiter reasoning about meaning: the less semantic
+judgement the arbiter carries, the better. A claim whose type cannot be derived
+is too vague for automatic verification and goes to a human.
 
-* **`claim_type` must not be self-declared.** A model free to name its own type
-  picks the one whose policy allows the weakest check — the same defect, one
-  storey up. The type is derived from the claim's form or assigned by the
-  arbiter, never accepted from the message.
-* **Partial coverage is not a status, it is a signal to split.** A check that
-  settles part of a claim ("faster and correct" — the test says nothing about
-  faster) means the claim must be broken into pieces. One claim, one check, one
-  status. Otherwise `verified_true` comes to mean "true in some respect", which
-  looks like a fact and behaves like a hint.
+There is no "partially verified". A policy answers one binary question — *is
+this check a COMPLETE verification for this type of claim?* If not, the claim is
+split. "The function is faster and correct" is two claims:
+
+```
+claim_1  behaviour is preserved     check: regression_test
+claim_2  the function is faster     check: benchmark
+```
+
+If the benchmark never ran, claim_1 may be `verified_true` while claim_2 is
+`evidence_unverifiable` — and the compound sentence never receives a green
+stamp as a whole. The invariant: **one claim, one meaning, one procedure, one
+status.**
+
+Which produces the gate that runs before any verification:
+
+1. is the claim atomic?
+2. is its type derivable without the model choosing?
+3. does a registered COMPLETE check exist for that type?
+4. if not — it is not verified automatically, and a human decides.
+
+So the first stage of an evidence engine is not verification at all. It is
+**claim normalisation**: turning one human sentence into a set of small
+checkable assertions. Verification is what happens afterwards, to things already
+shaped to be checkable.
 
 The mapping `claim_type -> check_id` needs its own negative tests, or the
 problem simply moves into the registry.
+
+### B5 — normalisation can lose the inconvenient half, undetectably
+
+Who splits the sentence? Not the deterministic classifier — it recognises the
+shape of an already-formed claim, it does not understand meaning. So the model
+splits. And a model splitting "faster and correct" may emit one claim, about
+correctness, which is easy to prove. The awkward half simply never exists.
+Atomic, typed, verified, and quietly incomplete.
+
+Nothing catches this automatically. The partial mitigation is to keep the
+original sentence beside its decomposition and never discard it —
+`original_claim -> [atomic_claims]` in the journal — so the loss is visible to a
+human comparing them. That is a price recorded, not a problem solved.
+
+### B6 — the share of claims that normalise at all is unmeasured
+
+A strict shape is what the classifier needs, but not every useful assertion fits
+one. If only a small fraction normalises, the system routes most work to a human
+and the benefit evaporates.
+
+This is cheap to measure before anything is built, on material that already
+exists: the working sessions in this repository are full of exactly the claims
+such a protocol would handle — "this test catches this break", "this path is
+test data, not a reference", "the doctrine is resolved from the workspace".
+Run those through the intended shape and count how many are atomic, how many
+have derivable types, and how many would find a registered complete check.
+
+A dry measurement on real claims answers whether to build this at all, before
+the first line of an arbiter is written.
 
 ### B2 — shared facts and global invalidation contradict each other (BLOCKING)
 
@@ -786,8 +835,9 @@ on an unanswered question.
 Not before B1 and B2 are answered. Suggested order after that, each stage
 useful alone:
 
-0. relevance mapping (B1) and an invalidation rule that is honest about what it
-   cannot do (B2) — everything below is worthless without them;
+0. claim normalisation and relevance mapping (B1), plus an invalidation rule
+   honest about what it cannot do (B2) — everything below is worthless without
+   them, and B6's measurement comes before even that;
 1. the journal and message shape, with no verification at all — just structure;
 2. two or three evidence types with their reproduction procedures and negative
    tests;
