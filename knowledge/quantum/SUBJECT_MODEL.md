@@ -199,7 +199,7 @@ from ontology, which the first version of this table did not do:
 
 | # | constraint | forced by | scope |
 | --- | --- | --- | --- |
-| E1 | the subject is not a file | QT1; 2 of 81 facts concern the named file | ontology |
+| E1 | for the measured entry boundary, `main.py` is not its semantic subject | QT1; 2 of 81 facts concern the named file | measurement, not a general file/subject law |
 | E2 | ~~the invoked file is a transit, replaceable without semantic loss~~ | — | **RESCOPED, see below** |
 | E3 | a subject spans **several carriers**, each with its own state space | the `--help` probe | ontology |
 | E4 | facts about **instantiation** fit no carrier or observer slot | the 12-fact residue | ontology |
