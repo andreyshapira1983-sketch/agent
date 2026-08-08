@@ -6,7 +6,7 @@
     "path": "main.py",
     "commit": "6880462",
     "sha256_prefix": "def397b4c33e51d3",
-    "_subject_identity_is_open": "OPEN FUNDAMENTAL, carried over unresolved. This specimen is NAMED after main.py, but the audit proved its claims are owned by five files. Probe QT1 falsified a claim by editing cli/app.py while main.py stayed byte-identical. The `subject` block below is therefore an ADDRESS, not a proof of ownership, and this specimen deliberately links only an entity whose evidence lives outside main.py — so the experiment does not hide the defect behind a convenient choice."
+    "_subject_identity_is_open": "OPEN FUNDAMENTAL, carried over unresolved. This specimen is NAMED after main.py, and the strongest established statement is narrow: main.py is NOT the semantic subject of the measured entry boundary. Probe QT1 falsified a claim by editing cli/app.py while main.py stayed byte-identical, and the audit found the claims are owned by five files. So for THIS subject the `subject` block is an address rather than a proof of ownership. No general file/subject law is claimed: that would need its own discriminator, and one measured case plus one later design decision is not one. The role name `transit` is not applied here -- whether that role is semantically empty is UNPROVEN, and the law that asserted it is dead."
   },
   "semantic_entities": {
     "outcome.RETURNED": {
