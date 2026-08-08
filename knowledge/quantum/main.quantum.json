@@ -1,107 +1,171 @@
 {
-  "_what_this_is": "The first pure Quantum File — a DERIVED semantic record of the physical `main.py`, written under the Quantum CNS mandate (2026-08-08). It contains no executable implementation and replaces nothing: `main.py` stays exactly as it is, and this file is a second view of it. Every entry here is derived from that source and from evidence already in the suite; nothing is inferred from intent, naming, or plausibility. Where evidence is absent the region is named UNPROVEN rather than filled in.",
+  "_what_this_is": "A DERIVED semantic record of the physical `main.py`, written under the Quantum CNS mandate (2026-08-08). No executable implementation; replaces nothing. `main.py` is untouched and this is a second view of it.",
+  "_revision": "SECOND EDITION. The first edition survived none of the operator's five adversarial challenges intact: one observer turned out to be two, a whole state space (termination mode) was missing, an equivalence class was named after an ambiguous boundary, source-derived descriptions were presented as proven semantics, and an exhaustiveness claim was stated without saying how exhaustiveness was established. Every correction below is recorded with its evidence rather than silently applied — the first edition's errors are audit data, not embarrassment. This file is NOT yet a schema; it becomes a template only after it survives review.",
   "_rules_it_obeys": [
-    "no executable implementation, no speculative semantics",
-    "state spaces, observers, equivalence classes, causal consequences, preconditions, protection evidence, and explicit UNPROVEN regions only",
-    "equivalence is always stated relative to a NAMED observation boundary (mandate rule 10)",
-    "labels are not deleted for being control-equivalent (mandate rule 8)",
-    "no global quotient is claimed (mandate rule 16)"
+    "state spaces, observers, equivalence classes, causal consequences, preconditions, protection evidence, UNPROVEN regions — nothing else",
+    "equivalence is always relative to a NAMED observation boundary (rule 10)",
+    "'does not branch on X' is never allowed to become 'X is equivalent' (challenge 3)",
+    "descriptive provenance may never masquerade as certified semantics (challenge 4)",
+    "labels are not deleted for being control-equivalent (rule 8)",
+    "no global quotient is claimed (rule 16)"
   ],
+
   "physical_subject": {
     "path": "main.py",
-    "shape_evidence": "AST-pinned by tests/characterization/test_main_public_surface.py: imports are EXACTLY {__future__.annotations, cli.app.run_cli}; the only definition is `main`; the tail is `if __name__ == \"__main__\": raise SystemExit(main())`.",
-    "body": "one statement — `return run_cli()`",
-    "isolation_evidence": "test_no_production_module_imports_from_main: nothing outside tests/ imports from `main`. So `main` has no consumers inside the runtime; its only consumer is the process boundary."
+    "body": "one statement — `return run_cli()` — plus the module tail `if __name__ == \"__main__\": raise SystemExit(main())`",
+    "shape_evidence": "AST-pinned by tests/characterization/test_main_public_surface.py: imports are EXACTLY {__future__.annotations, cli.app.run_cli}; the only definition is `main`; the tail text is checked literally.",
+    "isolation_evidence": "test_no_production_module_imports_from_main — nothing outside tests/ imports from `main`, so it has no consumer inside the runtime."
   },
 
   "state_spaces": {
-    "main_return_value": {
-      "type": "int, the process exit code",
-      "named_states_reachable_through_main": [
-        {"value": 0, "produced_by": "cli/app.py:122 (`--version`-class early return), :125, resume replay (cli/resume.py:134 via app.py:147), run_one_shot (cli/one_shot.py, every return is 0), run_repl (cli/repl.py, every return is 0)", "meaning": "the process reports success"},
-        {"value": 2, "produced_by": "cli/app.py:164 (empty --ask), :169 (file-hint preflight failure), and cli/resume.py:101 (invalid trace id) via app.py:147", "meaning": "the process reports a usage/preflight refusal"}
+    "main_termination_mode": {
+      "_origin": "ADDED in the second edition. Challenge 2 asked whether a termination dimension was missing; the answer came from the code, not from the suggestion. Enumerated by reading every way control can leave `main()` rather than by accepting a proposed name.",
+      "members_proven": [
+        {
+          "mode": "RETURNED",
+          "meaning": "run_cli() returns an int; `main` returns it; the module tail then executes `raise SystemExit(<that int>)`",
+          "evidence": "tests/characterization/test_cli_command_precedence.py asserts `main_module.main() == 0` — an observer that sees a RETURN; and the real-process test observes the returned 2 reaching the shell"
+        },
+        {
+          "mode": "PROPAGATED_SYSTEMEXIT",
+          "meaning": "a SystemExit raised BELOW `main` propagates through it. `main` never returns, and the module tail's `raise SystemExit(main())` is never evaluated — the exception that ends the process was constructed elsewhere",
+          "evidence_argparse_route": "tests/characterization/test_cli_argparse_surface.py wraps `main_module.main()` in pytest.raises(SystemExit) and reads codes 0 (--help) and 2 (unknown flag / missing argument / invalid choice). argparse raises inside run_cli, below main.",
+          "evidence_quit_route": "cli/command_dispatch.py:479 raises SystemExit(0) for `:quit`/`:exit`; tests/test_cli.py::test_quit_raises_system_exit proves the raise and its code. cli/repl.py's own docstring states it 'passes straight through this loop', and cli/app.py contains no try/except at all, so nothing between the dispatcher and `main` can catch it.",
+          "probe_2026_08_08": "a real process with `:quit` on stdin exits 0, and a real process with empty stdin (EOF) also exits 0 — see the observer-dependence note below, which is the whole point"
+        }
       ],
-      "states_NOT_produced_here": "1 and every other integer. No return path in the delegate chain yields them. This is an observation about the code as it stands, not a design statement.",
-      "argparse_exits_bypass_main_return": "`--help` exits 0 and an unknown flag / missing argument / invalid choice exit 2 by raising SystemExit inside argparse, so those codes never pass through `main`'s return at all. Evidence: tests/characterization/test_cli_argparse_surface.py asserts SystemExit codes 0 and 2 directly. Recorded because the process-level state space and `main`'s RETURN state space are not the same set, and conflating them would be the kind of false identity this layer exists to prevent."
+      "members_UNPROVEN": [
+        {
+          "mode": "PROPAGATED_OTHER_EXCEPTION",
+          "statement": "cli/app.py has no exception handling, so any non-SystemExit exception raised by the delegate chain would propagate through `main` and terminate the process with a traceback and code 1. Whether such an exception is REACHABLE in production has not been probed here.",
+          "status": "UNPROVEN — reachability unknown, therefore the mode is named but not counted among the proven members"
+        }
+      ],
+      "why_this_space_is_not_the_return_space": "In PROPAGATED_SYSTEMEXIT the chain `delegate return -> main return -> SystemExit argument` does not exist at all. The first edition's single 'proven causal chain' therefore describes RETURNED only, and said so nowhere. That was the first edition's most substantive error."
+    },
+
+    "main_return_value": {
+      "type": "int, evaluated only in the RETURNED termination mode",
+      "observed_states": [
+        {"value": 0, "source_sites": "13 literal `return 0` across cli/app.py, cli/one_shot.py, cli/repl.py, plus `return decision.exit_code` when resume replays a cached answer (cli/resume.py:134)"},
+        {"value": 2, "source_sites": "cli/app.py:164 (empty --ask), cli/app.py:169 (file-hint preflight failure), and cli/resume.py:101 (invalid trace id) via `return decision.exit_code`"}
+      ],
+      "exhaustiveness_of_{0,2}": {
+        "_origin": "REWRITTEN in the second edition. The first edition asserted '1 and every other integer are not produced here' without saying how that was established. Challenge 5 required the distinction between observed, statically exhaustive, runtime-proven, and UNPROVEN.",
+        "observed": "0 and 2 are both observed — 0 by in-process callers and by real-process probes, 2 by the real-process preflight test",
+        "statically_exhaustive_over_the_visible_call_graph": "A census of the delegate chain yields 15 literal integer returns: 13 zeros and 2 twos. The three non-literal returns were followed: `return run_one_shot(...)` (every return in cli/one_shot.py is 0), `return run_repl(...)` (every return in cli/repl.py is 0), and `return decision.exit_code`, whose producer cli/resume.py sets only 0 or 2 and which the caller reaches only after checking `is not None`.",
+        "NOT_runtime_proven": "No probe enumerates the reachable return set at runtime. ResumeDecision.exit_code is typed `int | None`, so nothing in the type system confines it to {0,2}; today's producers happen to. Test seams (app_module.build_agent, dispatch_module.handle_meta_command, the build_agent parameter of run_one_shot) are monkey-patchable, though none of them produces an exit code.",
+        "status": "STATICALLY EXHAUSTIVE over the current call graph; NOT runtime-proven; UNPROVEN against future indirect producers"
+      },
+      "argparse_codes_are_a_different_space": "`--help` exits 0 and malformed argv exits 2 through SystemExit raised inside argparse — in the PROPAGATED_SYSTEMEXIT mode, never through this return. Two state spaces that share integers are not the same set."
     }
   },
 
   "observers": {
-    "process_boundary": {
-      "what_it_reads": "the integer, via `raise SystemExit(main())`",
-      "distinguishes": "0 from 2 — success from refusal",
-      "evidence": "tests/characterization/test_main_public_surface.py::test_the_process_really_exits_with_the_code_main_returned runs a real process with nothing patched and reads the shell's exit code",
-      "mutation_on_record": "that test's own docstring records the measurement that motivated it: dropping the `return` from `main()` leaves the text guard on the tail green while a failing run exits 0 — a caller gating on the exit code would read an error as success. So the return VALUE has a proven causal consequence at this boundary."
+    "_origin": "SPLIT in the second edition. The first edition had one 'process_boundary'; challenge 1 pointed out that a caller reading the exact code and a shell predicate reading zero-vs-non-zero are different observers whose partitions merely coincide over {0,2}.",
+    "exact_exit_code_observer": {
+      "what_it_reads": "the integer itself",
+      "discrimination": "0 vs 2 vs any other value",
+      "evidence": "tests/characterization/test_main_public_surface.py::test_the_process_really_exits_with_the_code_main_returned asserts `result.returncode == 2` on a real subprocess with nothing patched. This is the observer the repository actually evidences.",
+      "preconditions_of_that_evidence": "the invocation names a missing --file, which fails in preflight, so the run genuinely produces a NON-ZERO code and the test cannot pass on a run that would have exited 0 anyway"
     },
-    "in_process_callers": {
-      "what_it_reads": "the returned int, by calling `main_module.main()` directly",
-      "distinguishes": "0 from 2",
-      "evidence": "tests/characterization/test_cli_command_precedence.py and test_main_public_surface.py::test_main_is_callable_and_returns_an_int",
-      "scope_limitation": "this observer patches seams (build_agent, load_dotenv, handle_meta_command). It can observe the value but not the process consequence; only process_boundary proves the latter."
+    "success_failure_observer": {
+      "what_it_reads": "zero vs non-zero — the discrimination a shell predicate like `if command; then` has",
+      "discrimination": "coarser than the above",
+      "coincidence_note": "over the currently reachable set {0,2} this observer's partition and the exact observer's partition happen to be identical. They are still different observers, and the coincidence is a property of today's state space, not of the boundary.",
+      "evidence": "NONE inside this repository. No test and no production caller is known to read the code this way.",
+      "status": "UNPROVEN existence — recorded because it is the observer an external caller most plausibly is, and because omitting it would let a coincidence pass for an identity"
+    },
+    "in_process_caller": {
+      "what_it_reads": "either the returned int, or the exception type when `main` does not return",
+      "discrimination": "RETURNED vs PROPAGATED_SYSTEMEXIT — the only observer that distinguishes the termination modes",
+      "evidence": "test_cli_command_precedence.py asserts a returned value; test_cli_argparse_surface.py asserts pytest.raises(SystemExit). Different tests, different modes, both observed.",
+      "scope_limitation": "these callers patch seams (build_agent, load_dotenv, handle_meta_command) and cannot observe the process consequence; only the exact_exit_code_observer proves that half"
     },
     "ast_shape_observer": {
-      "what_it_reads": "the source text of main.py — its imports, its single definition, its tail",
-      "distinguishes": "any edit to the file's shape",
-      "evidence": "test_main_public_surface.py (three AST/text guards)",
-      "class": "STRUCTURAL. It fires on any shape change and cannot tell a deliberate edit from a removed contract — recorded as such per the map's protection scale, and NOT counted as behavioural protection."
+      "what_it_reads": "the source text — imports, the single definition, the tail",
+      "discrimination": "any edit to the file's shape",
+      "class": "STRUCTURAL. It fires on any change and cannot separate a deliberate edit from a removed contract. Not counted as behavioural protection.",
+      "evidence": "three guards in test_main_public_surface.py"
     }
   },
 
   "equivalence_classes": {
-    "under_process_boundary": {
-      "partition": "{0} | {2}",
-      "basis": "the shell branches on zero versus non-zero; both members of each class are indistinguishable to it because each class has one member here",
-      "note": "this is a partition of the states `main` can RETURN. It is not a partition of process exit codes in general — argparse produces 0 and 2 without passing through the return."
+    "main_internal_control_path": {
+      "_origin": "RENAMED in the second edition. The first edition called this 'under_main_itself' and concluded ONE class. Challenge 3 showed the boundary was ambiguous: `main` does not BRANCH on the value, but it is an identity carrier that PRESERVES it (0 -> 0, 2 -> 2). 'Does not branch on X' silently becoming 'X is equivalent' is exactly the error this layer exists to catch.",
+      "boundary": "internal control-path selection inside main()",
+      "quotient": "ONE class — main selects no path; its body is a single return of a delegate call",
+      "explicitly_not_implied": "This says NOTHING about whether the values are distinguishable downstream. They are: see value_preservation below."
     },
-    "under_main_itself": {
-      "partition": "ONE class — `main` performs no branching",
-      "basis": "the body is `return run_cli()`. `main` distinguishes nothing; every distinction visible at the process boundary is produced by the delegate chain and passes through unexamined.",
-      "consequence_for_the_audit": "`main` is a PASS-THROUGH, so the semantic content attributed to it belongs to cli/app.py and below. This is why the quantum file for `main` is small and why its interesting regions are all references outward."
+    "value_preservation": {
+      "boundary": "what survives transit through main()",
+      "finding": "main is an IDENTITY CARRIER for the return value. Every distinction produced below it reaches the module tail unexamined and unmodified.",
+      "evidence": "the real-process test observes a 2 produced in preflight arriving at the shell as 2; in-process tests observe a 0 arriving as 0. The carrier preserves both observed states.",
+      "mutation_on_record": "test_the_process_really_exits_with_the_code_main_returned's docstring records the measurement that motivated it — dropping `return` from main() leaves the tail's text guard green while a failing run exits 0. So the preservation is not decorative: breaking it destroys a distinction that existed below."
+    },
+    "under_exact_exit_code_observer": {
+      "partition_over_the_observed_return_set": "{0} | {2}",
+      "scope": "this partitions the values main can RETURN. It does not partition process exit codes in general, because the PROPAGATED_SYSTEMEXIT mode delivers 0 and 2 without passing through the return."
+    },
+    "observer_dependent_split_found_by_probe": {
+      "the_two_runs": "a real process ending via `:quit` and a real process ending via EOF",
+      "under_exact_exit_code_observer": "INDISTINGUISHABLE — both exit 0",
+      "under_main_termination_mode": "DISTINCT — `:quit` propagates a SystemExit raised in the dispatcher, so main never returns; EOF returns 0 through run_repl and the module tail raises SystemExit(0)",
+      "significance": "the same pair of runs is one class for one observer and two classes for another. Recorded per rule 11: a class splitting when the boundary widens is the expected behaviour of this analysis, not a contradiction."
     }
   },
 
-  "causal_consequences_proven": [
-    {
-      "chain": "delegate return value -> main return value -> SystemExit argument -> process exit code -> caller's success/failure reading",
+  "causal_consequences": {
+    "returned_mode_chain": {
+      "chain": "delegate return value -> main return value -> SystemExit argument -> process exit code -> exact_exit_code_observer",
       "status": "PROVEN",
-      "evidence": "test_the_process_really_exits_with_the_code_main_returned — a real process, nothing patched, using `--file` naming a missing path so the failure happens in preflight and no model is called",
-      "preconditions_proven_by_that_test": "the chosen invocation genuinely fails in preflight (exit 2), so the test observes a NON-ZERO code and cannot pass by accident on a run that would have exited 0 anyway"
+      "scope_limitation_added_in_the_second_edition": "holds for the RETURNED mode only. In PROPAGATED_SYSTEMEXIT this chain has no instances."
+    },
+    "propagated_mode_chain": {
+      "chain": "SystemExit constructed below main -> propagates through main unchanged -> process exit code",
+      "status": "PROVEN for the argparse route (in-process observers read codes 0 and 2 out of the raised exception) and for the `:quit` route at the process level (probe exits 0)",
+      "gap": "no test observes the `:quit` SystemExit passing specifically through `main` as opposed to being raised at all; the probe shows the process code, and the absence of any try/except between the dispatcher and main is read from the source, not from a mutation"
     }
-  ],
-
-  "preconditions_recorded": {
-    "why_they_matter_here": "mandate rule 6 — a test that passes because its subject never existed is vacuous. For `main` the subject is a non-zero exit; a test that only ever exercised a successful run could not detect the dropped-return defect at all, which is precisely the failure the process-level test was written to catch."
   },
 
   "protection_status": {
-    "main_return_value_reaches_the_process": "PROVEN — behavioural, at the process boundary",
-    "main_shape": "STRUCTURAL only — three AST/text guards; they protect the file's form, not any consequence",
-    "isolation_from_the_runtime": "PROVEN — test_no_production_module_imports_from_main"
+    "return_value_reaches_the_process": "PROVEN — behavioural, exact_exit_code_observer",
+    "termination_mode_distinction": "PARTIALLY PROTECTED — in-process tests observe both modes, but no test asserts that a given invocation takes a given MODE; they assert the value or the exception separately",
+    "main_shape": "STRUCTURAL only",
+    "isolation_from_the_runtime": "PROVEN"
   },
 
   "unproven_regions": [
     {
-      "region": "the exit-code SEMANTICS of the delegate chain",
-      "statement": "That `2` means usage/preflight refusal and `0` means success is read off the call sites, not proven by a test that varies the meaning. No observer distinguishes 'refused because the trace id was invalid' from 'refused because the file hint failed preflight' — both are 2.",
-      "status": "UNPROVEN",
-      "belongs_to": "cli/app.py and cli/resume.py — to be walked in their own quantum files, not settled here"
+      "region": "the MEANING of exit code 2",
+      "first_edition_error": "the first edition wrote '2 -> the process reports a usage/preflight refusal' among the state descriptions while ALSO declaring the delegate chain's exit-code semantics UNPROVEN two sections later. Challenge 4 caught the contradiction.",
+      "corrected_status": "SOURCE-DERIVED DESCRIPTION, not certified semantics. 'Usage/preflight refusal' is read off the three call sites that produce 2; no test varies the meaning, and no observer distinguishes 'refused because the trace id was invalid' from 'refused because the file hint failed preflight'. Both are 2.",
+      "status": "UNPROVEN as semantics; the description is retained with its provenance labelled"
     },
     {
-      "region": "whether any caller outside the repository branches on the exit code",
-      "statement": "The process-level consequence is proven for a test caller. Whether a CI job, script or supervisor reads it is outside the repository's evidence.",
-      "status": "UNPROVEN",
-      "scope": "external"
+      "region": "PROPAGATED_OTHER_EXCEPTION reachability",
+      "status": "UNPROVEN — the mode exists structurally (no handler anywhere in cli/app.py) but no probe shows it is reachable in production"
     },
     {
-      "region": "run_repl's exit-code state space",
-      "statement": "Every observed return in cli/repl.py is 0. Whether a non-zero interactive exit is reachable at all has not been probed.",
-      "status": "UNPROVEN"
+      "region": "success_failure_observer existence",
+      "status": "UNPROVEN — no caller in this repository reads the code as zero-vs-non-zero"
+    },
+    {
+      "region": "run_repl's exit-code space",
+      "status": "UNPROVEN — every observed return is 0; whether a non-zero interactive return is reachable has not been probed"
+    },
+    {
+      "region": "runtime exhaustiveness of the return set",
+      "status": "UNPROVEN — see main_return_value.exhaustiveness_of_{0,2}; static exhaustiveness over today's call graph is not runtime proof"
     }
   ],
 
   "explicitly_not_claimed": [
-    "No global quantum count for `main` or for the CLI is asserted.",
-    "No equivalence between argparse's exit codes and `main`'s return values is asserted — they are different state spaces that happen to share integers.",
-    "No design change is proposed. `main` being a pass-through is an observation, not a complaint."
-  ]
+    "No global quantum count for main or for the CLI.",
+    "No identity between argparse's SystemExit codes and main's return values — different state spaces that share integers.",
+    "No claim that the two termination modes are equivalent because their process codes can coincide.",
+    "No design change. main being a pass-through and an identity carrier is an observation, not a complaint."
+  ],
+
+  "schema_status": "NOT A SCHEMA YET. Per the operator's instruction this file may not be promoted into a general Quantum File template until it survives adversarial review. It has now been through one such pass and was substantially wrong in five places; a second pass is owed before any generalisation."
 }
