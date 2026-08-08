@@ -117,6 +117,18 @@ def test_memory_inject_fires_only_after_first_turn(workspace: Path) -> None:
     assert "<conversation_history>" in planner_calls[1]["user"]
     assert "What is in doc.txt?" in planner_calls[1]["user"]
 
+    # ...and so did the SYNTHESIZER call for turn 2. This second assertion
+    # closes a hole measured 2026-08-08 (M31): cutting SynthesisState.history
+    # at the loop's call site left every memory test green — the planner side
+    # was watched, the synthesis side was not, though both are separate
+    # deliveries of the same conversation_history block. Turn 2's plan is
+    # empty, so its answer leans on history alone; the synthesizer must see it.
+    synth_calls = [c for c in llm.calls if "PLANNER_MODE" not in c["system"]]
+    assert "<conversation_history>" in synth_calls[1]["user"], (
+        "the synthesizer never received the conversation history — a "
+        "history-only follow-up answers blind (M31 hole)"
+    )
+
 
 # ---------- memory_cache_hit ----------
 
