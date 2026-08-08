@@ -13,7 +13,8 @@
     "certified_conditions": ["REACHABILITY", "CAUSALITY", "SEMANTICS", "PROTECTION"],
     "verdicts": ["PROVEN", "UNPROVEN", "NEGATIVE", "UNDER_QUESTION"],
     "path_statuses": ["PROVEN", "UNPROVEN", "DEAD", "PERIPHERAL", "PARTIAL"],
-    "_partial_note": "PARTIAL added 2026-08-08 on the operator's review: an arc whose delivery is proven but whose final hop is mock-blind (a live model consumes it) may not vanish from the count by being reclassified a 'coincidental carrier' — that is the descriptive/non-control loophole wearing a new coat. PARTIAL arcs are counted and listed, never absorbed."
+    "_partial_note": "PARTIAL added 2026-08-08 on the operator's review: an arc whose delivery is proven but whose final hop is mock-blind (a live model consumes it) may not vanish from the count by being reclassified a 'coincidental carrier' — that is the descriptive/non-control loophole wearing a new coat. PARTIAL arcs are counted and listed, never absorbed.",
+    "_owner_definition": "owner = the mechanism that answers for the state's lifecycle and semantics: creation, mutation, invalidation, end of life (mandate items 5-6). ATTACHMENT — which object physically holds the field — is provable separately (a creation site, an instance lifetime) and does NOT by itself establish ownership; nor does absence of traffic DISPROVE it. Added 2026-08-08 after the operator overturned owner=NEGATIVE on the dead field: traffic absence proves the carrier dead, not the owner absent."
   },
 
   "state_carriers": {
@@ -87,7 +88,7 @@
       "note": "Assigned once at construction and never read or written anywhere else. The docstring at core/replan.py:97 still declares it the scratch slot where every step failure lives — documentation describing a carrier that no longer carries.",
       "writers": [],
       "readers": [],
-      "owner": "NEGATIVE — ownership is disproven together with the traffic: nothing writes or reads the field, so there is nothing to own. (Was the literal 'N/A' until 2026-08-08 — the model's own first line forbids N/A, and the operator caught the model breaking its own rule.)",
+      "owner": "PROVEN as attachment, open as governance — AgentLoop creates the field (core/loop_init.py:221) and it dies with the instance: architectural attachment, proven by this record's own created_at. Governance of a live signal is a question about a signal that does not exist here; that fact already lives in carrier=NEGATIVE and is not re-encoded as owner=NEGATIVE. History: was the forbidden literal 'N/A' (caught 2026-08-08), then NEGATIVE for one revision — semantic masking of the same N/A with a different word, overturned by the operator the same day per _owner_definition.",
       "properties": {"carrier": "NEGATIVE"}
     }
   },
