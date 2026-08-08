@@ -107,7 +107,7 @@
       "_origin": "PROMOTED from HYPOTHETICAL_CLASS after attack 6. The third edition said its evidence was 'NONE in this repository'. That was FALSE, and the disproof sat inside the very file pass 2 had already discovered as a runtime consumer — pass 2 recorded that scripts/selfcheck.ps1 invokes main.py and never asked what it READS.",
       "reads": "zero vs non-zero",
       "domain": "all three variants",
-      "evidence": "scripts/selfcheck.ps1 `Run-Step`, lines 25-29: `$code = $LASTEXITCODE` then `$ok = ($code -eq 0)`, and `return $ok`. The boolean is what lands in `$results[...]` and drives the harness's own outcome. Six invocations of main.py pass through it.",
+      "evidence": "scripts/selfcheck.ps1 `Run-Step`, lines 25-29: `$code = $LASTEXITCODE` then `$ok = ($code -eq 0)`, and `return $ok`. The boolean is what lands in `$results[...]` and drives the harness's own outcome. SIX Run-Step call sites exist, of which exactly FOUR pass main.py — the other two run pytest and scripts/audit_release.py. CORRECTED 2026-08-08 during the .qm experiment: the third edition said 'five invocations', the fourth said 'six invocations of main.py', and both were wrong. The count is now derived from the PowerShell AST by main.qm property P4, so a wrong number is a BROKEN link rather than a sentence nobody rechecks.",
       "precondition_proven": "the calls are real (`& python @PyArgs` with main.py as argv[0], lines 36-39) and their result is consumed, not merely printed — `$results` is the harness's verdict table.",
       "collapse_recorded_per_the_mandate": "this consumer does NOT distinguish RETURNED(0) from PROPAGATED_SYSTEMEXIT(0). Both yield $LASTEXITCODE 0, both yield $ok = true. Under this observer the two variants are ONE class."
     },
@@ -201,7 +201,7 @@
   "runtime_consumers": {
     "_origin": "RENAMED after challenge 6 was upheld. The second edition said 'isolation_from_the_runtime: PROVEN' on the strength of a test that only censuses Python imports.",
     "what_the_test_proves": "test_no_production_module_imports_from_main proves STATIC IMPORT ISOLATION: no module outside tests/ contains an import of `main`.",
-    "what_it_does_not_prove": "absence of runtime consumers. A repository-visible consumer exists that no import census can see: scripts/selfcheck.ps1 invokes `main.py` as a SUBPROCESS with argv (six invocations — auto_run_dry, introspect, sweep_todo, confidence_gate and others).",
+    "what_it_does_not_prove": "absence of runtime consumers. A repository-visible consumer exists that no import census can see: scripts/selfcheck.ps1 invokes `main.py` as a SUBPROCESS with argv — four call sites, named auto_run_dry, introspect, sweep_todo and confidence_gate. The earlier 'and others' was wrong: those four are all of them.",
     "what_that_consumer_reads": "CHARACTERISED in pass 3, having only been NOTED in pass 2. `Run-Step` reads $LASTEXITCODE exactly, prints the exact integer to console and to a per-step log, then reduces it to `$ok = ($code -eq 0)` and returns THAT. Its control flow is a success_failure_observer; its log surface is an exact_exit_code_observer. See observers._what_this_section_still_cannot_express.",
     "renamed_claim": "static_import_isolation: PROVEN",
     "withdrawn_claim": "isolation_from_the_runtime: PROVEN — too strong; absence from one dependency census is not absence of all runtime consumers",
