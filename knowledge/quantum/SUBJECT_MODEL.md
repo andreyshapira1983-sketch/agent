@@ -766,12 +766,78 @@ status**. What the failure does show is a limit of the check itself: it compares
 predicted *value* with an observed one, so a dependency model that is wrong about
 the mechanism but right about the outcome passes silently.
 
+### Authority: the certificate now decides, the validator only executes
+
+The first version failed the authority test. Its `projection`, its dependency rules
+and its precedence were prose beside a Python program that hard-coded all three.
+Rewritten, the validator holds *how* to run an evaluation, bind evidence and apply
+an ordered rule list; the certificate holds *which* command, carrier, event,
+projection, environment keys and precedence. Measured, with Python untouched:
+
+| change made in `c2.claim.qm` alone | machine behaviour |
+| --- | --- |
+| `require_event` → an event that does not occur | OUT_OF_DOMAIN |
+| `projection_path` → a key that does not exist | OUT_OF_DOMAIN |
+| `expected` → another value | INVALID |
+| `bind_to_current_evaluation` → false | VALID (the binding is what was refusing) |
+| `environment_resolution` order reversed | PRECEDENCE_VIOLATED |
+
+**Evidence binding.** The workspace is seeded with a valid-looking older journal
+and the run is made to produce a false value: the verdict is INVALID, not VALID —
+the validator read the journal *this* evaluation produced. The certificate also
+names the record: `require_event: session_start`, checked before the projection, so
+a record that merely carries the key is not accepted as the claim's evidence.
+
+**`PRECEDENCE_VIOLATED` bites now, and it bit the certificate.** The earlier attempt
+failed and was recorded as unbitten. `AGENT_PROVIDER` provided a lever needing no
+source mutation: `core/llm.py:28` reads it and `:32` takes the `local` branch before
+the `AGENT_MODEL` override at `:35`, so the certificate asserted a rule D4 predicting
+`qwen-local`. **Observation: `gpt-4o-mini`.** The claim was true and the explanation
+was false, and the machine said so — the exact case where an outcome-only check
+passes silently.
+
+Withdrawing D4 **in the certificate alone** turned that run back to VALID. So the
+causal model is authoritative, not decorative. What remains open is recorded in the
+certificate: `AGENT_PROVIDER` is source-visible and measurably **inert** for this
+claim — the QT5 pattern found from the inside — and the mechanism that does produce
+the journal's value is UNRESOLVED, which leaves D3 with a right literal and an
+unproven explanation.
+
+**The stale-bytecode incident, on record.** The earlier `override=True` attempt was
+abandoned only after instrumenting the call rather than speculating: the trace shows
+`_default_model` runs once, after `load_dotenv`, seeing the right environment — and
+that the mutation on disk was **not in the module that ran**. All 723 `.pyc` files
+are timestamp-invalidated, so this is not a systemic hazard, but it is why that
+experiment's result was withdrawn instead of explained.
+
 **What this experiment establishes.** One semantic claim can carry machine-produced
 validity that is relative to a declared evaluation, distinguishes an active
 dependency from an inert one, invalidates under mutation of the former and not the
-latter, and restores. That is a nerve with a falsifiable dependency relationship,
-and it is the first thing in this lab that a machine decides rather than a
-paragraph asserts.
+latter, restores, refuses evidence that is not its own, and reports its own causal
+model as defective. That is the first thing in this lab a machine decides rather
+than a paragraph asserts.
+
+### The two artifacts are now one graph
+
+`main.qm` binds the certificate rather than copying it. The relationship is measured,
+not nominal: the A2 layered probe showed that the `:budget-status` path of *this*
+boundary opens the `FS_WRITE` channel that creates `logs/run_*.jsonl`, which the
+preflight path does not, and the certificate's evaluation launches the same subject.
+`main.qm` asserts nothing about the model at session start on its own; it names the
+carrier and gates the dependent state.
+
+| | graph verdict |
+| --- | --- |
+| clean | GREEN — `carrier.run_journal.model_at_session_start` **USABLE** |
+| certificate made INVALID | **DEPENDENT_UNAVAILABLE** — the bound state may not be read |
+| binding names a claim the certificate does not carry | UNRESOLVABLE |
+| binding points at a certificate that does not exist | UNRESOLVABLE |
+| restored | GREEN, USABLE |
+
+A refusal has its own exit code because a certificate saying *no* is the graph
+working, not failing. No value is cached anywhere: the binding holds a gate, and the
+state is fetched by re-evaluation, which is the only reason this connection does not
+reproduce the duplicated-derived-assertion disease documented above.
 
 **What it does not establish.** Nothing about a general format — one certificate,
 one claim, one evaluation, field names chosen to be thrown away. Nothing about

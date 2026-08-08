@@ -10,16 +10,24 @@ extracted by `scripts/qm_ps_anchor.ps1`, which uses PowerShell's own parser.
 Neither half is allowed to do the other's job: the bridge never asserts, and
 this file never reads the target's text.
 
-Four outcomes, deliberately distinct, because the audit that produced the
+It also walks the specimen's `certified_claims` bindings, which connect it to
+claim certificates that decide their own validity by re-evaluation. A binding
+carries no value: the specimen names a carrier its boundary emits and gates the
+dependent state on the certificate's verdict.
+
+Five outcomes, deliberately distinct, because the audit that produced the
 specimen found that a signal firing on *any* edit cannot be counted as
 behavioural evidence:
 
-    0  GREEN        the link resolves and every asserted property holds
+    0  GREEN        every link's properties hold and every bound state is usable
     1  BROKEN       a semantic property is FALSE -- the relationship is wrong
-    2  STALE        every property still holds, but the target's bytes moved;
+    2  STALE        properties still hold, but a target's bytes moved;
                     re-verification is owed, the relationship is not broken
-    3  UNRESOLVABLE the specimen, the entity, the target file or the anchor
-                    could not be found -- nothing was verified either way
+    3  UNRESOLVABLE a specimen, entity, target, anchor or certificate could not
+                    be found -- nothing was verified either way
+    5  DEPENDENT_UNAVAILABLE
+                    the graph is intact and a certificate REFUSED. The bound
+                    state may not be read. This is the system working.
 
 A run that merely parses `main.qm` exits 3, not 0. Syntax is not evidence.
 
@@ -34,11 +42,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-GREEN, BROKEN, STALE, UNRESOLVABLE = 0, 1, 2, 3
+GREEN, BROKEN, STALE, UNRESOLVABLE, DEPENDENT_UNAVAILABLE = 0, 1, 2, 3, 5
+
+# A certificate that refuses is the graph WORKING, not failing: the link is
+# intact and the dependent state is simply not usable. It gets its own code so
+# a refusal is never confused with a broken relationship.
+_CLAIM_STATUS = {0: "VALID", 1: "INVALID", 2: "OUT_OF_DOMAIN",
+                 3: "PRECEDENCE_VIOLATED", 4: "UNREADABLE"}
 
 # Exit codes are not a severity order: STALE is 2 and BROKEN is 1, so `max`
 # over several links would rank "target moved" above "relationship is false".
-_SEVERITY = {GREEN: 0, STALE: 1, BROKEN: 2, UNRESOLVABLE: 3}
+_SEVERITY = {GREEN: 0, STALE: 1, DEPENDENT_UNAVAILABLE: 2, BROKEN: 3, UNRESOLVABLE: 4}
 
 ROOT = Path(__file__).resolve().parent.parent
 _MISSING = object()
@@ -191,8 +205,67 @@ def main(argv: list[str]) -> int:
         else:
             print(f"  VERDICT {lid}: GREEN")
 
+    worst = _worse(worst, _check_certified_claims(specimen))
+
     print({GREEN: "\nGREEN", BROKEN: "\nBROKEN", STALE: "\nSTALE",
-           UNRESOLVABLE: "\nUNRESOLVABLE"}[worst])
+           UNRESOLVABLE: "\nUNRESOLVABLE",
+           DEPENDENT_UNAVAILABLE: "\nDEPENDENT_UNAVAILABLE"}[worst])
+    return worst
+
+
+def _check_certified_claims(specimen: dict) -> int:
+    """Walk the bindings that connect this specimen to claim certificates.
+
+    A binding is not a copy. The specimen names a carrier its own boundary emits
+    and delegates that carrier's certified STATE to a certificate that decides for
+    itself, by re-evaluation. So this walker resolves the certificate, runs it,
+    and gates the dependent state on the status it returns -- it never reads a
+    value out of the binding, because there is none to read.
+    """
+    bindings = specimen.get("certified_claims") or []
+    if not bindings:
+        return GREEN
+    worst = GREEN
+    for binding in bindings:
+        bid = binding.get("binding_id", "?")
+        print(f"\n=== binding {bid}: {binding.get('relationship')} ===")
+
+        cert_path = ROOT / binding.get("certificate", "")
+        if not cert_path.is_file():
+            print(f"UNRESOLVABLE: certificate {binding.get('certificate')!r} does not exist")
+            worst = _worse(worst, UNRESOLVABLE)
+            continue
+        try:
+            cert = json.loads(cert_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            print(f"UNRESOLVABLE: {cert_path.name} is not readable -- {exc}")
+            worst = _worse(worst, UNRESOLVABLE)
+            continue
+
+        wanted = binding.get("claim_id")
+        if cert.get("claim_id") != wanted:
+            print(f"UNRESOLVABLE: the binding names claim {wanted!r} but "
+                  f"{cert_path.name} certifies {cert.get('claim_id')!r} -- "
+                  f"the link points at the wrong claim")
+            worst = _worse(worst, UNRESOLVABLE)
+            continue
+        print(f"  certificate {cert_path.name} resolved, claim {wanted}")
+
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "qm_claim_check.py"), str(cert_path)],
+            capture_output=True, text=True, encoding="utf-8", timeout=900, cwd=str(ROOT),
+        )
+        status = _CLAIM_STATUS.get(proc.returncode, f"UNKNOWN({proc.returncode})")
+        print(f"  certificate re-evaluated -> {status}")
+
+        usable = status in (binding.get("usable_when") or {}).get("certificate_status", [])
+        state = binding.get("dependent_state", "<unnamed>")
+        if usable:
+            print(f"  VERDICT {bid}: {state} is USABLE")
+        else:
+            print(f"  VERDICT {bid}: {state} is UNAVAILABLE -- the specimen asserts "
+                  f"nothing about it on its own")
+            worst = _worse(worst, DEPENDENT_UNAVAILABLE)
     return worst
 
 
