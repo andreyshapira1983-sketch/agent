@@ -42,13 +42,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from qm_gate_claim import gate  # noqa: E402 -- the one operation this walker defers to
+
 GREEN, BROKEN, STALE, UNRESOLVABLE, DEPENDENT_UNAVAILABLE = 0, 1, 2, 3, 5
 
 # A certificate that refuses is the graph WORKING, not failing: the link is
 # intact and the dependent state is simply not usable. It gets its own code so
-# a refusal is never confused with a broken relationship.
-_CLAIM_STATUS = {0: "VALID", 1: "INVALID", 2: "OUT_OF_DOMAIN",
-                 3: "PRECEDENCE_VIOLATED", 4: "UNREADABLE"}
+# a refusal is never confused with a broken relationship. The mapping from a
+# certificate's verdict to that decision lives in scripts/qm_gate_claim.py.
 
 # Exit codes are not a severity order: STALE is 2 and BROKEN is 1, so `max`
 # over several links would rank "target moved" above "relationship is false".
@@ -359,31 +361,17 @@ def _check_producer_bindings(specimen: dict) -> int:
                 continue
 
         deferred = binding.get("certified_by") or {}
-        cert_path = ROOT / deferred.get("certificate", "")
-        if not cert_path.is_file():
-            print(f"UNRESOLVABLE: deferred certificate {deferred.get('certificate')!r} "
-                  f"does not exist")
-            worst = _worse(worst, UNRESOLVABLE)
-            continue
-        cert = json.loads(cert_path.read_text(encoding="utf-8"))
-        if cert.get("claim_id") != deferred.get("claim_id"):
-            print(f"UNRESOLVABLE: binding defers to {deferred.get('claim_id')!r} but "
-                  f"{cert_path.name} certifies {cert.get('claim_id')!r}")
-            worst = _worse(worst, UNRESOLVABLE)
-            continue
-
-        cproc = subprocess.run(
-            [sys.executable, str(ROOT / "scripts" / "qm_claim_check.py"), str(cert_path)],
-            capture_output=True, text=True, encoding="utf-8", timeout=900, cwd=str(ROOT),
-        )
-        status = _CLAIM_STATUS.get(cproc.returncode, f"UNKNOWN({cproc.returncode})")
-        print(f"  the carrier is produced; its certified state -> {status}")
-        if status == "VALID":
+        status, detail = gate(ROOT / deferred.get("certificate", ""),
+                              deferred.get("claim_id"))
+        print(f"  the carrier is produced; gate -> {status} ({detail})")
+        if status == "USABLE":
             print(f"  VERDICT {bid}: GREEN -- production proven, state certified")
-        else:
+        elif status == "UNAVAILABLE":
             print(f"  VERDICT {bid}: structurally resolved, but {deferred.get('projection')} "
                   f"is UNAVAILABLE")
             worst = _worse(worst, DEPENDENT_UNAVAILABLE)
+        else:
+            worst = _worse(worst, UNRESOLVABLE)
     return worst
 
 
@@ -404,35 +392,15 @@ def _check_certified_claims(specimen: dict) -> int:
         bid = binding.get("binding_id", "?")
         print(f"\n=== binding {bid}: {binding.get('relationship')} ===")
 
-        cert_path = ROOT / binding.get("certificate", "")
-        if not cert_path.is_file():
-            print(f"UNRESOLVABLE: certificate {binding.get('certificate')!r} does not exist")
-            worst = _worse(worst, UNRESOLVABLE)
-            continue
-        try:
-            cert = json.loads(cert_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            print(f"UNRESOLVABLE: {cert_path.name} is not readable -- {exc}")
+        status, detail = gate(ROOT / binding.get("certificate", ""),
+                              binding.get("claim_id"))
+        print(f"  gate -> {status} ({detail})")
+        if status == "UNRESOLVABLE":
+            print(f"UNRESOLVABLE: {detail}")
             worst = _worse(worst, UNRESOLVABLE)
             continue
 
-        wanted = binding.get("claim_id")
-        if cert.get("claim_id") != wanted:
-            print(f"UNRESOLVABLE: the binding names claim {wanted!r} but "
-                  f"{cert_path.name} certifies {cert.get('claim_id')!r} -- "
-                  f"the link points at the wrong claim")
-            worst = _worse(worst, UNRESOLVABLE)
-            continue
-        print(f"  certificate {cert_path.name} resolved, claim {wanted}")
-
-        proc = subprocess.run(
-            [sys.executable, str(ROOT / "scripts" / "qm_claim_check.py"), str(cert_path)],
-            capture_output=True, text=True, encoding="utf-8", timeout=900, cwd=str(ROOT),
-        )
-        status = _CLAIM_STATUS.get(proc.returncode, f"UNKNOWN({proc.returncode})")
-        print(f"  certificate re-evaluated -> {status}")
-
-        usable = status in (binding.get("usable_when") or {}).get("certificate_status", [])
+        usable = status == "USABLE"
         state = binding.get("dependent_state", "<unnamed>")
         if usable:
             print(f"  VERDICT {bid}: {state} is USABLE")
