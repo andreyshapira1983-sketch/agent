@@ -29,7 +29,15 @@ CENSUS = ROOT / "knowledge" / "maps" / "cns_census.json"
 #: Verdicts the model may use, from docs/NERVE_PROTOCOL.ru.md. `UNDER_QUESTION`
 #: exists so a disproven explanation can be marked without silently replacing
 #: it with its rival — both stay visible until one is measured.
-VERDICTS = frozenset({"PROVEN", "UNPROVEN", "NEGATIVE", "UNDER_QUESTION"})
+#:
+#: `PARTIAL` joined them 2026-08-08, when the model gained the same word as a
+#: path status: an arc whose delivery is proven while its final consumer's
+#: effect is not (a live model reading a prompt block; a durable write whose
+#: downstream decision is unbitten) needs a verdict of its own. Without it the
+#: only options were to overclaim PROVEN or to bury the arc — and burying is
+#: exactly the loophole the arc rule exists to close. This ratchet caught the
+#: gap the first time a genuinely partial arc was written down.
+VERDICTS = frozenset({"PROVEN", "UNPROVEN", "NEGATIVE", "UNDER_QUESTION", "PARTIAL"})
 
 ENTITIES = ("state_carriers", "signal_flows", "decision_boundaries",
             "state_initialization")
