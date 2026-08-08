@@ -208,6 +208,74 @@ def test_a_file_scoped_question_is_not_answered_from_memory(tmp_path: Path) -> N
     ) is None, "an answer tied to a named file must not be replayed verbatim"
 
 
+def test_an_operator_command_is_not_answered_from_memory(tmp_path: Path) -> None:
+    """A ':' command is an instruction to the program, never a question.
+
+    Same shape of hole as the file-hint one above, measured 2026-08-08 (M41):
+    deleting `and not user_question.strip().startswith(":")` reddened only
+    `test_the_body_moved_symbol_for_symbol` — the AST guard that fires on any
+    edit to the body. Without this, a stored answer whose text merely
+    resembles the command could be served instead of running it.
+    """
+    from core.models import Goal
+
+    agent = _agent(tmp_path)
+    episode = _episode()
+    goal = Goal(description="d", success_criteria="c")
+
+    def _arm() -> None:
+        agent._last_best_similar_episode = episode
+        agent._last_best_similar_score = 0.99
+
+    _arm()
+    assert agent._episodic_fast_path(
+        QUESTION, file_hint=None, goal=goal, local_critique_active=False
+    ) == episode.full_answer, (
+        "control: this question IS served from memory, or the refusal below "
+        "says nothing about the ':' prefix"
+    )
+
+    _arm()
+    assert agent._episodic_fast_path(
+        f": {QUESTION}", file_hint=None, goal=goal, local_critique_active=False
+    ) is None, "an operator command must be executed, not answered from memory"
+
+
+def test_a_local_critique_turn_is_not_answered_from_memory(tmp_path: Path) -> None:
+    """Critique the referent in front of us — never replay an old answer.
+
+    The first of the four `local_critique_active` consumers deferred here
+    from C05. Measured 2026-08-08 (M43): deleting `and not
+    local_critique_active` reddened only the AST guard, so the contract that
+    a critique turn must not be served from memory had no behavioural
+    observer at all.
+    """
+    from core.models import Goal
+
+    agent = _agent(tmp_path)
+    episode = _episode()
+    goal = Goal(description="d", success_criteria="c")
+
+    def _arm() -> None:
+        agent._last_best_similar_episode = episode
+        agent._last_best_similar_score = 0.99
+
+    _arm()
+    assert agent._episodic_fast_path(
+        QUESTION, file_hint=None, goal=goal, local_critique_active=False
+    ) == episode.full_answer, (
+        "control: the same turn without the critique flag IS replayed"
+    )
+
+    _arm()
+    assert agent._episodic_fast_path(
+        QUESTION, file_hint=None, goal=goal, local_critique_active=True
+    ) is None, (
+        "a critique turn was answered from memory: the analysis would be of "
+        "a stored answer rather than of the referent the operator named"
+    )
+
+
 def _fast_path_pure(episode: EpisodeRecord) -> bool:
     """The real gate, asked without building an agent — never a copy of it.
 
