@@ -15,8 +15,9 @@ it.
 
 The labels above are **descriptions, not statuses** — deliberately. The roster
 previously read `**2** (current)`, and when candidate 2 died the copy did not. The
-fix is not to update the duplicate but to stop duplicating: status is asserted in
-exactly one place, and `scripts/qm_doc_coherence.py` fails if a second appears.
+fix is not to update the duplicate but to stop duplicating a status that can move.
+`scripts/qm_doc_coherence.py` catches duplicates only when they CONTRADICT — see
+specimen S1 — so consistent restatements elsewhere in this note are unguarded.
 
 ## Why the question exists
 
@@ -72,12 +73,12 @@ it is investigating.
 Both are the same shape: **one semantic fact → duplicated derived assertions →
 the authoritative state changes → the dependents do not.**
 
-**The detector, and its own two failures.** `scripts/qm_doc_coherence.py` is told
+**The detector, and its own failures.** `scripts/qm_doc_coherence.py` is told
 nothing about which sentence is stale and has no reference copy. It looks for one
 subject carrying both an alive-class and a dead-class status word, and for a
 spelled-out count whose own enumeration expands to a different size.
 
-It was wrong four times, each differently, and every correction is a finding:
+It was wrong five times, each differently, and every correction is a finding:
 
 1. **Dead on arrival.** Line-scoped, it found nothing: the count `Seven
    constraints` ended one line and its enumeration `(E1, E3–E7)` began the next.
@@ -93,7 +94,6 @@ It was wrong four times, each differently, and every correction is a finding:
    surviving model` raised nothing, because candidate 1's death is asserted in a
    sentence that does not repeat its name. Status is inherited from headings, so
    the probe now scopes a heading's subject over its section.
-
 5. **The use/mention fix survived one round and then broke.** Writing up failure 3
    produced quotations that *wrapped across lines*, and the span pattern forbade
    newlines inside a quotation, so the probe fired on its own evidence again. The
@@ -113,6 +113,57 @@ between duplicated assertions*; it has no notion of derivation and cannot say wh
 side is authoritative. It depends on the document marking quotations. Heading-scoped
 inheritance is a heuristic, not a parse. Its vocabulary is fixed and small, so a
 status word outside it is invisible.
+
+### Three more specimens, recorded before correction
+
+Writing the section above produced three fresh instances of the same disease. Each
+was probed rather than assumed.
+
+**S1 — the prose claimed an enforcement the probe does not implement.** The note
+said status is asserted in exactly one place and that the probe fails if a second
+appears. Neither half is true. Candidate 0 states `FALSIFIED` in its own section,
+candidate 1 states `FALSIFIED` in its own section, candidate 2 carries
+`STRUCTURALLY INSUFFICIENT` in its heading, and the ledger states that all are
+dead — four consistent assertions, and the probe is green. Adding a fifth
+consistent one (`Candidate 0 is falsified, as established above`) kept it green.
+
+So the supported claim is only this: **the probe detects duplicate *contradictory*
+status. It permits duplicate *consistent* status, and therefore does not enforce a
+single authoritative source.** The prose is corrected to that, rather than the
+probe being enlarged to fit the prose — a single-source rule would need its own
+bite test, and inventing it here to rescue a sentence is how the sentence got wrong
+in the first place.
+
+**S2 — the write-up immediately drifted its own count.** The introduction said the
+probe `was wrong four times` above a list of five. Same shape as the `Seven
+constraints` specimen, one paragraph after describing it.
+
+And it was **invisible to R2**: a probe with `The probe failed seventeen times:`
+above a three-item numbered list returns green. R2 only matches a count against an
+*inline parenthetical* enumeration. A THIRD instance appeared while correcting the
+second: the same paragraph introduced the list as `its own two failures`. Three
+count drifts in one document, two of them created by the act of documenting the
+first — the derived count has no source, so every restatement is a new place to
+rot. So R2 biting on one form is not evidence that
+derived counts are protected — it protects one syntax, and the live specimen in
+this very document used the other.
+
+**S3 — a stale assertion no rule can see.** The A2 section still read
+`No probe has been run against this` while the same document contained the A2
+experiment and measured verdicts for H1a and H1b.
+
+This one matters more than the other two. It is not a status contradiction: no
+alive/dead vocabulary appears. It is not a count. The two statements share **no
+fixed vocabulary at all** — one is a negated-existence claim about an unnamed
+"this", the other is a section of results. Detecting it needs to know what "this"
+refers to and that the later section is an instance of it.
+
+**The conclusion this forces:** text-level contradiction detection is not a
+candidate for the general freshness mechanism. It catches divergence between
+assertions that happen to share a form. Semantic staleness — a claim that has been
+overtaken by evidence stated in different words — is outside it, and no widening of
+the vocabulary reaches it. Document coherence and semantic validity are now
+demonstrably two problems, not one.
 
 **What this does and does not license.** It shows the requirement *can* be made to
 bite. It does not establish the requirement as stated: the probe detects
@@ -193,15 +244,44 @@ and 3, the other merges 0 with 1 and 3. A partition is therefore not determined 
 the projection any more than by the surface.
 
 What the three probes together establish: a projection is a *function from carrier
-state to a value*; the behavioural partition is induced where that value meets a
-**decision with a consequence**. So the chain is
+state to a value*, and it does not determine the partition. **Projection
+equivalence** (two runs giving the same projected value) and **behavioural observer
+equivalence** (two runs producing the same consequence) are different relations, and
+the first does not determine the second.
+
+### Fourth probe: the decision does not determine it either
+
+The wording "the behavioural partition is induced at the decision" was the next
+thing to outrun its evidence. Discriminator (b) — *different decisions reconverging
+on one consequence* — bites in production code, without any construction:
+
+| decision site in `core/loop_step_execution.py` | |
+| --- | --- |
+| `gw.outcome == "deny"` (:348) | effectful path, gateway refusal |
+| `gw.outcome == "block"` (:371) | effectful path, gateway block |
+| `decision.decision == "deny"` (:402) | non-effectful path, policy check |
+
+Those distinct decisions reach **five** emission sites (:351, :363, :386, :405,
+:417) that all write the same `code="policy_blocked"`, and the downstream consumer
+in `core/loop_run_tail.py:302` tests **only** `code == "policy_blocked"`. So the
+consequence partition is strictly coarser than the decision partition: two runs
+that differ in decision are the *same* run under the consequence observer.
+
+So the partition belongs to no single arrow in
 
 > carrier state → projection → decision → consequence
 
-and the partition lives at the third arrow. **Projection equivalence** (two runs
-giving the same projected value) and **behavioural observer equivalence** (two runs
-producing the same consequence) are different relations, and the first does not
-determine the second.
+It is finer at the decision boundary and coarser at the consequence boundary, and
+neither is privileged. **Decision equivalence** and **consequence-relative
+behavioural equivalence** are separate relations, added to the projection
+equivalence already separated above.
+
+What survives is the lab's older and plainer principle, which none of these probes
+has dented: **equivalence is relative to a named observer and a named observation
+boundary.** Three attempts to locate the partition in a structural place — the
+surface, the projection, the decision — have each been falsified by measurement.
+That is now the strongest statement the evidence supports, and it is weaker than
+any of the three it replaced.
 
 ### The terminology contradiction, resolved
 
@@ -268,8 +348,9 @@ and network calls to the model. If the subject is "all carriers", it can never b
 completed, and certifying it is meaningless. A consumer-relative closure ("all
 carriers with a named consumer") matches the lab's existing INSTANTIATED /
 HYPOTHETICAL discipline, but nothing yet proves that closure is well-founded — a
-new consumer can appear at any time and silently widen the subject. No probe has
-been run against this.
+new consumer can appear at any time and silently widen the subject. The A2
+experiment below attacks exactly this; H1a and H1b now carry measured verdicts,
+and H1c does not.
 
 **A3 — does the residue really need its own part, or is it a producer fact?**
 P4 asserts six call sites, four passing `main.py`. That is neither producer nor
@@ -400,12 +481,20 @@ The row count `rows_in_log` stayed 1 throughout the second mutation: the record
 never left the carrier, only its class changed.
 
 **The structural result: one consumer, one carrier, two projections of radically
-different coarseness.** `events_matched` is a proper observer — blind to the
-nondeterministic dimensions, and it bites on the distinction it claims to observe.
-The `events` list, which carries `ts` and `payload`, is near-discrete on the same
-carrier for the same consumer. Observer status is therefore a property of a
-*projection*, not of a consumer and not of a carrier — a third level neither
-candidate 1 nor candidate 2 has.
+different coarseness.** `events_matched` is blind to the nondeterministic
+dimensions and bites on the distinction it claims to observe. The `events` list,
+which carries `ts` and `payload`, is near-discrete on the same carrier for the same
+consumer.
+
+> **Superseded sentence, kept as evidence.** This paragraph used to end:
+> `Observer status is therefore a property of a projection, not of a consumer and
+> not of a carrier`. **Classified: stale prose, and a second meaning of "observer"
+> smuggled in.** It was written when `observer` still meant *whatever induces the
+> partition* — the loose sense. The two-consumer probe separates the words: a
+> projection extracts a value, an observer is a projection plus a decision, and the
+> fourth probe then showed the decision does not fix the partition either. So the
+> ontology did briefly carry two incompatible meanings of `observer`; they are now
+> distinct, and the claim that either one *owns* the partition is withdrawn.
 
 *What the consequence actually is, stated honestly:* the projected state changes
 an authoritative **report** returned through a tool boundary. No in-process control
@@ -497,8 +586,11 @@ Ledger:
 | scoped negative (universe U, snapshot S, procedure D) | **CHECKABLE**, positively controlled, recall proven for one consumer |
 | projection as its own level | FORCED, both discriminators bite |
 | transit — is the role semantically empty? | UNPROVEN; the law that asserted it is dead |
-| producer-binding debt | **OPEN, and deeper than a missing hash** — see QT2 below |
-| duplicated derived assertions detectable when they diverge | shown to bite; generation-from-authoritative-state untested |
+| producer-binding debt | **OPEN, and not a hashing problem** — QT2 and QT3 below |
+| dependency frontier of a claim | **OPEN** — QT3 shows it leaves the repository |
+| duplicated derived assertions detectable when they diverge | bites for a shared form only; semantic staleness out of reach (S3) |
+| single authoritative status source | **NOT enforced** — the probe permits consistent duplicates (S1) |
+| partition has a structural home | REFUTED three times — surface, projection, decision |
 
 ### QT2 — the validity subject is not the producer's file either
 
@@ -513,11 +605,49 @@ bytes would be sufficient. Separating experiment:
 - therefore a `cli/app.py`-only binding would report **FRESH: falsely green**;
 - restored, exit code back to 0.
 
-So "producer source file" is not the validity subject. What controls the claim is
-the set of code that can produce the values the claim quantifies over — which is
-not known, is not a file, and is not to be approximated by hashing the repository.
-Determining what evidence actually controls a claim is now part of Step 1, not a
-detail of it.
+So `cli/app.py` alone is not the validity subject. **The conclusion first drawn
+here — that the subject is "the set of code capable of producing the quantified
+values" — outran the experiment**, which only showed the dependency set is larger
+than one file. The licensed statement is weaker:
+
+> A claim's validity depends on whatever can change its truth value within the
+> declared evaluation domain. QT2 proves that this dependency set extends beyond
+> the producer source file.
+
+### QT3 — and it extends beyond code entirely
+
+Attacking the dependency *class* rather than widening the file list. Claim under
+test: *`session_start` records `llm_model = gpt-4o-mini`*. The lever is the
+workspace's own `.env`, which `cli/app.py` loads by design — not code, not
+`config/`, not even a repository file.
+
+- precondition: no `AGENT_MODEL` in the workspace `.env`; combined sha of every
+  `.py` in the repository plus every `config/*.json` = `f4701e3349379e22`;
+- add one line, `AGENT_MODEL=some-other-model`, to the workspace `.env`;
+- the recorded model becomes `some-other-model` — **the claim is FALSE**;
+- combined sha after: `f4701e3349379e22` — **unchanged**;
+- so a binding over *all code and all config* would report **FRESH: falsely green**;
+- remove the line: back to `gpt-4o-mini`.
+
+The validity question is therefore no longer *which files must be hashed* — no set
+of repository files answers it. It becomes: **what is the dependency frontier of a
+semantic claim?** Configuration, environment, persisted state, external data and
+model responses are all in the candidate class, and none of them is a file this
+repository owns.
+
+### Three problems that looked like one
+
+The coarse representation made these look like a single question. They have now
+come apart, and collapsing them again would undo the evidence:
+
+- **document coherence** — do duplicated assertions in a record agree? Mechanically
+  detectable for contradictions of a shared form; provably out of reach for
+  semantic staleness (specimen S3).
+- **semantic validity** — can this claim still be true? Depends on a dependency
+  frontier that QT2 showed is wider than one file and QT3 showed is wider than the
+  repository.
+- **behavioural equivalence** — are two runs the same? Relative to a named observer
+  and boundary, and three attempts to give it a structural home have failed.
 
 The goal is no longer to rescue a candidate. It is to determine what exactly is
 being certified, relative to which frontier, how that frontier is represented, and
