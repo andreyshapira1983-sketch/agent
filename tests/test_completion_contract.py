@@ -122,6 +122,56 @@ class TestDerivedBeforeWork:
         )
 
 
+class TestTheLoopDeliversTheContract:
+    def test_a_cycle_that_owes_a_deliverable_journals_the_acceptance_duty(
+        self, workspace
+    ) -> None:
+        """The delivery wire loop -> arbiter, bitten through a real run.
+
+        Measured 2026-08-08 (M26): forcing completion_contract=None at the
+        loop's call site left all 27 tests of this file green — the contract
+        was derived, logged, and never delivered. The ordering test reads
+        SOURCE TEXT (structural class), the semantics tests call the arbiter
+        directly; nothing watched the wire between them. A run that owes a
+        file and produces nothing must journal the acceptance duty as an
+        obligation — that only happens when the derived contract actually
+        reaches evaluate_completion_obligations.
+        """
+        import json as _json
+
+        from core.model_usage import ModelUsageLimits
+        from tests.conftest import FakeLLM
+        from tests.test_budget_resume import _build_guarded_agent
+
+        llm = FakeLLM(
+            responses=[
+                '{"reasoning":"no tools","sources":[]}',
+                "Готово. Файл описан ниже.",  # a confident answer, no artifact
+            ]
+        )
+        agent = _build_guarded_agent(workspace, llm, ModelUsageLimits())
+
+        agent.run(user_question="Создай файл docs/report.md")
+
+        events = [
+            _json.loads(line)
+            for line in agent.log.path.read_text(encoding="utf-8").splitlines()
+        ]
+        obligation = [
+            e for e in events if e.get("event") == "completion_obligation"
+        ]
+        assert obligation, "the run must journal an obligation verdict"
+        payload = _json.dumps(obligation[-1], ensure_ascii=False)
+        assert "deliverable_produced" in payload, (
+            "the acceptance duty vanished: the derived contract never "
+            "reached the arbiter — the M26 hole is open again"
+        )
+        assert "silently_missing" in payload, (
+            "an unproduced deliverable with a confident answer must be "
+            "judged silently_missing"
+        )
+
+
 class TestAnswerCannotSatisfy:
     def test_a_perfect_answer_does_not_satisfy_a_deliverable(self):
         """Clause 4. The old completion machinery measured the answer, so a
