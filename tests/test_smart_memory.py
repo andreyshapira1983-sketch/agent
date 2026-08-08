@@ -946,3 +946,58 @@ def test_consolidation_report_lists_candidate_procedures(workspace: Path) -> Non
     assert procedure.id in ConsolidationReport.from_dict(
         report.to_dict()
     ).candidate_procedure_ids
+
+
+def test_a_repeat_question_hint_reaches_the_planner_prompt(workspace: Path) -> None:
+    """The re-ask hint's delivery — the C06 re-audit's open candidate, closed.
+
+    The same `repeat_ep` that feeds the replay admission also builds a
+    `<repeat_question_hint>` block for the planner: past id, outcome, quality,
+    the previous question and summary. Measured 2026-08-08 (M60): the hint
+    could be built and dropped on the floor and nothing anywhere reddened —
+    no test in the repository mentioned repeat_question_hint at all.
+
+    Delivery only. What the block changes in a live model's answer is
+    mock-blind by nature, so this arc stays PARTIAL in the
+    prompt_to_model_family, exactly like the other members.
+    """
+    question = "как устроена политика памяти проекта"
+    llm = FakeLLM([PLAN_GENERAL_KNOWLEDGE, SYNTH_GENERAL_KNOWLEDGE])
+    agent, log_path = _build_agent(workspace, llm)
+    agent.episodic_store.save(
+        EpisodeRecord(
+            goal="memory policy",
+            question=question,          # identical text -> similarity 1.0
+            outcome="success",
+            summary="ранее объяснённая политика памяти",
+            tools_used=(),
+            # Quality is DERIVED from the chunk counts, not taken from a
+            # passed-in score (discovered by probe: setting the score directly
+            # was silently overridden and the fast path replayed instead).
+            # Zero verified against five unverified puts quality under the
+            # 0.70 replay bar, so the planner actually runs and its prompt can
+            # be inspected — while re-ask detection, which only needs
+            # usage eligibility, still fires.
+            verified_chunks=0,
+            unverified_chunks=5,
+            full_answer="Политика памяти описана в data/persistent_memory.jsonl.",
+            usage_eligible=True,
+            completion_state="achieved",
+        )
+    )
+
+    agent.run(question)
+
+    planner_calls = [c for c in llm.calls if "PLANNER_MODE" in c["system"]]
+    assert planner_calls, (
+        "precondition: the planner must actually run, or there is no prompt "
+        "to carry the hint (a replay would have skipped it)"
+    )
+    assert "<repeat_question_hint>" in planner_calls[0]["user"], (
+        "the re-ask hint never reached the planner: the loop detected a "
+        "repeated question and told the planner nothing about it (M60 hole)"
+    )
+    events = _events(log_path)
+    assert [e for e in events if e["event"] == "repeat_question_detected"], (
+        "the detection must be journaled alongside the delivery"
+    )
