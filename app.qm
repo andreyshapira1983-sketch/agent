@@ -127,7 +127,7 @@
               },
               "independence_proven": "mutating ONLY the first occurrence of the shared expression -- the web site's override line, `if auto_write_memory is not None` -> `if False` -- flipped cells 3 and 4 of the WEB partition and left RSS untouched. So these are two measurements, not one reported twice. Restored byte-identical.",
               "reachability_per_site": "PROVEN separately. Each site delivers its effective control into agent.knowledge_pipeline.run(auto_write_memory=...) -- web at core/ingestion.py:206, rss at :332 -- observed by a recording pipeline on a stub agent, True and False both arriving.",
-              "quotient_decision": "STILL REFUSED. One of the two sites now has a non-vacuous consequence bite and the other does not. The condition requires both.",
+              "quotient_decision": "REFUSED, and now for a MEASURED reason rather than for missing evidence. Equivalence is relative to a named boundary and the two sites answer differently at two of them. Under the CONTROL-PARTITION / writer-invocation boundary they are INDISTINGUISHABLE: both follow the control in all six cells and attribute every suppression to auto_write_memory. Under the WRITE-ADMISSIBILITY boundary in the shipped configuration they are SHARPLY DISTINGUISHABLE: RSS produces claims the default policy admits, and Web cannot produce one at all -- 0.615 against a floor of 0.65, for every source-library entry. Quotienting them would erase that difference, so they stay separate semantic regimes.",
               "not_inferred_from_R_B": "nothing here is carried over from R-B. That the pipeline gate controls the writer is R-B's result about R-B's delivery; R-A's own delivery reaching the same gate is proven, and its consequence is not.",
               "preserved_failed_probe": {
                 "_kept_because": "it earned its place by proving that the first consequence test was not a consequence test at all.",
@@ -166,7 +166,32 @@
                 "UNPROVEN": "that the memory write COMPLETES. The writer is reached and its record is stubbed, as in R-B."
               },
               "web_site_closure": {
-                "status": "NOT DONE. The next unit. Nothing about web is inferred from RSS."
+                "status": "PROVEN under a named configuration, and BLOCKED in the shipped one. Both are stated because they differ.",
+                "site": "core/ingestion.py:120 (ingest_web_topic)",
+                "state_space_derived_from_the_web_path": "not inherited from RSS. Web needs a source-library entry, a search whose output survives _candidate_urls, and a fetch whose output evidence_from_tool_result will credit. Its chain carries TWO evidence kinds -- web_search_hit and web_page -- where RSS carried one, and its claim text is 'Fetched page <url>', unique per URL, so page claims can never corroborate each other.",
+                "preconditions_proven_in_every_cell": {
+                  "1 function reached": "report built",
+                  "2 source library resolves": "1 entry searched",
+                  "3 search validates and yields candidate urls": "2 pages fetched",
+                  "4 fetch credited as evidence": "pages_fetched = 2",
+                  "5 chain non-empty": "chain_len = 3 (1 search + 2 pages)",
+                  "6 registry produces claims": "claims = 4",
+                  "7 memory writer wired": "remember is not None in every cell",
+                  "8 require_verified": "False, fixed through the stub agent's _unattended_run"
+                },
+                "BLOCKED_in_the_shipped_configuration": "the ENABLED pole cannot exist at the default write policy, and the arithmetic is exact: evidence_from_tool_result gives a web_fetch evidence a base confidence of 0.75; freshness is already maximal at 1.0 (not_time_sensitive); final = base x tier x freshness, so clearing min_claim_confidence=0.65 needs a tier multiplier of at least 0.867. ALL SIX source-library entries -- wikipedia, wikibooks, project_gutenberg, internet_archive, open_library, arxiv -- rank `reputable` = 0.82, giving 0.615. The two higher tiers are not reachable for a web_page. So no page the web path can fetch reaches the memory writer while the policy is at its default, and no choice of input fixes that.",
+                "how_the_partition_was_obtained": "the write policy is an UNRELATED gate and was held IDENTICAL in every cell at min_claim_confidence=0.60, injected through the existing KnowledgePipeline(write_policy=...) seam. It was not disabled and not varied between arms; it was set once to a value that admits this path's own 0.615. No production code was changed.",
+                "control_partition_with_consequence": [
+                  "attr=True,  no override, dry=False -> control True,  writer_called=2, skipped=0, policy knowledge-write-mvp",
+                  "attr=False, no override, dry=False -> control False, writer_called=0, skipped=4, policy auto_write_memory",
+                  "attr=True,  override=False, dry=False -> control False, writer_called=0, skipped=4, policy auto_write_memory",
+                  "attr=False, override=True,  dry=False -> control True,  writer_called=2, skipped=0, policy knowledge-write-mvp",
+                  "attr=True,  override=True,  dry=True  -> control False, writer_called=0, skipped=4, policy auto_write_memory",
+                  "attr=False, override=False, dry=True  -> control False, writer_called=0, skipped=4, policy auto_write_memory"
+                ],
+                "attribution": "every suppression carries policy_id 'auto_write_memory'. Not an empty chain, not a missing writer, not the verification gate, not the write policy.",
+                "fail_before": "only the WEB read was cut (core/ingestion.py:120), leaving RSS and R-C intact. The module still parses, so the red is not syntax. S3 fails NAMING getattr_names_by_function.ingest_web_topic; S4 stays green, so it is not another regime. And the consequence follows: the enabled cell flips to control=False, writer_called=0, suppression still attributed to auto_write_memory rather than to another gate. Restored byte-identical, graph GREEN, writer_called=2 again.",
+                "UNPROVEN": "that the memory write COMPLETES -- the writer is reached and its record is stubbed, as in RSS and R-B."
               },
               "_HISTORY_downstream_consequence_per_site": "SUPERSEDED, kept as evidence. This is what the record said at the time of the empty-chain probe, and it must not be read as a current status: NOT PROVEN. The probe's tools returned empty output, so the provenance chain was empty, so the pipeline had no claims and the memory writer was never exercised in EITHER arm. That cell is vacuous and is recorded as vacuous, not as a pass. Proving it requires emulating the web_search/web_fetch and rss_fetch contracts well enough to produce real evidence -- a larger unit than one bite.",
               "CURRENT_downstream_consequence_per_site": {
