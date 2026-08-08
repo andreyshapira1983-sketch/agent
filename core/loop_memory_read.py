@@ -412,15 +412,6 @@ class AgentLoopMemoryRead:
             lines.append(line)
         return lines
 
-    def _episodic_store_mtime(self) -> float:
-        """Return the modification time of the episodic store file, or 0.0."""
-        if self.episodic_store is None:
-            return 0.0
-        try:
-            return self.episodic_store.path.stat().st_mtime
-        except OSError:
-            return 0.0
-
     def smart_memory_summary(self) -> dict[str, Any]:
         """Return local smart-memory counts for operator CLI commands."""
         episodes = self.episodic_store.load() if self.episodic_store else []

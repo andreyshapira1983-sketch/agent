@@ -241,10 +241,6 @@ class AgentLoopInit:
         # Keyed so run() can serve a cached answer without touching the LLM.
         self._last_best_similar_episode: Any = None  # EpisodeRecord | None
         self._last_best_similar_score: float = 0.0
-        # Planner plan cache: skips LLM planner call for identical questions
-        # within the same session (invalidated when the episodic store changes).
-        # Key: (hash(question), episodic_mtime, file_hint)
-        self._planner_cache: dict[tuple[int, float, str], Any] = {}
         # MAST FM-1.3 step-repetition tracker; replaced per `run()` call.
         self._step_repetition: StepRepetitionTracker = StepRepetitionTracker()
         # MAST FM-1.5 / FM-3.1 termination guard; replaced per `run()` call.

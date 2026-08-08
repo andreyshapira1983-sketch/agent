@@ -133,9 +133,7 @@ class AgentLoopAttempt:
         # Берётся у соседней примеси: работает через MRO, но связь между
         # модулями обязана быть записана, иначе её видно только на прогоне.
         _defect_signals: Any
-        _episodic_store_mtime: Any
         _executed_tools: Any
-        _planner_cache: Any
         cheap_path_enabled: Any
         last_referent_decision: Any
 
@@ -254,56 +252,34 @@ class AgentLoopAttempt:
                     )
                     st.cheap_path_active = True
                 else:
-                    # ── Planner cache ─────────────────────────────────────
-                    # Cache key: (question hash, episodic store mtime, file_hint).
-                    # Mtime invalidates the cache whenever a new episode is written
-                    # (the store changes → the planner might choose different tools).
-                    # Only applied on the first attempt with no failure context.
-                    _pc_key = (
-                        hash(st.user_question.lower().strip()),
-                        self._episodic_store_mtime(),
-                        st.file_hint or "",
-                    )
-                    if (
-                        st.attempt == 1
-                        and not failure_context.strip()
-                        and _pc_key in self._planner_cache
-                    ):
-                        st.planner_out = self._planner_cache[_pc_key]
-                        self.log.log(
-                            "planner_cache_hit",
-                            {
-                                "key_hash": _pc_key[0],
-                                "tools_cached": [s["tool"] for s in st.planner_out.sources],
-                            },
+                    # Планировщик зовётся всегда: кэш планов удалён по вердикту
+                    # оператора 2026-08-08. Замер (C08): собственный инвалидатор
+                    # (mtime эпизодного хранилища в ключе) делал кэш недостижимым
+                    # в любом профиле с банковкой эпизодов — 0 попаданий на двух
+                    # прогонах одного вопроса; наблюдателей у компонента не было
+                    # (M49/M50 зелёные). Кэширование планов, если понадобится, —
+                    # новая фича с новым контрактом и fail-before тестами, а не
+                    # починка того ключа.
+                    try:
+                        st.planner_out = self.planner.plan(
+                            question=st.user_question,
+                            file_hint=st.file_hint,
+                            history=st.planner_history,
+                            failure_context=failure_context,
+                            forbidden_actions=st.forbidden_actions,
+                            llm=st._task_planner_llm,
                         )
-                    else:
-                        try:
-                            st.planner_out = self.planner.plan(
-                                question=st.user_question,
-                                file_hint=st.file_hint,
-                                history=st.planner_history,
-                                failure_context=failure_context,
-                                forbidden_actions=st.forbidden_actions,
-                                llm=st._task_planner_llm,
-                            )
-                        except ModelBudgetExceeded as exc:
-                            self._save_budget_pause_checkpoint(
-                                st._cp,
-                                goal=st.goal,
-                                question=st.user_question,
-                                file_hint=st.file_hint,
-                                current_phase="planning",
-                                plan=st.plan,
-                                blocked=exc,
-                            )
-                            raise
-                        if (
-                            st.attempt == 1
-                            and not failure_context.strip()
-                            and "plan_parse_failed" not in st.planner_out.warnings
-                        ):
-                            self._planner_cache[_pc_key] = st.planner_out
+                    except ModelBudgetExceeded as exc:
+                        self._save_budget_pause_checkpoint(
+                            st._cp,
+                            goal=st.goal,
+                            question=st.user_question,
+                            file_hint=st.file_hint,
+                            current_phase="planning",
+                            plan=st.plan,
+                            blocked=exc,
+                        )
+                        raise
                 st.planner_out = force_file_hint_read_when_explicit(
                     st.planner_out,
                     question=st.user_question,

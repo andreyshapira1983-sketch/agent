@@ -102,6 +102,47 @@ class _Substitute(ast.NodeTransformer):
         return node
 
 
+class _DeclaredDeletions(ast.NodeTransformer):
+    """Санкционированные УДАЛЕНИЯ из исторического тела — по одному, поимённо.
+
+    Тот же принцип, что у `_Substitute`: правка истории допустима только как
+    объявленное преобразование, а не как молчаливое расширение допуска.
+
+    2026-08-08, вердикт оператора: кэш планировщика удалён из кода. Замер
+    (C08): собственный инвалидатор — mtime эпизодного хранилища в ключе —
+    делал кэш недостижимым в любом профиле с банковкой эпизодов (0 попаданий
+    на двух прогонах одного вопроса), а наблюдателей у компонента не было
+    вовсе (обе ломки M49/M50 остались зелёными). Здесь из ИСТОРИЧЕСКОГО тела
+    вычищаются ровно три конструкции кэша, чтобы сверка продолжала держать
+    всё остальное тело символ в символ:
+
+      1. `_pc_key = (...)` — присваивание ключа;
+      2. `if ... _pc_key in self._planner_cache: <hit> else: <plan>` —
+         ветвление на попадание; остаётся его else-ветка (настоящий вызов
+         планировщика);
+      3. `if ...: self._planner_cache[_pc_key] = ...` — сохранение в кэш.
+    """
+
+    @staticmethod
+    def _mentions_cache(node: ast.AST) -> bool:
+        return "_planner_cache" in ast.unparse(node)
+
+    def visit_Assign(self, node: ast.Assign):
+        if any(isinstance(t, ast.Name) and t.id == "_pc_key" for t in node.targets):
+            return None
+        return self.generic_visit(node)
+
+    def visit_If(self, node: ast.If):
+        node = self.generic_visit(node)
+        if self._mentions_cache(node.test):
+            # ветвление на попадание: остаётся только else-ветка
+            return node.orelse
+        if node.body and all(self._mentions_cache(s) for s in node.body) and not node.orelse:
+            # сохранение в кэш: тело состоит только из кэшевых строк
+            return None
+        return node
+
+
 def test_the_loop_moved_under_one_declared_substitution():
     """История + объявленная подстановка = то, что лежит в новом модуле."""
     old_src = _history()
@@ -121,11 +162,15 @@ def test_the_loop_moved_under_one_declared_substitution():
     new_loop = _the_attempt_loop(new_method)
     assert new_loop is not None, "в новом методе должен быть ровно один `while True`"
 
-    expected = ast.fix_missing_locations(_Substitute().visit(ast.parse(ast.unparse(old_loop))))
+    expected = ast.fix_missing_locations(
+        _DeclaredDeletions().visit(
+            _Substitute().visit(ast.parse(ast.unparse(old_loop)))
+        )
+    )
     got = ast.parse(ast.unparse(new_loop))
     assert ast.dump(expected) == ast.dump(got), (
-        "тело цикла отличается от истории СВЕРХ объявленной подстановки — "
-        "это уже не перенос"
+        "тело цикла отличается от истории СВЕРХ объявленной подстановки и "
+        "объявленных удалений — это уже не перенос"
     )
 
 
