@@ -305,6 +305,32 @@ def _check_producer_bindings(specimen: dict) -> int:
             worst = _worse(worst, BROKEN)
             continue
 
+        for check in binding.get("consumer_checks", []):
+            cres = check.get("resolver", {})
+            cfacts = _python_facts(ROOT / cres.get("bridge", ""),
+                                   ROOT / cres.get("module_file", ""),
+                                   cres.get("function", "__module__"))
+            if cfacts is None:
+                print(f"UNRESOLVABLE: regime {check.get('regime')} module "
+                      f"{cres.get('module_file')!r} produced no facts")
+                broken = True
+                worst = _worse(worst, UNRESOLVABLE)
+                break
+            for prop in check.get("properties", []):
+                results = [_check_assertion(a, cfacts) for a in prop.get("assertions", [])]
+                failed = [why for ok, why in results if not ok]
+                if failed:
+                    broken = True
+                    print(f"  {prop['id']} FAIL [{check.get('regime')}]: {prop['claim']}")
+                    for why in failed:
+                        print(f"      {why}")
+                else:
+                    print(f"  {prop['id']} PASS [{check.get('regime')}]: {prop['claim']}")
+        if broken:
+            print(f"  VERDICT {bid}: BROKEN -- a declared consumer regime no longer holds")
+            worst = _worse(worst, BROKEN)
+            continue
+
         cres = binding.get("consumer_resolver")
         if cres:
             cfacts = _python_facts(ROOT / cres.get("bridge", ""),
