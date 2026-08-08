@@ -483,3 +483,69 @@ class TestAcceptanceNoInfiniteLoop:
         assert len(exhausted) == 1
         # And the tool was called a bounded number of times.
         assert bad.calls <= 3
+
+
+class TestPolicyBlockedIsItsOwnDiscriminator:
+    """`policy_blocked` is the ONLY failure code any consumer reads by name.
+
+    `loop_run_tail` filters `failure_history` for it to build `denied_tools`,
+    and that routes the step to a DIFFERENT disclosure test inside the
+    obligation arbiter: policy/approval needles instead of the failure-code
+    strings. Measured 2026-08-08, holding plan, tool and answer fixed and
+    varying ONLY the trigger code:
+
+        policy_blocked -> blocked_and_disclosed -> triggered False
+                       -> banked `achieved`, procedure credit kept
+        approval_deny  -> silently_missing      -> triggered True
+                       -> banked `partially_achieved`, credit withheld
+
+    So the distinction is causally real. It was also unobserved: swapping the
+    trigger code reddened one assertion, and that one was a journal label
+    (Q3). This test is the missing behavioural observer — the answer below
+    discloses in POLICY language while naming neither the tool nor the code,
+    which is exactly the text on which the two routes disagree.
+    """
+
+    def test_a_policy_blocked_step_is_judged_disclosed_not_silently_missing(
+        self, workspace: Path
+    ):
+        disclosing_answer = (
+            "Conclusion: Политика не разрешила выполнить это действие. "
+            "[general-knowledge]\n"
+            "Facts:\n- запрет зафиксирован [general-knowledge]\n"
+            "Sources:\n1. general-knowledge\nConfidence: low\n"
+        )
+        # The blocked tool must be an OBSERVING tool, or the arbiter creates
+        # no plan obligation at all and the assertion below passes vacuously —
+        # which is exactly what the first draft of this test did (caught by
+        # the break-did-not-redden rule). `shell_exec` is in the observing
+        # set and is deliberately NOT registered, so the policy blocks it.
+        planner = _SequencedPlanner([
+            [{"tool": "shell_exec", "arguments": {"cmd": "git status"},
+              "label": "stub:shell", "expected_outcome": "blocked"}],
+        ])
+        agent, log_path = _build_agent(
+            workspace, [], planner,
+            replan_policy=ReplanPolicy(max_total_replans=1),
+            llm_responses=[disclosing_answer],
+        )
+
+        agent.run(user_question="проверь состояние репозитория", file_hint=None)
+
+        events = _events(log_path)
+        obligations = [
+            e for e in events if e["event"] == "completion_obligation"
+        ]
+        assert obligations, "the run must journal an obligation verdict"
+        payload_obj = obligations[-1]["payload"]
+        assert "blocked_and_disclosed" in json.dumps(payload_obj, ensure_ascii=False), (
+            "precondition: the denied route must actually classify this step, "
+            "or the assertion below proves nothing"
+        )
+        payload = json.dumps(obligations[-1], ensure_ascii=False)
+        assert "silently_missing" not in payload, (
+            "a policy-blocked step whose refusal the answer DISCLOSES in policy "
+            "language was judged silently_missing: the denied_tools route is "
+            "gone, and the banked verdict will be lowered from achieved to "
+            "partially_achieved with procedure credit withheld"
+        )
