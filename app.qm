@@ -166,7 +166,7 @@
                 "UNPROVEN": "that the memory write COMPLETES. The writer is reached and its record is stubbed, as in R-B."
               },
               "web_site_closure": {
-                "status": "PROVEN under a named configuration, and BLOCKED in the shipped one. Both are stated because they differ.",
+                "status": "PROVEN under a named configuration. In the shipped one the control-enabled STATE is reachable and its writer-invocation CONSEQUENCE is not. Both are stated because they differ.",
                 "site": "core/ingestion.py:120 (ingest_web_topic)",
                 "state_space_derived_from_the_web_path": "not inherited from RSS. Web needs a source-library entry, a search whose output survives _candidate_urls, and a fetch whose output evidence_from_tool_result will credit. Its chain carries TWO evidence kinds -- web_search_hit and web_page -- where RSS carried one, and its claim text is 'Fetched page <url>', unique per URL, so page claims can never corroborate each other.",
                 "preconditions_proven_in_every_cell": {
@@ -179,7 +179,6 @@
                   "7 memory writer wired": "remember is not None in every cell",
                   "8 require_verified": "False, fixed through the stub agent's _unattended_run"
                 },
-                "BLOCKED_in_the_shipped_configuration": "the ENABLED pole cannot exist at the default write policy, and the arithmetic is exact: evidence_from_tool_result gives a web_fetch evidence a base confidence of 0.75; freshness is already maximal at 1.0 (not_time_sensitive); final = base x tier x freshness, so clearing min_claim_confidence=0.65 needs a tier multiplier of at least 0.867. ALL SIX source-library entries -- wikipedia, wikibooks, project_gutenberg, internet_archive, open_library, arxiv -- rank `reputable` = 0.82, giving 0.615. The two higher tiers are not reachable for a web_page. So no page the web path can fetch reaches the memory writer while the policy is at its default, and no choice of input fixes that.",
                 "how_the_partition_was_obtained": "the write policy is an UNRELATED gate and was held IDENTICAL in every cell at min_claim_confidence=0.60, injected through the existing KnowledgePipeline(write_policy=...) seam. It was not disabled and not varied between arms; it was set once to a value that admits this path's own 0.615. No production code was changed.",
                 "control_partition_with_consequence": [
                   "attr=True,  no override, dry=False -> control True,  writer_called=2, skipped=0, policy knowledge-write-mvp",
@@ -191,7 +190,25 @@
                 ],
                 "attribution": "every suppression carries policy_id 'auto_write_memory'. Not an empty chain, not a missing writer, not the verification gate, not the write policy.",
                 "fail_before": "only the WEB read was cut (core/ingestion.py:120), leaving RSS and R-C intact. The module still parses, so the red is not syntax. S3 fails NAMING getattr_names_by_function.ingest_web_topic; S4 stays green, so it is not another regime. And the consequence follows: the enabled cell flips to control=False, writer_called=0, suppression still attributed to auto_write_memory rather than to another gate. Restored byte-identical, graph GREEN, writer_called=2 again.",
-                "UNPROVEN": "that the memory write COMPLETES -- the writer is reached and its record is stubbed, as in RSS and R-B."
+                "UNPROVEN": "that the memory write COMPLETES -- the writer is reached and its record is stubbed, as in RSS and R-B.",
+                "_SUPERSEDED_wording": "kept as evidence. This field once began 'the ENABLED pole cannot exist at the default write policy'. Read a week later that says the True branch is unreachable, which the six cells directly contradict. Replaced below at the precision the measurement carries.",
+                "reachable_and_unreachable_in_the_shipped_configuration": "In the shipped configuration the R-A Web control-ENABLED STATE is REACHABLE -- control=True is produced by two of the six cells -- and its MEMORY-WRITER INVOCATION CONSEQUENCE is UNREACHABLE under the default write policy. evidence_from_tool_result gives a web_fetch evidence a base confidence of 0.75; freshness is already maximal at 1.0 (not_time_sensitive); final = base x tier x freshness, so clearing min_claim_confidence=0.65 needs a tier multiplier of at least 0.867. ALL SIX source-library entries -- wikipedia, wikibooks, project_gutenberg, internet_archive, open_library, arxiv -- rank `reputable` = 0.82, giving 0.615. The two higher tiers are not reachable for a web_page. So no page the web path can fetch reaches the memory writer while the policy is at its default, and no choice of input fixes that.",
+                "what_this_does_and_does_not_settle": {
+                  "proven": "default Web path + reachable source tiers + current evidence scoring + default write threshold => no writer invocation.",
+                  "NOT_settled": "whether that is an intended policy or a configuration defect. The experiment does not decide it and must not: intent is not derivable from behaviour. Earlier prose called it 'not a defect', which upgrades a scoped result into a verdict about intent. Withdrawn.",
+                  "the_two_readings": [
+                    "if the contract was that knowledge_auto_write=True should let Web ingestion save acceptable web knowledge automatically, then this is a real defect: the feature is nominally on and mathematically inert at the default policy",
+                    "if the contract was that Web knowledge must not be auto-written without a stronger provenance or trust category, then this is a working safety policy"
+                  ],
+                  "banked_question": "Is Web auto-write being unreachable under the shipped default policy an intended contract or an operational configuration defect?",
+                  "status_of_that_question": "OPEN, banked deliberately. Not opened as a unit here."
+                },
+                "observer_relative_result": {
+                  "O1": "R-A control -> writer invocation, with the shared downstream gate held fixed. Web and RSS are INDISTINGUISHABLE.",
+                  "O2": "shipped end-to-end admissibility. Web and RSS are DISTINGUISHABLE.",
+                  "_why_it_mattered": "observer-relative equivalence stopped being a sentence in a document here. Six identical cells under O1 would have justified quotienting Web with RSS, and that would have erased a real difference the system has under O2."
+                },
+                "quotient_strength": "the refusal is no longer 'we do not know enough to collapse them'. It is 'we know enough to prove a global collapse would be wrong'."
               },
               "_HISTORY_downstream_consequence_per_site": "SUPERSEDED, kept as evidence. This is what the record said at the time of the empty-chain probe, and it must not be read as a current status: NOT PROVEN. The probe's tools returned empty output, so the provenance chain was empty, so the pipeline had no claims and the memory writer was never exercised in EITHER arm. That cell is vacuous and is recorded as vacuous, not as a pass. Proving it requires emulating the web_search/web_fetch and rss_fetch contracts well enough to produce real evidence -- a larger unit than one bite.",
               "CURRENT_downstream_consequence_per_site": {
