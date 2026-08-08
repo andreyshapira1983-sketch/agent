@@ -11,6 +11,36 @@
 - Preserve all existing user changes.
 - Do not modify files outside this repository.
 
+## Physical construction rule for Quantum work
+
+**One physical implementation file → one behavioral callable → one semantic
+responsibility.** This is stricter than a line budget and replaces it as the
+architectural boundary. The repository already showed why: a 400-line limit
+produced small files that still shared hidden state and had no real module
+boundary, so line count measured the wrong thing.
+
+- A file holding one long function with several independent responsibilities does
+  **not** satisfy the rule.
+- If one function contains two independently observable decisions, carriers,
+  consumers or consequences that can be separated **without inventing semantics**,
+  they are separate operations and belong in separate files.
+- Data-only definitions, constants, schemas and import/re-export modules are not
+  behavioral implementation files. They are treated separately, and must never
+  become containers for hidden executable logic.
+- Every new behavioral file states its connections explicitly:
+  `input/preconditions → one operation → output/carrier → named consumer`,
+  and that connection must **bite under mutation** before the next operation is
+  built.
+- Build one operation, one file, prove it, connect it to the Quantum graph, then
+  the next. Do not batch-create small files and connect them afterwards.
+- `.qm` semantics bind to the resolved callable or semantic boundary, never to the
+  filename. A filename is only a physical carrier.
+
+**Legacy code is not refactored to satisfy this.** Old responsibilities move only
+when the active Quantum construction path reaches them and the move can be proven
+behaviorally equivalent. File-size guards may remain as secondary checks; they are
+no longer the boundary.
+
 ## Development Workflow
 
 - Before changing code, explain the plan and name the files you intend to modify.
