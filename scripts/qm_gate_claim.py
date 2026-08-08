@@ -17,9 +17,22 @@ this logic, so a change to the gate had two places to go wrong and the graph had
 no single answer to "may this state be used?". Extracting it makes the gate one
 observable decision with one carrier.
 
-The three statuses are not interchangeable. UNRESOLVABLE means nothing was
-decided -- the certificate or the identity is missing. UNAVAILABLE means the
-graph is intact and the certificate REFUSED, which is the system working.
+The three statuses are not interchangeable.
+
+    USABLE        the certificate mechanism ran and established the state.
+    UNAVAILABLE   the mechanism RAN TO COMPLETION and did not establish a usable
+                  state in this evaluation. That covers a false claim and an
+                  evaluation outside the certificate's declared domain: both are
+                  trustworthy answers about the state. It does NOT mean "the claim
+                  was false", and it is never used when the mechanism itself was
+                  unsound.
+    UNRESOLVABLE  no trustworthy verdict exists. The certificate or its identity is
+                  missing, the validator did not run or did not declare a verdict,
+                  its declaration disagrees with its exit code, the certificate is
+                  unreadable, or the certificate's own dependency model was
+                  contradicted by the observation. The last case is a defect of the
+                  CERTIFICATE, not a refusal by it, and collapsing it into
+                  UNAVAILABLE would let a broken semantic model look like a decision.
 """
 from __future__ import annotations
 
@@ -36,6 +49,18 @@ _VERDICT_MARKER = "QM-VERDICT:"
 
 _CLAIM_STATUS = {0: "VALID", 1: "INVALID", 2: "OUT_OF_DOMAIN",
                  3: "PRECEDENCE_VIOLATED", 4: "UNREADABLE"}
+
+#: Every declared verdict maps here explicitly. Two of them used to fall through
+#: to UNAVAILABLE and were measured doing so: PRECEDENCE_VIOLATED says the
+#: certificate's own dependency model was contradicted, and UNREADABLE says no
+#: verdict was formed at all. Neither is a refusal, so neither may look like one.
+_GATE_MAPPING = {
+    "VALID": "USABLE",
+    "INVALID": "UNAVAILABLE",
+    "OUT_OF_DOMAIN": "UNAVAILABLE",
+    "PRECEDENCE_VIOLATED": "UNRESOLVABLE",
+    "UNREADABLE": "UNRESOLVABLE",
+}
 
 
 def gate(certificate: Path, claim_id: str) -> tuple[str, str]:
@@ -74,9 +99,9 @@ def gate(certificate: Path, claim_id: str) -> tuple[str, str]:
         return ("UNRESOLVABLE",
                 f"the validator declared {verdict!r} at exit={tail.strip()} but exited "
                 f"{proc.returncode} -- the declaration and the code disagree")
-    if verdict not in _CLAIM_STATUS.values():
+    if verdict not in _GATE_MAPPING:
         return "UNRESOLVABLE", f"the validator declared an unknown verdict {verdict!r}"
-    return ("USABLE" if verdict == "VALID" else "UNAVAILABLE"), f"certificate -> {verdict}"
+    return _GATE_MAPPING[verdict], f"certificate -> {verdict}"
 
 
 if __name__ == "__main__":
