@@ -1,0 +1,72 @@
+{
+  "_what_this_is": "ONE experimental claim certificate. Not a schema, not a format, not a generalisation of main.qm. It answers seven questions for ONE claim under ONE declared evaluation, so that the claim's validity can be machine-produced instead of asserted. Every field name here is disposable.",
+  "_not_claimed": [
+    "No general .qm claim format.",
+    "No architecture decision. A system may still choose conservative artifact-wide invalidation; that is a policy question this certificate does not settle.",
+    "No completeness of the dependency list — only what has been demonstrated.",
+    "No claim that the four statuses below are the right vocabulary."
+  ],
+
+  "claim_id": "C2",
+  "claim": {
+    "prose": "In the declared evaluation, the run journal's session_start record carries llm_model = gpt-4o-mini.",
+    "observable": {
+      "carrier": "the run journal written under <workspace>/logs/run_*.jsonl",
+      "projection": "first record -> payload.llm_model",
+      "expected": "gpt-4o-mini"
+    }
+  },
+
+  "evaluation_domain": {
+    "command": ["main.py", "--ask", ":budget-status", "--auto-approve", "deny"],
+    "workspace": "a directory supplied to the evaluation; its `.env` is part of the evaluation, not of the certificate",
+    "_why_this_command": "a local command: it exercises session start and model routing without a model call, so the evaluation is cheap and deterministic in the projected dimension.",
+    "out_of_domain_if": "the journal is absent or unreadable — then nothing was observed and no validity verdict may be produced"
+  },
+
+  "evidence_that_established_it": {
+    "method": "run the declared command, read the first journal record, project payload.llm_model",
+    "first_observed": "2026-08-08, value gpt-4o-mini",
+    "stability": "identical across repeated evaluations in the same domain; the projection excludes ts and trace_id, which differ every run"
+  },
+
+  "dependencies": [
+    {
+      "id": "D1",
+      "what": "workspace `.env`, key AGENT_MODEL",
+      "kind": "external, outside the repository",
+      "demonstrated_active": "QT3 — setting AGENT_MODEL in the workspace .env changed the observed value to some-other-model while the complete tracked repository snapshot (751 files) hashed identically at 7043297867c02b8d and git status stayed clean",
+      "demonstrated_inert": "QT5 — with AGENT_MODEL also present in the PROCESS environment, the .env value is ignored and the observed value follows the process environment",
+      "precedence_rule": "process environment wins over workspace .env, because cli/app.py calls load_dotenv without override=True",
+      "active_only_when": "AGENT_MODEL is absent from the process environment"
+    },
+    {
+      "id": "D2",
+      "what": "process environment, key AGENT_MODEL",
+      "kind": "external, outside the repository",
+      "demonstrated_active": "QT5 — with the process environment set, the observed value follows it regardless of the .env",
+      "precedence_rule": "highest precedence of the two demonstrated dependencies",
+      "active_only_when": "present"
+    },
+    {
+      "id": "D3",
+      "what": "core/llm.py `_default_model`",
+      "kind": "repository source",
+      "role": "supplies the value when neither D1 nor D2 is present",
+      "demonstrated_active": "NOT separately mutated in this experiment — recorded as a dependency by reading, not by biting. Weaker evidence than D1 and D2, and marked as such."
+    }
+  ],
+
+  "currency": {
+    "_what_makes_the_certification_current": "the certificate carries no snapshot hash of the repository, deliberately: QT3 measured that the complete tracked snapshot is unchanged by a mutation that falsifies this claim, so a repository hash would be a currency signal that cannot see this claim's active dependency.",
+    "instead": "currency is re-established by RE-EVALUATION. The validator runs the declared evaluation and observes the projected value; there is no cached verdict to go stale.",
+    "known_gap": "re-evaluation costs a process launch, and says nothing about evaluations other than the one it ran."
+  },
+
+  "status_vocabulary": {
+    "VALID": "the evaluation ran in domain and the projected value equals the expected value",
+    "INVALID": "the evaluation ran in domain and the projected value differs",
+    "OUT_OF_DOMAIN": "the evaluation could not be observed as declared — no journal, unreadable record",
+    "PRECEDENCE_VIOLATED": "the value observed is not the one this certificate's precedence rule predicts — the certificate's own dependency model is wrong, which is a defect of the certificate rather than of the claim"
+  }
+}
