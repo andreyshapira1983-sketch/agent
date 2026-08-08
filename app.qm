@@ -108,7 +108,10 @@
             ],
             "contract": "the attribute is read via getattr with fallback False and used as the DEFAULT for write_memory; an explicit auto_write_memory argument overrides it, and dry_run forces it off",
             "consequence": "whether ingested web/RSS knowledge is written to memory",
-            "_note_on_the_fallback": "the consumer's getattr default is False while the producer's default is True. That divergence only matters if the attribute can be absent, which is not established here."
+            "_note_on_the_fallback": "the consumer's getattr default is False while the producer's default is True. That divergence only matters if the attribute can be absent, which is not established here.",
+            "behavioral_closure": {
+              "status": "NOT TESTED. R-A has its own override argument and its own dry_run condition, and nothing about it is inferred from R-B. It stays an unclosed regime."
+            }
           },
           {
             "id": "R-B",
@@ -118,7 +121,15 @@
             ],
             "contract": "the attribute is read as self.knowledge_auto_write, ANDed with may_knowledge, and passed AS the auto_write_memory argument into knowledge_pipeline.run",
             "consequence": "whether the evidence chain's knowledge pipeline writes memory",
-            "_note": "this regime supplies the very argument that overrides regime A's default. Whether either call path ever reaches the other's function is NOT established."
+            "_note": "this regime supplies the very argument that overrides regime A's default. Whether either call path ever reaches the other's function is NOT established.",
+            "behavioral_closure": {
+              "status": "FROZEN 2026-08-08 -- three poles proven end to end through the production path. Only the memory WRITER was stubbed; everything between AgentLoop.knowledge_auto_write and the write decision ran for real.",
+              "ENABLED": "auto_write_memory=True with two file-kind evidences yielding verified claims -> the writer is REACHED (writer_called=1). The stub's return shape then raises, after the call, which is what was being measured and not more.",
+              "DISABLED": "identical claims, auto_write_memory=False -> writer_called=0, memory_skipped=2, and every decision carries policy_id 'auto_write_memory'. The pipeline distinguishes that from 'memory_writer_missing', so the refusal names THIS control value rather than a missing writer.",
+              "WIRE_CUT": "source and report projection held True, only the control delivery cut (app/bootstrap.py:288 default True->False). Graph: S1 FAIL, exit BROKEN. Consequence: report=True, control=False, writer_called=0, memory_skipped=2, policy_ids=['auto_write_memory']. The journal reported True while memory was not written -- the exact lie the missing watcher would have permitted. Restored byte-identical; report=True, control=True, delivered=True again.",
+              "what_is_not_shown": "that the write COMPLETES. The writer was reached; its record was stubbed. Completion is a different claim and is not made here.",
+              "path_exercised": "AgentLoop.knowledge_auto_write -> _catalogue_chain conjunct with may_knowledge -> KnowledgePipeline.run(auto_write_memory=...) -> the gate at core/knowledge_pipeline.py:518 -> the memory writer"
+            }
           }
         ],
         "explicitly_not_claimed": [
