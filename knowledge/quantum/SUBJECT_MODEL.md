@@ -205,7 +205,7 @@ from ontology, which the first version of this table did not do:
 | E4 | facts about **instantiation** fit no carrier or observer slot | the 12-fact residue | ontology |
 | E5 | one consumer binds **several carriers** | `selfcheck.ps1:23–29` | ontology |
 | E6 | the producer of record is a **symbol plus a termination contract**, not a file | the launch worked from `cli.app.run_cli` with `main.py` gone | ontology |
-| E7 | a behavioural partition has **no structural home**: not the surface, not the projection, not the decision | four probes, each falsifying one candidate home | ontology |
+| E7 | a behavioural partition has **no structural home among the three tested candidates** — not the surface, not the projection, not the decision | four probes, each falsifying one candidate home | ontology |
 
 > **Superseded, recorded as specimen S5.** This row used to read `a behavioural
 > partition is induced at the decision`. The fourth probe, further down this same
@@ -613,6 +613,8 @@ Ledger:
 | single authoritative status source | **NOT enforced** — the probe permits consistent duplicates (S1) |
 | partition has a structural home | REFUTED three times — surface, projection, decision |
 | observer = projection + decision | **NOT frozen** — the five concepts stay separately attackable |
+| one claim can carry machine-produced evaluation-relative validity | **YES** — the C2 certificate: T1–T4 plus a cross-check |
+| `PRECEDENCE_VIOLATED` (the certificate's self-check) | **UNBITTEN** — the attempt failed and the cause is undiagnosed |
 
 ### QT2 — the validity subject is not the producer's file either
 
@@ -649,17 +651,20 @@ workspace's own `.env`, which `cli/app.py` loads by design — not code, not
 - the recorded model becomes `some-other-model` — **the claim is FALSE**;
 - combined sha after: `f4701e3349379e22` — **unchanged**;
 - so a binding over **the repository's `.py` files and `config/*.json`** would
-  report **FRESH: falsely green**. Stated as measured: that set was held constant,
-  not "all code" and not "all configuration";
+  report **FRESH: falsely green**;
+- and the stronger version is measured rather than inferred: the **complete tracked
+  repository snapshot** — all 751 files under `git ls-files`, content included —
+  hashes to `7043297867c02b8d` before and after, with `git status` clean. So *no*
+  repository-file-only binding could detect this mutation;
 - remove the line: back to `gpt-4o-mini`.
 
-The validity question is therefore no longer *which files must be hashed* — no set
-of repository files answers it. It becomes: **what is the dependency frontier of a
+The validity question is therefore no longer *which files must be hashed*: the
+complete tracked file set was measured and does not answer it. It becomes: **what is the dependency frontier of a
 semantic claim?** Configuration, environment, persisted state, external data and
 model responses are all in the candidate class, and none of them is a file this
 repository owns.
 
-### QT4 — validity separates by claim, not by artifact
+### QT4 — claim-relative validity distinguishes what artifact-wide validity merges
 
 Two claims, one declared evaluation domain (`main.py --ask :budget-status`, fresh
 workspace, `AGENT_MODEL` cleared from the process environment):
@@ -707,14 +712,87 @@ another, decided by precedence rather than by presence. That distinguishes a
 evaluation. Recorded as a measured distinction only — not proposed as fields, since
 one precedence rule in one loader is thin ground for a structure.
 
+## The first construction experiment — one claim certificate
+
+`knowledge/quantum/c2.claim.qm` is a certificate for **one** claim, checked by
+`scripts/qm_claim_check.py`. It is not a schema and not a candidate: it exists to
+find out whether a single semantic claim can carry machine-produced,
+evaluation-relative validity with a falsifiable dependency relationship.
+
+It answers seven questions and nothing else: what is claimed; under what evaluation
+domain; what observation established it; which dependency was **demonstrated
+active**; which potential dependency was **demonstrated inert**; what makes the
+certification current; and what status is emitted when an active dependency moves.
+
+**Currency carries no repository hash, deliberately.** QT3 measured that the
+complete tracked snapshot — 751 files, hashing to `7043297867c02b8d` — is unchanged
+by a mutation that falsifies this claim. A file hash would therefore be a currency
+signal structurally blind to the claim's active dependency. Currency is
+re-established by re-evaluating, so there is no cached verdict to go stale.
+
+**Fail-before, four states, all as predicted:**
+
+| | evaluation | status |
+| --- | --- | --- |
+| T1 | clean: no `.env`, no process `AGENT_MODEL` | **VALID** (0), active dependency reported as the `core/llm.py` default |
+| T2 | mutate the **active** dependency — `AGENT_MODEL` into the workspace `.env` | **INVALID** (1) |
+| T3 | remove it | **VALID** (0) |
+| T4 | mutate the **inert** dependency — the same `.env` key, while the process environment also sets it | **VALID** (0), active dependency reported as the process environment |
+
+T4 is the one that matters: the dependency exists and its value changed, and the
+certificate did **not** invalidate, because in that evaluation it is not the active
+one. Presence is not dependency.
+
+**Cross-check against QT4's other claim.** With `cli/one_shot.py` mutated so C1 is
+false, the C2 certificate reports **VALID**. A mutation that invalidates one claim
+is not read as evidence about the other.
+
+**A status that fires and a status that does not.** `OUT_OF_DOMAIN` bites: pointed
+at a command that writes no journal, the validator returns 2 rather than guessing.
+`PRECEDENCE_VIOLATED` — the check on the certificate's own dependency model —
+**never fired**, and the attempt is on record as a failure:
+
+- the precedence rule was mutated at its source, `load_dotenv(workspace / ".env")`
+  → `..., override=True`;
+- the mutation is **live**: with only the `.env` present the value follows it;
+- but with both present, the process environment still wins, so the certificate's
+  prediction and the observation still agreed and the status stayed VALID;
+- the obvious explanation — a module-level capture of `AGENT_MODEL` before
+  `load_dotenv` runs — was checked and **not supported**: the only read is inside a
+  function, `core/llm.py:35`.
+
+So the mechanism is **undiagnosed**, and `PRECEDENCE_VIOLATED` is an **unbitten
+status**. What the failure does show is a limit of the check itself: it compares a
+predicted *value* with an observed one, so a dependency model that is wrong about
+the mechanism but right about the outcome passes silently.
+
+**What this experiment establishes.** One semantic claim can carry machine-produced
+validity that is relative to a declared evaluation, distinguishes an active
+dependency from an inert one, invalidates under mutation of the former and not the
+latter, and restores. That is a nerve with a falsifiable dependency relationship,
+and it is the first thing in this lab that a machine decides rather than a
+paragraph asserts.
+
+**What it does not establish.** Nothing about a general format — one certificate,
+one claim, one evaluation, field names chosen to be thrown away. Nothing about
+architecture: a system may still prefer conservative artifact-wide invalidation,
+which remains sound and merely coarse. And its own four-status vocabulary is only
+three-quarters proven.
+
 ### Three problems that looked like one
 
 The coarse representation made these look like a single question. They have now
 come apart, and collapsing them again would undo the evidence:
 
 - **document coherence** — do duplicated assertions in a record agree? Mechanically
-  detectable for contradictions of a shared form; provably out of reach for
-  semantic staleness (specimen S3).
+  detectable for contradictions of a shared form; **not reached by the shared-form
+  detector** for semantic staleness (specimen S3). Whether some other text-operating
+  mechanism could reach it is untested.
+
+> **Superseded, recorded as specimen S6.** This bullet used to read `provably out of
+> reach for semantic staleness`, six paragraphs after the same note had narrowed the
+> result to insufficiency of one detector. The note went stale against its own newer
+> result — the third time a summary line has outlived the finding it summarises.
 - **semantic validity** — can this claim still be true? Depends on a dependency
   frontier that QT2 showed is wider than one file and QT3 showed is wider than the
   repository.
