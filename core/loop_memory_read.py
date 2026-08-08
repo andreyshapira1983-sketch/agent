@@ -327,7 +327,10 @@ class AgentLoopMemoryRead:
                 # either.
                 if repeat_ep is not None and not is_usage_eligible(repeat_ep):
                     repeat_ep, repeat_score = None, 0.0
-                # Store for fast-path and planner-cache checks in run().
+                # Store for the fast-path admission in run(). (This line used
+                # to also claim "planner-cache checks": false — the planner
+                # cache keys on (question hash, store mtime, file_hint) and
+                # reads neither field. Verified by search 2026-08-08.)
                 self._last_best_similar_episode = repeat_ep
                 self._last_best_similar_score = repeat_score
                 if repeat_ep is not None:
