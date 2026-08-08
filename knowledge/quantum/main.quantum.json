@@ -1,16 +1,35 @@
 {
   "_what_this_is": "A DERIVED semantic record of the physical `main.py` under the Quantum CNS mandate. No executable implementation; replaces nothing; `main.py` is untouched.",
-  "_revision": "THIRD EDITION. The second edition survived four of six challenges only in part and failed two outright. Superseded claims are kept below as audit history, per the operator's instruction — including one case where the SECOND edition's own 'acknowledged gap' turned out to be an error of search rather than a real gap. Still NOT a schema.",
+  "_revision": "FOURTH EDITION. The third pass attacked the FORM rather than its contents, and the form failed. Six of seven attacks landed as FUNDAMENTAL, including the one finding that looked local and did not survive its own locality proof. One recorded negative claim was proved FALSE by evidence that had been in the repository since pass 2 discovered the file it lives in. The promotion criterion was attacked as instructed and is now recorded as FALSIFIED. Still NOT a schema — and now with a demonstrated reason why no schema may be derived yet.",
 
   "_adversarial_history": {
     "pass_1_2026_08_08": "Five challenges, all upheld: an observer was two, a state space was missing, an equivalence class was named after an ambiguous boundary, a source-derived description passed for semantics, an exhaustiveness claim had no method.",
-    "pass_2_2026_08_08": "Six challenges. Verdicts, each decided by probe before any wording changed: (1) SPLIT — the internal control quotient was still one level too coarse; (2) SURVIVES with the evidence class corrected — and the second edition had UNDERSTATED its own evidence; (3) REPRESENTATION ERROR — a hypothetical observer sat among evidenced ones; (4) SURVIVES, and the recorded 'gap' is WITHDRAWN as my own search failure; (5) REPRESENTATION ERROR — two spaces implied impossible states; (6) DOWNGRADED — static-import isolation was being read as runtime isolation."
+    "pass_2_2026_08_08": "Six challenges. Verdicts, each decided by probe before any wording changed: (1) SPLIT — the internal control quotient was still one level too coarse; (2) SURVIVES with the evidence class corrected — the second edition had UNDERSTATED its own evidence; (3) REPRESENTATION ERROR — a hypothetical observer sat among evidenced ones; (4) SURVIVES, and the recorded 'gap' is WITHDRAWN as my own search failure; (5) REPRESENTATION ERROR — two spaces implied impossible states; (6) DOWNGRADED — static-import isolation was being read as runtime isolation.",
+    "pass_3_2026_08_08": "Seven attacks on the FORM, its provenance, and its own promotion criterion. Results: (1) temporal identity — FUNDAMENTAL, proved by probe QT1; (2) subject ownership — FUNDAMENTAL, and the same defect as (1) seen from the other side; (3) totality of quotients — FUNDAMENTAL, no observer declares a domain; (4) negative claims — FUNDAMENTAL, and one such claim was FALSE; (5) protection independence — FUNDAMENTAL, 8 reds were 2 independent observations; (6) the external consumer — FUNDAMENTAL, one consumer instantiates two observer classes and the form cannot hold that; (7) the promotion criterion — FALSIFIED by self-demonstration.",
+    "_note_on_the_third_pass": "Passes 1 and 2 examined what the file SAID. Pass 3 examined what the file CAN say. Every dimension pass 3 opened had been unexamined in both prior passes, and five of them contained fundamental defects the whole time. This is itself the evidence used to falsify the promotion criterion."
+  },
+
+  "snapshot_binding": {
+    "_origin": "ADDED after attack 1. This is an EXPERIMENT, not a proposed field shape — the correct shape is unknown and deriving one is forbidden until the form stabilises. It exists so that the file's claims stop being undated assertions about a moving repository.",
+    "commit": "27ce254",
+    "subject_sha256_prefix": "main.py def397b4c33e51d3",
+    "cited_external_sources_sha256_prefix": {
+      "cli/app.py": "a39e32aae8070fbc",
+      "cli/command_dispatch.py": "a5587d886ab30abb",
+      "cli/resume.py": "efeeadc228afd7ba",
+      "scripts/selfcheck.ps1": "2b123deb503cac8a"
+    },
+    "what_this_does_NOT_solve": "It records WHEN the claims were true. It does not detect staleness, does not fail anything, and no ratchet checks it. A reader who trusts it must verify the hashes themselves."
   },
 
   "physical_subject": {
+    "_origin": "RE-STATED after attack 2 was upheld. The previous editions named `main.py` as the subject while nearly every load-bearing claim was about code outside it.",
     "path": "main.py",
     "body": "one statement — `return run_cli()` — plus the module tail `if __name__ == \"__main__\": raise SystemExit(main())`",
-    "shape_evidence": "AST-pinned by tests/characterization/test_main_public_surface.py"
+    "shape_evidence": "AST-pinned by tests/characterization/test_main_public_surface.py",
+    "actual_subject_of_the_claims": "NOT main.py's bytes. main.py contributes exactly two facts to this whole record — that it delegates, and that the tail converts the returned value into SystemExit. Everything else — which payloads are reachable, what code 2 means, which variants exist, who consumes the result — is a property of the PROCESS ROOTED AT main.py, whose behaviour lives in cli/app.py, cli/one_shot.py, cli/repl.py, cli/resume.py and cli/command_dispatch.py.",
+    "why_this_matters": "Attack 1 proved it is not a wording quibble: probe QT1 edited a `return 2` path in cli/app.py to `return 3`, main.py stayed byte-identical (def397b4c33e51d3 before and after), all 8 tests in test_main_public_surface.py stayed green, and this file's payload-exhaustiveness claim became false. A record whose subject is one file but whose claims are owned by five cannot express its own invalidation.",
+    "status": "OPEN FUNDAMENTAL. The snapshot_binding above is a stopgap, not a resolution: it pins the sources but does not make the file's subject coherent."
   },
 
   "outcome_space": {
@@ -31,7 +50,9 @@
       {
         "tag": "PROPAGATED_OTHER_EXCEPTION",
         "payload": "any non-SystemExit exception",
-        "reachability": "UNPROVEN — cli/app.py contains no exception handling, so the variant exists structurally; no probe shows it reachable in production"
+        "reachability": "UNPROVEN in production — no probe shows a live route to it",
+        "process_projection": "EXIT CODE 1 — measured by probe 2026-08-08 on a synthetic subject with main.py's exact shape. Recorded because the third edition let a whole variant exist with no stated projection, while asserting elsewhere that the payload universe was {0,2}. The value 1 is outside that set.",
+        "structural_note_corrected_by_attack_4": "The third edition supported this variant with 'cli/app.py contains no exception handling'. That statement is TRUE of cli/app.py (0 handlers) and of cli/one_shot.py (0) and cli/resume.py (0) — but cli/repl.py contains 11 `except` handlers. The instrument covered one file; the claim it was supporting is about the whole delegate chain."
       }
     ],
     "why_not_two_dimensions": "Because the payload's existence depends on the tag. Storing them as independent spaces made JSON convenient and semantics wrong.",
@@ -39,48 +60,67 @@
       "observed": "0 and 2",
       "statically_exhaustive_over_the_visible_call_graph": "15 literal integer returns in the delegate chain (13 zeros, 2 twos); the three non-literal returns were followed — run_one_shot returns only 0, run_repl returns only 0, and `return decision.exit_code` reads a field whose producer (cli/resume.py) sets only 0 or 2 and which the caller reaches only after an `is not None` check",
       "NOT_runtime_proven": "no probe enumerates the reachable set at runtime; ResumeDecision.exit_code is typed `int | None` and nothing confines it",
-      "status": "STATICALLY EXHAUSTIVE over today's call graph; NOT runtime-proven"
+      "status": "STATICALLY EXHAUSTIVE over the call graph AT COMMIT 27ce254; NOT runtime-proven",
+      "falsifiability_demonstrated": "probe QT1 made this claim false in one edit to a file this record does not name as its subject, with every cited evidence source still passing."
     }
   },
 
   "observers": {
     "_evidence_status_field": "ADDED after challenge 3 was upheld. Placement in this section no longer confers epistemic status: every observer carries `evidence_status`, one of INSTANTIATED (a real consumer exists in the audited system) or HYPOTHETICAL_CLASS (its discrimination is conceptually known; its existence here is UNPROVEN). A hypothetical observer may describe a possible quotient and may never be cited as proof of one.",
+    "_domain_field": "ADDED after attack 3 was upheld. Every observer now states its DOMAIN — the subset of the outcome space over which its quotient is defined — and names the variants where its projection is UNDEFINED. The third edition had none of this: when it introduced a THIRD variant, not one quotient was re-checked against it, and every observer's partition was silently still written for a two-variant space.",
     "exact_exit_code_observer": {
       "evidence_status": "INSTANTIATED",
       "reads": "the integer the process reports",
-      "discriminates": "0 vs 2 vs any other value",
+      "domain": "ALL THREE variants — this is the only observer that is total over the space",
+      "discriminates": "0 vs 2 vs 1 vs any other value; RETURNED(0) and PROPAGATED_SYSTEMEXIT(0) COLLAPSE for it",
       "evidence": "test_main_public_surface.py::test_the_process_really_exits_with_the_code_main_returned — real subprocess, nothing patched, asserts returncode == 2",
       "precondition_proven": "the invocation names a missing --file and fails in preflight, so the run genuinely produces a non-zero code; the test cannot pass on a run that would have exited 0 anyway"
     },
     "in_process_return_observer": {
       "evidence_status": "INSTANTIATED",
       "reads": "the value main() returns",
-      "discriminates": "0 vs 2 — and, jointly with the next observer, RETURNED from PROPAGATED_SYSTEMEXIT",
+      "domain": "RETURNED only",
+      "undefined_over": "both PROPAGATED variants — there is no return value to read; the observer does not see a different value, it does not complete. The third edition stated a quotient without noticing it had no domain.",
+      "discriminates": "0 vs 2 — and, jointly with the exception observer, RETURNED from PROPAGATED_SYSTEMEXIT",
       "evidence": "test_cli_command_precedence.py asserts main() == 0; test_cli_mode_selection.py:188 (and three further sites) assert main() == 2 on the same preflight scenario",
       "correction_to_the_second_edition": "the second edition cited only the subprocess for the value 2 and asked whether a direct observer of `main returned 2` existed. It does, in four places. The second edition UNDERSTATED its own evidence — recorded because an audit that overstates and one that understates are the same kind of error."
     },
     "in_process_exception_observer": {
       "evidence_status": "INSTANTIATED",
       "reads": "the exception type and code when main does not return",
+      "domain": "RETURNED and PROPAGATED_SYSTEMEXIT",
+      "undefined_over": "PROPAGATED_OTHER_EXCEPTION — as instantiated (`pytest.raises(SystemExit)`) it does not catch a RuntimeError, so that variant is not a third class for it but an instrument failure. Never stated before this edition.",
       "discriminates": "PROPAGATED_SYSTEMEXIT from RETURNED",
       "evidence": "test_cli_argparse_surface.py wraps main() in pytest.raises(SystemExit) for the argparse routes; test_cli_command_precedence.py::test_repl_quit_propagates_system_exit_zero drives main() with a scripted `:quit` reader and asserts the SystemExit"
     },
     "frame_trajectory_observer": {
       "evidence_status": "INSTANTIATED as a probe, not as a test",
       "reads": "the trace events of main's own frame (sys.settrace)",
-      "discriminates": "the two internal trajectories — see internal_control_path below",
-      "evidence": "probe 2026-08-08; no test in the repository observes this boundary"
+      "domain": "all three variants, but AT THE RECORDED RESOLUTION the two PROPAGATED variants collapse",
+      "resolution_dependence": "probe 2026-08-08: a SystemExit unwind and a RuntimeError unwind produce the IDENTICAL event shape [('exception', …), ('return', None)]. They separate only if the observer reads the exception class out of the event argument. Same observer name, two resolutions, two different quotients — the third edition named the boundary without fixing its resolution.",
+      "discriminates": "normal completion vs exceptional unwind — 2 classes over 3 variants",
+      "evidence": "probe 2026-08-08; no test in the repository observes this boundary",
+      "instrument_for_that_negative": "ADDED after attack 4: `grep -rl settrace tests/` returns 0 files at commit 27ce254. The claim was true in the third edition and had no recorded method."
     },
     "success_failure_observer": {
-      "evidence_status": "HYPOTHETICAL_CLASS",
-      "reads": "zero vs non-zero — the discrimination a shell predicate has",
-      "discriminates": "coarser than the exact observer; over the currently reachable payload set {0,2} the two partitions coincide, which is a property of today's states and not of the boundary",
-      "evidence": "NONE in this repository. It is described so that the coincidence cannot pass for an identity, and it may not be cited as proof of any quotient."
+      "evidence_status": "INSTANTIATED",
+      "_origin": "PROMOTED from HYPOTHETICAL_CLASS after attack 6. The third edition said its evidence was 'NONE in this repository'. That was FALSE, and the disproof sat inside the very file pass 2 had already discovered as a runtime consumer — pass 2 recorded that scripts/selfcheck.ps1 invokes main.py and never asked what it READS.",
+      "reads": "zero vs non-zero",
+      "domain": "all three variants",
+      "evidence": "scripts/selfcheck.ps1 `Run-Step`, lines 25-29: `$code = $LASTEXITCODE` then `$ok = ($code -eq 0)`, and `return $ok`. The boolean is what lands in `$results[...]` and drives the harness's own outcome. Six invocations of main.py pass through it.",
+      "precondition_proven": "the calls are real (`& python @PyArgs` with main.py as argv[0], lines 36-39) and their result is consumed, not merely printed — `$results` is the harness's verdict table.",
+      "collapse_recorded_per_the_mandate": "this consumer does NOT distinguish RETURNED(0) from PROPAGATED_SYSTEMEXIT(0). Both yield $LASTEXITCODE 0, both yield $ok = true. Under this observer the two variants are ONE class."
     },
     "ast_shape_observer": {
       "evidence_status": "INSTANTIATED",
       "reads": "the source text — imports, the single definition, the tail",
+      "domain": "none of the outcome space — it observes the subject, not the outcome",
       "class": "STRUCTURAL — fires on any edit, cannot separate a deliberate change from a removed contract; not counted as behavioural protection"
+    },
+    "_what_this_section_still_cannot_express": {
+      "_origin": "attack 6, and this is why that attack is FUNDAMENTAL rather than a one-word status fix.",
+      "problem": "scripts/selfcheck.ps1 is ONE consumer that instantiates TWO observer classes at two different internal surfaces: `$ok` (zero vs non-zero) drives its control flow, while `exit={1}` prints the EXACT integer to console and tees it to a per-step log. This section is a flat map from observer to evidence. It has no notion of a consumer, therefore no way to say that one consumer occupies two observer classes, nor which of its surfaces a downstream reader depends on.",
+      "consequence": "the correct entry cannot be written in the current form. It was written above by flattening — the exact-code surface of this consumer is not recorded anywhere."
     }
   },
 
@@ -90,7 +130,7 @@
       "boundary": "the trajectory of main's own frame",
       "probe": "sys.settrace over main's frame, with the externally visible process code HELD EQUAL at 0 in both runs — delegate returns 0, versus delegate raises SystemExit(0)",
       "observed": "RETURNED yields frame events [('return', 0)]. PROPAGATED yields [('exception', …), ('return', None)] — the frame records an exception and its return event carries None, because no value was ever produced.",
-      "quotient": "TWO classes, not one: normal completion and exceptional unwind",
+      "quotient": "TWO classes over the three-variant space: normal completion, and exceptional unwind (which merges both PROPAGATED variants at this resolution)",
       "significance": "the first adversarial pass corrected the state space and left the control quotient one level too coarse. Two consecutive editions asserted a quotient the file's own other section already contradicted.",
       "superseded_claim": "SECOND EDITION: 'main_internal_control_path — quotient: ONE class'. Withdrawn."
     },
@@ -104,6 +144,7 @@
     "observer_dependent_split": {
       "the_pair": "a real process ending via `:quit` versus one ending via EOF",
       "under_exact_exit_code_observer": "ONE class — both exit 0",
+      "under_success_failure_observer": "ONE class — both are $ok = true in scripts/selfcheck.ps1",
       "under_in_process_exception_observer": "TWO classes — one raises, one returns",
       "under_frame_trajectory_observer": "TWO classes — distinct trajectories",
       "recorded_per_rule_11": "a class splitting as the boundary widens is expected behaviour of the analysis"
@@ -124,51 +165,111 @@
       "REACHABILITY": "PROVEN — argparse routes and the `:quit` dispatcher, each with tests",
       "CAUSALITY": "PROVEN BY PROBE — a delegate raising SystemExit(7) makes main raise SystemExit(7); measured, not inferred from the absence of a handler",
       "BEHAVIOURAL_OBSERVATION": "PROVEN — test_cli_command_precedence.py::test_repl_quit_propagates_system_exit_zero drives main() with a scripted `:quit` and asserts the SystemExit. The second edition claimed no such test existed. It does.",
-      "PROTECTION": "PROVEN — mutation QM1 wrapped main's body in try/except SystemExit: return 0, and 8 characterization tests reddened, including the `:quit` transit test and the argparse invalid-choice test. Fail-before satisfied; implementation restored; suite green.",
+      "PROTECTION": "PROVEN — see protection_status.systemexit_transit, whose evidence was RE-COUNTED in pass 3 and is weaker than the third edition stated.",
       "superseded_claim": "SECOND EDITION: 'gap: no test observes the :quit SystemExit passing specifically through main'. Withdrawn as an error of search."
     }
   },
 
   "protection_status": {
     "returned_payload_reaches_the_process": "PROVEN — behavioural, both ends",
-    "systemexit_transit": "PROVEN — QM1, 8 reds",
-    "internal_trajectory_distinction": "UNPROTECTED — only a probe observes it; no test asserts which trajectory a given invocation takes. Recorded as a fact about the suite, not as a defect: no downstream consumer of the trajectory itself has been demonstrated.",
-    "static_import_isolation": "PROVEN — see the renamed claim below",
+    "systemexit_transit": {
+      "verdict": "PROVEN — but by 2 independent observations, not 8",
+      "_origin": "RE-COUNTED after attack 5. The third edition recorded 'QM1, 8 reds' and used the count as evidence weight. Re-running QM1 (wrapping main's body in try: return run_cli() except SystemExit: return 0) and reading every red test shows the 8 are not 8.",
+      "the_eight_reds": [
+        "test_cli_argparse_surface.py::test_help_exits_zero_and_lists_exactly_seven_flags",
+        "test_cli_argparse_surface.py::test_usage_line_shape",
+        "test_cli_argparse_surface.py::test_auto_approve_choices_and_documented_defaults",
+        "test_cli_argparse_surface.py::test_resume_metavar_is_trace_id",
+        "test_cli_argparse_surface.py::test_unknown_argument_exits_two",
+        "test_cli_argparse_surface.py::test_flag_missing_its_value_exits_two",
+        "test_cli_argparse_surface.py::test_invalid_auto_approve_choice_exits_two",
+        "test_cli_command_precedence.py::test_repl_quit_propagates_system_exit_zero"
+      ],
+      "why_they_are_not_eight": "The first FOUR share one helper, `_help_text`, whose body does `with pytest.raises(SystemExit): main_module.main()` and asserts code 0. The mutation breaks that helper's precondition; the four tests' own assertions are about help TEXT — flag count, usage line, choices, metavar — and never mention the transit. They are one consequence observed four times, and INCIDENTAL to their own subjects. The next THREE assert SystemExit code 2 through three different argparse triggers: one consequence, three triggers, one route.",
+      "minimal_independent_protection_set": [
+        "one argparse-route observation of the transit (any one of the three exit-two tests)",
+        "test_cli_command_precedence.py::test_repl_quit_propagates_system_exit_zero — a DIFFERENT producer of the SystemExit (the dispatcher, not argparse)"
+      ],
+      "bite": "Both survive the fail-before test: they redden under QM1 and go green on restore. Implementation restored; tree clean at 27ce254.",
+      "what_the_form_could_not_express": "the third edition had one field for protection and put a test COUNT in it. There was no place to record independence, no place to record that a red was incidental to its test's subject, and no place to distinguish a producer-route from a trigger. This is why attack 5 is fundamental rather than an arithmetic correction."
+    },
+    "internal_trajectory_distinction": "UNPROTECTED — only a probe observes it; no test asserts which trajectory a given invocation takes (instrument: 0 files under tests/ use settrace at 27ce254). Recorded as a fact about the suite, not as a defect: no downstream consumer of the trajectory itself has been demonstrated.",
+    "static_import_isolation": "PROVEN — see runtime_consumers",
     "main_shape": "STRUCTURAL only"
   },
 
   "runtime_consumers": {
     "_origin": "RENAMED after challenge 6 was upheld. The second edition said 'isolation_from_the_runtime: PROVEN' on the strength of a test that only censuses Python imports.",
     "what_the_test_proves": "test_no_production_module_imports_from_main proves STATIC IMPORT ISOLATION: no module outside tests/ contains an import of `main`.",
-    "what_it_does_not_prove": "absence of runtime consumers. A repository-visible consumer exists that no import census can see: scripts/selfcheck.ps1 invokes `main.py` as a SUBPROCESS with argv (five invocations — auto_run_dry, introspect, sweep_todo, confidence_gate and others). That consumer reads the process exit code, which makes it a real instance of the exact_exit_code_observer class outside the test suite.",
+    "what_it_does_not_prove": "absence of runtime consumers. A repository-visible consumer exists that no import census can see: scripts/selfcheck.ps1 invokes `main.py` as a SUBPROCESS with argv (six invocations — auto_run_dry, introspect, sweep_todo, confidence_gate and others).",
+    "what_that_consumer_reads": "CHARACTERISED in pass 3, having only been NOTED in pass 2. `Run-Step` reads $LASTEXITCODE exactly, prints the exact integer to console and to a per-step log, then reduces it to `$ok = ($code -eq 0)` and returns THAT. Its control flow is a success_failure_observer; its log surface is an exact_exit_code_observer. See observers._what_this_section_still_cannot_express.",
     "renamed_claim": "static_import_isolation: PROVEN",
     "withdrawn_claim": "isolation_from_the_runtime: PROVEN — too strong; absence from one dependency census is not absence of all runtime consumers",
     "unproven_remainder": "dynamic import (importlib), entry-point invocation, and console-script packaging were not censused"
   },
 
+  "negative_claims_register": {
+    "_origin": "ADDED after attack 4 was upheld. The third edition wrote negative claims in the same grammar as positive ones — no method, no instrument, no precondition — while positive claims carried evidence_status and precondition_proven. Every negative claim is listed here with the instrument that decided it, or with the admission that none exists.",
+    "claims": [
+      {"claim": "no module outside tests/ imports main", "instrument": "test_no_production_module_imports_from_main — a census that runs", "status": "HOLDS, and it is the only negative claim in this file that a test enforces"},
+      {"claim": "no test observes the frame-trajectory boundary", "instrument": "grep -rl settrace tests/ -> 0 files at 27ce254", "status": "HOLDS; instrument was absent in the third edition and is recorded now"},
+      {"claim": "cli/app.py contains no exception handling", "instrument": "read + `grep -cE '^\\s*except '` -> app.py 0, one_shot.py 0, resume.py 0, repl.py 11", "status": "TRUE AS WRITTEN, MISUSED AS SUPPORT — it was carrying a claim about the whole delegate chain, and the chain has 11 handlers in cli/repl.py"},
+      {"claim": "nothing confines ResumeDecision.exit_code", "instrument": "the type annotation `int | None`; no validator was searched for", "status": "UNPROVEN AS A NEGATIVE — an unsearched absence"},
+      {"claim": "no probe enumerates the reachable payload set at runtime", "instrument": "self-report about this audit's own activity", "status": "HOLDS — the one class of negative claim that needs no external instrument"},
+      {"claim": "dynamic import / entry-point consumers", "instrument": "NONE — explicitly not censused", "status": "HONEST NON-CLAIM"},
+      {"claim": "success_failure_observer has NO evidence in this repository", "instrument": "NONE — asserted", "status": "FALSE. Disproved by scripts/selfcheck.ps1 lines 25-29. Preserved here as the worst single error of the third edition: an unsupported negative that outranked evidence already present in a file the file itself cited."}
+    ],
+    "the_pattern": "Of seven negative claims, ONE had an enforcing instrument, one was a legitimate self-report, two were honest non-claims, one was true but misapplied, one was an unsearched absence, and one was false. The form gave all seven the same authority."
+  },
+
   "unproven_regions": [
     {"region": "the MEANING of exit code 2", "status": "SOURCE-DERIVED DESCRIPTION, not certified semantics — read off the three call sites that produce 2; no observer separates 'invalid trace id' from 'file-hint preflight failure'"},
-    {"region": "PROPAGATED_OTHER_EXCEPTION reachability", "status": "UNPROVEN"},
-    {"region": "success_failure_observer existence in this system", "status": "UNPROVEN — HYPOTHETICAL_CLASS"},
+    {"region": "PROPAGATED_OTHER_EXCEPTION reachability in production", "status": "UNPROVEN — its process projection (exit 1) is now measured, but no live route to it is demonstrated, and cli/repl.py's 11 handlers were not examined for which exceptions they stop"},
     {"region": "run_repl's payload space", "status": "UNPROVEN — every observed return is 0"},
-    {"region": "runtime exhaustiveness of the RETURNED payload", "status": "UNPROVEN"},
-    {"region": "dynamic/entry-point consumers of main.py", "status": "UNPROVEN — not censused"}
+    {"region": "runtime exhaustiveness of the RETURNED payload", "status": "UNPROVEN, and demonstrably falsifiable without touching the subject — probe QT1"},
+    {"region": "dynamic/entry-point consumers of main.py", "status": "UNPROVEN — not censused"},
+    {"region": "the identity of this record's own subject", "status": "OPEN FUNDAMENTAL — see physical_subject.actual_subject_of_the_claims"}
   ],
 
   "explicitly_not_claimed": [
     "No global quantum count.",
     "No identity between argparse's SystemExit codes and the RETURNED payload — the same integers in different variants of one tagged space.",
     "No claim that the variants are equivalent because their process codes can coincide.",
-    "No design change. main being a pass-through, an identity carrier and a transparent conduit are observations."
+    "No design change. main being a pass-through, an identity carrier and a transparent conduit are observations.",
+    "No claim that snapshot_binding is the right shape for temporal binding. It is a stopgap whose shape is deliberately unjustified.",
+    "No claim that this edition is closer to promotion than the third. Pass 3 argues the opposite."
   ],
 
-  "schema_status": "NOT A SCHEMA. Two adversarial passes; the first found five errors, the second found two outright failures and four partial ones — including one place where the file understated its own evidence and one where it recorded a gap that did not exist. A representation that has been wrong in both directions has not yet demonstrated stability.",
+  "schema_status": "NOT A SCHEMA. Three adversarial passes. The first found five errors of content, the second two outright failures and four partial, the third six fundamental defects of FORM in dimensions neither earlier pass had opened. The form has now been shown to be unable to express: its own subject, its own validity window, the domain of a quotient, the independence of its protection evidence, the epistemic status of a negative, and a consumer occupying two observer classes. That is not a file that needs another edit. It is a form that has not been designed yet.",
 
   "promotion_criterion": {
-    "_origin": "Operator's ruling 2026-08-08, recorded here rather than left in conversation: keep attacking this sidecar; do not derive a format or a standard from it yet. Grounds for calling the model stable appear only when failures stop being fundamental and only local evidence refinements remain.",
-    "what_counts_as_FUNDAMENTAL": "the file's SHAPE was wrong — a state space was missing entirely; a quotient sat at the wrong granularity; the representation could express impossible states; epistemic status was conferred by placement rather than by evidence; a claim's scope was wider than its instrument. Both passes so far produced failures of this kind.",
-    "what_counts_as_LOCAL": "the shape held and a citation was incomplete, a status needed grading, or a probe needed tightening — the two evidence-direction errors of pass 2 (understating the returned-2 evidence, inventing a transit gap) are borderline: they were local in shape but severe in kind, since an audit that understates is as wrong as one that overstates.",
-    "criterion": "Promotion to a general Quantum File format requires a pass whose findings are ALL local by the above test. Until then this file is a laboratory subject, and the format question stays closed.",
-    "why_not_sooner": "A schema derived from a representation that is still collapsing would propagate its errors to every subject written against it — and those errors would then be invisible, because the schema would make them look like compliance."
+    "verdict": "FALSIFIED — attacked as instructed rather than satisfied, and it did not survive.",
+    "superseded_criterion": "THIRD EDITION: 'Promotion to a general Quantum File format requires a pass whose findings are ALL local by the above test.' Preserved as audit evidence.",
+    "falsifications": [
+      {
+        "name": "the criterion measures the attacker, not the artifact",
+        "argument": "'A pass whose findings are all local' leaves the pass as a free variable and constrains nothing about its coverage. Passes 1 and 2 never opened temporal identity, subject ownership, quotient totality, negative-claim method, protection independence, or consumer characterisation. Five of those six contained fundamental defects the entire time.",
+        "self_demonstration": "Had pass 3 been a citation-checking pass, its findings would all have been local and this file would have been promoted with every one of those defects intact. The criterion cannot distinguish a stable artifact from an unexamined dimension."
+      },
+      {
+        "name": "the classifier is inside the artifact under test",
+        "argument": "FUNDAMENTAL vs LOCAL is decided by the same agent that wrote the claims, against a definition stored in the file being judged. Promotion is reachable by editing `what_counts_as_LOCAL`. The third edition already shows the drift: pass 2's evidence-direction errors were filed as 'borderline', a category the criterion does not define."
+      },
+      {
+        "name": "'all local' rewards a lucky pass",
+        "argument": "The criterion is a conjunction over one pass, so promotion probability rises as attacks get shallower or the attacker tires. It is monotone in exactly the wrong direction: it should become harder to satisfy as the artifact absorbs more structure, and instead it becomes easier to satisfy as scrutiny drops."
+      },
+      {
+        "name": "it certifies a snapshot as if it were durable",
+        "argument": "Probe QT1 showed a claim in this file can go false with ZERO edits to the file and zero edits to its named subject. A criterion phrased entirely in terms of adversarial passes says nothing about a truth-value that decays between them."
+      },
+      {
+        "name": "'LOCAL' failed its own locality proof on the one candidate that had it",
+        "argument": "The operator required that a LOCAL finding be shown not to change the shape of how another Quantum File would represent the same category of fact. Attack 6 produced the only finding that looked local — one word, HYPOTHETICAL_CLASS to INSTANTIATED. Recording it CORRECTLY requires expressing that one consumer occupies two observer classes at two internal surfaces, and that it collapses RETURNED(0) with PROPAGATED_SYSTEMEXIT(0). The observers section is a flat observer→evidence map with no concept of a consumer. Any Quantum File with a cross-process or cross-language consumer meets the same wall. The finding is therefore FUNDAMENTAL, and the pass contains ZERO proven-local findings.",
+        "consequence": "The LOCAL/FUNDAMENTAL distinction is not merely hard to apply — under the operator's own proof obligation, the only candidate that presented as local dissolved on inspection."
+      }
+    ],
+    "what_replaces_it": "NOTHING YET, deliberately. Writing a better criterion now would repeat the error the criterion was guarding against: deriving a general rule from a subject that is still collapsing. What can be said without inventing anything: any future criterion must be indexed to a NAMED set of attack dimensions rather than to 'a pass', must survive being applied by someone other than the artifact's author, and must have a way of expiring when the sources change. Those are three requirements, not a criterion.",
+    "status_of_the_format_question": "CLOSED, and further from opening than after pass 2."
   }
 }
