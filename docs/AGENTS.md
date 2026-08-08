@@ -13,9 +13,12 @@
 
 ## Physical construction rule for Quantum work
 
-**One physical implementation file → one behavioral callable → one semantic
-responsibility.** This is stricter than a line budget and replaces it as the
-architectural boundary. The repository already showed why: a 400-line limit
+**One physical implementation file → exactly ONE Python function definition → one
+semantic responsibility.** Literally one `def`, counted over the whole module,
+nested definitions included — not "one behavioral callable plus helpers". The
+looser wording let a 447-line file with eight private helpers describe itself as
+one responsibility, which is how the debt below accumulated. This replaces the line
+budget as the architectural boundary. The repository already showed why: a 400-line limit
 produced small files that still shared hidden state and had no real module
 boundary, so line count measured the wrong thing.
 
@@ -35,6 +38,11 @@ boundary, so line count measured the wrong thing.
   the next. Do not batch-create small files and connect them afterwards.
 - `.qm` semantics bind to the resolved callable or semantic boundary, never to the
   filename. A filename is only a physical carrier.
+
+**Mechanically enforced.** `tests/test_qm_one_operation_ratchet.py` counts the
+definitions in every `scripts/qm_*.py`. A file already above one is DEBT with a
+recorded ceiling that may only fall; a file not in that table is new and must define
+exactly one. The ceiling is never raised: a new operation gets a new file.
 
 **Legacy code is not refactored to satisfy this.** Old responsibilities move only
 when the active Quantum construction path reaches them and the move can be proven

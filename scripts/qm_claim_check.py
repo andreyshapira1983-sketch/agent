@@ -204,5 +204,14 @@ def main(argv: list[str]) -> int:
     return INVALID
 
 
+#: Emitted as the last stdout line so a caller can tell "this program produced a
+#: verdict" from "this program failed". An exit code alone cannot carry that
+#: difference: a crash, a syntax error and a missing file all look like a verdict.
+_VERDICT_MARKER = "QM-VERDICT:"
+
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    _code = main(sys.argv)
+    _names = {VALID: "VALID", INVALID: "INVALID", OUT_OF_DOMAIN: "OUT_OF_DOMAIN",
+              PRECEDENCE_VIOLATED: "PRECEDENCE_VIOLATED", UNREADABLE: "UNREADABLE"}
+    print(f"{_VERDICT_MARKER} {_names.get(_code, 'UNKNOWN')} exit={_code}")
+    raise SystemExit(_code)
