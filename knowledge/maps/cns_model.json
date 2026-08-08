@@ -787,5 +787,42 @@
     ],
     "carriers_not_in_clusters": "state_carriers section above holds failure_history, _step_trigger_tls, _last_step_failure (DEAD); artifacts and chain still owe carrier records",
     "next_edge": "C08: the attempt loop — planner, policy gate, step execution, carriers (failure_history effect on live-model consumers, _step_trigger_tls, artifacts, chain), StepRepetitionTracker, TerminationGuard; plus its deferred arcs: the planner-skip consumer of local_critique_active and repeat_question_hint delivery. The three runtime-trace candidates stay queued to their clusters."
+  },
+
+  "quantum_cns": {
+    "_mandate": "Operator mandate 2026-08-08, standing and open-ended. A SECOND, finer audit over the whole CNS — previously certified areas included. Existing evidence, arcs, mutations, carriers, boundaries and history are PRESERVED; what is re-questioned is their semantic granularity. Project terminology only: 'quantum' means decompose until no further decomposition yields a behaviourally distinguishable state under the declared observation boundary. No schedule. Correctness and irreducibility outrank finishing.",
+    "_two_views": {
+      "physical_cns": "modules, calls, branches, carriers, named states, gates, fields, enums, source-level wiring — the existing signal_flows / decision_boundaries / state_carriers / path_ledger sections",
+      "quantum_cns": "equivalence classes RELATIVE TO NAMED CONSUMERS, irreducible behavioural distinctions, observer-dependent splits, prompt-only distinctions, journal-only distinctions, masked distinctions, and unprotected causal distinctions — this section"
+    },
+    "_finding_schema": "Every finding states, at minimum: named state space -> observation boundary -> consumers and what each reads -> candidate partition -> mutation/probe -> preconditions proven -> observed consequence -> equivalence or split -> protection status -> scope limitation. A green mutation is never automatically a hole: it must be diagnosed as unreachable, vacuous, genuinely equivalent, masked/redundant, journal-only, prompt-only, or a real unprotected distinction.",
+    "_no_global_quotient_yet": "No whole-CNS 'number of quantum states' is claimed and none may be claimed until every relevant downstream consumer has been walked. Quotients belong to named observers.",
+    "_state_space_inventory": {
+      "counted": "85 Literal-typed discrete state spaces in core/ (mechanical count, 2026-08-08). That is the OUTER bound of the queue, not the work list: many belong to organs outside the CNS perimeter and enter only where a perimeter consumer reads them.",
+      "queue_order": "Start where the CNS's own control lives, then widen: (1) ReplanDecision.action [DONE], (2) GatewayOutcome, (3) ObligationStatus, (4) approval verdicts, (5) EpisodeOutcome + completion_state, (6) ProcedureStatus, (7) PolicyDecision.decision + risk, (8) PlanStep/Action statuses, (9) FailureType [done earlier, re-question under this schema], then organs.",
+      "already_walked_under_this_schema": ["FailureType (14 states) — recorded in signal_flows._quantum_decomposition_failure_taxonomy; its result is TWO orthogonal partitions, and policy_blocked's causal distinction is now protected", "ReplanDecision.action (3 states) — below"]
+    },
+    "findings": {
+      "replan_decision_action": {
+        "named_state_space": "ReplanAction = continue | abort_no_retry | abort_exhausted (core/replan.py:434)",
+        "consumers_and_what_each_reads": [
+          {"consumer": "core/loop_attempt.py:478", "reads": "equality with 'continue' ONLY — the retry branch", "kind": "control"},
+          {"consumer": "core/loop_verify_replan.py:235", "reads": "inequality with 'continue' ONLY — sets replan_exhausted and breaks", "kind": "control"},
+          {"consumer": "journal: loop_attempt.py:522,534, loop_verify_replan.py:243, replan.py:453 to_log_payload", "reads": "the full string", "kind": "diagnostic"}
+        ],
+        "observation_boundaries": {
+          "loop_control": "what the two control consumers can distinguish",
+          "journal_operator": "what a reader of the run's events can distinguish"
+        },
+        "candidate_partition": "Under loop_control the properties read are binary: {continue} | {abort_no_retry, abort_exhausted}. Under journal_operator all three are distinct.",
+        "preconditions_proven": "All three states shown reachable from decide() before any equivalence claim: continue (budget available), abort_no_retry (per-type budget exhausted 2/2), abort_exhausted (global cap 3/3). Probed directly, not inferred from tests.",
+        "mutation": "QA1 — the per-type branch returns abort_exhausted instead of abort_no_retry, at the PRODUCER, with reason and advice strings untouched so the mutation isolates the action value alone.",
+        "observed_consequence": "Four reds, and every one of them observes the NAME: three unit assertions of the form `d.action == 'abort_no_retry'` at the producer, and one journal assertion `payload['decision_action'] == 'abort_no_retry'`. No test observed a downstream behavioural difference, and by the consumer inventory none could: both aborts take the identical non-continue path, and advice/forbidden_actions are propagated only on the continue branch.",
+        "verdict": "SPLIT BY OBSERVER. Under loop_control: abort_no_retry and abort_exhausted are OBSERVATIONALLY EQUIVALENT — the control quotient is binary, {retry} | {stop}. Under journal_operator: three distinct states, and the distinction is real and useful (why the run stopped).",
+        "protection_status": "PROTECTED as a diagnostic distinction — the producer's unit tests and one journal assertion hold the names. NOT a hole: there is no unobserved causal consequence, because there is no causal consequence.",
+        "scope_limitation": "Boundary named explicitly per rule 10: this says nothing about a future consumer. If any consumer ever branches on the abort FLAVOUR, the class splits and this record must be revisited — that is expected behaviour of the analysis, not a contradiction.",
+        "no_code_change": "None proposed. The names carry operator meaning (why the run stopped) and rule 8 forbids collapsing them for control-equivalence alone."
+      }
+    }
   }
 }
