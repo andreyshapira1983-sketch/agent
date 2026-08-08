@@ -2,8 +2,15 @@
 
 **Not a schema. Not adopted.** This records the candidate subject models, the
 evidence that forced each, and the measurement that killed each. Every candidate is
-kept, per the lab's rule that failed representations are results. **The ledger at
-the bottom is the authoritative status; nothing above it states one.**
+kept, per the lab's rule that failed representations are results. The ledger at the
+bottom is where status is *intended* to live.
+
+> **Superseded, recorded as specimen S4.** This paragraph used to end: `The ledger
+> at the bottom is the authoritative status; nothing above it states one`. Plainly
+> false — candidates 0, 1 and 2 each assert a status above it. The coherence probe
+> stayed green because those duplicates agree, which is exactly the S1 limit; and
+> the sentence is S3-class as well, since no rule of the probe can see that a
+> universal claim about a document is contradicted by the document.
 
 **Candidate identity.** Candidates are numbered **0** (file-centric), **1**
 (single junction), **2** (boundary-and-carriers). No candidate ever existed between
@@ -158,12 +165,13 @@ fixed vocabulary at all** — one is a negated-existence claim about an unnamed
 "this", the other is a section of results. Detecting it needs to know what "this"
 refers to and that the later section is an instance of it.
 
-**The conclusion this forces:** text-level contradiction detection is not a
-candidate for the general freshness mechanism. It catches divergence between
-assertions that happen to share a form. Semantic staleness — a claim that has been
-overtaken by evidence stated in different words — is outside it, and no widening of
-the vocabulary reaches it. Document coherence and semantic validity are now
-demonstrably two problems, not one.
+**The conclusion this forces, at the scope it was measured:** *shared-form textual
+contradiction detection is insufficient for general semantic freshness.* It catches
+divergence between assertions that happen to share a form, and S3 shares none. What
+is NOT shown is that no text-operating mechanism could — coreference-aware parsing,
+structured claims and generated derivations were never attacked, and the universal
+version of this sentence would be an impossibility claim without evidence. Document
+coherence and semantic validity are, at minimum, not the same problem.
 
 **What this does and does not license.** It shows the requirement *can* be made to
 bite. It does not establish the requirement as stated: the probe detects
@@ -197,7 +205,19 @@ from ontology, which the first version of this table did not do:
 | E4 | facts about **instantiation** fit no carrier or observer slot | the 12-fact residue | ontology |
 | E5 | one consumer binds **several carriers** | `selfcheck.ps1:23–29` | ontology |
 | E6 | the producer of record is a **symbol plus a termination contract**, not a file | the launch worked from `cli.app.run_cli` with `main.py` gone | ontology |
-| E7 | a **behavioural partition is induced at the decision** — not by a surface, and not by a projection either | the two discriminators plus the two-consumer probe below | ontology |
+| E7 | a behavioural partition has **no structural home**: not the surface, not the projection, not the decision | four probes, each falsifying one candidate home | ontology |
+
+> **Superseded, recorded as specimen S5.** This row used to read `a behavioural
+> partition is induced at the decision`. The fourth probe, further down this same
+> note, falsifies precisely that. That table is a derived
+> restatement of results proved elsewhere, and it rotted the moment the result
+> moved — the same shape as S1 and S2, in the one table meant to be authoritative.
+>
+> Writing this note also produced the probe's **first false positive**: the phrase
+> `the surviving-constraints table` put an alive-class word inside candidate 2's
+> section, and the probe read it as a status claim. Its vocabulary is not only
+> small but *unsensed* — it cannot tell a status word from the same word used
+> otherwise. Recorded as a second limit beside the known one.
 
 ### E2, rescoped
 
@@ -587,10 +607,12 @@ Ledger:
 | projection as its own level | FORCED, both discriminators bite |
 | transit — is the role semantically empty? | UNPROVEN; the law that asserted it is dead |
 | producer-binding debt | **OPEN, and not a hashing problem** — QT2 and QT3 below |
-| dependency frontier of a claim | **OPEN** — QT3 shows it leaves the repository |
+| dependency frontier of a claim | **OPEN** — QT3 shows it leaves the repository; QT5 shows it is evaluation-relative, not static |
+| validity: artifact-level or claim-level | **SEPARATED** — QT4: one claim false while another stays true, both directions |
 | duplicated derived assertions detectable when they diverge | bites for a shared form only; semantic staleness out of reach (S3) |
 | single authoritative status source | **NOT enforced** — the probe permits consistent duplicates (S1) |
 | partition has a structural home | REFUTED three times — surface, projection, decision |
+| observer = projection + decision | **NOT frozen** — the five concepts stay separately attackable |
 
 ### QT2 — the validity subject is not the producer's file either
 
@@ -626,7 +648,9 @@ workspace's own `.env`, which `cli/app.py` loads by design — not code, not
 - add one line, `AGENT_MODEL=some-other-model`, to the workspace `.env`;
 - the recorded model becomes `some-other-model` — **the claim is FALSE**;
 - combined sha after: `f4701e3349379e22` — **unchanged**;
-- so a binding over *all code and all config* would report **FRESH: falsely green**;
+- so a binding over **the repository's `.py` files and `config/*.json`** would
+  report **FRESH: falsely green**. Stated as measured: that set was held constant,
+  not "all code" and not "all configuration";
 - remove the line: back to `gpt-4o-mini`.
 
 The validity question is therefore no longer *which files must be hashed* — no set
@@ -634,6 +658,54 @@ of repository files answers it. It becomes: **what is the dependency frontier of
 semantic claim?** Configuration, environment, persisted state, external data and
 model responses are all in the candidate class, and none of them is a file this
 repository owns.
+
+### QT4 — validity separates by claim, not by artifact
+
+Two claims, one declared evaluation domain (`main.py --ask :budget-status`, fresh
+workspace, `AGENT_MODEL` cleared from the process environment):
+
+- **C1** — `RETURNED payload ∈ {0,2}`
+- **C2** — `session_start records llm_model = gpt-4o-mini`
+
+Both true at baseline. Two separating mutations, each restored:
+
+| | C1 | C2 |
+| --- | --- | --- |
+| baseline | true (exit 0) | true (`gpt-4o-mini`) |
+| **M1** — `cli/one_shot.py`, one `return 0` → `return 3` | **FALSE** (exit 3) | **still true** |
+| **M2** — one line in the workspace `.env` | **still true** (exit 0) | **FALSE** (`some-other-model`) |
+
+**One claim can be invalid while another in the same artifact is valid, in both
+directions.** An artifact-wide binary freshness state is therefore strictly coarser
+than the measured validity structure.
+
+*What this does not settle.* It does not show claim-level validity is the right
+architecture. A coarse artifact-level invalidation may be a deliberate
+conservatism — invalidating everything when anything moves is sound, merely
+imprecise. The experiment forces only that the two are **not the same relation**,
+and that the artifact-level one loses information the claim-level one has.
+
+**Vacuous mutation, on record.** M1's first run reported C1 still true. The
+mutation had matched nothing: the file on disk carries CRLF endings — a residue of
+an earlier text-mode restore — and the needle used a bare `\n`. It was caught only
+because a mutation designed to bite came back green, and the rerun asserts that the
+replacement changed the bytes before trusting the result.
+
+### QT5 — a dependency can be present and inert
+
+QT3 showed the workspace `.env` can control C2. It does not follow that `.env` is a
+dependency of C2 in every evaluation. `cli/app.py` calls `load_dotenv` without
+`override`, so a variable already in the process environment wins. Measured:
+
+- workspace `.env` says `AGENT_MODEL=from-dotenv`;
+- process environment says `AGENT_MODEL=from-process-env`;
+- recorded model: **`from-process-env`** — the `.env` line is **inert**.
+
+So the same physical dependency is load-bearing in one evaluation and irrelevant in
+another, decided by precedence rather than by presence. That distinguishes a
+**potential** dependency frontier from the **active** frontier of a given
+evaluation. Recorded as a measured distinction only — not proposed as fields, since
+one precedence rule in one loader is thin ground for a structure.
 
 ### Three problems that looked like one
 
@@ -649,10 +721,21 @@ come apart, and collapsing them again would undo the evidence:
 - **behavioural equivalence** — are two runs the same? Relative to a named observer
   and boundary, and three attempts to give it a structural home have failed.
 
-The goal is no longer to rescue a candidate. It is to determine what exactly is
-being certified, relative to which frontier, how that frontier is represented, and
-how the system detects that it moved. Three of those four have no answer yet, and
-the fourth — the frontier's representation — has one checkable piece.
+The goal is no longer to rescue a candidate. The question QT4 sharpens is whether
+semantic validity is a property of an artifact, of a boundary, or of an individual
+claim relative to an evaluation domain and a dependency frontier. QT4 shows the
+artifact-level relation is strictly coarser than the claim-level one; it does not
+show which belongs in a representation.
+
+If that separation holds under further attack, **H2 itself needs restating** — from
+*did the artifact frontier move?* to *which claims lost or expanded their certified
+frontier, and why?* That reformulation is **not adopted**: one experiment with two
+claims is not enough to redefine the next hypothesis.
+
+Also not frozen: `observer = projection + decision`. Projection, decision,
+consequence, observer and observation boundary remain five separately attackable
+concepts, because every structural relation proposed between them so far has been
+falsified within one or two probes.
 
 Nothing here is adopted, and no field names are proposed. `main.qm` is unchanged,
 and no production file was modified by any experiment in this note.
