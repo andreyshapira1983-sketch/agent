@@ -252,14 +252,34 @@
           {
             "id": "R-C",
             "name": "project-suppressed",
-            "status": "DISCOVERED, NOT TESTED",
+            "status": "TESTED",
             "sites": [
               "core/ingestion.py:457 (_ingest_paths)"
             ],
             "contract": "the same three statements as R-A, plus a fourth: `if mode == \"project\": write_memory = False`. An extra unconditional suppressor that R-A's sites do not have.",
             "_why_its_own_regime": "found while enumerating R-A's sites. It differs from R-A in the expression itself, so grouping it with R-A would be exactly the error the R-A/R-B split was made to avoid.",
             "behavioral_closure": {
-              "status": "NOT TESTED. No cells, no reachability, no consequence."
+              "status": "PROVEN at the DEFAULT write policy -- file evidence scores 0.9 x primary 0.95 = 0.855 against the 0.65 floor, so unlike Web nothing was held.",
+              "state_space_derived_from_ingest_paths": "FOUR control statements where R-A has three, and the fourth sits AFTER the override: attr read -> explicit override -> dry_run -> `if mode == \"project\": write_memory = False`. Order is the contract: in R-A an explicit override=True wins; in R-C mode='project' suppresses even it.",
+              "reachability": "both modes reachable from real commands: :ingest-source -> mode='source' (core/ingestion.py:62), :ingest-project -> mode='project' (:87). The probe used real files and real chunking; this path has no tool registry to stub.",
+              "preconditions_proven_in_every_cell": "files_ingested>0, chain non-empty, claims>0, writer wired, require_verified held False",
+              "control_partition_with_consequence": [
+                "source : attr=T over=-  dry=F -> True,  writer=1",
+                "source : attr=F over=-  dry=F -> False, writer=0",
+                "source : attr=T over=F  dry=F -> False, writer=0",
+                "source : attr=F over=T  dry=F -> True,  writer=1",
+                "source : attr=T over=T  dry=T -> False, writer=0",
+                "project: attr=T over=-  dry=F -> False, writer=0",
+                "project: attr=T over=T  dry=F -> False, writer=0  <- the decisive cell: override=True CANNOT rescue project mode",
+                "project: attr=F over=T  dry=F -> False, writer=0"
+              ],
+              "attribution_nuance": "every suppression carries policy_id 'auto_write_memory' -- the pipeline names the PARAMETER, and cannot say which of the four statements zeroed it. The fail-before is what attributes project cells to the suppressor.",
+              "fail_before": "only the two-line `if mode == \"project\"` suppressor was cut (unique in the file, asserted before mutating). The module still parses. Project cells 6-8 flip to control=True with the writer CALLED; source cells stay byte-for-byte the same, so the red is this suppressor and nothing else. Restored byte-identical; project cells suppressed again.",
+              "not_inferred_from_R_A": "nothing carried over. The shared three statements were re-measured here, and the fourth is R-C's own.",
+              "UNPROVEN": [
+                "that the memory write COMPLETES (writer stubbed, as everywhere)",
+                "structural protection of the suppressor itself: the frozen bridge does not extract if-comparisons, and the machinery is not being extended for convenience. The suppressor is protected behaviorally by this closure only."
+              ]
             }
           }
         ],
@@ -370,6 +390,28 @@
                 }
               ],
               "_why_separate": "S3 asserts a getattr read and is structurally blind to `self.NAME`. Until this property existed, regime R-B was inside the binding's prose and outside its verification."
+            }
+          ]
+        },
+        {
+          "regime": "R-C",
+          "resolver": {
+            "kind": "python_ast",
+            "bridge": "scripts/qm_py_anchor.py",
+            "module_file": "core/ingestion.py",
+            "function": "__module__"
+          },
+          "properties": [
+            {
+              "id": "S5",
+              "claim": "regime R-C still reads the field by name, at its own anchor",
+              "assertions": [
+                {
+                  "path": "getattr_names_by_function._ingest_paths",
+                  "op": "contains",
+                  "value": "knowledge_auto_write"
+                }
+              ]
             }
           ]
         }
