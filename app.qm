@@ -1,0 +1,176 @@
+{
+  "_specimen": "SECOND physical .qm specimen. Not a schema, not a format, and not a model of app/bootstrap.py. Its subject is a SEMANTIC BOUNDARY — the callable app.bootstrap.build_agent — because the lab's own subject work killed the file-centric model three times. Field names are disposable.",
+  "_seeded_with": "exactly one relationship that was already earned by measurement, and nothing else. This file does not attempt to model everything build_agent produces.",
+  "subject": {
+    "kind": "semantic_boundary",
+    "symbol": "app.bootstrap.build_agent",
+    "resolved_in": "app/bootstrap.py",
+    "_why_not_the_file": "the file is where the symbol currently lives. QT1 and the entry-point experiment both showed that a file is an address, not a subject; naming the callable is what survived.",
+    "_scope": "only the production of one carrier is represented here. build_agent emits at least four logged events and seventeen payload keys on the one modelled event; this specimen claims nothing about the rest."
+  },
+  "producer_bindings": [
+    {
+      "binding_id": "PB1",
+      "relationship": "THIS boundary produces the carrier that C2 certifies",
+      "produces": "the session_start record of the current evaluation's run journal",
+      "_why_this_edge_is_earned": "measured before it was written: the A2 layered probe showed the :budget-status path opens the FS_WRITE channel that creates logs/run_*.jsonl, and C2's causal closure traced the value in that record to app/bootstrap.py:204 inside this very callable.",
+      "resolver": {
+        "kind": "python_ast",
+        "bridge": "scripts/qm_py_anchor.py",
+        "module_file": "app/bootstrap.py",
+        "function": "build_agent",
+        "_why": "the same rule the PowerShell link follows — the anchor is resolved by the language's own parser, not by matching text."
+      },
+      "verified_properties": [
+        {
+          "id": "A1",
+          "claim": "the producer symbol resolves in the module the specimen names",
+          "assertions": [
+            {
+              "path": "parse_ok",
+              "op": "equals",
+              "value": true
+            },
+            {
+              "path": "anchor_found",
+              "op": "equals",
+              "value": true
+            }
+          ]
+        },
+        {
+          "id": "A2",
+          "claim": "the boundary emits the carrier record this binding is about",
+          "assertions": [
+            {
+              "path": "logged_events",
+              "op": "contains",
+              "value": "session_start"
+            }
+          ]
+        },
+        {
+          "id": "A3",
+          "claim": "that record carries the field the certificate projects",
+          "assertions": [
+            {
+              "path": "payload_keys.session_start",
+              "op": "contains",
+              "value": "llm_model"
+            }
+          ],
+          "_note": "the KEY is asserted here; the VALUE is not. What the value must be, what it depends on and whether it currently holds are the certificate's business, and duplicating any of it here would rebuild the duplicated-derived-assertion disease this lab spent a day documenting."
+        }
+      ],
+      "certified_by": {
+        "certificate": "knowledge/quantum/c2.claim.qm",
+        "claim_id": "C2",
+        "projection": "payload.llm_model",
+        "_no_duplication": "no expected value, no dependency model, no precedence rule and no verdict appears in this file. The certificate decides, by re-evaluation, and this binding only names which projection it defers."
+      },
+      "downstream": "main.qm binding B1 gates whether the certified state may be used"
+    },
+    {
+      "binding_id": "PB2",
+      "relationship": "ONE source, TWO projections: one reported, one controlling",
+      "_shape": "AGENT_KNOWLEDGE_AUTO_WRITE -> { session_start.knowledge_auto_write (report) , AgentLoop.knowledge_auto_write (control) }",
+      "_why_this_edge_is_earned": "chosen by a bounded selector: of build_agent's seventeen session_start keys, this was the only one with a single unambiguous named consumer in the declared universe of 280 files. C3 carries the causal proof on the report side; the control side was measured separately.",
+      "source": {
+        "kind": "environment_variable",
+        "key": "AGENT_KNOWLEDGE_AUTO_WRITE",
+        "default": true,
+        "read_at": [
+          "app/bootstrap.py:224 -- into the journal payload",
+          "app/bootstrap.py:288 -- into the AgentLoop constructor"
+        ]
+      },
+      "report_projection": {
+        "of": "session_start.knowledge_auto_write",
+        "certified_by": {
+          "certificate": "knowledge/quantum/c3.claim.qm",
+          "claim_id": "C3",
+          "projection": "payload.knowledge_auto_write",
+          "_no_duplication": "expected value, dependency model, value map and verdict all live in the certificate"
+        },
+        "_consequence": "none of its own -- a report is read by an operator or a tool, not by a branch"
+      },
+      "control_projection": {
+        "of": "AgentLoop.knowledge_auto_write",
+        "constructed_at": "app/bootstrap.py:268 returns AgentLoop(...), receiving the attribute at :288",
+        "consumers": [
+          "core/ingestion.py:120 and :268 -- write_memory = bool(getattr(agent, 'knowledge_auto_write', False))",
+          "core/loop_evidence_chain.py:133 -- self.knowledge_auto_write gates may_knowledge"
+        ],
+        "consequence": "whether ingested knowledge is written to memory. A control-flow consequence, unlike the report projection's.",
+        "measured": "build_agent yields the attribute True with the variable unset and False with it set to 0"
+      },
+      "resolver": {
+        "kind": "python_ast",
+        "bridge": "scripts/qm_py_anchor.py",
+        "module_file": "app/bootstrap.py",
+        "function": "build_agent"
+      },
+      "verified_properties": [
+        {
+          "id": "S1",
+          "claim": "both projections are fed by ONE source read the same way",
+          "assertions": [
+            {
+              "path": "literal_calls._env_bool",
+              "op": "count_of_value",
+              "value": [
+                "AGENT_KNOWLEDGE_AUTO_WRITE",
+                true
+              ],
+              "expected": 2
+            }
+          ],
+          "_this_closes_an_open_finding": "the two reads previously agreed by construction with NOTHING checking that they agree. A change to either one alone -- a different key or a different default -- would have let the journal lie about the control state, and no test in this repository would have noticed. This assertion is that missing watcher."
+        },
+        {
+          "id": "S2",
+          "claim": "the report projection still leaves the boundary",
+          "assertions": [
+            {
+              "path": "payload_keys.session_start",
+              "op": "contains",
+              "value": "knowledge_auto_write"
+            }
+          ]
+        }
+      ],
+      "consumer_resolver": {
+        "kind": "python_ast",
+        "bridge": "scripts/qm_py_anchor.py",
+        "module_file": "core/ingestion.py",
+        "function": "__module__"
+      },
+      "consumer_properties": [
+        {
+          "id": "S3",
+          "claim": "the named consumer of the CONTROL projection still reads it by name",
+          "assertions": [
+            {
+              "path": "getattr_names",
+              "op": "contains",
+              "value": "knowledge_auto_write"
+            }
+          ]
+        }
+      ],
+      "certified_by": {
+        "certificate": "knowledge/quantum/c3.claim.qm",
+        "claim_id": "C3",
+        "projection": "payload.knowledge_auto_write",
+        "_gates": "only the REPORT projection. The control projection has no certificate yet, and this binding does not pretend otherwise."
+      }
+    }
+  ],
+  "not_claimed": [
+    "No claim about the other three events build_agent logs, or the other sixteen keys of session_start.",
+    "No claim that app/bootstrap.py is the subject.",
+    "No general .qm producer vocabulary — `producer_bindings` is one experiment's field name.",
+    "No independent assertion about the model at session start: this specimen produces the carrier and defers the state.",
+    "No certificate for the control projection. C3 certifies what is REPORTED; that the reported value equals the controlling value is asserted structurally by S1 and is not certified by re-evaluation."
+  ]
+}
