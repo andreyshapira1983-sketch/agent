@@ -112,11 +112,24 @@ def _check_assertion(a: dict, facts: dict) -> tuple[bool, str]:
         ok = found == a["expected"]
         return ok, (f"{path} contains {found} x {a['value']!r}"
                     + ("" if ok else f", asserted {a['expected']}"))
+    if op == "contains":
+        if not isinstance(actual, list):
+            return False, f"{path} is not a list ({actual!r})"
+        ok = a["value"] in actual
+        return ok, (f"{path} contains {a['value']!r}" if ok
+                    else f"{path} does not contain {a['value']!r}; it has {actual!r}")
     return False, f"{path}: unknown operator {op!r}"
 
 
 def main(argv: list[str]) -> int:
-    specimen_path = ROOT / (argv[1] if len(argv) > 1 else "main.qm")
+    specimens = argv[1:] or ["main.qm", "app.qm"]
+    if len(specimens) > 1:
+        worst_all = GREEN
+        for one in specimens:
+            print(f"\n########## {one} ##########")
+            worst_all = _worse(worst_all, main([argv[0], one]))
+        return worst_all
+    specimen_path = ROOT / specimens[0]
 
     if not specimen_path.is_file():
         print(f"UNRESOLVABLE: no specimen at {specimen_path}")
@@ -128,8 +141,8 @@ def main(argv: list[str]) -> int:
         return UNRESOLVABLE
 
     links = specimen.get("external_links") or []
-    if not links:
-        print("UNRESOLVABLE: the specimen declares no external link")
+    if not links and not specimen.get("producer_bindings"):
+        print("UNRESOLVABLE: the specimen declares no link of any kind")
         return UNRESOLVABLE
 
     worst = GREEN
@@ -205,11 +218,146 @@ def main(argv: list[str]) -> int:
         else:
             print(f"  VERDICT {lid}: GREEN")
 
+    worst = _worse(worst, _check_producer_bindings(specimen))
     worst = _worse(worst, _check_certified_claims(specimen))
 
     print({GREEN: "\nGREEN", BROKEN: "\nBROKEN", STALE: "\nSTALE",
            UNRESOLVABLE: "\nUNRESOLVABLE",
            DEPENDENT_UNAVAILABLE: "\nDEPENDENT_UNAVAILABLE"}[worst])
+    return worst
+
+
+def _python_facts(bridge: Path, module_file: Path, function: str) -> dict | None:
+    if not bridge.is_file() or not module_file.is_file():
+        return None
+    proc = subprocess.run(
+        [sys.executable, str(bridge), str(module_file), function],
+        capture_output=True, text=True, encoding="utf-8", timeout=300, cwd=str(ROOT),
+    )
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+
+def _check_producer_bindings(specimen: dict) -> int:
+    """Walk bindings that assert THIS boundary produces a carrier.
+
+    A producer binding is verified with the same discipline as an external link:
+    the anchor is resolved by the language's own parser, the specimen supplies the
+    assertions, and the certificate it defers to is resolved but never copied.
+    """
+    bindings = specimen.get("producer_bindings") or []
+    if not bindings:
+        return GREEN
+    worst = GREEN
+    for binding in bindings:
+        bid = binding.get("binding_id", "?")
+        print(f"\n=== producer binding {bid}: {binding.get('relationship')} ===")
+
+        resolver = binding.get("resolver", {})
+        if resolver.get("kind") != "python_ast":
+            print(f"UNRESOLVABLE: no resolver for kind {resolver.get('kind')!r}")
+            worst = _worse(worst, UNRESOLVABLE)
+            continue
+        bridge = ROOT / resolver.get("bridge", "")
+        module_file = ROOT / resolver.get("module_file", "")
+        if not bridge.is_file() or not module_file.is_file():
+            print(f"UNRESOLVABLE: bridge or module file missing "
+                  f"({resolver.get('bridge')!r}, {resolver.get('module_file')!r})")
+            worst = _worse(worst, UNRESOLVABLE)
+            continue
+
+        proc = subprocess.run(
+            [sys.executable, str(bridge), str(module_file), resolver.get("function", "")],
+            capture_output=True, text=True, encoding="utf-8", timeout=300, cwd=str(ROOT),
+        )
+        try:
+            facts = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            print("UNRESOLVABLE: the Python anchor bridge produced no facts")
+            worst = _worse(worst, UNRESOLVABLE)
+            continue
+
+        if not facts.get("anchor_found"):
+            print(f"UNRESOLVABLE: {resolver.get('function')!r} is not a module-level "
+                  f"function in {resolver.get('module_file')}")
+            worst = _worse(worst, UNRESOLVABLE)
+            continue
+        print(f"  anchor {resolver.get('function')!r} resolved at lines "
+              f"{facts.get('anchor_first_line')}-{facts.get('anchor_last_line')}")
+
+        broken = False
+        for prop in binding.get("verified_properties", []):
+            results = [_check_assertion(a, facts) for a in prop.get("assertions", [])]
+            failed = [why for ok, why in results if not ok]
+            if failed:
+                broken = True
+                print(f"  {prop['id']} FAIL: {prop['claim']}")
+                for why in failed:
+                    print(f"      {why}")
+            else:
+                print(f"  {prop['id']} PASS: {prop['claim']}")
+                for _, why in results:
+                    print(f"      {why}")
+        if broken:
+            print(f"  VERDICT {bid}: BROKEN -- this boundary does not produce what "
+                  f"the binding asserts")
+            worst = _worse(worst, BROKEN)
+            continue
+
+        cres = binding.get("consumer_resolver")
+        if cres:
+            cfacts = _python_facts(ROOT / cres.get("bridge", ""),
+                                   ROOT / cres.get("module_file", ""),
+                                   cres.get("function", "__module__"))
+            if cfacts is None:
+                print(f"UNRESOLVABLE: the consumer module {cres.get('module_file')!r} "
+                      f"produced no facts")
+                worst = _worse(worst, UNRESOLVABLE)
+                continue
+            for prop in binding.get("consumer_properties", []):
+                results = [_check_assertion(a, cfacts) for a in prop.get("assertions", [])]
+                failed = [why for ok, why in results if not ok]
+                if failed:
+                    broken = True
+                    print(f"  {prop['id']} FAIL: {prop['claim']}")
+                    for why in failed:
+                        print(f"      {why}")
+                else:
+                    print(f"  {prop['id']} PASS: {prop['claim']}")
+                    for _, why in results:
+                        print(f"      {why}")
+            if broken:
+                print(f"  VERDICT {bid}: BROKEN -- the named consumer no longer reads it")
+                worst = _worse(worst, BROKEN)
+                continue
+
+        deferred = binding.get("certified_by") or {}
+        cert_path = ROOT / deferred.get("certificate", "")
+        if not cert_path.is_file():
+            print(f"UNRESOLVABLE: deferred certificate {deferred.get('certificate')!r} "
+                  f"does not exist")
+            worst = _worse(worst, UNRESOLVABLE)
+            continue
+        cert = json.loads(cert_path.read_text(encoding="utf-8"))
+        if cert.get("claim_id") != deferred.get("claim_id"):
+            print(f"UNRESOLVABLE: binding defers to {deferred.get('claim_id')!r} but "
+                  f"{cert_path.name} certifies {cert.get('claim_id')!r}")
+            worst = _worse(worst, UNRESOLVABLE)
+            continue
+
+        cproc = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "qm_claim_check.py"), str(cert_path)],
+            capture_output=True, text=True, encoding="utf-8", timeout=900, cwd=str(ROOT),
+        )
+        status = _CLAIM_STATUS.get(cproc.returncode, f"UNKNOWN({cproc.returncode})")
+        print(f"  the carrier is produced; its certified state -> {status}")
+        if status == "VALID":
+            print(f"  VERDICT {bid}: GREEN -- production proven, state certified")
+        else:
+            print(f"  VERDICT {bid}: structurally resolved, but {deferred.get('projection')} "
+                  f"is UNAVAILABLE")
+            worst = _worse(worst, DEPENDENT_UNAVAILABLE)
     return worst
 
 

@@ -83,8 +83,15 @@ def _predict(cert: dict, env: dict[str, str]) -> tuple[str, object]:
         src = rule["value_from"]
         if "literal" in src:
             return rule["id"], src["literal"]
-        value = env.get(src["key"], src.get("default", _ABSENT))
-        return rule["id"], value
+        raw = env.get(src["key"], _ABSENT)
+        if raw is _ABSENT:
+            return rule["id"], src.get("default", _ABSENT)
+        if "map" in src:
+            # The mapping from a raw string to a semantic value is a fact about
+            # the variable, so the certificate carries it. Anything unmapped is
+            # left raw and will surface as a mismatch rather than a guess.
+            return rule["id"], src["map"].get(str(raw).strip().lower(), raw)
+        return rule["id"], raw
     return "<no rule matched>", _ABSENT
 
 
