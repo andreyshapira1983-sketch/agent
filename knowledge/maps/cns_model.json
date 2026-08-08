@@ -1,6 +1,8 @@
 {
   "_comment": "The four entities the node/edge census cannot hold. Entities and their names come from the operator's map (autonomous_agent_nervous_system_ru, slide 05); statuses come from docs/NERVE_PROTOCOL.ru.md. Nodes and call_edges stay in cns_census.json and are referenced by id from here. An empty list or the literal UNPROVEN means not proven; there is no N/A.",
-  "taken": "2026-08-07",
+  "structural_snapshot_taken": "2026-08-07",
+  "ledger_updated": "2026-08-08",
+  "_dating_note": "One 'taken' date used to head this file and had gone stale: it dated the 2026-08-07 structural walk while arcs and clusters were being rewritten on 2026-08-08. The file is two things and now says so. structural_snapshot_taken dates the static halves — state_carriers, state_initialization, decision_boundaries — which are re-derived only by a fresh walk of the code. ledger_updated dates the living halves — signal_flows and path_ledger — which change with every cluster closed; each arc carries its own dated evidence, so this field is a freshness hint, not a source of truth.",
   "_status_vocabulary": {
     "effect_scale": [
       "L1 signal exists",
@@ -121,11 +123,13 @@
         "CAUSALITY": "PROVEN — M3 and M4, each both ways, at both consumers",
         "SEMANTICS": "PROVEN — fallback and pinning both two-pole tested; run_id vs task_id vs trace_id distinction pinned by the identity suite",
         "PROTECTION": "PROVEN — entry-edge break reddens 5 (4 identity + 1 join), consumer break reddens 2 (unit + join)",
-        "verdict": "PROVEN on all four conditions — first certified CNS arc (scope: entry edge -> ContextVar -> episode + usage-ledger consumers; on_token/deep_escalation travel the same edge but are separate signals with their own open records)"
+        "verdict": "PROVEN on all four conditions — first certified CNS arc (scope: entry edge -> ContextVar -> episode + usage-ledger consumers; on_token/deep_escalation travel the same edge but are separate signals, each with its own arc record)"
       },
-      "open_items": [
-        "on_token and deep_escalation travel this same entry edge; their delivery is unproven",
-        "budget_guard wrapper (app/budget_guard.py:53,75) converts ModelBudgetExceeded into an answer — semantics not yet walked"
+      "open_items": [],
+      "open_items_closed_2026_08_08": [
+        "on_token delivery -> its own arc on_token_streaming, CERTIFIED (six fail-before tests; the billing-bypass defect found and fixed)",
+        "deep_escalation delivery -> its own arc deep_escalation_delivery, CERTIFIED (M11)",
+        "budget_guard wrapper semantics -> its own arc budget_stop_resume, CERTIFIED both modes (M5-M9, both retirement poles, all three catch sites)"
       ]
     },
     "abort_episode_banking": {
@@ -290,7 +294,7 @@
       "consumers": [
         "planner.plan(llm=st._task_planner_llm) (core/loop_attempt.py:288)",
         "_synthesize(llm=_synth_llm) via the ladder (core/loop_synthesis.py:638)",
-        "verify-replan planner call (core/loop_verify_replan.py:326) — see open item"
+        "verify-replan planner call (core/loop_verify_replan.py:326) — bitten by M23"
       ],
       "evidence": {
         "hole_measured": "M22a+M22b (2026-08-08): both llm= overrides cut -> 221 routing tests green. for_task was still called, its verdict still logged in adaptive_route, and its RESULT silently discarded — every run would execute on the default model. One wire past M11: the operator's escalation reached the router, the router picked the deep model, the loop threw the choice away",
@@ -488,10 +492,10 @@
       {"id": "C05", "scope": "turn-context read: history, persistent/experience blocks, local critique flag; read-only claim (core/loop_context.py, memory boundary)", "status": "UNPROVEN", "opened": "2026-08-08", "partial": "the two prompt_to_model_family members that lived here are now PROVEN-delivery both sides: long_term (M32) and conversation_history (M31/M33, M31 was a hole closed with a synth-side assertion). PARTIAL as arcs, per the family rule (live-model effect mock-blind)", "open": ["read-only claim of _retrieve_turn_context (only journal + cycle fields mutated) — not yet bitten", "local_critique flag suppressing LTM/episodic injection (loop_context.py:149) — delivery pole exists in test_local_critique_pr2, the suppression bite not yet isolated", "experience_block delivery — not separately walked"]},
       {"id": "C06", "scope": "episodic fast path: replay gate, quality gate, caches (core/loop.py:243-274 + loop_memory_read)", "status": "UNPROVEN", "known": "MIR-002 unmeasured-quality hole closed; fast-path mirror-test finding in PROJECT_MAP"},
       {"id": "C07", "scope": "multi-file intent: prepare_multi_file_review -> refusal gate -> forced sources (core/file_request_intent.py, loop_gates)", "status": "UNPROVEN"},
-      {"id": "C08", "scope": "attempt loop: planner -> policy gate -> step execution -> tools -> evidence; carriers failure_history, _step_trigger_tls, artifacts, chain; StepRepetitionTracker, TerminationGuard (loop_attempt, loop_step_execution)", "status": "UNPROVEN", "known": "post_tool_trust_boundary PROVEN (08c29cf); failure_history delivery PROVEN, effect UNPROVEN; _TRUSTED_INTERNAL_TOOLS hole documented"},
+      {"id": "C08", "scope": "attempt loop: planner -> policy gate -> step execution -> tools -> evidence; carriers failure_history, _step_trigger_tls, artifacts, chain; StepRepetitionTracker, TerminationGuard (loop_attempt, loop_step_execution)", "status": "UNPROVEN", "known": "post_tool_trust_boundary PROVEN (08c29cf); failure_history delivery PROVEN and its ARBITER effect PROVEN at L5 through the real call site (M19 — codes emptied at loop_run_tail flips a disclosing run failed_but_reported -> silently_missing, and the verdict is authoritative at banking), while the SYNTHESIS and VERIFICATION consumers' effects stay UNPROVEN — they land in a live model's prompt and the mock cannot show it (prompt_to_model_family); _TRUSTED_INTERNAL_TOOLS hole documented"},
       {"id": "C09", "scope": "evidence fold + ranking + cataloguing (loop_evidence_chain)", "status": "UNPROVEN"},
       {"id": "C10", "scope": "synthesis ladder: SynthesisState, tier forcing, failure_history gated at loop_synthesis.py:637, streaming on_token (loop_synthesis)", "status": "UNPROVEN"},
-      {"id": "C11", "scope": "verify & settle: Verifier, refuted claims, unresolved_citation replan, VERIFY_REPLAN_HARD_CAP (loop_verify_replan, verifier)", "status": "UNPROVEN", "known": "unresolved_citation flow 3 of 4 certified conditions (10240f8)"},
+      {"id": "C11", "scope": "verify & settle: Verifier, refuted claims, unresolved_citation replan, VERIFY_REPLAN_HARD_CAP (loop_verify_replan, verifier)", "status": "UNPROVEN", "known": "unresolved_citation flow CERTIFIED on all four conditions (10240f8 + M20 isolated gate + M21 strict two-verdict differential); the rest of the cluster — Verifier itself, refuted claims, the hard cap — is unwalked"},
       {"id": "C12", "scope": "response draft deciders -> single arbitration render (loop_response_deciders, response_draft)", "status": "UNPROVEN"},
       {"id": "C13", "scope": "completion obligations: reads C03 contract + failure_history -> journal verdict, observational (loop_run_tail)", "status": "UNPROVEN"},
       {"id": "C14", "scope": "run tail: outbound redaction, verification counters, profile/assumption writes, stagnation/disagreement shadows (loop_run_tail)", "status": "UNPROVEN"},
