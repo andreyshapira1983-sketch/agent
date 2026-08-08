@@ -103,15 +103,35 @@
             "id": "R-A",
             "name": "default-with-override",
             "sites": [
-              "core/ingestion.py:120",
-              "core/ingestion.py:268"
+              "core/ingestion.py:120 (ingest_web_topic)",
+              "core/ingestion.py:268 (ingest_rss_feed)"
             ],
             "contract": "the attribute is read via getattr with fallback False and used as the DEFAULT for write_memory; an explicit auto_write_memory argument overrides it, and dry_run forces it off",
             "consequence": "whether ingested web/RSS knowledge is written to memory",
             "_note_on_the_fallback": "the consumer's getattr default is False while the producer's default is True. That divergence only matters if the attribute can be absent, which is not established here.",
             "behavioral_closure": {
-              "status": "NOT TESTED. R-A has its own override argument and its own dry_run condition, and nothing about it is inferred from R-B. It stays an unclosed regime."
-            }
+              "status": "PARTIAL. The two sites are NOT quotient-ed into one consumer class.",
+              "control_partition_measured_at_each_site": {
+                "method": "the effective control is read where each site computes it -- both build their report with auto_write_memory=write_memory before touching the registry, so a recording report class observes the real value and the missing registry then aborts the run. No network, no tool emulation, no re-implementation of the expression.",
+                "cells": {
+                  "attr=True, no override, dry=False": "True",
+                  "attr=False, no override, dry=False": "False",
+                  "attr=True, override=False, dry=False": "False",
+                  "attr=False, override=True, dry=False": "True",
+                  "attr=True, override=True, dry=True": "False",
+                  "attr=False, override=False, dry=True": "False"
+                },
+                "web": "[True, False, False, True, False, False]",
+                "rss": "[True, False, False, True, False, False]",
+                "identical": "yes, over all six cells"
+              },
+              "independence_proven": "mutating ONLY the first occurrence of the shared expression -- the web site's override line, `if auto_write_memory is not None` -> `if False` -- flipped cells 3 and 4 of the WEB partition and left RSS untouched. So these are two measurements, not one reported twice. Restored byte-identical.",
+              "reachability_per_site": "PROVEN separately. Each site delivers its effective control into agent.knowledge_pipeline.run(auto_write_memory=...) -- web at core/ingestion.py:206, rss at :332 -- observed by a recording pipeline on a stub agent, True and False both arriving.",
+              "downstream_consequence_per_site": "NOT PROVEN. The probe's tools returned empty output, so the provenance chain was empty, so the pipeline had no claims and the memory writer was never exercised in EITHER arm. That cell is vacuous and is recorded as vacuous, not as a pass. Proving it requires emulating the web_search/web_fetch and rss_fetch contracts well enough to produce real evidence -- a larger unit than one bite.",
+              "quotient_decision": "REFUSED. The operator's condition is the same consumer decision AND the same relevant downstream consequence under adversarial mutation. The decision matches over six cells and the consequence is unproven, so the two sites stay SEPARATE semantic regimes. Structural similarity is not semantic equivalence.",
+              "not_inferred_from_R_B": "nothing here is carried over from R-B. That the pipeline gate controls the writer is R-B's result about R-B's delivery; R-A's own delivery reaching the same gate is proven, and its consequence is not."
+            },
+            "_site_list_correction": "the earlier edition listed TWO sites. There are THREE physical reads of the attribute in core/ingestion.py -- 120, 268 and 457 -- and the third carries an extra suppressor the other two do not. It is not part of R-A; it is recorded below as its own untested regime."
           },
           {
             "id": "R-B",
@@ -127,8 +147,32 @@
               "ENABLED": "auto_write_memory=True with two file-kind evidences yielding verified claims -> the writer is REACHED (writer_called=1). The stub's return shape then raises, after the call, which is what was being measured and not more.",
               "DISABLED": "identical claims, auto_write_memory=False -> writer_called=0, memory_skipped=2, and every decision carries policy_id 'auto_write_memory'. The pipeline distinguishes that from 'memory_writer_missing', so the refusal names THIS control value rather than a missing writer.",
               "WIRE_CUT": "source and report projection held True, only the control delivery cut (app/bootstrap.py:288 default True->False). Graph: S1 FAIL, exit BROKEN. Consequence: report=True, control=False, writer_called=0, memory_skipped=2, policy_ids=['auto_write_memory']. The journal reported True while memory was not written -- the exact lie the missing watcher would have permitted. Restored byte-identical; report=True, control=True, delivered=True again.",
-              "what_is_not_shown": "that the write COMPLETES. The writer was reached; its record was stubbed. Completion is a different claim and is not made here.",
-              "path_exercised": "AgentLoop.knowledge_auto_write -> _catalogue_chain conjunct with may_knowledge -> KnowledgePipeline.run(auto_write_memory=...) -> the gate at core/knowledge_pipeline.py:518 -> the memory writer"
+              "path_exercised": "AgentLoop.knowledge_auto_write -> _catalogue_chain conjunct with may_knowledge -> KnowledgePipeline.run(auto_write_memory=...) -> the gate at core/knowledge_pipeline.py:518 -> the memory writer",
+              "strongest_justified_statement": "R-B controls ADMISSION TO and INVOCATION OF the memory writer.",
+              "established": [
+                "source identity",
+                "control delivery from AgentLoop.knowledge_auto_write",
+                "the may_knowledge conjunct",
+                "delivery into KnowledgePipeline.run(auto_write_memory=...)",
+                "the distinction between an auto_write_memory refusal and memory_writer_missing",
+                "actual memory-writer invocation when enabled",
+                "suppression of writer invocation when disabled",
+                "WIRE-CUT causality: report projection held True while only the control delivery is cut makes S1 fail and suppresses the writer call"
+              ],
+              "UNPROVEN": "that durable memory writing COMPLETES. The writer was reached and its record was intentionally stubbed. Completion is a different claim and is not made."
+            }
+          },
+          {
+            "id": "R-C",
+            "name": "project-suppressed",
+            "status": "DISCOVERED, NOT TESTED",
+            "sites": [
+              "core/ingestion.py:457 (_ingest_paths)"
+            ],
+            "contract": "the same three statements as R-A, plus a fourth: `if mode == \"project\": write_memory = False`. An extra unconditional suppressor that R-A's sites do not have.",
+            "_why_its_own_regime": "found while enumerating R-A's sites. It differs from R-A in the expression itself, so grouping it with R-A would be exactly the error the R-A/R-B split was made to avoid.",
+            "behavioral_closure": {
+              "status": "NOT TESTED. No cells, no reachability, no consequence."
             }
           }
         ],
@@ -235,6 +279,7 @@
     "No general .qm producer vocabulary — `producer_bindings` is one experiment's field name.",
     "No independent assertion about the model at session start: this specimen produces the carrier and defers the state.",
     "No certificate for the control projection. C3 certifies what is REPORTED; that the reported value equals the controlling value is asserted structurally by S1 and is not certified by re-evaluation.",
-    "No claim that the three control-read sites form one consumer contract; they are at least two conditional regimes and are recorded as such."
+    "No claim that the three control-read sites form one consumer contract; they are at least two conditional regimes and are recorded as such.",
+    "No quotient of the web and RSS sites into one R-A consumer class: the decision matches over six cells, the downstream consequence is unproven, and the condition for quotienting requires both."
   ]
 }
