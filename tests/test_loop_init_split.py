@@ -63,8 +63,24 @@ def _new_init() -> ast.FunctionDef | None:
     )
 
 
+#: Санкционированные УДАЛЕНИЯ из исторического конструктора — поимённо, как
+#: объявленная подстановка в `test_loop_attempt_split`. 2026-08-08, вердикт
+#: оператора: кэш планировщика удалён (замер C08 — недостижим в профилях с
+#: банковкой эпизодов, наблюдателей ноль), с ним ушло поле `_planner_cache`.
+_DECLARED_DELETED_FIELDS = frozenset({"_planner_cache"})
+
+
+def _mentions_deleted(stmt: ast.stmt) -> bool:
+    return any(name in ast.unparse(stmt) for name in _DECLARED_DELETED_FIELDS)
+
+
 def test_logic_moved_symbol_for_symbol():
-    """Дословность ЛОГИКИ: тело конструктора совпадает с историей."""
+    """Дословность ЛОГИКИ: тело конструктора совпадает с историей.
+
+    Сверх объявленных удалений — присваивания полей из
+    `_DECLARED_DELETED_FIELDS` вычищаются из ИСТОРИЧЕСКОГО тела до сверки,
+    чтобы дословность продолжала держать всё остальное.
+    """
     old_src = _history()
     if not old_src.strip():  # pragma: no cover — поверхностный клон без истории
         pytest.skip("история недоступна (shallow clone) — сверку не выполнить")
@@ -73,9 +89,14 @@ def test_logic_moved_symbol_for_symbol():
         pytest.skip("конструктор в истории не найден — раскол уже зафиксирован")
     new = _new_init()
     assert new is not None, "`__init__` пропал из нового модуля"
-    old_body = "".join(ast.dump(s, include_attributes=False) for s in old.body)
+    old_body = "".join(
+        ast.dump(s, include_attributes=False)
+        for s in old.body if not _mentions_deleted(s)
+    )
     new_body = "".join(ast.dump(s, include_attributes=False) for s in new.body)
-    assert old_body == new_body, "тело конструктора изменилось при переносе"
+    assert old_body == new_body, (
+        "тело конструктора изменилось при переносе сверх объявленных удалений"
+    )
 
 
 def test_the_signature_is_untouched():

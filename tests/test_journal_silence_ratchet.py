@@ -81,7 +81,12 @@ from except_audit import journal_silent_in, loop_layer_files  # noqa: E402
 #: through `_risk_probe_failed` now; the ordinary "this step writes" case is
 #: still silent, because an event per effect step would be a stream rather
 #: than a signal.
-JOURNAL_SILENT_BASELINE = 11
+#: 11 -> 10 (2026-08-08): not a repair but a deletion — the planner cache was
+#: removed on the operator's verdict (C08), and `_episodic_store_mtime`, whose
+#: `except OSError: return 0.0` was one of the counted silent handlers, went
+#: with it as the key's only supplier. The handler did not learn to report;
+#: the code that owned it ceased to exist.
+JOURNAL_SILENT_BASELINE = 10
 
 _LAYER = Path("core")
 

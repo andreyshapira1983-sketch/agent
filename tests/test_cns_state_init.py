@@ -1,7 +1,7 @@
 """Census of where the nervous system's state is created.
 
 WHY THIS IS A SEPARATE CENSUS. The node rule skips dunders as plumbing, so
-`AgentLoopInit.__init__` — 231 lines creating 64 fields, the only place the
+`AgentLoopInit.__init__` — creating 63 fields (64 until the planner cache was removed, 2026-08-08), the only place the
 loop's state comes into being — is invisible to `tests/test_cns_census.py`.
 Making it a 75th ordinary node would be the wrong repair: a constructor is a
 different KIND of surface, and the questions asked of it (lifetime, origin,
@@ -13,7 +13,7 @@ newly dead field cannot appear unnoticed.
 
 WHAT IT DOES NOT PROVE. Ownership. Protocol item 6 is explicit: an assignment
 site proves where a value is created or injected, never who owns it. The model
-therefore records `owner: UNPROVEN` for all 64, and this file does not compute
+therefore records `owner: UNPROVEN` for all 63, and this file does not compute
 one.
 
 THE RULE'S OWN BLIND SPOTS, stated because they cost two wrong answers already:
@@ -151,7 +151,7 @@ def test_no_field_became_dead_unnoticed() -> None:
 def test_ownership_is_not_claimed_for_any_field() -> None:
     """Protocol item 6: `self.X = ...` proves a site, never an owner."""
     section = _model_section()
-    assert section["owner"] == "UNPROVEN for all 64", (
+    assert section["owner"] == "UNPROVEN for all 63", (
         "ownership was recorded without an experiment proving it; an "
         "assignment site is not an owner (operator's map, model error 4)"
     )
