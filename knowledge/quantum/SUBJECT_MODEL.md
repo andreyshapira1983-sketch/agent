@@ -1,19 +1,22 @@
 # What a `.qm` artifact is about — working note, Step 1
 
-**Not a schema. Not adopted.** This records a candidate subject model, the evidence
-that forced it, and the attacks it has and has not survived. Two candidates are
-already dead and are kept here as evidence, per the lab's rule that failed
-representations are results.
+**Not a schema. Not adopted.** This records the candidate subject models, the
+evidence that forced each, and the measurement that killed each. Every candidate is
+kept, per the lab's rule that failed representations are results. **The ledger at
+the bottom is the authoritative status; nothing above it states one.**
 
-Status at the bottom: **Step 1 is NOT complete.** One attack is unresolved.
+**Candidate identity.** Candidates are numbered **0** (file-centric), **1**
+(single junction), **2** (boundary-and-carriers). No candidate ever existed between
+1 and 2. A spoken report once called the last one "candidate 3" by counting the
+dead ones and continuing from the wrong index; that was an off-by-one in the
+telling, not a lost candidate. Recorded rather than silently corrected, because if
+the identity of the thing under evaluation is ambiguous, so is every verdict about
+it.
 
-**Candidate identity.** There are exactly three candidates: **0** (file-centric),
-**1** (single junction), **2** (current). No candidate ever existed between 1 and
-the current one. A spoken report once called the survivor "candidate 3" by
-counting the two dead ones and then continuing from the wrong index; that was an
-off-by-one in the telling, not a lost candidate. Recorded rather than silently
-corrected, because if the identity of the thing under evaluation is ambiguous, so
-is every verdict about it.
+The labels above are **descriptions, not statuses** — deliberately. The roster
+previously read `**2** (current)`, and when candidate 2 died the copy did not. The
+fix is not to update the duplicate but to stop duplicating: status is asserted in
+exactly one place, and `scripts/qm_doc_coherence.py` fails if a second appears.
 
 ## Why the question exists
 
@@ -53,6 +56,72 @@ carrier, including `selfcheck.ps1`. Two classes on the stdout carrier: 2 of 33
 lines differ. A subject with one carrier cannot hold the result of the very
 experiment that motivated it.
 
+## Specimen: this note contradicted itself, and a probe found it
+
+Recorded before correcting, because the document became an instance of the disease
+it is investigating.
+
+**Two contradictions, verbatim as they stood.**
+
+1. The opening roster read `**2** (current)` while the body read
+   `## Candidate 2 — STRUCTURALLY INSUFFICIENT` and the ledger read *there is no
+   surviving candidate*. One semantic fact, three assertions, one of them stale.
+2. `Seven constraints (E1, E3–E7)` — that set has six members. The count is derived
+   from the list, duplicated in prose, and has no authoritative source.
+
+Both are the same shape: **one semantic fact → duplicated derived assertions →
+the authoritative state changes → the dependents do not.**
+
+**The detector, and its own two failures.** `scripts/qm_doc_coherence.py` is told
+nothing about which sentence is stale and has no reference copy. It looks for one
+subject carrying both an alive-class and a dead-class status word, and for a
+spelled-out count whose own enumeration expands to a different size.
+
+It was wrong four times, each differently, and every correction is a finding:
+
+1. **Dead on arrival.** Line-scoped, it found nothing: the count `Seven
+   constraints` ended one line and its enumeration `(E1, E3–E7)` began the next.
+2. **Still blind to the named specimen.** Raised to sentences, it caught a
+   contradiction — but by a different route, missing the roster, because
+   `There are exactly three candidates:` and the bolded numerals fell into
+   different sentences. Paragraph granularity fixed it.
+3. **It lit up on its own evidence.** The specimen above quotes both
+   contradictions verbatim, and the probe cannot tell **use from mention**. The
+   document now marks quotations with backticks and the probe blanks code spans —
+   blanking, not deleting, so line numbers survive.
+4. **A recall hole the bite test exposed.** Injecting `Candidate 1 is the current
+   surviving model` raised nothing, because candidate 1's death is asserted in a
+   sentence that does not repeat its name. Status is inherited from headings, so
+   the probe now scopes a heading's subject over its section.
+
+5. **The use/mention fix survived one round and then broke.** Writing up failure 3
+   produced quotations that *wrapped across lines*, and the span pattern forbade
+   newlines inside a quotation, so the probe fired on its own evidence again. The
+   fix had assumed quotations do not reflow.
+
+Every one of those five is the same failure as the disease itself, one level down:
+**the detector's scope was narrower than the fact it had to see** — and failure 5
+adds that a fix can carry the same assumption it was written to remove.
+
+**Bite test.** Clean document: `COHERENT`, exit 0. Inject two synthetic
+contradictions: both rules fire, exit 1. Restore: exit 0 again. Run over
+`docs/PROJECT_MAP.ru.md` as well: clean, so the disease was not everywhere — it
+was where derived statements had drifted from a status that moved.
+
+**Its limits, stated so its silence is not overread.** It detects *divergence
+between duplicated assertions*; it has no notion of derivation and cannot say which
+side is authoritative. It depends on the document marking quotations. Heading-scoped
+inheritance is a heuristic, not a parse. Its vocabulary is fixed and small, so a
+status word outside it is invisible.
+
+**What this does and does not license.** It shows the requirement *can* be made to
+bite. It does not establish the requirement as stated: the probe detects
+**divergence between duplicated assertions**, and cannot tell which one is
+authoritative — it has no notion of derivation at all. So what is earned is the
+weaker claim that duplicated derived assertions can be made mechanically
+detectable when they diverge. Generation-from-an-authoritative-state remains
+**untested**, and is not adopted.
+
 ## Candidate 2 — STRUCTURALLY INSUFFICIENT
 
 > **Killed by the projection measurement below.** It attached partitions and
@@ -62,8 +131,9 @@ experiment that motivated it.
 > A model whose ontology puts the partition in the wrong place cannot be repaired
 > by wording. Preserved whole, as a failed representation.
 >
-> **There is currently no surviving candidate.** "Blocked on A2" was the previous
-> status and it is withdrawn: the candidate did not survive to be blocked.
+> Its previous status line, `blocked on A2`, is withdrawn — it did not last long
+> enough to be blocked. The authoritative status for every candidate is the ledger
+> at the end of this note, and this block deliberately states none.
 
 Its constraints are kept, because most of them outlived it. Scope is now separated
 from ontology, which the first version of this table did not do:
@@ -76,7 +146,7 @@ from ontology, which the first version of this table did not do:
 | E4 | facts about **instantiation** fit no carrier or observer slot | the 12-fact residue | ontology |
 | E5 | one consumer binds **several carriers** | `selfcheck.ps1:23–29` | ontology |
 | E6 | the producer of record is a **symbol plus a termination contract**, not a file | the launch worked from `cli.app.run_cli` with `main.py` gone | ontology |
-| E7 | a **partition belongs to a projection**, not to a surface or a consumer | both discriminators below | ontology |
+| E7 | a **behavioural partition is induced at the decision** — not by a surface, and not by a projection either | the two discriminators plus the two-consumer probe below | ontology |
 
 ### E2, rescoped
 
@@ -105,9 +175,41 @@ projection `$code -eq 0` reaches three destinations — `return $ok`, the colour
 choice `if ($ok)`, and the summary via `$results` — without its partition
 changing.
 
-So surfaces and projections are many-to-many, and the partition travels with the
-projection. This is not terminology becoming more precise: it is a relation
-Candidate 2 could not express, demonstrated in both directions.
+So surfaces and projections are many-to-many. **But that is as far as those two
+discriminators reach**, and the first wording — "the partition belongs to the
+projection" — went further than they license.
+
+**Third probe: one projection, two real consumers, incomparable partitions.** The
+projection is *read the process exit code as an integer*. Two consumers already in
+the repository take exactly that and nothing else:
+
+| consumer | decision | partition over {0,1,2,3} |
+| --- | --- | --- |
+| `scripts/selfcheck.ps1:26` | `$ok = ($code -eq 0)` | `[[0], [1,2,3]]` |
+| `tests/characterization/test_main_public_surface.py:154` | `assert result.returncode == 2` | `[[0,1,3], [2]]` |
+
+Same projection, and **neither partition refines the other** — one merges 2 with 1
+and 3, the other merges 0 with 1 and 3. A partition is therefore not determined by
+the projection any more than by the surface.
+
+What the three probes together establish: a projection is a *function from carrier
+state to a value*; the behavioural partition is induced where that value meets a
+**decision with a consequence**. So the chain is
+
+> carrier state → projection → decision → consequence
+
+and the partition lives at the third arrow. **Projection equivalence** (two runs
+giving the same projected value) and **behavioural observer equivalence** (two runs
+producing the same consequence) are different relations, and the first does not
+determine the second.
+
+### The terminology contradiction, resolved
+
+The note said both *a partition is induced by an observer* and *a partition belongs
+to a projection*. The two-consumer probe decides it: the first survives, the second
+is **obsolete**. `projection` and `observer` are not interchangeable, and the
+discriminator is exactly the probe above — hold the projection fixed, vary the
+observer, and the partition changes.
 
 ### The law this model proposed — DEAD
 
@@ -179,11 +281,12 @@ part of the model.
 **A4 — does the model earn its keep on the fact the old one could not express?**
 The unexpressible fact was one consumer occupying two observer classes. Under
 candidate 2 it becomes ordinary: one consumer, one carrier, two surfaces — plus a
-second carrier the old model had no room for at all. **SURVIVED at the time, and
-is now superseded:** E7 shows the two things are two *projections*, and that
-candidate 2 put the partition on the surface. A4 is the attack candidate 2 passed
-while carrying the defect that later killed it — kept as a reminder that passing
-the attacks you thought to write is not evidence of soundness.
+second carrier the old model had no room for at all. **This attack was repelled at
+the time, and its verdict is now superseded:** E7 shows the two things are two
+projections, and that the partition was put on the surface. A4 is the attack that
+was passed while the defect that later proved fatal was already present — kept as
+a reminder that passing the attacks you thought to write is not evidence of
+soundness.
 
 ## The A2 experiment — closure
 
@@ -376,10 +479,10 @@ the answer came back *too clean*.
 
 ## Status
 
-**There is no surviving candidate.** Candidates 0, 1 and 2 are all dead, each by a
-different measurement, and all three are preserved above. Seven constraints
-(E1, E3–E7) outlived candidate 2 and are what any successor must satisfy; E2 is
-rescoped to a measurement and no longer a constraint.
+**No candidate is alive.** Candidates 0, 1 and 2 are all dead, each by a different
+measurement, and all three are preserved above. Six constraints — E1, E3, E4, E5,
+E6, E7 — outlived candidate 2 and are what any successor must satisfy; E2 is
+rescoped to a measurement and is no longer a constraint.
 
 **Step 1 is not complete. Step 2 does not begin.**
 
@@ -394,7 +497,27 @@ Ledger:
 | scoped negative (universe U, snapshot S, procedure D) | **CHECKABLE**, positively controlled, recall proven for one consumer |
 | projection as its own level | FORCED, both discriminators bite |
 | transit — is the role semantically empty? | UNPROVEN; the law that asserted it is dead |
-| producer-binding debt | **OPEN** — `cli/app.py` controls the truth of `main.qm`'s claims and `main.qm` does not bind it |
+| producer-binding debt | **OPEN, and deeper than a missing hash** — see QT2 below |
+| duplicated derived assertions detectable when they diverge | shown to bite; generation-from-authoritative-state untested |
+
+### QT2 — the validity subject is not the producer's file either
+
+QT1 proved that `cli/app.py` controls the truth of `main.qm`'s claims, so the
+current binding is insufficient. It did **not** prove that binding `cli/app.py`'s
+bytes would be sufficient. Separating experiment:
+
+- precondition: `cli/app.py` sha `a39e32aae8070fbc`, baseline exit code 0;
+- mutate **one downstream dependency**, `cli/one_shot.py`, one `return 0` → `return 3`;
+- result: exit code **3**, so the claim *RETURNED payload ∈ {0,2}* is now **FALSE**;
+- `cli/app.py` sha after: `a39e32aae8070fbc` — **unchanged**;
+- therefore a `cli/app.py`-only binding would report **FRESH: falsely green**;
+- restored, exit code back to 0.
+
+So "producer source file" is not the validity subject. What controls the claim is
+the set of code that can produce the values the claim quantifies over — which is
+not known, is not a file, and is not to be approximated by hashing the repository.
+Determining what evidence actually controls a claim is now part of Step 1, not a
+detail of it.
 
 The goal is no longer to rescue a candidate. It is to determine what exactly is
 being certified, relative to which frontier, how that frontier is represented, and
