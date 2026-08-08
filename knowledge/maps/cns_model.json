@@ -13,7 +13,8 @@
       "L6 externally observable outcome changed"
     ],
     "certified_conditions": ["REACHABILITY", "CAUSALITY", "SEMANTICS", "PROTECTION"],
-    "verdicts": ["PROVEN", "UNPROVEN", "NEGATIVE", "UNDER_QUESTION", "PARTIAL"],
+    "verdicts": ["PROVEN", "UNPROVEN", "NEGATIVE", "UNDER_QUESTION"],
+    "_two_vocabularies_note": "path_statuses answer 'how far is this arc proven' (PARTIAL lives there); verdicts answer 'is this condition met' and roll up to 'are all four met'. They are not interchangeable: a PARTIAL arc carries status=PARTIAL and certified.verdict=UNPROVEN, because 'partly' is not a way of meeting four conditions. PARTIAL was briefly added to verdicts on 2026-08-08 to silence a ratchet; the operator refused the widening and the file's own prompt_to_model_family already showed the right shape.",
     "path_statuses": ["PROVEN", "UNPROVEN", "DEAD", "PERIPHERAL", "PARTIAL"],
     "_partial_note": "PARTIAL added 2026-08-08 on the operator's review: an arc whose delivery is proven but whose final hop is mock-blind (a live model consumes it) may not vanish from the count by being reclassified a 'coincidental carrier' — that is the descriptive/non-control loophole wearing a new coat. PARTIAL arcs are counted and listed, never absorbed.",
     "_owner_definition": "owner = the mechanism that answers for the state's lifecycle and semantics: creation, mutation, invalidation, end of life (mandate items 5-6). ATTACHMENT — which object physically holds the field — is provable separately (a creation site, an instance lifetime) and does NOT by itself establish ownership; nor does absence of traffic DISPROVE it. Added 2026-08-08 after the operator overturned owner=NEGATIVE on the dead field: traffic absence proves the carrier dead, not the owner absent."
@@ -371,23 +372,22 @@
         "read_only_claim": "NEGATIVE as originally written, corrected in the module 2026-08-08: «Чтение и только чтение» was disproven by the access-stats write. Corrected text names the one durable effect and its permission gate."
       }
     },
-    "local_critique_suppression": {
-      "producer": "referent resolution -> local_critique_active (core/loop_context.py:126)",
-      "carrier": "the boolean, consumed inside the same phase",
-      "consumer": "the block-assembly branch (loop_context.py:149): on a critique turn long-term and experience blocks are withheld, so the turn analyses the named referent rather than the agent's memories (PR2)",
-      "why_this_is_a_full_arc": "its consumer's decision is observable WITHOUT a live model — the blocks are either emitted or empty, and the test reads them directly. Per _arc_rule the arc ends at that last non-model consumer; what the emptied blocks then do inside a prompt belongs to prompt_to_model_family.",
-      "evidence": {
-        "M35": "suppression disabled -> 33 tests across the critique/memory/persistent suites stayed green; the PR2 contract lived only in a comment. Now reds the suppression bite",
-        "poles": "withheld on a critique turn (with a precondition assert that retrieval WOULD have returned something), delivered on an ordinary turn"
-      },
-      "certified": {
-        "REACHABILITY": "PROVEN",
-        "CAUSALITY": "PROVEN — M35 both ways",
-        "SEMANTICS": "PROVEN — both poles, and the suppression is conditional rather than a permanent off",
-        "PROTECTION": "PROVEN",
-        "verdict": "PROVEN on all four conditions"
-      },
-      "bite_classes": "M35 — Behavioral: the emitted block contents"
+    "_local_critique_suppression_reclassified": {
+      "kind": "DECISION BOUNDARY, not a semantic arc — see decision_boundaries.local_critique_block_suppression",
+      "history": "Recorded 2026-08-08 as a certified arc. The operator then asked me to defend its EXISTENCE against the first clause of _arc_rule ('a value crosses a phase or module boundary and enters a consumer') rather than against the effect question, and the defense failed on my own record's words: carrier 'the boolean, consumed inside the same phase'. My justification answered 'can the effect be shown without a live model?' — a status question — while the existence question went unanswered. Producer and consumer both sit inside _retrieve_turn_context; nothing crosses. So the bite is real and keeps its value, but it certifies a decision boundary, not an arc. Certified-arc count drops by one.",
+      "what_the_bite_still_proves": "M35 remains a Behavioral bite on the boundary's control semantics: on a critique turn the long-term and experience blocks are withheld, on an ordinary turn they are delivered."
+    },
+    "local_critique_flag_downstream": {
+      "status": "UNPROVEN",
+      "kind": "candidate arcs — FOUR of them, found while defending the reclassification above",
+      "producer": "referent resolution -> local_critique_active (core/loop_context.py:126), returned from the phase",
+      "note": "The flag DOES cross module boundaries — just not to the consumer I had certified. Bundling its intra-phase suppression into a 'certified arc' is what stopped the walk before these four were even recorded. Each is a candidate arc under _arc_rule with a control consequence, and none is bitten:",
+      "candidates": [
+        {"consumer": "core/loop_gates.py:142", "does": "disables the episodic fast path — no stored answer may be replayed on a critique turn", "status": "UNPROVEN (C06 territory)"},
+        {"consumer": "core/loop_attempt.py:191", "does": "SKIPS THE PLANNER on attempt 1 and synthesises from the analysis target instead — the heaviest consequence of the four", "status": "UNPROVEN (C08)"},
+        {"consumer": "core/loop_synthesis.py via SynthesisState", "does": "drives the lean/critique prompt shape (local_critique passed to the synthesiser)", "status": "UNPROVEN (C10)"},
+        {"consumer": "core/loop_response_deciders.py:279", "does": "feeds answer enforcement", "status": "UNPROVEN (C12)"}
+      ]
     },
     "access_stats_bump": {
       "producer": "long-term retrieval inside the turn-context read: every selected record gets access_count+1 and last_accessed_at=now, one rewrite of the store (core/loop_memory_read.py:152-170)",
@@ -398,12 +398,13 @@
         "M36": "the access_stats permission gate bypassed -> the withheld-sink pole reds",
         "write_side": "PROVEN both poles: exactly one durable sink touched during the phase, and nothing touched when access_stats is off the allowlist"
       },
+      "status": "PARTIAL",
       "certified": {
         "REACHABILITY": "PROVEN for the write; the hygiene consumer is reached only by a separate hygiene run, not by this phase",
         "CAUSALITY": "PROVEN for producer -> store (M36, M37); UNPROVEN for store -> archival decision",
         "SEMANTICS": "PROVEN for the permission contract; UNPROVEN for what a bumped record actually earns — no test anywhere varies access_count and observes the archival verdict (checked 2026-08-08: the only tests touching access_count assert it stays 0 under audit/dry-run, which is the same permission pole)",
-        "PROTECTION": "PROVEN for the write and its gate; NONE for the downstream effect",
-        "verdict": "PARTIAL — the write is certified, the consequence is not. Recorded as a candidate arc with an open item rather than absorbed into a neighbouring certification."
+        "PROTECTION": "PROVEN for the write and its gate; UNPROVEN for the downstream effect",
+        "verdict": "UNPROVEN — the four conditions are not all met. The arc's own status is PARTIAL (see `status`): the write is certified, the consequence is not. Two fields because they answer two questions; 'partly' is not a way of meeting four conditions."
       },
       "open_items": ["vary access_count and observe the hygiene archival decision (memory_hygiene.py:461,491) — the bump's whole justification is unbitten"],
       "bite_classes": "M36/M37 — Behavioral for the write side (durable file hashes, access_count values)"
@@ -411,14 +412,17 @@
     "prompt_to_model_family": {
       "status": "PARTIAL",
       "rule": "every member carries a decision-shaped value into a live model's prompt; delivery is provable and bitten per member, the model-side effect is mock-blind by nature. PARTIAL by construction — these arcs never certify under a mocked model and never disappear from the count either.",
-      "members": [
-        {"block": "role_block <role_context>", "delivery": "PROVEN (M24)"},
-        {"block": "profile_block <user_profile>", "delivery": "PROVEN (M13 restart bite)"},
-        {"block": "assumptions_block", "delivery": "PROVEN (M14 — prompt pole)"},
-        {"block": "failure_context (exhausted regime)", "delivery": "PROVEN (gate pair tests)"},
-        {"block": "long_term_block <long_term_memory>", "delivery": "PROVEN both sides (C05, 2026-08-08): planner via persistent inject tests; synthesis via M32 (cut persistent_block at the synth call site -> 9 red in test_persistent_integration)"},
-        {"block": "experience_block <agent_experience_memory>", "delivery": "PROVEN, planner only — it enters the planner_history join and never reaches synthesis separately (M34 reds test_experience_memory_is_injected_into_next_planner_call). ADDED 2026-08-08: it was missing from this family though structurally identical to long_term_block, which is how it ended up absorbed into a neighbouring arc's certification"},
-        {"block": "history_block <conversation_history>", "delivery": "PROVEN both sides (C05, 2026-08-08): planner via M33 (drop history from the planner_history join -> red test_memory_inject_fires_only_after_first_turn); synthesis via M31, which was a HOLE until closed — cutting SynthesisState.history left every memory test green because only the planner side was watched; a synth-side assertion was added to the same test, now red under M31. The 17th wire of the producer-with-a-journal family."}
+      "_counting_note": "SEVEN block types, NINE candidate arcs — corrected 2026-08-08 on the operator's challenge. The member list below used to say 'PROVEN both sides' for long_term and history, collapsing two consumers into one entry; that is precisely what the granularity clause I had just sharpened forbids, and the map's wire-identity already counted planner and synthesis delivery as two wires. Block type is a naming convenience; the arc unit is value -> consumer.",
+      "arcs": [
+        {"value": "role_block <role_context>", "consumer": "synthesis prompt", "delivery": "PROVEN (M24)"},
+        {"value": "profile_block <user_profile>", "consumer": "synthesis prompt", "delivery": "PROVEN (M13 restart bite)"},
+        {"value": "assumptions_block", "consumer": "synthesis prompt", "delivery": "PROVEN (M14 — prompt pole)"},
+        {"value": "failure_context (exhausted regime)", "consumer": "synthesis prompt", "delivery": "PROVEN (gate pair tests)"},
+        {"value": "long_term_block <long_term_memory>", "consumer": "planner prompt", "delivery": "PROVEN (persistent inject tests)"},
+        {"value": "long_term_block <long_term_memory>", "consumer": "synthesis prompt", "delivery": "PROVEN (M32 — cut persistent_block at the synth call site -> 9 red in test_persistent_integration)"},
+        {"value": "experience_block <agent_experience_memory>", "consumer": "planner prompt", "delivery": "PROVEN (M34); it never reaches synthesis separately, so this value has ONE arc, not two. Added to the family 2026-08-08 — it was missing though structurally identical to long_term_block, which is how it ended up absorbed into a neighbouring arc's certification"},
+        {"value": "history_block <conversation_history>", "consumer": "planner prompt", "delivery": "PROVEN (M33 — drop history from the planner_history join -> red)"},
+        {"value": "history_block <conversation_history>", "consumer": "synthesis prompt", "delivery": "PROVEN (M31, which was a HOLE until closed — cutting SynthesisState.history left every memory test green because only the planner side was watched). The 17th wire of the producer-with-a-journal family."}
       ],
       "note": "goal -> episode delivery is PROVEN (M25); the NEXT hop (episode.goal inside experience-retrieval ranking) is a separate C15 arc, UNPROVEN — named here so it cannot quietly vanish."
     },
@@ -462,6 +466,14 @@
       "reads": "unresolved_urls emptiness",
       "consequence_class": "PHASE",
       "protection": "PROVEN in isolation 2026-08-08: both poles (no citation -> decide never consulted; citation -> consulted), and M20 breaks the GATE, not the detector — 3 red"
+    },
+    "local_critique_block_suppression": {
+      "site": "core/loop_context.py:149",
+      "reads": "local_critique_active",
+      "consequence_class": "PHASE",
+      "decides": "whether long-term and experience blocks are assembled at all for this turn — PR2's contract that a critique turn analyses the named referent, not the agent's memories",
+      "protection": "PROVEN 2026-08-08 (M35 both poles). Before the bite, disabling the branch left 33 tests green across the critique, memory-wiring and persistent suites: the contract lived only in a comment.",
+      "classification_note": "Lives here rather than among signal_flows because producer and consumer are both inside _retrieve_turn_context — nothing crosses a boundary, so it is not an arc under _arc_rule. Moved here on the operator's challenge 2026-08-08; the bite is unchanged, only the category is honest."
     },
     "post_tool_trust_boundary": {
       "site": "core/loop_step_execution.py:652",
@@ -537,7 +549,7 @@
       {"id": "C02", "scope": "_observe_and_route: goal, question class, role route, model tier choice, deep escalation (core/loop_observe.py)", "status": "PROVEN", "opened": "2026-08-08", "walked": "2026-08-08", "proven_arcs": ["adaptive_tier_delivery — CERTIFIED for the dialogue path (M22a/M22b; the hole: 221 green with the router's choice discarded)", "deep_escalation_delivery — CERTIFIED earlier (M11, counted in C00)", "question classification -> redaction surfaces — held by tests/test_safety_integration.py (S5/S6)", "save_observe — bitten in C01; TypeError-propagates and non-TypeError fallback — bitten by the existing routing suite"], "open": [], "closure_note": "Wiring/delivery closed — the operator's ruling on what 'closed' may mean here: all three sub-wires bitten the same day (M23 verify-path tier delivery; M24 role_block delivery; M25 goal-into-episode). The live-model effect of role_block is NOT closed and never was claimable under a mock: it lives as a member of the prompt_to_model_family arc, status PARTIAL, counted. All bites Behavioral."},
       {"id": "C03", "scope": "derive_completion_contract before any tool runs; ordering claim; consumed in C13", "status": "PROVEN", "opened": "2026-08-08", "walked": "2026-08-08", "proven_arcs": ["completion_contract_delivery — CERTIFIED (M26 found the delivery wire naked under the file's own 27 green tests; ordering wire's protection declared Structural)"], "open": [], "closure_note": "One mutation, one bite. The cluster's semantics were already the best-covered in the perimeter (a direct-call two-pole battery plus banking authority); what was missing was the one wire between the well-lit producer and the well-lit consumer — the same shape as fifteen wires before it."},
       {"id": "C04", "scope": "admission gates: _odd_gate, _clarification_gate (core/loop_gates.py)", "status": "PROVEN", "opened": "2026-08-08", "walked": "2026-08-08", "proven_arcs": ["admission_gates — wiring CERTIFIED (M27, M28, M29 + early-return bites); order OBSERVABILITY proven (M29), order CORRECTNESS held UNDER_QUESTION — see admission_gates.order_semantics"], "open": ["order correctness (ODD > clarification): a design decision, not proven correct; two live arguments (fail-closed FOR, false-ODD-positive AGAINST); awaits owner ratification"], "closure_note": "Dissected as detector -> verdict -> caller authority -> early return -> cleanup per the operator's four requirements. Two overreaches of mine were overturned in the operator's 2026-08-08 review and are recorded, not buried: (1) M30 counted as causal evidence — it is STRUCTURAL, moved to cleanup_invariant_stream_on_token; (2) the order invariant called 'operator-endorsed' — the operator had written it with 'например' as an example of FORM, and M29 proves observability, not correctness. The order test now stands as a regression guard on the committed order, with correctness UNDER_QUESTION. The Russian ODD-regex defect stays a detector bug, outside this arc's verdict."},
-      {"id": "C05", "scope": "turn-context read: history, persistent/experience blocks, local critique flag; read-only claim (core/loop_context.py, memory boundary)", "status": "UNPROVEN", "opened": "2026-08-08", "walked": "2026-08-08", "proven_arcs": ["local_critique_suppression — CERTIFIED (M35 both poles)", "prompt_to_model_family members long_term (M32), conversation_history (M31/M33), experience (M34) — delivery PROVEN; PARTIAL as arcs per the family rule (live-model effect mock-blind)"], "open": ["access_stats_bump — PARTIAL: the write and its permission gate are certified (M36, M37), but nothing anywhere varies access_count and observes the hygiene archival decision that justifies the write"], "closure_note": "Three obligations bitten, and then the cluster's own certification was OVERTURNED under review: what had been recorded as one certified arc (turn_context_read) was three values going to three consumers, one of them untested. Split into local_critique_suppression (PROVEN), access_stats_bump (PARTIAL, open) and three family members. The cluster stays UNPROVEN until the archival effect is bitten. Two findings kept: the suppression contract had no observer at all (33 green under M35), and my first bite for it was VACUOUS — its question retrieved nothing anyway, so it passed with the suppression disabled; caught by the break-did-not-redden rule."},
+      {"id": "C05", "scope": "turn-context read: history, persistent/experience blocks, local critique flag; read-only claim (core/loop_context.py, memory boundary)", "status": "UNPROVEN", "opened": "2026-08-08", "walked": "2026-08-08", "proven_arcs": ["prompt_to_model_family arcs born here: long_term->planner, long_term->synthesis (M32), history->planner (M33), history->synthesis (M31), experience->planner (M34) — delivery PROVEN each, PARTIAL as arcs per the family rule (live-model effect mock-blind)"], "decision_boundaries_certified": ["local_critique_block_suppression — M35 both poles; reclassified out of the arc count on the operator's challenge, since producer and consumer are both inside this phase"], "open": ["access_stats_bump — status PARTIAL: the write and its permission gate are certified (M36, M37), but nothing anywhere varies access_count and observes the hygiene archival decision that justifies the write", "local_critique_flag_downstream — FOUR unbitten candidate arcs found while defending the reclassification (fast-path disable, planner skip on attempt 1, synthesis prompt shape, answer enforcement); each belongs to a later cluster and none may be counted as covered by M35"], "closure_note": "Three obligations bitten, and then the cluster's own certification was OVERTURNED under review: what had been recorded as one certified arc (turn_context_read) was three values going to three consumers, one of them untested. Split into local_critique_suppression (PROVEN), access_stats_bump (PARTIAL, open) and three family members. The cluster stays UNPROVEN until the archival effect is bitten. Two findings kept: the suppression contract had no observer at all (33 green under M35), and my first bite for it was VACUOUS — its question retrieved nothing anyway, so it passed with the suppression disabled; caught by the break-did-not-redden rule."},
       {"id": "C06", "scope": "episodic fast path: replay gate, quality gate, caches (core/loop.py:243-274 + loop_memory_read)", "status": "UNPROVEN", "known": "MIR-002 unmeasured-quality hole closed; fast-path mirror-test finding in PROJECT_MAP"},
       {"id": "C07", "scope": "multi-file intent: prepare_multi_file_review -> refusal gate -> forced sources (core/file_request_intent.py, loop_gates)", "status": "UNPROVEN"},
       {"id": "C08", "scope": "attempt loop: planner -> policy gate -> step execution -> tools -> evidence; carriers failure_history, _step_trigger_tls, artifacts, chain; StepRepetitionTracker, TerminationGuard (loop_attempt, loop_step_execution)", "status": "UNPROVEN", "known": "post_tool_trust_boundary PROVEN (08c29cf); failure_history delivery PROVEN and its ARBITER effect PROVEN at L5 through the real call site (M19 — codes emptied at loop_run_tail flips a disclosing run failed_but_reported -> silently_missing, and the verdict is authoritative at banking), while the SYNTHESIS and VERIFICATION consumers' effects stay UNPROVEN — they land in a live model's prompt and the mock cannot show it (prompt_to_model_family); _TRUSTED_INTERNAL_TOOLS hole documented"},
