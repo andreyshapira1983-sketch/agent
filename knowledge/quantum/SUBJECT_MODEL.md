@@ -839,6 +839,45 @@ working, not failing. No value is cached anywhere: the binding holds a gate, and
 state is fetched by re-evaluation, which is the only reason this connection does not
 reproduce the duplicated-derived-assertion disease documented above.
 
+### Closing the causal debt — C2 is now FROZEN
+
+The certificate carried one open debt: D3 named a value that was right and a
+mechanism that was not proven. It is closed by instrumentation, and both of the
+guesses made on the way were wrong.
+
+`core/model_router.py` was the suspect. It is **on** the path and is **not** the
+producer: the route it computes is discarded one hop later. The cost cap was the
+second suspect and is also innocent — `max_cost_tier` is `None` with no environment
+set, so it returns the route untouched. The producer is `_llm_factory`'s
+credential-healing branch:
+
+> `app/bootstrap.py:145` router → `:161` `for_role(SYNTHESIZER)` → route model
+> `gpt-5.4` → `core/model_router.py:941` `_llm_factory`: the default provider is
+> `anthropic`, **anthropic has no credentials here**, so the branch substitutes the
+> first credentialed provider and **drops the model**, by design and by its own
+> comment → `core/llm.py:134` `self.model = None or _default_model('openai')` →
+> `:35` returns `AGENT_MODEL` when set, else the literal → `bootstrap.py:204` writes
+> it into `session_start`.
+
+**Causal mutation:** `AGENT_MODEL=via-agent-model` → the journal records
+`via-agent-model`. **Non-causal mutation that provably lands:**
+`AGENT_SYNTHESIZER_MODEL=gpt-5.4` → the route reason becomes
+`env:AGENT_SYNTHESIZER`, and the journal value does not move.
+
+**And the whole structure is conditional.** Giving anthropic a credential lifts the
+condition and the *same* role variable becomes causal: `gpt-5.4` is recorded; with
+no role variable the record is `claude-sonnet-5` via `policy:conservative`. So C2's
+claim was only ever true inside an unstated environment. The certificate now
+declares that environment as preconditions, and the validator returns
+**OUT_OF_DOMAIN** rather than a verdict when they do not hold — an unmet
+precondition is not a false claim.
+
+This also explains the QT5 inertness from the inside: `AGENT_PROVIDER` never reaches
+`LLM`, because the healing branch passes the substitute provider explicitly.
+
+C2 is **frozen**. One gap is recorded rather than fixed: the precondition tests that
+a key is present, not that it works.
+
 **What it does not establish.** Nothing about a general format — one certificate,
 one claim, one evaluation, field names chosen to be thrown away. Nothing about
 architecture: a system may still prefer conservative artifact-wide invalidation,
