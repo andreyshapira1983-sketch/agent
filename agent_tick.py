@@ -763,9 +763,9 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     from dotenv import load_dotenv
     load_dotenv(workspace / ".env")
 
-    # Give the test runner enough time for a full suite (1800+ tests).
-    # RunTestsTool reads this env var if no explicit timeout_seconds was given.
-    os.environ.setdefault("AGENT_TEST_TIMEOUT_SECONDS", "300")
+    # Full-suite budget; the basis lives with DEFAULT_TIMEOUT_SECONDS in
+    # tools/run_tests.py. RunTestsTool reads this when given no explicit value.
+    os.environ.setdefault("AGENT_TEST_TIMEOUT_SECONDS", "900")
 
     # Lazy import after dotenv so env vars are available
     from app.bootstrap import build_agent
