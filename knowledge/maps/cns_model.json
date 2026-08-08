@@ -88,7 +88,13 @@
       "note": "Assigned once at construction and never read or written anywhere else. The docstring at core/replan.py:97 still declares it the scratch slot where every step failure lives — documentation describing a carrier that no longer carries.",
       "writers": [],
       "readers": [],
-      "owner": "PROVEN as attachment, open as governance — AgentLoop creates the field (core/loop_init.py:221) and it dies with the instance: architectural attachment, proven by this record's own created_at. Governance of a live signal is a question about a signal that does not exist here; that fact already lives in carrier=NEGATIVE and is not re-encoded as owner=NEGATIVE. History: was the forbidden literal 'N/A' (caught 2026-08-08), then NEGATIVE for one revision — semantic masking of the same N/A with a different word, overturned by the operator the same day per _owner_definition.",
+      "owner": "UNPROVEN — governance of the state's semantics was never established for anyone, and traffic absence neither proves nor disproves it (_owner_definition). History: the forbidden literal 'N/A' (caught 2026-08-08), then NEGATIVE for one revision (semantic masking of the same N/A), then attachment encoded INSIDE this field for one more (mixing the two axes the definition had just separated) — each caught by the operator the same day.",
+      "attachment": {
+        "status": "PROVEN",
+        "holder": "AgentLoop instance",
+        "created_at": "core/loop_init.py:221",
+        "lifetime": "instance lifetime"
+      },
       "properties": {"carrier": "NEGATIVE"}
     }
   },
