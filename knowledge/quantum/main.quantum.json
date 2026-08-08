@@ -162,5 +162,13 @@
     "No design change. main being a pass-through, an identity carrier and a transparent conduit are observations."
   ],
 
-  "schema_status": "NOT A SCHEMA. Two adversarial passes; the first found five errors, the second found two outright failures and four partial ones — including one place where the file understated its own evidence and one where it recorded a gap that did not exist. A representation that has been wrong in both directions has not yet demonstrated stability."
+  "schema_status": "NOT A SCHEMA. Two adversarial passes; the first found five errors, the second found two outright failures and four partial ones — including one place where the file understated its own evidence and one where it recorded a gap that did not exist. A representation that has been wrong in both directions has not yet demonstrated stability.",
+
+  "promotion_criterion": {
+    "_origin": "Operator's ruling 2026-08-08, recorded here rather than left in conversation: keep attacking this sidecar; do not derive a format or a standard from it yet. Grounds for calling the model stable appear only when failures stop being fundamental and only local evidence refinements remain.",
+    "what_counts_as_FUNDAMENTAL": "the file's SHAPE was wrong — a state space was missing entirely; a quotient sat at the wrong granularity; the representation could express impossible states; epistemic status was conferred by placement rather than by evidence; a claim's scope was wider than its instrument. Both passes so far produced failures of this kind.",
+    "what_counts_as_LOCAL": "the shape held and a citation was incomplete, a status needed grading, or a probe needed tightening — the two evidence-direction errors of pass 2 (understating the returned-2 evidence, inventing a transit gap) are borderline: they were local in shape but severe in kind, since an audit that understates is as wrong as one that overstates.",
+    "criterion": "Promotion to a general Quantum File format requires a pass whose findings are ALL local by the above test. Until then this file is a laboratory subject, and the format question stays closed.",
+    "why_not_sooner": "A schema derived from a representation that is still collapsing would propagate its errors to every subject written against it — and those errors would then be invisible, because the schema would make them look like compliance."
+  }
 }
