@@ -53,24 +53,61 @@ carrier, including `selfcheck.ps1`. Two classes on the stdout carrier: 2 of 33
 lines differ. A subject with one carrier cannot hold the result of the very
 experiment that motivated it.
 
-## Candidate 2 — current, under attack
+## Candidate 2 — STRUCTURALLY INSUFFICIENT
 
-The evidence forces at least this much structure. Stated as constraints, not as
-fields:
+> **Killed by the projection measurement below.** It attached partitions and
+> domains to *observation surfaces*. Measurement shows a partition is not a
+> property of a surface: two projections on one surface induce different
+> partitions, and one projection reaches several surfaces carrying one partition.
+> A model whose ontology puts the partition in the wrong place cannot be repaired
+> by wording. Preserved whole, as a failed representation.
+>
+> **There is currently no surviving candidate.** "Blocked on A2" was the previous
+> status and it is withdrawn: the candidate did not survive to be blocked.
 
-| # | constraint | forced by |
-| --- | --- | --- |
-| E1 | the subject is not a file | QT1; 2 of 81 facts concern the named file |
-| E2 | the invoked file is a **transit**, not a role — replaceable without semantic loss | entry experiment: `main.py` absent, all four behaviours reproduced |
-| E3 | a subject spans **several carriers**, each with its own state space | the `--help` probe above |
-| E4 | facts about **instantiation** fit no carrier or observer slot | the 12-fact residue: call-site count, `argv0`, forbidden path |
-| E5 | one consumer binds **several carriers**, and several **surfaces** per carrier | `selfcheck.ps1:23–29` — `Tee-Object` takes merged stdout/stderr to a log and a console, `$LASTEXITCODE` feeds both `$ok` and printed text |
-| E6 | the producer of record is a **symbol plus a termination contract**, not a file | the launch worked from `cli.app.run_cli` with `main.py` gone |
+Its constraints are kept, because most of them outlived it. Scope is now separated
+from ontology, which the first version of this table did not do:
 
-So the unit is: **one named execution boundary; the carriers that cross it; per
-carrier a state space, a producer, consumers, and observation surfaces with
-domains; plus the binding that instantiates the whole thing — including transits,
-which are named but hold no semantics.**
+| # | constraint | forced by | scope |
+| --- | --- | --- | --- |
+| E1 | the subject is not a file | QT1; 2 of 81 facts concern the named file | ontology |
+| E2 | ~~the invoked file is a transit, replaceable without semantic loss~~ | — | **RESCOPED, see below** |
+| E3 | a subject spans **several carriers**, each with its own state space | the `--help` probe | ontology |
+| E4 | facts about **instantiation** fit no carrier or observer slot | the 12-fact residue | ontology |
+| E5 | one consumer binds **several carriers** | `selfcheck.ps1:23–29` | ontology |
+| E6 | the producer of record is a **symbol plus a termination contract**, not a file | the launch worked from `cli.app.run_cli` with `main.py` gone | ontology |
+| E7 | a **partition belongs to a projection**, not to a surface or a consumer | both discriminators below | ontology |
+
+### E2, rescoped
+
+The old wording made a general claim out of one scenario. Split in two:
+
+- **Measured, in one scenario, over two carriers:** with `argv[0]` held fixed,
+  removing `main.py` from the execution path left the exit-code carrier and the
+  stdout carrier byte-identical, and the `SystemExit` transit intact.
+- **Ontology:** *transit* names a role that is invoked but is neither producer,
+  carrier, consumer nor observer. **Whether that role is semantically empty is
+  UNPROVEN.** Nothing licenses "replaceable without semantic loss" as a definition;
+  the one law that said so is dead, and no carrier beyond those two was checked.
+
+### E7 — projection is a distinct level, and it bites
+
+The operator supplied two discriminators. Both were run, and both bite.
+
+**(a) Two projections, one surface, different partitions.** `run_journal` returns
+one dict through one call — a single output surface. Mutating only `ts` and
+`trace_id`: `events_matched` stays 1 → 1 (**one class**), while `events` changes
+(**two classes**). Same destination, same call, same keys. The surface cannot be
+what carries the partition.
+
+**(b) One projection, several surfaces, one partition.** In `selfcheck.ps1` the
+projection `$code -eq 0` reaches three destinations — `return $ok`, the colour
+choice `if ($ok)`, and the summary via `$results` — without its partition
+changing.
+
+So surfaces and projections are many-to-many, and the partition travels with the
+projection. This is not terminology becoming more precise: it is a relation
+Candidate 2 could not express, demonstrated in both directions.
 
 ### The law this model proposed — DEAD
 
@@ -141,8 +178,12 @@ part of the model.
 
 **A4 — does the model earn its keep on the fact the old one could not express?**
 The unexpressible fact was one consumer occupying two observer classes. Under
-candidate 2 it is ordinary: one consumer, one carrier, two surfaces — plus a
-second carrier the old model had no room for at all. **SURVIVES.**
+candidate 2 it becomes ordinary: one consumer, one carrier, two surfaces — plus a
+second carrier the old model had no room for at all. **SURVIVED at the time, and
+is now superseded:** E7 shows the two things are two *projections*, and that
+candidate 2 put the partition on the surface. A4 is the attack candidate 2 passed
+while carrying the defect that later killed it — kept as a reminder that passing
+the attacks you thought to write is not evidence of soundness.
 
 ## The A2 experiment — closure
 
@@ -168,14 +209,23 @@ which proves determinism, not closure. The result that matters is the comparison
 `logs/run_<trace>.jsonl` — an effect this note first recorded as unconsumed and
 later found to have had a consumer all along.
 
-### H1 — closed-world subject: REFUTED for this boundary
+### H1 — split into three, because the first verdict was broader than the experiment
 
-There is no single carrier set `C` for boundary `B`. `C` is a function of the path
-taken through `B`, and the difference is not marginal — a whole channel appears.
-Closing over all paths would require enumerating all paths; and even the union is
-not *discoverable by running*, since `FS_WRITE` was found only because S2 was
-chosen. A discovery procedure that finds what you already thought to look for is
-not a closure rule.
+The original H1 wording covered two claims and the verdict prose drifted into a
+third. Separated:
+
+- **H1a — one path-independent active carrier set `C(B)`. REFUTED.** The active
+  carrier set is a function of the path: S1 has `FS_READ` only, S2 adds an entire
+  `FS_WRITE` channel. This is what the experiment actually measured.
+- **H1b — closure derived by observing executions. REFUTED.** `FS_WRITE` was found
+  only because S2 was chosen. A discovery procedure that finds what you already
+  thought to look for is not a closure rule, and no number of additional runs
+  changes that.
+- **H1c — *any* mechanically checkable closed-world closure rule. UNPROVEN, NOT
+  ATTACKED.** A union over paths, or a static, compositional, registry-based or
+  formal derivation might yield one. Nothing here tests those, and the earlier
+  phrasing "closing over all paths would require enumerating all paths" asserted
+  their impossibility without evidence. **Withdrawn.**
 
 ### H2 — open-world with closed certification scope: UNTESTED
 
@@ -270,6 +320,39 @@ false**. Nothing `main.qm` asserts became untrue when the journal consumer was
 found; the artifact simply never had a field able to say whether its carrier list
 was complete or merely as far as anyone had looked.
 
+### What H2 must actually test — and the one piece now built
+
+A new consumer is **necessary but not sufficient**. The question H2 asks is whether
+a validator can *detect* that the certification frontier moved, without a human
+telling it. If a new consumer appears and the certification stays green because
+nothing mechanically notices, then open-world certification is operationally
+useless — the status would be produced by retrospective interpretation, which is
+the thing this lab exists to avoid.
+
+So H2 needs, in order: a **declared frontier** with checkable evidence; a **scoped
+negative** for the chosen effect; a **genuinely new consumer**; and a **mechanism**
+that emits FALSE / STALE / SCOPE_EXPANDED / still-valid-under-narrower-scope by
+itself.
+
+**The scoped negative is checkable — built and positively controlled.** The claim
+form is *no consumer of effect E exists within declared universe U at snapshot S
+according to procedure D*, not a metaphysical absence. Instantiated:
+
+- **U** — 278 files: repository `.py` outside `tests/`, plus every `.ps1`.
+- **D** — textual reference to the effect's store or its reader.
+- **Positive control** — run against the journal effect, D returns 46 candidate
+  files and **does find `tools/agent_state_view.py`**, the consumer this note
+  previously missed. A search whose silence is to mean anything must first be shown
+  capable of finding a known consumer; this one is.
+
+**What the positive control does and does not license.** For a negative claim
+**recall** is load-bearing and **precision** only costs review effort — 46 hits
+needing a second, precise pass is expensive, not invalid. Recall itself is proven
+for exactly one consumer: a reader that builds its path dynamically, lives outside
+U, or is another process entirely would escape D. The negative is therefore valid
+strictly at the scope declared, which is what makes it usable and what forbids
+reading it as "nothing consumes E".
+
 ### Three vacuous probes, preserved
 
 1. `runpy.run_path` cell in the 2×2 — silently re-tied the two factors it existed
@@ -293,30 +376,30 @@ the answer came back *too clean*.
 
 ## Status
 
-Candidate 2 survives A1, A3, A4 and is blocked on A2. **Step 1 is not complete and
-Step 2 must not begin.**
+**There is no surviving candidate.** Candidates 0, 1 and 2 are all dead, each by a
+different measurement, and all three are preserved above. Seven constraints
+(E1, E3–E7) outlived candidate 2 and are what any successor must satisfy; E2 is
+rescoped to a measurement and no longer a constraint.
 
-Where A2 now stands:
+**Step 1 is not complete. Step 2 does not begin.**
 
-- **H1 is refuted for this boundary.** The carrier set is a function of the path,
-  not of the boundary, and a whole channel appears between two paths.
-- **H2 is untested.** The step-7 mutation did not happen: the effect chosen for it
-  already had a consumer.
-- **A third level is forced by measurement** and belongs to whatever eventually
-  replaces candidate 2: observer status is a property of a *projection*, not of a
-  consumer and not of a carrier. One consumer over one carrier held one proper
-  projection and one near-discrete one at the same time.
-- **The transit law is dead** and nothing replaces it. `argv[0]` was measured into
-  the binding; the transit's transparency is unestablished beyond two carriers in
-  one scenario.
-- **Still owed from A1:** validity binding must cover the producer source
-  (`cli/app.py`), which `main.qm` does not bind.
+Ledger:
 
-What must be settled before Step 2: whether the carrier set of a boundary can be
-closed by a checkable rule, or whether a `.qm` subject is inherently open and must
-say so in a form a validator can act on. Testing H2 needs a consumer that is
-genuinely new — which now means finding an emitted effect and *proving* it
-unconsumed before building against it, rather than assuming it.
+| item | status |
+| --- | --- |
+| H1a — path-independent active carrier set | REFUTED |
+| H1b — closure by observing executions | REFUTED |
+| H1c — any checkable closed-world rule | UNPROVEN, not attacked; earlier impossibility claim withdrawn |
+| H2 — open world with closed certification scope | UNTESTED; the detection mechanism does not exist |
+| scoped negative (universe U, snapshot S, procedure D) | **CHECKABLE**, positively controlled, recall proven for one consumer |
+| projection as its own level | FORCED, both discriminators bite |
+| transit — is the role semantically empty? | UNPROVEN; the law that asserted it is dead |
+| producer-binding debt | **OPEN** — `cli/app.py` controls the truth of `main.qm`'s claims and `main.qm` does not bind it |
+
+The goal is no longer to rescue a candidate. It is to determine what exactly is
+being certified, relative to which frontier, how that frontier is represented, and
+how the system detects that it moved. Three of those four have no answer yet, and
+the fourth — the frontier's representation — has one checkable piece.
 
 Nothing here is adopted, and no field names are proposed. `main.qm` is unchanged,
 and no production file was modified by any experiment in this note.
