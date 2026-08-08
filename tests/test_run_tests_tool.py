@@ -63,9 +63,9 @@ class TestConstruction:
         with pytest.raises(ValueError):
             RunTestsTool(workspace_root=workspace, timeout_seconds=-1)
 
-    def test_default_timeout_is_300s(self, workspace: Path):
+    def test_default_timeout_matches_the_declared_constant(self, workspace: Path):
         t = RunTestsTool(workspace_root=workspace)
-        assert t.timeout_seconds == DEFAULT_TIMEOUT_SECONDS == 300.0
+        assert t.timeout_seconds == DEFAULT_TIMEOUT_SECONDS == 900.0
 
     def test_risk_is_reversible(self, workspace: Path):
         t = RunTestsTool(workspace_root=workspace)

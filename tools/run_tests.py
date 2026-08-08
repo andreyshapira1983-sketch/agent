@@ -10,7 +10,8 @@ Safety model:
     paths/pattern. No metacharacters get to the OS shell because there
     IS no shell in the pipeline.
   - cwd is the workspace root; pytest cannot escape it.
-  - timeout (default 300 s) — full suite needs ~3 min on this repo; capped via
+  - timeout (default 900 s) — the full suite is 7262 tests and has been measured
+    at 327-411 s here; the default is twice the worst measurement, capped via
     subprocess. Override with AGENT_TEST_TIMEOUT_SECONDS.
   - output capped at 1 MiB stdout / 1 MiB stderr to keep audit logs
     bounded; oversized output is truncated with a marker.
@@ -42,7 +43,14 @@ from tools.base import Risk, Tool, require_ascii_identifier
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_TIMEOUT_SECONDS = 300.0
+#: Full-suite wall time measured on this repository, warm caches, five runs:
+#: 327, 333, 339, 390, 411 s against 7262 collected tests. The budget bounds a
+#: HANG, not the duration, and the costs are asymmetric -- too low and health can
+#: never be established at all, too high and a hang is merely noticed later while
+#: `timed_out -> inconclusive` still refuses to call a partial run green. So it
+#: clears the worst measurement by a margin wide enough for a cold bytecode cache
+#: and a busy machine: twice 411 s, rounded up.
+DEFAULT_TIMEOUT_SECONDS = 900.0
 MAX_STDOUT_BYTES = 1 * 1024 * 1024  # 1 MiB
 MAX_STDERR_BYTES = 1 * 1024 * 1024
 MAX_PATHS = 16                       # planner shouldn't submit huge path lists
