@@ -128,8 +128,47 @@
               "independence_proven": "mutating ONLY the first occurrence of the shared expression -- the web site's override line, `if auto_write_memory is not None` -> `if False` -- flipped cells 3 and 4 of the WEB partition and left RSS untouched. So these are two measurements, not one reported twice. Restored byte-identical.",
               "reachability_per_site": "PROVEN separately. Each site delivers its effective control into agent.knowledge_pipeline.run(auto_write_memory=...) -- web at core/ingestion.py:206, rss at :332 -- observed by a recording pipeline on a stub agent, True and False both arriving.",
               "downstream_consequence_per_site": "NOT PROVEN. The probe's tools returned empty output, so the provenance chain was empty, so the pipeline had no claims and the memory writer was never exercised in EITHER arm. That cell is vacuous and is recorded as vacuous, not as a pass. Proving it requires emulating the web_search/web_fetch and rss_fetch contracts well enough to produce real evidence -- a larger unit than one bite.",
-              "quotient_decision": "REFUSED. The operator's condition is the same consumer decision AND the same relevant downstream consequence under adversarial mutation. The decision matches over six cells and the consequence is unproven, so the two sites stay SEPARATE semantic regimes. Structural similarity is not semantic equivalence.",
-              "not_inferred_from_R_B": "nothing here is carried over from R-B. That the pipeline gate controls the writer is R-B's result about R-B's delivery; R-A's own delivery reaching the same gate is proven, and its consequence is not."
+              "quotient_decision": "STILL REFUSED. One of the two sites now has a non-vacuous consequence bite and the other does not. The condition requires both.",
+              "not_inferred_from_R_B": "nothing here is carried over from R-B. That the pipeline gate controls the writer is R-B's result about R-B's delivery; R-A's own delivery reaching the same gate is proven, and its consequence is not.",
+              "preserved_failed_probe": {
+                "_kept_because": "it earned its place by proving that the first consequence test was not a consequence test at all.",
+                "REACHABILITY": "PROVEN -- both sites deliver the effective control into agent.knowledge_pipeline.run(auto_write_memory=...)",
+                "PRECONDITION(chain non-empty / claim exists)": "NEGATIVE in that probe -- the stub tools returned empty output, so the ProvenanceChain was empty and no claim existed that could exercise the memory-write decision",
+                "CAUSAL CONSEQUENCE": "UNPROVEN by that probe. writer_called=0 under a NEGATIVE precondition says nothing about control semantics.",
+                "classification": "ANTI-VACUITY FAILURE. Not an R-A success and not an R-A failure.",
+                "no_production_change": "the probe was not made to pass by repairing production code."
+              },
+              "rss_site_closure": {
+                "status": "PROVEN, non-vacuous. The subject was instantiated before the writer was read.",
+                "site": "core/ingestion.py:268 (ingest_rss_feed)",
+                "preconditions_proven_in_every_cell": {
+                  "1 function reached": "entries_ingested = 2",
+                  "2 valid entries accepted": "2 of 2, built from a feed whose entries carry title, url, summary and published_at",
+                  "3 chain non-empty": "chain_len = 2",
+                  "4 registry produces claims": "claims = 8",
+                  "5 memory writer wired": "remember is not None in every cell",
+                  "6 independent gates named and controlled": {
+                    "require_verified": "False, fixed by the stub agent's _unattended_run() -- the gate is controlled, not avoided",
+                    "source type": "'article' -- not forum and not unknown, so the write policy's source-type rejection cannot be the cause",
+                    "claim status": "'extracted' -- not unverified, so the write policy's status rejection cannot be the cause",
+                    "write policy": "accepted in the enabled cells with reasons naming confidence=0.68, trust=0.68 and type=article"
+                  }
+                },
+                "control_partition_with_consequence": [
+                  "attr=True,  no override, dry=False -> control True,  writer_called=8, skipped=0, policy knowledge-write-mvp",
+                  "attr=False, no override, dry=False -> control False, writer_called=0, skipped=8, policy auto_write_memory",
+                  "attr=True,  override=False, dry=False -> control False, writer_called=0, skipped=8, policy auto_write_memory",
+                  "attr=False, override=True,  dry=False -> control True,  writer_called=8, skipped=0, policy knowledge-write-mvp",
+                  "attr=True,  override=True,  dry=True  -> control False, writer_called=0, skipped=8, policy auto_write_memory",
+                  "attr=False, override=False, dry=True  -> control False, writer_called=0, skipped=8, policy auto_write_memory"
+                ],
+                "attribution": "every suppression carries policy_id 'auto_write_memory' and the reason 'auto_write_memory is off'. Not an empty chain, not a missing writer, not the verification gate, not a write-policy rejection.",
+                "held_fixed_across_arms": "same feed, same chain length, same 8 claims, same statuses, same source types, same writer availability, same require_verified. Only the R-A control input moved.",
+                "UNPROVEN": "that the memory write COMPLETES. The writer is reached and its record is stubbed, as in R-B."
+              },
+              "web_site_closure": {
+                "status": "NOT DONE. The next unit. Nothing about web is inferred from RSS."
+              }
             },
             "_site_list_correction": "the earlier edition listed TWO sites. There are THREE physical reads of the attribute in core/ingestion.py -- 120, 268 and 457 -- and the third carries an extra suppressor the other two do not. It is not part of R-A; it is recorded below as its own untested regime."
           },
