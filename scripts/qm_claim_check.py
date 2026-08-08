@@ -116,6 +116,19 @@ def main(argv: list[str]) -> int:
     workspace.mkdir(parents=True, exist_ok=True)
 
     env, origin = _resolve_env(cert, workspace)
+
+    # Declared preconditions of the evaluation domain. An unmet precondition is
+    # not a false claim: the claim says nothing about that environment, and
+    # answering VALID or INVALID there would be answering a question nobody asked.
+    for pre in cert["evaluation_domain"].get("preconditions", []):
+        key = pre.get("env_absent") or pre.get("env_present")
+        present = key in env
+        want = "present" if "env_present" in pre else "absent"
+        if (want == "present") != present:
+            print(f"OUT_OF_DOMAIN: precondition {pre.get('id')} requires {key} "
+                  f"{want}, and it is {'present' if present else 'absent'}")
+            return OUT_OF_DOMAIN
+
     rule_id, predicted = _predict(cert, env)
 
     # Evidence binding, part 1: what existed BEFORE this evaluation.
