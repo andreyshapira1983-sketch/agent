@@ -1,0 +1,107 @@
+{
+  "_what_this_is": "The first pure Quantum File — a DERIVED semantic record of the physical `main.py`, written under the Quantum CNS mandate (2026-08-08). It contains no executable implementation and replaces nothing: `main.py` stays exactly as it is, and this file is a second view of it. Every entry here is derived from that source and from evidence already in the suite; nothing is inferred from intent, naming, or plausibility. Where evidence is absent the region is named UNPROVEN rather than filled in.",
+  "_rules_it_obeys": [
+    "no executable implementation, no speculative semantics",
+    "state spaces, observers, equivalence classes, causal consequences, preconditions, protection evidence, and explicit UNPROVEN regions only",
+    "equivalence is always stated relative to a NAMED observation boundary (mandate rule 10)",
+    "labels are not deleted for being control-equivalent (mandate rule 8)",
+    "no global quotient is claimed (mandate rule 16)"
+  ],
+  "physical_subject": {
+    "path": "main.py",
+    "shape_evidence": "AST-pinned by tests/characterization/test_main_public_surface.py: imports are EXACTLY {__future__.annotations, cli.app.run_cli}; the only definition is `main`; the tail is `if __name__ == \"__main__\": raise SystemExit(main())`.",
+    "body": "one statement — `return run_cli()`",
+    "isolation_evidence": "test_no_production_module_imports_from_main: nothing outside tests/ imports from `main`. So `main` has no consumers inside the runtime; its only consumer is the process boundary."
+  },
+
+  "state_spaces": {
+    "main_return_value": {
+      "type": "int, the process exit code",
+      "named_states_reachable_through_main": [
+        {"value": 0, "produced_by": "cli/app.py:122 (`--version`-class early return), :125, resume replay (cli/resume.py:134 via app.py:147), run_one_shot (cli/one_shot.py, every return is 0), run_repl (cli/repl.py, every return is 0)", "meaning": "the process reports success"},
+        {"value": 2, "produced_by": "cli/app.py:164 (empty --ask), :169 (file-hint preflight failure), and cli/resume.py:101 (invalid trace id) via app.py:147", "meaning": "the process reports a usage/preflight refusal"}
+      ],
+      "states_NOT_produced_here": "1 and every other integer. No return path in the delegate chain yields them. This is an observation about the code as it stands, not a design statement.",
+      "argparse_exits_bypass_main_return": "`--help` exits 0 and an unknown flag / missing argument / invalid choice exit 2 by raising SystemExit inside argparse, so those codes never pass through `main`'s return at all. Evidence: tests/characterization/test_cli_argparse_surface.py asserts SystemExit codes 0 and 2 directly. Recorded because the process-level state space and `main`'s RETURN state space are not the same set, and conflating them would be the kind of false identity this layer exists to prevent."
+    }
+  },
+
+  "observers": {
+    "process_boundary": {
+      "what_it_reads": "the integer, via `raise SystemExit(main())`",
+      "distinguishes": "0 from 2 — success from refusal",
+      "evidence": "tests/characterization/test_main_public_surface.py::test_the_process_really_exits_with_the_code_main_returned runs a real process with nothing patched and reads the shell's exit code",
+      "mutation_on_record": "that test's own docstring records the measurement that motivated it: dropping the `return` from `main()` leaves the text guard on the tail green while a failing run exits 0 — a caller gating on the exit code would read an error as success. So the return VALUE has a proven causal consequence at this boundary."
+    },
+    "in_process_callers": {
+      "what_it_reads": "the returned int, by calling `main_module.main()` directly",
+      "distinguishes": "0 from 2",
+      "evidence": "tests/characterization/test_cli_command_precedence.py and test_main_public_surface.py::test_main_is_callable_and_returns_an_int",
+      "scope_limitation": "this observer patches seams (build_agent, load_dotenv, handle_meta_command). It can observe the value but not the process consequence; only process_boundary proves the latter."
+    },
+    "ast_shape_observer": {
+      "what_it_reads": "the source text of main.py — its imports, its single definition, its tail",
+      "distinguishes": "any edit to the file's shape",
+      "evidence": "test_main_public_surface.py (three AST/text guards)",
+      "class": "STRUCTURAL. It fires on any shape change and cannot tell a deliberate edit from a removed contract — recorded as such per the map's protection scale, and NOT counted as behavioural protection."
+    }
+  },
+
+  "equivalence_classes": {
+    "under_process_boundary": {
+      "partition": "{0} | {2}",
+      "basis": "the shell branches on zero versus non-zero; both members of each class are indistinguishable to it because each class has one member here",
+      "note": "this is a partition of the states `main` can RETURN. It is not a partition of process exit codes in general — argparse produces 0 and 2 without passing through the return."
+    },
+    "under_main_itself": {
+      "partition": "ONE class — `main` performs no branching",
+      "basis": "the body is `return run_cli()`. `main` distinguishes nothing; every distinction visible at the process boundary is produced by the delegate chain and passes through unexamined.",
+      "consequence_for_the_audit": "`main` is a PASS-THROUGH, so the semantic content attributed to it belongs to cli/app.py and below. This is why the quantum file for `main` is small and why its interesting regions are all references outward."
+    }
+  },
+
+  "causal_consequences_proven": [
+    {
+      "chain": "delegate return value -> main return value -> SystemExit argument -> process exit code -> caller's success/failure reading",
+      "status": "PROVEN",
+      "evidence": "test_the_process_really_exits_with_the_code_main_returned — a real process, nothing patched, using `--file` naming a missing path so the failure happens in preflight and no model is called",
+      "preconditions_proven_by_that_test": "the chosen invocation genuinely fails in preflight (exit 2), so the test observes a NON-ZERO code and cannot pass by accident on a run that would have exited 0 anyway"
+    }
+  ],
+
+  "preconditions_recorded": {
+    "why_they_matter_here": "mandate rule 6 — a test that passes because its subject never existed is vacuous. For `main` the subject is a non-zero exit; a test that only ever exercised a successful run could not detect the dropped-return defect at all, which is precisely the failure the process-level test was written to catch."
+  },
+
+  "protection_status": {
+    "main_return_value_reaches_the_process": "PROVEN — behavioural, at the process boundary",
+    "main_shape": "STRUCTURAL only — three AST/text guards; they protect the file's form, not any consequence",
+    "isolation_from_the_runtime": "PROVEN — test_no_production_module_imports_from_main"
+  },
+
+  "unproven_regions": [
+    {
+      "region": "the exit-code SEMANTICS of the delegate chain",
+      "statement": "That `2` means usage/preflight refusal and `0` means success is read off the call sites, not proven by a test that varies the meaning. No observer distinguishes 'refused because the trace id was invalid' from 'refused because the file hint failed preflight' — both are 2.",
+      "status": "UNPROVEN",
+      "belongs_to": "cli/app.py and cli/resume.py — to be walked in their own quantum files, not settled here"
+    },
+    {
+      "region": "whether any caller outside the repository branches on the exit code",
+      "statement": "The process-level consequence is proven for a test caller. Whether a CI job, script or supervisor reads it is outside the repository's evidence.",
+      "status": "UNPROVEN",
+      "scope": "external"
+    },
+    {
+      "region": "run_repl's exit-code state space",
+      "statement": "Every observed return in cli/repl.py is 0. Whether a non-zero interactive exit is reachable at all has not been probed.",
+      "status": "UNPROVEN"
+    }
+  ],
+
+  "explicitly_not_claimed": [
+    "No global quantum count for `main` or for the CLI is asserted.",
+    "No equivalence between argparse's exit codes and `main`'s return values is asserted — they are different state spaces that happen to share integers.",
+    "No design change is proposed. `main` being a pass-through is an observation, not a complaint."
+  ]
+}
