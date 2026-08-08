@@ -97,12 +97,36 @@
       "control_projection": {
         "of": "AgentLoop.knowledge_auto_write",
         "constructed_at": "app/bootstrap.py:268 returns AgentLoop(...), receiving the attribute at :288",
-        "consumers": [
-          "core/ingestion.py:120 and :268 -- write_memory = bool(getattr(agent, 'knowledge_auto_write', False))",
-          "core/loop_evidence_chain.py:133 -- self.knowledge_auto_write gates may_knowledge"
+        "_correction": "an earlier edition of this binding called these 'the named consumer', singular, and asserted only the getattr sites. That grouped three physical sites under one contract without proving one, which is precisely what this lab's own granularity clause forbids: a granularity note may group only the physical sites of the SAME value -> SAME consumer-contract pair. The grouping is withdrawn.",
+        "regimes": [
+          {
+            "id": "R-A",
+            "name": "default-with-override",
+            "sites": [
+              "core/ingestion.py:120",
+              "core/ingestion.py:268"
+            ],
+            "contract": "the attribute is read via getattr with fallback False and used as the DEFAULT for write_memory; an explicit auto_write_memory argument overrides it, and dry_run forces it off",
+            "consequence": "whether ingested web/RSS knowledge is written to memory",
+            "_note_on_the_fallback": "the consumer's getattr default is False while the producer's default is True. That divergence only matters if the attribute can be absent, which is not established here."
+          },
+          {
+            "id": "R-B",
+            "name": "conjunct",
+            "sites": [
+              "core/loop_evidence_chain.py:133"
+            ],
+            "contract": "the attribute is read as self.knowledge_auto_write, ANDed with may_knowledge, and passed AS the auto_write_memory argument into knowledge_pipeline.run",
+            "consequence": "whether the evidence chain's knowledge pipeline writes memory",
+            "_note": "this regime supplies the very argument that overrides regime A's default. Whether either call path ever reaches the other's function is NOT established."
+          }
         ],
-        "consequence": "whether ingested knowledge is written to memory. A control-flow consequence, unlike the report projection's.",
-        "measured": "build_agent yields the attribute True with the variable unset and False with it set to 0"
+        "explicitly_not_claimed": [
+          "That R-A and R-B are one consumer contract. They are at least two conditional regimes over three physical sites.",
+          "That the two regimes ever meet at one callee.",
+          "Any ordering or precedence between them."
+        ],
+        "measured": "build_agent yields the attribute True with the variable unset and False with it set to 0. That is a fact about the PRODUCER side and is shared by both regimes; it says nothing about their contracts."
       },
       "resolver": {
         "kind": "python_ast",
@@ -139,31 +163,59 @@
           ]
         }
       ],
-      "consumer_resolver": {
-        "kind": "python_ast",
-        "bridge": "scripts/qm_py_anchor.py",
-        "module_file": "core/ingestion.py",
-        "function": "__module__"
-      },
-      "consumer_properties": [
-        {
-          "id": "S3",
-          "claim": "the named consumer of the CONTROL projection still reads it by name",
-          "assertions": [
-            {
-              "path": "getattr_names",
-              "op": "contains",
-              "value": "knowledge_auto_write"
-            }
-          ]
-        }
-      ],
       "certified_by": {
         "certificate": "knowledge/quantum/c3.claim.qm",
         "claim_id": "C3",
         "projection": "payload.knowledge_auto_write",
         "_gates": "only the REPORT projection. The control projection has no certificate yet, and this binding does not pretend otherwise."
-      }
+      },
+      "consumer_checks": [
+        {
+          "regime": "R-A",
+          "resolver": {
+            "kind": "python_ast",
+            "bridge": "scripts/qm_py_anchor.py",
+            "module_file": "core/ingestion.py",
+            "function": "__module__"
+          },
+          "properties": [
+            {
+              "id": "S3",
+              "claim": "regime R-A still reads the field by name",
+              "assertions": [
+                {
+                  "path": "getattr_names",
+                  "op": "contains",
+                  "value": "knowledge_auto_write"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "regime": "R-B",
+          "resolver": {
+            "kind": "python_ast",
+            "bridge": "scripts/qm_py_anchor.py",
+            "module_file": "core/loop_evidence_chain.py",
+            "function": "__module__"
+          },
+          "properties": [
+            {
+              "id": "S4",
+              "claim": "regime R-B still reads the field off itself",
+              "assertions": [
+                {
+                  "path": "self_attribute_reads",
+                  "op": "contains",
+                  "value": "knowledge_auto_write"
+                }
+              ],
+              "_why_separate": "S3 asserts a getattr read and is structurally blind to `self.NAME`. Until this property existed, regime R-B was inside the binding's prose and outside its verification."
+            }
+          ]
+        }
+      ]
     }
   ],
   "not_claimed": [
@@ -171,6 +223,7 @@
     "No claim that app/bootstrap.py is the subject.",
     "No general .qm producer vocabulary — `producer_bindings` is one experiment's field name.",
     "No independent assertion about the model at session start: this specimen produces the carrier and defers the state.",
-    "No certificate for the control projection. C3 certifies what is REPORTED; that the reported value equals the controlling value is asserted structurally by S1 and is not certified by re-evaluation."
+    "No certificate for the control projection. C3 certifies what is REPORTED; that the reported value equals the controlling value is asserted structurally by S1 and is not certified by re-evaluation.",
+    "No claim that the three control-read sites form one consumer contract; they are at least two conditional regimes and are recorded as such."
   ]
 }

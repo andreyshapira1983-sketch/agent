@@ -48,6 +48,15 @@ def main(argv: list[str]) -> int:
         for name in (_string(node.args[1]),) if name is not None
     })
 
+    # Attributes read as `self.NAME` anywhere in the module. A consumer that
+    # reads a field off itself is invisible to the getattr fact above, and the
+    # first version of the app.qm binding was silently blind to exactly that.
+    self_attribute_reads = sorted({
+        node.attr for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load)
+        and isinstance(node.value, ast.Name) and node.value.id == "self"
+    })
+
     anchor = None
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == want:
@@ -55,7 +64,8 @@ def main(argv: list[str]) -> int:
             break
     if anchor is None:
         print(json.dumps({"parse_ok": True, "anchor_found": False,
-                          "getattr_names": getattr_names}))
+                          "getattr_names": getattr_names,
+                          "self_attribute_reads": self_attribute_reads}))
         return 0
 
     events: list[str] = []
@@ -95,6 +105,7 @@ def main(argv: list[str]) -> int:
         "parse_ok": True,
         "anchor_found": True,
         "getattr_names": getattr_names,
+        "self_attribute_reads": self_attribute_reads,
         "literal_calls": literal_calls,
         "anchor_first_line": anchor.lineno,
         "anchor_last_line": getattr(anchor, "end_lineno", anchor.lineno),
