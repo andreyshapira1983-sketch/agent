@@ -74,7 +74,7 @@
       "binding_id": "PB2",
       "relationship": "ONE source, TWO projections: one reported, one controlling",
       "_shape": "AGENT_KNOWLEDGE_AUTO_WRITE -> { session_start.knowledge_auto_write (report) , AgentLoop.knowledge_auto_write (control) }",
-      "_why_this_edge_is_earned": "chosen by a bounded selector: of build_agent's seventeen session_start keys, this was the only one with a single unambiguous named consumer in the declared universe of 280 files. C3 carries the causal proof on the report side; the control side was measured separately.",
+      "_why_this_edge_is_earned": "chosen by a bounded selector, not by taste: of build_agent's seventeen session_start keys, this was the only one read BY NAME anywhere in the declared universe of 280 files. CORRECTED: the earlier wording said 'a single unambiguous named consumer'. That was true of what the SELECTOR counted -- one key with one hit -- and false of the field, which is read by three regimes across four physical sites. The selector counted keys, not consumers.",
       "source": {
         "kind": "environment_variable",
         "key": "AGENT_KNOWLEDGE_AUTO_WRITE",
@@ -127,7 +127,6 @@
               },
               "independence_proven": "mutating ONLY the first occurrence of the shared expression -- the web site's override line, `if auto_write_memory is not None` -> `if False` -- flipped cells 3 and 4 of the WEB partition and left RSS untouched. So these are two measurements, not one reported twice. Restored byte-identical.",
               "reachability_per_site": "PROVEN separately. Each site delivers its effective control into agent.knowledge_pipeline.run(auto_write_memory=...) -- web at core/ingestion.py:206, rss at :332 -- observed by a recording pipeline on a stub agent, True and False both arriving.",
-              "downstream_consequence_per_site": "NOT PROVEN. The probe's tools returned empty output, so the provenance chain was empty, so the pipeline had no claims and the memory writer was never exercised in EITHER arm. That cell is vacuous and is recorded as vacuous, not as a pass. Proving it requires emulating the web_search/web_fetch and rss_fetch contracts well enough to produce real evidence -- a larger unit than one bite.",
               "quotient_decision": "STILL REFUSED. One of the two sites now has a non-vacuous consequence bite and the other does not. The condition requires both.",
               "not_inferred_from_R_B": "nothing here is carried over from R-B. That the pipeline gate controls the writer is R-B's result about R-B's delivery; R-A's own delivery reaching the same gate is proven, and its consequence is not.",
               "preserved_failed_probe": {
@@ -168,7 +167,14 @@
               },
               "web_site_closure": {
                 "status": "NOT DONE. The next unit. Nothing about web is inferred from RSS."
-              }
+              },
+              "_HISTORY_downstream_consequence_per_site": "SUPERSEDED, kept as evidence. This is what the record said at the time of the empty-chain probe, and it must not be read as a current status: NOT PROVEN. The probe's tools returned empty output, so the provenance chain was empty, so the pipeline had no claims and the memory writer was never exercised in EITHER arm. That cell is vacuous and is recorded as vacuous, not as a pass. Proving it requires emulating the web_search/web_fetch and rss_fetch contracts well enough to produce real evidence -- a larger unit than one bite.",
+              "CURRENT_downstream_consequence_per_site": {
+                "_where_authority_lives": "here. The _HISTORY_ field above records what was believed before the RSS closure.",
+                "rss": "PROVEN non-vacuously -- see rss_site_closure. Preconditions proven in every cell; every suppression attributed by the pipeline to auto_write_memory.",
+                "web": "UNPROVEN. No non-vacuous consequence bite exists for the web site."
+              },
+              "_site_count_correction": "this regime's own note above still says 'three physical sites' where it describes the WITHDRAWN grouping. That sentence is HISTORY and is left verbatim: it records what the withdrawn grouping covered. The current count of control reads of this field is FOUR -- two in R-A, one in R-B, one in R-C."
             },
             "_site_list_correction": "the earlier edition listed TWO sites. There are THREE physical reads of the attribute in core/ingestion.py -- 120, 268 and 457 -- and the third carries an extra suppressor the other two do not. It is not part of R-A; it is recorded below as its own untested regime."
           },
@@ -275,14 +281,20 @@
           "properties": [
             {
               "id": "S3",
-              "claim": "regime R-A still reads the field by name",
+              "claim": "each R-A site still reads the field by name, at its own anchor",
               "assertions": [
                 {
-                  "path": "getattr_names",
+                  "path": "getattr_names_by_function.ingest_web_topic",
+                  "op": "contains",
+                  "value": "knowledge_auto_write"
+                },
+                {
+                  "path": "getattr_names_by_function.ingest_rss_feed",
                   "op": "contains",
                   "value": "knowledge_auto_write"
                 }
-              ]
+              ],
+              "_replaces": "a module-wide membership assertion, proved FALSE PROTECTION: with both R-A reads removed and only R-C's read left in the same module, it stayed green while the module still parsed."
             }
           ]
         },
@@ -318,7 +330,7 @@
     "No general .qm producer vocabulary — `producer_bindings` is one experiment's field name.",
     "No independent assertion about the model at session start: this specimen produces the carrier and defers the state.",
     "No certificate for the control projection. C3 certifies what is REPORTED; that the reported value equals the controlling value is asserted structurally by S1 and is not certified by re-evaluation.",
-    "No claim that the three control-read sites form one consumer contract; they are at least two conditional regimes and are recorded as such.",
-    "No quotient of the web and RSS sites into one R-A consumer class: the decision matches over six cells, the downstream consequence is unproven, and the condition for quotienting requires both."
+    "No quotient of the web and RSS sites into one R-A consumer class: the decision matches over six cells, the downstream consequence is unproven, and the condition for quotienting requires both.",
+    "No claim that the FOUR control-read sites -- two in R-A, one in R-B, one in R-C -- form one consumer contract. Earlier editions said three, counting R-A and R-B before R-C was discovered."
   ]
 }

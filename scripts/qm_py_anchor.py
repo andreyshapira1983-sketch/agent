@@ -57,6 +57,20 @@ def main(argv: list[str]) -> int:
         and isinstance(node.value, ast.Name) and node.value.id == "self"
     })
 
+    # Per-FUNCTION getattr names. Module-wide membership was proved false
+    # protection: two regimes reading the same field from the same module make a
+    # module-scoped assertion survive the removal of either one.
+    getattr_names_by_function = {
+        fn.name: sorted({
+            nm for sub in ast.walk(fn)
+            if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name)
+            and sub.func.id == "getattr" and len(sub.args) >= 2
+            for nm in (_string(sub.args[1]),) if nm is not None
+        })
+        for fn in ast.walk(tree)
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
     anchor = None
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == want:
@@ -65,6 +79,7 @@ def main(argv: list[str]) -> int:
     if anchor is None:
         print(json.dumps({"parse_ok": True, "anchor_found": False,
                           "getattr_names": getattr_names,
+                          "getattr_names_by_function": getattr_names_by_function,
                           "self_attribute_reads": self_attribute_reads}))
         return 0
 
@@ -105,6 +120,7 @@ def main(argv: list[str]) -> int:
         "parse_ok": True,
         "anchor_found": True,
         "getattr_names": getattr_names,
+        "getattr_names_by_function": getattr_names_by_function,
         "self_attribute_reads": self_attribute_reads,
         "literal_calls": literal_calls,
         "anchor_first_line": anchor.lineno,

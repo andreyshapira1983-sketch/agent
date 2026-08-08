@@ -32,6 +32,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 #: What the claim validator's exit codes mean. Kept here because this operation
 #: is the only thing that interprets them.
+_VERDICT_MARKER = "QM-VERDICT:"
+
 _CLAIM_STATUS = {0: "VALID", 1: "INVALID", 2: "OUT_OF_DOMAIN",
                  3: "PRECEDENCE_VIOLATED", 4: "UNREADABLE"}
 
@@ -49,11 +51,31 @@ def gate(certificate: Path, claim_id: str) -> tuple[str, str]:
                 f"the binding names claim {claim_id!r} but {certificate.name} "
                 f"certifies {cert.get('claim_id')!r}")
 
+    validator = ROOT / "scripts" / "qm_claim_check.py"
+    if not validator.is_file():
+        return "UNRESOLVABLE", f"the validator {validator.name} is missing"
     proc = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "qm_claim_check.py"), str(certificate)],
+        [sys.executable, str(validator), str(certificate)],
         capture_output=True, text=True, encoding="utf-8", timeout=900, cwd=str(ROOT),
     )
-    verdict = _CLAIM_STATUS.get(proc.returncode, f"UNKNOWN({proc.returncode})")
+    # PROVENANCE. An exit code proves nothing about where it came from: a crash, a
+    # syntax error, a missing file and a deliberate refusal all arrive as integers.
+    # UNAVAILABLE is reserved for "the mechanism ran and the certificate refused",
+    # so the verdict must be DECLARED by the validator and must agree with its code.
+    declared = [line.split(":", 1)[1].strip()
+                for line in (proc.stdout or "").splitlines()
+                if line.startswith(_VERDICT_MARKER)]
+    if not declared:
+        return ("UNRESOLVABLE",
+                f"the validator produced no {_VERDICT_MARKER} line (exit {proc.returncode}); "
+                f"no verdict was reached")
+    verdict, _, tail = declared[-1].partition(" exit=")
+    if tail.strip() != str(proc.returncode):
+        return ("UNRESOLVABLE",
+                f"the validator declared {verdict!r} at exit={tail.strip()} but exited "
+                f"{proc.returncode} -- the declaration and the code disagree")
+    if verdict not in _CLAIM_STATUS.values():
+        return "UNRESOLVABLE", f"the validator declared an unknown verdict {verdict!r}"
     return ("USABLE" if verdict == "VALID" else "UNAVAILABLE"), f"certificate -> {verdict}"
 
 
