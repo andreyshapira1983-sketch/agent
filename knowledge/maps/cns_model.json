@@ -869,6 +869,18 @@
       }
     },
     "findings": {
+      "evidence_fold_guard_granularity": {
+        "named_state_space": "The SCOPE of the failure guard in core/loop_evidence_chain.py:_fold_evidence_chain — per record, or around the loop. Two values, and the difference is whether one malformed record silently truncates the whole chain.",
+        "why_it_was_opened": "The code's own comment (MIR-061) records that the guard once sat outside the loop, that a single failed conversion left 1 of 5 records arriving, and that the verifier then judged the answer against a truncated chain so citations came back cited_but_unmatched for an unrelated reason. The comment ends 'these two must not drift apart again' — a warning, which is not an instrument.",
+        "prediction": "GREEN. The one test found by grepping the event name saves a SINGLE record, and with one record a per-record guard and a per-loop guard are observationally identical: chain 0, one skip event. Measured on a shim first, so the premise was checked rather than assumed.",
+        "mutation": "ONE relation: a `break` at the end of the except block, which reproduces the historical behaviour exactly — the first failure abandons the rest and still logs once.",
+        "observed_consequence": "RED, and by a test named for the property: tests/test_evidence_integration.py::TestMalformedMemoryRecordDoesNotTruncateChain::test_one_bad_record_only_skips_itself. The prediction was wrong because the grep found the event name in one test and stopped; the class holds a second case with two records that discriminates exactly this.",
+        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "PROVEN"},
+        "protection_status": "Already held. No test was added, and adding one would duplicate a better-named existing case.",
+        "the_lesson_for_this_program": "Second falsified prediction in a row. The working assumption formed inside C08 — that a path found by a census is probably unobserved — does not generalise. Protection in this repository is UNEVEN rather than absent, and grepping an event name finds the tests that log it, not the tests that discriminate on it.",
+        "scope_limitation": "One of the three folds. The working-memory fold reports through _sensor_failed and the dialogue fold through dialogue_evidence_skipped; neither was measured here, and no test names either event.",
+        "no_code_change": "None. The code was already right and already guarded."
+      },
       "last_two_producer_sites": {
         "named_state_space": "The two producers whose code is not a literal: the failure CLASSIFIER at core/loop_step_execution.py:484-486, and the last-resort postprocessing guard at :790.",
         "the_classifier": "raw_error.startswith(('FileNotFoundError:', 'IsADirectoryError:')) -> file_not_found, else tool_error. A TEXTUAL discrimination on an error string whose two outcomes carry different budgets (1 versus 2) and different requires_different_action flags, so a misclassification changes control: a missing file would be retried where the code's own comment says it must not be.",
