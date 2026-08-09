@@ -356,7 +356,7 @@ class AgentLoop(
         # text, which no longer changes, so asking again can only ask forever.
         _decided = None if _resumed else self._clarification_gate(user_question)
         if _decided is not None:
-            self.pending_clarification_question = user_question  # what it asked ABOUT
+            self._park_clarification(user_question)  # what it asked ABOUT
             return _decided
 
         # Memory retrieval — read-only injection into prompts

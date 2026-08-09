@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import inspect
 import subprocess  # nosec B404 — читаем историю через git show, вход фиксирован
 from pathlib import Path
@@ -69,9 +70,21 @@ def _new_init() -> ast.FunctionDef | None:
 #: банковкой эпизодов, наблюдателей ноль), с ним ушло поле `_planner_cache`.
 _DECLARED_DELETED_FIELDS = frozenset({"_planner_cache"})
 
+#: Санкционированные ДОБАВЛЕНИЯ — тем же порядком, что и удаления выше.
+#: 2026-08-09, вторая итерация починки уточнений: вопрос, о котором задано
+#: уточнение, обязан пережить процесс, а `AgentLoop` не знает своего рабочего
+#: каталога — путь, как и все хранилища, приходит извне. Добавка допустима
+#: ТОЛЬКО в хвосте подписи: конструктор зовут позиционно, и вставка в середину
+#: сдвинула бы всё после неё. Это проверяется отдельно, ниже.
+_DECLARED_ADDED_PARAMS = ("pending_clarification_path",)
+
 
 def _mentions_deleted(stmt: ast.stmt) -> bool:
     return any(name in ast.unparse(stmt) for name in _DECLARED_DELETED_FIELDS)
+
+
+def _mentions_added(stmt: ast.stmt) -> bool:
+    return any(name in ast.unparse(stmt) for name in _DECLARED_ADDED_PARAMS)
 
 
 def test_logic_moved_symbol_for_symbol():
@@ -93,9 +106,12 @@ def test_logic_moved_symbol_for_symbol():
         ast.dump(s, include_attributes=False)
         for s in old.body if not _mentions_deleted(s)
     )
-    new_body = "".join(ast.dump(s, include_attributes=False) for s in new.body)
+    new_body = "".join(
+        ast.dump(s, include_attributes=False)
+        for s in new.body if not _mentions_added(s)
+    )
     assert old_body == new_body, (
-        "тело конструктора изменилось при переносе сверх объявленных удалений"
+        "тело конструктора изменилось сверх объявленных удалений и добавлений"
     )
 
 
@@ -114,8 +130,33 @@ def test_the_signature_is_untouched():
         pytest.skip("конструктор в истории не найден")
     new = _new_init()
     assert new is not None
-    assert ast.dump(old.args) == ast.dump(new.args), (
-        "подпись конструктора изменилась при переносе"
+    trimmed = copy.deepcopy(new.args)
+    added = [a for a in trimmed.args if a.arg in _DECLARED_ADDED_PARAMS]
+    trimmed.args = [a for a in trimmed.args if a.arg not in _DECLARED_ADDED_PARAMS]
+    trimmed.defaults = trimmed.defaults[: len(trimmed.defaults) - len(added)]
+    assert ast.dump(old.args) == ast.dump(trimmed), (
+        "подпись конструктора изменилась сверх объявленных добавлений"
+    )
+
+
+def test_declared_additions_are_appended_and_optional():
+    """Добавка живёт В ХВОСТЕ и со значением по умолчанию.
+
+    Это и есть свойство, которое охраняет сверка подписи: параметры передают
+    позиционно, часть из них одного типа, и вставка в середину подменила бы
+    аргументы молча. Без этой проверки объявление добавления сняло бы стража
+    целиком, а не расширило его на один названный параметр.
+    """
+    new = _new_init()
+    assert new is not None
+    names = [a.arg for a in new.args.posonlyargs + new.args.args]
+    tail = names[len(names) - len(_DECLARED_ADDED_PARAMS):]
+    assert tail == list(_DECLARED_ADDED_PARAMS), (
+        f"объявленные добавления обязаны стоять в хвосте подписи, а стоят: {names}"
+    )
+    assert len(new.args.defaults) >= len(_DECLARED_ADDED_PARAMS), (
+        "добавленный параметр обязан иметь значение по умолчанию — иначе он "
+        "ломает каждый прежний вызов конструктора"
     )
 
 

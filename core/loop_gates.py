@@ -45,6 +45,7 @@ class AgentLoopGates:
         memory: Any
         odd_enabled: Any
         clarification_enabled: Any
+        pending_clarification_path: Any
         episodic_replay: Any
         _stream_on_token: Any
         _last_best_similar_episode: Any
@@ -95,15 +96,23 @@ class AgentLoopGates:
         original text and asking again could only ask forever. See
         docs/CODE_NOTES.md, "Уточнение не выбрасывает вопрос".
         """
-        pending = getattr(self, "pending_clarification_question", None)
+        pending = None
+        if getattr(self, "pending_clarification_path", None) is not None:
+            from core.pending_clarification import pending_clarification
+            pending = pending_clarification(self.pending_clarification_path)
         if not pending:
             return user_question, False
-        self.pending_clarification_question = None
         self.log.log(
             "clarification_resumed",
             {"original_chars": len(pending), "reply_chars": len(user_question)},
         )
         return pending + "\n\n" + user_question, True
+
+    def _park_clarification(self, user_question: str) -> None:
+        """Park the question a clarification was just raised about."""
+        if getattr(self, "pending_clarification_path", None) is not None:
+            from core.pending_clarification import pending_clarification
+            pending_clarification(self.pending_clarification_path, user_question)
 
     def _clarification_gate(self, user_question: str) -> str | None:
         """Уточняющий вопрос, если запрос двусмыслен, иначе `None`."""

@@ -22,6 +22,7 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from core.approval import ApprovalProvider
@@ -104,6 +105,11 @@ class AgentLoopInit:
         experience_retrieval: bool = True,
         episodic_replay: bool = True,
         durable_writes: frozenset[str] | None = None,
+        # ДОБАВЛЕН В ХВОСТ СОЗНАТЕЛЬНО. Конструктор зовут позиционно; вставка
+        # в середину сдвинула бы всё после неё и молча подменила аргументы
+        # одного типа. В хвосте ни один прежний вызов не меняет смысла.
+        # Объявлено в `tests/test_loop_init_split.py` поимённо.
+        pending_clarification_path: Path | None = None,
     ):
         self.registry = registry
         self.policy = policy
@@ -148,6 +154,9 @@ class AgentLoopInit:
         )
         self.memory = memory  # may be None for stateless one-shot use
         self.persistent_store = persistent_store
+        #: Where a clarification parks its question so a LATER PROCESS can
+        #: pick it up; instance state could not, measured 2026-08-09.
+        self.pending_clarification_path = pending_clarification_path
         self.retrieval_policy = retrieval_policy or MemoryRetrievalPolicy()
         self.write_policy = write_policy or MemoryWritePolicy()
         self.memory_write_registry = memory_write_registry

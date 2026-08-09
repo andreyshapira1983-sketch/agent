@@ -218,7 +218,7 @@ def test_the_map_states_the_numbers_the_census_computes() -> None:
         "with_properties": with_properties,
         "without": len(census["nodes"]) - with_properties,
     }
-    topology = re.search(r"находит \*\*(\d+) узла и (\d+) рёбер\*\*", text)
+    topology = re.search(r"находит \*\*(\d+) узл(?:а|ов) и (\d+) рёбер\*\*", text)
     status = re.search(
         r"\*\*(\d+) узлов из (\d+)\*\* имеют хотя бы одно доказанное свойство, "
         r"\*\*(\d+)\*\* — ни одного", text)
