@@ -844,6 +844,15 @@
       "C07": {"state": "CARRIED_FORWARD", "checked": "No named site changed after closure (core/file_request_intent.py, core/loop.py, core/loop_gates.py, core/planner.py, core/replan.py)."}
     },
     "defect_bank": {
+      "stale_docstring_that_misled_the_agents_own_audit": {
+        "found": "2026-08-09, from a live production run of the subject, not from reading",
+        "site": "tests/test_episode_write_error_visibility.py:93",
+        "what": "The docstring of test_a_bad_call_to_the_episode_factory_raises says 'Today this is swallowed into smart_memory_error and the cycle continues as if memory were merely unavailable.' Two lines below it the test asserts `with pytest.raises(TypeError, match=\"unexpected keyword argument\")` and PASSES. The prose describes the pre-repair state in the present tense; the assertion proves the repair holds.",
+        "why_it_matters_more_than_an_ordinary_stale_comment": "It has already misled a reader, and the reader was the agent itself. Asked to self-audit, the agent read this file (file_read is in its journal), took the prose at face value and reported MIR-052 as one of exactly two CONFIRMED current defects — while citing, as its own evidence, the very test that asserts the opposite.",
+        "behavioural_effect": "None on the runtime. The falsehood is in prose read by humans and by the agent.",
+        "scope_note": "tests/ is laboratory, not the frozen subject, so this is repairable without touching production. It is BANKED rather than repaired because the wording is currently the reproduction of the false-positive path, and destroying the reproduction before the operator has seen it would be the worse trade.",
+        "related_but_NOT_the_same": "core/smart_memory.py:1230 and tests/test_completion_marker.py:433 also mention MIR-052 in the present tense, but they describe why the episode factory COERCES rather than raises, which may still be accurate for their own scope. Not verified either way, and deliberately not counted as the same defect."
+      },
       "_rule": "Production is read-only for the mapping program. A defect found while mapping is recorded here with its evidence and left in place. Banking is not triage: nothing here is scheduled, and nothing here has been judged worth fixing.",
       "stale_planner_cache_comment": {
         "found": "2026-08-09, carry-forward pass",
@@ -869,6 +878,20 @@
       }
     },
     "findings": {
+      "_live_production_run_observed_2026_08_09": {
+        "what": "A full production run of the subject on 2026-08-09 at 20:01, driven by the operator with a self-audit question, journalled end to end. Not an experiment of this program: an ordinary run, observed.",
+        "corroborates_C08_U5": "reasoning_action_mismatch fired with unjustified_actions=['list_dir', 'run_tests'] and was banked into the episode as defect_signals. That is the arc C08-U5 measured — the check reaching _defect_signals and the episode — seen live in production rather than in a probe.",
+        "three_things_the_run_knew_and_the_answer_did_not_say": [
+          "confidence_vector relevance_score=0.051 with overall_confidence=0.54. The vector judged the answer barely relevant to the question; the answer's own verification tail reported 'уверенность: средняя' and the 0.051 never surfaced in any interpretable form.",
+          "evidence_budget_trim left memory_chars_kept=0 and memory_ids_kept=[] — all 16 memory sources trimmed to zero characters — while source_registry still counted source_types={'memory': 16} and the answer cited them. Counted as sources, emptied of content.",
+          "knowledge_pipeline recorded memory_saved=0, memory_rejected=103: every one of the 103 extracted claims was refused by the write policy."
+        ],
+        "status": "OBSERVATION, not a unit. Nothing here was mutated, predicted or controlled.",
+        "candidates_it_raises": [
+          "Is relevance_score ever surfaced to a consumer, or is it journal-only? Same question shape as the premature detector (C09-U5), and answerable by enumeration.",
+          "Does a source whose content was trimmed to zero remain citable in the verification pass? If yes, a citation can resolve against an empty excerpt."
+        ]
+      },
       "readiness_blocker_block_had_no_loop_level_observer": {
         "named_state_space": "Which PRODUCER produced the gateway's `block`, and whether the loop obeys each of them. Two producers: kill_switch_active and readiness_blocker (core/gateway_consult.py:118-129).",
         "evaluation_domain": {
