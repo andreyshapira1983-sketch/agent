@@ -6,7 +6,15 @@
   "snapshot": {
     "sha": "f88997395abd7ade9f5a7bbb7e7e57db7a2cd1ee",
     "branch_at_open": "audit/startup-path-and-doc-cleanup",
-    "subject_paths": ["core", "cli", "app", "api", "tools", "agent_tick.py", "main.py"],
+    "subject_paths": [
+      "core",
+      "cli",
+      "app",
+      "api",
+      "tools",
+      "agent_tick.py",
+      "main.py"
+    ],
     "guard": "scripts/qm_subject_freeze.py",
     "guard_last_result": "INTACT (exit 0)",
     "note": "The branch head moves as the laboratory grows. The SUBJECT does not: every claim is about the production runtime as of this SHA."
@@ -14,7 +22,12 @@
   "evaluation_domain_of_this_checkpoint": {
     "code": "f889973",
     "held": [],
-    "observed": ["Python 3.11.9", "Windows 11", "git 2.x", "working tree clean at open"],
+    "observed": [
+      "Python 3.11.9",
+      "Windows 11",
+      "git 2.x",
+      "working tree clean at open"
+    ],
     "durable_state": "none required — the units closed so far read git history and the repository tree only",
     "external": "none — no network, no credentials, no model calls used by the units closed so far"
   },
@@ -25,7 +38,12 @@
       "result": "YES for both conditions. scripts/qm_subject_freeze.py returns INTACT / TRACKED_DRIFT / UNTRACKED_ADDITION / BOTH / UNREADABLE.",
       "evidence": "Bitten against the real repository: an untracked core/_qm_freeze_probe.py gave exit 2; an appended newline in main.py gave exit 1; both together gave exit 3; main.py restored byte-identically (git hash-object 204c6a93 before and after); baseline exit 0 each time. Made durable in tests/test_qm_subject_freeze.py against a throwaway git repository, including the case that motivates it — a new module under core/ while `git diff --stat` against the snapshot stays empty.",
       "anti_vacuity": "The one-operation ratchet was asked directly whether it governs the new file: in scope, one definition counted, six files governed. A guard nobody governs is the failure mode this program cannot afford.",
-      "verdicts": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "PROVEN"}
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "PROVEN"
+      }
     },
     {
       "id": "P01-carry-forward",
@@ -38,22 +56,59 @@
         "MAP: C06's scope said 'caches' for a planner cache deleted at a990e48. Corrected with a dated note.",
         "CODE (banked, not fixed): core/loop_memory_read.py:330 describes the deleted planner cache in the present tense. It was written as the correction of an earlier lying comment and outlived its subject by hours."
       ],
-      "verdicts": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "UNPROVEN"},
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "UNPROVEN"
+      },
       "protection_note": "UNPROVEN deliberately. Nothing mechanically prevents a future production change from staling a carried-forward cluster silently; the carry-forward derivation is a script run by hand, not a guard in the suite. Whether that instrument should exist is a question for a later unit, not an assumption now."
+    },
+    {
+      "id": "P02-anchor-and-writer-integrity",
+      "question": "Do the map's `file:line` anchors still point at what they name, and are its writer sets complete?",
+      "result": "NO on both, on the map's own acceptance case. Four drifted anchors and a writer set of three where eleven exist. Both classes now guarded.",
+      "evidence": "tests/test_cns_anchor_integrity.py was written first and run against the map as it stood: four failures, every one a real pre-existing defect, none synthetic. The four anchors were all in core/loop_attempt.py and all off by exactly the 24 lines a990e48 removed when it deleted the planner cache — one pointed at a blank line, one at a lone ')', one at 'action_spec={' inside _build_plan, a method that reads nothing of that carrier. The writer finding is stronger than drift: _step_trigger_tls recorded three writers with properties.writers reading PROVEN, and the three are exactly the policy_blocked family, the one path C08 had certified. Checked against history — eleven write sites already existed at b4017bb, the commit that wrote three, and core/loop_step_execution.py has not changed since. The record was wrong when written, not stale.",
+      "anti_vacuity": "The census is asserted to find something before completeness is asserted (>=11 for the thread-local slot, exactly 4 for the list, exactly 0 for the dead field). Rule 1's sub-checks were probed directly: the corrected anchor names its carrier and carries .extend(, the old anchor does not name it at all.",
+      "found": [
+        "MAP: four anchors on failure_history describing sites they no longer occupy.",
+        "MAP: _step_trigger_tls understated its producers by 8 of 11. The missing codes are verify_failed, web_empty, timeout, injection_blocked, unknown twice and two variable codes; every one is exercised by tests, so all eight are live sites. injection_blocked is a security-relevant producer that the map's writer set did not contain.",
+        "MAP: the existing anchor guard silently skips any anchor whose text carries a suffix, because its digit test fails on 'path:110 (consume)'. Every _step_trigger_tls anchor was therefore unchecked."
+      ],
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "PROVEN"
+      },
+      "scope_limitation": "Proves that what the map says about writers and anchors matches the code it points at. Does NOT prove the carrier list is complete, nor that a named consumer really consumes.",
+      "reopens": "C08. Its certified arc policy_deny_stops_the_step (M51) rests on the same three writers; the eight unlisted producers of the same carrier were never walked. Per the program's carry-forward rule, a newly discovered producer reopens the unit that generalised from a partial walk."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C08",
-    "why_first": "Of the eleven open clusters it holds the most power over execution and the widest fan-out: planner -> policy gate -> step execution -> tools -> evidence. Its own record names what is still unclosed: the 423-line attempt-loop body has never been read line by line.",
-    "entry_question": "Which values cross into the attempt loop's decisions, and which of them has a consumer whose behaviour changes when the value changes?",
-    "known_before_starting": "Certified already inside C08: post_tool_trust_boundary, failure_history delivery and its arbiter effect at L5, step_failure_to_policy (M47/M48), policy_deny_stops_the_step (M51), gateway_refusal_stops_the_effect (M52/M53), approval_verdict_stops_the_step (M54/M55), artifacts (M57), chain (M58), the planner-skip consumer of local_critique_active (M59, attributed to an existing test), repeat_question_hint delivery (M60, PARTIAL). The planner cache was measured and then deleted. What remains open is the unread body and the live-model consumers the mock cannot observe."
+    "id": "C08-U1-failure-code-delivery",
+    "cluster": "C08 (reopened by P02)",
+    "entry_question": "Is the failure CODE a semantically distinguishable value, or only the fact of failure? Concretely: does anything observe which of the 14 codes a trigger carries?",
+    "why_this_one": "P02 proved the map recorded 3 of 11 producers of _step_trigger_tls, all of them policy_blocked. The other eight carry seven different codes, and core/replan.py gives every code its OWN budget (max_occurrences 1 or 2) and its OWN advice text, so the codes are not interchangeable by construction. C08 certified the one family it walked.",
+    "planned_bite": "Mutate ONE literal — core/loop_step_execution.py:654 code=\"injection_blocked\" -> code=\"unknown\" — and run the suite. Both codes have max_occurrences=1, so the abort still happens and `replan_exhausted` still fires; what changes is the code text.",
+    "prediction_stated_before_measuring": "GREEN. tests/test_tool_output_passes_the_injection_guard.py asserts the CONSEQUENCE (replan_exhausted), deliberately not the event, and tests/test_failure_history_reaches_arbitration.py asserts the PRESENCE of the <failure_context> block, not its content. Nothing found so far asserts a `code=` line.",
+    "consumers_to_diagnose_if_green": [
+      "core/loop_synthesis.py:240 — the code is written into the synthesis prompt as `code={trig.code}`, so delivery is mock-observable at L2 even though the model's use of it is not.",
+      "core/completion_obligation.py:250-253 — failure_codes are disclosure needles matched as substrings against the answer; a different code changes failed_but_reported vs silently_missing only if the answer contains the literal token, which may make this consumer near-unreachable in practice.",
+      "core/replan.py:543 — decision.reason embeds the code; journal-only for a budget-1 type, because advice_for_planner is read only on the `continue` branch."
+    ],
+    "expected_shape_of_the_finding": "For budget-1 codes the control surface may be genuinely thin. That is a semantic result to state, not a hole to assume: the green must be diagnosed against the eight-way scale before anything is called unprotected."
   },
-  "last_proven_causal_front": "C00-C07 carried forward to S; inside C08 the certified arcs listed above stand, with the attempt-loop body unread.",
+  "last_proven_causal_front": "C00-C07 carried forward to S. The 628-line core/loop_attempt.py has now been read end to end, which closes C08's standing 'body not read line by line' item; the read produced four further candidates recorded in open_questions. Inside C08 the previously certified arcs stand, but policy_deny_stops_the_step is reopened as a claim about ONE code family rather than about the carrier.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
-    "C00 and C03 site sets are over-approximations recovered from test imports. Tightening them is admissible work but has not been done; the over-approximation is safe for staleness and unsafe for coverage claims."
+    "C00 and C03 site sets are over-approximations recovered from test imports. Tightening them is admissible work but has not been done; the over-approximation is safe for staleness and unsafe for coverage claims.",
+    "C08 candidate: cheap_path_active crosses out of the attempt loop to FOUR consumers (loop_evidence_chain:309, loop_synthesis:584 and :641, loop.py:684), and its own docstring at loop_attempt.py:83-84 names three — omitting the only one that reaches durable state (skip_consolidation -> memory consolidation). Three of the four have two-pole end-to-end tests; the lean_context wire at :641 is a disjunction with adapt_context and may be masked.",
+    "C08 candidate: attempt_failures is discarded on the SUCCESS path. A plan where one step fails and another produces an artifact breaks at loop_attempt.py:441 before the extend at :448, so the failed step's trigger never enters failure_history. The obligation arbiter at loop_run_tail.py:301/315 reads failure codes; step.status == 'failed' may mask the loss at completion_obligation.py:250.",
+    "C08 candidate: inconsistent failure semantics inside one method — two naked `except Exception: pass` (loop_attempt.py:335, :359) beside two handlers that report through _sensor_failed (:470, :627).",
+    "C08 candidate: force_file_hint_read_when_explicit is applied to every planner substitution EXCEPT the forced_sources branch on attempt 1."
   ],
   "changed_files_this_checkpoint": [
     "scripts/qm_subject_freeze.py (new)",
@@ -62,11 +117,12 @@
     "knowledge/maps/cns_model.json (quantum_cns._program, .carry_forward, .defect_bank, .coverage; C06 scope correction; epilogue on the stale-comment record)"
   ],
   "checks_run_on_this_tree": {
+    "_note": "Re-stated after P02; the suite line below belongs to the tree of P00/P01 and is re-run before the P02 commit.",
     "scripts/qm_subject_freeze.py": "INTACT",
     "scripts/qm_link_check.py": "GREEN",
     "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
     "ruff_debt": "399 findings repo-wide against a baseline of 405; the two new files contribute none",
-    "full_suite": "7277 passed, 1 xfailed, pytest exit 0, 349s",
+    "full_suite": "P02 tree: 7285 passed, 1 xfailed, pytest exit 0, 341s. (P00/P01 tree: 7277 passed, exit 0.)",
     "_reporting_trap_repeated": "The FIRST run of this suite reported 'exit code 0' while pytest had actually failed test_lint_debt_does_not_grow (406 > 405). The zero came from `tail` at the end of a pipe, not from pytest — the same trap already recorded once in this project's history. The rerun above pipes to a file and records $? explicitly."
   }
 }
