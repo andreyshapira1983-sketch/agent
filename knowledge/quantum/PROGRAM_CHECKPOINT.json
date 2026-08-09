@@ -480,17 +480,35 @@
         "PROTECTION": "NEGATIVE before, PROVEN after"
       },
       "scope_limitation": "The wiring assertion reads the call site statically. A full turn reaching the catalogue branch under a partial allowlist would be stronger and was not written."
+    },
+    {
+      "id": "C09-closure-review",
+      "cluster": "C09",
+      "question": "With four units done, what does C09 still owe?",
+      "result": "Not closable. Two of the five values on its decision surface are untouched and a third is accepted on the code's own word.",
+      "bookkeeping_done": [
+        "C09 gains partial_walk and open in the ledger; it had neither, so the cluster read as untouched while four units had landed on it.",
+        "Three open items named: rank_chain itself (never entered, though its output reaches the synthesis prompt and the source registry); the knowledge pipeline's own contract (this cluster proved the three permissions REACH it, not what it does with them); and _premature_keyword_fired, recorded as a non-decision on the strength of its own docstring rather than a walked consumer.",
+        "path_ledger.next_edge re-derived to name the admissible fronts: those three items, C08's remainder, or C10."
+      ],
+      "verdicts": {
+        "REACHABILITY": "N/A",
+        "CAUSALITY": "N/A",
+        "SEMANTICS": "N/A",
+        "PROTECTION": "N/A"
+      },
+      "note": "A bookkeeping unit. Nothing measured. The one judgement it makes is that a cluster is not closed because its best-lit half is finished — the same correction C08's closure review had to make."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C09-closure-or-C10",
+    "id": "C09-U5-premature-detector-consumers",
     "cluster": "C09",
-    "entry_question": "With the three folds and the two sink permissions closed, what remains in C09 — and is the cluster closable or does the ranking half still owe evidence?",
-    "why_this_one": "Same shape as the C08 closure review, which corrected a debt statement that had been carried as a page count. Re-derive C09's remainder from the registry rather than from this session.",
-    "planned_work": "List what the four C09 units covered against the five-value decision surface recorded in c09_catalogue_decision_surface. rank_chain itself and the knowledge pipeline's own contract were never entered; decide whether they belong to C09 or to their own subjects."
+    "entry_question": "_premature_keyword_fired is recorded as a shadow that decides nothing. Is that measured, or is it the code's claim about itself?",
+    "why_this_one": "It is the cheapest of the three open items and the one most likely to be wrong in an interesting way — this program has already found two places where a value described as observational reached a consumer that acted on it. The other two items are larger subjects that may not belong to this cluster at all.",
+    "planned_probe": "Follow the returned flag from _rank_and_catalog_evidence to every consumer, and mutate it to fire always. If nothing changes but a journal payload, the code's claim is confirmed by measurement rather than accepted."
   },
-  "last_proven_causal_front": "C00-C07 carried forward. C08's carrier debt discharged. C09: three folds guarded, decision surface enumerated, and both catalogue sink permissions now guarded at the derivation. rank_chain and the knowledge pipeline's own contract are untouched.",
+  "last_proven_causal_front": "C00-C07 carried forward. C08's carrier debt discharged, its remainder is actuation and mock-blind consumers. C09: fold half finished and guarded, catalogue permissions guarded at the derivation, three items still open and named in the ledger.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
@@ -510,7 +528,7 @@
     "scripts/qm_subject_freeze.py": "INTACT",
     "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
     "ruff_debt": "399 repo-wide against a baseline of 405",
-    "full_suite": "C09-U4 tree: 7313 passed, 5 xfailed, pytest exit 0, 326s"
+    "full_suite": "C09 closure-review tree: 7313 passed, 5 xfailed, pytest exit 0, 326s"
   },
   "units_completed_count": 16
 }
