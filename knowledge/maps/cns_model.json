@@ -869,6 +869,17 @@
       }
     },
     "findings": {
+      "actuation_outcome_space_is_six_wide_and_certified_at_three": {
+        "named_state_space": "GatewayDecision.outcome from core/actuation_gateway.py:evaluate. SIX values, enumerated from the code rather than from the record: passthrough (:121, not an effectful tool), block (:104, hard stop), deny (:137, policy), escalate (:144, policy), simulate (:153, dry run), allow (:160).",
+        "what_the_record_claims": "C08's partial_walk reads: gateway_refusal_stops_the_effect CERTIFIED (M52, M53) — both refusals on the effectful path had zero observers while only `simulate` was covered end to end. That accounts for simulate plus TWO refusals: at most three of six. The record does not say WHICH two, and identifying them from the M52/M53 tests is the first step of the next unit rather than a guess made here.",
+        "the_shape_it_repeats": "This is the P02 shape exactly. There, three certified policy_blocked writers stood for a set of eleven. Here, two certified refusals stand for an outcome space of six, and the record's own wording — 'both refusals' — reads as the set rather than as the walk.",
+        "provenance_collapse_inside_one_value": "The `block` outcome is produced by collect_hard_stop_reasons (core/gateway_consult.py:103) from at least three independent sources: a kill switch whose status is itself computed from the budget snapshot, and readiness blockers gated by check_readiness. Distinct causes, one outcome value. Whether any consumer distinguishes them is unmeasured.",
+        "a_second_entry_point_the_record_never_mentions": "ActuationGateway.evaluate_self_apply (core/actuation_gateway.py:167-193) is a separate public entry to the same gateway. It appears in no C08 certification.",
+        "method": "Static census only, as in C08-U6 — no mutation, no suite. It establishes the DEBT precisely; it establishes nothing about behaviour.",
+        "verdict": {"REACHABILITY": "PROVEN for the enumeration", "CAUSALITY": "N/A", "SEMANTICS": "N/A", "PROTECTION": "N/A"},
+        "why_this_frontier_was_derived_and_not_asserted": "Under §22 dominance, effectful actuation and C09 cataloguing were INCOMPARABLE at the C08->C09 transition: actuation wins on execution authority and world-state consequence, C09 won on evidence gap because it had zero units. C09 now has six; the evidence-gap advantage is spent; actuation dominates and the frontier is a singleton. The earlier transition skipped this derivation and asserted 'actuation is largely certified' from the record — the same record this census now shows to be a walk written down as a set.",
+        "no_code_change": "None. Production is read-only and nothing here is a defect claim."
+      },
       "the_ranker_is_consumed_as_a_classifier": {
         "named_state_space": "The ORDER of SourceRankingReport.ranks — the thing rank_chain is named for.",
         "method": "COMPLETE ENUMERATION, the instrument C09-U5 established, with its three admissibility conditions verified rather than assumed: the attribute names are unique and unshadowed across production; the only indirect accesses are three getattr sites and all three read realtime_required, not ranks; and the derived key was enumerated too.",
