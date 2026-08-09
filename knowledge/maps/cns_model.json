@@ -869,6 +869,27 @@
       }
     },
     "findings": {
+      "injection_budget_decides_visibility": {
+        "named_state_space": "FailureBudget.max_occurrences for injection_blocked — one integer in core/replan.py:379, currently 1.",
+        "evaluation_domain": {
+          "code": "f889973",
+          "held": ["max_replan_attempts=3, the SHIPPED default", "single-step plan through FakePlanner, which filters its own sources against forbidden_actions exactly as the real planner's sanitiser would", "one echo tool returning a contaminated payload", "memory=None"],
+          "observed": ["FakeLLM synthesizer", "the per-type rule decides here; at max_replan_attempts=1 the GLOBAL cap pre-empts it and this constant becomes invisible"],
+          "durable_state": "temporary workspace, no stores",
+          "external": "none"
+        },
+        "the_stated_contract": "The comment above the entry says blocked content must not be retried with the same tool and query, because it would just fetch the same poisoned page.",
+        "what_the_measurement_showed_instead": "That half is held by a DIFFERENT mechanism. requires_different_action=True puts (tool, args) on the forbidden list, so with the budget raised to 2 the poisoned call is not repeated at all: attempt 2's plan comes back empty after the filter, and the tool is invoked once, not twice. The budget is not what prevents the repeat.",
+        "what_the_budget_actually_decides": "Whether the user is told. With the budget at 2 the empty second plan takes the SUCCESS branch of the attempt loop (core/loop_attempt.py:441 reads an empty plan as an intentional zero-tool plan), so replan_exhausted is never set, the gate at core/loop_synthesis.py:637 hands the synthesizer None, and the answer is composed from general knowledge with no failure context and the word 'injection' nowhere in the prompt. Both poles measured on the same probe: budget 1 gives replan_exhausted=True, <failure_context> present, 'injection' present; budget 2 gives all three False.",
+        "mutation": "ONE integer, core/replan.py:379, max_occurrences 1 -> 2.",
+        "observed_consequence": "FULL SUITE GREEN: 7286 passed, 1 xfail, exit 0. Nothing observed it — including the delivery test added the same day, because that test holds max_replan_attempts=1 where the global cap pre-empts the per-type rule. The same evaluation-domain trap twice in one cluster.",
+        "green_mutation_diagnosis": "Not unreachable, not vacuous. PARTIALLY masked — the repetition half of the stated contract is genuinely held by requires_different_action, so the comment's stated fear does not materialise. NOT masked for the disclosure half: no other mechanism tells the answer that an injection was blocked. Classification: a real unprotected distinction, on a security-relevant constant, whose true role is disclosure rather than the retry limiting its own comment describes.",
+        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "NEGATIVE"},
+        "protection_status": "Was NEGATIVE across 7286 tests. Now held by tests/test_tool_output_passes_the_injection_guard.py::test_under_the_shipped_cap_a_blocked_injection_still_reaches_the_answer, which asserts the stop comes from the injection budget by name so a stop produced by the global cap cannot satisfy it.",
+        "scope_limitation": "One constant of fourteen. The other thirteen budgets are unmeasured, and no claim is made about what a live model does with the failure context once it arrives.",
+        "spawned_candidate": "core/loop_attempt.py:441 treats an empty plan as an intentional zero-tool plan. A plan emptied by the forbidden-action filter is indistinguishable there from a planner that chose no tools — the same collapse this finding rode on. Registered UNPROVEN, unbitten.",
+        "no_code_change": "None proposed. Production is read-only for the mapping program, and the constant is correct as it stands; what was missing was an observer."
+      },
       "failure_trigger_code": {
         "named_state_space": "ReplanTrigger.code — 14 values (core/replan.py ALL_FAILURE_TYPES), carried by _step_trigger_tls out of core/loop_step_execution.py and accumulated in failure_history.",
         "evaluation_domain": {
