@@ -460,22 +460,37 @@
         "PROTECTION": "UNPROVEN"
       },
       "note": "A read, not a bite. Nothing is claimed beyond where these values are and what they gate."
+    },
+    {
+      "id": "C09-U4-catalogue-sink-permissions",
+      "cluster": "C09",
+      "question": "may_source_registry and may_knowledge each gate a durable write. Is either observed, or only the flag?",
+      "result": "Neither was observed at the DERIVATION. A one-string swap left 7307 tests green. Now guarded behaviour-plus-wiring.",
+      "prediction": "GREEN — stated after establishing that no test uses a partial allowlist, and that the two answers are equal under every non-partial one.",
+      "premise_verified_first": "The gate was measured across all four allowlist shapes: None allows both, frozenset() denies both, and only a partial allowlist makes them differ.",
+      "mutation": "ONE string at core/loop.py:312 — may_knowledge asks about source_registry.",
+      "observed": "GREEN, 7307 passed, exit 0. Restore byte-identical (8671c8f1).",
+      "what_the_neighbour_could_not_see": "test_catalogue_core_is_shared.py::test_permissions_reach_the_pipeline covers the hop AFTER this one and supplies the booleans itself, so a swap upstream is invisible to it.",
+      "my_own_trap_recorded": "The behavioural tests were written first and did NOT redden on the swap: they call _durable_learning_suppressed directly, exercising a restatement of core/loop.py rather than core/loop.py. Same shape this project recorded once before, with a replay gate restated inside a test instead of called. Caught by the break-did-not-redden rule.",
+      "made_durable": "tests/test_catalogue_permissions_name_their_own_sink.py — behaviour (a partial allowlist permits only its own sink, both directions, plus a guard naming the configurations that cannot discriminate) and wiring (an AST assertion that each derivation passes its own name). The pairing test_verified_memory_gate_follows_gateway_path.py already uses; not a body-equivalence ratchet.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "NEGATIVE before, PROVEN after"
+      },
+      "scope_limitation": "The wiring assertion reads the call site statically. A full turn reaching the catalogue branch under a partial allowlist would be stronger and was not written."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C09-U4-catalogue-sink-permissions",
+    "id": "C09-closure-or-C10",
     "cluster": "C09",
-    "entry_question": "may_source_registry and may_knowledge each gate a write to durable state — the source registry and long-term memory. Is either effect observed, or only the flag?",
-    "why_this_one": "They are the thin ones by coverage (two test files each) and the powerful ones by consequence, and the surface read has already located them precisely.",
-    "planned_probe": "Establish first what a run with each permission on and off actually writes to disk — the sink, not the flag. Then bite the wiring. The pattern to test against is the unattended gate's: behaviour AND call-site wiring, since either alone has already been shown insufficient in this cluster.",
-    "method_notes_carried_forward": [
-      "Check for a test that DISCRIMINATES, not one that logs an event name — two predictions have already died on that.",
-      "Verify the premise on a shim or probe before predicting.",
-      "An AST body-equivalence ratchet reddening is NOT behavioural protection; C06 ruled on that shape."
-    ]
+    "entry_question": "With the three folds and the two sink permissions closed, what remains in C09 — and is the cluster closable or does the ranking half still owe evidence?",
+    "why_this_one": "Same shape as the C08 closure review, which corrected a debt statement that had been carried as a page count. Re-derive C09's remainder from the registry rather than from this session.",
+    "planned_work": "List what the four C09 units covered against the five-value decision surface recorded in c09_catalogue_decision_surface. rank_chain itself and the knowledge pipeline's own contract were never entered; decide whether they belong to C09 or to their own subjects."
   },
-  "last_proven_causal_front": "C00-C07 carried forward. C08's carrier debt discharged. C09: all three folds measured and guarded; the ranking and cataloguing decision surface is enumerated, with the two sink permissions identified as the next unit.",
+  "last_proven_causal_front": "C00-C07 carried forward. C08's carrier debt discharged. C09: three folds guarded, decision surface enumerated, and both catalogue sink permissions now guarded at the derivation. rank_chain and the knowledge pipeline's own contract are untouched.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
@@ -495,7 +510,7 @@
     "scripts/qm_subject_freeze.py": "INTACT",
     "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
     "ruff_debt": "399 repo-wide against a baseline of 405",
-    "full_suite": "C09-U3 tree: 7307 passed, 5 xfailed, pytest exit 0, 327s"
+    "full_suite": "C09-U4 tree: 7313 passed, 5 xfailed, pytest exit 0, 326s"
   },
   "units_completed_count": 16
 }
