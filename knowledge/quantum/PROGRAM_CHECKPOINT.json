@@ -554,26 +554,37 @@
       },
       "no_test_added": "No behaviour depends on the order, so there is nothing to protect. The INVARIANCE is unguarded — a later consumer reading ranks[0] would make the order semantic silently — and that is registered as a candidate, not claimed here.",
       "validation": "Ledger-only change: targeted guards (test_cns_model.py, test_cns_anchor_integrity.py) and the subject guard. No full suite, which for a ledger-only change establishes nothing."
+    },
+    {
+      "id": "C08-U10-actuation-outcome-census",
+      "cluster": "C08",
+      "question": "Is the actuation certification a claim about the outcome SET, or about the paths a walk happened to touch?",
+      "result": "About the walk. The outcome space is SIX values wide; the record accounts for at most three.",
+      "evaluation_domain_class": "RUNTIME_DOMAIN_FREE",
+      "evaluation_domain_note": "Static census over core/actuation_gateway.py and core/gateway_consult.py at f889973. No runtime domain.",
+      "the_six": "passthrough (:121), block (:104), deny (:137), escalate (:144), simulate (:153), allow (:160).",
+      "the_record": "gateway_refusal_stops_the_effect CERTIFIED (M52, M53) — 'both refusals ... while only simulate was covered end to end'. Simulate plus two refusals = at most three of six. WHICH two is not stated and is deliberately not guessed here.",
+      "provenance_collapse": "The `block` outcome is produced by collect_hard_stop_reasons from at least three independent sources — a kill switch whose status derives from the budget snapshot, and readiness blockers gated by check_readiness. Distinct causes, one value. Unmeasured whether any consumer distinguishes them.",
+      "unmentioned_entry_point": "ActuationGateway.evaluate_self_apply (:167-193) appears in no C08 certification.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN for the enumeration",
+        "CAUSALITY": "N/A",
+        "SEMANTICS": "N/A",
+        "PROTECTION": "N/A"
+      },
+      "method_note": "Census, not a bite. It establishes the debt precisely and nothing about behaviour — the same instrument and the same limits as C08-U6."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C08-U10-actuation-producer-census",
+    "id": "C08-U11-identify-and-close-the-uncertified-outcomes",
     "cluster": "C08",
-    "entry_question": "The actuation gateway and the approval path are recorded as certified by M52/M53 and M54/M55. Is that a claim about the producer SET, or about the paths that walk certified them?",
-    "why_this_one_now_derives_rather_than_asserts": "Under §22 dominance, effectful actuation and C09 cataloguing were INCOMPARABLE at the C08->C09 transition: actuation wins on execution authority and world-state consequence, C09 won on evidence gap because it had zero units. C09 now has six. The evidence-gap advantage is spent, so actuation dominates and the frontier is a singleton. This is the derivation the earlier transition skipped.",
-    "the_precedent_it_applies": "P02 proved that _step_trigger_tls's record named three writers where eleven exist, because a single certified walk had been written down as the carrier's set. The actuation record has exactly the same shape — a small number of certified mutations standing for a path — and has never been censused.",
-    "planned_probe": "Static census first, as in C08-U6: enumerate every site that can refuse or permit an effect, and compare against what M52-M55 actually certified. Only then decide between mutation and enumeration.",
-    "method_notes_carried_forward": [
-      "Check for a test that DISCRIMINATES, not one that logs an event name.",
-      "Verify the premise before predicting; explain any zero result before interpreting it.",
-      "An AST body-equivalence ratchet is not behavioural protection.",
-      "A test that restates the code instead of calling it will not redden.",
-      "Full mutant suite only when the conclusion depends on the observer SET rather than on observer existence.",
-      "Enumeration replaces the full suite for PRODUCTION consumers under three conditions; never for TEST observers."
-    ]
+    "entry_question": "Which two of the six gateway outcomes did M52/M53 certify, and does any observer distinguish the remaining three?",
+    "first_step": "Read the M52/M53 tests to identify the two certified refusals BY NAME. The census deliberately refused to guess; this is where the guess is replaced by evidence.",
+    "then": "For each uncertified outcome, decide between enumeration and mutation by the rule now in force — enumeration for production consumers under its three conditions, mutation plus a full suite only when the conclusion depends on the observer SET rather than on observer existence.",
+    "watch_for": "The block outcome collapses at least three independent producers into one value. If a consumer distinguishes the reasons, that is a split; if none does, that is a quotient — and either way the observer set must be named."
   },
-  "last_proven_causal_front": "C00-C07 carried forward. C08's carrier debt discharged; its actuation record is now the named next subject. C09: three folds guarded, catalogue permissions guarded at the derivation, the premature detector and the rank ORDER both closed by enumeration as journal-only. C09's own scope is exhausted apart from the knowledge pipeline's contract, which is a separate subject.",
+  "last_proven_causal_front": "C00-C07 carried forward. C09's own scope exhausted apart from the knowledge pipeline's contract. C08 reopened on actuation: the outcome space is six wide, the record accounts for at most three, one outcome collapses three producers, and a second entry point is uncertified.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
