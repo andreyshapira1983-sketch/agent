@@ -63,7 +63,18 @@ def _events(log_path: Path) -> list[dict]:
     return out
 
 
-def _run(workspace: Path, payload: str) -> tuple[_EchoTool, list[dict], str, FakeLLM]:
+def _run(
+    workspace: Path, payload: str, *, max_replan_attempts: int = 1
+) -> tuple[_EchoTool, list[dict], str, FakeLLM]:
+    """`max_replan_attempts` is part of the EVALUATION DOMAIN, not decoration.
+
+    At 1 the global replan cap fires on the first failure and the per-type
+    budget in `core/replan.py` is never consulted — measured, not assumed:
+    the decision reason reads "global replan cap reached (1/1)". At the
+    shipped default of 3 the same run reports "injection_blocked budget
+    exhausted (1/1)" instead. Two different mechanisms produce the same
+    stop, and a test that holds the first is blind to the second.
+    """
     tool = _EchoTool(payload)
     registry = ToolRegistry()
     registry.register(tool)
@@ -71,7 +82,7 @@ def _run(workspace: Path, payload: str) -> tuple[_EchoTool, list[dict], str, Fak
         responses=[
             "Conclusion: ok. [stub:t]\nFacts:\n- ran [stub:t]\n"
             "Sources:\n1. stub:t - t\nConfidence: medium\nUnverified: nothing\n"
-        ]
+        ] * 3
     )
     trace_id = new_trace_id()
     logger = TraceLogger(trace_id=trace_id, log_dir=workspace / "logs", verbose=False)
@@ -86,7 +97,7 @@ def _run(workspace: Path, payload: str) -> tuple[_EchoTool, list[dict], str, Fak
         llm=llm,
         logger=logger,
         memory=None,
-        max_replan_attempts=1,
+        max_replan_attempts=max_replan_attempts,
     )
     answer = agent.run("проверь вывод инструмента")
     return tool, _events(log_path), answer, llm
@@ -146,6 +157,55 @@ def test_the_refusal_travels_as_injection_blocked_and_not_merely_as_a_failure(
     assert "code=injection_blocked" in prompts, (
         "the synthesizer was told a step failed but not that the cause was a "
         "blocked injection; the trigger's code is what carries that"
+    )
+
+
+def test_under_the_shipped_cap_a_blocked_injection_still_reaches_the_answer(
+    tmp_path: Path,
+) -> None:
+    """`max_occurrences=1` is what makes the block VISIBLE, not just unrepeated.
+
+    The budget's own comment says blocked content must not be retried with the
+    same tool and query. Measured: that half is held by a different mechanism.
+    `requires_different_action=True` puts (tool, args) on the forbidden list, so
+    even with the budget raised to 2 the poisoned call is not repeated — the
+    planner's sources are filtered and attempt 2 comes back empty.
+
+    What the budget actually decides is whether the user is told. Raised to 2,
+    the empty second plan takes the SUCCESS branch of the attempt loop, the run
+    never sets `replan_exhausted`, the gate at loop_synthesis.py:637 therefore
+    hands the synthesizer None, and the answer is composed from general
+    knowledge with no failure context and the word "injection" nowhere in the
+    prompt. A blocked prompt-injection turns into a confident ordinary answer.
+
+    All 7286 tests stayed green under that mutation (2026-08-09), including the
+    delivery test above — which holds `max_replan_attempts=1`, where the global
+    cap pre-empts the per-type rule and the budget is never consulted. That is
+    why this test names the shipped default explicitly.
+    """
+    _tool, events, _answer, llm = _run(tmp_path, CONTAMINATED, max_replan_attempts=3)
+
+    names = [e.get("event") for e in events]
+    assert "injection_blocked" in names, (
+        "precondition: the scan must actually have blocked something"
+    )
+    exhausted = [e for e in events if e.get("event") == "replan_exhausted"]
+    assert exhausted, (
+        "a blocked injection must end the attempt loop under the shipped cap, "
+        f"not continue into a general-knowledge answer; events: {sorted({n for n in names if n})}"
+    )
+    assert "injection_blocked budget exhausted" in str(
+        exhausted[0]["payload"].get("decision_reason", "")
+    ), (
+        "the stop must come from the injection budget itself — a stop produced "
+        "by the global cap would leave this constant untested, which is exactly "
+        "how it went unprotected"
+    )
+
+    prompts = " || ".join(call["user"] for call in llm.calls)
+    assert "<failure_context>" in prompts and "injection" in prompts.casefold(), (
+        "the synthesizer must be told WHY it has no evidence; without this the "
+        "run answers from general knowledge as if the tool had never been called"
     )
 
 

@@ -117,19 +117,53 @@
         "PROTECTION": "NEGATIVE -> now PROVEN at delivery"
       },
       "scope_limitation": "One of fourteen codes, one of eleven write sites, delivery only. The other thirteen codes are unmeasured and the per-type budget effect was never exercised — the global cap fired first."
+    },
+    {
+      "id": "C08-U2-per-type-budget",
+      "cluster": "C08",
+      "question": "Does the per-type budget decide anything, and if so what?",
+      "result": "Yes, and not what its own comment says. The injection budget decides DISCLOSURE, not repetition. Unprotected across 7286 tests; now held.",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [
+          "max_replan_attempts=3 — the SHIPPED default, chosen deliberately after C08-U1 showed that 1 pre-empts the per-type rule",
+          "FakePlanner, which filters its own sources against forbidden_actions as the real sanitiser would",
+          "one echo tool with a contaminated payload",
+          "memory=None"
+        ],
+        "observed": [
+          "FakeLLM synthesizer",
+          "at max_replan_attempts=1 the global cap wins and this constant is invisible"
+        ],
+        "durable_state": "temporary workspace, no stores",
+        "external": "none"
+      },
+      "two_mutations": [
+        "code=\"injection_blocked\" -> \"verify_failed\" (budget 2) under the default cap: the run took a SECOND attempt and touched the world twice. Full suite with my own delivery guard deselected: 7285 passed, exit 0 — before this program nothing observed that the failure code decides how many times the agent acts.",
+        "max_occurrences 1 -> 2 for injection_blocked: full suite 7286 passed, exit 0."
+      ],
+      "the_surprise": "The budget's comment says blocked content must not be retried with the same tool and query. Measured, that half is held by a DIFFERENT mechanism: requires_different_action=True forbids the (tool, args) pair, so at budget 2 the poisoned call is not repeated — attempt 2's plan comes back empty. What the budget actually decides is whether the user is told: the empty plan takes the SUCCESS branch, replan_exhausted is never set, loop_synthesis.py:637 withholds the failure context, and a blocked prompt-injection becomes a confident general-knowledge answer. Both poles measured: budget 1 gives replan_exhausted / <failure_context> / 'injection' all present, budget 2 all absent.",
+      "my_own_trap_recorded": "The delivery guard added earlier the same day could not see this, because it holds max_replan_attempts=1 where the global cap pre-empts the per-type rule. The same evaluation-domain trap twice inside one cluster — the first time in the subject, the second time in my own instrument.",
+      "made_durable": "tests/test_tool_output_passes_the_injection_guard.py::test_under_the_shipped_cap_a_blocked_injection_still_reaches_the_answer. It asserts the stop comes from the injection budget BY NAME, so a stop produced by the global cap cannot satisfy it. Fail-before verified; restore byte-identical (core/replan.py 80c00c36, core/loop_step_execution.py 4eaa5500).",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "NEGATIVE -> now PROVEN"
+      },
+      "spawned_candidate": "core/loop_attempt.py:441 reads an empty plan as an intentional zero-tool plan. A plan emptied by the forbidden-action filter is indistinguishable there from a planner that chose no tools. UNPROVEN, unbitten — registered in the registry finding."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C08-U2-per-type-budget",
+    "id": "C08-U3-empty-plan-provenance",
     "cluster": "C08",
-    "entry_question": "Does the per-type budget in core/replan.py actually decide anything, or does the global cap always fire first in reachable configurations?",
-    "why_this_one": "C08-U1 could not exercise it: with max_replan_attempts=1 the global cap wins and decision_reason read 'global replan cap reached (1/1)'. A budget that never decides is a different finding from a budget that decides silently, and the codes' max_occurrences (1 for file_not_found, approval_unavailable, injection_blocked and unknown; 2 for the other ten) is the only place the fourteen values differ in CONTROL rather than in text.",
-    "planned_probe": "Raise max_replan_attempts above the smallest per-type budget and drive the same failure type twice, then read decision_reason. Then bite: change one budget's max_occurrences and predict which pole moves.",
-    "watch_for": "The trap C08-U1 walked into and named: a domain where the intended mechanism is pre-empted by an unrelated one. State the held configuration before claiming anything about S.",
-    "planned_bite_refined": "Confirmed read-only before opening the unit: under the DEFAULT cap of 3 the same run reports decision_reason 'injection_blocked budget exhausted (1/1)', so the per-type rule does decide and only the held max_replan_attempts=1 of C08-U1 pre-empted it. The sharper bite is therefore code=\"injection_blocked\" -> code=\"verify_failed\" (budget 2) under the default cap: predict the run no longer aborts on the first occurrence but takes a SECOND attempt — a control difference at L5 rather than a text difference."
+    "entry_question": "Can the attempt loop tell an intentional zero-tool plan from a plan the forbidden-action filter emptied?",
+    "why_this_one": "It is the collapse C08-U2 rode on, it is now measured rather than suspected, and it sits on the success/failure boundary of the whole attempt loop — the single condition at core/loop_attempt.py:441 that decides whether a run reports failure at all.",
+    "planned_probe": "Drive a run whose second-attempt plan is emptied ONLY by the forbidden filter, and compare its observable outcome against a run whose planner genuinely returned no sources. If the two are indistinguishable to every consumer, the space is collapsed; name the observers before claiming it.",
+    "watch_for": "plan_parse_failed is already treated as a third case at the same site, so the site has a precedent for distinguishing provenance — check whether that precedent generalises before proposing anything."
   },
-  "last_proven_causal_front": "C00-C07 carried forward. core/loop_attempt.py read end to end. Inside C08 the trigger CODE is now proven to reach the synthesis prompt and is guarded there for injection_blocked; the per-type budget consumer remains unexercised.",
+  "last_proven_causal_front": "C00-C07 carried forward. core/loop_attempt.py read end to end. Inside C08: the trigger CODE reaches the synthesis prompt and is guarded; the per-type budget is proven to decide DISCLOSURE for injection_blocked and is guarded under the shipped cap. The empty-plan provenance collapse at loop_attempt.py:441 is measured but unbitten.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
@@ -148,8 +182,10 @@
   "checks_run_on_this_tree": {
     "scripts/qm_subject_freeze.py": "INTACT",
     "ruff_debt": "399 repo-wide against a baseline of 405",
-    "full_suite": "C08-U1 tree: 7286 passed, 1 xfailed, pytest exit 0, 336s",
-    "mutant_run": "the same suite on the mutant (code=\"unknown\"): 7285 passed, exit 0 — the green that made the finding",
-    "_reporting_trap_repeated": "The first suite run of this program reported 'exit code 0' while pytest had failed: the zero came from `tail` at the end of a pipe. Every run since writes to a file and records $? explicitly."
+    "full_suite": "C08-U2 tree: 7287 passed, 1 xfailed, pytest exit 0, 325s",
+    "mutant_runs": [
+      "code -> verify_failed, own guard deselected: 7285 passed, exit 0",
+      "injection budget 1 -> 2: 7286 passed, exit 0"
+    ]
   }
 }
