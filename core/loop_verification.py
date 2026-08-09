@@ -169,8 +169,9 @@ class AgentLoopVerification:
         # P1/P2 — confidence vector. Decompose the scalar gate into
         # three axes (evidence / coherence / relevance) so triage
         # can target the right subsystem when something is off.
-        # Logging only.
+        # Reported to the operator through the verification summary.
         try:
+            self.last_confidence_vector = None  # never a previous run's axes
             from core.confidence_vector import compute_vector
             _cv = compute_vector(
                 report=report,
@@ -178,6 +179,10 @@ class AgentLoopVerification:
                 question=user_question,
                 answer=draft_answer,
             )
+            # Kept on the loop, not only logged: the summary reports the
+            # relevance axis. Reset per run in `loop.py` so a previous run's
+            # vector can never be shown beside this run's answer.
+            self.last_confidence_vector = _cv
             self.log.log("confidence_vector", _cv.to_log_payload())
         except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
             self._sensor_failed("confidence_vector", exc)

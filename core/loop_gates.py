@@ -87,6 +87,24 @@ class AgentLoopGates:
                 return _odd.message
         return None
 
+    def _resume_clarification(self, user_question: str) -> tuple[str, bool]:
+        """Re-attach the question a clarification asked ABOUT to the answer.
+
+        Returns the effective question and whether this run is a resumption —
+        a resumed run is never re-gated, because the trigger lives in the
+        original text and asking again could only ask forever. See
+        docs/CODE_NOTES.md, "Уточнение не выбрасывает вопрос".
+        """
+        pending = getattr(self, "pending_clarification_question", None)
+        if not pending:
+            return user_question, False
+        self.pending_clarification_question = None
+        self.log.log(
+            "clarification_resumed",
+            {"original_chars": len(pending), "reply_chars": len(user_question)},
+        )
+        return pending + "\n\n" + user_question, True
+
     def _clarification_gate(self, user_question: str) -> str | None:
         """Уточняющий вопрос, если запрос двусмыслен, иначе `None`."""
         # 2c. Clarification Policy (§3 Clarification Policy).

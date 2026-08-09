@@ -80,6 +80,7 @@ class AgentLoopResponseDeciders:
         last_provenance: Any
         last_self_analysis: Any
         last_source_ranking: Any
+        last_confidence_vector: Any
         last_role_context: Any
 
         # Объявляем ВЫЗЫВАЕМЫМИ атрибутами: заглушка-функция с пустым телом
@@ -326,8 +327,8 @@ class AgentLoopResponseDeciders:
         if self.last_verification is not None:
             try:
                 _vsummary = build_verification_summary(
-                    self.last_verification, chain=self.last_provenance
-                )
+                    self.last_verification, chain=self.last_provenance,
+                    vector=self.last_confidence_vector)
                 self.log.log(
                     "verification_explained", _vsummary.to_log_payload()
                 )
