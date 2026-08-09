@@ -869,6 +869,37 @@
       }
     },
     "findings": {
+      "readiness_blocker_block_had_no_loop_level_observer": {
+        "named_state_space": "Which PRODUCER produced the gateway's `block`, and whether the loop obeys each of them. Two producers: kill_switch_active and readiness_blocker (core/gateway_consult.py:118-129).",
+        "evaluation_domain": {
+          "code": "f889973",
+          "held": [
+            "approval_provider=AutoApprover(default='approve') — so nothing but the gateway can stop the effect",
+            "NO kill switch engaged at any point — the other producer is the subject",
+            "max_replan_attempts=1, clarification_enabled=False",
+            "a one-step plan whose only step is an effectful file_write"
+          ],
+          "observed": [
+            "FakeLLM synthesizer",
+            "the ambient suite domain declared once in ambient_evaluation_domain"
+          ],
+          "durable_state": "temporary workspace; the write target is the observable",
+          "external": "none"
+        },
+        "premise_proven_before_the_mutation": "Three poles measured on the real code. Readiness blocker plus check_readiness=True: gateway returns `block` with reason 'readiness_blocker: 2 approval item(s) pending', the file is NOT written, and gateway_blocked plus replan_exhausted are journalled. Same blockers with check_readiness=False: `allow`, file written. Nothing engaged: `allow`, file written. So the behaviour is CORRECT and the gate is check_readiness, not the tuple.",
+        "mutation": "ONE relation at the wiring, core/loop_step_execution.py:320: check_readiness=bool(getattr(self, 'gateway_check_readiness', False)) forced to False. That disables exactly one producer of one outcome and leaves the kill-switch producer untouched.",
+        "observed_consequence": "The mutation is live: the subject probe's gateway returned `allow`, the file reached the disk. FULL SUITE GREEN — 7313 passed, 5 xfailed, exit 0. A readiness blocker stopped being able to stop an effectful write and nothing in the suite noticed. Restore byte-identical (4eaa5500), subject INTACT.",
+        "the_certifying_test_stayed_green_and_that_is_the_point": "Under the same mutation, tests/test_gateway_refusals_stop_the_effect_c08.py passed both its cases, because M53 drives `block` through a latched kill switch. A certification of an OUTCOME is not a certification of its PRODUCERS — measured here, not argued.",
+        "verdict": {
+          "REACHABILITY": "PROVEN",
+          "CAUSALITY": "PROVEN",
+          "SEMANTICS": "PROVEN",
+          "PROTECTION": "NEGATIVE before this unit; PROVEN after"
+        },
+        "protection_status": "tests/test_gateway_readiness_block_stops_the_effect.py asserts the same three facts the kill-switch test does — the effect does not happen, the refusal is journalled under its own code, the failure reaches the replan machinery — and additionally requires the block to be attributed to the readiness producer BY NAME, so a block arriving from the kill switch cannot satisfy it. Two controls carry the anti-vacuity: with the gate off, and with nothing engaged, the write goes through. Fail-before verified.",
+        "why_it_is_security_relevant": "readiness_blockers is how pending approvals reach the gateway. With the producer unobserved, a change that dropped it would let an effectful tool run while approvals were still outstanding, and the run would look ordinary.",
+        "no_code_change": "None. The wiring is correct; what was missing was an observer."
+      },
       "the_block_outcome_was_certified_through_one_of_its_two_producers": {
         "named_state_space": "The PRODUCER of the gateway's `block` outcome. core/gateway_consult.py:collect_hard_stop_reasons builds the reason tuple from TWO independent sources: kill_switch_active (:118-126, whose state is computed from the budget snapshot) and readiness_blocker (:127-129, gated by check_readiness).",
         "the_guess_replaced_by_evidence": "The census refused to name which two refusals M52/M53 certified. tests/test_gateway_refusals_stop_the_effect_c08.py answers it in its own docstring and test names: M52 is `deny` (test_a_gateway_deny_prevents_the_write) and M53 is `block` (test_a_gateway_hard_stop_prevents_the_write). `simulate` had a prior end-to-end observer. The certified set at the LOOP level is deny + block + simulate.",
