@@ -498,17 +498,33 @@
         "PROTECTION": "N/A"
       },
       "note": "A bookkeeping unit. Nothing measured. The one judgement it makes is that a cluster is not closed because its best-lit half is finished — the same correction C08's closure review had to make."
+    },
+    {
+      "id": "C09-U5-premature-detector-consumers",
+      "cluster": "C09",
+      "question": "Is _premature_keyword_fired's status as a non-decision measured, or is it the code's claim about itself?",
+      "result": "CONFIRMED, and by a stronger argument than the claim carried.",
+      "method": "COMPLETE ENUMERATION rather than a mutation. A mutation shows only that the TESTED consumers ignore a value; the enumeration shows no consumer exists to act on it.",
+      "the_whole_path": "Produced at loop_evidence_chain.py:294, returned at :341, unpacked at loop.py:508, passed at loop.py:641, received at loop_run_tail.py:279, and written at :324 as _payload['shadow_keyword_detector'] = bool(...). That assignment is the terminus; no occurrence anywhere is a condition. The key itself appears exactly once in production and in one test file that asserts its presence and value.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "N/A"
+      },
+      "no_test_added": "There is no behaviour to protect. A test pinning 'nothing reads it' would be an enumeration frozen in amber, and the enumeration is cheap to redo.",
+      "scope_limitation": "Static, over the production tree. A consumer reaching the field through the journal FILE after the fact — an operator, an analysis script outside these paths — is not covered, and is exactly what the field exists for."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C09-U5-premature-detector-consumers",
+    "id": "C09-U6-rank-chain",
     "cluster": "C09",
-    "entry_question": "_premature_keyword_fired is recorded as a shadow that decides nothing. Is that measured, or is it the code's claim about itself?",
-    "why_this_one": "It is the cheapest of the three open items and the one most likely to be wrong in an interesting way — this program has already found two places where a value described as observational reached a consumer that acted on it. The other two items are larger subjects that may not belong to this cluster at all.",
-    "planned_probe": "Follow the returned flag from _rank_and_catalog_evidence to every consumer, and mutate it to fire always. If nothing changes but a journal payload, the code's claim is confirmed by measurement rather than accepted."
+    "entry_question": "rank_chain orders the evidence. Its output reaches the synthesis prompt and the source registry — does the ORDER change any consumer, or only the presentation?",
+    "why_this_one": "It is the last C09 item that belongs to this cluster; the knowledge pipeline's own contract is a separate subject. And ordering is the classic place where a value looks decisive and is not.",
+    "planned_probe": "Find every consumer of the ranking object, not just the ones that log it. Then decide between a mutation (reverse the order) and an enumeration — C09-U5 showed enumeration is the stronger instrument when the consumer set is small."
   },
-  "last_proven_causal_front": "C00-C07 carried forward. C08's carrier debt discharged, its remainder is actuation and mock-blind consumers. C09: fold half finished and guarded, catalogue permissions guarded at the derivation, three items still open and named in the ledger.",
+  "last_proven_causal_front": "C00-C07 carried forward. C08's carrier debt discharged. C09: fold half guarded, catalogue permissions guarded at the derivation, the premature detector closed by enumeration. rank_chain and the knowledge pipeline's own contract remain.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
@@ -528,7 +544,7 @@
     "scripts/qm_subject_freeze.py": "INTACT",
     "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
     "ruff_debt": "399 repo-wide against a baseline of 405",
-    "full_suite": "C09 closure-review tree: 7313 passed, 5 xfailed, pytest exit 0, 326s"
+    "full_suite": "C09-U5 tree: 7313 passed, 5 xfailed, pytest exit 0, 321s"
   },
   "units_completed_count": 16
 }
