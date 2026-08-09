@@ -32,7 +32,7 @@
       "declared_as_output": false,
       "declared_output_note": "AttemptState.OUTPUTS names eight fields and a test guards exactly that set; this is the ninth channel and it is typed as an input ('does not change during the section') while loop_attempt.py:472 extends it. The OUTPUTS test therefore looks like a complete interface contract and is not.",
       "writers": [
-        {"site": "core/loop_attempt.py:472", "node": "loop_attempt.py::AgentLoopAttempt._run_attempt_loop", "puts": "failures of an ATTEMPT", "call": "extend"},
+        {"site": "core/loop_attempt.py:448", "node": "loop_attempt.py::AgentLoopAttempt._run_attempt_loop", "puts": "failures of an ATTEMPT", "call": "extend", "_anchor_correction": "read :472 until 2026-08-09 — a blank line by then. All four loop_attempt anchors on this carrier were off by exactly the 24 lines a990e48 removed when it deleted the planner cache; that commit updated census counts and the shape ratchet and left these. Now guarded by tests/test_cns_anchor_integrity.py, which requires an anchor to name its carrier."},
         {"site": "core/loop_verify_replan.py:149", "node": "loop_verify_replan.py::AgentLoopVerifyReplan._replan_on_refuted_claims", "puts": "claim_refuted", "call": "append"},
         {"site": "core/loop_verify_replan.py:228", "node": "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer", "puts": "unresolved_citation", "call": "append"},
         {"site": "core/loop_verify_replan.py:379", "node": "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer", "puts": "failure of a step executed INSIDE the verify loop — a different kind from the other three", "call": "append"}
@@ -44,9 +44,9 @@
         {"site": "core/loop_run_tail.py:301", "role": "control", "uses": "policy_blocked triggers -> denied_tools for the obligation arbiter"},
         {"site": "core/loop_run_tail.py:315", "role": "control", "uses": "failure codes -> obligation arbiter"},
         {"site": "core/subsystem_disagreement.py:87", "role": "dead_end", "uses": "codes into a journal event; loop_verification.py:154 states it is recorded and never acted on"},
-        {"site": "core/loop_attempt.py:539", "role": "dead_end", "uses": "log line"},
-        {"site": "core/loop_attempt.py:549", "role": "dead_end", "uses": "log line"},
-        {"site": "core/loop_attempt.py:166", "role": "dead_end", "uses": "count_failures into the replan_attempt event — found 2026-08-08 while reconciling the map's 6 against this list's 8: BOTH numbers were wrong"}
+        {"site": "core/loop_attempt.py:515", "role": "dead_end", "uses": "log line — the codes inside the replan_exhausted ErrorObject message", "_anchor_correction": "read :539 until 2026-08-09; same 24-line shift"},
+        {"site": "core/loop_attempt.py:525", "role": "dead_end", "uses": "log line — the same ErrorObject's context payload", "_anchor_correction": "read :549 until 2026-08-09, by then pointing at action_spec={ inside _build_plan, a method that reads nothing of this carrier"},
+        {"site": "core/loop_attempt.py:164", "role": "dead_end", "uses": "count_failures into the replan_attempt event — found 2026-08-08 while reconciling the map's 6 against this list's 8: BOTH numbers were wrong"}
       ],
       "reader_count": "2 logical producer mechanisms -> 4 physical write sites; 4 logical consumer mechanisms (replan policy+prompt-context, synthesis block, obligations arbiter — control; journal — dead end) -> 9 physical read sites (5 control + 4 dead_end). Recounted from code 2026-08-08; any future site count must state both units.",
       "lifetime": "one run(); created in _run_inner, never reset inside it, discarded with the frame",
@@ -78,8 +78,10 @@
       "created_at": "core/loop_step_execution.py:43",
       "transport": "module-level thread-local; read via getattr (core/loop_step_execution.py:110)",
       "note": "Every step failure travels through this carrier. It is invisible to the node/edge discovery rule and absent from the operator's map — found by reconciliation on 2026-08-07.",
-      "writers": ["core/loop_step_execution.py:362", "core/loop_step_execution.py:385", "core/loop_step_execution.py:416"],
+      "writers": ["core/loop_step_execution.py:362 (policy_blocked)", "core/loop_step_execution.py:385 (policy_blocked)", "core/loop_step_execution.py:416 (policy_blocked)", "core/loop_step_execution.py:451 (code — variable)", "core/loop_step_execution.py:462 (unknown)", "core/loop_step_execution.py:496 (replan_code — variable)", "core/loop_step_execution.py:528 (verify_failed)", "core/loop_step_execution.py:555 (web_empty)", "core/loop_step_execution.py:576 (timeout)", "core/loop_step_execution.py:653 (injection_blocked)", "core/loop_step_execution.py:789 (unknown)"],
+      "_writers_correction": "Recorded THREE writers until 2026-08-09; the code has eleven, all inside the 558-line _execute_step. The three that were listed are exactly the policy_blocked family — the one path C08 had certified (M51) — so a single certified walk had been written down as the carrier's writer set. Not staleness: eleven already existed at b4017bb, the commit that wrote three, and core/loop_step_execution.py has not changed since. Every missing code (verify_failed, web_empty, timeout, injection_blocked, unknown, and two variable codes) is exercised by tests, so these are live sites. Found by tests/test_cns_anchor_integrity.py, which derives the set from the AST instead of from a walk.",
       "readers": ["core/loop_step_execution.py:110 (consume)"],
+      "_readers_note": "One reader, verified against the same census: lines 108, 111 and 255 write None (the clear and the consume), and 110 is the only read. The bare-string anchor shape with a trailing '(consume)' is why tests/test_cns_model.py never checked any of these — its digit test fails on the suffix and the anchor is skipped in silence.",
       "lifetime": "per step, per worker thread; set to None on read",
       "owner": "UNPROVEN",
       "properties": {"carrier": "PROVEN", "writers": "PROVEN", "readers": "PROVEN", "delivery_non_empty": "UNPROVEN", "effect": "UNPROVEN"}
