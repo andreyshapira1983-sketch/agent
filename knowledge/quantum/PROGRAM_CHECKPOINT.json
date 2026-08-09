@@ -83,24 +83,53 @@
       },
       "scope_limitation": "Proves that what the map says about writers and anchors matches the code it points at. Does NOT prove the carrier list is complete, nor that a named consumer really consumes.",
       "reopens": "C08. Its certified arc policy_deny_stops_the_step (M51) rests on the same three writers; the eight unlisted producers of the same carrier were never walked. Per the program's carry-forward rule, a newly discovered producer reopens the unit that generalised from a partial walk."
+    },
+    {
+      "id": "C08-U1-failure-code-delivery",
+      "cluster": "C08",
+      "question": "Is the failure CODE a semantically distinguishable value, or is only the fact of failure observed?",
+      "result": "The distinction is real and was entirely unobserved. Now protected at delivery.",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [
+          "max_replan_attempts=1",
+          "single-step plan via FakePlanner",
+          "one echo tool with a fixed payload",
+          "memory=None"
+        ],
+        "observed": [
+          "FakeLLM synthesizer — the final hop is mock-blind by construction",
+          "the GLOBAL replan cap fires before any per-type budget here, so the code's budget effect was not exercised"
+        ],
+        "durable_state": "temporary workspace, no stores",
+        "external": "none"
+      },
+      "preconditions_proven": "Before mutating: tool.calls=1, <failure_context> present, and `code=injection_blocked` present in the synthesizer prompt.",
+      "mutation": "ONE literal, core/loop_step_execution.py:654, code=\"injection_blocked\" -> code=\"unknown\". Both types have max_occurrences=1, so the abort is unchanged and only the code text moves.",
+      "prediction": "GREEN — stated before the run.",
+      "observed": "GREEN. Full suite on the mutant: 7285 passed, 1 xfail, pytest exit 0. The mutation was live: the prompt carried code=unknown and the journal's triggers list read ['unknown']. Restore byte-identical, hash 4eaa5500 before and after, subject guard INTACT.",
+      "diagnosis": "Not unreachable, not vacuous, not equivalent, not journal-only. Partial redundancy for the OPERATOR observer only — the injection_blocked EVENT is written from the scan itself and stayed in the journal unchanged through the mutation, so a human still saw it while the synthesizer did not. Classification: a real unprotected distinction at delivery to a live-model consumer.",
+      "made_durable": "tests/test_tool_output_passes_the_injection_guard.py::test_the_refusal_travels_as_injection_blocked_and_not_merely_as_a_failure — reds on exactly this mutation, greens on the restored file, and carries a precondition assertion so it cannot pass on an empty prompt.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "NEGATIVE -> now PROVEN at delivery"
+      },
+      "scope_limitation": "One of fourteen codes, one of eleven write sites, delivery only. The other thirteen codes are unmeasured and the per-type budget effect was never exercised — the global cap fired first."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C08-U1-failure-code-delivery",
-    "cluster": "C08 (reopened by P02)",
-    "entry_question": "Is the failure CODE a semantically distinguishable value, or only the fact of failure? Concretely: does anything observe which of the 14 codes a trigger carries?",
-    "why_this_one": "P02 proved the map recorded 3 of 11 producers of _step_trigger_tls, all of them policy_blocked. The other eight carry seven different codes, and core/replan.py gives every code its OWN budget (max_occurrences 1 or 2) and its OWN advice text, so the codes are not interchangeable by construction. C08 certified the one family it walked.",
-    "planned_bite": "Mutate ONE literal — core/loop_step_execution.py:654 code=\"injection_blocked\" -> code=\"unknown\" — and run the suite. Both codes have max_occurrences=1, so the abort still happens and `replan_exhausted` still fires; what changes is the code text.",
-    "prediction_stated_before_measuring": "GREEN. tests/test_tool_output_passes_the_injection_guard.py asserts the CONSEQUENCE (replan_exhausted), deliberately not the event, and tests/test_failure_history_reaches_arbitration.py asserts the PRESENCE of the <failure_context> block, not its content. Nothing found so far asserts a `code=` line.",
-    "consumers_to_diagnose_if_green": [
-      "core/loop_synthesis.py:240 — the code is written into the synthesis prompt as `code={trig.code}`, so delivery is mock-observable at L2 even though the model's use of it is not.",
-      "core/completion_obligation.py:250-253 — failure_codes are disclosure needles matched as substrings against the answer; a different code changes failed_but_reported vs silently_missing only if the answer contains the literal token, which may make this consumer near-unreachable in practice.",
-      "core/replan.py:543 — decision.reason embeds the code; journal-only for a budget-1 type, because advice_for_planner is read only on the `continue` branch."
-    ],
-    "expected_shape_of_the_finding": "For budget-1 codes the control surface may be genuinely thin. That is a semantic result to state, not a hole to assume: the green must be diagnosed against the eight-way scale before anything is called unprotected."
+    "id": "C08-U2-per-type-budget",
+    "cluster": "C08",
+    "entry_question": "Does the per-type budget in core/replan.py actually decide anything, or does the global cap always fire first in reachable configurations?",
+    "why_this_one": "C08-U1 could not exercise it: with max_replan_attempts=1 the global cap wins and decision_reason read 'global replan cap reached (1/1)'. A budget that never decides is a different finding from a budget that decides silently, and the codes' max_occurrences (1 for file_not_found, approval_unavailable, injection_blocked and unknown; 2 for the other ten) is the only place the fourteen values differ in CONTROL rather than in text.",
+    "planned_probe": "Raise max_replan_attempts above the smallest per-type budget and drive the same failure type twice, then read decision_reason. Then bite: change one budget's max_occurrences and predict which pole moves.",
+    "watch_for": "The trap C08-U1 walked into and named: a domain where the intended mechanism is pre-empted by an unrelated one. State the held configuration before claiming anything about S.",
+    "planned_bite_refined": "Confirmed read-only before opening the unit: under the DEFAULT cap of 3 the same run reports decision_reason 'injection_blocked budget exhausted (1/1)', so the per-type rule does decide and only the held max_replan_attempts=1 of C08-U1 pre-empted it. The sharper bite is therefore code=\"injection_blocked\" -> code=\"verify_failed\" (budget 2) under the default cap: predict the run no longer aborts on the first occurrence but takes a SECOND attempt — a control difference at L5 rather than a text difference."
   },
-  "last_proven_causal_front": "C00-C07 carried forward to S. The 628-line core/loop_attempt.py has now been read end to end, which closes C08's standing 'body not read line by line' item; the read produced four further candidates recorded in open_questions. Inside C08 the previously certified arcs stand, but policy_deny_stops_the_step is reopened as a claim about ONE code family rather than about the carrier.",
+  "last_proven_causal_front": "C00-C07 carried forward. core/loop_attempt.py read end to end. Inside C08 the trigger CODE is now proven to reach the synthesis prompt and is guarded there for injection_blocked; the per-type budget consumer remains unexercised.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
@@ -117,12 +146,10 @@
     "knowledge/maps/cns_model.json (quantum_cns._program, .carry_forward, .defect_bank, .coverage; C06 scope correction; epilogue on the stale-comment record)"
   ],
   "checks_run_on_this_tree": {
-    "_note": "Re-stated after P02; the suite line below belongs to the tree of P00/P01 and is re-run before the P02 commit.",
     "scripts/qm_subject_freeze.py": "INTACT",
-    "scripts/qm_link_check.py": "GREEN",
-    "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
-    "ruff_debt": "399 findings repo-wide against a baseline of 405; the two new files contribute none",
-    "full_suite": "P02 tree: 7285 passed, 1 xfailed, pytest exit 0, 341s. (P00/P01 tree: 7277 passed, exit 0.)",
-    "_reporting_trap_repeated": "The FIRST run of this suite reported 'exit code 0' while pytest had actually failed test_lint_debt_does_not_grow (406 > 405). The zero came from `tail` at the end of a pipe, not from pytest — the same trap already recorded once in this project's history. The rerun above pipes to a file and records $? explicitly."
+    "ruff_debt": "399 repo-wide against a baseline of 405",
+    "full_suite": "C08-U1 tree: 7286 passed, 1 xfailed, pytest exit 0, 336s",
+    "mutant_run": "the same suite on the mutant (code=\"unknown\"): 7285 passed, exit 0 — the green that made the finding",
+    "_reporting_trap_repeated": "The first suite run of this program reported 'exit code 0' while pytest had failed: the zero came from `tail` at the end of a pipe. Every run since writes to a file and records $? explicitly."
   }
 }

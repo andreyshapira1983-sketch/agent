@@ -869,6 +869,30 @@
       }
     },
     "findings": {
+      "failure_trigger_code": {
+        "named_state_space": "ReplanTrigger.code — 14 values (core/replan.py ALL_FAILURE_TYPES), carried by _step_trigger_tls out of core/loop_step_execution.py and accumulated in failure_history.",
+        "evaluation_domain": {
+          "code": "f889973",
+          "held": ["max_replan_attempts=1", "a single-step plan through FakePlanner", "one echo tool returning a fixed payload", "no memory (memory=None)"],
+          "observed": ["FakeLLM synthesizer, so the final hop is mock-blind by construction", "the global replan cap fires before any per-type budget in this configuration — decision_reason reads 'global replan cap reached (1/1)'"],
+          "durable_state": "temporary workspace, no stores",
+          "external": "none — no network, no credentials, no model call"
+        },
+        "consumers_and_what_each_reads": [
+          "core/loop_synthesis.py:240 — writes `code={trig.code}` into the <failure_context> block of the synthesis prompt. LIVE MODEL consumer: delivery is mock-observable, use is not.",
+          "core/replan.py:543-556 — per-type budget: every code has its own max_occurrences (1 or 2) and its own advice text, so the codes are distinguishable by construction, not by convention.",
+          "core/completion_obligation.py:250-253 — failure_codes are disclosure NEEDLES, substring-matched against the composed answer; a different code changes failed_but_reported vs silently_missing only when the answer contains the literal token.",
+          "core/loop_run_tail.py:301 — only the policy_blocked code is singled out, for denied_tools."
+        ],
+        "preconditions_proven": "The write site fires and the value is delivered: a contaminated tool output produced tool.calls=1, `<failure_context>` present, and `code=injection_blocked` present in the synthesizer prompt before any mutation.",
+        "mutation": "ONE literal at core/loop_step_execution.py:654 — code=\"injection_blocked\" -> code=\"unknown\". Both types have max_occurrences=1, so the abort and replan_exhausted are unchanged and only the code text moves.",
+        "observed_consequence": "The mutation is behaviourally live — the prompt changed from `code=injection_blocked` to `code=unknown` and the journal's triggers list from ['injection_blocked'] to ['unknown'] — and the FULL SUITE stayed green: 7285 passed, 1 xfail, pytest exit 0. Byte-identical restore (4eaa5500) verified before and after.",
+        "green_mutation_diagnosis": "NOT unreachable (the site fired), NOT vacuous (the delivered value changed), NOT equivalent (each code carries its own budget, advice and prompt text), NOT journal-only (it reaches the synthesis prompt). Partial redundancy exists for the OPERATOR observer only: the `injection_blocked` journal EVENT is written from the scan itself and stayed in the log unchanged throughout the mutation, so a human reading the journal still saw the injection. The synthesizer did not. Classification: a real unprotected distinction at DELIVERY to a live-model consumer.",
+        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "NEGATIVE"},
+        "protection_status": "Was NEGATIVE — no observer anywhere in 7285 tests. Now protected at delivery by tests/test_tool_output_passes_the_injection_guard.py::test_the_refusal_travels_as_injection_blocked_and_not_merely_as_a_failure, which reddens on exactly this mutation and greens on the restored file.",
+        "scope_limitation": "Proven for ONE of the fourteen codes, at ONE of the eleven write sites, at DELIVERY only. What the model does with the word is a live-model question and is not claimed. The other thirteen codes remain unmeasured, and the per-type BUDGET effect was not exercised at all in this domain — the global cap fired first.",
+        "no_code_change": "None proposed. Production is read-only for the mapping program; the code was already correct and what was missing was an observer."
+      },
       "replan_decision_action": {
         "named_state_space": "ReplanAction = continue | abort_no_retry | abort_exhausted (core/replan.py:434)",
         "consumers_and_what_each_reads": [
