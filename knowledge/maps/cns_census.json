@@ -49,6 +49,7 @@
     "loop_evidence_chain.py::AgentLoopEvidenceChain._rank_and_catalog_evidence": [],
     "loop_gates.py::AgentLoopGates._check_clarification": [],
     "loop_gates.py::AgentLoopGates._check_operational_domain": [],
+    "loop_gates.py::AgentLoopGates._resume_clarification": [],
     "loop_gates.py::AgentLoopGates._clarification_gate": [
       "discovery",
       "callers",
@@ -172,6 +173,10 @@
     [
       "loop.py::AgentLoop._run_inner",
       "loop_evidence_chain.py::AgentLoopEvidenceChain._rank_and_catalog_evidence"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_gates.py::AgentLoopGates._resume_clarification"
     ],
     [
       "loop.py::AgentLoop._run_inner",

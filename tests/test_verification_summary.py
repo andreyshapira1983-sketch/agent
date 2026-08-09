@@ -340,7 +340,10 @@ class TestLoopWiring:
         # молчал бы, а падал бы AttributeError — что и произошло.
         import core.loop_response_deciders as deciders_mod
 
-        def _boom(report, chain=None):
+        # The stub must accept what the CALLER passes, or the failure this test
+        # measures becomes a TypeError from the signature rather than the
+        # RuntimeError from the body. `vector` joined the call on 2026-08-09.
+        def _boom(report, chain=None, vector=None):
             raise RuntimeError("схема вердиктов изменилась")
 
         monkeypatch.setattr(deciders_mod, "build_verification_summary", _boom)

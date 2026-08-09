@@ -141,11 +141,29 @@ def _gap_counts(report: VerificationReport) -> list[tuple[str, int]]:
     return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
 
+#: Below this, the tail says the answer may not be addressing the question.
+#: NOT an operator-set number. Chosen from measurement: two production runs on
+#: 2026-08-09 answered a question that had not been asked and scored 0.051 and
+#: 0.231, while an on-topic pair scores 1.000 and an off-topic one 0.000 on the
+#: same metric. The gap is wide because the score is token overlap, so the
+#: threshold sits well above the observed failures and well below a real answer.
+#: Raise or lower it on evidence, not on taste.
+_LOW_RELEVANCE = 0.35
+
+
 def build_verification_summary(
     report: VerificationReport,
     chain: ProvenanceChain | None = None,
+    vector: object | None = None,
 ) -> VerificationSummary:
-    """Compose the five points from the verifier's own numbers. Pure."""
+    """Compose the five points from the verifier's own numbers. Pure.
+
+    ``vector`` is the three-axis confidence diagnosis. It is optional because
+    the summary predates it and must still build without one, and it is REPORTED
+    RATHER THAN MERGED: citation integrity and task relevance answer different
+    questions, and folding them into a single word would destroy the very
+    information this argument exists to carry.
+    """
     examined = sum(1 for c in report.chunks if c.verdict != "structural")
     verified = report.verified_chunks
 
@@ -222,6 +240,12 @@ def build_verification_summary(
             f"{TAIL_PREFIX} подтверждено {verified} из {examined} утверждений; "
             f"без внешнего подтверждения: {gap_total}; уверенность: {word}."
         )
+        _relevance = getattr(vector, "relevance_score", None)
+        if _relevance is not None and _relevance < _LOW_RELEVANCE:
+            tail += (
+                f" Соответствие вопросу: {_relevance:.2f} — ответ может отвечать "
+                "не на заданный вопрос."
+            )
 
     return VerificationSummary(
         checked=checked,

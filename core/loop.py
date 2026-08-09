@@ -317,6 +317,8 @@ class AgentLoop(
         # Кусок 16 разбора `_run_inner`: открывающая часть прогона (профиль,
         # реестр допущений, писатель контрольных точек) живёт в
         # `core/loop_context.py` — всё, что заводится один раз и до фаз.
+        user_question, _resumed = self._resume_clarification(user_question)
+
         _run_assumptions, _cp = self._open_run(user_question)
 
         # 1. Observe
@@ -350,8 +352,11 @@ class AgentLoop(
         if _decided is not None:
             return _decided
 
-        _decided = self._clarification_gate(user_question)
+        # Never re-gated on a resumed run: the trigger lives in the ORIGINAL
+        # text, which no longer changes, so asking again can only ask forever.
+        _decided = None if _resumed else self._clarification_gate(user_question)
         if _decided is not None:
+            self.pending_clarification_question = user_question  # what it asked ABOUT
             return _decided
 
         # Memory retrieval — read-only injection into prompts
