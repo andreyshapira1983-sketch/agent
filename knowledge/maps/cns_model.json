@@ -869,6 +869,25 @@
       }
     },
     "findings": {
+      "the_ranker_is_consumed_as_a_classifier": {
+        "named_state_space": "The ORDER of SourceRankingReport.ranks — the thing rank_chain is named for.",
+        "method": "COMPLETE ENUMERATION, the instrument C09-U5 established, with its three admissibility conditions verified rather than assumed: the attribute names are unique and unshadowed across production; the only indirect accesses are three getattr sites and all three read realtime_required, not ranks; and the derived key was enumerated too.",
+        "every_consumer_of_the_order": {
+          "core/output_policy.py:62 and :65": "filters ranks by support_level == direct / insufficient_for_realtime. SET MEMBERSHIP — order-invariant.",
+          "core/output_policy.py:78": "min(rank.confidence_ceiling for rank in direct). AGGREGATE — order-invariant.",
+          "core/source_ranker.py:246 support_counts": "counting by support_level — order-invariant.",
+          "core/source_registry.py:198": "builds a dict keyed by rank.evidence_id, which comes from evidence.id. KEYED LOOKUP — order-invariant.",
+          "core/loop_response_deciders.py:258, core/loop_run_tail.py:311, core/loop_verification.py:212": "read realtime_required. A FIELD on the same object, not the order."
+        },
+        "where_the_order_actually_reaches": "Two places, both journal-only. SourceRankingReport.best uses max(), which returns the FIRST maximum, so the order breaks ties — and .best has exactly one consumer in the whole production tree: to_log_payload at source_ranker.py:251. The second is the ranks list order inside that same payload. Nothing anywhere reads the payload keys 'ranks' or 'support_counts', and the ranking is never serialised into durable state — loop_run_tail touches it only through realtime_required.",
+        "the_collapse": "Under the enumerated production observer set at f889973, the state space 'ordering of the evidence' collapses to a triple: (the multiset of support_levels, the minimum confidence_ceiling among direct ranks, the realtime_required flag). A function named rank_chain, producing a report named SourceRankingReport, is consumed as a CLASSIFIER plus an aggregate plus a flag. Names prove nothing here, which is why this is an observation about consumption and not a defect claim about naming.",
+        "observer_set_named_because_the_claim_is_a_quotient": "Production consumers at snapshot f889973, statically enumerated. NOT claimed for operators reading the journal, for whom the order is visible and may well be the point.",
+        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "NEGATIVE for the order; PROVEN for the labelling, the aggregate and the flag", "SEMANTICS": "PROVEN", "PROTECTION": "N/A"},
+        "protection_note": "N/A rather than NEGATIVE: there is no behaviour that depends on the order, so there is nothing to protect. What IS unguarded is the INVARIANCE — a consumer added later that reads ranks[0] would make the order semantic silently, and no instrument would notice. That is a candidate, not this unit's claim.",
+        "no_test_added": "None. Following C09-U5: a test asserting 'no consumer reads the order' is an enumeration frozen in amber, and the enumeration is cheap to redo.",
+        "spawned_candidate": "SourceRankingReport.best is a computed property with exactly one consumer, the log payload. Journal-only by the same enumeration. Registered, unbitten.",
+        "no_code_change": "None. Production is read-only, and nothing here is wrong — the ranker computes an order that its consumers do not need."
+      },
       "premature_detector_is_journal_only_by_enumeration": {
         "named_state_space": "_premature_keyword_fired — one boolean produced at core/loop_evidence_chain.py:294 and returned at :341.",
         "why_it_was_opened": "The ledger recorded it as a shadow that decides nothing, on the strength of its own docstring rather than a walked consumer. This program has twice found a value described as observational reaching something that acted on it, so the claim was worth a walk.",

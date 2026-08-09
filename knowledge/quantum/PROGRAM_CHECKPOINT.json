@@ -534,29 +534,46 @@
       "scope_limitation": "Static, over the production tree. A consumer reaching the field through the journal FILE after the fact — an operator, an analysis script outside these paths — is not covered, and is exactly what the field exists for.",
       "evaluation_domain_class": "RUNTIME_DOMAIN_FREE",
       "evaluation_domain_note": "Complete static enumeration over the production tree. Commit d7cc6d5 records the whole path from producer to terminus."
+    },
+    {
+      "id": "C09-U6-rank-chain",
+      "cluster": "C09",
+      "question": "Does the ORDER of the evidence ranking change any consumer, or only a field that travels on the same object?",
+      "result": "The order reaches NO decision. Every production consumer is order-invariant; the order surfaces only in the journal.",
+      "evaluation_domain_class": "RUNTIME_DOMAIN_FREE",
+      "evaluation_domain_note": "Complete static enumeration over the production tree at f889973. No runtime domain exists; the three admissibility conditions for enumeration were verified, not assumed.",
+      "method": "Enumeration rather than mutation, per C09-U5. Conditions checked: unique unshadowed attribute names; the only indirect accesses are three getattr sites, all reading realtime_required; the derived key (to_log_payload) enumerated as well.",
+      "consumers": "output_policy filters by support_level (set membership) and takes min(confidence_ceiling) (aggregate); support_counts counts; source_registry builds a dict keyed by evidence_id; three sites read the realtime_required FIELD. All order-invariant.",
+      "where_the_order_reaches": ".best, whose max() tie-break is order-sensitive and whose only consumer in the entire tree is to_log_payload; and the ranks list order inside that same payload. Nothing reads either key, and the ranking is never serialised into durable state.",
+      "the_collapse": "Under the enumerated production observer set, 'ordering of evidence' collapses to (multiset of support_levels, min confidence_ceiling among direct, realtime_required). rank_chain is named as a ranker and consumed as a classifier.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "NEGATIVE for the order; PROVEN for the labelling, aggregate and flag",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "N/A"
+      },
+      "no_test_added": "No behaviour depends on the order, so there is nothing to protect. The INVARIANCE is unguarded — a later consumer reading ranks[0] would make the order semantic silently — and that is registered as a candidate, not claimed here.",
+      "validation": "Ledger-only change: targeted guards (test_cns_model.py, test_cns_anchor_integrity.py) and the subject guard. No full suite, which for a ledger-only change establishes nothing."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C09-U6-rank-chain",
-    "cluster": "C09",
-    "entry_question": "rank_chain orders the evidence. Does the ORDER change any consumer, or only a field that happens to travel on the same object?",
-    "consumers_located_read_only": [
-      "core/loop_response_deciders.py:252 — reads `realtime_required` off the ranking. That is a FIELD, not the order; a run with the evidence reversed would read the same boolean.",
-      "core/loop_response_deciders.py:400 — passes the whole ranking into apply_ranker_output_policy, which shapes the ANSWER. This is the only place the order can matter, and it is where the unit should start.",
-      "core/loop_run_tail.py:67 and core/loop.py:584 — declarations and a pass-through; core/ingestion.py:225/351/551 assign last_source_ranking on the ingestion path, which is a different producer of the same field and may be a separate subject.",
-      "Everything else found is a log payload."
-    ],
-    "planned_probe": "Read apply_ranker_output_policy first. If it consumes only aggregate properties, the ORDER is presentation and the finding is a collapse worth recording; if it reads the first element or a rank, mutate the order and measure. Enumeration is the stronger instrument when the consumer set is this small — C09-U5 established that.",
-    "note_for_the_next_context": "The ingestion.py writers of last_source_ranking are a second producer of a field this cluster treats as its own. Ask who produces, not only who reads — that has already caught one thing in this program.",
+    "id": "C08-U10-actuation-producer-census",
+    "cluster": "C08",
+    "entry_question": "The actuation gateway and the approval path are recorded as certified by M52/M53 and M54/M55. Is that a claim about the producer SET, or about the paths that walk certified them?",
+    "why_this_one_now_derives_rather_than_asserts": "Under §22 dominance, effectful actuation and C09 cataloguing were INCOMPARABLE at the C08->C09 transition: actuation wins on execution authority and world-state consequence, C09 won on evidence gap because it had zero units. C09 now has six. The evidence-gap advantage is spent, so actuation dominates and the frontier is a singleton. This is the derivation the earlier transition skipped.",
+    "the_precedent_it_applies": "P02 proved that _step_trigger_tls's record named three writers where eleven exist, because a single certified walk had been written down as the carrier's set. The actuation record has exactly the same shape — a small number of certified mutations standing for a path — and has never been censused.",
+    "planned_probe": "Static census first, as in C08-U6: enumerate every site that can refuse or permit an effect, and compare against what M52-M55 actually certified. Only then decide between mutation and enumeration.",
     "method_notes_carried_forward": [
-      "Check for a test that DISCRIMINATES, not one that logs an event name — two predictions have died on that.",
-      "Verify the premise on a shim or probe before predicting.",
-      "An AST body-equivalence ratchet reddening is NOT behavioural protection.",
-      "A test that restates the code instead of calling it will not redden — that trap cost one iteration in C09-U4."
+      "Check for a test that DISCRIMINATES, not one that logs an event name.",
+      "Verify the premise before predicting; explain any zero result before interpreting it.",
+      "An AST body-equivalence ratchet is not behavioural protection.",
+      "A test that restates the code instead of calling it will not redden.",
+      "Full mutant suite only when the conclusion depends on the observer SET rather than on observer existence.",
+      "Enumeration replaces the full suite for PRODUCTION consumers under three conditions; never for TEST observers."
     ]
   },
-  "last_proven_causal_front": "C00-C07 carried forward. C08's carrier debt discharged. C09: fold half guarded, catalogue permissions guarded at the derivation, the premature detector closed by enumeration. rank_chain and the knowledge pipeline's own contract remain.",
+  "last_proven_causal_front": "C00-C07 carried forward. C08's carrier debt discharged; its actuation record is now the named next subject. C09: three folds guarded, catalogue permissions guarded at the derivation, the premature detector and the rank ORDER both closed by enumeration as journal-only. C09's own scope is exhausted apart from the knowledge pipeline's contract, which is a separate subject.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
