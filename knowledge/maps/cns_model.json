@@ -869,6 +869,19 @@
       }
     },
     "findings": {
+      "the_other_two_folds_were_only_shape_guarded": {
+        "named_state_space": "The same guard SCOPE as evidence_fold_guard_granularity, at the other two folds of core/loop_evidence_chain.py:_fold_evidence_chain — working-memory artifacts and recent dialogue turns.",
+        "prediction": "GREEN, stated after checking for a test that DISCRIMINATES rather than one that logs: no test names either skip event, and both uses of evidence_from_prior_turn in the suite construct evidence directly rather than injecting a failure.",
+        "premise_verified_first": "On a shim, both folds are granular under the real code — a malformed artifact and a failing turn conversion each skip only themselves and the sibling still reaches the chain. The dialogue fold's admitted count reports 1, not 2, so it is honest about what landed.",
+        "mutation": "The same ONE relation applied to both: a break at the end of each except block. Both confirmed live — the chain drops from 1 to 0 in each case.",
+        "observed_consequence": "One failure across the whole suite, and it is not a behavioural one: test_loop_evidence_chain_split.py::test_logic_moved_symbol_for_symbol, an AST body-equivalence ratchet from the module split. 7302 tests passed with both folds truncating.",
+        "why_that_failure_does_not_count_as_protection": "This project has already ruled on exactly this shape, in C06: a guard that fires on any edit cannot tell a deliberate change from a deleted safety condition. The ratchet would redden identically for a renamed local. Behaviourally the property was unobserved.",
+        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "NEGATIVE — shape-guarded only"},
+        "protection_status": "tests/test_evidence_fold_granularity.py now holds all three properties behaviourally, with a fourth test asserting that three items land when nothing fails, so the others cannot be satisfied by an empty fold. Fail-before verified: three of four red on the mutation.",
+        "the_asymmetry_itself": "One fold of three had a behavioural test; its two neighbours, written in the same style with the same guard shape, had only the shape ratchet. The comment beside the first fold warns that the loops must not drift apart — it was addressed to a reader, and the reader it needed was a test.",
+        "scope_limitation": "The new tests drive the method through a shim rather than a full run, so they would not notice if _fold_evidence_chain stopped being called; the evidence_collected assertions elsewhere would. The trade is stated in the file.",
+        "no_code_change": "None. All three folds were already correct."
+      },
       "evidence_fold_guard_granularity": {
         "named_state_space": "The SCOPE of the failure guard in core/loop_evidence_chain.py:_fold_evidence_chain — per record, or around the loop. Two values, and the difference is whether one malformed record silently truncates the whole chain.",
         "why_it_was_opened": "The code's own comment (MIR-061) records that the guard once sat outside the loop, that a single failed conversion left 1 of 5 records arriving, and that the verifier then judged the answer against a truncated chain so citations came back cited_but_unmatched for an unrelated reason. The comment ends 'these two must not drift apart again' — a warning, which is not an instrument.",
