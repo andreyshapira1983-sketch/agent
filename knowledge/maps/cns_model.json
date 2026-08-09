@@ -869,6 +869,18 @@
       }
     },
     "findings": {
+      "catalogue_permissions_asked_about_the_wrong_sink": {
+        "named_state_space": "Which SINK NAME each of the two catalogue permissions passes to _durable_learning_suppressed at core/loop.py:312-313. Two lines that differ only in a string, and the last thing between a turn and two different durable writes — long-term memory and the persisted source registry.",
+        "why_it_was_invisible": "In every configuration the suite exercises the two answers are EQUAL. durable_writes=None allows both, frozenset() denies both, and the two absolute brakes deny everything. They can only disagree under an allowlist holding one of the two names and not the other, and no test used one — measured directly on the gate across all four shapes.",
+        "mutation": "ONE string: line 312 asks about source_registry instead of knowledge.",
+        "observed_consequence": "GREEN. 7307 passed, exit 0. Restore byte-identical (8671c8f1).",
+        "what_the_neighbouring_test_could_not_see": "tests/test_catalogue_core_is_shared.py::test_permissions_reach_the_pipeline covers the hop AFTER this one — given the two booleans, the pipeline receives remember, auto_write_memory and source_store accordingly. It supplies the booleans itself, so it cannot see a swap upstream.",
+        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "NEGATIVE"},
+        "protection_status": "tests/test_catalogue_permissions_name_their_own_sink.py. Behaviour: a partial allowlist holding one sink permits only that sink, in both directions, plus a guard naming the two configurations that cannot tell them apart. Wiring: an AST assertion that each derivation passes its own name — the same behaviour-plus-wiring pairing test_verified_memory_gate_follows_gateway_path.py already uses, and NOT a body-equivalence ratchet, since it reads one argument of one call.",
+        "my_own_trap_recorded": "The behavioural tests were written first and did NOT redden on the swap. They call _durable_learning_suppressed directly, so they exercise a restatement of core/loop.py rather than core/loop.py. This project recorded the same shape once before — a replay gate whose conditions were restated inside a test instead of called. Caught by the break-did-not-redden rule; the wiring assertion is what closes it.",
+        "scope_limitation": "The wiring assertion reads the call site statically. A full turn reaching the catalogue branch under a partial allowlist would be stronger and was not written; the behavioural half here covers the gate, not the derivation.",
+        "no_code_change": "None. The derivation is correct; nothing was watching it."
+      },
       "c09_catalogue_decision_surface": {
         "named_state_space": "The values that cross into a decision inside core/loop_evidence_chain.py:_catalogue_chain and :_rank_and_catalog_evidence, derived by reading both end to end rather than by grepping.",
         "why_read_first": "The five units that came from reading the attempt loop end to end were worth more than the ones guessed from a census. The same method is applied here before any bite.",
