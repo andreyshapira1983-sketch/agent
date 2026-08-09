@@ -869,6 +869,23 @@
       }
     },
     "findings": {
+      "the_block_outcome_was_certified_through_one_of_its_two_producers": {
+        "named_state_space": "The PRODUCER of the gateway's `block` outcome. core/gateway_consult.py:collect_hard_stop_reasons builds the reason tuple from TWO independent sources: kill_switch_active (:118-126, whose state is computed from the budget snapshot) and readiness_blocker (:127-129, gated by check_readiness).",
+        "the_guess_replaced_by_evidence": "The census refused to name which two refusals M52/M53 certified. tests/test_gateway_refusals_stop_the_effect_c08.py answers it in its own docstring and test names: M52 is `deny` (test_a_gateway_deny_prevents_the_write) and M53 is `block` (test_a_gateway_hard_stop_prevents_the_write). `simulate` had a prior end-to-end observer. The certified set at the LOOP level is deny + block + simulate.",
+        "the_census_was_pessimistic_about_the_suite": "escalate has its own loop-level AND runtime-level contract file (tests/test_gateway_escalate_contract.py, importing both AgentLoop and AutonomousRuntime). allow and passthrough are permissive outcomes whose failure mode is a FALSE REFUSAL, which any end-to-end test that writes or reads a file would catch. 'At most three of six' was right about the record and pessimistic about the suite.",
+        "where_the_real_gap_is": "M53 drives `block` through a LATCHED KILL SWITCH — the test file defines _LatchedKillSwitch for exactly that. The readiness_blocker producer of the same outcome is exercised only at tests/test_actuation_gateway.py:325 and tests/test_gateway_consult.py:36, both of which call the gateway class or the collector function DIRECTLY and never drive the loop. The claim 'the loop obeys a block' is certified through one producer of two.",
+        "why_this_is_the_P02_shape_one_level_deeper": "P02 found a certified walk written down as a writer SET. Here the walk is written down as an OUTCOME, and the outcome has its own producer set that the walk did not cover. The same question — which producers did the walk actually touch — has now paid twice on this cluster.",
+        "historical_corroboration_already_in_the_code": "The collector's docstring records that the parameter `blockers` once shadowed the module function `readiness_blockers`, so the function could not be called at all, and that nothing tried to, which is why it cost nothing until then. A prior session's finding, and evidence that this producer has a history of being unreached.",
+        "method": "Static, by reading the certifying tests and the collector. No mutation, no suite.",
+        "verdict": {
+          "REACHABILITY": "PROVEN for the enumeration",
+          "CAUSALITY": "N/A",
+          "SEMANTICS": "N/A",
+          "PROTECTION": "UNPROVEN for the readiness_blocker producer at the loop level"
+        },
+        "what_is_NOT_claimed": "That the loop disobeys a readiness-blocker block. Nothing here measures behaviour. The claim is exactly that no observer was found for it at the loop level, which is a statement about the search.",
+        "no_code_change": "None."
+      },
       "actuation_outcome_space_is_six_wide_and_certified_at_three": {
         "named_state_space": "GatewayDecision.outcome from core/actuation_gateway.py:evaluate. SIX values, enumerated from the code rather than from the record: passthrough (:121, not an effectful tool), block (:104, hard stop), deny (:137, policy), escalate (:144, policy), simulate (:153, dry run), allow (:160).",
         "what_the_record_claims": "C08's partial_walk reads: gateway_refusal_stops_the_effect CERTIFIED (M52, M53) — both refusals on the effectful path had zero observers while only `simulate` was covered end to end. That accounts for simulate plus TWO refusals: at most three of six. The record does not say WHICH two, and identifying them from the M52/M53 tests is the first step of the next unit rather than a guess made here.",
