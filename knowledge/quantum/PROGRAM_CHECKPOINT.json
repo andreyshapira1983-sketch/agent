@@ -1,0 +1,72 @@
+{
+  "_what_this_is": "Resumable state for the Quantum CNS Full-Agent Mapping Program. Context windows end; this file is how the next one restarts without asking anybody. Everything here is derivable from the repository — nothing depends on a conversation being remembered. Read it, run the subject guard, continue at next_admissible_unit.",
+  "program": "Quantum CNS Full-Agent Mapping Program",
+  "opened": "2026-08-09",
+  "updated": "2026-08-09",
+  "snapshot": {
+    "sha": "f88997395abd7ade9f5a7bbb7e7e57db7a2cd1ee",
+    "branch_at_open": "audit/startup-path-and-doc-cleanup",
+    "subject_paths": ["core", "cli", "app", "api", "tools", "agent_tick.py", "main.py"],
+    "guard": "scripts/qm_subject_freeze.py",
+    "guard_last_result": "INTACT (exit 0)",
+    "note": "The branch head moves as the laboratory grows. The SUBJECT does not: every claim is about the production runtime as of this SHA."
+  },
+  "evaluation_domain_of_this_checkpoint": {
+    "code": "f889973",
+    "held": [],
+    "observed": ["Python 3.11.9", "Windows 11", "git 2.x", "working tree clean at open"],
+    "durable_state": "none required — the units closed so far read git history and the repository tree only",
+    "external": "none — no network, no credentials, no model calls used by the units closed so far"
+  },
+  "completed_units": [
+    {
+      "id": "P00-subject-guard",
+      "question": "Can the program detect, mechanically, that its own subject moved?",
+      "result": "YES for both conditions. scripts/qm_subject_freeze.py returns INTACT / TRACKED_DRIFT / UNTRACKED_ADDITION / BOTH / UNREADABLE.",
+      "evidence": "Bitten against the real repository: an untracked core/_qm_freeze_probe.py gave exit 2; an appended newline in main.py gave exit 1; both together gave exit 3; main.py restored byte-identically (git hash-object 204c6a93 before and after); baseline exit 0 each time. Made durable in tests/test_qm_subject_freeze.py against a throwaway git repository, including the case that motivates it — a new module under core/ while `git diff --stat` against the snapshot stays empty.",
+      "anti_vacuity": "The one-operation ratchet was asked directly whether it governs the new file: in scope, one definition counted, six files governed. A guard nobody governs is the failure mode this program cannot afford.",
+      "verdicts": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "PROVEN"}
+    },
+    {
+      "id": "P01-carry-forward",
+      "question": "Do the eight already-closed clusters (C00-C07) still hold at snapshot S, and where exactly do they live?",
+      "result": "All eight CARRIED_FORWARD. Two map defects found, one code defect banked.",
+      "evidence": "Sites resolved mechanically against the 247 production module stems present at S; each site's last commit compared against the commit where its cluster first read PROVEN. Three sites had moved after closure and each was adjudicated on its diff: core/loop_context.py (C01) proven docstring-only by comparing ASTs with every docstring stripped; agent_tick.py (C00) confined to the AGENT_TEST_TIMEOUT_SECONDS literal, which no C00 arc reads; core/loop_memory_read.py (C06) deleted _episodic_store_mtime, which is none of C06's six certified arcs.",
+      "anti_vacuity": "The first detection pass used a path-shaped regex, reported zero sites for C00 and C03, and missed core/loop_memory_read.py in C06 — silence that would have read as stability. The widened stem index was probed (it resolves 'loop_memory_read') before its silence was trusted, and the sites for C00/C03 were recovered from their closure commits' test imports.",
+      "found": [
+        "MAP: C00 and C03 closed without naming a single production path. A closed cluster with no site index cannot enter a bidirectional coverage index at all. Recovered and recorded in quantum_cns.coverage.unit_to_physical.",
+        "MAP: C06's scope said 'caches' for a planner cache deleted at a990e48. Corrected with a dated note.",
+        "CODE (banked, not fixed): core/loop_memory_read.py:330 describes the deleted planner cache in the present tense. It was written as the correction of an earlier lying comment and outlived its subject by hours."
+      ],
+      "verdicts": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "UNPROVEN"},
+      "protection_note": "UNPROVEN deliberately. Nothing mechanically prevents a future production change from staling a carried-forward cluster silently; the carry-forward derivation is a script run by hand, not a guard in the suite. Whether that instrument should exist is a question for a later unit, not an assumption now."
+    }
+  ],
+  "current_unit": null,
+  "next_admissible_unit": {
+    "id": "C08",
+    "why_first": "Of the eleven open clusters it holds the most power over execution and the widest fan-out: planner -> policy gate -> step execution -> tools -> evidence. Its own record names what is still unclosed: the 423-line attempt-loop body has never been read line by line.",
+    "entry_question": "Which values cross into the attempt loop's decisions, and which of them has a consumer whose behaviour changes when the value changes?",
+    "known_before_starting": "Certified already inside C08: post_tool_trust_boundary, failure_history delivery and its arbiter effect at L5, step_failure_to_policy (M47/M48), policy_deny_stops_the_step (M51), gateway_refusal_stops_the_effect (M52/M53), approval_verdict_stops_the_step (M54/M55), artifacts (M57), chain (M58), the planner-skip consumer of local_critique_active (M59, attributed to an existing test), repeat_question_hint delivery (M60, PARTIAL). The planner cache was measured and then deleted. What remains open is the unread body and the live-model consumers the mock cannot observe."
+  },
+  "last_proven_causal_front": "C00-C07 carried forward to S; inside C08 the certified arcs listed above stand, with the attempt-loop body unread.",
+  "unresolved_contradiction": null,
+  "open_questions": [
+    "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
+    "C00 and C03 site sets are over-approximations recovered from test imports. Tightening them is admissible work but has not been done; the over-approximation is safe for staleness and unsafe for coverage claims."
+  ],
+  "changed_files_this_checkpoint": [
+    "scripts/qm_subject_freeze.py (new)",
+    "tests/test_qm_subject_freeze.py (new)",
+    "knowledge/quantum/PROGRAM_CHECKPOINT.json (new)",
+    "knowledge/maps/cns_model.json (quantum_cns._program, .carry_forward, .defect_bank, .coverage; C06 scope correction; epilogue on the stale-comment record)"
+  ],
+  "checks_run_on_this_tree": {
+    "scripts/qm_subject_freeze.py": "INTACT",
+    "scripts/qm_link_check.py": "GREEN",
+    "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
+    "ruff_debt": "399 findings repo-wide against a baseline of 405; the two new files contribute none",
+    "full_suite": "7277 passed, 1 xfailed, pytest exit 0, 349s",
+    "_reporting_trap_repeated": "The FIRST run of this suite reported 'exit code 0' while pytest had actually failed test_lint_debt_does_not_grow (406 > 405). The zero came from `tail` at the end of a pipe, not from pytest — the same trap already recorded once in this project's history. The rerun above pipes to a file and records $? explicitly."
+  }
+}
