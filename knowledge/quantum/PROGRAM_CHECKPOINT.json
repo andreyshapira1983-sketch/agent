@@ -340,17 +340,49 @@
       },
       "no_new_test": "None written. The existing protection is stronger than what this unit would have added.",
       "harness_error_recorded": "The first probe reported zero of everything. Not the subject: the question was «сделай что-нибудь» and the C04 clarification gate stopped the run before the planner. The gate was working; the probe was asking something the agent is designed to refuse."
+    },
+    {
+      "id": "C08-U8-remaining-producers",
+      "cluster": "C08",
+      "question": "Are web_empty, timeout and the tool-error path watched the way verify_failed is, or the way injection_blocked was?",
+      "result": "Mixed, and the mixture is the finding. web_empty PROTECTED (2 tests, as predicted). timeout UNPROTECTED (7297 passed with the code swapped) — now guarded. The two variable-code producers remain unmeasured by this method.",
+      "predictions_before_the_runs": "web_empty RED (named in an acceptance test) — correct. timeout GREEN (its sixteen mentions are about tool timeouts, not the trigger) — correct. tool_error RED — untested this round, the producer selects its code at runtime.",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [
+          "max_replan_attempts=3, the shipped default",
+          "a stand-in shell_exec returning {'timed_out': True}, because the loop's condition is the tool NAME plus that key",
+          "a concrete question — a vague one is stopped by the clarification gate before the planner runs"
+        ],
+        "observed": [
+          "FakeLLM synthesizer",
+          "timeout and web_empty both carry budget 2 and requires_different_action=False, so swapping one for the other leaves control flow identical"
+        ],
+        "durable_state": "temporary workspace",
+        "external": "none"
+      },
+      "reachability_proven_first": "The timeout site fires: the tool runs twice under budget 2, and the retry prompt changes from the timeout advice (414 chars) to the web_empty advice (478 chars). The green was therefore about the observer, not about the site.",
+      "the_shape_of_the_gap": "Protection is inherited, not uniform. MVP-8-era files assert that the planner's retry context NAMES the code; where that pattern was carried the producer is protected, where a newer path was added it was not. injection_blocked is a security path whose test asserted the consequence deliberately; timeout is an operational path with sixteen files mentioning the word and none watching the trigger.",
+      "why_it_matters": "Each code selects its own advice. timeout says REDUCE SCOPE; web_empty says REFORMULATE the query. A shell command that ran out of time and is told to rephrase its query has been handed advice for a different failure.",
+      "made_durable": "tests/test_shell_timeout_replan_code.py — the same assertion shape the protected producers already had, plus the advice text itself. Fail-before verified: two of three red on the mutation, the precondition test stays green because the budget is unchanged.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "PROVEN after this unit; NEGATIVE for timeout before it"
+      },
+      "scope_limitation": "Four literal producers measured. The variable-code producers (:489/:497 replan_code, :451 the approval verdict) select their code at runtime and were not measured this way; :451 is separately certified as M54/M55."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C08-U8-remaining-three-producers",
+    "id": "C08-U9-variable-code-producers",
     "cluster": "C08",
-    "entry_question": "Are :555 (web_empty), :576 (timeout) and :496 (the tool-error path) watched the way verify_failed is, or the way injection_blocked was?",
-    "why_this_one": "C08-U7 turned the question from 'is this one unprotected' into 'which of them inherited the MVP-8 assertion pattern and which did not'. That is answerable in one pass per producer with the same isolated mutation, and the answer is the remaining C08 debt.",
-    "planned_probe": "Same shape each time: hold the shipped cap, drive the producer, mutate ONLY the ReplanTrigger code to another same-budget code, run the suite. Predict per producer from whether an MVP-8-era acceptance test names it — and record the prediction before the run, because one has already been wrong."
+    "entry_question": "The producers at :489 and :497 take their code from a runtime variable (replan_code). What values can it hold, who computes it, and is the mapping from tool failure to code observed?",
+    "why_this_one": "It is the last unmeasured producer of the carrier, and the only one whose code is a computation rather than a literal — so the isolated-literal mutation used for the other four does not apply, and the subject is the classifier rather than the constant.",
+    "planned_probe": "Find where replan_code is computed, enumerate its outputs, and check whether any test pins a tool failure to the code it produces. Then choose a mutation on the CLASSIFIER, not on a literal."
   },
-  "last_proven_causal_front": "C00-C07 carried forward. C08: the attempt loop read end to end with five candidates closed; the producer set censused; injection_blocked walked and now guarded; verify_failed found already guarded by three pre-existing tests. Three live producers remain unwalked.",
+  "last_proven_causal_front": "C00-C07 carried forward. C08: attempt loop read end to end with five candidates closed; producer set censused; all four LITERAL producers now measured — injection_blocked and timeout were unprotected and are now guarded, verify_failed and web_empty were already watched. The two variable-code producers are the remaining debt.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
@@ -370,6 +402,6 @@
     "scripts/qm_subject_freeze.py": "INTACT",
     "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
     "ruff_debt": "399 repo-wide against a baseline of 405",
-    "full_suite": "C08-U7 tree: 7297 passed, 5 xfailed, pytest exit 0, 321s"
+    "full_suite": "C08-U8 tree: 7300 passed, 5 xfailed, pytest exit 0, 321s"
   }
 }
