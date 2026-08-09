@@ -420,17 +420,36 @@
       },
       "no_new_test": "None. Adding one would duplicate a better-named existing case.",
       "scope_limitation": "One of the three folds. The working-memory fold reports through _sensor_failed and the dialogue fold through dialogue_evidence_skipped; neither was measured, and no test names either event."
+    },
+    {
+      "id": "C09-U2-the-other-two-folds",
+      "cluster": "C09",
+      "question": "Do the working-memory and dialogue folds hold the granularity the persistent fold is guarded for?",
+      "result": "They hold it, and nothing behavioural was watching. Now guarded.",
+      "prediction": "GREEN — and this time the check was for a test that DISCRIMINATES rather than one that logs: no test names either skip event, and both uses of evidence_from_prior_turn in the suite construct evidence directly instead of injecting a failure.",
+      "premise_verified_first": "On a shim, both folds are granular under the real code: a malformed artifact and a failing turn conversion each skip only themselves, and the dialogue fold's admitted count reports 1 rather than 2.",
+      "mutation": "The same one relation applied to both — a break at the end of each except block. Both live: the chain drops 1 -> 0 in each case.",
+      "observed": "One failure in the whole suite, and not a behavioural one: test_logic_moved_symbol_for_symbol, an AST body-equivalence ratchet from the module split. 7302 passed with both folds truncating. Restore byte-identical (cbedbdc5).",
+      "why_that_is_not_protection": "C06 already ruled on this shape: a guard that fires on any edit cannot tell a deliberate change from a deleted safety condition. It would redden identically for a renamed local.",
+      "made_durable": "tests/test_evidence_fold_granularity.py — all three properties behaviourally, plus a fourth test asserting three items land when nothing fails so the others cannot pass on an empty fold. Fail-before verified: three of four red.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "NEGATIVE before, PROVEN after"
+      },
+      "scope_limitation": "The new tests drive the method through a shim, so they would not notice if _fold_evidence_chain stopped being called; the evidence_collected assertions elsewhere would. Stated in the file rather than hidden."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C09-U2-the-other-two-folds",
+    "id": "C09-U3-ranking-and-cataloguing",
     "cluster": "C09",
-    "entry_question": "The working-memory fold and the dialogue fold have the same per-record shape and no test names either of their skip events. Do they hold the granularity the persistent fold is guarded for?",
-    "why_this_one": "It is the direct continuation, and the two falsified predictions say what to do differently: check for a test that DISCRIMINATES, not one that logs, and verify the premise on a shim before predicting.",
-    "planned_probe": "Same shim, two records each, first one failing. Establish that the granularity is live, then mutate the scope and run the suite."
+    "entry_question": "_rank_and_catalog_evidence and _catalogue_chain are the rest of C09. What values cross into a decision there, and which has a live consumer?",
+    "why_this_one": "The fold is done — all three sources measured. Ranking is what the synthesis prompt and the source registry read, so it is the cluster's remaining power.",
+    "planned_probe": "Read both methods end to end first, as with the attempt loop: the two units that came from that read were worth more than the ones guessed from a census."
   },
-  "last_proven_causal_front": "C00-C07 carried forward. C08's carrier debt discharged. C09 opened: the persistent-record fold's guard granularity is protected by an existing named test; the working-memory and dialogue folds are unmeasured.",
+  "last_proven_causal_front": "C00-C07 carried forward. C08's carrier debt discharged. C09: all three folds of _fold_evidence_chain measured — one was behaviourally guarded, two were shape-guarded only and are now guarded. Ranking and cataloguing remain.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
@@ -450,6 +469,6 @@
     "scripts/qm_subject_freeze.py": "INTACT",
     "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
     "ruff_debt": "399 repo-wide against a baseline of 405",
-    "full_suite": "C09-U1 tree: 7303 passed, 5 xfailed, pytest exit 0, 326s"
+    "full_suite": "C09-U2 tree: 7307 passed, 5 xfailed, pytest exit 0, 315s"
   }
 }
