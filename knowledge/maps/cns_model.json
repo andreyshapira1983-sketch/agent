@@ -12,14 +12,29 @@
       "L5 downstream path changed",
       "L6 externally observable outcome changed"
     ],
-    "certified_conditions": ["REACHABILITY", "CAUSALITY", "SEMANTICS", "PROTECTION"],
-    "verdicts": ["PROVEN", "UNPROVEN", "NEGATIVE", "UNDER_QUESTION"],
+    "certified_conditions": [
+      "REACHABILITY",
+      "CAUSALITY",
+      "SEMANTICS",
+      "PROTECTION"
+    ],
+    "verdicts": [
+      "PROVEN",
+      "UNPROVEN",
+      "NEGATIVE",
+      "UNDER_QUESTION"
+    ],
     "_two_vocabularies_note": "path_statuses answer 'how far is this arc proven' (PARTIAL lives there); verdicts answer 'is this condition met' and roll up to 'are all four met'. They are not interchangeable: a PARTIAL arc carries status=PARTIAL and certified.verdict=UNPROVEN, because 'partly' is not a way of meeting four conditions. PARTIAL was briefly added to verdicts on 2026-08-08 to silence a ratchet; the operator refused the widening and the file's own prompt_to_model_family already showed the right shape.",
-    "path_statuses": ["PROVEN", "UNPROVEN", "DEAD", "PERIPHERAL", "PARTIAL"],
+    "path_statuses": [
+      "PROVEN",
+      "UNPROVEN",
+      "DEAD",
+      "PERIPHERAL",
+      "PARTIAL"
+    ],
     "_partial_note": "PARTIAL added 2026-08-08 on the operator's review: an arc whose delivery is proven but whose final hop is mock-blind (a live model consumes it) may not vanish from the count by being reclassified a 'coincidental carrier' — that is the descriptive/non-control loophole wearing a new coat. PARTIAL arcs are counted and listed, never absorbed.",
     "_owner_definition": "owner = the mechanism that answers for the state's lifecycle and semantics: creation, mutation, invalidation, end of life (mandate items 5-6). ATTACHMENT — which object physically holds the field — is provable separately (a creation site, an instance lifetime) and does NOT by itself establish ownership; nor does absence of traffic DISPROVE it. Added 2026-08-08 after the operator overturned owner=NEGATIVE on the dead field: traffic absence proves the carrier dead, not the owner absent."
   },
-
   "state_carriers": {
     "failure_history": {
       "_acceptance_case": "The operator's test of this schema: if this carrier cannot be described here without smearing facts across nodes, the schema is wrong again.",
@@ -32,21 +47,81 @@
       "declared_as_output": false,
       "declared_output_note": "AttemptState.OUTPUTS names eight fields and a test guards exactly that set; this is the ninth channel and it is typed as an input ('does not change during the section') while loop_attempt.py:472 extends it. The OUTPUTS test therefore looks like a complete interface contract and is not.",
       "writers": [
-        {"site": "core/loop_attempt.py:448", "node": "loop_attempt.py::AgentLoopAttempt._run_attempt_loop", "puts": "failures of an ATTEMPT", "call": "extend", "_anchor_correction": "read :472 until 2026-08-09 — a blank line by then. All four loop_attempt anchors on this carrier were off by exactly the 24 lines a990e48 removed when it deleted the planner cache; that commit updated census counts and the shape ratchet and left these. Now guarded by tests/test_cns_anchor_integrity.py, which requires an anchor to name its carrier."},
-        {"site": "core/loop_verify_replan.py:149", "node": "loop_verify_replan.py::AgentLoopVerifyReplan._replan_on_refuted_claims", "puts": "claim_refuted", "call": "append"},
-        {"site": "core/loop_verify_replan.py:228", "node": "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer", "puts": "unresolved_citation", "call": "append"},
-        {"site": "core/loop_verify_replan.py:379", "node": "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer", "puts": "failure of a step executed INSIDE the verify loop — a different kind from the other three", "call": "append"}
+        {
+          "site": "core/loop_attempt.py:448",
+          "node": "loop_attempt.py::AgentLoopAttempt._run_attempt_loop",
+          "puts": "failures of an ATTEMPT",
+          "call": "extend",
+          "_anchor_correction": "read :472 until 2026-08-09 — a blank line by then. All four loop_attempt anchors on this carrier were off by exactly the 24 lines a990e48 removed when it deleted the planner cache; that commit updated census counts and the shape ratchet and left these. Now guarded by tests/test_cns_anchor_integrity.py, which requires an anchor to name its carrier."
+        },
+        {
+          "site": "core/loop_verify_replan.py:149",
+          "node": "loop_verify_replan.py::AgentLoopVerifyReplan._replan_on_refuted_claims",
+          "puts": "claim_refuted",
+          "call": "append"
+        },
+        {
+          "site": "core/loop_verify_replan.py:228",
+          "node": "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
+          "puts": "unresolved_citation",
+          "call": "append"
+        },
+        {
+          "site": "core/loop_verify_replan.py:379",
+          "node": "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
+          "puts": "failure of a step executed INSIDE the verify loop — a different kind from the other three",
+          "call": "append"
+        }
       ],
       "readers": [
-        {"site": "core/replan.py:496", "role": "control", "uses": "decide(): global cap and per-type budget"},
-        {"site": "core/replan.py:132", "role": "control", "uses": "format_replan_context(): whole list becomes planner prompt text"},
-        {"site": "core/loop_synthesis.py:235", "role": "control", "uses": "<failure_context> block in the synthesis prompt", "gated_by": "core/loop_synthesis.py:637 — receives None unless st.replan_exhausted"},
-        {"site": "core/loop_run_tail.py:301", "role": "control", "uses": "policy_blocked triggers -> denied_tools for the obligation arbiter"},
-        {"site": "core/loop_run_tail.py:315", "role": "control", "uses": "failure codes -> obligation arbiter"},
-        {"site": "core/subsystem_disagreement.py:87", "role": "dead_end", "uses": "codes into a journal event; loop_verification.py:154 states it is recorded and never acted on"},
-        {"site": "core/loop_attempt.py:515", "role": "dead_end", "uses": "log line — the codes inside the replan_exhausted ErrorObject message", "_anchor_correction": "read :539 until 2026-08-09; same 24-line shift"},
-        {"site": "core/loop_attempt.py:525", "role": "dead_end", "uses": "log line — the same ErrorObject's context payload", "_anchor_correction": "read :549 until 2026-08-09, by then pointing at action_spec={ inside _build_plan, a method that reads nothing of this carrier"},
-        {"site": "core/loop_attempt.py:164", "role": "dead_end", "uses": "count_failures into the replan_attempt event — found 2026-08-08 while reconciling the map's 6 against this list's 8: BOTH numbers were wrong"}
+        {
+          "site": "core/replan.py:496",
+          "role": "control",
+          "uses": "decide(): global cap and per-type budget"
+        },
+        {
+          "site": "core/replan.py:132",
+          "role": "control",
+          "uses": "format_replan_context(): whole list becomes planner prompt text"
+        },
+        {
+          "site": "core/loop_synthesis.py:235",
+          "role": "control",
+          "uses": "<failure_context> block in the synthesis prompt",
+          "gated_by": "core/loop_synthesis.py:637 — receives None unless st.replan_exhausted"
+        },
+        {
+          "site": "core/loop_run_tail.py:301",
+          "role": "control",
+          "uses": "policy_blocked triggers -> denied_tools for the obligation arbiter"
+        },
+        {
+          "site": "core/loop_run_tail.py:315",
+          "role": "control",
+          "uses": "failure codes -> obligation arbiter"
+        },
+        {
+          "site": "core/subsystem_disagreement.py:87",
+          "role": "dead_end",
+          "uses": "codes into a journal event; loop_verification.py:154 states it is recorded and never acted on"
+        },
+        {
+          "site": "core/loop_attempt.py:515",
+          "role": "dead_end",
+          "uses": "log line — the codes inside the replan_exhausted ErrorObject message",
+          "_anchor_correction": "read :539 until 2026-08-09; same 24-line shift"
+        },
+        {
+          "site": "core/loop_attempt.py:525",
+          "role": "dead_end",
+          "uses": "log line — the same ErrorObject's context payload",
+          "_anchor_correction": "read :549 until 2026-08-09, by then pointing at action_spec={ inside _build_plan, a method that reads nothing of this carrier"
+        },
+        {
+          "site": "core/loop_attempt.py:164",
+          "role": "dead_end",
+          "uses": "count_failures into the replan_attempt event — found 2026-08-08 while reconciling the map's 6 against this list's 8: BOTH numbers were wrong"
+        }
       ],
       "reader_count": "2 logical producer mechanisms -> 4 physical write sites; 4 logical consumer mechanisms (replan policy+prompt-context, synthesis block, obligations arbiter — control; journal — dead end) -> 9 physical read sites (5 control + 4 dead_end). Recounted from code 2026-08-08; any future site count must state both units.",
       "lifetime": "one run(); created in _run_inner, never reset inside it, discarded with the frame",
@@ -66,27 +141,55 @@
         "semantic_integrity": "NEGATIVE"
       },
       "semantic_defects": [
-        {"defect": "two different kinds of failure share one list", "detail": "attempt failures and verify-loop step failures are counted by one budget and printed as one list; the planner prompt says 'Previous attempts produced N failed step(s)' where N includes what was never an attempt"},
-        {"defect": "synthetic attempt number", "detail": "core/loop_verify_replan.py:226 sets attempt = st.attempt + verify_replan_attempt; that number reaches the planner and the synthesis block as if it were a real attempt"},
-        {"defect": "duplication per verify iteration", "detail": "the same unresolved URL is appended again on each iteration: twice into the type budget, twice into the planner prompt"}
+        {
+          "defect": "two different kinds of failure share one list",
+          "detail": "attempt failures and verify-loop step failures are counted by one budget and printed as one list; the planner prompt says 'Previous attempts produced N failed step(s)' where N includes what was never an attempt"
+        },
+        {
+          "defect": "synthetic attempt number",
+          "detail": "core/loop_verify_replan.py:226 sets attempt = st.attempt + verify_replan_attempt; that number reaches the planner and the synthesis block as if it were a real attempt"
+        },
+        {
+          "defect": "duplication per verify iteration",
+          "detail": "the same unresolved URL is appended again on each iteration: twice into the type budget, twice into the planner prompt"
+        }
       ]
     },
-
     "_step_trigger_tls": {
       "kind": "scratch slot",
       "type": "threading.local",
       "created_at": "core/loop_step_execution.py:43",
       "transport": "module-level thread-local; read via getattr (core/loop_step_execution.py:110)",
       "note": "Every step failure travels through this carrier. It is invisible to the node/edge discovery rule and absent from the operator's map — found by reconciliation on 2026-08-07.",
-      "writers": ["core/loop_step_execution.py:362 (policy_blocked)", "core/loop_step_execution.py:385 (policy_blocked)", "core/loop_step_execution.py:416 (policy_blocked)", "core/loop_step_execution.py:451 (code — variable)", "core/loop_step_execution.py:462 (unknown)", "core/loop_step_execution.py:496 (replan_code — variable)", "core/loop_step_execution.py:528 (verify_failed)", "core/loop_step_execution.py:555 (web_empty)", "core/loop_step_execution.py:576 (timeout)", "core/loop_step_execution.py:653 (injection_blocked)", "core/loop_step_execution.py:789 (unknown)"],
-      "_writers_reachability_census": "2026-08-09. Eleven sites, not eleven live producers. :462 is UNREACHABLE in the shipped system and is a defensive branch: it fires only when action.type != 'tool_call', Action.type is Literal[tool_call, llm_synthesize, output], both production plan builders write tool_call (core/loop_attempt.py:550, core/self_repair.py:274), and no code anywhere in core/cli/app/api/tools deserialises a Plan or PlanStep from external data. :451 was already certified as approval_verdict_stops_the_step (M54/M55) — the site simply was not named. Live and unwalked: :496, :528, :555, :576, plus :789 as a last-resort guard.", "_writers_correction": "Recorded THREE writers until 2026-08-09; the code has eleven, all inside the 558-line _execute_step. The three that were listed are exactly the policy_blocked family — the one path C08 had certified (M51) — so a single certified walk had been written down as the carrier's writer set. Not staleness: eleven already existed at b4017bb, the commit that wrote three, and core/loop_step_execution.py has not changed since. Every missing code (verify_failed, web_empty, timeout, injection_blocked, unknown, and two variable codes) is exercised by tests, so these are live sites. Found by tests/test_cns_anchor_integrity.py, which derives the set from the AST instead of from a walk.",
-      "readers": ["core/loop_step_execution.py:110 (consume)"],
+      "writers": [
+        "core/loop_step_execution.py:362 (policy_blocked)",
+        "core/loop_step_execution.py:385 (policy_blocked)",
+        "core/loop_step_execution.py:416 (policy_blocked)",
+        "core/loop_step_execution.py:451 (code — variable)",
+        "core/loop_step_execution.py:462 (unknown)",
+        "core/loop_step_execution.py:496 (replan_code — variable)",
+        "core/loop_step_execution.py:528 (verify_failed)",
+        "core/loop_step_execution.py:555 (web_empty)",
+        "core/loop_step_execution.py:576 (timeout)",
+        "core/loop_step_execution.py:653 (injection_blocked)",
+        "core/loop_step_execution.py:789 (unknown)"
+      ],
+      "_writers_reachability_census": "2026-08-09. Eleven sites, not eleven live producers. :462 is UNREACHABLE in the shipped system and is a defensive branch: it fires only when action.type != 'tool_call', Action.type is Literal[tool_call, llm_synthesize, output], both production plan builders write tool_call (core/loop_attempt.py:550, core/self_repair.py:274), and no code anywhere in core/cli/app/api/tools deserialises a Plan or PlanStep from external data. :451 was already certified as approval_verdict_stops_the_step (M54/M55) — the site simply was not named. Live and unwalked: :496, :528, :555, :576, plus :789 as a last-resort guard.",
+      "_writers_correction": "Recorded THREE writers until 2026-08-09; the code has eleven, all inside the 558-line _execute_step. The three that were listed are exactly the policy_blocked family — the one path C08 had certified (M51) — so a single certified walk had been written down as the carrier's writer set. Not staleness: eleven already existed at b4017bb, the commit that wrote three, and core/loop_step_execution.py has not changed since. Every missing code (verify_failed, web_empty, timeout, injection_blocked, unknown, and two variable codes) is exercised by tests, so these are live sites. Found by tests/test_cns_anchor_integrity.py, which derives the set from the AST instead of from a walk.",
+      "readers": [
+        "core/loop_step_execution.py:110 (consume)"
+      ],
       "_readers_note": "One reader, verified against the same census: lines 108, 111 and 255 write None (the clear and the consume), and 110 is the only read. The bare-string anchor shape with a trailing '(consume)' is why tests/test_cns_model.py never checked any of these — its digit test fails on the suffix and the anchor is skipped in silence.",
       "lifetime": "per step, per worker thread; set to None on read",
       "owner": "UNPROVEN",
-      "properties": {"carrier": "PROVEN", "writers": "PROVEN", "readers": "PROVEN", "delivery_non_empty": "UNPROVEN", "effect": "UNPROVEN"}
+      "properties": {
+        "carrier": "PROVEN",
+        "writers": "PROVEN",
+        "readers": "PROVEN",
+        "delivery_non_empty": "UNPROVEN",
+        "effect": "UNPROVEN"
+      }
     },
-
     "_last_step_failure": {
       "kind": "dead field",
       "created_at": "core/loop_init.py:221",
@@ -100,18 +203,28 @@
         "created_at": "core/loop_init.py:221",
         "lifetime": "instance lifetime"
       },
-      "properties": {"carrier": "NEGATIVE"}
+      "properties": {
+        "carrier": "NEGATIVE"
+      }
     }
   },
-
   "signal_flows": {
     "run_identity": {
       "producer": "loop.py::AgentLoop.run — binds identity via run_scope before any cycle work (core/loop.py:214)",
       "carrier": "ContextVar[RunContext] (core/run_context.py:36); scoped, reset in finally, nested scopes restore",
       "consumers": [
-        {"site": "core/loop_memory_write.py:196", "uses": "episode run_id/task_id at banking"},
-        {"site": "core/loop_memory_write.py:403", "uses": "aborted-episode run_id/task_id"},
-        {"site": "core/model_usage.py:207", "uses": "per-run spend attribution; falls back to session trace_id when no run is bound"}
+        {
+          "site": "core/loop_memory_write.py:196",
+          "uses": "episode run_id/task_id at banking"
+        },
+        {
+          "site": "core/loop_memory_write.py:403",
+          "uses": "aborted-episode run_id/task_id"
+        },
+        {
+          "site": "core/model_usage.py:207",
+          "uses": "per-run spend attribution; falls back to session trace_id when no run is bound"
+        }
       ],
       "effect_level": "L6 for the episode consumer: episode id derives from run_id, idempotency keys on it",
       "evidence": {
@@ -157,9 +270,21 @@
     "budget_stop_resume": {
       "producer": "ModelUsageLedger.assert_can_start raises ModelBudgetExceeded before the LLM call (core/model_usage.py:227); carrier: the exception itself, through router -> phase -> run() -> guard",
       "in_cycle_catch_sites": [
-        {"site": "core/loop_attempt.py:290", "phase": "planning", "does": "saves rich paused checkpoint (goal, steps done/remaining, blocked counter) and re-raises"},
-        {"site": "core/loop_synthesis.py:684", "phase": "synthesis", "does": "same"},
-        {"site": "core/loop_verify_replan.py:328", "phase": "verification_replan", "does": "same"}
+        {
+          "site": "core/loop_attempt.py:290",
+          "phase": "planning",
+          "does": "saves rich paused checkpoint (goal, steps done/remaining, blocked counter) and re-raises"
+        },
+        {
+          "site": "core/loop_synthesis.py:684",
+          "phase": "synthesis",
+          "does": "same"
+        },
+        {
+          "site": "core/loop_verify_replan.py:328",
+          "phase": "verification_replan",
+          "does": "same"
+        }
       ],
       "consumers": [
         "checkpoint file -> resume prompt (cli/resume.py:51: question, goal, phase, steps, counter)",
@@ -185,7 +310,11 @@
         "verdict": "PROVEN on all four conditions — second certified CNS arc. Note the designed asymmetry: a resume that pauses again leaves TWO paused tasks (old truthful, new under the fresh trace); tested, not accidental. The streamed-mode scope limit found 2026-08-08 is closed the same day: with the wrapper's stream_complete in place the synthesis pause fires in streamed mode too (test_streamed_cycle_is_blocked_and_paused_on_an_exhausted_budget)."
       },
       "semantic_defects": [
-        {"defect": "a successfully resumed task never retires", "status": "RESOLVED 2026-08-08 with the operator's verdict", "detail": "probe: pause -> resume -> success left the task paused and resumable forever; no code path wrote paused->done and the fresh trace_id joined to nothing. Fixed by carrying the join explicitly: ResumeDecision.resumed_paused_trace -> run_one_shot -> guard -> _retire_resumed_pause on the no-exception path; retired task keeps its report plus resumed_by. Both poles tested; design note in docs/CODE_NOTES.md."}
+        {
+          "defect": "a successfully resumed task never retires",
+          "status": "RESOLVED 2026-08-08 with the operator's verdict",
+          "detail": "probe: pause -> resume -> success left the task paused and resumable forever; no code path wrote paused->done and the fresh trace_id joined to nothing. Fixed by carrying the join explicitly: ResumeDecision.resumed_paused_trace -> run_one_shot -> guard -> _retire_resumed_pause on the no-exception path; retired task keeps its report plus resumed_by. Both poles tested; design note in docs/CODE_NOTES.md."
+        }
       ]
     },
     "on_token_streaming": {
@@ -206,7 +335,11 @@
         "verdict": "PROVEN on all four conditions — third certified CNS arc (entry edge -> _stream_on_token -> streamed synthesis -> billed wrapper)"
       },
       "semantic_defects": [
-        {"defect": "streamed synthesis bypassed the usage ledger and its budget", "status": "RESOLVED 2026-08-08 on the operator's verdict", "detail": "UsageTrackedLLM defined only complete; __getattr__ handed stream_complete to the RAW provider LLM, skipping assert_can_start, log_start and record. Measured: streamed cycle billed only the planner; max_calls=1 did not stop a streamed run. Fixed with a real stream_complete on the wrapper mirroring complete's billing; no provider failover for streamed calls by design. Six fail-before tests pin it; ratchet ceiling 1800->1860 with justification."}
+        {
+          "defect": "streamed synthesis bypassed the usage ledger and its budget",
+          "status": "RESOLVED 2026-08-08 on the operator's verdict",
+          "detail": "UsageTrackedLLM defined only complete; __getattr__ handed stream_complete to the RAW provider LLM, skipping assert_can_start, log_start and record. Measured: streamed cycle billed only the planner; max_calls=1 did not stop a streamed run. Fixed with a real stream_complete on the wrapper mirroring complete's billing; no provider failover for streamed calls by design. Six fail-before tests pin it; ratchet ceiling 1800->1860 with justification."
+        }
       ]
     },
     "deep_escalation_delivery": {
@@ -273,8 +406,10 @@
       "producer": "_open_run builds CheckpointWriter (or a NoOp sentinel for loggers without trace_id/log_dir — production loggers always have both, PERIPHERAL)",
       "carrier": "_cp threaded through AttemptState / SynthesisState / VerifyState and the tail",
       "writers": [
-        "save_observe (loop_observe.py:83)", "save_plan (loop_attempt.py:364)",
-        "save_act (loop_attempt.py:454)", "save_respond (loop_run_tail.py:168)",
+        "save_observe (loop_observe.py:83)",
+        "save_plan (loop_attempt.py:364)",
+        "save_act (loop_attempt.py:454)",
+        "save_respond (loop_run_tail.py:168)",
         "save_paused (three catch sites, certified in budget_stop_resume)"
       ],
       "consumer": "cli/resume.py: observe feeds the question, respond feeds the cached-answer replay, paused feeds the budget restore; act records surface only as an artifact list in a stderr notice",
@@ -368,7 +503,11 @@
       "kind": "PHASE GROUPING, not an arc — carries no verdict of its own",
       "site": "_retrieve_turn_context (core/loop_context.py:81)",
       "history": "Was recorded 2026-08-08 as ONE arc certified on all four conditions. The operator asked me to defend that under _arc_rule and I could not: the record grouped THREE different values going to THREE different consumers (prompt blocks -> live models; the critique flag -> the suppression branch; access stats -> the hygiene archiver), and one of those consumers had never been tested at all. Grouping them under one CERTIFIED verdict was the 'coincidental carrier' loophole in its newest disguise — the very thing _arc_rule exists to forbid. Split below; the rule needed no weakening, only the clause on what a granularity note may group.",
-      "arcs_born_from_the_split": ["local_critique_suppression", "access_stats_bump", "prompt_to_model_family members: history, long_term, experience"],
+      "arcs_born_from_the_split": [
+        "local_critique_suppression",
+        "access_stats_bump",
+        "prompt_to_model_family members: history, long_term, experience"
+      ],
       "shared_evidence": {
         "vacuous_first_draft": "the first suppression test asked «разбери этот ответ», for which retrieval returns nothing anyway, so it passed with the suppression disabled — a mirror/vacuous assertion caught by the break-did-not-redden rule and fixed with a keyword-overlapping question plus an explicit precondition assert",
         "read_only_claim": "NEGATIVE as originally written, corrected in the module 2026-08-08: «Чтение и только чтение» was disproven by the access-stats write. Corrected text names the one durable effect and its permission gate."
@@ -385,10 +524,26 @@
       "producer": "referent resolution -> local_critique_active (core/loop_context.py:126), returned from the phase",
       "note": "The flag DOES cross module boundaries — just not to the consumer I had certified. Bundling its intra-phase suppression into a 'certified arc' is what stopped the walk before these four were even recorded. Each is a candidate arc under _arc_rule with a control consequence. Status per candidate below — the blanket 'none is bitten' was left standing after C06 closed the first one and is corrected here (operator's review, 2026-08-08):",
       "candidates": [
-        {"consumer": "core/loop_gates.py:142", "does": "disables the episodic fast path — no stored answer may be replayed on a critique turn", "status": "PROVEN — CLOSED in C06 as the arc local_critique_to_replay_admission (M43 plus a behavioural bite with a control pole)"},
-        {"consumer": "core/loop_attempt.py:191", "does": "SKIPS THE PLANNER on attempt 1 and synthesises from the analysis target instead — the heaviest consequence of the four", "status": "UNPROVEN (C08)"},
-        {"consumer": "core/loop_synthesis.py via SynthesisState", "does": "drives the lean/critique prompt shape (local_critique passed to the synthesiser)", "status": "UNPROVEN (C10)"},
-        {"consumer": "core/loop_response_deciders.py:279", "does": "feeds answer enforcement", "status": "UNPROVEN (C12)"}
+        {
+          "consumer": "core/loop_gates.py:142",
+          "does": "disables the episodic fast path — no stored answer may be replayed on a critique turn",
+          "status": "PROVEN — CLOSED in C06 as the arc local_critique_to_replay_admission (M43 plus a behavioural bite with a control pole)"
+        },
+        {
+          "consumer": "core/loop_attempt.py:191",
+          "does": "SKIPS THE PLANNER on attempt 1 and synthesises from the analysis target instead — the heaviest consequence of the four",
+          "status": "UNPROVEN (C08)"
+        },
+        {
+          "consumer": "core/loop_synthesis.py via SynthesisState",
+          "does": "drives the lean/critique prompt shape (local_critique passed to the synthesiser)",
+          "status": "UNPROVEN (C10)"
+        },
+        {
+          "consumer": "core/loop_response_deciders.py:279",
+          "does": "feeds answer enforcement",
+          "status": "UNPROVEN (C12)"
+        }
       ]
     },
     "step_failure_to_policy": {
@@ -402,7 +557,13 @@
         "no_silent_exit": "the AST check answers the adversarial question directly — a step failing WITHOUT a trigger would be marked failed and stay invisible to the policy; no such path exists today"
       },
       "status": "PROVEN",
-      "certified": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN — M47 and M48 both ways", "SEMANTICS": "PROVEN — distinct codes from distinct steps survive as distinct triggers in one attempt", "PROTECTION": "PROVEN", "verdict": "PROVEN on all four conditions"},
+      "certified": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN — M47 and M48 both ways",
+        "SEMANTICS": "PROVEN — distinct codes from distinct steps survive as distinct triggers in one attempt",
+        "PROTECTION": "PROVEN",
+        "verdict": "PROVEN on all four conditions"
+      },
       "bite_classes": "M47/M48 — Behavioral, observed through the journal's trigger lists on a real run; the journal is an output surface and the tests do not restate the logic, so this is not a mirror"
     },
     "_quantum_decomposition_failure_taxonomy": {
@@ -427,7 +588,13 @@
         "M55": "the whole verdict->code mapping collapsed to approval_unavailable -> 3 red, including test_approval_deny_replans_with_safe_alternative. The distinction that CARRIES control semantics is protected"
       },
       "status": "PROVEN",
-      "certified": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN — M54 and M55 both ways", "SEMANTICS": "PROVEN for the refusal and for the code distinctions that differ in control semantics", "PROTECTION": "PROVEN", "verdict": "PROVEN on all four conditions"},
+      "certified": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN — M54 and M55 both ways",
+        "SEMANTICS": "PROVEN for the refusal and for the code distinctions that differ in control semantics",
+        "PROTECTION": "PROVEN",
+        "verdict": "PROVEN on all four conditions"
+      },
       "equivalent_mutation_found": "M56 mapped abort -> approval_deny (one line, nothing else) and the whole selection stayed GREEN. Checked before calling it a hole, and it is not one: ReplanPolicy gives approval_deny and approval_abort IDENTICAL semantics (max_occurrences 2, requires_different_action True). They differ ONLY in the advice text handed to the planner — a prompt_to_model_family shape, where delivery is provable and the live-model effect is mock-blind. So M56 is an equivalent mutation under a mocked model, the same class the map records for the old `continue x4` measurement, and not a missing observer. approval_unavailable IS distinguished (max_occurrences 1), which is why M55 reddened where M56 did not.",
       "bite_classes": "M54/M55 — Behavioral: the effect blocked, and the replan taking a safer alternative"
     },
@@ -445,7 +612,13 @@
         "reachability_probed_first": "a stub latched kill switch drives a real run to outcome=block with the file unwritten and codes [gateway_blocked, replan_exhausted] — measured before writing the test, so the bite pins observed behaviour rather than an assumed shape"
       },
       "status": "PROVEN",
-      "certified": {"REACHABILITY": "PROVEN — block via a latched kill switch through a real run; deny forced at the gateway seam", "CAUSALITY": "PROVEN — M52 and M53 each redden their own bite", "SEMANTICS": "PROVEN for both refusals; the simulate and escalate outcomes are separate paths with their own coverage", "PROTECTION": "PROVEN (was zero-observer on both refusals)", "verdict": "PROVEN on all four conditions"},
+      "certified": {
+        "REACHABILITY": "PROVEN — block via a latched kill switch through a real run; deny forced at the gateway seam",
+        "CAUSALITY": "PROVEN — M52 and M53 each redden their own bite",
+        "SEMANTICS": "PROVEN for both refusals; the simulate and escalate outcomes are separate paths with their own coverage",
+        "PROTECTION": "PROVEN (was zero-observer on both refusals)",
+        "verdict": "PROVEN on all four conditions"
+      },
       "bite_classes": "M52/M53 — Behavioral: the file on disk, the error codes, the replan trace",
       "note_on_the_deny_test": "the deny verdict is forced at the ActuationGateway.evaluate seam rather than re-derived from policy configuration. Stated openly: this test asserts the LOOP's obedience, and when a policy SHOULD deny is the gateway suite's question, not this one's"
     },
@@ -454,9 +627,17 @@
       "producer": "core/policy.py via self.policy.check(action) at core/loop_step_execution.py:399",
       "carrier": "the decision object, consumed in the same block",
       "consumer_contract": "deny -> the step does NOT execute, a policy_blocked ReplanTrigger is written to the thread-local carrier, and the failure reaches the replan policy through step_failure_to_policy",
-      "evidence": {"M51": "the deny branch disabled -> 2 red, both behavioural: test_denied_unknown_tool_never_runs_in_loop (a denied tool must never run) and test_blocked_tool_then_alternative_runs (the block must produce a replan that tries an alternative)"},
+      "evidence": {
+        "M51": "the deny branch disabled -> 2 red, both behavioural: test_denied_unknown_tool_never_runs_in_loop (a denied tool must never run) and test_blocked_tool_then_alternative_runs (the block must produce a replan that tries an alternative)"
+      },
       "status": "PROVEN",
-      "certified": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN — M51 both ways", "SEMANTICS": "PROVEN — the denied tool does not run AND the run recovers via an alternative", "PROTECTION": "PROVEN", "verdict": "PROVEN on all four conditions"},
+      "certified": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN — M51 both ways",
+        "SEMANTICS": "PROVEN — the denied tool does not run AND the run recovers via an alternative",
+        "PROTECTION": "PROVEN",
+        "verdict": "PROVEN on all four conditions"
+      },
       "note": "the effectful branch (actuation gateway, approval) is a separate path at :314 and is NOT covered by this arc"
     },
     "_planner_cache_measured": {
@@ -492,7 +673,13 @@
         "producer_units": "twelve unit tests on prepare_multi_file_review own the verdict semantics (hinted refusal, path validation, no-workspace refusal, explicit-mode override)"
       },
       "status": "PROVEN",
-      "certified": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN — M45 both ways since the bite", "SEMANTICS": "PROVEN — verdict semantics at the producer's suite, authority at the new bite", "PROTECTION": "PROVEN (was Structural-only)", "verdict": "PROVEN on all four conditions"}
+      "certified": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN — M45 both ways since the bite",
+        "SEMANTICS": "PROVEN — verdict semantics at the producer's suite, authority at the new bite",
+        "PROTECTION": "PROVEN (was Structural-only)",
+        "verdict": "PROVEN on all four conditions"
+      }
     },
     "multi_file_forced_plan": {
       "value": "the forced half of the verdict: validated read-steps (sources), reasoning, warnings",
@@ -504,7 +691,13 @@
         "granularity_note": "sources/reasoning/warnings travel as one verdict into one consumer contract (one PlannerOutput constructor) — grouped per the granularity clause as one value-tuple -> one contract; the M45 arc is the OTHER half of the verdict with a different consumer, hence a separate arc"
       },
       "status": "PROVEN",
-      "certified": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN — M46 both ways since the bite", "SEMANTICS": "PROVEN for attempt-1 substitution; the attempt-2+ fallback to the real planner is recorded, unbitten", "PROTECTION": "PROVEN (was zero-observer)", "verdict": "PROVEN on all four conditions, with the replan-fallback semantics named"}
+      "certified": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN — M46 both ways since the bite",
+        "SEMANTICS": "PROVEN for attempt-1 substitution; the attempt-2+ fallback to the real planner is recorded, unbitten",
+        "PROTECTION": "PROVEN (was zero-observer)",
+        "verdict": "PROVEN on all four conditions, with the replan-fallback semantics named"
+      }
     },
     "_episodic_replay_gate_split": {
       "kind": "SPLIT RECORD — one entry that had certified FOUR admission values as a single arc, divided 2026-08-08 on the operator's challenge",
@@ -512,34 +705,65 @@
       "why_it_failed": "The defense answers only the CONSUMER half of the identity rule. _arc_rule's sentence is explicit: different VALUES are different candidate arcs however tidy grouping would be, even when the consumer is shared. That is the identical shape I had split correctly one commit earlier — access_count and last_accessed_at, two values on the one archival contract, two arcs. Repeating the error immediately afterwards is recorded rather than quietly fixed.",
       "existence_checked_per_value": "All SIX inputs cross a module boundary into the gate, so each satisfies the existence clause: episodic_replay (app/bootstrap -> loop_init field -> loop_gates), file_hint and user_question (caller -> run -> _run_inner -> gate), local_critique_active (loop_context -> loop.py -> gate), _last_best_similar_episode and _last_best_similar_score (loop_memory_read -> instance fields -> gate). None is intra-phase, so none is excluded the way local_critique_block_suppression was.",
       "gate_itself": "kept in the existing representation as decision_boundaries.episodic_replay_admission — no new taxonomy invented.",
-      "resulting_arcs": ["replay_profile_flag_to_admission", "file_hint_to_admission", "operator_command_prefix_to_admission", "local_critique_to_replay_admission", "similar_episode_to_admission", "similarity_score_to_admission"]
+      "resulting_arcs": [
+        "replay_profile_flag_to_admission",
+        "file_hint_to_admission",
+        "operator_command_prefix_to_admission",
+        "local_critique_to_replay_admission",
+        "similar_episode_to_admission",
+        "similarity_score_to_admission"
+      ]
     },
     "replay_profile_flag_to_admission": {
       "value": "episodic_replay (bool), fixed at construction",
       "producer": "app/bootstrap.build_agent, from the profile (agent_tick.UNATTENDED_MEMORY_PROFILE sets it False)",
       "carrier": "self.episodic_replay (core/loop_init.py:126)",
       "consumer_contract": "the replay admission at core/loop_gates.py:141 — may this agent serve a stored answer at all",
-      "evidence": {"M44": "the condition removed -> test_autonomous_profile_reads_but_never_replays reds: the unattended profile replayed"},
+      "evidence": {
+        "M44": "the condition removed -> test_autonomous_profile_reads_but_never_replays reds: the unattended profile replayed"
+      },
       "status": "PROVEN",
-      "certified": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN — M44 both ways", "SEMANTICS": "PROVEN — the profile that may read experience but not replay is the second pole", "PROTECTION": "PROVEN", "verdict": "PROVEN on all four conditions"}
+      "certified": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN — M44 both ways",
+        "SEMANTICS": "PROVEN — the profile that may read experience but not replay is the second pole",
+        "PROTECTION": "PROVEN",
+        "verdict": "PROVEN on all four conditions"
+      }
     },
     "file_hint_to_admission": {
       "value": "file_hint (str | None), the operator's named file",
       "producer": "the caller (CLI/API) through run() -> _run_inner",
       "carrier": "parameter chain into _episodic_fast_path",
       "consumer_contract": "the replay admission at core/loop_gates.py:143 — a stored answer is not about this file",
-      "evidence": {"M42": "the condition removed -> test_a_file_scoped_question_is_not_answered_from_memory reds"},
+      "evidence": {
+        "M42": "the condition removed -> test_a_file_scoped_question_is_not_answered_from_memory reds"
+      },
       "status": "PROVEN",
-      "certified": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN — M42 both ways", "SEMANTICS": "PROVEN — control pole asserts the same question without a hint IS replayed", "PROTECTION": "PROVEN", "verdict": "PROVEN on all four conditions"}
+      "certified": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN — M42 both ways",
+        "SEMANTICS": "PROVEN — control pole asserts the same question without a hint IS replayed",
+        "PROTECTION": "PROVEN",
+        "verdict": "PROVEN on all four conditions"
+      }
     },
     "operator_command_prefix_to_admission": {
       "value": "user_question, read for a leading ':' — an instruction to the program rather than a question",
       "producer": "the caller through run() -> _run_inner",
       "carrier": "parameter chain into _episodic_fast_path",
       "consumer_contract": "the replay admission at core/loop_gates.py:144 — a command must be executed, never answered from memory",
-      "evidence": {"M41": "the condition removed -> reddened ONLY test_the_body_moved_symbol_for_symbol, the AST guard on the whole body, which fires on any edit and so cannot tell a deliberate change from a deleted safety condition. Behavioural bite added 2026-08-08 with a control pole; M41 now reds it"},
+      "evidence": {
+        "M41": "the condition removed -> reddened ONLY test_the_body_moved_symbol_for_symbol, the AST guard on the whole body, which fires on any edit and so cannot tell a deliberate change from a deleted safety condition. Behavioural bite added 2026-08-08 with a control pole; M41 now reds it"
+      },
       "status": "PROVEN",
-      "certified": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN — M41 both ways since the new bite", "SEMANTICS": "PROVEN — control pole first", "PROTECTION": "PROVEN (was Structural-only)", "verdict": "PROVEN on all four conditions"}
+      "certified": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN — M41 both ways since the new bite",
+        "SEMANTICS": "PROVEN — control pole first",
+        "PROTECTION": "PROVEN (was Structural-only)",
+        "verdict": "PROVEN on all four conditions"
+      }
     },
     "local_critique_to_replay_admission": {
       "value": "local_critique_active (bool)",
@@ -547,9 +771,17 @@
       "carrier": "returned from the phase, threaded through _run_inner (core/loop.py:372) into the gate — a genuine module crossing, unlike the intra-phase suppression that was reclassified out of the arc count",
       "consumer_contract": "the replay admission at core/loop_gates.py:142 — a critique turn must analyse the referent the operator named, not a replayed answer",
       "closes": "the first of the four local_critique_flag_downstream candidates deferred from C05",
-      "evidence": {"M43": "the condition removed -> reddened ONLY the AST guard. Behavioural bite added 2026-08-08 with a control pole; M43 now reds it"},
+      "evidence": {
+        "M43": "the condition removed -> reddened ONLY the AST guard. Behavioural bite added 2026-08-08 with a control pole; M43 now reds it"
+      },
       "status": "PROVEN",
-      "certified": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN — M43 both ways since the new bite", "SEMANTICS": "PROVEN — control pole first", "PROTECTION": "PROVEN (was Structural-only)", "verdict": "PROVEN on all four conditions"}
+      "certified": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN — M43 both ways since the new bite",
+        "SEMANTICS": "PROVEN — control pole first",
+        "PROTECTION": "PROVEN (was Structural-only)",
+        "verdict": "PROVEN on all four conditions"
+      }
     },
     "similar_episode_to_admission": {
       "value": "_last_best_similar_episode (EpisodeRecord | None) — the stored answer and the fields the gate judges it by (completion, quality score, full_answer, tools_used)",
@@ -565,21 +797,38 @@
         "_stale_code_comment_epilogue": "2026-08-09, carry-forward pass: the sentence above is now itself past tense. The planner cache was deleted at a990e48 hours after that correction, so the replacement comment — which describes the cache's key in the present tense — outlived its subject. Recorded in defect_bank.stale_planner_cache_comment; production is read-only for the mapping program, so the comment stands. The lesson repeats one level up: a correction is a new fact, and a new fact has to hunt its own echoes."
       },
       "status": "PROVEN",
-      "certified": {"REACHABILITY": "PROVEN — end-to-end through the real producer, both poles", "CAUSALITY": "PROVEN — deleting a field check reds the helper's tests", "SEMANTICS": "PROVEN — unmeasured quality refused, achieved-with-bad-outcome refused, tool-using episodes refused; the eligibility drop lives at the producer and has its own suites", "PROTECTION": "PROVEN", "verdict": "PROVEN on all four conditions — survived an independent adversarial re-audit (verdict PARTIAL against the RECORD, ACCEPT for the arc): the certification stood on stronger evidence than the record had cited, while the record itself missed a sibling consumer and the failure semantics, both now written down"}
+      "certified": {
+        "REACHABILITY": "PROVEN — end-to-end through the real producer, both poles",
+        "CAUSALITY": "PROVEN — deleting a field check reds the helper's tests",
+        "SEMANTICS": "PROVEN — unmeasured quality refused, achieved-with-bad-outcome refused, tool-using episodes refused; the eligibility drop lives at the producer and has its own suites",
+        "PROTECTION": "PROVEN",
+        "verdict": "PROVEN on all four conditions — survived an independent adversarial re-audit (verdict PARTIAL against the RECORD, ACCEPT for the arc): the certification stood on stronger evidence than the record had cited, while the record itself missed a sibling consumer and the failure semantics, both now written down"
+      }
     },
     "similarity_score_to_admission": {
       "value": "_last_best_similar_score (float)",
       "producer": "experience retrieval, same site",
       "carrier": "instance field",
       "consumer_contract": "_fast_path_allows_replay compares it against _REPLAY_MIN_SIMILARITY",
-      "evidence": {"unit_bite": "test_the_declared_threshold_gates_replay asserts the wiring in both directions (at the threshold it replays, a hundredth below it does not). Its docstring records that deleting the comparison once failed none of 7139 tests; it fails there now"},
+      "evidence": {
+        "unit_bite": "test_the_declared_threshold_gates_replay asserts the wiring in both directions (at the threshold it replays, a hundredth below it does not). Its docstring records that deleting the comparison once failed none of 7139 tests; it fails there now"
+      },
       "status": "PROVEN",
-      "certified": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN for the wiring; the VALUE 0.85 has no justification anywhere in the repo and is deliberately not pinned — that absence is recorded, not dressed as a contract", "PROTECTION": "PROVEN", "verdict": "PROVEN on all four conditions, with the threshold's rationale explicitly UNPROVEN"}
+      "certified": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN for the wiring; the VALUE 0.85 has no justification anywhere in the repo and is deliberately not pinned — that absence is recorded, not dressed as a contract",
+        "PROTECTION": "PROVEN",
+        "verdict": "PROVEN on all four conditions, with the threshold's rationale explicitly UNPROVEN"
+      }
     },
     "_access_stats_bump_split": {
       "kind": "SPLIT RECORD — the single access_stats_bump entry defended and divided 2026-08-08 on the operator's demand to name exact value/consumer-contract pairs",
       "defense_outcome": "The producer writes TWO values in one store rewrite: access_count (int) and last_accessed_at (datetime). Under the sharpened clause different VALUES are different candidate arcs even when they share a consumer, so one entry could not hold them. On the second half of the question — 'importance vs archival' — the split does NOT go further: _importance_score is a private helper with EXACTLY ONE caller, archive_low_value_memory at core/memory_hygiene.py:510 (grepped across core/, cli/, app/). It is an internal computation step of the archival contract, not a consumer contract of its own, so inventing an 'importance arc' would have been new taxonomy rather than a real pair.",
-      "resulting_arcs": ["access_count_to_archival", "last_accessed_at_to_archival"],
+      "resulting_arcs": [
+        "access_count_to_archival",
+        "last_accessed_at_to_archival"
+      ],
       "observation_not_chased": "While constructing the poles: the docstring at memory_hygiene.py:491 states condition 3 as 'access_count == 0 OR days-since-access >= min_age_days', but the code (513-518) checks only the last_accessed_at half — access_count reaches the decision solely through the score. An edge case (access_count > 0 with last_accessed_at None) is therefore archivable in code and not per the docstring, mostly masked because a non-zero count also lifts the score. Recorded, not investigated: outside the obligation being closed."
     },
     "access_count_to_archival": {
@@ -621,7 +870,9 @@
         "PROTECTION": "PROVEN for the value's arc; NOT claimed for either route alone",
         "verdict": "PROVEN on all four conditions, with the route-level gap named"
       },
-      "open_items": ["neither route of this value is independently bitten (M39 and M40a are each absorbed by the other). Closing that means treating the routes as separate contracts, which under _arc_rule they are not — recorded as a known blind spot of the suite, not as an arc"],
+      "open_items": [
+        "neither route of this value is independently bitten (M39 and M40a are each absorbed by the other). Closing that means treating the routes as separate contracts, which under _arc_rule they are not — recorded as a known blind spot of the suite, not as an arc"
+      ],
       "bite_classes": "M39/M40 — Behavioral (the archival verdict)"
     },
     "prompt_to_model_family": {
@@ -629,16 +880,56 @@
       "rule": "every member carries a decision-shaped value into a live model's prompt; delivery is provable and bitten per member, the model-side effect is mock-blind by nature. PARTIAL by construction — these arcs never certify under a mocked model and never disappear from the count either.",
       "_counting_note": "EIGHT block types, TEN PARTIAL arcs — all ten now have proven delivery: the repeat_question_hint candidate was promoted 2026-08-08 when C08 bit its delivery (M60), so the family no longer holds an unproven member. Corrected 2026-08-08 twice on the operator's challenges: first the member list said 'PROVEN both sides' for long_term and history, collapsing two consumers into one entry against the granularity clause; then this note said 'SEVEN types, NINE arcs' after the hint candidate had joined. Block type is a naming convenience; the arc unit is value -> consumer, and the PARTIAL count stays NINE.",
       "arcs": [
-        {"value": "role_block <role_context>", "consumer": "synthesis prompt", "delivery": "PROVEN (M24)"},
-        {"value": "profile_block <user_profile>", "consumer": "synthesis prompt", "delivery": "PROVEN (M13 restart bite)"},
-        {"value": "assumptions_block", "consumer": "synthesis prompt", "delivery": "PROVEN (M14 — prompt pole)"},
-        {"value": "failure_context (exhausted regime)", "consumer": "synthesis prompt", "delivery": "PROVEN (gate pair tests)"},
-        {"value": "long_term_block <long_term_memory>", "consumer": "planner prompt", "delivery": "PROVEN (persistent inject tests)"},
-        {"value": "long_term_block <long_term_memory>", "consumer": "synthesis prompt", "delivery": "PROVEN (M32 — cut persistent_block at the synth call site -> 9 red in test_persistent_integration)"},
-        {"value": "experience_block <agent_experience_memory>", "consumer": "planner prompt", "delivery": "PROVEN (M34); it never reaches synthesis separately, so this value has ONE arc, not two. Added to the family 2026-08-08 — it was missing though structurally identical to long_term_block, which is how it ended up absorbed into a neighbouring arc's certification"},
-        {"value": "history_block <conversation_history>", "consumer": "planner prompt", "delivery": "PROVEN (M33 — drop history from the planner_history join -> red)"},
-        {"value": "repeat_question_hint (repeat_ep id, outcome, quality, past question/summary)", "consumer": "planner prompt", "delivery": "PROVEN 2026-08-08 (C08) -> the arc is now PARTIAL like its siblings. M60: the hint could be built and dropped and nothing reddened. Bite: a repeated question whose past episode scores below the replay bar must show <repeat_question_hint> in the planner prompt AND journal repeat_question_detected. Two probes were needed first — the cheap path and then the fast path swallowed the run — and the second revealed that answer_quality_score is DERIVED from chunk counts, so a directly-passed score was silently overridden"},
-        {"value": "history_block <conversation_history>", "consumer": "synthesis prompt", "delivery": "PROVEN (M31, which was a HOLE until closed — cutting SynthesisState.history left every memory test green because only the planner side was watched). The 17th wire of the producer-with-a-journal family."}
+        {
+          "value": "role_block <role_context>",
+          "consumer": "synthesis prompt",
+          "delivery": "PROVEN (M24)"
+        },
+        {
+          "value": "profile_block <user_profile>",
+          "consumer": "synthesis prompt",
+          "delivery": "PROVEN (M13 restart bite)"
+        },
+        {
+          "value": "assumptions_block",
+          "consumer": "synthesis prompt",
+          "delivery": "PROVEN (M14 — prompt pole)"
+        },
+        {
+          "value": "failure_context (exhausted regime)",
+          "consumer": "synthesis prompt",
+          "delivery": "PROVEN (gate pair tests)"
+        },
+        {
+          "value": "long_term_block <long_term_memory>",
+          "consumer": "planner prompt",
+          "delivery": "PROVEN (persistent inject tests)"
+        },
+        {
+          "value": "long_term_block <long_term_memory>",
+          "consumer": "synthesis prompt",
+          "delivery": "PROVEN (M32 — cut persistent_block at the synth call site -> 9 red in test_persistent_integration)"
+        },
+        {
+          "value": "experience_block <agent_experience_memory>",
+          "consumer": "planner prompt",
+          "delivery": "PROVEN (M34); it never reaches synthesis separately, so this value has ONE arc, not two. Added to the family 2026-08-08 — it was missing though structurally identical to long_term_block, which is how it ended up absorbed into a neighbouring arc's certification"
+        },
+        {
+          "value": "history_block <conversation_history>",
+          "consumer": "planner prompt",
+          "delivery": "PROVEN (M33 — drop history from the planner_history join -> red)"
+        },
+        {
+          "value": "repeat_question_hint (repeat_ep id, outcome, quality, past question/summary)",
+          "consumer": "planner prompt",
+          "delivery": "PROVEN 2026-08-08 (C08) -> the arc is now PARTIAL like its siblings. M60: the hint could be built and dropped and nothing reddened. Bite: a repeated question whose past episode scores below the replay bar must show <repeat_question_hint> in the planner prompt AND journal repeat_question_detected. Two probes were needed first — the cheap path and then the fast path swallowed the run — and the second revealed that answer_quality_score is DERIVED from chunk counts, so a directly-passed score was silently overridden"
+        },
+        {
+          "value": "history_block <conversation_history>",
+          "consumer": "synthesis prompt",
+          "delivery": "PROVEN (M31, which was a HOLE until closed — cutting SynthesisState.history left every memory test green because only the planner side was watched). The 17th wire of the producer-with-a-journal family."
+        }
       ],
       "note": "goal -> episode delivery is PROVEN (M25); the NEXT hop (episode.goal inside experience-retrieval ranking) is a separate C15 arc, UNPROVEN — named here so it cannot quietly vanish."
     },
@@ -668,7 +959,6 @@
       "bite_classes": "M20 — Behavioral at the seam (a recorder wraps the REAL decide, so admission is observed, not re-derived); M21 — Behavioral (path length + journal event). Forced-verdict tests substitute the producer and observe the real consumer — the inverse of M11's recorder, stated openly."
     }
   },
-
   "decision_boundaries": {
     "verify_replan_authority": {
       "site": "core/loop_verify_replan.py:235",
@@ -707,15 +997,19 @@
       "protection": "PROVEN (08c29cf)"
     }
   },
-
   "state_initialization": {
     "_root": {
       "site": "core/loop_init.py::AgentLoopInit.__init__",
       "size_lines": 231,
-      "self_fields": 63,
+      "self_fields": 64,
       "note": "Invisible to the node census: the discovery rule skips dunders as plumbing, so the single place where the nervous system's state is created is outside the map. Per the operator's map (model error 4), an assignment proves the initialization site, not ownership.",
-      "proven": ["initialization_site"],
-      "unproven": ["owner", "reset semantics"]
+      "proven": [
+        "initialization_site"
+      ],
+      "unproven": [
+        "owner",
+        "reset semantics"
+      ]
     },
     "_discovery_rule": "Fields = `self.X = ...` and `self.X: T = ...` inside AgentLoopInit.__init__. Use = `self.X` anywhere in core/loop*.py, PLUS getattr/setattr/hasattr(self, 'X') with a literal name. Outside use = the same attribute name reached on any object anywhere in the repo — a candidate, not proof, since another class may carry the same name.",
     "_rule_blind_to": [
@@ -730,17 +1024,22 @@
         "meaning": "written somewhere in the perimeter during a run, so the value does not survive as constructed"
       },
       "read_only_in_perimeter": {
-        "count": 35,
-        "meaning": "organs and configuration: the loop reads them, never reassigns"
+        "count": 36,
+        "meaning": "organs and configuration: the loop reads them, never reassigns. +1 on 2026-08-09 (second iteration of the clarification repair): `pending_clarification_path` — where the question a clarification was raised about waits for a reply the ASKING PROCESS will not live to hear. Injected like every other store, because AgentLoop does not know its workspace; `None` disables carry-forward, which is the one-shot profile."
       },
       "outside_only": {
         "count": 1,
-        "fields": ["max_replan_attempts"],
+        "fields": [
+          "max_replan_attempts"
+        ],
         "meaning": "mirror of replan_policy.max_total_replans; nothing in the perimeter reads it"
       },
       "dead": {
         "count": 2,
-        "fields": ["_CompensationPlanCls", "_last_step_failure"],
+        "fields": [
+          "_CompensationPlanCls",
+          "_last_step_failure"
+        ],
         "meaning": "assigned at construction, never read or written by anyone, getattr included"
       }
     },
@@ -756,7 +1055,6 @@
     "owner": "UNPROVEN for all 63",
     "owner_note": "Protocol item 6: initialization site, lifetime and type are provable; ownership is a separate claim and is not derived from `self.X = ...`."
   },
-
   "path_ledger": {
     "_arc_rule": "FORMAL, second edition (operator's review 2026-08-08 caught a circularity in the first: if dependence had to be PROVEN for the arc to exist, an unproven nerve could hide behind 'no dependence established, so no arc yet'). EXISTENCE and STATUS are separate questions. A CANDIDATE ARC exists wherever a value actually crosses a phase or module boundary and enters a consumer — no proof of effect required; entering the queue is what makes the effect investigable. STATUS then grades the proof: UNPROVEN — dependence not yet shown; PARTIAL — part of the causal chain proven (e.g. delivery yes, effect mock-blind: the prompt_to_model family is PARTIAL by construction); PROVEN — dependence + semantics + protection shown; DEAD — absence of causal effect proven. An arc ends at the last consumer provable without a live model; hops into a live model form their own PARTIAL arcs. Granularity notes may group physical sites; they never delete a candidate. CLAUSE SHARPENED 2026-08-08 after the operator made me defend turn_context_read: a granularity note may group ONLY the physical sites of the SAME value -> SAME consumer-contract pair (several call sites delivering one routed model to one planner contract, say). Different VALUES or different CONSUMERS are different candidate arcs however tidy it would be to group them — the rule needed no weakening, it had been violated: one record had held prompt blocks, a suppression flag and a durable stats write under a single CERTIFIED verdict, and one of those consumers had never been tested. goal -> retrieval (C15) is the standing example of the other half of the rule: a candidate arc held as UNPROVEN precisely because its dependence is not yet shown.",
     "_mandate": "Operator mandate 2026-08-08: dissect, prove and certify the whole CNS runtime control path. Clusters follow the REAL execution graph from runtime entry points, never file order. Statuses from path_statuses; UNPROVEN never becomes an assumption; a call edge is never a proven signal flow. A cluster is closed only when its report (SCOPE -> EXECUTION PATH -> SIGNALS/STATE -> OWNERSHIP -> FAILURE SEMANTICS -> TEST EVIDENCE -> MUTATION EVIDENCE -> VERDICT -> NEXT EDGE) exists and its critical contracts have proven bites. This ledger is the work queue and the proof journal, not the goal.",
@@ -768,30 +1066,223 @@
       "app/daemon.py, app/worker_pool.py (scheduler contour over the same loop)"
     ],
     "clusters": [
-      {"id": "C00", "scope": "entry edges -> run identity -> abort/cancel exits", "status": "PROVEN", "opened": "2026-08-08", "closed": "2026-08-08", "proven_arcs": ["run_identity — CERTIFIED (M3, M4, join test)", "abort_episode_banking — CERTIFIED (M1, M2, M12, both silent-skip poles)", "budget_stop_resume — CERTIFIED, streamed and plain (M5-M9, both retirement poles, all three catch sites)", "on_token_streaming — CERTIFIED; billing-bypass defect fixed on the operator's verdict, six fail-before tests", "deep_escalation_delivery — CERTIFIED (M11, identity-preserving delivery to both roles)"], "closure_note": "Five arcs; eleven numbered mutations (M1-M9, M11, M12 — the count was once written as twelve, corrected 2026-08-08) plus the streaming fail-before (the wrapper method absent IS the mutant state). Every bite retro-classified per the map's protection scale: all Behavioral, two with stated caveats (M6 reads the branch through the operator-facing notice; M11's consumer is a recorder). Two defects found by measurement and fixed on the operator's verdict (a resumed pause never retired; streamed synthesis escaped the budget wrapper). PROVEN means every arc this walk found is certified — not that no sixth arc exists; the discovery rule for entry-edge arcs was reading run()'s signature and exception paths."},
-      {"id": "C01", "scope": "_open_run: profile, assumptions registry, checkpoint writer (core/loop_context.py)", "status": "PROVEN", "opened": "2026-08-08", "walked": "2026-08-08", "proven_arcs": ["user_profile_load — CERTIFIED (M13 restart bite; M18 closed the language bridge the same day; accumulation is provably immune to the load)", "assumption_seeding — CERTIFIED (M14 -> 5 red; M18 closed the named sub-wire)", "checkpoint_phases — CERTIFIED (M15 respond wire, naked under 242 green; M16+M17 plan/act wires, naked under 73 green)"], "open": [], "closure_note": "Walked 2026-08-08; the operator ruled 'closed' too strong while sub-wires stayed open, and the debt was paid the same day on the operator's finish-first order: plan/act wires bitten through the real loop (M16+M17 — 73 tests had stayed green with both cut; new test reads the rows back via CheckpointLoader), and the language bridge bitten end-to-end (M18 — a profile that knows Russian must outrank the heuristic on an English-looking question, source='profile'). Six mutations total (M13-M18), four new bites, no code defects; the one surprise (profile load redundant for accumulation) is a semantics correction written down."},
-      {"id": "C02", "scope": "_observe_and_route: goal, question class, role route, model tier choice, deep escalation (core/loop_observe.py)", "status": "PROVEN", "opened": "2026-08-08", "walked": "2026-08-08", "proven_arcs": ["adaptive_tier_delivery — CERTIFIED for the dialogue path (M22a/M22b; the hole: 221 green with the router's choice discarded)", "deep_escalation_delivery — CERTIFIED earlier (M11, counted in C00)", "question classification -> redaction surfaces — held by tests/test_safety_integration.py (S5/S6)", "save_observe — bitten in C01; TypeError-propagates and non-TypeError fallback — bitten by the existing routing suite"], "open": [], "closure_note": "Wiring/delivery closed — the operator's ruling on what 'closed' may mean here: all three sub-wires bitten the same day (M23 verify-path tier delivery; M24 role_block delivery; M25 goal-into-episode). The live-model effect of role_block is NOT closed and never was claimable under a mock: it lives as a member of the prompt_to_model_family arc, status PARTIAL, counted. All bites Behavioral."},
-      {"id": "C03", "scope": "derive_completion_contract before any tool runs; ordering claim; consumed in C13", "status": "PROVEN", "opened": "2026-08-08", "walked": "2026-08-08", "proven_arcs": ["completion_contract_delivery — CERTIFIED (M26 found the delivery wire naked under the file's own 27 green tests; ordering wire's protection declared Structural)"], "open": [], "closure_note": "One mutation, one bite. The cluster's semantics were already the best-covered in the perimeter (a direct-call two-pole battery plus banking authority); what was missing was the one wire between the well-lit producer and the well-lit consumer — the same shape as fifteen wires before it."},
-      {"id": "C04", "scope": "admission gates: _odd_gate, _clarification_gate (core/loop_gates.py)", "status": "PROVEN", "opened": "2026-08-08", "walked": "2026-08-08", "proven_arcs": ["admission_gates — wiring CERTIFIED (M27, M28, M29 + early-return bites); order OBSERVABILITY proven (M29), order CORRECTNESS held UNDER_QUESTION — see admission_gates.order_semantics"], "open": ["order correctness (ODD > clarification): a design decision, not proven correct; two live arguments (fail-closed FOR, false-ODD-positive AGAINST); awaits owner ratification"], "closure_note": "Dissected as detector -> verdict -> caller authority -> early return -> cleanup per the operator's four requirements. Two overreaches of mine were overturned in the operator's 2026-08-08 review and are recorded, not buried: (1) M30 counted as causal evidence — it is STRUCTURAL, moved to cleanup_invariant_stream_on_token; (2) the order invariant called 'operator-endorsed' — the operator had written it with 'например' as an example of FORM, and M29 proves observability, not correctness. The order test now stands as a regression guard on the committed order, with correctness UNDER_QUESTION. The Russian ODD-regex defect stays a detector bug, outside this arc's verdict."},
-      {"id": "C05", "scope": "turn-context read: history, persistent/experience blocks, local critique flag; read-only claim (core/loop_context.py, memory boundary)", "status": "PROVEN", "opened": "2026-08-08", "walked": "2026-08-08", "closed": "2026-08-08", "proven_arcs": ["access_count_to_archival — CERTIFIED (M36, M37 write; M38 consequence)", "last_accessed_at_to_archival — CERTIFIED for the value (M40), route-level blind spot named", "prompt_to_model_family arcs born here: long_term->planner, long_term->synthesis (M32), history->planner (M33), history->synthesis (M31), experience->planner (M34) — delivery PROVEN each, PARTIAL as arcs per the family rule (live-model effect mock-blind)"], "decision_boundaries_certified": ["local_critique_block_suppression — M35 both poles; reclassified out of the arc count on the operator's challenge, since producer and consumer are both inside this phase"], "open": [], "deferred_to_consumer_clusters": ["local_critique_flag_downstream — four candidate arcs whose CONSUMERS live outside this scope: C06 (fast-path disable), C08 (planner skip on attempt 1), C10 (synthesis prompt shape), C12 (answer enforcement). Deferred, not dismissed: each is registered in its consumer cluster's entry, on the rule that a cluster owns the arcs whose CONSUMER it contains — the same rule that put goal->retrieval in C15. C05 produces the flag and has proven everything terminating inside it."], "closure_note": "CLOSED after three rounds of overturned claims — the record of the mistakes is the point. Round one: what was written as ONE certified arc (turn_context_read) held three values going to three consumers, one untested. Round two: the split itself was wrong three ways — a decision boundary counted as an arc, the granularity clause violated one commit after sharpening it, and the verdict vocabulary widened to silence a ratchet. Round three closed the real consequence: access_count and last_accessed_at are separate values on ONE consumer contract (the archival decision; _importance_score is a private single-caller helper, not a contract), both now certified. Three lessons kept: the suppression contract had no observer at all (33 green under M35); my first bite for it was VACUOUS; and M39 stayed green because last_accessed_at has two redundant routes — diagnosed, not patched around."},
-      {"id": "C06", "scope": "episodic fast path: replay gate, quality gate, admission conditions (core/loop.py:243-274 + loop_memory_read)", "_scope_correction": "Read 'caches' until 2026-08-09. The planner cache was deleted at a990e48; the fast path's _last_best_similar_episode is a per-run field, not a cache. The word named something that no longer exists. Corrected by the carry-forward pass, which also banked the comment at core/loop_memory_read.py:331 still describing the deleted cache in the present tense.", "status": "PROVEN", "known": "MIR-002 unmeasured-quality hole closed; fast-path mirror-test finding in PROJECT_MAP", "deferred_arcs_from_other_clusters": ["local_critique_active disables the episodic fast path (core/loop_gates.py:142) — deferred here from C05, CLOSED 2026-08-08 as local_critique_to_replay_admission"], "opened": "2026-08-08", "walked": "2026-08-08", "closed": "2026-08-08", "proven_arcs": ["SIX arcs, one per value crossing into the admission (split 2026-08-08 after a single-arc record failed its defense): replay_profile_flag (M44), file_hint (M42), operator_command_prefix (M41), local_critique (M43), similar_episode and similarity_score (pre-existing unit bites, cited not re-measured)"], "open": [], "closure_note": "Two of the four admission conditions (the ':' prefix and local_critique_active) were guarded solely by an AST body-equivalence test — a guard that fires on any edit and so cannot tell a deliberate change from a deleted safety condition. Both now have behavioural bites with control poles. The first record of this cluster certified all four conditions as ONE arc; that failed its defense against _arc_rule (different VALUES are different arcs even on a shared consumer) and was split into six arcs plus the gate, which stays in the decision-boundary representation.", "decision_boundaries_certified": ["episodic_replay_admission — the conjunctive gate itself, protection PROVEN by M41-M44, one mutation per condition"], "post_certification_reaudit": "2026-08-08, operator-ordered independent re-audit of an arc not originally investigated (similar_episode_to_admission, certified by citation): C06 reopened, existing certifications retained; the re-audit found NO false-certified replay arc — the certification stood on stronger end-to-end evidence than its record had cited; it DISCOVERED missing failure semantics (the naked except-pass over the re-ask section, recorded on the arc) and one consumer-owned candidate (repeat_question_hint -> planner prompt, UNPROVEN, registered in C08 and in prompt_to_model_family); record reconciled; C06 reclosed. A lying code comment (planner-cache consumer that does not exist) was corrected the same day."},
-      {"id": "C07", "scope": "multi-file intent: prepare_multi_file_review -> refusal gate -> forced sources (core/file_request_intent.py, loop_gates)", "status": "PROVEN", "opened": "2026-08-08", "walked": "2026-08-08", "closed": "2026-08-08", "proven_arcs": ["multi_file_refusal_authority — CERTIFIED (M45: was guarded only by an inspect call-site counter)", "multi_file_forced_plan — CERTIFIED (M46: 49 tests green with the kernel's plan silently replaced by the LLM's)"], "closure_note": "Both loop wires of the kernel's multi-file verdict had no behavioural observer: the refusal's authority was held by a Structural source-text guard, the forced plan by nothing at all. Both bitten through real runs. The producer's own twelve unit tests own the verdict semantics and are cited, not duplicated. The attempt-2+ fallback (a replan consults the real planner, the forced plan is not reapplied) is recorded as observed semantics without a bite."},
-      {"id": "C08", "scope": "attempt loop: planner -> policy gate -> step execution -> tools -> evidence; carriers failure_history, _step_trigger_tls, artifacts, chain; StepRepetitionTracker, TerminationGuard (loop_attempt, loop_step_execution)", "status": "UNPROVEN", "known": "post_tool_trust_boundary PROVEN (08c29cf); failure_history delivery PROVEN and its ARBITER effect PROVEN at L5 through the real call site (M19 — codes emptied at loop_run_tail flips a disclosing run failed_but_reported -> silently_missing, and the verdict is authoritative at banking), while the SYNTHESIS and VERIFICATION consumers' effects stay UNPROVEN — they land in a live model's prompt and the mock cannot show it (prompt_to_model_family); _TRUSTED_INTERNAL_TOOLS hole documented", "deferred_arcs_from_other_clusters": ["local_critique_active SKIPS THE PLANNER on attempt 1 and synthesises from the analysis target (core/loop_attempt.py:191) — candidate arc deferred here from C05, unbitten; heaviest of the four", "repeat_question_hint -> planner prompt (core/loop_memory_read.py:351-364) — UNPROVEN candidate registered 2026-08-08 by the independent re-audit: the same repeat_ep that feeds the replay admission also builds a planner hint, and no test anywhere mentions repeat_question_hint; delivery unproven, family member in prompt_to_model_family"], "opened": "2026-08-08", "partial_walk": "Carriers walked 2026-08-08: step_failure_to_policy CERTIFIED (M47, M48); StepRepetitionTracker and TerminationGuard recorded as SENSORS whose only consumer is the journal, not arcs. The knowability question the operator ordered is answered in _retry_decision_knowability: the loop holds artifacts and NO obligation state, the decider sees only (failure_history, completed_attempts), and the unmet-deliverable half of the later verdict WAS computable at the stop point. No defect claimed. Second pass: policy_deny_stops_the_step CERTIFIED (M51); the planner cache measured and recorded as a zero-observer component that its own mtime key makes unreachable in any profile that banks episodes. Third pass: the planner cache REMOVED on the operator's verdict (see _planner_cache_measured.resolution). Fourth pass: gateway_refusal_stops_the_effect CERTIFIED (M52, M53) — both refusals on the effectful path had zero observers while only `simulate` was covered end to end. Fifth pass: approval_verdict_stops_the_step CERTIFIED (M54, M55); M56 examined and classified an EQUIVALENT mutation, not a hole — approval_deny and approval_abort carry identical policy budgets and differ only in planner advice text. Sixth pass: artifacts (M57, 4 red) and chain (M58, 5 red) proven as carriers out of the loop; the planner-skip consumer of local_critique_active found ALREADY covered (M59 reds test_local_critique_on_skips_planner_and_injects_target) — attributed, not duplicated; repeat_question_hint delivery bitten (M60) and promoted from UNPROVEN candidate to PARTIAL family member. Both deferred arcs from C05/C06 are now closed.", "open": ["NOTHING remains unwalked in the _step_trigger_tls producer set — all eleven sites are accounted for as of 2026-08-09: three certified as policy_blocked (M51), one as the approval verdict (M54/M55), one UNREACHABLE (:462), the failure classifier PROTECTED by TestFileNotFoundReplan, and the five remaining measured individually. Three of those had no observer at all and are now guarded: injection_blocked, timeout and the last-resort postprocessing guard. What keeps C08 open is no longer this carrier.", "the rest of the cluster scope: effectful actuation, the evidence hand-off, and the live-model consumers a mock cannot observe (prompt_to_model_family)", "whether the empty-plan and partial-attempt findings change anything C13 owns — both ran into core/completion_obligation.py, which is C13 scope, and neither cluster has been walked"], "_body_read": "2026-08-09: the standing item 'the 423-line body still not read line by line' is CLOSED. All 628 lines of core/loop_attempt.py were read end to end by the mapping program, and that read produced five candidates, all five since closed as units — failure_trigger_code, injection_budget_decides_visibility, empty_plan_provenance, partial_attempt_denial_downgrade and attempt_loop_sensor_silence. The old wording's line count was also wrong: _run_attempt_loop is 401 lines and the file is 628. One of the eight missing producers, injection_blocked, was walked end to end in the same program.", "_why_not_reclosed": "A cluster whose central carrier has seven unwalked producers is not closed. The five units above raised the evidence considerably and did not touch that debt. A census on 2026-08-09 refined that number without shrinking the debt dishonestly: of the eleven producers, :362/:385/:416 are the policy_blocked family certified by M51; :451 carries the approval verdict and is already certified by M54/M55 — the carrier record simply never named the site; :653 (injection_blocked) was walked end to end by this program; :462 is UNREACHABLE and is a defensive branch, not a producer — it fires only when action.type != tool_call, Action.type is Literal[tool_call, llm_synthesize, output], both production plan builders (loop_attempt.py:550, self_repair.py:274) write tool_call, and plans are never deserialised from external data (no Plan(**...), no model_validate anywhere in core/cli/app/api/tools). That leaves FOUR live unwalked producers and one last-resort guard."},
-      {"id": "C09", "scope": "evidence fold + ranking + cataloguing (loop_evidence_chain)", "status": "UNPROVEN", "opened": "2026-08-09", "partial_walk": "Four units. The FOLD half is finished: all three sources measured on a shim before any mutation, one (persistent records) found already behaviourally guarded, two (working-memory artifacts, dialogue turns) held up only by an AST body-equivalence ratchet and now guarded behaviourally. The CATALOGUE half: its five-value decision surface enumerated by reading both methods end to end, and both sink permissions found unguarded AT THE DERIVATION — a one-string swap of the sink name left 7307 tests green — now guarded behaviour-plus-wiring.", "open": ["rank_chain itself — never entered. It is called from both catalogue branches and its output reaches the synthesis prompt and the source registry, but whether its ORDER changes any consumer is unmeasured.", "the knowledge pipeline's own contract: _catalogue_chain's docstring says the pipeline catalogues sources, writes long-term memory and persists the registry inside one call. This cluster proved the three permissions reach it; what it does with them is its own subject.", "_premature_keyword_fired — CLOSED 2026-08-09 by complete enumeration: the flag reaches exactly one consumer, a dictionary key in one log payload (loop_run_tail.py:324), and that key is read by no production code. The code's claim about itself is confirmed by a stronger argument than it carried."], "_why_not_closed": "Two of the five values on the surface are untouched and the third is accepted on the code's own word. A cluster is not closed because its best-lit half is finished."},
-      {"id": "C10", "scope": "synthesis ladder: SynthesisState, tier forcing, failure_history gated at loop_synthesis.py:637, streaming on_token (loop_synthesis)", "status": "UNPROVEN", "deferred_arcs_from_other_clusters": ["local_critique_active shapes the synthesis prompt via SynthesisState — candidate arc deferred here from C05, unbitten"]},
-      {"id": "C11", "scope": "verify & settle: Verifier, refuted claims, unresolved_citation replan, VERIFY_REPLAN_HARD_CAP (loop_verify_replan, verifier)", "status": "UNPROVEN", "known": "unresolved_citation flow CERTIFIED on all four conditions (10240f8 + M20 isolated gate + M21 strict two-verdict differential); the rest of the cluster — Verifier itself, refuted claims, the hard cap — is unwalked"},
-      {"id": "C12", "scope": "response draft deciders -> single arbitration render (loop_response_deciders, response_draft)", "status": "UNPROVEN", "deferred_arcs_from_other_clusters": ["local_critique_active feeds answer enforcement (core/loop_response_deciders.py:279) — candidate arc deferred here from C05, unbitten"]},
-      {"id": "C13", "scope": "completion obligations: reads C03 contract + failure_history -> journal verdict, observational (loop_run_tail)", "status": "UNPROVEN", "stale_scope_note": "The scope line still calls the obligation verdict 'observational', but M19 (2026-08-08) already proved downstream banking authority: the verdict lowers a declared achieved to partially_achieved and withholds procedure credit at L5. Recorded per the operator's instruction; the substantive reconciliation of C13's description is DEFERRED to the C13 walk itself.", "_inherited_from_C08_2026_08_09": "Two findings of the mapping program ran into this cluster's consumer before it was ever walked, and are registered here so its walk starts from them rather than rediscovering them: empty_plan_provenance — the arbiter receives the LAST attempt's plan_steps, so a plan emptied by the forbidden-action filter leaves it nothing to judge and it reports 'no wired source created an obligation', identical to a run that needed no tool; and partial_attempt_denial_downgrade — blocked_and_disclosed is unreachable when the attempt succeeded partially, because denied_tools is built from a failure_history the success-path break left empty. Both carry measurements and tests; neither has been judged against this cluster's own contract."},
-      {"id": "C14", "scope": "run tail: outbound redaction, verification counters, profile/assumption writes, stagnation/disagreement shadows (loop_run_tail)", "status": "UNPROVEN"},
-      {"id": "C15", "scope": "episode banking LAST: _record_experience_memory, three sinks, idempotency on run_id (loop_memory_write)", "status": "UNPROVEN", "known": "store-level idempotency PROVEN (save_once tests); whole-boundary semantics open"},
-      {"id": "C16", "scope": "autonomous contour: agent_tick -> runtime -> task queue -> budget guard -> same loop; task_id retry semantics", "status": "UNPROVEN"},
-      {"id": "C17", "scope": "API entry: api/server serialisation lock, shared instance", "status": "UNPROVEN"},
-      {"id": "C18", "scope": "future subagent lifecycle ports: mark the boundary so current architecture does not block it; nothing to implement now", "status": "UNPROVEN"}
+      {
+        "id": "C00",
+        "scope": "entry edges -> run identity -> abort/cancel exits",
+        "status": "PROVEN",
+        "opened": "2026-08-08",
+        "closed": "2026-08-08",
+        "proven_arcs": [
+          "run_identity — CERTIFIED (M3, M4, join test)",
+          "abort_episode_banking — CERTIFIED (M1, M2, M12, both silent-skip poles)",
+          "budget_stop_resume — CERTIFIED, streamed and plain (M5-M9, both retirement poles, all three catch sites)",
+          "on_token_streaming — CERTIFIED; billing-bypass defect fixed on the operator's verdict, six fail-before tests",
+          "deep_escalation_delivery — CERTIFIED (M11, identity-preserving delivery to both roles)"
+        ],
+        "closure_note": "Five arcs; eleven numbered mutations (M1-M9, M11, M12 — the count was once written as twelve, corrected 2026-08-08) plus the streaming fail-before (the wrapper method absent IS the mutant state). Every bite retro-classified per the map's protection scale: all Behavioral, two with stated caveats (M6 reads the branch through the operator-facing notice; M11's consumer is a recorder). Two defects found by measurement and fixed on the operator's verdict (a resumed pause never retired; streamed synthesis escaped the budget wrapper). PROVEN means every arc this walk found is certified — not that no sixth arc exists; the discovery rule for entry-edge arcs was reading run()'s signature and exception paths."
+      },
+      {
+        "id": "C01",
+        "scope": "_open_run: profile, assumptions registry, checkpoint writer (core/loop_context.py)",
+        "status": "PROVEN",
+        "opened": "2026-08-08",
+        "walked": "2026-08-08",
+        "proven_arcs": [
+          "user_profile_load — CERTIFIED (M13 restart bite; M18 closed the language bridge the same day; accumulation is provably immune to the load)",
+          "assumption_seeding — CERTIFIED (M14 -> 5 red; M18 closed the named sub-wire)",
+          "checkpoint_phases — CERTIFIED (M15 respond wire, naked under 242 green; M16+M17 plan/act wires, naked under 73 green)"
+        ],
+        "open": [],
+        "closure_note": "Walked 2026-08-08; the operator ruled 'closed' too strong while sub-wires stayed open, and the debt was paid the same day on the operator's finish-first order: plan/act wires bitten through the real loop (M16+M17 — 73 tests had stayed green with both cut; new test reads the rows back via CheckpointLoader), and the language bridge bitten end-to-end (M18 — a profile that knows Russian must outrank the heuristic on an English-looking question, source='profile'). Six mutations total (M13-M18), four new bites, no code defects; the one surprise (profile load redundant for accumulation) is a semantics correction written down."
+      },
+      {
+        "id": "C02",
+        "scope": "_observe_and_route: goal, question class, role route, model tier choice, deep escalation (core/loop_observe.py)",
+        "status": "PROVEN",
+        "opened": "2026-08-08",
+        "walked": "2026-08-08",
+        "proven_arcs": [
+          "adaptive_tier_delivery — CERTIFIED for the dialogue path (M22a/M22b; the hole: 221 green with the router's choice discarded)",
+          "deep_escalation_delivery — CERTIFIED earlier (M11, counted in C00)",
+          "question classification -> redaction surfaces — held by tests/test_safety_integration.py (S5/S6)",
+          "save_observe — bitten in C01; TypeError-propagates and non-TypeError fallback — bitten by the existing routing suite"
+        ],
+        "open": [],
+        "closure_note": "Wiring/delivery closed — the operator's ruling on what 'closed' may mean here: all three sub-wires bitten the same day (M23 verify-path tier delivery; M24 role_block delivery; M25 goal-into-episode). The live-model effect of role_block is NOT closed and never was claimable under a mock: it lives as a member of the prompt_to_model_family arc, status PARTIAL, counted. All bites Behavioral."
+      },
+      {
+        "id": "C03",
+        "scope": "derive_completion_contract before any tool runs; ordering claim; consumed in C13",
+        "status": "PROVEN",
+        "opened": "2026-08-08",
+        "walked": "2026-08-08",
+        "proven_arcs": [
+          "completion_contract_delivery — CERTIFIED (M26 found the delivery wire naked under the file's own 27 green tests; ordering wire's protection declared Structural)"
+        ],
+        "open": [],
+        "closure_note": "One mutation, one bite. The cluster's semantics were already the best-covered in the perimeter (a direct-call two-pole battery plus banking authority); what was missing was the one wire between the well-lit producer and the well-lit consumer — the same shape as fifteen wires before it."
+      },
+      {
+        "id": "C04",
+        "scope": "admission gates: _odd_gate, _clarification_gate (core/loop_gates.py)",
+        "status": "PROVEN",
+        "opened": "2026-08-08",
+        "walked": "2026-08-08",
+        "proven_arcs": [
+          "admission_gates — wiring CERTIFIED (M27, M28, M29 + early-return bites); order OBSERVABILITY proven (M29), order CORRECTNESS held UNDER_QUESTION — see admission_gates.order_semantics"
+        ],
+        "open": [
+          "order correctness (ODD > clarification): a design decision, not proven correct; two live arguments (fail-closed FOR, false-ODD-positive AGAINST); awaits owner ratification"
+        ],
+        "closure_note": "Dissected as detector -> verdict -> caller authority -> early return -> cleanup per the operator's four requirements. Two overreaches of mine were overturned in the operator's 2026-08-08 review and are recorded, not buried: (1) M30 counted as causal evidence — it is STRUCTURAL, moved to cleanup_invariant_stream_on_token; (2) the order invariant called 'operator-endorsed' — the operator had written it with 'например' as an example of FORM, and M29 proves observability, not correctness. The order test now stands as a regression guard on the committed order, with correctness UNDER_QUESTION. The Russian ODD-regex defect stays a detector bug, outside this arc's verdict."
+      },
+      {
+        "id": "C05",
+        "scope": "turn-context read: history, persistent/experience blocks, local critique flag; read-only claim (core/loop_context.py, memory boundary)",
+        "status": "PROVEN",
+        "opened": "2026-08-08",
+        "walked": "2026-08-08",
+        "closed": "2026-08-08",
+        "proven_arcs": [
+          "access_count_to_archival — CERTIFIED (M36, M37 write; M38 consequence)",
+          "last_accessed_at_to_archival — CERTIFIED for the value (M40), route-level blind spot named",
+          "prompt_to_model_family arcs born here: long_term->planner, long_term->synthesis (M32), history->planner (M33), history->synthesis (M31), experience->planner (M34) — delivery PROVEN each, PARTIAL as arcs per the family rule (live-model effect mock-blind)"
+        ],
+        "decision_boundaries_certified": [
+          "local_critique_block_suppression — M35 both poles; reclassified out of the arc count on the operator's challenge, since producer and consumer are both inside this phase"
+        ],
+        "open": [],
+        "deferred_to_consumer_clusters": [
+          "local_critique_flag_downstream — four candidate arcs whose CONSUMERS live outside this scope: C06 (fast-path disable), C08 (planner skip on attempt 1), C10 (synthesis prompt shape), C12 (answer enforcement). Deferred, not dismissed: each is registered in its consumer cluster's entry, on the rule that a cluster owns the arcs whose CONSUMER it contains — the same rule that put goal->retrieval in C15. C05 produces the flag and has proven everything terminating inside it."
+        ],
+        "closure_note": "CLOSED after three rounds of overturned claims — the record of the mistakes is the point. Round one: what was written as ONE certified arc (turn_context_read) held three values going to three consumers, one untested. Round two: the split itself was wrong three ways — a decision boundary counted as an arc, the granularity clause violated one commit after sharpening it, and the verdict vocabulary widened to silence a ratchet. Round three closed the real consequence: access_count and last_accessed_at are separate values on ONE consumer contract (the archival decision; _importance_score is a private single-caller helper, not a contract), both now certified. Three lessons kept: the suppression contract had no observer at all (33 green under M35); my first bite for it was VACUOUS; and M39 stayed green because last_accessed_at has two redundant routes — diagnosed, not patched around."
+      },
+      {
+        "id": "C06",
+        "scope": "episodic fast path: replay gate, quality gate, admission conditions (core/loop.py:243-274 + loop_memory_read)",
+        "_scope_correction": "Read 'caches' until 2026-08-09. The planner cache was deleted at a990e48; the fast path's _last_best_similar_episode is a per-run field, not a cache. The word named something that no longer exists. Corrected by the carry-forward pass, which also banked the comment at core/loop_memory_read.py:331 still describing the deleted cache in the present tense.",
+        "status": "PROVEN",
+        "known": "MIR-002 unmeasured-quality hole closed; fast-path mirror-test finding in PROJECT_MAP",
+        "deferred_arcs_from_other_clusters": [
+          "local_critique_active disables the episodic fast path (core/loop_gates.py:142) — deferred here from C05, CLOSED 2026-08-08 as local_critique_to_replay_admission"
+        ],
+        "opened": "2026-08-08",
+        "walked": "2026-08-08",
+        "closed": "2026-08-08",
+        "proven_arcs": [
+          "SIX arcs, one per value crossing into the admission (split 2026-08-08 after a single-arc record failed its defense): replay_profile_flag (M44), file_hint (M42), operator_command_prefix (M41), local_critique (M43), similar_episode and similarity_score (pre-existing unit bites, cited not re-measured)"
+        ],
+        "open": [],
+        "closure_note": "Two of the four admission conditions (the ':' prefix and local_critique_active) were guarded solely by an AST body-equivalence test — a guard that fires on any edit and so cannot tell a deliberate change from a deleted safety condition. Both now have behavioural bites with control poles. The first record of this cluster certified all four conditions as ONE arc; that failed its defense against _arc_rule (different VALUES are different arcs even on a shared consumer) and was split into six arcs plus the gate, which stays in the decision-boundary representation.",
+        "decision_boundaries_certified": [
+          "episodic_replay_admission — the conjunctive gate itself, protection PROVEN by M41-M44, one mutation per condition"
+        ],
+        "post_certification_reaudit": "2026-08-08, operator-ordered independent re-audit of an arc not originally investigated (similar_episode_to_admission, certified by citation): C06 reopened, existing certifications retained; the re-audit found NO false-certified replay arc — the certification stood on stronger end-to-end evidence than its record had cited; it DISCOVERED missing failure semantics (the naked except-pass over the re-ask section, recorded on the arc) and one consumer-owned candidate (repeat_question_hint -> planner prompt, UNPROVEN, registered in C08 and in prompt_to_model_family); record reconciled; C06 reclosed. A lying code comment (planner-cache consumer that does not exist) was corrected the same day."
+      },
+      {
+        "id": "C07",
+        "scope": "multi-file intent: prepare_multi_file_review -> refusal gate -> forced sources (core/file_request_intent.py, loop_gates)",
+        "status": "PROVEN",
+        "opened": "2026-08-08",
+        "walked": "2026-08-08",
+        "closed": "2026-08-08",
+        "proven_arcs": [
+          "multi_file_refusal_authority — CERTIFIED (M45: was guarded only by an inspect call-site counter)",
+          "multi_file_forced_plan — CERTIFIED (M46: 49 tests green with the kernel's plan silently replaced by the LLM's)"
+        ],
+        "closure_note": "Both loop wires of the kernel's multi-file verdict had no behavioural observer: the refusal's authority was held by a Structural source-text guard, the forced plan by nothing at all. Both bitten through real runs. The producer's own twelve unit tests own the verdict semantics and are cited, not duplicated. The attempt-2+ fallback (a replan consults the real planner, the forced plan is not reapplied) is recorded as observed semantics without a bite."
+      },
+      {
+        "id": "C08",
+        "scope": "attempt loop: planner -> policy gate -> step execution -> tools -> evidence; carriers failure_history, _step_trigger_tls, artifacts, chain; StepRepetitionTracker, TerminationGuard (loop_attempt, loop_step_execution)",
+        "status": "UNPROVEN",
+        "known": "post_tool_trust_boundary PROVEN (08c29cf); failure_history delivery PROVEN and its ARBITER effect PROVEN at L5 through the real call site (M19 — codes emptied at loop_run_tail flips a disclosing run failed_but_reported -> silently_missing, and the verdict is authoritative at banking), while the SYNTHESIS and VERIFICATION consumers' effects stay UNPROVEN — they land in a live model's prompt and the mock cannot show it (prompt_to_model_family); _TRUSTED_INTERNAL_TOOLS hole documented",
+        "deferred_arcs_from_other_clusters": [
+          "local_critique_active SKIPS THE PLANNER on attempt 1 and synthesises from the analysis target (core/loop_attempt.py:191) — candidate arc deferred here from C05, unbitten; heaviest of the four",
+          "repeat_question_hint -> planner prompt (core/loop_memory_read.py:351-364) — UNPROVEN candidate registered 2026-08-08 by the independent re-audit: the same repeat_ep that feeds the replay admission also builds a planner hint, and no test anywhere mentions repeat_question_hint; delivery unproven, family member in prompt_to_model_family"
+        ],
+        "opened": "2026-08-08",
+        "partial_walk": "Carriers walked 2026-08-08: step_failure_to_policy CERTIFIED (M47, M48); StepRepetitionTracker and TerminationGuard recorded as SENSORS whose only consumer is the journal, not arcs. The knowability question the operator ordered is answered in _retry_decision_knowability: the loop holds artifacts and NO obligation state, the decider sees only (failure_history, completed_attempts), and the unmet-deliverable half of the later verdict WAS computable at the stop point. No defect claimed. Second pass: policy_deny_stops_the_step CERTIFIED (M51); the planner cache measured and recorded as a zero-observer component that its own mtime key makes unreachable in any profile that banks episodes. Third pass: the planner cache REMOVED on the operator's verdict (see _planner_cache_measured.resolution). Fourth pass: gateway_refusal_stops_the_effect CERTIFIED (M52, M53) — both refusals on the effectful path had zero observers while only `simulate` was covered end to end. Fifth pass: approval_verdict_stops_the_step CERTIFIED (M54, M55); M56 examined and classified an EQUIVALENT mutation, not a hole — approval_deny and approval_abort carry identical policy budgets and differ only in planner advice text. Sixth pass: artifacts (M57, 4 red) and chain (M58, 5 red) proven as carriers out of the loop; the planner-skip consumer of local_critique_active found ALREADY covered (M59 reds test_local_critique_on_skips_planner_and_injects_target) — attributed, not duplicated; repeat_question_hint delivery bitten (M60) and promoted from UNPROVEN candidate to PARTIAL family member. Both deferred arcs from C05/C06 are now closed.",
+        "open": [
+          "NOTHING remains unwalked in the _step_trigger_tls producer set — all eleven sites are accounted for as of 2026-08-09: three certified as policy_blocked (M51), one as the approval verdict (M54/M55), one UNREACHABLE (:462), the failure classifier PROTECTED by TestFileNotFoundReplan, and the five remaining measured individually. Three of those had no observer at all and are now guarded: injection_blocked, timeout and the last-resort postprocessing guard. What keeps C08 open is no longer this carrier.",
+          "the rest of the cluster scope: effectful actuation, the evidence hand-off, and the live-model consumers a mock cannot observe (prompt_to_model_family)",
+          "whether the empty-plan and partial-attempt findings change anything C13 owns — both ran into core/completion_obligation.py, which is C13 scope, and neither cluster has been walked"
+        ],
+        "_body_read": "2026-08-09: the standing item 'the 423-line body still not read line by line' is CLOSED. All 628 lines of core/loop_attempt.py were read end to end by the mapping program, and that read produced five candidates, all five since closed as units — failure_trigger_code, injection_budget_decides_visibility, empty_plan_provenance, partial_attempt_denial_downgrade and attempt_loop_sensor_silence. The old wording's line count was also wrong: _run_attempt_loop is 401 lines and the file is 628. One of the eight missing producers, injection_blocked, was walked end to end in the same program.",
+        "_why_not_reclosed": "A cluster whose central carrier has seven unwalked producers is not closed. The five units above raised the evidence considerably and did not touch that debt. A census on 2026-08-09 refined that number without shrinking the debt dishonestly: of the eleven producers, :362/:385/:416 are the policy_blocked family certified by M51; :451 carries the approval verdict and is already certified by M54/M55 — the carrier record simply never named the site; :653 (injection_blocked) was walked end to end by this program; :462 is UNREACHABLE and is a defensive branch, not a producer — it fires only when action.type != tool_call, Action.type is Literal[tool_call, llm_synthesize, output], both production plan builders (loop_attempt.py:550, self_repair.py:274) write tool_call, and plans are never deserialised from external data (no Plan(**...), no model_validate anywhere in core/cli/app/api/tools). That leaves FOUR live unwalked producers and one last-resort guard."
+      },
+      {
+        "id": "C09",
+        "scope": "evidence fold + ranking + cataloguing (loop_evidence_chain)",
+        "status": "UNPROVEN",
+        "opened": "2026-08-09",
+        "partial_walk": "Four units. The FOLD half is finished: all three sources measured on a shim before any mutation, one (persistent records) found already behaviourally guarded, two (working-memory artifacts, dialogue turns) held up only by an AST body-equivalence ratchet and now guarded behaviourally. The CATALOGUE half: its five-value decision surface enumerated by reading both methods end to end, and both sink permissions found unguarded AT THE DERIVATION — a one-string swap of the sink name left 7307 tests green — now guarded behaviour-plus-wiring.",
+        "open": [
+          "rank_chain itself — never entered. It is called from both catalogue branches and its output reaches the synthesis prompt and the source registry, but whether its ORDER changes any consumer is unmeasured.",
+          "the knowledge pipeline's own contract: _catalogue_chain's docstring says the pipeline catalogues sources, writes long-term memory and persists the registry inside one call. This cluster proved the three permissions reach it; what it does with them is its own subject.",
+          "_premature_keyword_fired — CLOSED 2026-08-09 by complete enumeration: the flag reaches exactly one consumer, a dictionary key in one log payload (loop_run_tail.py:324), and that key is read by no production code. The code's claim about itself is confirmed by a stronger argument than it carried."
+        ],
+        "_why_not_closed": "Two of the five values on the surface are untouched and the third is accepted on the code's own word. A cluster is not closed because its best-lit half is finished."
+      },
+      {
+        "id": "C10",
+        "scope": "synthesis ladder: SynthesisState, tier forcing, failure_history gated at loop_synthesis.py:637, streaming on_token (loop_synthesis)",
+        "status": "UNPROVEN",
+        "deferred_arcs_from_other_clusters": [
+          "local_critique_active shapes the synthesis prompt via SynthesisState — candidate arc deferred here from C05, unbitten"
+        ]
+      },
+      {
+        "id": "C11",
+        "scope": "verify & settle: Verifier, refuted claims, unresolved_citation replan, VERIFY_REPLAN_HARD_CAP (loop_verify_replan, verifier)",
+        "status": "UNPROVEN",
+        "known": "unresolved_citation flow CERTIFIED on all four conditions (10240f8 + M20 isolated gate + M21 strict two-verdict differential); the rest of the cluster — Verifier itself, refuted claims, the hard cap — is unwalked"
+      },
+      {
+        "id": "C12",
+        "scope": "response draft deciders -> single arbitration render (loop_response_deciders, response_draft)",
+        "status": "UNPROVEN",
+        "deferred_arcs_from_other_clusters": [
+          "local_critique_active feeds answer enforcement (core/loop_response_deciders.py:279) — candidate arc deferred here from C05, unbitten"
+        ]
+      },
+      {
+        "id": "C13",
+        "scope": "completion obligations: reads C03 contract + failure_history -> journal verdict, observational (loop_run_tail)",
+        "status": "UNPROVEN",
+        "stale_scope_note": "The scope line still calls the obligation verdict 'observational', but M19 (2026-08-08) already proved downstream banking authority: the verdict lowers a declared achieved to partially_achieved and withholds procedure credit at L5. Recorded per the operator's instruction; the substantive reconciliation of C13's description is DEFERRED to the C13 walk itself.",
+        "_inherited_from_C08_2026_08_09": "Two findings of the mapping program ran into this cluster's consumer before it was ever walked, and are registered here so its walk starts from them rather than rediscovering them: empty_plan_provenance — the arbiter receives the LAST attempt's plan_steps, so a plan emptied by the forbidden-action filter leaves it nothing to judge and it reports 'no wired source created an obligation', identical to a run that needed no tool; and partial_attempt_denial_downgrade — blocked_and_disclosed is unreachable when the attempt succeeded partially, because denied_tools is built from a failure_history the success-path break left empty. Both carry measurements and tests; neither has been judged against this cluster's own contract."
+      },
+      {
+        "id": "C14",
+        "scope": "run tail: outbound redaction, verification counters, profile/assumption writes, stagnation/disagreement shadows (loop_run_tail)",
+        "status": "UNPROVEN"
+      },
+      {
+        "id": "C15",
+        "scope": "episode banking LAST: _record_experience_memory, three sinks, idempotency on run_id (loop_memory_write)",
+        "status": "UNPROVEN",
+        "known": "store-level idempotency PROVEN (save_once tests); whole-boundary semantics open"
+      },
+      {
+        "id": "C16",
+        "scope": "autonomous contour: agent_tick -> runtime -> task queue -> budget guard -> same loop; task_id retry semantics",
+        "status": "UNPROVEN"
+      },
+      {
+        "id": "C17",
+        "scope": "API entry: api/server serialisation lock, shared instance",
+        "status": "UNPROVEN"
+      },
+      {
+        "id": "C18",
+        "scope": "future subagent lifecycle ports: mark the boundary so current architecture does not block it; nothing to implement now",
+        "status": "UNPROVEN"
+      }
     ],
     "carriers_not_in_clusters": "state_carriers section above holds failure_history, _step_trigger_tls, _last_step_failure (DEAD); artifacts and chain still owe carrier records",
     "next_edge": "C09 stays OPEN after four units. Its FOLD half is finished — three sources measured, one already guarded, two guarded here. Its CATALOGUE half has an enumerated decision surface and both sink permissions now guarded at the derivation. What is left: rank_chain itself, never entered; the knowledge pipeline's own contract, which this cluster only proved is reached; and _premature_keyword_fired, recorded as a non-decision on the code's own word rather than on a walked consumer. C08 remains open on effectful actuation and the live-model consumers a mock cannot observe. The admissible fronts are those three C09 items, C08's remainder, or C10 — the synthesis ladder, which is where the failure context and the cheap path both land."
   },
-
   "quantum_cns": {
     "_mandate": "Operator mandate 2026-08-08, standing and open-ended. A SECOND, finer audit over the whole CNS — previously certified areas included. Existing evidence, arcs, mutations, carriers, boundaries and history are PRESERVED; what is re-questioned is their semantic granularity. Project terminology only: 'quantum' means decompose until no further decomposition yields a behaviourally distinguishable state under the declared observation boundary. No schedule. Correctness and irreducibility outrank finishing.",
     "_two_views": {
@@ -804,13 +1295,24 @@
     "_state_space_inventory": {
       "counted": "85 Literal-typed discrete state spaces in core/ (mechanical count, 2026-08-08). That is the OUTER bound of the queue, not the work list: many belong to organs outside the CNS perimeter and enter only where a perimeter consumer reads them.",
       "queue_order": "Start where the CNS's own control lives, then widen: (1) ReplanDecision.action [DONE], (2) GatewayOutcome, (3) ObligationStatus, (4) approval verdicts, (5) EpisodeOutcome + completion_state, (6) ProcedureStatus, (7) PolicyDecision.decision + risk, (8) PlanStep/Action statuses, (9) FailureType [done earlier, re-question under this schema], then organs.",
-      "already_walked_under_this_schema": ["FailureType (14 states) — recorded in signal_flows._quantum_decomposition_failure_taxonomy; its result is TWO orthogonal partitions, and policy_blocked's causal distinction is now protected", "ReplanDecision.action (3 states) — below"]
+      "already_walked_under_this_schema": [
+        "FailureType (14 states) — recorded in signal_flows._quantum_decomposition_failure_taxonomy; its result is TWO orthogonal partitions, and policy_blocked's causal distinction is now protected",
+        "ReplanDecision.action (3 states) — below"
+      ]
     },
     "_program": {
       "name": "Quantum CNS Full-Agent Mapping Program",
       "opened": "2026-08-09",
       "snapshot": "f88997395abd7ade9f5a7bbb7e7e57db7a2cd1ee",
-      "subject_paths": ["core", "cli", "app", "api", "tools", "agent_tick.py", "main.py"],
+      "subject_paths": [
+        "core",
+        "cli",
+        "app",
+        "api",
+        "tools",
+        "agent_tick.py",
+        "main.py"
+      ],
       "subject_guard": "scripts/qm_subject_freeze.py — fails on tracked drift from the snapshot AND on any new untracked file under a subject path. The second condition is the one a diff cannot express: a new module under core/ changes what the agent is while every tracked diff stays empty. Bitten by hand on the real repository (INTACT/TRACKED_DRIFT/UNTRACKED_ADDITION/BOTH all fired, main.py restored byte-identically) and made durable in tests/test_qm_subject_freeze.py against a throwaway repository.",
       "evaluation_domain_rule": "A code snapshot is one axis of four. Every unit records: the snapshot SHA; which config/env values were HELD and which merely OBSERVED, separately; durable-state preconditions or fixtures; and external assumptions (credentials, network, provider availability). Behaviour seen under ambient mutable state is never promoted to a claim about the snapshot alone — a claim reads 'in S under domain D', and D is named. Precedent: C2 held only inside an unnamed environment until its preconditions were declared.",
       "production_is_read_only": "Defects found in the subject are banked, not fixed. The laboratory (scripts/, tests/, docs/, knowledge/) may grow; the thing it describes stays still.",
@@ -828,20 +1330,32 @@
         "state": "CARRIED_FORWARD",
         "checked": "core/loop_context.py changed at f4d6e2d after C01 closed at 2e60a7d. Proven docstring-only: both revisions parsed and every module/class/function docstring stripped, the resulting ASTs are identical. C01's three arcs are behavioural and untouched."
       },
-      "C02": {"state": "CARRIED_FORWARD", "checked": "No named site changed after closure (core/loop_observe.py, core/redaction.py)."},
+      "C02": {
+        "state": "CARRIED_FORWARD",
+        "checked": "No named site changed after closure (core/loop_observe.py, core/redaction.py)."
+      },
       "C03": {
         "state": "CARRIED_FORWARD",
         "checked": "Record named no production path; sites recovered from the closure commit 953f294 via tests/test_completion_contract.py imports. None changed after closure.",
         "map_defect": "Same missing site index as C00."
       },
-      "C04": {"state": "CARRIED_FORWARD", "checked": "No named site changed after closure (core/evidence.py, core/loop_gates.py)."},
-      "C05": {"state": "CARRIED_FORWARD", "checked": "Its only moving site, core/loop_context.py, moved in the very commit that closed it."},
+      "C04": {
+        "state": "CARRIED_FORWARD",
+        "checked": "No named site changed after closure (core/evidence.py, core/loop_gates.py)."
+      },
+      "C05": {
+        "state": "CARRIED_FORWARD",
+        "checked": "Its only moving site, core/loop_context.py, moved in the very commit that closed it."
+      },
       "C06": {
         "state": "CARRIED_FORWARD",
         "checked": "core/loop_memory_read.py changed at a990e48 after C06 reclosed at 980cc9d. The change deletes _episodic_store_mtime, which is not among C06's six certified arcs (replay_profile_flag, file_hint, operator_command_prefix, local_critique, similar_episode, similarity_score) — it supplied the planner cache key and was deliberately left uncertified before that component's deletion. The six arcs survive.",
         "map_defect": "The scope line still reads 'replay gate, quality gate, caches'. The planner cache was deleted at a990e48 and the episodic fast path is not a cache; the word now names something that does not exist. Corrected in the cluster record."
       },
-      "C07": {"state": "CARRIED_FORWARD", "checked": "No named site changed after closure (core/file_request_intent.py, core/loop.py, core/loop_gates.py, core/planner.py, core/replan.py)."}
+      "C07": {
+        "state": "CARRIED_FORWARD",
+        "checked": "No named site changed after closure (core/file_request_intent.py, core/loop.py, core/loop_gates.py, core/planner.py, core/replan.py)."
+      }
     },
     "defect_bank": {
       "stale_docstring_that_misled_the_agents_own_audit": {
@@ -866,14 +1380,60 @@
     "coverage": {
       "_rule": "A bidirectional index. physical_to_unit answers 'what is known about this file'; unit_to_physical answers 'where does this unit live'. Absence of an entry is itself a finding, never a blank. Seeded by the carry-forward pass; grows with every unit.",
       "unit_to_physical": {
-        "C00": ["agent_tick.py", "app/bootstrap.py", "core/deep_escalation.py", "core/logger.py", "core/loop.py", "core/model_router.py", "core/model_usage.py", "core/models.py", "core/planner.py", "core/policy.py", "core/smart_memory.py", "core/task_complexity.py", "tools/base.py", "tools/file_read.py"],
-        "C01": ["core/checkpoint.py", "core/loop.py", "core/loop_context.py"],
-        "C02": ["core/loop_observe.py", "core/redaction.py"],
-        "C03": ["core/completion_contract.py", "core/completion_obligation.py", "core/model_usage.py", "core/smart_memory.py"],
-        "C04": ["core/evidence.py", "core/loop_gates.py"],
-        "C05": ["core/loop_context.py", "core/memory.py", "core/planner.py"],
-        "C06": ["core/evidence.py", "core/loop.py", "core/loop_gates.py", "core/loop_memory_read.py", "core/planner.py"],
-        "C07": ["core/file_request_intent.py", "core/loop.py", "core/loop_gates.py", "core/planner.py", "core/replan.py"],
+        "C00": [
+          "agent_tick.py",
+          "app/bootstrap.py",
+          "core/deep_escalation.py",
+          "core/logger.py",
+          "core/loop.py",
+          "core/model_router.py",
+          "core/model_usage.py",
+          "core/models.py",
+          "core/planner.py",
+          "core/policy.py",
+          "core/smart_memory.py",
+          "core/task_complexity.py",
+          "tools/base.py",
+          "tools/file_read.py"
+        ],
+        "C01": [
+          "core/checkpoint.py",
+          "core/loop.py",
+          "core/loop_context.py"
+        ],
+        "C02": [
+          "core/loop_observe.py",
+          "core/redaction.py"
+        ],
+        "C03": [
+          "core/completion_contract.py",
+          "core/completion_obligation.py",
+          "core/model_usage.py",
+          "core/smart_memory.py"
+        ],
+        "C04": [
+          "core/evidence.py",
+          "core/loop_gates.py"
+        ],
+        "C05": [
+          "core/loop_context.py",
+          "core/memory.py",
+          "core/planner.py"
+        ],
+        "C06": [
+          "core/evidence.py",
+          "core/loop.py",
+          "core/loop_gates.py",
+          "core/loop_memory_read.py",
+          "core/planner.py"
+        ],
+        "C07": [
+          "core/file_request_intent.py",
+          "core/loop.py",
+          "core/loop_gates.py",
+          "core/planner.py",
+          "core/replan.py"
+        ],
         "_derivation_note": "C00 and C03 are recovered from their closure commits' test imports and are therefore an OVER-approximation: a test's import list includes fixtures as well as subjects. Over-approximation is the safe direction for a staleness check — it can raise a false STALE, never a false CARRIED_FORWARD. The other clusters are word-resolved from their own records."
       }
     },
@@ -947,7 +1507,12 @@
         "provenance_collapse_inside_one_value": "The `block` outcome is produced by collect_hard_stop_reasons (core/gateway_consult.py:103) from at least three independent sources: a kill switch whose status is itself computed from the budget snapshot, and readiness blockers gated by check_readiness. Distinct causes, one outcome value. Whether any consumer distinguishes them is unmeasured.",
         "a_second_entry_point_the_record_never_mentions": "ActuationGateway.evaluate_self_apply (core/actuation_gateway.py:167-193) is a separate public entry to the same gateway. It appears in no C08 certification.",
         "method": "Static census only, as in C08-U6 — no mutation, no suite. It establishes the DEBT precisely; it establishes nothing about behaviour.",
-        "verdict": {"REACHABILITY": "PROVEN for the enumeration", "CAUSALITY": "N/A", "SEMANTICS": "N/A", "PROTECTION": "N/A"},
+        "verdict": {
+          "REACHABILITY": "PROVEN for the enumeration",
+          "CAUSALITY": "N/A",
+          "SEMANTICS": "N/A",
+          "PROTECTION": "N/A"
+        },
         "why_this_frontier_was_derived_and_not_asserted": "Under §22 dominance, effectful actuation and C09 cataloguing were INCOMPARABLE at the C08->C09 transition: actuation wins on execution authority and world-state consequence, C09 won on evidence gap because it had zero units. C09 now has six; the evidence-gap advantage is spent; actuation dominates and the frontier is a singleton. The earlier transition skipped this derivation and asserted 'actuation is largely certified' from the record — the same record this census now shows to be a walk written down as a set.",
         "no_code_change": "None. Production is read-only and nothing here is a defect claim."
       },
@@ -962,9 +1527,16 @@
           "core/loop_response_deciders.py:258, core/loop_run_tail.py:311, core/loop_verification.py:212": "read realtime_required. A FIELD on the same object, not the order."
         },
         "where_the_order_actually_reaches": "Two places, both journal-only. SourceRankingReport.best uses max(), which returns the FIRST maximum, so the order breaks ties — and .best has exactly one consumer in the whole production tree: to_log_payload at source_ranker.py:251. The second is the ranks list order inside that same payload. Nothing anywhere reads the payload keys 'ranks' or 'support_counts', and the ranking is never serialised into durable state — loop_run_tail touches it only through realtime_required.",
-        "_downgraded_2026_08_09": "The operator ruled that enumeration establishes CONSUMER ABSENCE within a mechanically justified discovery domain and does NOT automatically establish downstream semantic equivalence. What this unit established is therefore the narrower claim: NO PRODUCTION CONSUMER READS THE ORDER within the enumerated domain. The wording below asserts a quotient, which this instrument did not earn; it is kept verbatim and marked rather than rewritten.", "_the_claim_that_was_actually_earned": "No production consumer reads the order at f889973, within a discovery domain covering the attribute name, the indirect-access sites and the derived log key.", "the_collapse_OVERREACHED": "Under the enumerated production observer set at f889973, the state space 'ordering of the evidence' collapses to a triple: (the multiset of support_levels, the minimum confidence_ceiling among direct ranks, the realtime_required flag). A function named rank_chain, producing a report named SourceRankingReport, is consumed as a CLASSIFIER plus an aggregate plus a flag. Names prove nothing here, which is why this is an observation about consumption and not a defect claim about naming.",
+        "_downgraded_2026_08_09": "The operator ruled that enumeration establishes CONSUMER ABSENCE within a mechanically justified discovery domain and does NOT automatically establish downstream semantic equivalence. What this unit established is therefore the narrower claim: NO PRODUCTION CONSUMER READS THE ORDER within the enumerated domain. The wording below asserts a quotient, which this instrument did not earn; it is kept verbatim and marked rather than rewritten.",
+        "_the_claim_that_was_actually_earned": "No production consumer reads the order at f889973, within a discovery domain covering the attribute name, the indirect-access sites and the derived log key.",
+        "the_collapse_OVERREACHED": "Under the enumerated production observer set at f889973, the state space 'ordering of the evidence' collapses to a triple: (the multiset of support_levels, the minimum confidence_ceiling among direct ranks, the realtime_required flag). A function named rank_chain, producing a report named SourceRankingReport, is consumed as a CLASSIFIER plus an aggregate plus a flag. Names prove nothing here, which is why this is an observation about consumption and not a defect claim about naming.",
         "observer_set_named_because_the_claim_is_a_quotient": "Production consumers at snapshot f889973, statically enumerated. NOT claimed for operators reading the journal, for whom the order is visible and may well be the point.",
-        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "NEGATIVE for the order; PROVEN for the labelling, the aggregate and the flag", "SEMANTICS": "PROVEN", "PROTECTION": "N/A"},
+        "verdict": {
+          "REACHABILITY": "PROVEN",
+          "CAUSALITY": "NEGATIVE for the order; PROVEN for the labelling, the aggregate and the flag",
+          "SEMANTICS": "PROVEN",
+          "PROTECTION": "N/A"
+        },
         "protection_note": "N/A rather than NEGATIVE: there is no behaviour that depends on the order, so there is nothing to protect. What IS unguarded is the INVARIANCE — a consumer added later that reads ranks[0] would make the order semantic silently, and no instrument would notice. That is a candidate, not this unit's claim.",
         "no_test_added": "None. Following C09-U5: a test asserting 'no consumer reads the order' is an enumeration frozen in amber, and the enumeration is cheap to redo.",
         "spawned_candidate": "SourceRankingReport.best is a computed property with exactly one consumer, the log payload. Journal-only by the same enumeration. Registered, unbitten.",
@@ -976,7 +1548,12 @@
         "method": "COMPLETE ENUMERATION rather than a mutation. Every occurrence of the name across core, cli, app, api and tools was listed, and then every occurrence of the payload key it turns into. A mutation would only show that the TESTED consumers do not act on it; the enumeration shows that no consumer exists to act on it at all.",
         "the_whole_path": "Produced at loop_evidence_chain.py:286-294; returned at :341; unpacked at loop.py:508; passed at loop.py:641 into loop_run_tail; received as a parameter at loop_run_tail.py:279; and written at :324 as _payload['shadow_keyword_detector'] = bool(...). That assignment is the terminus. No occurrence anywhere is a condition.",
         "the_key_it_becomes": "shadow_keyword_detector appears exactly once in production — the assignment above — and in one test file, which asserts the key is present and, in one case, that it is False. Nothing reads it to decide anything.",
-        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "N/A"},
+        "verdict": {
+          "REACHABILITY": "PROVEN",
+          "CAUSALITY": "PROVEN",
+          "SEMANTICS": "PROVEN",
+          "PROTECTION": "N/A"
+        },
         "result": "The code's claim about itself is CONFIRMED, and by a stronger argument than the claim carried: the detector is journal-only not because tested consumers ignore it, but because its single consumer is a dictionary key in one log payload.",
         "no_test_added": "None. There is no behaviour to protect — the value has no behavioural consumer. A test pinning 'nothing reads it' would be an enumeration frozen in amber, and the enumeration is cheap to redo.",
         "scope_limitation": "Static, over the production tree only. A consumer reaching the field through the journal file after the fact — an operator, an analysis script outside these paths — is not covered and is exactly what the field exists for.",
@@ -988,7 +1565,12 @@
         "mutation": "ONE string: line 312 asks about source_registry instead of knowledge.",
         "observed_consequence": "GREEN. 7307 passed, exit 0. Restore byte-identical (8671c8f1).",
         "what_the_neighbouring_test_could_not_see": "tests/test_catalogue_core_is_shared.py::test_permissions_reach_the_pipeline covers the hop AFTER this one — given the two booleans, the pipeline receives remember, auto_write_memory and source_store accordingly. It supplies the booleans itself, so it cannot see a swap upstream.",
-        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "NEGATIVE"},
+        "verdict": {
+          "REACHABILITY": "PROVEN",
+          "CAUSALITY": "PROVEN",
+          "SEMANTICS": "PROVEN",
+          "PROTECTION": "NEGATIVE"
+        },
         "protection_status": "tests/test_catalogue_permissions_name_their_own_sink.py. Behaviour: a partial allowlist holding one sink permits only that sink, in both directions, plus a guard naming the two configurations that cannot tell them apart. Wiring: an AST assertion that each derivation passes its own name — the same behaviour-plus-wiring pairing test_verified_memory_gate_follows_gateway_path.py already uses, and NOT a body-equivalence ratchet, since it reads one argument of one call.",
         "my_own_trap_recorded": "The behavioural tests were written first and did NOT redden on the swap. They call _durable_learning_suppressed directly, so they exercise a restatement of core/loop.py rather than core/loop.py. This project recorded the same shape once before — a replay gate whose conditions were restated inside a test instead of called. Caught by the break-did-not-redden rule; the wiring assertion is what closes it.",
         "scope_limitation": "The wiring assertion reads the call site statically. A full turn reaching the catalogue branch under a partial allowlist would be stronger and was not written; the behavioural half here covers the gate, not the derivation.",
@@ -1006,7 +1588,12 @@
         },
         "the_docstring_is_a_warning_worth_keeping": "core/loop_evidence_chain.py:106 says in bold that this is not a pure computation and must not be described as one: the knowledge pipeline catalogues sources AND writes to long-term memory AND persists the registry, all inside one call, governed by the two permissions and by _unattended_run.",
         "already_protected": "The unattended gate is the best-covered of the three: tests/test_verified_memory_gate_follows_gateway_path.py drives _unattended_run() across gateway paths and additionally asserts, by AST, that require_verified is passed _unattended_run at the call site. That pairing — behaviour plus wiring — is the shape the two evidence folds lacked.",
-        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "UNPROVEN", "SEMANTICS": "UNPROVEN", "PROTECTION": "UNPROVEN"},
+        "verdict": {
+          "REACHABILITY": "PROVEN",
+          "CAUSALITY": "UNPROVEN",
+          "SEMANTICS": "UNPROVEN",
+          "PROTECTION": "UNPROVEN"
+        },
         "note": "A read, not a bite. Nothing is claimed about any of these values beyond where they are and what they gate. The next unit takes ONE of them.",
         "next": "may_source_registry and may_knowledge are the thin ones by coverage and both reach durable state; either is the admissible next unit."
       },
@@ -1017,7 +1604,12 @@
         "mutation": "The same ONE relation applied to both: a break at the end of each except block. Both confirmed live — the chain drops from 1 to 0 in each case.",
         "observed_consequence": "One failure across the whole suite, and it is not a behavioural one: test_loop_evidence_chain_split.py::test_logic_moved_symbol_for_symbol, an AST body-equivalence ratchet from the module split. 7302 tests passed with both folds truncating.",
         "why_that_failure_does_not_count_as_protection": "This project has already ruled on exactly this shape, in C06: a guard that fires on any edit cannot tell a deliberate change from a deleted safety condition. The ratchet would redden identically for a renamed local. Behaviourally the property was unobserved.",
-        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "NEGATIVE — shape-guarded only"},
+        "verdict": {
+          "REACHABILITY": "PROVEN",
+          "CAUSALITY": "PROVEN",
+          "SEMANTICS": "PROVEN",
+          "PROTECTION": "NEGATIVE — shape-guarded only"
+        },
         "protection_status": "tests/test_evidence_fold_granularity.py now holds all three properties behaviourally, with a fourth test asserting that three items land when nothing fails, so the others cannot be satisfied by an empty fold. Fail-before verified: three of four red on the mutation.",
         "the_asymmetry_itself": "One fold of three had a behavioural test; its two neighbours, written in the same style with the same guard shape, had only the shape ratchet. The comment beside the first fold warns that the loops must not drift apart — it was addressed to a reader, and the reader it needed was a test.",
         "scope_limitation": "The new tests drive the method through a shim rather than a full run, so they would not notice if _fold_evidence_chain stopped being called; the evidence_collected assertions elsewhere would. The trade is stated in the file.",
@@ -1029,7 +1621,12 @@
         "prediction": "GREEN. The one test found by grepping the event name saves a SINGLE record, and with one record a per-record guard and a per-loop guard are observationally identical: chain 0, one skip event. Measured on a shim first, so the premise was checked rather than assumed.",
         "mutation": "ONE relation: a `break` at the end of the except block, which reproduces the historical behaviour exactly — the first failure abandons the rest and still logs once.",
         "observed_consequence": "RED, and by a test named for the property: tests/test_evidence_integration.py::TestMalformedMemoryRecordDoesNotTruncateChain::test_one_bad_record_only_skips_itself. The prediction was wrong because the grep found the event name in one test and stopped; the class holds a second case with two records that discriminates exactly this.",
-        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "PROVEN"},
+        "verdict": {
+          "REACHABILITY": "PROVEN",
+          "CAUSALITY": "PROVEN",
+          "SEMANTICS": "PROVEN",
+          "PROTECTION": "PROVEN"
+        },
         "protection_status": "Already held. No test was added, and adding one would duplicate a better-named existing case.",
         "the_lesson_for_this_program": "Second falsified prediction in a row. The working assumption formed inside C08 — that a path found by a census is probably unobserved — does not generalise. Protection in this repository is UNEVEN rather than absent, and grepping an event name finds the tests that log it, not the tests that discriminate on it.",
         "scope_limitation": "One of the three folds. The working-memory fold reports through _sensor_failed and the dialogue fold through dialogue_evidence_skipped; neither was measured here, and no test names either event.",
@@ -1043,12 +1640,24 @@
         "guard_result": "UNPROTECTED. With the code changed to tool_error — budget 2, one literal, nothing else touched — the tool is invoked TWICE, the same postprocessing error is logged twice, and 7300 tests pass. The guard had been reporting honestly the whole time and nothing was listening.",
         "evaluation_domain": {
           "code": "f889973",
-          "held": ["max_replan_attempts=3, the shipped default", "a tool that succeeds and returns harmless output, so the break is strictly downstream of it", "classify() rebound to raise, which is inside the guarded stretch", "a concrete question, since a vague one is stopped by the clarification gate"],
-          "observed": ["FakeLLM synthesizer"],
+          "held": [
+            "max_replan_attempts=3, the shipped default",
+            "a tool that succeeds and returns harmless output, so the break is strictly downstream of it",
+            "classify() rebound to raise, which is inside the guarded stretch",
+            "a concrete question, since a vague one is stopped by the clarification gate"
+          ],
+          "observed": [
+            "FakeLLM synthesizer"
+          ],
           "durable_state": "temporary workspace",
           "external": "none"
         },
-        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "PROVEN after this unit; NEGATIVE for the guard before it"},
+        "verdict": {
+          "REACHABILITY": "PROVEN",
+          "CAUSALITY": "PROVEN",
+          "SEMANTICS": "PROVEN",
+          "PROTECTION": "PROVEN after this unit; NEGATIVE for the guard before it"
+        },
         "protection_status": "tests/test_postprocessing_guard_stops_the_run.py asserts both halves — the healthy run reaches evidence in one invocation, and the broken one stops by the unknown budget BY NAME without banking anything. Asserting only the stop would pass equally against a system that never ran the tool at all.",
         "closes": "The producer set of _step_trigger_tls. All eleven sites are now accounted for: three certified as policy_blocked (M51), one as the approval verdict (M54/M55), one unreachable, four literal producers measured individually, and these two.",
         "no_code_change": "None. Every producer was correct; six of the nine reachable ones had observers and three did not."
@@ -1064,7 +1673,12 @@
         },
         "the_shape_of_the_gap": "Protection here is not random and not uniform. The MVP-8-era files carry an assertion that the planner's retry context NAMES the code (test_replan.py::test_failure_context_contains_code_tool_reason). Where that pattern was inherited the producer is protected; where a newer path was added it was not. injection_blocked is a security path whose own test asserted the consequence deliberately and stopped there; timeout is an operational path with sixteen test files mentioning the word and none of them watching the trigger.",
         "why_it_matters_beyond_bookkeeping": "Each code selects its own advice, and the advice is what the planner reads before deciding what to try next. timeout says REDUCE SCOPE — ask for less data. web_empty says REFORMULATE the query. A shell command that ran out of time and is told to rephrase its query has been handed advice for a different failure.",
-        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "PROVEN — after this unit; NEGATIVE for timeout before it"},
+        "verdict": {
+          "REACHABILITY": "PROVEN",
+          "CAUSALITY": "PROVEN",
+          "SEMANTICS": "PROVEN",
+          "PROTECTION": "PROVEN — after this unit; NEGATIVE for timeout before it"
+        },
         "protection_status": "tests/test_shell_timeout_replan_code.py closes the last one with the same assertion shape the other two already had, plus the advice text itself. Fail-before verified: two of its three tests red on the mutation, the precondition test stays green because the budget is unchanged.",
         "scope_limitation": "Four literal producers. The two variable-code producers (:489/:497 replan_code, and :451 the approval verdict) select their code at runtime and were not measured this way; :451 is separately certified as M54/M55.",
         "no_code_change": "None. Every producer was correct; three of the four observers existed and one did not."
@@ -1075,8 +1689,15 @@
         "prediction": "GREEN, stated before the run.",
         "evaluation_domain": {
           "code": "f889973",
-          "held": ["max_replan_attempts=3, the shipped default", "one tool that runs successfully and then rejects its own output through validate_output", "a concrete question, because a vague one is stopped by the clarification gate before the planner is ever called"],
-          "observed": ["FakeLLM synthesizer", "verify_failed carries budget 2, so unlike injection_blocked it BUYS a retry — which is what makes the advice consumer reachable at all"],
+          "held": [
+            "max_replan_attempts=3, the shipped default",
+            "one tool that runs successfully and then rejects its own output through validate_output",
+            "a concrete question, because a vague one is stopped by the clarification gate before the planner is ever called"
+          ],
+          "observed": [
+            "FakeLLM synthesizer",
+            "verify_failed carries budget 2, so unlike injection_blocked it BUYS a retry — which is what makes the advice consumer reachable at all"
+          ],
           "durable_state": "temporary workspace",
           "external": "none"
         },
@@ -1084,7 +1705,12 @@
         "observed_consequence": "RED. Three pre-existing tests caught it: test_replan.py::TestReplanAfterVerifyFailed::test_verify_failed_triggers_replan, test_replan.py::TestPlannerSeesFailureHistory::test_failure_context_contains_code_tool_reason, and test_replan_policy_integration.py::TestAcceptanceVerifyFailed::test_verify_failed_replans_with_new_plan. 3 failed, 7294 passed. Restore byte-identical (4eaa5500).",
         "the_prediction_was_wrong_and_that_is_the_finding": "An unwalked producer is not an unprotected one. More usefully, the middle test asserts `code=verify_failed` INSIDE the planner's failure_context — precisely the assertion shape that injection_blocked lacked, in a file written in the MVP-8 era. The pattern existed in this repository and was not carried to the newer security path, whose own test asserted the consequence deliberately and stopped there. Coverage copied from the neighbour, with the same detail missing in the copy.",
         "also_established": "A budget-2 code's ADVICE reaches the planner on the retry the budget buys — planner call 1 carries 436 characters of failure_context containing both the code and the advice text, while call 0 carries none. This is the consumer C08-U2 could not exercise, because a budget-1 code never retries.",
-        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "PROVEN"},
+        "verdict": {
+          "REACHABILITY": "PROVEN",
+          "CAUSALITY": "PROVEN",
+          "SEMANTICS": "PROVEN",
+          "PROTECTION": "PROVEN"
+        },
         "no_new_test": "None written. The protection already exists and is stronger than what this program would have added.",
         "a_harness_error_recorded": "The first probe reported zero tool calls, zero planner calls, zero of everything. The cause was not the subject: the question was «сделай что-нибудь», and the clarification gate certified in C04 stopped the run before the planner. The gate was working; the probe was asking a question the agent is designed to refuse."
       },
@@ -1092,15 +1718,28 @@
         "named_state_space": "The failure-reporting policy of the four guarded sensors inside core/loop_attempt.py::_run_attempt_loop. Two values: silent (except Exception: pass, at :335 and :359) and reporting (self._sensor_failed, at :470 and :627).",
         "evaluation_domain": {
           "code": "f889973",
-          "held": ["max_replan_attempts=3", "a one-step plan over a real file for the two silent sensors; a refused ghost tool for the stagnation sensor, whose only path is the FAILURE branch", "artifact labels in the sanitiser's real format", "memory=None"],
-          "observed": ["FakeLLM synthesizer", "each guarded call was made to raise by rebinding the name the loop calls — no production file was edited"],
+          "held": [
+            "max_replan_attempts=3",
+            "a one-step plan over a real file for the two silent sensors; a refused ghost tool for the stagnation sensor, whose only path is the FAILURE branch",
+            "artifact labels in the sanitiser's real format",
+            "memory=None"
+          ],
+          "observed": [
+            "FakeLLM synthesizer",
+            "each guarded call was made to raise by rebinding the name the loop calls — no production file was edited"
+          ],
           "durable_state": "temporary workspace with one file",
           "external": "none"
         },
         "measured": "extract_from_plan broken -> assumptions_registered goes 1 to 0 and nothing else changes; that is the arc C01 certified as assumption_seeding, switched off in silence. check_reasoning_actions broken -> reasoning_action_mismatch goes 1 to 0 AND _defect_signals goes ['reasoning_action_mismatch'] to [], which is durable because that list is banked with the episode. In both cases sensor_failed stays at 0.",
         "the_contrast_in_the_same_method": "Breaking TerminationGuard.observe_attempt on the failure path emits sensor_failed with payload {'sensor': 'stagnation_shadow', 'error_type': 'RuntimeError'}. Eleven lines apart, two policies.",
         "relation_to_the_existing_ratchet": "tests/test_journal_silence_ratchet.py counts journal-silent handlers across the loop layer and holds the number exactly. It answers HOW MANY, which is the right question for a budget, and does not ask what any particular handler hides. These two hide a certified arc and a durable defect signal.",
-        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "PARTIAL"},
+        "verdict": {
+          "REACHABILITY": "PROVEN",
+          "CAUSALITY": "PROVEN",
+          "SEMANTICS": "PROVEN",
+          "PROTECTION": "PARTIAL"
+        },
         "protection_status": "The reporting behaviour and both losses are now pinned plainly in tests/test_attempt_loop_sensor_silence.py. The uniform property — a sensor dying inside the attempt loop should be visible other than by its output going missing — is one parametrized test whose marks record exactly who fails it: the stagnation guard passes, the two silent handlers are xfail(strict=True).",
         "two_probe_misreadings_recorded": "Each produced a 'nothing happened' that looked like a result. First: the loop REPLACES self._termination_guard on every run(), so patching the instance is undone before the sensor is consulted — the class must be patched. Second: the event is spelled sensor_failed, not sensor_failure, so a counter watching the wrong name reported zero for a handler that had reported perfectly. The first silent-handler measurement was re-run under the correct name before anything was written down.",
         "scope_limitation": "Four handlers in one method. Nothing is claimed about the other journal-silent handlers the ratchet counts, and nothing about whether a live model would behave differently with the assumption registry empty.",
@@ -1111,14 +1750,28 @@
         "the_structural_fact": "core/loop_attempt.py breaks at :441 as soon as the attempt produced any artifact, and that break precedes the extend at :448 that carries the attempt's triggers into failure_history. A plan where one step succeeds and another is denied therefore ends the run with an EMPTY failure_history.",
         "evaluation_domain": {
           "code": "f889973",
-          "held": ["max_replan_attempts=3", "a registry holding file_read only, so a planned web_search is refused by the gate", "a two-step plan: one readable file, one web_search", "artifact labels in the sanitiser's real format", "memory=None"],
-          "observed": ["FakeLLM synthesizer", "the consumer-level comparison was made by calling evaluate_completion_obligations directly, so nothing but the trigger differs between the poles"],
+          "held": [
+            "max_replan_attempts=3",
+            "a registry holding file_read only, so a planned web_search is refused by the gate",
+            "a two-step plan: one readable file, one web_search",
+            "artifact labels in the sanitiser's real format",
+            "memory=None"
+          ],
+          "observed": [
+            "FakeLLM synthesizer",
+            "the consumer-level comparison was made by calling evaluate_completion_obligations directly, so nothing but the trigger differs between the poles"
+          ],
           "durable_state": "temporary workspace holding one file",
           "external": "none"
         },
         "what_survives_the_loss": "The arbiter is NOT blinded. core/loop_attempt.py:408 sets step.status = 'failed', and completion_obligation.py:250 branches on `status == \"failed\" or failure_codes`, so the denied step is still marked and an answer naming the tool is still credited. Three poles measured end to end: a silent answer gives silently_missing, an answer naming web_search gives failed_but_reported. For that distinction the loss is MASKED.",
         "what_does_not_survive": "blocked_and_disclosed — the state that says a policy DECLINED this rather than it merely not working. That branch tests `tool in denied`, and denied is built at core/loop_run_tail.py:301 from failure_history entries coded policy_blocked. On the success path that list is empty, so the branch is unreachable. Measured at the consumer with everything else held equal — same answer, same step, same status, only the trigger differing: blocked_and_disclosed versus failed_but_reported.",
-        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "PARTIAL"},
+        "verdict": {
+          "REACHABILITY": "PROVEN",
+          "CAUSALITY": "PROVEN",
+          "SEMANTICS": "PROVEN",
+          "PROTECTION": "PARTIAL"
+        },
         "protection_status": "The arbiter's own distinction is now pinned plainly by tests/test_partial_attempt_failure_reporting.py (a refusal reads as a refusal when the trigger is present; as a breakdown when it is absent; a silent answer is caught either way). The loop-level gap is xfail(strict=True) on the property — a denial should read as a denial wherever it happens — which prescribes no design.",
         "probe_artifact_caught": "The first probe reported the successfully read file as silently_missing. The cause was the probe: it hand-wrote the artifact label as 'ok:1', while core/step_sanitizer.py:154 builds 'file:{path}' and the arbiter looks for the file name inside the artifact labels. With the real format the obligation is satisfied. Recorded because a harness that invents a label tests its own invention, and this one nearly became a published finding.",
         "hypothesis_withdrawn": "Before measuring, the expectation was that a partially successful attempt could NEVER be credited for disclosing its denial. FALSE — _discloses takes the tool NAME as a needle alongside the codes, so an answer naming web_search reaches failed_but_reported with no trigger at all. Only the blocked/failed distinction is lost.",
@@ -1130,8 +1783,16 @@
         "observation_boundaries": "The break condition at core/loop_attempt.py:441 partitions those six into TWO — {plan_parse_failed} and {everything else}. The journal partitions them into three, because an unregistered tool also emits plan_tool_drop. The remaining four leave only free-text warning strings.",
         "evaluation_domain": {
           "code": "f889973",
-          "held": ["max_replan_attempts=3 — the SHIPPED default", "an EMPTY tool registry, so the policy gate refuses the only planned step", "FakePlanner, which filters its own sources against forbidden_actions exactly as core/planner.py:_validate_steps does", "memory=None"],
-          "observed": ["FakeLLM synthesizer", "NO production mutation of any kind — this is the shipped path"],
+          "held": [
+            "max_replan_attempts=3 — the SHIPPED default",
+            "an EMPTY tool registry, so the policy gate refuses the only planned step",
+            "FakePlanner, which filters its own sources against forbidden_actions exactly as core/planner.py:_validate_steps does",
+            "memory=None"
+          ],
+          "observed": [
+            "FakeLLM synthesizer",
+            "NO production mutation of any kind — this is the shipped path"
+          ],
           "durable_state": "temporary workspace, no stores",
           "external": "none"
         },
@@ -1139,7 +1800,12 @@
         "measured_sequence": "Attempt 1 plans one step; the policy gate blocks it; the trigger is policy_blocked; budget 2 means continue, and requires_different_action puts (tool, args) on the forbidden list; attempt 2's plan comes back EMPTY, filtered by that list; the loop breaks on the SUCCESS branch; replan_exhausted is never set; core/loop_synthesis.py:637 hands the synthesizer None; the answer is composed from general knowledge.",
         "the_collapse": "Compared against a control run whose planner simply chose no tools, the denied run is IDENTICAL at every consumer outside the journal: failure_context_reached_synthesis False in both, obligation_count 0 in both, answer_mentions_a_block False in both, replan_exhausted False in both. The two observation dictionaries are literally equal.",
         "why_the_arbiter_cannot_help": "core/loop_run_tail.py:301 reads policy_blocked out of failure_history into denied_tools, and failure_history IS non-empty here — the run holds the denial. But core/completion_obligation.py builds obligations from plan_steps, and the plan handed to it is the LAST attempt's, which is the empty one. The mechanism that emptied the plan is the same one that removed the obligation the denial would have marked. The run knew and had nothing to attach it to.",
-        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "NEGATIVE"},
+        "verdict": {
+          "REACHABILITY": "PROVEN",
+          "CAUSALITY": "PROVEN",
+          "SEMANTICS": "PROVEN",
+          "PROTECTION": "NEGATIVE"
+        },
         "protection_status": "The MECHANISM is now pinned by tests/test_empty_plan_provenance.py (the step is stopped, the retry comes back empty, no artifact is invented). The COLLAPSE is recorded as xfail(strict=True) rather than asserted: the test says only that a denied run should differ from a no-tool run somewhere outside the journal, which prescribes no design. Any repair makes it XPASS, and strict turns that into a failure — the signal to replace the marker.",
         "scope_limitation": "Driven through policy_blocked with an empty registry. The other three retry-and-forbid codes (approval_deny, approval_abort, claim_refuted) are expected to produce the same sequence and were NOT measured. No claim is made about multi-step plans, where a surviving sibling step keeps the plan non-empty.",
         "no_code_change": "None proposed, and none should be inferred. Production is read-only for the mapping program; whether the answer path ought to learn about a denied tool is a design decision for its owner, which is why the gap is announced rather than closed."
@@ -1148,8 +1814,16 @@
         "named_state_space": "FailureBudget.max_occurrences for injection_blocked — one integer in core/replan.py:379, currently 1.",
         "evaluation_domain": {
           "code": "f889973",
-          "held": ["max_replan_attempts=3, the SHIPPED default", "single-step plan through FakePlanner, which filters its own sources against forbidden_actions exactly as the real planner's sanitiser would", "one echo tool returning a contaminated payload", "memory=None"],
-          "observed": ["FakeLLM synthesizer", "the per-type rule decides here; at max_replan_attempts=1 the GLOBAL cap pre-empts it and this constant becomes invisible"],
+          "held": [
+            "max_replan_attempts=3, the SHIPPED default",
+            "single-step plan through FakePlanner, which filters its own sources against forbidden_actions exactly as the real planner's sanitiser would",
+            "one echo tool returning a contaminated payload",
+            "memory=None"
+          ],
+          "observed": [
+            "FakeLLM synthesizer",
+            "the per-type rule decides here; at max_replan_attempts=1 the GLOBAL cap pre-empts it and this constant becomes invisible"
+          ],
           "durable_state": "temporary workspace, no stores",
           "external": "none"
         },
@@ -1159,7 +1833,12 @@
         "mutation": "ONE integer, core/replan.py:379, max_occurrences 1 -> 2.",
         "observed_consequence": "FULL SUITE GREEN: 7286 passed, 1 xfail, exit 0. Nothing observed it — including the delivery test added the same day, because that test holds max_replan_attempts=1 where the global cap pre-empts the per-type rule. The same evaluation-domain trap twice in one cluster.",
         "green_mutation_diagnosis": "Not unreachable, not vacuous. PARTIALLY masked — the repetition half of the stated contract is genuinely held by requires_different_action, so the comment's stated fear does not materialise. NOT masked for the disclosure half: no other mechanism tells the answer that an injection was blocked. Classification: a real unprotected distinction, on a security-relevant constant, whose true role is disclosure rather than the retry limiting its own comment describes.",
-        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "NEGATIVE"},
+        "verdict": {
+          "REACHABILITY": "PROVEN",
+          "CAUSALITY": "PROVEN",
+          "SEMANTICS": "PROVEN",
+          "PROTECTION": "NEGATIVE"
+        },
         "protection_status": "Was NEGATIVE across 7286 tests. Now held by tests/test_tool_output_passes_the_injection_guard.py::test_under_the_shipped_cap_a_blocked_injection_still_reaches_the_answer, which asserts the stop comes from the injection budget by name so a stop produced by the global cap cannot satisfy it.",
         "scope_limitation": "One constant of fourteen. The other thirteen budgets are unmeasured, and no claim is made about what a live model does with the failure context once it arrives.",
         "spawned_candidate": "core/loop_attempt.py:441 treats an empty plan as an intentional zero-tool plan. A plan emptied by the forbidden-action filter is indistinguishable there from a planner that chose no tools — the same collapse this finding rode on. Registered UNPROVEN, unbitten.",
@@ -1169,8 +1848,16 @@
         "named_state_space": "ReplanTrigger.code — 14 values (core/replan.py ALL_FAILURE_TYPES), carried by _step_trigger_tls out of core/loop_step_execution.py and accumulated in failure_history.",
         "evaluation_domain": {
           "code": "f889973",
-          "held": ["max_replan_attempts=1", "a single-step plan through FakePlanner", "one echo tool returning a fixed payload", "no memory (memory=None)"],
-          "observed": ["FakeLLM synthesizer, so the final hop is mock-blind by construction", "the global replan cap fires before any per-type budget in this configuration — decision_reason reads 'global replan cap reached (1/1)'"],
+          "held": [
+            "max_replan_attempts=1",
+            "a single-step plan through FakePlanner",
+            "one echo tool returning a fixed payload",
+            "no memory (memory=None)"
+          ],
+          "observed": [
+            "FakeLLM synthesizer, so the final hop is mock-blind by construction",
+            "the global replan cap fires before any per-type budget in this configuration — decision_reason reads 'global replan cap reached (1/1)'"
+          ],
           "durable_state": "temporary workspace, no stores",
           "external": "none — no network, no credentials, no model call"
         },
@@ -1184,7 +1871,12 @@
         "mutation": "ONE literal at core/loop_step_execution.py:654 — code=\"injection_blocked\" -> code=\"unknown\". Both types have max_occurrences=1, so the abort and replan_exhausted are unchanged and only the code text moves.",
         "observed_consequence": "The mutation is behaviourally live — the prompt changed from `code=injection_blocked` to `code=unknown` and the journal's triggers list from ['injection_blocked'] to ['unknown'] — and the FULL SUITE stayed green: 7285 passed, 1 xfail, pytest exit 0. Byte-identical restore (4eaa5500) verified before and after.",
         "green_mutation_diagnosis": "NOT unreachable (the site fired), NOT vacuous (the delivered value changed), NOT equivalent (each code carries its own budget, advice and prompt text), NOT journal-only (it reaches the synthesis prompt). Partial redundancy exists for the OPERATOR observer only: the `injection_blocked` journal EVENT is written from the scan itself and stayed in the log unchanged throughout the mutation, so a human reading the journal still saw the injection. The synthesizer did not. Classification: a real unprotected distinction at DELIVERY to a live-model consumer.",
-        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "NEGATIVE"},
+        "verdict": {
+          "REACHABILITY": "PROVEN",
+          "CAUSALITY": "PROVEN",
+          "SEMANTICS": "PROVEN",
+          "PROTECTION": "NEGATIVE"
+        },
         "protection_status": "Was NEGATIVE — no observer anywhere in 7285 tests. Now protected at delivery by tests/test_tool_output_passes_the_injection_guard.py::test_the_refusal_travels_as_injection_blocked_and_not_merely_as_a_failure, which reddens on exactly this mutation and greens on the restored file.",
         "scope_limitation": "Proven for ONE of the fourteen codes, at ONE of the eleven write sites, at DELIVERY only. What the model does with the word is a live-model question and is not claimed. The other thirteen codes remain unmeasured, and the per-type BUDGET effect was not exercised at all in this domain — the global cap fired first.",
         "no_code_change": "None proposed. Production is read-only for the mapping program; the code was already correct and what was missing was an observer."
@@ -1192,9 +1884,21 @@
       "replan_decision_action": {
         "named_state_space": "ReplanAction = continue | abort_no_retry | abort_exhausted (core/replan.py:434)",
         "consumers_and_what_each_reads": [
-          {"consumer": "core/loop_attempt.py:478", "reads": "equality with 'continue' ONLY — the retry branch", "kind": "control"},
-          {"consumer": "core/loop_verify_replan.py:235", "reads": "inequality with 'continue' ONLY — sets replan_exhausted and breaks", "kind": "control"},
-          {"consumer": "journal: loop_attempt.py:522,534, loop_verify_replan.py:243, replan.py:453 to_log_payload", "reads": "the full string", "kind": "diagnostic"}
+          {
+            "consumer": "core/loop_attempt.py:478",
+            "reads": "equality with 'continue' ONLY — the retry branch",
+            "kind": "control"
+          },
+          {
+            "consumer": "core/loop_verify_replan.py:235",
+            "reads": "inequality with 'continue' ONLY — sets replan_exhausted and breaks",
+            "kind": "control"
+          },
+          {
+            "consumer": "journal: loop_attempt.py:522,534, loop_verify_replan.py:243, replan.py:453 to_log_payload",
+            "reads": "the full string",
+            "kind": "diagnostic"
+          }
         ],
         "observation_boundaries": {
           "loop_control": "what the two control consumers can distinguish",

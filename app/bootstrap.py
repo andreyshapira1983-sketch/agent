@@ -52,6 +52,11 @@ DEFAULT_PROCEDURAL_MEMORY_PATH = Path("data") / "procedural_memory.jsonl"
 DEFAULT_MEMORY_CONSOLIDATION_PATH = Path("data") / "memory_consolidation.jsonl"
 DEFAULT_USER_PROFILE_PATH = Path("data") / "user_profile.jsonl"
 DEFAULT_ASSUMPTIONS_PATH = Path("data") / "assumptions.jsonl"  # Layer 5
+#: Where a clarification parks the question it asked ABOUT, so the operator's
+#: reply is added to that question instead of replacing it. Survives the
+#: process because the agent that asks and the agent that hears the answer
+#: are not the same object — measured, see core/pending_clarification.py.
+DEFAULT_PENDING_CLARIFICATION_PATH = Path("data") / "pending_clarification.json"
 
 
 def build_agent(
@@ -164,6 +169,12 @@ def build_agent(
         registry=registry,
     )
     memory = WorkingMemory() if with_memory else None
+
+    # Уточнение ждёт ответа на диске: спрашивает один процесс, отвечает другой.
+    # Условие — рабочая память, см. `core/pending_clarification.py`.
+    pending_clarification_path = (
+        workspace / DEFAULT_PENDING_CLARIFICATION_PATH if with_memory else None
+    )
 
     persistent_store: PersistentMemoryStore | None = None
     source_registry_store: SourceRegistryStore | None = None
@@ -289,6 +300,7 @@ def build_agent(
         approval_provider=approval_provider,
         user_profile_store=user_profile_store,
         assumption_store=assumption_store,  # Layer 5
+        pending_clarification_path=pending_clarification_path,
         experience_retrieval=experience_retrieval,
         episodic_replay=episodic_replay,
         durable_writes=durable_writes,
