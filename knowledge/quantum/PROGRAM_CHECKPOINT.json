@@ -43,7 +43,9 @@
         "CAUSALITY": "PROVEN",
         "SEMANTICS": "PROVEN",
         "PROTECTION": "PROVEN"
-      }
+      },
+      "evaluation_domain_class": "RUNTIME_DOMAIN_FREE",
+      "evaluation_domain_note": "The bites exercise git and the filesystem, not the agent runtime. Every held condition is captured in tests/test_qm_subject_freeze.py, which builds a throwaway repository, and in commit b976c1b, which records the exit codes and the byte-identical hash 204c6a93."
     },
     {
       "id": "P01-carry-forward",
@@ -62,7 +64,9 @@
         "SEMANTICS": "PROVEN",
         "PROTECTION": "UNPROVEN"
       },
-      "protection_note": "UNPROVEN deliberately. Nothing mechanically prevents a future production change from staling a carried-forward cluster silently; the carry-forward derivation is a script run by hand, not a guard in the suite. Whether that instrument should exist is a question for a later unit, not an assumption now."
+      "protection_note": "UNPROVEN deliberately. Nothing mechanically prevents a future production change from staling a carried-forward cluster silently; the carry-forward derivation is a script run by hand, not a guard in the suite. Whether that instrument should exist is a question for a later unit, not an assumption now.",
+      "evaluation_domain_class": "RUNTIME_DOMAIN_FREE",
+      "evaluation_domain_note": "Static git and AST analysis. Reconstructible from scratchpad/carry.py and carry2.py and from commit b976c1b."
     },
     {
       "id": "P02-anchor-and-writer-integrity",
@@ -82,7 +86,9 @@
         "PROTECTION": "PROVEN"
       },
       "scope_limitation": "Proves that what the map says about writers and anchors matches the code it points at. Does NOT prove the carrier list is complete, nor that a named consumer really consumes.",
-      "reopens": "C08. Its certified arc policy_deny_stops_the_step (M51) rests on the same three writers; the eight unlisted producers of the same carrier were never walked. Per the program's carry-forward rule, a newly discovered producer reopens the unit that generalised from a partial walk."
+      "reopens": "C08. Its certified arc policy_deny_stops_the_step (M51) rests on the same three writers; the eight unlisted producers of the same carrier were never walked. Per the program's carry-forward rule, a newly discovered producer reopens the unit that generalised from a partial walk.",
+      "evaluation_domain_class": "RUNTIME_DOMAIN_FREE",
+      "evaluation_domain_note": "Static AST plus git history. Reconstructible from tests/test_cns_anchor_integrity.py and scratchpad/anchor_rule.py, tls.py, tls2.py."
     },
     {
       "id": "C08-U1-failure-code-delivery",
@@ -272,7 +278,9 @@
         "SEMANTICS": "N/A",
         "PROTECTION": "N/A"
       },
-      "note": "A bookkeeping unit. No new behaviour was measured, and no verdict is claimed."
+      "note": "A bookkeeping unit. No new behaviour was measured, and no verdict is claimed.",
+      "evaluation_domain_class": "NOT_APPLICABLE",
+      "evaluation_domain_note": "Bookkeeping. No measurement was made, so there is no domain to record."
     },
     {
       "id": "C08-U6-producer-reachability-census",
@@ -419,7 +427,9 @@
         "PROTECTION": "PROVEN"
       },
       "no_new_test": "None. Adding one would duplicate a better-named existing case.",
-      "scope_limitation": "One of the three folds. The working-memory fold reports through _sensor_failed and the dialogue fold through dialogue_evidence_skipped; neither was measured, and no test names either event."
+      "scope_limitation": "One of the three folds. The working-memory fold reports through _sensor_failed and the dialogue fold through dialogue_evidence_skipped; neither was measured, and no test names either event.",
+      "evaluation_domain_class": "DOMAIN_RECONSTRUCTED",
+      "evaluation_domain_note": "Held values recoverable without a rerun: the premise shim is scratchpad/probe_fold.py (one record versus two, first failing), the mutation is stated in commit 6714db7, and the suite result sits under the ambient domain above."
     },
     {
       "id": "C09-U2-the-other-two-folds",
@@ -438,7 +448,9 @@
         "SEMANTICS": "PROVEN",
         "PROTECTION": "NEGATIVE before, PROVEN after"
       },
-      "scope_limitation": "The new tests drive the method through a shim, so they would not notice if _fold_evidence_chain stopped being called; the evidence_collected assertions elsewhere would. Stated in the file rather than hidden."
+      "scope_limitation": "The new tests drive the method through a shim, so they would not notice if _fold_evidence_chain stopped being called; the evidence_collected assertions elsewhere would. Stated in the file rather than hidden.",
+      "evaluation_domain_class": "DOMAIN_RECONSTRUCTED",
+      "evaluation_domain_note": "Same shape: scratchpad/probe_fold2.py holds the two-item fixtures for both folds, tests/test_evidence_fold_granularity.py holds them permanently, commit 0344a12 states the mutation."
     },
     {
       "id": "C09-U3-catalogue-decision-surface",
@@ -459,7 +471,9 @@
         "SEMANTICS": "UNPROVEN",
         "PROTECTION": "UNPROVEN"
       },
-      "note": "A read, not a bite. Nothing is claimed beyond where these values are and what they gate."
+      "note": "A read, not a bite. Nothing is claimed beyond where these values are and what they gate.",
+      "evaluation_domain_class": "NOT_APPLICABLE",
+      "evaluation_domain_note": "A read. No experiment, no domain."
     },
     {
       "id": "C09-U4-catalogue-sink-permissions",
@@ -479,7 +493,9 @@
         "SEMANTICS": "PROVEN",
         "PROTECTION": "NEGATIVE before, PROVEN after"
       },
-      "scope_limitation": "The wiring assertion reads the call site statically. A full turn reaching the catalogue branch under a partial allowlist would be stronger and was not written."
+      "scope_limitation": "The wiring assertion reads the call site statically. A full turn reaching the catalogue branch under a partial allowlist would be stronger and was not written.",
+      "evaluation_domain_class": "DOMAIN_RECONSTRUCTED",
+      "evaluation_domain_note": "Two halves. The gate enumeration over all four allowlist shapes is runtime-domain-free and is preserved in tests/test_catalogue_permissions_name_their_own_sink.py. The full-suite mutation result sits under the ambient domain above. Commit ec63e0a states the mutation."
     },
     {
       "id": "C09-closure-review",
@@ -497,7 +513,9 @@
         "SEMANTICS": "N/A",
         "PROTECTION": "N/A"
       },
-      "note": "A bookkeeping unit. Nothing measured. The one judgement it makes is that a cluster is not closed because its best-lit half is finished — the same correction C08's closure review had to make."
+      "note": "A bookkeeping unit. Nothing measured. The one judgement it makes is that a cluster is not closed because its best-lit half is finished — the same correction C08's closure review had to make.",
+      "evaluation_domain_class": "NOT_APPLICABLE",
+      "evaluation_domain_note": "Bookkeeping."
     },
     {
       "id": "C09-U5-premature-detector-consumers",
@@ -513,7 +531,9 @@
         "PROTECTION": "N/A"
       },
       "no_test_added": "There is no behaviour to protect. A test pinning 'nothing reads it' would be an enumeration frozen in amber, and the enumeration is cheap to redo.",
-      "scope_limitation": "Static, over the production tree. A consumer reaching the field through the journal FILE after the fact — an operator, an analysis script outside these paths — is not covered, and is exactly what the field exists for."
+      "scope_limitation": "Static, over the production tree. A consumer reaching the field through the journal FILE after the fact — an operator, an analysis script outside these paths — is not covered, and is exactly what the field exists for.",
+      "evaluation_domain_class": "RUNTIME_DOMAIN_FREE",
+      "evaluation_domain_note": "Complete static enumeration over the production tree. Commit d7cc6d5 records the whole path from producer to terminus."
     }
   ],
   "current_unit": null,
@@ -558,5 +578,34 @@
     "ruff_debt": "399 repo-wide against a baseline of 405",
     "full_suite": "checkpoint-only tree: 7313 passed, 5 xfailed, pytest exit 0, 328s"
   },
-  "units_completed_count": 16
+  "units_completed_count": 16,
+  "ambient_evaluation_domain": {
+    "_why_here_and_not_per_unit": "Declared ONCE. A unit records only the values it HELD that could have been otherwise and that its conclusion depends on; repeating the ambient conditions in every record made them look like unit-specific choices and hid the ones that were.",
+    "established_by": "reading tests/conftest.py, not by re-running anything",
+    "applies_to": "every full-suite and targeted pytest result recorded by this program",
+    "conditions": [
+      "outbound network denied session-wide by the autouse _deny_outbound_network fixture unless AGENT_TESTS_ALLOW_NETWORK=1",
+      "operator model-routing env stripped before each test by _neutralize_operator_model_env",
+      "a placeholder credential guaranteed by _ensure_placeholder_credential — read only to answer 'is one present?'; no test constructs a real client",
+      "Python 3.11.9, Windows 11, pytest 9.0.3"
+    ]
+  },
+  "evaluation_domain_audit_E2": {
+    "run": "2026-08-09, zero pytest executions — reading only",
+    "question": "Can the held values of every unit lacking a structured evaluation_domain be recovered from durable artifacts without re-running the experiment?",
+    "result": "YES for all ten. Four are RUNTIME_DOMAIN_FREE (static analysis has no runtime domain), three are NOT_APPLICABLE (no measurement), three are DOMAIN_RECONSTRUCTED from probe scripts, test files and commit messages that all still exist. DOMAIN_IRRECOVERABLE: none.",
+    "hypothesis_corrected": "The previous review asserted 'zero reruns required' as a conclusion. It was a hypothesis. This audit establishes it; before the audit it was not evidence.",
+    "term_corrected": "RUNTIME_DOMAIN_FREE, not DOMAIN_FREE. A static unit still depends on the snapshot, on the tool version and on its discovery rule — it is free of a RUNTIME domain, not of all conditions.",
+    "artifacts_verified_present": [
+      "carry.py",
+      "carry2.py",
+      "anchor_rule.py",
+      "tls.py",
+      "tls2.py",
+      "probe_rule1.py",
+      "probe_fold.py",
+      "probe_fold2.py"
+    ],
+    "rule_going_forward": "Ambient conditions are declared once in ambient_evaluation_domain. A unit records only the values it HELD that could have been otherwise and that its conclusion depends on. Quotienting or equivalence claims across units with incompatible held values are forbidden — this is the rule that C08-U1 (max_replan_attempts=1) and C08-U2 (=3) needed and did not have."
+  }
 }
