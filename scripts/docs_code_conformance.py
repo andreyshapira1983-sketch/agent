@@ -70,6 +70,11 @@ _COMMAND_RE = re.compile(r"(?<![\w:])(:[a-z][a-z0-9-]{2,})(?![\w-])")
 _NON_COMMAND_TOKENS = {
     ":task-begin", ":task-end", ":task-abort", ":end",   # REPL block tokens
     ":command", ":commands", ":token",                    # prose placeholders
+    # The pre-model census (PROJECT_MAP, 2026-08-09) documents a DELIBERATELY
+    # unknown command as a probe input: mechanism M8 is "what the dispatcher
+    # does with a command that does not exist". It is a documented non-command,
+    # the same class as the prose placeholders above.
+    ":unknown-xyz",
 }
 
 #: A path introduced by one of these words is a file the document says does NOT
