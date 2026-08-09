@@ -439,17 +439,43 @@
         "PROTECTION": "NEGATIVE before, PROVEN after"
       },
       "scope_limitation": "The new tests drive the method through a shim, so they would not notice if _fold_evidence_chain stopped being called; the evidence_collected assertions elsewhere would. Stated in the file rather than hidden."
+    },
+    {
+      "id": "C09-U3-catalogue-decision-surface",
+      "cluster": "C09",
+      "question": "What values cross into a decision in the ranking and cataloguing half of C09?",
+      "result": "Five values enumerated by reading both methods end to end. One of them is explicitly NOT a decision, and the best-covered one shows the protection shape the evidence folds lacked.",
+      "the_surface": [
+        "may_source_registry — chooses whether source_store is passed, therefore whether the registry is PERSISTED. Two test files name it.",
+        "may_knowledge — chooses `remember` and `auto_write_memory`; gates a write to LONG-TERM MEMORY. Two test files name it.",
+        "_unattended_run() -> require_verified — an unattended run must have corroboration before a claim reaches memory; read from gateway_path.",
+        "cheap_path_active — selects or skips the whole catalogue branch; already measured under C08's cheap-path candidate.",
+        "_premature_keyword_fired — explicitly NOT a decision: a shadow detector retained for comparison, measured at 1/12 recall, firing on «объясни разницу…» because `разниц` is a diff-tool keyword. Carried into an event, never acted on."
+      ],
+      "already_protected": "The unattended gate is the best covered: tests/test_verified_memory_gate_follows_gateway_path.py drives _unattended_run() across gateway paths AND asserts by AST that require_verified is passed _unattended_run at the call site. Behaviour plus wiring — exactly the pairing the two evidence folds lacked, and worth naming as the pattern to look for.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "UNPROVEN",
+        "SEMANTICS": "UNPROVEN",
+        "PROTECTION": "UNPROVEN"
+      },
+      "note": "A read, not a bite. Nothing is claimed beyond where these values are and what they gate."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C09-U3-ranking-and-cataloguing",
+    "id": "C09-U4-catalogue-sink-permissions",
     "cluster": "C09",
-    "entry_question": "_rank_and_catalog_evidence and _catalogue_chain are the rest of C09. What values cross into a decision there, and which has a live consumer?",
-    "why_this_one": "The fold is done — all three sources measured. Ranking is what the synthesis prompt and the source registry read, so it is the cluster's remaining power.",
-    "planned_probe": "Read both methods end to end first, as with the attempt loop: the two units that came from that read were worth more than the ones guessed from a census."
+    "entry_question": "may_source_registry and may_knowledge each gate a write to durable state — the source registry and long-term memory. Is either effect observed, or only the flag?",
+    "why_this_one": "They are the thin ones by coverage (two test files each) and the powerful ones by consequence, and the surface read has already located them precisely.",
+    "planned_probe": "Establish first what a run with each permission on and off actually writes to disk — the sink, not the flag. Then bite the wiring. The pattern to test against is the unattended gate's: behaviour AND call-site wiring, since either alone has already been shown insufficient in this cluster.",
+    "method_notes_carried_forward": [
+      "Check for a test that DISCRIMINATES, not one that logs an event name — two predictions have already died on that.",
+      "Verify the premise on a shim or probe before predicting.",
+      "An AST body-equivalence ratchet reddening is NOT behavioural protection; C06 ruled on that shape."
+    ]
   },
-  "last_proven_causal_front": "C00-C07 carried forward. C08's carrier debt discharged. C09: all three folds of _fold_evidence_chain measured — one was behaviourally guarded, two were shape-guarded only and are now guarded. Ranking and cataloguing remain.",
+  "last_proven_causal_front": "C00-C07 carried forward. C08's carrier debt discharged. C09: all three folds measured and guarded; the ranking and cataloguing decision surface is enumerated, with the two sink permissions identified as the next unit.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
@@ -469,6 +495,7 @@
     "scripts/qm_subject_freeze.py": "INTACT",
     "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
     "ruff_debt": "399 repo-wide against a baseline of 405",
-    "full_suite": "C09-U2 tree: 7307 passed, 5 xfailed, pytest exit 0, 315s"
-  }
+    "full_suite": "C09-U3 tree: 7307 passed, 5 xfailed, pytest exit 0, 327s"
+  },
+  "units_completed_count": 16
 }
