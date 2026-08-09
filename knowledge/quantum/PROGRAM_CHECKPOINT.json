@@ -152,18 +152,49 @@
         "PROTECTION": "NEGATIVE -> now PROVEN"
       },
       "spawned_candidate": "core/loop_attempt.py:441 reads an empty plan as an intentional zero-tool plan. A plan emptied by the forbidden-action filter is indistinguishable there from a planner that chose no tools. UNPROVEN, unbitten — registered in the registry finding."
+    },
+    {
+      "id": "C08-U3-empty-plan-provenance",
+      "cluster": "C08",
+      "question": "Can the attempt loop tell an intentional zero-tool plan from a plan something else emptied?",
+      "result": "No — and the run that was denied its tool is indistinguishable from one that needed none at EVERY consumer outside the journal. Measured on the shipped path with nothing mutated.",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [
+          "max_replan_attempts=3 — the shipped default",
+          "an EMPTY tool registry so the policy gate refuses the only step",
+          "FakePlanner, which filters its sources against forbidden_actions as the real validator does",
+          "memory=None"
+        ],
+        "observed": [
+          "FakeLLM synthesizer",
+          "NO production mutation — this is not a bite, it is a measurement of shipped behaviour"
+        ],
+        "durable_state": "temporary workspace, no stores",
+        "external": "none"
+      },
+      "evidence": "Two runs compared. Denied run: attempt 1 plans one step, policy_blocked (budget 2, requires_different_action), continue, attempt 2's plan comes back empty from the forbidden filter, break on the SUCCESS branch. Control run: planner returns no sources at all. Their non-journal observation dictionaries are literally equal — failure_context_reached_synthesis False, obligation_count 0, answer_mentions_a_block False, replan_exhausted False. The journal differs (one `policy` event, one `replan_attempt`); nothing else does.",
+      "the_sharp_part": "The obligation arbiter exists to catch a silently missing observation. It receives the denial — loop_run_tail.py:301 reads policy_blocked out of a non-empty failure_history into denied_tools — and builds its obligations from plan_steps, which is the LAST attempt's empty plan. The mechanism that emptied the plan removed the obligation the denial would have marked.",
+      "made_durable": "tests/test_empty_plan_provenance.py. The MECHANISM is asserted plainly (step stopped, retry empty, no artifact invented). The COLLAPSE is xfail(strict=True) on a claim that prescribes no design — a denied run should differ from a no-tool run somewhere outside the journal. Verified with --runxfail that it fails on the assertion, not on an error. Any repair XPASSes and strict turns that into a failure.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "NEGATIVE — announced, not closed"
+      },
+      "scope_limitation": "Driven through policy_blocked only. The other three retry-and-forbid codes (approval_deny, approval_abort, claim_refuted) are expected to behave the same and were not measured. Multi-step plans, where a surviving sibling keeps the plan non-empty, are untouched.",
+      "not_fixed_on_purpose": "Production is read-only for this program, and whether the answer path ought to learn about a denied tool is a design decision for its owner."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C08-U3-empty-plan-provenance",
+    "id": "C08-U4-partial-failure-discarded-on-success",
     "cluster": "C08",
-    "entry_question": "Can the attempt loop tell an intentional zero-tool plan from a plan the forbidden-action filter emptied?",
-    "why_this_one": "It is the collapse C08-U2 rode on, it is now measured rather than suspected, and it sits on the success/failure boundary of the whole attempt loop — the single condition at core/loop_attempt.py:441 that decides whether a run reports failure at all.",
-    "planned_probe": "Drive a run whose second-attempt plan is emptied ONLY by the forbidden filter, and compare its observable outcome against a run whose planner genuinely returned no sources. If the two are indistinguishable to every consumer, the space is collapsed; name the observers before claiming it.",
-    "watch_for": "plan_parse_failed is already treated as a third case at the same site, so the site has a precedent for distinguishing provenance — check whether that precedent generalises before proposing anything."
+    "entry_question": "A plan where one step fails and another produces an artifact breaks at core/loop_attempt.py:441 BEFORE the extend at :448. Does the failed step's trigger reach any consumer, or is it dropped?",
+    "why_this_one": "It is the multi-step case C08-U3 explicitly excluded, it sits on the same success/failure boundary, and it is the last of the four candidates the end-to-end read of the attempt loop produced. The obligation arbiter may see the failure anyway through step.status == 'failed' at completion_obligation.py:250, which would make it masked rather than lost — that has to be measured, not assumed.",
+    "planned_probe": "One plan, two steps: one tool that succeeds, one that the policy gate denies. Compare against the same plan with both succeeding, and against a single denied step. Name the observers before claiming anything."
   },
-  "last_proven_causal_front": "C00-C07 carried forward. core/loop_attempt.py read end to end. Inside C08: the trigger CODE reaches the synthesis prompt and is guarded; the per-type budget is proven to decide DISCLOSURE for injection_blocked and is guarded under the shipped cap. The empty-plan provenance collapse at loop_attempt.py:441 is measured but unbitten.",
+  "last_proven_causal_front": "C00-C07 carried forward. core/loop_attempt.py read end to end. Inside C08: the trigger CODE is guarded at delivery; the injection budget is proven to decide disclosure and is guarded under the shipped cap; the empty-plan provenance collapse is measured on the shipped path, its mechanism pinned and its gap announced by a strict xfail.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
@@ -181,11 +212,8 @@
   ],
   "checks_run_on_this_tree": {
     "scripts/qm_subject_freeze.py": "INTACT",
+    "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
     "ruff_debt": "399 repo-wide against a baseline of 405",
-    "full_suite": "C08-U2 tree: 7287 passed, 1 xfailed, pytest exit 0, 325s",
-    "mutant_runs": [
-      "code -> verify_failed, own guard deselected: 7285 passed, exit 0",
-      "injection budget 1 -> 2: 7286 passed, exit 0"
-    ]
+    "full_suite": "C08-U3 tree: 7289 passed, 2 xfailed (one pre-existing MIR-060, one new and deliberate), pytest exit 0, 324s"
   }
 }
