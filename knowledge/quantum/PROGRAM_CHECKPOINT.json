@@ -590,19 +590,52 @@
         "PROTECTION": "UNPROVEN for the readiness_blocker producer at the loop level"
       },
       "what_is_not_claimed": "That the loop disobeys a readiness-blocker block. Nothing here measures behaviour. The claim is exactly that no observer was found for it at the loop level, which is a statement about the search."
+    },
+    {
+      "id": "C08-U12-readiness-blocker-block-through-the-loop",
+      "cluster": "C08",
+      "question": "Does the loop obey a `block` produced by a readiness blocker, and does anything observe it?",
+      "result": "It obeys. Nothing observed it. Now guarded.",
+      "prediction": "GREEN, stated before the run, on the C08-U11 grounds that this producer is exercised only by direct class and function calls.",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [
+          "approval_provider=AutoApprover(default='approve') — so nothing but the gateway can stop the effect",
+          "NO kill switch engaged at any point — the other producer is the subject",
+          "max_replan_attempts=1, clarification_enabled=False",
+          "a one-step plan whose only step is an effectful file_write"
+        ],
+        "observed": [
+          "FakeLLM synthesizer",
+          "the ambient suite domain declared once in ambient_evaluation_domain"
+        ],
+        "durable_state": "temporary workspace; the write target is the observable",
+        "external": "none"
+      },
+      "evaluation_domain_class": "DOMAIN_RECORDED",
+      "premise_proven_first": "Three poles measured on the real code. Readiness blocker plus check_readiness=True: gateway returns `block` with reason 'readiness_blocker: 2 approval item(s) pending', the file is NOT written, and gateway_blocked plus replan_exhausted are journalled. Same blockers with check_readiness=False: `allow`, file written. Nothing engaged: `allow`, file written. So the behaviour is CORRECT and the gate is check_readiness, not the tuple.",
+      "mutation": "ONE relation at the wiring, core/loop_step_execution.py:320: check_readiness=bool(getattr(self, 'gateway_check_readiness', False)) forced to False. That disables exactly one producer of one outcome and leaves the kill-switch producer untouched.",
+      "observed": "The mutation is live: the subject probe's gateway returned `allow`, the file reached the disk. FULL SUITE GREEN — 7313 passed, 5 xfailed, exit 0. A readiness blocker stopped being able to stop an effectful write and nothing in the suite noticed. Restore byte-identical (4eaa5500), subject INTACT.",
+      "the_certifying_test_stayed_green": "Under the same mutation, tests/test_gateway_refusals_stop_the_effect_c08.py passed both its cases, because M53 drives `block` through a latched kill switch. A certification of an OUTCOME is not a certification of its PRODUCERS — measured here, not argued.",
+      "made_durable": "tests/test_gateway_readiness_block_stops_the_effect.py asserts the same three facts the kill-switch test does — the effect does not happen, the refusal is journalled under its own code, the failure reaches the replan machinery — and additionally requires the block to be attributed to the readiness producer BY NAME, so a block arriving from the kill switch cannot satisfy it. Two controls carry the anti-vacuity: with the gate off, and with nothing engaged, the write goes through. Fail-before verified.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "NEGATIVE before this unit; PROVEN after"
+      },
+      "scope_limitation": "One producer of one outcome, driven through the repl path with an auto-approver. Nothing is claimed about the runtime path, nor about what happens when both producers fire at once."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C08-U12-readiness-blocker-block-through-the-loop",
+    "id": "C08-U13-evaluate-self-apply",
     "cluster": "C08",
-    "entry_question": "Does the loop obey a `block` produced by a readiness blocker, with no kill switch engaged — and does anything observe it?",
-    "premise_already_established": "block has two producers; M53 walked only the kill switch one; the readiness_blocker producer is exercised only by direct class/function calls.",
-    "planned_probe": "Build the agent as tests/test_gateway_refusals_stop_the_effect_c08.py does, but with check_readiness=True and a non-empty blockers tuple INSTEAD of the latched kill switch. Assert the three things M53 asserts: the effect does not happen, the refusal is journalled under its own code, and the failure reaches the replan machinery. Establish the premise first — that the gateway really returns block for that configuration — before concluding anything from a green.",
-    "trigger_for_a_full_suite": "Only if the conclusion becomes 'no observer exists'. If a targeted battery reddens, existence is established and the full suite adds nothing.",
-    "watch_for": "The census over-read the record and under-read the suite. Check for a DISCRIMINATING observer, not a file that mentions the word."
+    "entry_question": "ActuationGateway.evaluate_self_apply is a second public entry to the same gateway and appears in no C08 certification. What outcomes does it produce, which producers feed them, and is the caller's obedience observed?",
+    "why_this_one": "It is the last item the actuation census turned up and the only remaining entry point with no certification at all. The same question that has now paid three times on this cluster — which producers did the walk actually touch — applies to it untouched.",
+    "method_note": "tests/test_gateway_self_apply.py exists and names block, deny and escalate. Read it FIRST to see which of those it drives through a caller and which it asserts on the class, exactly as C08-U11 did for M52/M53. Do not guess."
   },
-  "last_proven_causal_front": "C00-C07 carried forward. C09's own scope exhausted apart from the knowledge pipeline's contract. C08 actuation: outcome space enumerated at six, the certified pair named by evidence (deny, block), and the live gap located inside `block` — one of its two producers has no loop-level observer.",
+  "last_proven_causal_front": "C00-C07 carried forward. C09's own scope exhausted apart from the knowledge pipeline's contract. C08 actuation: outcome space enumerated at six; the certified pair named by evidence; the readiness producer of `block` proven correct, proven unobserved and now guarded. evaluate_self_apply remains uncertified.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
@@ -620,9 +653,9 @@
   ],
   "checks_run_on_this_tree": {
     "scripts/qm_subject_freeze.py": "INTACT",
-    "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
-    "ruff_debt": "399 repo-wide against a baseline of 405",
-    "full_suite": "checkpoint-only tree: 7313 passed, 5 xfailed, pytest exit 0, 328s"
+    "targeted": "test_cns_model.py, test_cns_anchor_integrity.py, the new gateway file and the certifying C08 file",
+    "mutant_run": "readiness producer disabled: 7313 passed, 5 xfailed, exit 0 — the green that made the finding",
+    "full_suite": "not run on the final tree: the change is a new test file plus ledger, and the mutant run above is the load-bearing measurement"
   },
   "units_completed_count": 16,
   "ambient_evaluation_domain": {
