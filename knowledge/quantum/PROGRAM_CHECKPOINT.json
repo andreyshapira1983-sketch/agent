@@ -573,18 +573,36 @@
         "PROTECTION": "N/A"
       },
       "method_note": "Census, not a bite. It establishes the debt precisely and nothing about behaviour — the same instrument and the same limits as C08-U6."
+    },
+    {
+      "id": "C08-U11-identify-the-certified-refusals",
+      "cluster": "C08",
+      "question": "Which two of the six gateway outcomes did M52/M53 certify, and what does that leave uncovered?",
+      "result": "M52 = deny, M53 = block, plus a prior observer for simulate. The gap is not where the census predicted: it is INSIDE `block`, whose second producer was never driven through the loop.",
+      "evaluation_domain_class": "RUNTIME_DOMAIN_FREE",
+      "evaluation_domain_note": "Read the certifying test file and the reason collector at f889973. No runtime domain.",
+      "guess_replaced_by_evidence": "The census refused to name which two refusals M52/M53 certified. tests/test_gateway_refusals_stop_the_effect_c08.py answers it in its own docstring and test names: M52 is `deny` (test_a_gateway_deny_prevents_the_write) and M53 is `block` (test_a_gateway_hard_stop_prevents_the_write). `simulate` had a prior end-to-end observer. The certified set at the LOOP level is deny + block + simulate.",
+      "census_corrected_both_ways": "AGAINST the census: escalate has a loop-level and runtime-level contract file, and allow/passthrough are permissive outcomes whose failure mode end-to-end tests already catch. IN FAVOUR: the gap that does exist is sharper than the census could see — `block` has two producers and M53 walked only the kill switch.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN for the enumeration",
+        "CAUSALITY": "N/A",
+        "SEMANTICS": "N/A",
+        "PROTECTION": "UNPROVEN for the readiness_blocker producer at the loop level"
+      },
+      "what_is_not_claimed": "That the loop disobeys a readiness-blocker block. Nothing here measures behaviour. The claim is exactly that no observer was found for it at the loop level, which is a statement about the search."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C08-U11-identify-and-close-the-uncertified-outcomes",
+    "id": "C08-U12-readiness-blocker-block-through-the-loop",
     "cluster": "C08",
-    "entry_question": "Which two of the six gateway outcomes did M52/M53 certify, and does any observer distinguish the remaining three?",
-    "first_step": "Read the M52/M53 tests to identify the two certified refusals BY NAME. The census deliberately refused to guess; this is where the guess is replaced by evidence.",
-    "then": "For each uncertified outcome, decide between enumeration and mutation by the rule now in force — enumeration for production consumers under its three conditions, mutation plus a full suite only when the conclusion depends on the observer SET rather than on observer existence.",
-    "watch_for": "The block outcome collapses at least three independent producers into one value. If a consumer distinguishes the reasons, that is a split; if none does, that is a quotient — and either way the observer set must be named."
+    "entry_question": "Does the loop obey a `block` produced by a readiness blocker, with no kill switch engaged — and does anything observe it?",
+    "premise_already_established": "block has two producers; M53 walked only the kill switch one; the readiness_blocker producer is exercised only by direct class/function calls.",
+    "planned_probe": "Build the agent as tests/test_gateway_refusals_stop_the_effect_c08.py does, but with check_readiness=True and a non-empty blockers tuple INSTEAD of the latched kill switch. Assert the three things M53 asserts: the effect does not happen, the refusal is journalled under its own code, and the failure reaches the replan machinery. Establish the premise first — that the gateway really returns block for that configuration — before concluding anything from a green.",
+    "trigger_for_a_full_suite": "Only if the conclusion becomes 'no observer exists'. If a targeted battery reddens, existence is established and the full suite adds nothing.",
+    "watch_for": "The census over-read the record and under-read the suite. Check for a DISCRIMINATING observer, not a file that mentions the word."
   },
-  "last_proven_causal_front": "C00-C07 carried forward. C09's own scope exhausted apart from the knowledge pipeline's contract. C08 reopened on actuation: the outcome space is six wide, the record accounts for at most three, one outcome collapses three producers, and a second entry point is uncertified.",
+  "last_proven_causal_front": "C00-C07 carried forward. C09's own scope exhausted apart from the knowledge pipeline's contract. C08 actuation: outcome space enumerated at six, the certified pair named by evidence (deny, block), and the live gap located inside `block` — one of its two producers has no loop-level observer.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
