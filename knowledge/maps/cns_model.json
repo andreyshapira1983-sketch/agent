@@ -1375,6 +1375,15 @@
         "why_it_matters": "It was written as a correction to an earlier lying comment, then outlived its subject by hours. It reads as a live invariant and misdirects anyone tracing the episodic fast path.",
         "behavioural_effect": "None. Comment only.",
         "carried_from": "earlier sessions banked separately: planner veto on every soft match; the threefold price of the 'conversation' veto; the dispatcher building a full agent to serve a local command; ':unknown-xyz' exiting zero; a resume of a missing id falling through to interactive; web auto-write unreachable under the shipped policy; AGENT_PROVIDER present but inert."
+      },
+      "repeat_question_detected_has_no_observed_consumer": {
+        "found": "2026-08-09, live production run of the subject; recorded SEPARATELY at the operator's instruction and deliberately NOT mixed into the clarification-continuity repair.",
+        "site": "producer not yet identified by measurement; observed only as a journal event in the run trace",
+        "what": "The event `repeat_question_detected` fired with similarity=0.89 in a run whose answer showed no sign of having consumed it. Whether anything reads it is UNVERIFIED: no enumeration of consumers and no mutation has been run against this signal.",
+        "why_it_matters": "If nothing consumes it, this is the same shape as the confidence vector before its repair — a sensor that reports to the journal and to nobody. The clarification repair is evidence that this shape recurs here.",
+        "behavioural_effect": "UNKNOWN — no measurement performed. Two admissible readings remain open: (a) the signal is genuinely unconsumed, or (b) it is consumed and its effect was invisible in this particular run. Enumeration would tell (a) from (b); until then this is a CANDIDATE, not a finding.",
+        "carried_from": "the second-iteration clarification repair, 2026-08-09 — noticed in the same trace, kept out of that repair on purpose",
+        "status": "UNVERIFIED FOLLOW-UP CANDIDATE — nothing here has been proven, scheduled, or judged worth fixing"
       }
     },
     "coverage": {
