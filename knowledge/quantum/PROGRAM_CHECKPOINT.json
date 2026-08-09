@@ -217,17 +217,48 @@
         "PROTECTION": "PARTIAL"
       },
       "scope_limitation": "One denial kind, one observing tool. Nothing claimed about several denied steps in one attempt, nor about consumers downstream of the arbiter's log payload."
+    },
+    {
+      "id": "C08-U5-sensor-silence",
+      "cluster": "C08",
+      "question": "Two `except Exception: pass` handlers sit beside two that report. Is the difference a decision, and can either silent one swallow something that matters?",
+      "result": "Both silent handlers hide a real loss with no trace at all, and the contrast sits eleven lines away in the same method.",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [
+          "max_replan_attempts=3",
+          "one-step plan over a real file for the silent sensors; a refused ghost tool for the stagnation sensor, whose only path is the failure branch",
+          "artifact labels in the sanitiser's real format",
+          "memory=None"
+        ],
+        "observed": [
+          "FakeLLM synthesizer",
+          "each guarded call was made to raise by rebinding the name the loop calls — no production file edited"
+        ],
+        "durable_state": "temporary workspace with one file",
+        "external": "none"
+      },
+      "evidence": "extract_from_plan broken: assumptions_registered 1 -> 0, the arc C01 certified as assumption_seeding switched off in silence. check_reasoning_actions broken: reasoning_action_mismatch 1 -> 0 and _defect_signals ['reasoning_action_mismatch'] -> [], which is durable because that list is banked with the episode. sensor_failed stays 0 in both. Contrast: breaking TerminationGuard.observe_attempt emits sensor_failed with sensor='stagnation_shadow'.",
+      "two_probe_misreadings_recorded": "The loop REPLACES self._termination_guard on every run(), so patching the instance is undone before the sensor is consulted — the class must be patched. And the event is spelled sensor_failed, not sensor_failure, so a counter on the wrong name reported zero for a handler that had reported perfectly; the silent-handler measurement was re-run under the correct name before anything was written down.",
+      "made_durable": "tests/test_attempt_loop_sensor_silence.py — the reporting behaviour and both losses asserted plainly, plus one parametrized test of the uniform property whose marks record exactly who fails it.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "PARTIAL"
+      },
+      "scope_limitation": "Four handlers in one method. Nothing claimed about the other journal-silent handlers the existing ratchet counts."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C08-U5-silent-sensor-handlers",
+    "id": "C08-closure-review",
     "cluster": "C08",
-    "entry_question": "Two `except Exception: pass` handlers sit inside _run_attempt_loop (loop_attempt.py:335 and :359) beside two that report through _sensor_failed (:470 and :627). Is the difference a decision or an accident, and can either silent handler swallow something that matters?",
-    "why_this_one": "It is the last of the four candidates the end-to-end read produced, the map already tracks a journal-silence budget, and a handler that hides a failure is exactly the shape this program keeps finding.",
-    "planned_probe": "Make each guarded block raise, and ask what an observer can still see. The reasoning-action check also appends to _defect_signals, which is banked with the episode — so one of the two touches durable state and the other does not."
+    "entry_question": "With all five candidates from the end-to-end read now closed, what remains open in C08 before it can be reclosed — and does anything found here reopen a sibling cluster?",
+    "why_this_one": "C08 was reopened by P02 because its certified policy_deny arc generalised from three of eleven producers. Five units later the attempt loop's own body is exhausted; the honest next step is a closure review rather than another bite, and the review must state what the eight unwalked producers still owe.",
+    "planned_work": "Re-derive C08's open list from the registry rather than from memory; check whether the empty-plan and partial-attempt findings touch C13 (completion obligations) or C11 (verify and settle), which own the consumers those findings ran into; only then decide between reclosing C08 and opening the next cluster."
   },
-  "last_proven_causal_front": "C00-C07 carried forward. core/loop_attempt.py read end to end and four of its five candidates now closed: trigger code delivery, the injection budget's disclosure role, empty-plan provenance, and the partial-attempt denial downgrade. The silent sensor handlers remain.",
+  "last_proven_causal_front": "C00-C07 carried forward. core/loop_attempt.py read end to end and ALL FIVE candidates from that read are closed: trigger code delivery, the injection budget's disclosure role, empty-plan provenance, the partial-attempt denial downgrade, and sensor silence. The eight unwalked producers of _step_trigger_tls remain the open debt inside C08.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
@@ -247,6 +278,6 @@
     "scripts/qm_subject_freeze.py": "INTACT",
     "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
     "ruff_debt": "399 repo-wide against a baseline of 405",
-    "full_suite": "C08-U4 tree: 7292 passed, 3 xfailed (MIR-060 plus the two deliberate gap markers), pytest exit 0, 325s"
+    "full_suite": "C08-U5 tree: 7297 passed, 5 xfailed (MIR-060 plus four deliberate gap markers), pytest exit 0, 314s"
   }
 }
