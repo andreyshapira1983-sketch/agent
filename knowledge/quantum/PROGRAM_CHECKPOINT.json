@@ -248,15 +248,40 @@
         "PROTECTION": "PARTIAL"
       },
       "scope_limitation": "Four handlers in one method. Nothing claimed about the other journal-silent handlers the existing ratchet counts."
+    },
+    {
+      "id": "C08-closure-review",
+      "cluster": "C08",
+      "question": "With the attempt loop's body exhausted, what is actually open in C08, and does anything found there reach a sibling cluster?",
+      "result": "C08 stays OPEN, with its debt restated from a page count to seven unwalked producers. Two findings registered against C13 before that cluster is ever walked. Three stale lines corrected in the operator's map.",
+      "bookkeeping_done": [
+        "C08's standing open item — 'the 423-line body still not read line by line' — is CLOSED; all 628 lines were read and the five candidates that read produced are all closed as units. The old wording's number was wrong too: _run_attempt_loop is 401 lines, the file is 628.",
+        "C08's open list re-derived: the seven still-unwalked producers of _step_trigger_tls, and whether the empty-plan and partial-attempt findings change anything C13 owns.",
+        "C13 gains _inherited_from_C08_2026_08_09 so its future walk starts from the two findings that ran into its consumer rather than rediscovering them.",
+        "path_ledger.next_edge re-derived to match."
+      ],
+      "echoes_hunted": [
+        "docs/PROJECT_MAP.ru.md:1440 carried the drifted anchor loop_attempt:472 — corrected to :448 with the reason.",
+        "docs/PROJECT_MAP.ru.md:1441 listed the _step_trigger_tls writers as '362,385,416…' — replaced with all eleven and the note that the record was wrong when written, not stale.",
+        "docs/PROJECT_MAP.ru.md's proven chain policy_blocked -> denied_tools -> blocked_and_disclosed stated without scope — the C08-U4 qualification added: it holds for an attempt that failed ENTIRELY, and is unreachable when the same attempt produced any artifact."
+      ],
+      "a_reformatting_error_caught": "The first attempt at these edits round-tripped cns_model.json through json.dump, which reformatted 761 lines of a hand-formatted file and would have buried a three-line change. Reverted and redone as text edits; the diff is now 3 insertions and 3 deletions.",
+      "verdicts": {
+        "REACHABILITY": "N/A",
+        "CAUSALITY": "N/A",
+        "SEMANTICS": "N/A",
+        "PROTECTION": "N/A"
+      },
+      "note": "A bookkeeping unit. No new behaviour was measured, and no verdict is claimed."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C08-closure-review",
+    "id": "C08-U6-remaining-producers",
     "cluster": "C08",
-    "entry_question": "With all five candidates from the end-to-end read now closed, what remains open in C08 before it can be reclosed — and does anything found here reopen a sibling cluster?",
-    "why_this_one": "C08 was reopened by P02 because its certified policy_deny arc generalised from three of eleven producers. Five units later the attempt loop's own body is exhausted; the honest next step is a closure review rather than another bite, and the review must state what the eight unwalked producers still owe.",
-    "planned_work": "Re-derive C08's open list from the registry rather than from memory; check whether the empty-plan and partial-attempt findings touch C13 (completion obligations) or C11 (verify and settle), which own the consumers those findings ran into; only then decide between reclosing C08 and opening the next cluster."
+    "entry_question": "Of the seven unwalked producers of _step_trigger_tls, which carry a code whose distinct budget or advice changes behaviour that a mock can observe?",
+    "why_this_one": "It is the named debt that keeps C08 open, and C08-U1/U2 established the method: the code selects a per-type budget, and the budget decides whether the run reports at all. verify_failed, web_empty and timeout all carry budget 2; unknown carries budget 1, like injection_blocked, and is written at two sites.",
+    "planned_probe": "Take the budget-1 producer first (unknown, sites 462 and 789), since C08-U2 showed budget 1 is where disclosure is decided. Establish reachability of each site before mutating anything, and state the held cap explicitly — that trap has now bitten twice."
   },
   "last_proven_causal_front": "C00-C07 carried forward. core/loop_attempt.py read end to end and ALL FIVE candidates from that read are closed: trigger code delivery, the injection budget's disclosure role, empty-plan provenance, the partial-attempt denial downgrade, and sensor silence. The eight unwalked producers of _step_trigger_tls remain the open debt inside C08.",
   "unresolved_contradiction": null,
@@ -278,6 +303,6 @@
     "scripts/qm_subject_freeze.py": "INTACT",
     "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
     "ruff_debt": "399 repo-wide against a baseline of 405",
-    "full_suite": "C08-U5 tree: 7297 passed, 5 xfailed (MIR-060 plus four deliberate gap markers), pytest exit 0, 314s"
+    "full_suite": "C08 closure-review tree: 7297 passed, 5 xfailed, pytest exit 0, 312s"
   }
 }
