@@ -402,16 +402,35 @@
         "PROTECTION": "PROVEN after this unit"
       },
       "closes": "The _step_trigger_tls producer debt that P02 opened. Eleven sites: three policy_blocked (M51), one approval verdict (M54/M55), one unreachable, four literal producers, and these two. Three of the nine reachable ones had no observer and are now guarded."
+    },
+    {
+      "id": "C09-U1-fold-guard-granularity",
+      "cluster": "C09",
+      "question": "Is the per-record guard granularity in the evidence fold protected, or only commented?",
+      "result": "PROTECTED. Second falsified prediction in a row.",
+      "prediction": "GREEN — the one test found by grepping the event name saves a SINGLE record, and with one record a per-record guard and a per-loop guard are observationally identical. The premise was verified on a shim first: one record gives chain 0 and one skip event either way; two records with the first failing give chain 1 under the real code.",
+      "mutation": "ONE relation: a `break` at the end of the except block, reproducing the historical behaviour the MIR-061 comment describes.",
+      "observed": "RED, by tests/test_evidence_integration.py::TestMalformedMemoryRecordDoesNotTruncateChain::test_one_bad_record_only_skips_itself — a test named for exactly this property. Restore byte-identical (cbedbdc5).",
+      "why_the_prediction_was_wrong": "The grep found the event name in one test and I stopped there. The class holds a second case, with two records, that discriminates precisely this. Grepping an event name finds the tests that LOG it, not the tests that discriminate on it.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "PROVEN"
+      },
+      "no_new_test": "None. Adding one would duplicate a better-named existing case.",
+      "scope_limitation": "One of the three folds. The working-memory fold reports through _sensor_failed and the dialogue fold through dialogue_evidence_skipped; neither was measured, and no test names either event."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C09-or-C08-remainder",
-    "entry_question": "C08's carrier debt is discharged. What is left in C08 is effectful actuation, the evidence hand-off, and the live-model consumers a mock cannot observe. Is the next admissible unit inside C08, or is C09 (evidence fold and cataloguing) the better front?",
-    "why_it_is_a_choice_now": "The producer work was a single named debt and it is finished. The remaining C08 scope overlaps C09's, so picking without measuring would be guessing — re-derive both from the registry first.",
-    "planned_work": "Read C08's remaining scope and C09's against the coverage index, then choose by the §22 priority order: reachability, live consumer, power over execution, ability to change durable state."
+    "id": "C09-U2-the-other-two-folds",
+    "cluster": "C09",
+    "entry_question": "The working-memory fold and the dialogue fold have the same per-record shape and no test names either of their skip events. Do they hold the granularity the persistent fold is guarded for?",
+    "why_this_one": "It is the direct continuation, and the two falsified predictions say what to do differently: check for a test that DISCRIMINATES, not one that logs, and verify the premise on a shim before predicting.",
+    "planned_probe": "Same shim, two records each, first one failing. Establish that the granularity is live, then mutate the scope and run the suite."
   },
-  "last_proven_causal_front": "C00-C07 carried forward. C08: attempt loop read end to end with five candidates closed, and the _step_trigger_tls producer set fully accounted for — three of the nine reachable producers had no observer and are now guarded. The carrier debt P02 opened is discharged.",
+  "last_proven_causal_front": "C00-C07 carried forward. C08's carrier debt discharged. C09 opened: the persistent-record fold's guard granularity is protected by an existing named test; the working-memory and dialogue folds are unmeasured.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
@@ -431,6 +450,6 @@
     "scripts/qm_subject_freeze.py": "INTACT",
     "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
     "ruff_debt": "399 repo-wide against a baseline of 405",
-    "full_suite": "C08-U9 tree: 7303 passed, 5 xfailed, pytest exit 0, 319s"
+    "full_suite": "C09-U1 tree: 7303 passed, 5 xfailed, pytest exit 0, 326s"
   }
 }
