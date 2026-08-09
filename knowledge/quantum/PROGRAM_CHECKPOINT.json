@@ -273,17 +273,51 @@
         "PROTECTION": "N/A"
       },
       "note": "A bookkeeping unit. No new behaviour was measured, and no verdict is claimed."
+    },
+    {
+      "id": "C08-U6-producer-reachability-census",
+      "cluster": "C08",
+      "question": "Of the eleven producers of _step_trigger_tls, which are live and which were never producers at all?",
+      "result": "Eleven sites, but not eleven live producers. One is unreachable, one was already certified under another name, and four plus a last-resort guard remain genuinely unwalked.",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [],
+        "observed": [
+          "static reachability derived from the type system and from every construction site in core/ cli/ app/ api/ tools/"
+        ],
+        "durable_state": "none",
+        "external": "none"
+      },
+      "census": {
+        ":362 :385 :416": "policy_blocked family — certified M51.",
+        ":451": "the approval verdict (approval_deny / approval_abort / approval_unavailable) — ALREADY certified as approval_verdict_stops_the_step, M54/M55. The carrier record simply never named the site, so it read as unwalked debt.",
+        ":462": "UNREACHABLE. It fires only when action.type != 'tool_call'. Action.type is Literal[tool_call, llm_synthesize, output]; both production plan builders write tool_call (loop_attempt.py:550, self_repair.py:274); and no code in core/cli/app/api/tools deserialises a Plan or PlanStep from external data — no Plan(**...), no model_validate. A defensive branch, not a producer.",
+        ":496": "LIVE, unwalked — replan_code, the tool-error path.",
+        ":528": "LIVE, unwalked — verify_failed, tool result validation.",
+        ":555": "LIVE, unwalked — web_empty.",
+        ":576": "LIVE, unwalked — timeout, shell_exec.",
+        ":653": "injection_blocked — walked end to end by this program (C08-U1, C08-U2).",
+        ":789": "a last-resort guard around postprocessing writing code=unknown; reachable only if classify/redact/cache_store raises, and not yet driven."
+      },
+      "corrects_my_own_earlier_statement": "The closure review one commit earlier said 'seven unwalked producers'. The count was right and the characterisation was not: one of the seven cannot fire at all and one was already certified under a different name. The debt is four live producers and one guard.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "N/A",
+        "SEMANTICS": "N/A",
+        "PROTECTION": "N/A"
+      },
+      "note": "A census, not a bite. Nothing was mutated and no behaviour is claimed beyond reachability."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C08-U6-remaining-producers",
+    "id": "C08-U7-verify-failed-producer",
     "cluster": "C08",
-    "entry_question": "Of the seven unwalked producers of _step_trigger_tls, which carry a code whose distinct budget or advice changes behaviour that a mock can observe?",
-    "why_this_one": "It is the named debt that keeps C08 open, and C08-U1/U2 established the method: the code selects a per-type budget, and the budget decides whether the run reports at all. verify_failed, web_empty and timeout all carry budget 2; unknown carries budget 1, like injection_blocked, and is written at two sites.",
-    "planned_probe": "Take the budget-1 producer first (unknown, sites 462 and 789), since C08-U2 showed budget 1 is where disclosure is decided. Establish reachability of each site before mutating anything, and state the held cap explicitly — that trap has now bitten twice."
+    "entry_question": "Does the verify_failed producer at core/loop_step_execution.py:528 deliver a distinguishable value, and is anything watching?",
+    "why_this_one": "First of the four live unwalked producers. verify_failed carries budget 2, so unlike injection_blocked it does NOT stop the run on first occurrence — the interesting question is whether its advice text reaches the planner on the retry, which is the consumer C08-U2 could not exercise because budget-1 codes never retry.",
+    "planned_probe": "Drive a tool whose result fails validation, under the shipped cap, and read the planner's second call for the budget's advice text. State the held configuration first — the pre-emption trap has bitten twice."
   },
-  "last_proven_causal_front": "C00-C07 carried forward. core/loop_attempt.py read end to end and ALL FIVE candidates from that read are closed: trigger code delivery, the injection budget's disclosure role, empty-plan provenance, the partial-attempt denial downgrade, and sensor silence. The eight unwalked producers of _step_trigger_tls remain the open debt inside C08.",
+  "last_proven_causal_front": "C00-C07 carried forward. core/loop_attempt.py read end to end, its five candidates closed. The _step_trigger_tls producer set is now censused: four live unwalked producers plus one last-resort guard remain in C08.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
@@ -303,6 +337,6 @@
     "scripts/qm_subject_freeze.py": "INTACT",
     "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
     "ruff_debt": "399 repo-wide against a baseline of 405",
-    "full_suite": "C08 closure-review tree: 7297 passed, 5 xfailed, pytest exit 0, 312s"
+    "full_suite": "C08-U6 tree: 7297 passed, 5 xfailed, pytest exit 0, 322s"
   }
 }
