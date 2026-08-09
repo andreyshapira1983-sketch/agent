@@ -869,6 +869,24 @@
       }
     },
     "findings": {
+      "attempt_loop_sensor_silence": {
+        "named_state_space": "The failure-reporting policy of the four guarded sensors inside core/loop_attempt.py::_run_attempt_loop. Two values: silent (except Exception: pass, at :335 and :359) and reporting (self._sensor_failed, at :470 and :627).",
+        "evaluation_domain": {
+          "code": "f889973",
+          "held": ["max_replan_attempts=3", "a one-step plan over a real file for the two silent sensors; a refused ghost tool for the stagnation sensor, whose only path is the FAILURE branch", "artifact labels in the sanitiser's real format", "memory=None"],
+          "observed": ["FakeLLM synthesizer", "each guarded call was made to raise by rebinding the name the loop calls — no production file was edited"],
+          "durable_state": "temporary workspace with one file",
+          "external": "none"
+        },
+        "measured": "extract_from_plan broken -> assumptions_registered goes 1 to 0 and nothing else changes; that is the arc C01 certified as assumption_seeding, switched off in silence. check_reasoning_actions broken -> reasoning_action_mismatch goes 1 to 0 AND _defect_signals goes ['reasoning_action_mismatch'] to [], which is durable because that list is banked with the episode. In both cases sensor_failed stays at 0.",
+        "the_contrast_in_the_same_method": "Breaking TerminationGuard.observe_attempt on the failure path emits sensor_failed with payload {'sensor': 'stagnation_shadow', 'error_type': 'RuntimeError'}. Eleven lines apart, two policies.",
+        "relation_to_the_existing_ratchet": "tests/test_journal_silence_ratchet.py counts journal-silent handlers across the loop layer and holds the number exactly. It answers HOW MANY, which is the right question for a budget, and does not ask what any particular handler hides. These two hide a certified arc and a durable defect signal.",
+        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "PARTIAL"},
+        "protection_status": "The reporting behaviour and both losses are now pinned plainly in tests/test_attempt_loop_sensor_silence.py. The uniform property — a sensor dying inside the attempt loop should be visible other than by its output going missing — is one parametrized test whose marks record exactly who fails it: the stagnation guard passes, the two silent handlers are xfail(strict=True).",
+        "two_probe_misreadings_recorded": "Each produced a 'nothing happened' that looked like a result. First: the loop REPLACES self._termination_guard on every run(), so patching the instance is undone before the sensor is consulted — the class must be patched. Second: the event is spelled sensor_failed, not sensor_failure, so a counter watching the wrong name reported zero for a handler that had reported perfectly. The first silent-handler measurement was re-run under the correct name before anything was written down.",
+        "scope_limitation": "Four handlers in one method. Nothing is claimed about the other journal-silent handlers the ratchet counts, and nothing about whether a live model would behave differently with the assumption registry empty.",
+        "no_code_change": "None proposed. Production is read-only for the mapping program, and the repair is obvious enough — _sensor_failed sits eleven lines below — that proposing it would be the audit legislating."
+      },
       "partial_attempt_denial_downgrade": {
         "named_state_space": "The obligation state of a planned observing step that was refused: satisfied | blocked_and_disclosed | failed_but_reported | silently_missing (core/completion_obligation.py:240-256).",
         "the_structural_fact": "core/loop_attempt.py breaks at :441 as soon as the attempt produced any artifact, and that break precedes the extend at :448 that carries the attempt's triggers into failure_history. A plan where one step succeeds and another is denied therefore ends the run with an EMPTY failure_history.",
