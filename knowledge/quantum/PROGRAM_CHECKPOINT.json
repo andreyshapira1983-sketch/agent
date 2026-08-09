@@ -307,17 +307,50 @@
         "PROTECTION": "N/A"
       },
       "note": "A census, not a bite. Nothing was mutated and no behaviour is claimed beyond reachability."
+    },
+    {
+      "id": "C08-U7-verify-failed-producer",
+      "cluster": "C08",
+      "question": "Does the verify_failed producer deliver a distinguishable value, and is anything watching?",
+      "result": "PROTECTED. The prediction of another unobserved delivery was wrong, and the way it was wrong is the finding.",
+      "prediction": "GREEN, stated before the run.",
+      "observed": "RED. Three pre-existing tests caught the mutation — 3 failed, 7294 passed. Restore byte-identical (4eaa5500).",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [
+          "max_replan_attempts=3",
+          "one tool that succeeds and then rejects its own output through validate_output",
+          "a CONCRETE question — a vague one is stopped by the C04 clarification gate before the planner is ever called"
+        ],
+        "observed": [
+          "FakeLLM synthesizer",
+          "verify_failed carries budget 2, so it BUYS a retry, which is what makes the advice consumer reachable at all"
+        ],
+        "durable_state": "temporary workspace",
+        "external": "none"
+      },
+      "mutation": "ONE literal at core/loop_step_execution.py:529, verify_failed -> web_empty. Both budget 2, both requires_different_action=False, so control flow is identical and only the advice text moves. The ErrorObject at :521 left alone so the trigger is isolated from the journal.",
+      "the_finding": "An unwalked producer is not an unprotected one. And the test that caught it — test_failure_context_contains_code_tool_reason — asserts `code=verify_failed` inside the planner's failure_context, which is exactly the assertion shape injection_blocked lacked. The pattern existed in this repository, in an MVP-8-era file, and was not carried to the newer security path.",
+      "also_established": "A budget-2 code's ADVICE reaches the planner on the retry the budget buys: planner call 1 carries 436 characters containing both the code and the advice, call 0 carries none. That is the consumer C08-U2 could not exercise.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "PROVEN"
+      },
+      "no_new_test": "None written. The existing protection is stronger than what this unit would have added.",
+      "harness_error_recorded": "The first probe reported zero of everything. Not the subject: the question was «сделай что-нибудь» and the C04 clarification gate stopped the run before the planner. The gate was working; the probe was asking something the agent is designed to refuse."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C08-U7-verify-failed-producer",
+    "id": "C08-U8-remaining-three-producers",
     "cluster": "C08",
-    "entry_question": "Does the verify_failed producer at core/loop_step_execution.py:528 deliver a distinguishable value, and is anything watching?",
-    "why_this_one": "First of the four live unwalked producers. verify_failed carries budget 2, so unlike injection_blocked it does NOT stop the run on first occurrence — the interesting question is whether its advice text reaches the planner on the retry, which is the consumer C08-U2 could not exercise because budget-1 codes never retry.",
-    "planned_probe": "Drive a tool whose result fails validation, under the shipped cap, and read the planner's second call for the budget's advice text. State the held configuration first — the pre-emption trap has bitten twice."
+    "entry_question": "Are :555 (web_empty), :576 (timeout) and :496 (the tool-error path) watched the way verify_failed is, or the way injection_blocked was?",
+    "why_this_one": "C08-U7 turned the question from 'is this one unprotected' into 'which of them inherited the MVP-8 assertion pattern and which did not'. That is answerable in one pass per producer with the same isolated mutation, and the answer is the remaining C08 debt.",
+    "planned_probe": "Same shape each time: hold the shipped cap, drive the producer, mutate ONLY the ReplanTrigger code to another same-budget code, run the suite. Predict per producer from whether an MVP-8-era acceptance test names it — and record the prediction before the run, because one has already been wrong."
   },
-  "last_proven_causal_front": "C00-C07 carried forward. core/loop_attempt.py read end to end, its five candidates closed. The _step_trigger_tls producer set is now censused: four live unwalked producers plus one last-resort guard remain in C08.",
+  "last_proven_causal_front": "C00-C07 carried forward. C08: the attempt loop read end to end with five candidates closed; the producer set censused; injection_blocked walked and now guarded; verify_failed found already guarded by three pre-existing tests. Three live producers remain unwalked.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
@@ -337,6 +370,6 @@
     "scripts/qm_subject_freeze.py": "INTACT",
     "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
     "ruff_debt": "399 repo-wide against a baseline of 405",
-    "full_suite": "C08-U6 tree: 7297 passed, 5 xfailed, pytest exit 0, 322s"
+    "full_suite": "C08-U7 tree: 7297 passed, 5 xfailed, pytest exit 0, 321s"
   }
 }

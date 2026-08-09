@@ -869,6 +869,25 @@
       }
     },
     "findings": {
+      "verify_failed_producer_is_already_watched": {
+        "named_state_space": "The same one as failure_trigger_code — ReplanTrigger.code — measured at a DIFFERENT producer: core/loop_step_execution.py:529, the tool-result-validation path.",
+        "why_it_was_opened": "It was the first of the four live unwalked producers left by the C08-U6 census. The expectation, formed from injection_blocked, was another unobserved delivery.",
+        "prediction": "GREEN, stated before the run.",
+        "evaluation_domain": {
+          "code": "f889973",
+          "held": ["max_replan_attempts=3, the shipped default", "one tool that runs successfully and then rejects its own output through validate_output", "a concrete question, because a vague one is stopped by the clarification gate before the planner is ever called"],
+          "observed": ["FakeLLM synthesizer", "verify_failed carries budget 2, so unlike injection_blocked it BUYS a retry — which is what makes the advice consumer reachable at all"],
+          "durable_state": "temporary workspace",
+          "external": "none"
+        },
+        "mutation": "ONE literal at core/loop_step_execution.py:529, code=\"verify_failed\" -> \"web_empty\". Both carry budget 2 and requires_different_action=False, so the control flow is identical — two tool invocations either way — and only the advice text and the stop reason move. The ErrorObject at :521 was deliberately left alone so the journal still says verify_failed and the trigger alone is isolated.",
+        "observed_consequence": "RED. Three pre-existing tests caught it: test_replan.py::TestReplanAfterVerifyFailed::test_verify_failed_triggers_replan, test_replan.py::TestPlannerSeesFailureHistory::test_failure_context_contains_code_tool_reason, and test_replan_policy_integration.py::TestAcceptanceVerifyFailed::test_verify_failed_replans_with_new_plan. 3 failed, 7294 passed. Restore byte-identical (4eaa5500).",
+        "the_prediction_was_wrong_and_that_is_the_finding": "An unwalked producer is not an unprotected one. More usefully, the middle test asserts `code=verify_failed` INSIDE the planner's failure_context — precisely the assertion shape that injection_blocked lacked, in a file written in the MVP-8 era. The pattern existed in this repository and was not carried to the newer security path, whose own test asserted the consequence deliberately and stopped there. Coverage copied from the neighbour, with the same detail missing in the copy.",
+        "also_established": "A budget-2 code's ADVICE reaches the planner on the retry the budget buys — planner call 1 carries 436 characters of failure_context containing both the code and the advice text, while call 0 carries none. This is the consumer C08-U2 could not exercise, because a budget-1 code never retries.",
+        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "PROVEN"},
+        "no_new_test": "None written. The protection already exists and is stronger than what this program would have added.",
+        "a_harness_error_recorded": "The first probe reported zero tool calls, zero planner calls, zero of everything. The cause was not the subject: the question was «сделай что-нибудь», and the clarification gate certified in C04 stopped the run before the planner. The gate was working; the probe was asking a question the agent is designed to refuse."
+      },
       "attempt_loop_sensor_silence": {
         "named_state_space": "The failure-reporting policy of the four guarded sensors inside core/loop_attempt.py::_run_attempt_loop. Two values: silent (except Exception: pass, at :335 and :359) and reporting (self._sensor_failed, at :470 and :627).",
         "evaluation_domain": {
