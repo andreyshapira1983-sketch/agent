@@ -869,6 +869,25 @@
       }
     },
     "findings": {
+      "empty_plan_provenance": {
+        "named_state_space": "WHY the attempt loop's plan has no steps. At least six values: the planner chose none; plan_parse_failed; a step that is not an object; a step missing a tool name; an unregistered tool; a (tool, args) pair on the forbidden list; a step the sanitiser rejected (core/planner.py:_validate_steps).",
+        "observation_boundaries": "The break condition at core/loop_attempt.py:441 partitions those six into TWO — {plan_parse_failed} and {everything else}. The journal partitions them into three, because an unregistered tool also emits plan_tool_drop. The remaining four leave only free-text warning strings.",
+        "evaluation_domain": {
+          "code": "f889973",
+          "held": ["max_replan_attempts=3 — the SHIPPED default", "an EMPTY tool registry, so the policy gate refuses the only planned step", "FakePlanner, which filters its own sources against forbidden_actions exactly as core/planner.py:_validate_steps does", "memory=None"],
+          "observed": ["FakeLLM synthesizer", "NO production mutation of any kind — this is the shipped path"],
+          "durable_state": "temporary workspace, no stores",
+          "external": "none"
+        },
+        "why_it_is_an_ordinary_path": "Four of the fourteen failure types both allow a retry (budget 2) and forbid repeating the action: approval_deny, approval_abort, policy_blocked and claim_refuted. Any single-source plan that fails with one of them produces the sequence below.",
+        "measured_sequence": "Attempt 1 plans one step; the policy gate blocks it; the trigger is policy_blocked; budget 2 means continue, and requires_different_action puts (tool, args) on the forbidden list; attempt 2's plan comes back EMPTY, filtered by that list; the loop breaks on the SUCCESS branch; replan_exhausted is never set; core/loop_synthesis.py:637 hands the synthesizer None; the answer is composed from general knowledge.",
+        "the_collapse": "Compared against a control run whose planner simply chose no tools, the denied run is IDENTICAL at every consumer outside the journal: failure_context_reached_synthesis False in both, obligation_count 0 in both, answer_mentions_a_block False in both, replan_exhausted False in both. The two observation dictionaries are literally equal.",
+        "why_the_arbiter_cannot_help": "core/loop_run_tail.py:301 reads policy_blocked out of failure_history into denied_tools, and failure_history IS non-empty here — the run holds the denial. But core/completion_obligation.py builds obligations from plan_steps, and the plan handed to it is the LAST attempt's, which is the empty one. The mechanism that emptied the plan is the same one that removed the obligation the denial would have marked. The run knew and had nothing to attach it to.",
+        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "NEGATIVE"},
+        "protection_status": "The MECHANISM is now pinned by tests/test_empty_plan_provenance.py (the step is stopped, the retry comes back empty, no artifact is invented). The COLLAPSE is recorded as xfail(strict=True) rather than asserted: the test says only that a denied run should differ from a no-tool run somewhere outside the journal, which prescribes no design. Any repair makes it XPASS, and strict turns that into a failure — the signal to replace the marker.",
+        "scope_limitation": "Driven through policy_blocked with an empty registry. The other three retry-and-forbid codes (approval_deny, approval_abort, claim_refuted) are expected to produce the same sequence and were NOT measured. No claim is made about multi-step plans, where a surviving sibling step keeps the plan non-empty.",
+        "no_code_change": "None proposed, and none should be inferred. Production is read-only for the mapping program; whether the answer path ought to learn about a denied tool is a design decision for its owner, which is why the gap is announced rather than closed."
+      },
       "injection_budget_decides_visibility": {
         "named_state_space": "FailureBudget.max_occurrences for injection_blocked — one integer in core/replan.py:379, currently 1.",
         "evaluation_domain": {
