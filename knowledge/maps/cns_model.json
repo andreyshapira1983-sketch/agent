@@ -869,6 +869,25 @@
       }
     },
     "findings": {
+      "partial_attempt_denial_downgrade": {
+        "named_state_space": "The obligation state of a planned observing step that was refused: satisfied | blocked_and_disclosed | failed_but_reported | silently_missing (core/completion_obligation.py:240-256).",
+        "the_structural_fact": "core/loop_attempt.py breaks at :441 as soon as the attempt produced any artifact, and that break precedes the extend at :448 that carries the attempt's triggers into failure_history. A plan where one step succeeds and another is denied therefore ends the run with an EMPTY failure_history.",
+        "evaluation_domain": {
+          "code": "f889973",
+          "held": ["max_replan_attempts=3", "a registry holding file_read only, so a planned web_search is refused by the gate", "a two-step plan: one readable file, one web_search", "artifact labels in the sanitiser's real format", "memory=None"],
+          "observed": ["FakeLLM synthesizer", "the consumer-level comparison was made by calling evaluate_completion_obligations directly, so nothing but the trigger differs between the poles"],
+          "durable_state": "temporary workspace holding one file",
+          "external": "none"
+        },
+        "what_survives_the_loss": "The arbiter is NOT blinded. core/loop_attempt.py:408 sets step.status = 'failed', and completion_obligation.py:250 branches on `status == \"failed\" or failure_codes`, so the denied step is still marked and an answer naming the tool is still credited. Three poles measured end to end: a silent answer gives silently_missing, an answer naming web_search gives failed_but_reported. For that distinction the loss is MASKED.",
+        "what_does_not_survive": "blocked_and_disclosed — the state that says a policy DECLINED this rather than it merely not working. That branch tests `tool in denied`, and denied is built at core/loop_run_tail.py:301 from failure_history entries coded policy_blocked. On the success path that list is empty, so the branch is unreachable. Measured at the consumer with everything else held equal — same answer, same step, same status, only the trigger differing: blocked_and_disclosed versus failed_but_reported.",
+        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "PROVEN", "SEMANTICS": "PROVEN", "PROTECTION": "PARTIAL"},
+        "protection_status": "The arbiter's own distinction is now pinned plainly by tests/test_partial_attempt_failure_reporting.py (a refusal reads as a refusal when the trigger is present; as a breakdown when it is absent; a silent answer is caught either way). The loop-level gap is xfail(strict=True) on the property — a denial should read as a denial wherever it happens — which prescribes no design.",
+        "probe_artifact_caught": "The first probe reported the successfully read file as silently_missing. The cause was the probe: it hand-wrote the artifact label as 'ok:1', while core/step_sanitizer.py:154 builds 'file:{path}' and the arbiter looks for the file name inside the artifact labels. With the real format the obligation is satisfied. Recorded because a harness that invents a label tests its own invention, and this one nearly became a published finding.",
+        "hypothesis_withdrawn": "Before measuring, the expectation was that a partially successful attempt could NEVER be credited for disclosing its denial. FALSE — _discloses takes the tool NAME as a needle alongside the codes, so an answer naming web_search reaches failed_but_reported with no trigger at all. Only the blocked/failed distinction is lost.",
+        "scope_limitation": "One denial kind (policy_blocked) and one observing tool. Nothing is claimed about attempts with several denied steps, nor about whether the downgrade changes anything downstream of the arbiter's own log payload.",
+        "no_code_change": "None proposed. Production is read-only for the mapping program."
+      },
       "empty_plan_provenance": {
         "named_state_space": "WHY the attempt loop's plan has no steps. At least six values: the planner chose none; plan_parse_failed; a step that is not an object; a step missing a tool name; an unregistered tool; a (tool, args) pair on the forbidden list; a step the sanitiser rejected (core/planner.py:_validate_steps).",
         "observation_boundaries": "The break condition at core/loop_attempt.py:441 partitions those six into TWO — {plan_parse_failed} and {everything else}. The journal partitions them into three, because an unregistered tool also emits plan_tool_drop. The remaining four leave only free-text warning strings.",

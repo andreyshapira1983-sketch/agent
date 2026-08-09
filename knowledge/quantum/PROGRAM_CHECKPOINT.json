@@ -184,17 +184,50 @@
       },
       "scope_limitation": "Driven through policy_blocked only. The other three retry-and-forbid codes (approval_deny, approval_abort, claim_refuted) are expected to behave the same and were not measured. Multi-step plans, where a surviving sibling keeps the plan non-empty, are untouched.",
       "not_fixed_on_purpose": "Production is read-only for this program, and whether the answer path ought to learn about a denied tool is a design decision for its owner."
+    },
+    {
+      "id": "C08-U4-partial-attempt-denial-downgrade",
+      "cluster": "C08",
+      "question": "A plan where one step fails and another produces an artifact breaks before the triggers reach failure_history. Does the failed step reach any consumer?",
+      "result": "Yes — the arbiter still sees it through step.status, so the loss is MASKED for the missing/reported distinction. What is genuinely lost is the blocked/failed distinction: a policy denial in such an attempt can never read as blocked_and_disclosed.",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [
+          "max_replan_attempts=3",
+          "registry holding file_read only, so a planned web_search is refused",
+          "two-step plan: one readable file, one web_search",
+          "artifact labels in the sanitiser's real format",
+          "memory=None"
+        ],
+        "observed": [
+          "FakeLLM synthesizer",
+          "the consumer comparison was made by calling evaluate_completion_obligations directly, so only the trigger differs between poles"
+        ],
+        "durable_state": "temporary workspace with one file",
+        "external": "none"
+      },
+      "evidence": "Three end-to-end poles: silent answer gives silently_missing, an answer naming web_search gives failed_but_reported, and the successful sibling stays satisfied. Then at the consumer with everything else held equal — same answer, same step, same status, only the trigger differing — blocked_and_disclosed versus failed_but_reported.",
+      "hypothesis_withdrawn": "The expectation before measuring was that such an attempt could never be credited for disclosing. FALSE: _discloses takes the tool NAME as a needle alongside the codes, so an answer naming web_search reaches failed_but_reported with no trigger at all.",
+      "probe_artifact_caught": "The first probe reported the successfully read file as silently_missing. It was the probe's own hand-written label 'ok:1'; core/step_sanitizer.py:154 builds 'file:{path}', and the arbiter looks for the file name inside artifact labels. With the real format the obligation is satisfied. A harness that invents a label tests its own invention — this one nearly became a published finding.",
+      "made_durable": "tests/test_partial_attempt_failure_reporting.py — the arbiter's distinction pinned plainly in both directions plus a silent-answer guard, and the loop-level gap as xfail(strict=True) on a property that prescribes no design.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "PARTIAL"
+      },
+      "scope_limitation": "One denial kind, one observing tool. Nothing claimed about several denied steps in one attempt, nor about consumers downstream of the arbiter's log payload."
     }
   ],
   "current_unit": null,
   "next_admissible_unit": {
-    "id": "C08-U4-partial-failure-discarded-on-success",
+    "id": "C08-U5-silent-sensor-handlers",
     "cluster": "C08",
-    "entry_question": "A plan where one step fails and another produces an artifact breaks at core/loop_attempt.py:441 BEFORE the extend at :448. Does the failed step's trigger reach any consumer, or is it dropped?",
-    "why_this_one": "It is the multi-step case C08-U3 explicitly excluded, it sits on the same success/failure boundary, and it is the last of the four candidates the end-to-end read of the attempt loop produced. The obligation arbiter may see the failure anyway through step.status == 'failed' at completion_obligation.py:250, which would make it masked rather than lost — that has to be measured, not assumed.",
-    "planned_probe": "One plan, two steps: one tool that succeeds, one that the policy gate denies. Compare against the same plan with both succeeding, and against a single denied step. Name the observers before claiming anything."
+    "entry_question": "Two `except Exception: pass` handlers sit inside _run_attempt_loop (loop_attempt.py:335 and :359) beside two that report through _sensor_failed (:470 and :627). Is the difference a decision or an accident, and can either silent handler swallow something that matters?",
+    "why_this_one": "It is the last of the four candidates the end-to-end read produced, the map already tracks a journal-silence budget, and a handler that hides a failure is exactly the shape this program keeps finding.",
+    "planned_probe": "Make each guarded block raise, and ask what an observer can still see. The reasoning-action check also appends to _defect_signals, which is banked with the episode — so one of the two touches durable state and the other does not."
   },
-  "last_proven_causal_front": "C00-C07 carried forward. core/loop_attempt.py read end to end. Inside C08: the trigger CODE is guarded at delivery; the injection budget is proven to decide disclosure and is guarded under the shipped cap; the empty-plan provenance collapse is measured on the shipped path, its mechanism pinned and its gap announced by a strict xfail.",
+  "last_proven_causal_front": "C00-C07 carried forward. core/loop_attempt.py read end to end and four of its five candidates now closed: trigger code delivery, the injection budget's disclosure role, empty-plan provenance, and the partial-attempt denial downgrade. The silent sensor handlers remain.",
   "unresolved_contradiction": null,
   "open_questions": [
     "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
@@ -214,6 +247,6 @@
     "scripts/qm_subject_freeze.py": "INTACT",
     "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
     "ruff_debt": "399 repo-wide against a baseline of 405",
-    "full_suite": "C08-U3 tree: 7289 passed, 2 xfailed (one pre-existing MIR-060, one new and deliberate), pytest exit 0, 324s"
+    "full_suite": "C08-U4 tree: 7292 passed, 3 xfailed (MIR-060 plus the two deliberate gap markers), pytest exit 0, 325s"
   }
 }
