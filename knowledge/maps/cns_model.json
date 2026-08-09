@@ -869,6 +869,22 @@
       }
     },
     "findings": {
+      "c09_catalogue_decision_surface": {
+        "named_state_space": "The values that cross into a decision inside core/loop_evidence_chain.py:_catalogue_chain and :_rank_and_catalog_evidence, derived by reading both end to end rather than by grepping.",
+        "why_read_first": "The five units that came from reading the attempt loop end to end were worth more than the ones guessed from a census. The same method is applied here before any bite.",
+        "the_surface": {
+          "may_source_registry": "Chooses whether source_store is passed at all, and therefore whether the source registry is PERSISTED. Named in two test files.",
+          "may_knowledge": "Chooses both `remember` and `auto_write_memory`. Gates a write to LONG-TERM MEMORY. Named in two test files.",
+          "_unattended_run()": "Becomes require_verified: an unattended run must have corroboration before a claim is written to memory. Read from gateway_path — repl is a human, daemon and runtime are not.",
+          "cheap_path_active": "Selects the whole catalogue branch or skips it. Already measured under C08's cheap-path candidate: four consumers, two-pole tests for three of them.",
+          "_premature_keyword_fired": "Explicitly NOT a decision. The docstring records it as a shadow detector retained for comparison, measured at 1/12 recall, firing on «объясни разницу…» because `разниц` is a diff-tool keyword. The caller carries it into an event and does not act on it."
+        },
+        "the_docstring_is_a_warning_worth_keeping": "core/loop_evidence_chain.py:106 says in bold that this is not a pure computation and must not be described as one: the knowledge pipeline catalogues sources AND writes to long-term memory AND persists the registry, all inside one call, governed by the two permissions and by _unattended_run.",
+        "already_protected": "The unattended gate is the best-covered of the three: tests/test_verified_memory_gate_follows_gateway_path.py drives _unattended_run() across gateway paths and additionally asserts, by AST, that require_verified is passed _unattended_run at the call site. That pairing — behaviour plus wiring — is the shape the two evidence folds lacked.",
+        "verdict": {"REACHABILITY": "PROVEN", "CAUSALITY": "UNPROVEN", "SEMANTICS": "UNPROVEN", "PROTECTION": "UNPROVEN"},
+        "note": "A read, not a bite. Nothing is claimed about any of these values beyond where they are and what they gate. The next unit takes ONE of them.",
+        "next": "may_source_registry and may_knowledge are the thin ones by coverage and both reach durable state; either is the admissible next unit."
+      },
       "the_other_two_folds_were_only_shape_guarded": {
         "named_state_space": "The same guard SCOPE as evidence_fold_guard_granularity, at the other two folds of core/loop_evidence_chain.py:_fold_evidence_chain — working-memory artifacts and recent dialogue turns.",
         "prediction": "GREEN, stated after checking for a test that DISCRIMINATES rather than one that logs: no test names either skip event, and both uses of evidence_from_prior_turn in the suite construct evidence directly rather than injecting a failure.",
