@@ -520,9 +520,21 @@
   "next_admissible_unit": {
     "id": "C09-U6-rank-chain",
     "cluster": "C09",
-    "entry_question": "rank_chain orders the evidence. Its output reaches the synthesis prompt and the source registry — does the ORDER change any consumer, or only the presentation?",
-    "why_this_one": "It is the last C09 item that belongs to this cluster; the knowledge pipeline's own contract is a separate subject. And ordering is the classic place where a value looks decisive and is not.",
-    "planned_probe": "Find every consumer of the ranking object, not just the ones that log it. Then decide between a mutation (reverse the order) and an enumeration — C09-U5 showed enumeration is the stronger instrument when the consumer set is small."
+    "entry_question": "rank_chain orders the evidence. Does the ORDER change any consumer, or only a field that happens to travel on the same object?",
+    "consumers_located_read_only": [
+      "core/loop_response_deciders.py:252 — reads `realtime_required` off the ranking. That is a FIELD, not the order; a run with the evidence reversed would read the same boolean.",
+      "core/loop_response_deciders.py:400 — passes the whole ranking into apply_ranker_output_policy, which shapes the ANSWER. This is the only place the order can matter, and it is where the unit should start.",
+      "core/loop_run_tail.py:67 and core/loop.py:584 — declarations and a pass-through; core/ingestion.py:225/351/551 assign last_source_ranking on the ingestion path, which is a different producer of the same field and may be a separate subject.",
+      "Everything else found is a log payload."
+    ],
+    "planned_probe": "Read apply_ranker_output_policy first. If it consumes only aggregate properties, the ORDER is presentation and the finding is a collapse worth recording; if it reads the first element or a rank, mutate the order and measure. Enumeration is the stronger instrument when the consumer set is this small — C09-U5 established that.",
+    "note_for_the_next_context": "The ingestion.py writers of last_source_ranking are a second producer of a field this cluster treats as its own. Ask who produces, not only who reads — that has already caught one thing in this program.",
+    "method_notes_carried_forward": [
+      "Check for a test that DISCRIMINATES, not one that logs an event name — two predictions have died on that.",
+      "Verify the premise on a shim or probe before predicting.",
+      "An AST body-equivalence ratchet reddening is NOT behavioural protection.",
+      "A test that restates the code instead of calling it will not redden — that trap cost one iteration in C09-U4."
+    ]
   },
   "last_proven_causal_front": "C00-C07 carried forward. C08's carrier debt discharged. C09: fold half guarded, catalogue permissions guarded at the derivation, the premature detector closed by enumeration. rank_chain and the knowledge pipeline's own contract remain.",
   "unresolved_contradiction": null,
@@ -544,7 +556,7 @@
     "scripts/qm_subject_freeze.py": "INTACT",
     "repository_guards": "docs_link_check, docs_code_conformance, agent_anatomy_check, architecture_invariants, commands_map_check, check_function_length_baseline — all exit 0",
     "ruff_debt": "399 repo-wide against a baseline of 405",
-    "full_suite": "C09-U5 tree: 7313 passed, 5 xfailed, pytest exit 0, 321s"
+    "full_suite": "checkpoint-only tree: 7313 passed, 5 xfailed, pytest exit 0, 328s"
   },
   "units_completed_count": 16
 }
