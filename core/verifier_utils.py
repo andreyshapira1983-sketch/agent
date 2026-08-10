@@ -274,3 +274,89 @@ def _is_derivative_subagent_evidence(ev: Evidence) -> bool:
         return True
     sid = ev.source_id or ""
     return bool("subagent_" in sid or sid == "tool_output:spawn_subagent")
+
+
+#: Отличительные литералы: идентификаторы моделей и прогонов, SHA, пути к файлам.
+#: Голые числа СОЗНАТЕЛЬНО не входят — счёт, сумма и сравнение принадлежат
+#: `evaluate_claim_arithmetic`, и второй судья над той же областью спорил бы с
+#: первым. Форма собрана по предметам, наблюдавшимся живьём: `claude-…`,
+#: `run_…`, `trace_…`, SHA коммита, `core/…​.py`.
+#: Через дефис — ТОЛЬКО с цифрой внутри. Измерено: без этого условия обычная
+#: проза («goal-directed», «read-only», «fail-before») читается как
+#: идентификатор, и гейт демотирует верные утверждения. Через подчёркивание
+#: цифра не нужна: `AWS_SECRET_KEY` словом не бывает.
+_SALIENT_LITERAL_RE = re.compile(
+    r"\b(?:[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+"
+    r"|[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]*\d[A-Za-z0-9]*)+(?:-[A-Za-z0-9]+)*"
+    r"|[0-9a-f]{7,40}"
+    r"|[\w./\-]+\.(?:py|md|json|jsonl|txt|yaml|yml|cmd|toml))\b"
+)
+
+
+#: Маркер ссылки в тексте ответа: `[file:core/loop.py]`, `[memory:mem_…]`.
+_CITATION_TOKEN_RE = re.compile(r"\[[^\[\]]*\]")
+
+
+def salient_literals(text: str) -> set[str]:
+    """Отличительные литералы текста, в нижнем регистре."""
+    return {m.group(0).lower() for m in _SALIENT_LITERAL_RE.finditer(text or "")}
+
+
+def literals_absent_from_excerpt(
+    claim: str, excerpt: str, source_id: str = ""
+) -> set[str]:
+    """Литералы утверждения, которых НЕТ в цитируемой улике.
+
+    MIR-060, доказанный класс. Эксперимент 2026-08-10 показал: разрешение
+    ссылки само по себе даёт `verified`, а мутация `strict_ok = True -> False`
+    перевела в неподтверждённые ВСЕ шесть случаев, включая истинный контроль —
+    значит истинность не устанавливал никто.
+
+    Живой вред этого класса: ответ назвал `claude-3-7-sonnet-20250219`,
+    телеметрия того же прогона — `claude-sonnet-4-5`, верификация доложила
+    24 из 24. Литерал, которого в улике нет, ссылкой не подтверждается.
+
+    Пустое множество означает «этот гейт возражений не имеет», а не «истина
+    установлена»: как и соседние три, он умеет только отнимать.
+    """
+    if not claim or not excerpt:
+        return set()
+    # Маркеры ссылок вырезаются ПЕРВЫМ делом. Внутри `[file:core/loop.py]`
+    # лежит адрес источника, а не утверждение о мире; оставь его — и всякая
+    # цитата, чей source_id не встречается в собственной выдержке, оказалась
+    # бы «литералом, которого нет в улике». Измерено: без этой строки гейт
+    # демотировал истинный контроль.
+    body = _CITATION_TOKEN_RE.sub(" ", claim)
+    # Имя СОБСТВЕННОГО источника чужим литералом не считается: «набор прошёл в
+    # tests/bug_lab [test:run_tests:bug_lab]» называет адрес, который цитата и
+    # устанавливает. Измерено: без этого гейт демотировал три существующие
+    # фикстуры, где проза повторяла имя цитируемого источника.
+    known = salient_literals(excerpt) | salient_literals(source_id or "")
+    return {
+        lit for lit in salient_literals(body)
+        if lit not in known and not any(lit in k or k in lit for k in known)
+    }
+
+
+def absent_literal_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
+    """Причина демоции, если утверждение называет то, чего нет в улике.
+
+    Возвращает `ClaimReason` или `None`. Отдельная функция, а не строки внутри
+    `verify`: там уже 68 ветвей, и четвёртый гейт обязан читаться так же, как
+    три соседних, — одним вопросом и одним ответом.
+    """
+    if prefix in {"user", "memory", "general-knowledge"}:
+        return None
+    absent = literals_absent_from_excerpt(
+        chunk_text, ev.excerpt or "", ev.source_id or ""
+    )
+    if not absent:
+        return None
+    from .verifier_models import ClaimReason
+    return ClaimReason(
+        code="cited_literal_absent",
+        expected=", ".join(sorted(absent)[:3]),
+        actual="",
+        explanation="утверждение называет то, чего нет в цитируемой улике",
+        computed_from=ev.source_id or "",
+    )
