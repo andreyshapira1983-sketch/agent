@@ -135,6 +135,12 @@ class CompletionObligationResult:
     unavailable_sources: tuple[str, ...] = UNWIRED_SOURCES
     obligations: tuple[Obligation, ...] = ()
     notes: tuple[str, ...] = field(default_factory=tuple)
+    #: `complete` | `partial` — покрытие КОНТРАКТА ОПЕРАТОРА, не плана.
+    #: Отдельным полем, потому что `satisfied` отвечает на другой вопрос:
+    #: выполнены ли обязательства, которые модуль СУМЕЛ представить. Слитые в
+    #: одно, они дали живой повтор 2026-08-10: `coverage=partial` в начале хода
+    #: и `satisfied=True` в конце того же хода.
+    contract_coverage: str = "complete"
 
     def to_log_payload(self) -> dict[str, Any]:
         return {
@@ -142,6 +148,7 @@ class CompletionObligationResult:
             "satisfied": self.satisfied,
             "triggered": self.triggered,
             "requirement_sources": list(self.requirement_sources),
+            "contract_coverage": self.contract_coverage,
             "missing_requirements": list(self.missing_requirements),
             # Reported on every turn, satisfied or not: "we could not consult
             # this source" is a different statement from "this source said
@@ -334,6 +341,14 @@ def evaluate_completion_obligations(
         notes.append("no wired source created an obligation")
     if triggered:
         notes.append("an obligation was left unmet without disclosure")
+    # Покрытие берётся у контракта как есть: судить о нём здесь значило бы
+    # завести второй ответ на вопрос, у которого уже есть владелец.
+    coverage = str(getattr(contract, "coverage", "complete") or "complete")
+    if coverage == "partial":
+        notes.append(
+            "part of the operator's contract could not be represented; "
+            "satisfaction below covers the represented obligations only"
+        )
 
     return CompletionObligationResult(
         required=required,
@@ -343,5 +358,6 @@ def evaluate_completion_obligations(
         missing_requirements=missing,
         unavailable_sources=unavailable,
         obligations=tuple(obligations),
+        contract_coverage=coverage,
         notes=tuple(notes),
     )

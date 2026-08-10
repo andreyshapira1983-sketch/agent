@@ -333,5 +333,10 @@ class AgentLoopRunTail:
             # is what carries that authority.
             if _obl.triggered:
                 self._defect_signals.append("obligation_silently_missing")
+            # Соседний сигнал с той же односторонней властью и другим основанием:
+            # часть контракта оператора модуль не сумел ПРЕДСТАВИТЬ, значит и
+            # удостоверять её выполнение не на чем (живой повтор 2026-08-10).
+            if _obl.contract_coverage == "partial":
+                self._defect_signals.append("user_contract_unrepresented")
         except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
             self._sensor_failed("completion_obligation", exc)

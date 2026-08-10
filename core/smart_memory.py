@@ -1334,6 +1334,7 @@ def assemble_completion_verdict(
     declared: str | None,
     obligation_unmet: bool = False,
     enforcement_failed: bool = False,
+    user_contract_partial: bool = False,
 ) -> CompletionVerdict:
     """The single rule table. :func:`assemble_completion_state` delegates here.
 
@@ -1352,6 +1353,16 @@ def assemble_completion_verdict(
     if obligation_unmet and declared == "achieved":
         return _displaced(
             "partially_achieved", declared, "obligation_silently_missing"
+        )
+    # Та же односторонняя власть, другое основание. `obligation_unmet` — «долг
+    # остался невыполненным»; здесь — «часть контракта оператора модуль вообще
+    # не сумел представить», и удостоверять её выполнение не на чем. Живой
+    # повтор 2026-08-10: `coverage=partial` в начале хода и `satisfied=True` в
+    # конце него же. Отказ УДОСТОВЕРЯТЬ — не то же самое, что утверждать провал:
+    # `partially_achieved` и означает «сделано не всё, что просили проверить».
+    if user_contract_partial and declared == "achieved":
+        return _displaced(
+            "partially_achieved", declared, "user_contract_unrepresented"
         )
     # Census A2, and authoritative on measured grounds rather than caution. The
     # answer-safety check raised, so the run delivered a safe refusal instead of
@@ -1655,6 +1666,7 @@ def episode_from_agent_cycle(
         replan_exhausted=bool(replan_exhausted),
         declared=declared_completion,
         obligation_unmet="obligation_silently_missing" in (signals or ()),
+        user_contract_partial="user_contract_unrepresented" in (signals or ()),
         enforcement_failed="answer_enforcement_failed" in (signals or ()),
     )
     return EpisodeRecord(

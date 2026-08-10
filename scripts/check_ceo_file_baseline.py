@@ -46,7 +46,7 @@ WATCH: dict[str, int] = {
     # решение «писать ли в постоянную память без присмотра» стоит того,
     # чтобы следующий читатель узнал причину, а не восстанавливал её.
     "core/autonomous_runtime.py": 1500,    # measured 1495; aspiration 1150
-    "core/smart_memory.py": 1907,          # measured 1861 after the causal-credit split + outcome extraction +7 (2026-08-10): один предикат `_answer_disqualified` на ДВА рубежа — допуск эпизода и кредит процедуры. Порознь они уже разошлись, и самоопровергнувшийся прогон поднял счётчик активной процедуры.
+    "core/smart_memory.py": 1919,          # measured 1861 after the causal-credit split + outcome extraction +7 (2026-08-10): один предикат `_answer_disqualified` на ДВА рубежа — допуск эпизода и кредит процедуры. Порознь они уже разошлись, и самоопровергнувшийся прогон поднял счётчик активной процедуры. +12 (2026-08-10): вердикт завершения перестал удостоверять то, чего не проверял — `user_contract_partial` понижает заявленное `achieved`, как и `obligation_unmet`, и той же односторонней властью.
     "core/self_build_producer.py": 1841,   # 1860 → 1841: reply diagnosis moved out to core/builder_reply_diagnosis.py (MIR-084)
     "core/model_router.py": 1860,          # 1800 → 1860: UsageTrackedLLM.stream_complete added (2026-08-08) — the streamed path used to escape billing via __getattr__; the billed method must live on the wrapper, so the growth is the fix, not drift
 }
