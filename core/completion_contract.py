@@ -153,6 +153,63 @@ _UNSUPPORTED_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
+#: Единица задания, названная ЗАГОЛОВКОМ: `## 3. Найди границу` или
+#: `### B. Образец`. Только заголовок — перечисление в прозе («есть 3 причины»)
+#: структурой задания не является, и считать его единицей значило бы выдумать
+#: пункт, которого оператор не давал. Кириллица, латиница и транслит читаются
+#: одинаково: маркер — номер или буква A–Z с точкой в начале заголовка.
+_REQUESTED_UNIT_RE = re.compile(
+    r"^\s{0,3}#{1,4}\s*((?:\d{1,2}|[A-Z])\.\s+\S.*?)\s*$",
+    re.MULTILINE,
+)
+
+
+@dataclass(frozen=True)
+class RequestedUnit:
+    """Названный оператором раздел работы или отчёта.
+
+    Существует, потому что `unsupported_deliverables` группирует по КЛАССАМ:
+    четырнадцать названных единиц живого задания давали две записи
+    (`report_sections`, `prohibition`). `partial` сообщал, что часть контракта
+    не представлена, и не сообщал какая — в конце хода сверять было не с чем.
+    """
+
+    title: str
+
+    def to_log_payload(self) -> dict[str, Any]:
+        return {"title": self.title}
+
+
+def requested_units(text: str) -> tuple[RequestedUnit, ...]:
+    """Единицы задания в порядке их появления, без повторов."""
+    seen: set[str] = set()
+    out: list[RequestedUnit] = []
+    for match in _REQUESTED_UNIT_RE.finditer(text or ""):
+        title = " ".join(match.group(1).split())
+        key = title.casefold()
+        if key not in seen:
+            seen.add(key)
+            out.append(RequestedUnit(title=title))
+    return tuple(out)
+
+
+def unaddressed_units(contract: Any, answer: str) -> tuple[str, ...]:
+    """Названные единицы, следа которых в ответе нет.
+
+    Присутствие, а не качество. Единица считается адресованной, если в ответе
+    встречается её содержательная часть — заголовок без номера. Судить, ХОРОШО
+    ли раздел раскрыт, эта функция не берётся: для этого нужно понимание, а
+    выдуманный судья здесь был бы тем же дефектом, что и выдуманный долг.
+    """
+    body = (answer or "").casefold()
+    missing: list[str] = []
+    for unit in getattr(contract, "requested_units", ()) or ():
+        tail = unit.title.split(".", 1)[-1].strip().casefold()
+        if tail and tail not in body:
+            missing.append(unit.title)
+    return tuple(missing)
+
+
 @dataclass(frozen=True)
 class UnsupportedDeliverable:
     """Затребованное, которое извлекатель видит и НЕ умеет проверять.
@@ -194,6 +251,9 @@ class CompletionContract:
     obligations: tuple[ContractObligation, ...] = ()
     ambiguities: tuple[str, ...] = ()
     unsupported_deliverables: tuple[UnsupportedDeliverable, ...] = ()
+    #: Единицы, названные оператором заголовками. Отдельно от
+    #: `unsupported_deliverables`: там классы, здесь предметы.
+    requested_units: tuple[RequestedUnit, ...] = ()
 
     @property
     def coverage(self) -> str:
@@ -223,6 +283,7 @@ class CompletionContract:
                 u.to_log_payload() for u in self.unsupported_deliverables
             ],
             "coverage": self.coverage,
+            "requested_units": [u.to_log_payload() for u in self.requested_units],
         }
 
 
@@ -357,6 +418,9 @@ def derive_completion_contract(
         obligations=tuple(obligations),
         ambiguities=tuple(ambiguities),
         unsupported_deliverables=_unsupported_in(text),
+        # По ПОЛНОМУ тексту: единицы называют и запрещающие разделы
+        # тоже («7. Do not repeat the imagined-API failure»).
+        requested_units=requested_units(text),
     )
 
 

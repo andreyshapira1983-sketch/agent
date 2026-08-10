@@ -141,6 +141,11 @@ class CompletionObligationResult:
     #: одно, они дали живой повтор 2026-08-10: `coverage=partial` в начале хода
     #: и `satisfied=True` в конце того же хода.
     contract_coverage: str = "complete"
+    #: Названные оператором единицы, следа которых в ответе нет —
+    #: поимённо. `contract_coverage` говорит «часть не представлена»,
+    #: это говорит КАКАЯ (жалоба оператора 2026-08-10: «задача
+    #: раздроблена, и он этого не видит»).
+    unaddressed_units: tuple[str, ...] = ()
 
     def to_log_payload(self) -> dict[str, Any]:
         return {
@@ -149,6 +154,7 @@ class CompletionObligationResult:
             "triggered": self.triggered,
             "requirement_sources": list(self.requirement_sources),
             "contract_coverage": self.contract_coverage,
+            "unaddressed_units": list(self.unaddressed_units),
             "missing_requirements": list(self.missing_requirements),
             # Reported on every turn, satisfied or not: "we could not consult
             # this source" is a different statement from "this source said
@@ -352,6 +358,13 @@ def evaluate_completion_obligations(
     # Покрытие берётся у контракта как есть: судить о нём здесь значило бы
     # завести второй ответ на вопрос, у которого уже есть владелец.
     coverage = str(getattr(contract, "coverage", "complete") or "complete")
+    from core.completion_contract import unaddressed_units as _unaddressed
+    missing_units = _unaddressed(contract, answer) if contract is not None else ()
+    if missing_units:
+        notes.append(
+            "named units of the request left unaddressed: "
+            + "; ".join(missing_units[:5])
+        )
     if coverage == "partial":
         notes.append(
             "part of the operator's contract could not be represented; "
@@ -367,5 +380,6 @@ def evaluate_completion_obligations(
         unavailable_sources=unavailable,
         obligations=tuple(obligations),
         contract_coverage=coverage,
+        unaddressed_units=missing_units,
         notes=tuple(notes),
     )
