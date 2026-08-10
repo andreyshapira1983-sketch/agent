@@ -114,6 +114,36 @@ def classify_evidence(ev: Any) -> EvidenceClass | None:
 # The operator addressing the agent itself. Without one of these a sentence
 # about "an incorrect answer" is about someone else's answer — a server's, an
 # API's, a colleague's — and must not disable world-fact verification.
+#: Разбор СОБСТВЕННОЙ ОБРАБОТКИ ТЕКУЩЕГО хода. Два условия в одном образце, и
+#: оба обязательны: предмет — своя работа (поведение, обработка, маршрутизация,
+#: трасса, компоненты системы), и указатель — на ЭТО сообщение/прогон. Порознь
+#: они ловят обычные вопросы: «этот проект» — указатель без предмета, «проверь
+#: маршрутизацию» — предмет без указателя. Латиница отдельной ветвью: оператор
+#: пишет транслитом, и слепота к этому уже стоила подавленного ответа.
+_CURRENT_RUN_INTROSPECTION_RE = re.compile(
+    r"(?:"
+    r"(?:сво[ей]|твоё|твое|твоей|твоего|твоя|твои)\s+"
+    r"(?:фактическ\w+\s+)?"
+    r"(?:поведени\w*|обработк\w*|трасс\w*|маршрутизаци\w*|систем\w*)"
+    r"|(?:sво[ej]|svoe|svoyu|tvoey|tvoyey|tvoey|tvoego)\s+"
+    r"(?:fakticheskoy?\s+|fakticheskoe\s+)?"
+    r"(?:povedeni\w*|obrabotk\w*|trasse?\w*|marshrutizaci\w*|sistem\w*)"
+    r"|your\s+(?:actual\s+|own\s+)?"
+    r"(?:behaviou?r|processing|trace|routing|system)"
+    r")"
+    r"|(?:"
+    r"(?:этого|это)\s+сообщени\w*"
+    r"|(?:etogo|eto)\s+soobshcheni\w*"
+    r"|this\s+(?:message|request|turn|run)"
+    r")"
+    r"(?=[\s\S]{0,400}?(?:"
+    r"компонент\w*|трасс\w*|маршрут\w*|определил|обработк\w*"
+    r"|komponent\w*|trass\w*|marshrut\w*|opredelil|obrabotk\w*"
+    r"|component|trace|rout|determine|process"
+    r"))",
+    re.IGNORECASE,
+)
+
 _AGENT_ADDRESSED_RE = re.compile(
     r"(?i)(?:^|\W)("
     r"ты|тебя|тебе|тобой|твой|твоя|твоё|твое|твои|твоего|твоём|твоем|"
@@ -193,6 +223,19 @@ def is_self_analysis_turn(
     text = (question or "").strip()
     if not text:
         return SelfAnalysisDecision(False, "empty_question")
+
+    # Вторая дорога, и у неё другая улика. Условие «нужен прошлый ход» верно
+    # для просьбы объяснить ПРОШЛЫЙ ответ, но разбор ТЕКУЩЕГО прогона опирается
+    # на `trace` — класс из этой же таксономии, существующий с первого
+    # сообщения. 2026-08-10 первый ход сессии просил разобрать обработку именно
+    # этого сообщения и был вырезан гейтом улик: спрашивали историю там, где
+    # улика лежала в журнале.
+    own_run = _CURRENT_RUN_INTROSPECTION_RE.search(text)
+    if own_run is not None:
+        return SelfAnalysisDecision(
+            True, "current_run_introspection", (own_run.group(0).lower(),)
+        )
+
     if not has_prior_turn:
         return SelfAnalysisDecision(False, "no_prior_turn")
 

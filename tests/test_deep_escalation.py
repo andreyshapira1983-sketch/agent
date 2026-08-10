@@ -68,21 +68,24 @@ class TestApprove:
 
 class TestDowngrade:
     def test_missing_reason_downgrades(self) -> None:
+        # 2026-08-10: код понижения разведён на два. Понижение here НЕ ослаблено —
+        # уточнён диагноз: отсутствие запроса и негодная причина требуют от
+        # оператора разных действий.
         decision = evaluate_deep_escalation(_approved_request(reason=None))
         assert decision.effective_tier == "standard"
         assert decision.gate == "downgraded"
-        assert decision.route_reason == "deep_downgraded:missing_reason"
+        assert decision.route_reason == "deep_downgraded:not_requested"
 
     def test_invalid_reason_downgrades(self) -> None:
         decision = evaluate_deep_escalation(_approved_request(reason="better_quality"))
-        assert decision.route_reason == "deep_downgraded:missing_reason"
+        assert decision.route_reason == "deep_downgraded:unknown_reason"
 
     def test_reserved_reason_is_not_active_and_downgrades(self) -> None:
         # Reserved v2 reasons must NOT unlock deep in v1.
         for reason in RESERVED_REASONS:
             decision = evaluate_deep_escalation(_approved_request(reason=reason))
             assert decision.downgraded is True
-            assert decision.route_reason == "deep_downgraded:missing_reason"
+            assert decision.route_reason == "deep_downgraded:unknown_reason"
 
     def test_vague_expected_output_downgrades(self) -> None:
         decision = evaluate_deep_escalation(_approved_request(expected_output="make_it_better"))
@@ -110,7 +113,7 @@ class TestDowngrade:
         # The autonomous path passes no reason/budget/operator → always standard.
         decision = evaluate_deep_escalation(DeepEscalationRequest(role="planner"))
         assert decision.effective_tier == "standard"
-        assert decision.route_reason == "deep_downgraded:missing_reason"
+        assert decision.route_reason == "deep_downgraded:not_requested"
 
 
 class TestReservedSeparation:
