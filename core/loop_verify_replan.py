@@ -157,7 +157,9 @@ class AgentLoopVerifyReplan:
             ),
             attempt=st.attempt,
         ))
-        self.log.log("claims_refuted_by_arithmetic", {
+        # Имя общее: гейтов, дающих `ClaimReason`, четыре, и различают их не
+        # вывеской, а полем `code`. См. tests/test_refutation_event_names_its_gate.
+        self.log.log("claims_refuted_by_content", {
             "count": len(refuted),
             "reasons": [c.reason.to_log_payload() for c in refuted[:5]],
         })

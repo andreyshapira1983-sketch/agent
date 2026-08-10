@@ -61,13 +61,13 @@
           "call": "append"
         },
         {
-          "site": "core/loop_verify_replan.py:228",
+          "site": "core/loop_verify_replan.py:230",
           "node": "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
           "puts": "unresolved_citation",
           "call": "append"
         },
         {
-          "site": "core/loop_verify_replan.py:379",
+          "site": "core/loop_verify_replan.py:381",
           "node": "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
           "puts": "failure of a step executed INSIDE the verify loop — a different kind from the other three",
           "call": "append"
