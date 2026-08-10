@@ -70,7 +70,7 @@ WATCH: dict[str, int] = {
     "core/operator_intent.py:route_operator_intent": 175,
     "core/self_repair.py:SelfRepairController.run": 173,
     "core/self_build_producer.py:_critic_review": 172,
-    "core/completion_obligation.py:evaluate_completion_obligations": 181,  # +8 (2026-08-10): источник `intent` читает ТРЕБУЮЩУЮ часть запроса одной функцией с контрактом — запрет перестал заводить долг, который запрещает.  # +2: покрытие контракта оператора доводится до вердикта.
+    "core/completion_obligation.py:evaluate_completion_obligations": 189,  # +8 (2026-08-10): непокрытые единицы задания перечисляются поимённо и доходят до вердикта — жалоба оператора о раздроблённой задаче.  # +8 (2026-08-10): источник `intent` читает ТРЕБУЮЩУЮ часть запроса одной функцией с контрактом — запрет перестал заводить долг, который запрещает.  # +2: покрытие контракта оператора доводится до вердикта.
     "core/self_apply_bridge.py:run_approved_self_apply": 170,
     "core/self_repair.py:SelfRepairController._execute_tool": 170,
     "core/autonomous_runtime.py:AutonomousRuntime._task_propose": 167,

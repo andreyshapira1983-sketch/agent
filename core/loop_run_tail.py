@@ -338,5 +338,10 @@ class AgentLoopRunTail:
             # удостоверять её выполнение не на чем (живой повтор 2026-08-10).
             if _obl.contract_coverage == "partial":
                 self._defect_signals.append("user_contract_unrepresented")
+            # Отдельный сигнал: единицы БЫЛИ представимы и всё равно не
+            # адресованы. Это уже не граница извлекателя, а потерянная часть
+            # задания — то самое дробление, которое оператор видел глазами.
+            if _obl.unaddressed_units:
+                self._defect_signals.append("named_units_unaddressed")
         except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
             self._sensor_failed("completion_obligation", exc)

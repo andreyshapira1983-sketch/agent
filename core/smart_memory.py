@@ -1666,7 +1666,10 @@ def episode_from_agent_cycle(
         replan_exhausted=bool(replan_exhausted),
         declared=declared_completion,
         obligation_unmet="obligation_silently_missing" in (signals or ()),
-        user_contract_partial="user_contract_unrepresented" in (signals or ()),
+        user_contract_partial=bool(
+            {"user_contract_unrepresented", "named_units_unaddressed"}
+            & set(signals or ())
+        ),
         enforcement_failed="answer_enforcement_failed" in (signals or ()),
     )
     return EpisodeRecord(
