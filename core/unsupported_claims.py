@@ -211,6 +211,7 @@ def apply_answer_enforcement(
     local_critique_active: bool = False,
     verifier_failure: bool = False,
     mode: str | None = None,
+    contract: Any | None = None,
 ) -> EnforcementResult:
     """Рубеж принятия ответа: прежние исходы плюс очная ставка разделов.
 
@@ -237,6 +238,7 @@ def apply_answer_enforcement(
         verifier_failure=verifier_failure,
         mode=mode,
     )
+    result = _annotate_unrepresented_prohibitions(result, contract, question)
     if not found:
         return result
     if result.outcome != "none":
@@ -252,6 +254,48 @@ def apply_answer_enforcement(
         would_change_answer=True,
         reason=f"asserted_and_denied_in_one_answer={len(found)}",
         contradictions=found,
+    )
+
+
+def _annotate_unrepresented_prohibitions(
+    result: EnforcementResult, contract: Any | None, question: str
+) -> EnforcementResult:
+    """Довести до ОПЕРАТОРА запрет, который контракт не умеет проверять.
+
+    Не блокирует и не судит о нарушении: модуль честно не умеет проверять
+    запрет, а значит не может и установить, что он нарушен. Блокировать по
+    непроверяемому признаку значило бы выдумать обязательство — ровно то, что
+    `derive_completion_contract` отказывается делать по своему контракту.
+
+    Чинится единственное, что доказано замером 2026-08-10: запрет был
+    распознан, помечен `unsupported`, и на этом след обрывался — у поля не
+    было ни одного потребителя вне своего модуля. Оператор узнавал о границе
+    из журнала, если вообще смотрел.
+    """
+    entries = tuple(getattr(contract, "unsupported_deliverables", ()) or ())
+    quoted = [e.evidence for e in entries if getattr(e, "kind", "") == "prohibition"]
+    if not quoted:
+        return result
+    locale = "ru" if (_looks_russian(question) or _looks_russian(result.answer)) else "en"
+    listed = "; ".join(quoted[:3])
+    if locale == "ru":
+        note = (
+            f"\n\n⚠️ Запрет в запросе не проверялся механически: «{listed}». "
+            "Контракт завершения распознал его, но представить и проверить "
+            "такое обязательство не умеет — соблюдение не подтверждено."
+        )
+    else:
+        note = (
+            f"\n\n⚠️ A prohibition in the request was not mechanically checked: "
+            f"“{listed}”. The completion contract recognised it but "
+            "cannot represent or verify this class of obligation — compliance "
+            "is not established."
+        )
+    return replace(
+        result,
+        answer=result.answer + note,
+        applied=True,
+        would_change_answer=True,
     )
 
 

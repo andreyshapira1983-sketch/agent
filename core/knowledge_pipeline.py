@@ -32,6 +32,14 @@ from core.truth_hype_filter import evaluate as evaluate_truth_hype
 KnowledgeDecision = Literal["save", "reject"]
 
 
+#: Токен, которым `core/redaction.py` заменяет вырезанный секрет. Его наличие
+#: означает, что текст — ОСТАТОК секретного материала, даже если сам секрет уже
+#: не читается. Форма фиксирована там: `[REDACTED:<kind>]`, kind в нижнем
+#: регистре через дефис. Слово «redacted» в прозе под шаблон не подходит —
+#: иначе документация о самой редактуре перестала бы быть знанием.
+_REDACTION_MARKER_RE = re.compile(r"\[REDACTED:[a-z0-9-]+\]")
+
+
 @dataclass(frozen=True)
 class KnowledgeWriteDecision:
     decision: KnowledgeDecision
@@ -403,6 +411,18 @@ class KnowledgeWritePolicy:
             return KnowledgeWriteDecision("reject", (f"claim too long (>{self.max_chars})",))
         if contains_secret(text)[0]:
             return KnowledgeWriteDecision("reject", ("claim contains secret material",))
+        # Остаток редактуры. Проверка выше судит ТЕКСТ, а текст сюда приходит
+        # уже вычищенным, поэтому `TELEGRAM=[REDACTED:telegram-bot-token]` под
+        # шаблон ключа не подходит и проезжает. Замер 2026-08-10: такие строки
+        # из `.env` легли в долговечную семантическую память с тегами
+        # `fact, knowledge` — значение не утекло, утёк инвентарь секретов
+        # установки, живущий дольше прогона. Маркер редактуры и есть
+        # доказательство, что материал был секретным: вердикт источника
+        # (`class=secret`) до этой политики не доезжает, а маркер доезжает.
+        if _REDACTION_MARKER_RE.search(text):
+            return KnowledgeWriteDecision(
+                "reject", ("claim is redacted secret residue",)
+            )
         # Truth/Hype filter (first LEARNING antibody): promotional content with
         # no checkable substance is "шумиха", not knowledge — never absorb it.
         _th = evaluate_truth_hype(text)

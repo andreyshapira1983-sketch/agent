@@ -633,6 +633,7 @@ class AgentLoop(
             replan_exhausted=replan_exhausted,
             local_critique_active=local_critique_active,
             verifier_failure=verifier_failure,
+            completion_contract=completion_contract,
         )
 
         # ── Compose ─────────────────────────────────────────────────────────

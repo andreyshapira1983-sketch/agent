@@ -160,9 +160,13 @@ def test_the_call_site_passes_every_run_local():
     assert len(calls) == 1, "вызов должен быть ровно один"
     call = calls[0]
     assert [ast.unparse(a) for a in call.args] == ["answer"]
+    # +`completion_contract` (2026-08-10): рубеж принятия ответа обязан знать
+    # про распознанные и непроверяемые запреты. Передаётся run-локалью, как и
+    # остальные пять, — на экземпляре его держать запрещено
+    # (`tests/test_completion_marker.py`), и запрет верен.
     assert {kw.arg for kw in call.keywords} == {
         "user_question", "artifacts", "replan_exhausted",
-        "local_critique_active", "verifier_failure",
+        "local_critique_active", "verifier_failure", "completion_contract",
     }
     # Имена run-локалей передаются как есть — подмены на `self.…` не было.
     assert all(

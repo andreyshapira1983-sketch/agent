@@ -27,7 +27,7 @@ WATCH: dict[str, int] = {
     # вектора уверенности — в `core/loop_verification.py`, комментарии срезаны до
     # контракта в одну строку, пояснение живёт в docs/CODE_NOTES.md. Остаток —
     # вызов, флаг и запоминание вопроса; меньше не бывает без потери смысла.
-    "core/loop.py": 760,                  # разбор на модули (правило оператора: потолок 2000): −828 строк ушло в core/loop_step_execution, −234 в core/loop_response_deciders, −423 в core/loop_synthesis, −106 в core/loop_evidence_chain, −123 в core/loop_verification, −122 в core/loop_observe, −165 в core/loop_run_tail, −57 и −63 в loop_evidence_chain/loop_context, −375 в core/loop_attempt, −341 в core/loop_verify_replan, −254 в core/loop_init, −84 в core/loop_synthesis, −158 мелких методов, −139 ворот в core/loop_gates, −97 пролога и обязательств; оркестратор +8 (2026-08-10): ребро происхождения прогона — обёртка `run` владеет идентичностью прогона, и записывать связь run_id/trace_id/session_id обязана она, а не сосед. +8 ещё: журнал без trace_id ребра не даёт, и это отсутствие названо явно (`run_identity_unavailable`) — иначе «связи нет» и «связь не записали» снова неразличимы.
+    "core/loop.py": 761,                  # разбор на модули (правило оператора: потолок 2000): −828 строк ушло в core/loop_step_execution, −234 в core/loop_response_deciders, −423 в core/loop_synthesis, −106 в core/loop_evidence_chain, −123 в core/loop_verification, −122 в core/loop_observe, −165 в core/loop_run_tail, −57 и −63 в loop_evidence_chain/loop_context, −375 в core/loop_attempt, −341 в core/loop_verify_replan, −254 в core/loop_init, −84 в core/loop_synthesis, −158 мелких методов, −139 ворот в core/loop_gates, −97 пролога и обязательств; оркестратор +8 (2026-08-10): ребро происхождения прогона — обёртка `run` владеет идентичностью прогона, и записывать связь run_id/trace_id/session_id обязана она, а не сосед. +8 ещё: журнал без trace_id ребра не даёт, и это отсутствие названо явно (`run_identity_unavailable`) — иначе «связи нет» и «связь не записали» снова неразличимы. +1: контракт завершения передаётся в рубеж принятия ответа run-локалью.
     "main.py": 2000,                       # 47 today; the old extraction's win
     "core/planner.py": 560,                # measured 516 after piece 5 (host-tools context out)
     "agent_tick.py": 1500,                 # measured 1458; aspiration 1300
@@ -46,7 +46,7 @@ WATCH: dict[str, int] = {
     # решение «писать ли в постоянную память без присмотра» стоит того,
     # чтобы следующий читатель узнал причину, а не восстанавливал её.
     "core/autonomous_runtime.py": 1500,    # measured 1495; aspiration 1150
-    "core/smart_memory.py": 1900,          # measured 1861 after the causal-credit split + outcome extraction
+    "core/smart_memory.py": 1907,          # measured 1861 after the causal-credit split + outcome extraction +7 (2026-08-10): один предикат `_answer_disqualified` на ДВА рубежа — допуск эпизода и кредит процедуры. Порознь они уже разошлись, и самоопровергнувшийся прогон поднял счётчик активной процедуры.
     "core/self_build_producer.py": 1841,   # 1860 → 1841: reply diagnosis moved out to core/builder_reply_diagnosis.py (MIR-084)
     "core/model_router.py": 1860,          # 1800 → 1860: UsageTrackedLLM.stream_complete added (2026-08-08) — the streamed path used to escape billing via __getattr__; the billed method must live on the wrapper, so the growth is the fix, not drift
 }
