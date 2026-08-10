@@ -31,6 +31,7 @@ from .verifier_utils import (
     _merge_citation_only_chunks,
     _output_contract_header_name,
     _tool_citation_for,
+    absent_literal_reason,
     extract_statistical_figures,
     is_statistical_claim,
     is_structural_chunk,
@@ -237,6 +238,12 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                         actual=arith.actual, explanation=arith.explanation,
                         computed_from=arith.computed_from,
                     )
+                # MIR-060 (c): четвёртый гейт — отличительные литералы утверждения
+                # обязаны быть в улике. Тело в `verifier_utils.absent_literal_reason`.
+                _lit = absent_literal_reason(chunk_text, ev, c.prefix)
+                if _lit is not None:
+                    strict_ok = False
+                    chunk_reason = chunk_reason or _lit
                 if stat_claim and c.prefix not in {"user", "memory", "general-knowledge"}:
                     excerpt = ev.excerpt or ""
                     if stat_figures:
