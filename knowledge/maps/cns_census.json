@@ -103,6 +103,7 @@
       "callers",
       "inputs"
     ],
+    "loop_memory_write.py::AgentLoopMemoryWrite._log_causal_observation": [],
     "loop_memory_write.py::AgentLoopMemoryWrite._unattended_run": [],
     "loop_memory_write.py::AgentLoopMemoryWrite.set_audit_read_only": [],
     "loop_observe.py::AgentLoopObserve._interpret": [],
@@ -507,6 +508,14 @@
     ],
     [
       "loop_synthesis.py::AgentLoopSynthesis._runtime_self_prompt_block",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._record_experience_memory",
+      "loop_memory_write.py::AgentLoopMemoryWrite._log_causal_observation"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._log_causal_observation",
       "loop_sensor.py::AgentLoopSensor._sensor_failed"
     ]
   ]
