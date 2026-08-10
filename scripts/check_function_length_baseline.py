@@ -50,7 +50,7 @@ WATCH: dict[str, int] = {
     # the other two, where `strict_ok` is decided, because that is the only
     # place a citation and its excerpt are both in hand. Extracting it would
     # move the gate away from the decision it feeds.
-    "core/verifier_core.py:verify": 304,  # +4 (2026-08-10): четвёртый гейт содержания (MIR-060, класс «литерал есть в утверждении и отсутствует в улике»); тело вынесено в verifier_utils, здесь только вопрос и ответ.
+    "core/verifier_core.py:verify": 310,  # +6 (2026-08-10): пятый гейт содержания — утверждение об отсутствии, опровергнутое собственной уликой; тело в verifier_utils.  # +4 (2026-08-10): четвёртый гейт содержания (MIR-060, класс «литерал есть в утверждении и отсутствует в улике»); тело вынесено в verifier_utils, здесь только вопрос и ответ.
     "app/bootstrap.py:build_agent": 246,
     "core/loop_memory_write.py:AgentLoopMemoryWrite._record_experience_memory": 246,
     "core/referent_resolver.py:ReferentResolver.resolve": 240,

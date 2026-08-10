@@ -131,7 +131,12 @@ def test_counting_claims_stay_with_arithmetic() -> None:
 @pytest.mark.parametrize("claim,excerpt", [
     ("Ветка собрана на 20698b1e4c29f", "HEAD=aff6be7c1d2e3f4"),
     ("Файл config/model_catalog.json просрочен", "config/models.yaml: fresh"),
-    ("Запись AWS_SECRET_KEY отсутствует", "GITHUB_TOKEN отсутствует"),
+    # БЫЛО «Запись AWS_SECRET_KEY отсутствует» — но это утверждение ОБ
+    # ОТСУТСТВИИ, и литеральный гейт ловил его по неверному основанию: литерала
+    # нет в улике ровно потому, что о его отсутствии и говорят. Такие судит
+    # пятый гейт (`absence_reason`) по обратному правилу. Намерение фикстуры —
+    # «чужой литерал пойман» — сохранено на утвердительном носителе.
+    ("Ключ AWS_SECRET_KEY записан в конфигурацию", "GITHUB_TOKEN=значение"),
 ])
 def test_other_absent_literals_are_caught(claim: str, excerpt: str) -> None:
     """Опровержение: класс, а не три заученных предмета."""

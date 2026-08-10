@@ -31,6 +31,7 @@ from .verifier_utils import (
     _merge_citation_only_chunks,
     _output_contract_header_name,
     _tool_citation_for,
+    absence_reason,
     absent_literal_reason,
     extract_statistical_figures,
     is_statistical_claim,
@@ -244,6 +245,12 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                 if _lit is not None:
                     strict_ok = False
                     chunk_reason = chunk_reason or _lit
+                # MIR-060 (d): пятый гейт, обратное правило четвёртого —
+                # утверждение «этого там нет», опровергнутое собственной уликой.
+                _abs = absence_reason(chunk_text, ev, c.prefix)
+                if _abs is not None:
+                    strict_ok = False
+                    chunk_reason = chunk_reason or _abs
                 if stat_claim and c.prefix not in {"user", "memory", "general-knowledge"}:
                     excerpt = ev.excerpt or ""
                     if stat_figures:
