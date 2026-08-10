@@ -153,13 +153,26 @@ _UNSUPPORTED_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
-#: Единица задания, названная ЗАГОЛОВКОМ: `## 3. Найди границу` или
-#: `### B. Образец`. Только заголовок — перечисление в прозе («есть 3 причины»)
-#: структурой задания не является, и считать его единицей значило бы выдумать
-#: пункт, которого оператор не давал. Кириллица, латиница и транслит читаются
-#: одинаково: маркер — номер или буква A–Z с точкой в начале заголовка.
+#: Единица задания, названная ЗАГОЛОВКОМ. Три формы метки:
+#:
+#:   `## 3. Найди границу`      — номер с точкой
+#:   `### B. Образец`           — буква с точкой
+#:   `# U01 — Verifier`         — ПОМЕЧЕННАЯ единица: буквы с цифрами,
+#:                                 разделитель — тире, длинное тире или двоеточие
+#:
+#: Третья форма добавлена 2026-08-10 по живому провалу: задание объявило
+#: «Each unit has a stable identifier U01 through U12 … must survive
+#: unchanged», а извлекатель взял семь разделов ФИНАЛЬНОГО ОТЧЁТА (`A.`…`G.`)
+#: и ни одной из двенадцати рабочих единиц. Идентификатор оператора — часть
+#: контракта, а не наша перефразировка, и он сохраняется дословно.
+#:
+#: Только ЗАГОЛОВОК. Упоминание в прозе («сделай как в U01») раздела не
+#: объявляет, и считать его единицей значило бы выдумать пункт.
 _REQUESTED_UNIT_RE = re.compile(
-    r"^\s{0,3}#{1,4}\s*((?:\d{1,2}|[A-Z])\.\s+\S.*?)\s*$",
+    r"^\s{0,3}#{1,4}\s*("
+    r"(?:\d{1,2}|[A-Z])\.\s+\S.*?"
+    r"|(?:[A-Za-z\u0410-\u042f\u0430-\u044f]{1,4}\d{1,3})\s*[\u2014\u2013:-]\s+\S.*?"
+    r")\s*$",
     re.MULTILINE,
 )
 
@@ -168,6 +181,12 @@ _REQUESTED_UNIT_RE = re.compile(
 class RequestedUnit:
     """Названный оператором раздел работы или отчёта.
 
+    `identifier` — метка, которую оператор объявил САМ (`U01`, `R7`, `B`).
+    Она часть контракта, а не наша перефразировка, и по ней же считается
+    адресованность: ответ «U01: точка входа — verify()» покрывает единицу, не
+    повторяя её заголовок дословно. Без этого сверка помечала непокрытыми все
+    единицы разом и была бесполезна (замер 2026-08-10).
+
     Существует, потому что `unsupported_deliverables` группирует по КЛАССАМ:
     четырнадцать названных единиц живого задания давали две записи
     (`report_sections`, `prohibition`). `partial` сообщал, что часть контракта
@@ -175,9 +194,17 @@ class RequestedUnit:
     """
 
     title: str
+    identifier: str = ""
 
     def to_log_payload(self) -> dict[str, Any]:
-        return {"title": self.title}
+        return {"title": self.title, "identifier": self.identifier}
+
+
+#: Метка в начале заголовка: `U01`, `R7`, `3`, `B`. Ровно та строка, которую
+#: написал оператор, — по ней и сверяется адресованность.
+_UNIT_LABEL_RE = re.compile(
+    r"^([A-Za-z\u0410-\u042f\u0430-\u044f]{0,4}\d{1,3}|[A-Z])\s*[.\u2014\u2013:-]"
+)
 
 
 def requested_units(text: str) -> tuple[RequestedUnit, ...]:
@@ -189,7 +216,10 @@ def requested_units(text: str) -> tuple[RequestedUnit, ...]:
         key = title.casefold()
         if key not in seen:
             seen.add(key)
-            out.append(RequestedUnit(title=title))
+            label = _UNIT_LABEL_RE.match(title)
+            out.append(RequestedUnit(
+                title=title, identifier=label.group(1) if label else ""
+            ))
     return tuple(out)
 
 
@@ -204,6 +234,12 @@ def unaddressed_units(contract: Any, answer: str) -> tuple[str, ...]:
     body = (answer or "").casefold()
     missing: list[str] = []
     for unit in getattr(contract, "requested_units", ()) or ():
+        # Метка засчитывается только начиная с двух знаков: односимвольная
+        # («C») совпала бы с любой буквой в тексте и объявила бы покрытым
+        # всё подряд. Для таких единиц остаётся сверка по заголовку.
+        ident = (unit.identifier or "").casefold()
+        if len(ident) >= 2 and ident in body:
+            continue
         tail = unit.title.split(".", 1)[-1].strip().casefold()
         if tail and tail not in body:
             missing.append(unit.title)
