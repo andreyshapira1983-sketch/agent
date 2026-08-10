@@ -98,7 +98,9 @@ def test_being_hard_is_not_a_reason():
     decision = evaluate_deep_escalation(_request(reason="complexity"))
 
     assert decision.downgraded
-    assert "missing_reason" in decision.route_reason
+    # «complexity» — это СЛОВО, которого ворота не знают, а не отсутствие
+    # запроса: с 2026-08-10 эти случаи различимы, отказ прежний.
+    assert "unknown_reason" in decision.route_reason
 
 
 def test_an_unwired_role_is_still_refused():

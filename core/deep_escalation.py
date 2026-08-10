@@ -242,7 +242,14 @@ def evaluate_deep_escalation(request: DeepEscalationRequest) -> DeepEscalationDe
             return _downgrade(f"catalog_{status}")
         return _downgrade("no_deep_model")
     if request.reason not in ACTIVE_REASONS:
-        return _downgrade("missing_reason")
+        # Тот же приём, что строкой выше для каталога: один исход, две разные
+        # инструкции оператору. `not_requested` — никто глубокий тир и не
+        # просил, читать нечего; `unknown_reason` — просили словом, которого
+        # ворота не знают, и вот это стоит посмотреть. Прежний общий код
+        # `missing_reason` заставлял расследовать штатный путь (2026-08-10).
+        if not (request.reason or "").strip():
+            return _downgrade("not_requested")
+        return _downgrade("unknown_reason")
     if request.expected_output not in EXPECTED_OUTPUTS:
         return _downgrade("vague_expected_output")
     if not (request.budget_ok or request.operator_approved):

@@ -214,12 +214,20 @@ class AgentLoop(
         with run_scope(new_id("run"), task_id) as _ctx:
             # Ребро происхождения ПЕРВЫМ событием прогона: пока связи не было,
             # система не могла сказать, какое исполнение чей журнал (2026-08-10).
-            self.log.log("run_identity", identity_provenance(
-                trace_id=str(getattr(self.log, "trace_id", "")),
-                run_id=_ctx.run_id,
-                task_id=_ctx.task_id,
-                session_id=getattr(self.memory, "session_id", None),
-            ))
+            _trace_id = str(getattr(self.log, "trace_id", "") or "")
+            if _trace_id:
+                self.log.log("run_identity", identity_provenance(
+                    trace_id=_trace_id,
+                    run_id=_ctx.run_id,
+                    task_id=_ctx.task_id,
+                    session_id=getattr(self.memory, "session_id", None),
+                ))
+            else:
+                # Отсутствие объясняет себя само: полуребро запрещено, но и
+                # молчать нельзя — иначе «связи нет» и «связь не записали»
+                # снова станут неразличимы, а это ровно чинимый дефект.
+                self.log.log("run_identity_unavailable",
+                             {"run_id": _ctx.run_id, "missing": "trace_id"})
             try:
                 return self._run_inner(
                     user_question=user_question,
