@@ -219,7 +219,15 @@ def evaluate_completion_obligations(
 
     # ── intent ───────────────────────────────────────────────────────────
     # Object-based: a named path, or a turn-scoped file hint.
-    named = paths_mentioned(question)
+    #
+    # Читается из ТРЕБУЮЩЕЙ части запроса, как и в `core/completion_contract`,
+    # и ОДНОЙ функцией с ним: два судьи над вопросом «что здесь просят» уже
+    # расходились в этой системе, и второй экземпляр правила разошёлся бы
+    # снова. Замер 2026-08-10: «Do not modify core/loop.py» заводило здесь
+    # долг наблюдения за core/loop.py, и послушание запрету доходило до
+    # вердикта как `obligation_silently_missing`.
+    from core.completion_contract import demanding_text
+    named = paths_mentioned(demanding_text(question))
     if file_hint and str(file_hint).strip():
         named = tuple(dict.fromkeys(named + (str(file_hint).strip(),)))
     for path in named:
