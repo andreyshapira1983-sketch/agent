@@ -85,13 +85,13 @@ def test_a_different_subject_is_still_caught() -> None:
 
 
 def _episode(**kw) -> EpisodeRecord:
-    base = dict(
-        goal="g", question="q", outcome="success", summary="s",
-        full_answer=_OTHER_CONTRADICTION, completion_state="achieved",
-        verified_chunks=6, unverified_chunks=0, answer_quality_score=1.0,
-        tools_used=["shell_exec"], source_labels=["shell:git"],
-        used_procedure_ids=["proc_other"],
-    )
+    base = {
+        "goal": "g", "question": "q", "outcome": "success", "summary": "s",
+        "full_answer": _OTHER_CONTRADICTION, "completion_state": "achieved",
+        "verified_chunks": 6, "unverified_chunks": 0, "answer_quality_score": 1.0,
+        "tools_used": ["shell_exec"], "source_labels": ["shell:git"],
+        "used_procedure_ids": ["proc_other"],
+    }
     base.update(kw)
     return EpisodeRecord(**base)
 
@@ -150,7 +150,7 @@ def test_uppercase_marker_is_not_a_bypass() -> None:
     пишет вид только так. Если запись когда-нибудь сменит форму, этот тест
     покраснеет — и это именно то, чего от него хотят.
     """
-    from core.redaction import _replacement  # noqa: PLC0415 — форма у автора
+    from core.redaction import _replacement  # форма токена берётся у автора
 
     produced = _replacement("openai-key")
     decision = KnowledgeWritePolicy().decide(
