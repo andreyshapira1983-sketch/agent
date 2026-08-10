@@ -82,6 +82,10 @@ class AgentLoopResponseDeciders:
         last_source_ranking: Any
         last_confidence_vector: Any
         last_role_context: Any
+        # Заводит `core/loop.py` за ход, дописывает `core/loop_attempt.py`.
+        # Отсюда сюда кладётся `self_contradiction` — единственная дорога от
+        # рубежа принятия ответа к рубежу допуска в обучение.
+        _defect_signals: Any
 
         # Объявляем ВЫЗЫВАЕМЫМИ атрибутами: заглушка-функция с пустым телом
         # читается анализаторами как «функция без return», и каждый вызов
@@ -288,6 +292,13 @@ class AgentLoopResponseDeciders:
                     "low_evidence_truncation",
                     _enf.low_evidence_payload or _enf.to_log_payload(),
                 )
+            _stage = "bank_contradiction"
+            # Сигнал дефекта — единственная дорога от рубежа принятия ответа к
+            # рубежу обучения: `decide_usage_eligibility` читает его и не пускает
+            # самоопровергнувшийся ответ в опыт. Ставится по НАХОДКЕ, а не по
+            # исходу: более сильное действие могло забрать исход себе.
+            if getattr(_enf, "contradictions", ()):
+                self._defect_signals.append("self_contradiction")
             _stage = "set_body"
             if _enf.applied:
                 draft.set_body(_enf.answer, by="answer_enforcement")

@@ -120,6 +120,55 @@ _TESTS_PASS_RE = re.compile(
 )
 
 
+#: Классы затребованного, которые извлекатель РАСПОЗНАЁТ, но проверять не умеет.
+#: Каждый образец — заявление «эти слова однозначно просят вот это»; ложное
+#: заявление здесь не выдумывает обязательство (их по-прежнему строят только
+#: пути к файлам), а лишь помечает границу, и цена ошибки соответственно ниже.
+#: Латиница и кириллица порознь: оператор пишет и транслитом тоже.
+_UNSUPPORTED_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("report_sections", re.compile(
+        r"(отчита\w*|отчёт\w*|отчет\w*|доложи)\s+(отдельно|по\s+раздел|разделами)"
+        r"|(report|answer)\s+separately"
+        r"|(в\s+конце|at\s+the\s+end)\s+(отчита|report)"
+        r"|(перечисли|определи|opredeli)\s*:"
+        r"|report\s+separately",
+        re.IGNORECASE)),
+    ("experiment", re.compile(
+        r"(проведи|выполни|поставь)\s+(\w+\s+){0,3}(эксперимент|опыт|замер)"
+        r"|(perform|run|conduct)\s+(at\s+least\s+one\s+)?(\w+\s+){0,3}experiment"
+        r"|challenge-response",
+        re.IGNORECASE)),
+    ("prohibition", re.compile(
+        r"\b(не\s+(исправляй|меняй|трогай|используй|спрашивай|модифицируй))"
+        r"|\bne\s+(ispravlyay|menyay|trogay|ispolzuy)"
+        r"|\bdo\s+not\s+(use|modify|change|ask|interpret|merely|stop)"
+        r"|\bmust\s+not\s+use",
+        re.IGNORECASE)),
+    ("verification_requirement", re.compile(
+        r"(докажи|обоснуй|подтверди)\s"
+        r"|(prove|substantiate|justify)\s+(that|your|the)"
+        r"|fail-before"
+        r"|(попробуй|try)\s+(опроверг|to\s+falsify)",
+        re.IGNORECASE)),
+)
+
+
+@dataclass(frozen=True)
+class UnsupportedDeliverable:
+    """Затребованное, которое извлекатель видит и НЕ умеет проверять.
+
+    Существует ради одного различия: пустой список обязательств раньше означал
+    и «запрос ничего не должен», и «запрошенное я представить не умею».
+    Потребитель читал второе как первое (живой случай 2026-08-10).
+    """
+
+    kind: str
+    evidence: str
+
+    def to_log_payload(self) -> dict[str, Any]:
+        return {"kind": self.kind, "evidence": self.evidence}
+
+
 @dataclass(frozen=True)
 class ContractObligation:
     """One thing that must be true after the run, and how that is checked."""
@@ -144,6 +193,17 @@ class CompletionContract:
 
     obligations: tuple[ContractObligation, ...] = ()
     ambiguities: tuple[str, ...] = ()
+    unsupported_deliverables: tuple[UnsupportedDeliverable, ...] = ()
+
+    @property
+    def coverage(self) -> str:
+        """`complete`, пока извлекатель не встретил ничего вне своей области.
+
+        Отвечает на вопрос, который раньше задать было негде: «этот ноль —
+        про запрос или про меня?». Потребитель, увидевший `partial`, знает,
+        что отсутствие обязательств не означает отсутствия долга.
+        """
+        return "partial" if self.unsupported_deliverables else "complete"
 
     @property
     def needs_clarification(self) -> bool:
@@ -159,6 +219,10 @@ class CompletionContract:
             "obligations": [o.to_log_payload() for o in self.obligations],
             "ambiguities": list(self.ambiguities),
             "needs_clarification": self.needs_clarification,
+            "unsupported_deliverables": [
+                u.to_log_payload() for u in self.unsupported_deliverables
+            ],
+            "coverage": self.coverage,
         }
 
 
@@ -284,7 +348,25 @@ def derive_completion_contract(
     return CompletionContract(
         obligations=tuple(obligations),
         ambiguities=tuple(ambiguities),
+        unsupported_deliverables=_unsupported_in(text),
     )
+
+
+def _unsupported_in(text: str) -> tuple[UnsupportedDeliverable, ...]:
+    """Затребованное, которое видно в тексте и непроверяемо этим модулем.
+
+    Возвращает по одной записи на класс, с ЦИТАТОЙ из запроса: запись без
+    улики недоказуема, а потребителю нужно не «где-то там просили отчёт», а
+    место, по которому он это проверит сам.
+    """
+    found: list[UnsupportedDeliverable] = []
+    for kind, pattern in _UNSUPPORTED_PATTERNS:
+        match = pattern.search(text)
+        if match is not None:
+            found.append(UnsupportedDeliverable(
+                kind=kind, evidence=match.group(0).strip()
+            ))
+    return tuple(found)
 
 
 #: Only an explicit write proves a file deliverable. `shell_exec` was here in
