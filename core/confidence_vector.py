@@ -203,19 +203,71 @@ def relevance_score(question: str | None, answer: str | None) -> float:
     return max(0.0, min(1.0, coverage))
 
 
+def _script_of(tokens: Sequence[str]) -> str:
+    """Dominant writing system of a token list: ``latin``, ``cyrillic`` or ``none``.
+
+    Only letters vote. Digits, punctuation and code identifiers are shared by
+    both sides and would blur the distinction this exists to draw.
+    """
+    latin = cyrillic = 0
+    for token in tokens:
+        for ch in token:
+            if "a" <= ch.lower() <= "z":
+                latin += 1
+            elif "а" <= ch.lower() <= "я" or ch.lower() == "ё":
+                cyrillic += 1
+    if latin == 0 and cyrillic == 0:
+        return "none"
+    return "latin" if latin >= cyrillic else "cyrillic"
+
+
+def relevance_applicable(question: str | None, answer: str | None) -> bool:
+    """Whether word coverage can mean "the answer addressed the question".
+
+    MEASURED 2026-08-10: the same Russian answer scored 0.009 against an English
+    question and 0.421 against the same question in Russian. The measurement did
+    not change its mind about the answer — it changed alphabets. The operator
+    writes in Latin script and transliteration and reads Cyrillic answers, so
+    the low score was not a finding about the answer, it was a finding about the
+    keyboard, and it was being reported as the former.
+
+    Coverage counts shared word forms. Between writing systems there are almost
+    none, so the number is not a low relevance — it is no measurement at all,
+    and the honest report of a measurement that did not happen is that it did
+    not happen.
+    """
+    q_script = _script_of(_tokenise(question or ""))
+    a_script = _script_of(_tokenise(answer or ""))
+    if q_script == "none" or a_script == "none":
+        return False
+    return q_script == a_script
+
+
 @dataclass(frozen=True)
 class ConfidenceVector:
-    """Three-axis confidence diagnosis plus a weighted overall score."""
+    """Three-axis confidence diagnosis plus a weighted overall score.
+
+    ``relevance_score`` is ``None`` exactly when ``relevance_applicable`` is
+    False. The pair is deliberately not collapsed into a single number: a
+    consumer that sees 0.0 cannot tell "the answer missed the question" from
+    "the question and the answer are written in different alphabets", and one
+    of those is an accusation while the other is a shrug.
+    """
     evidence_score: float
     coherence_score: float
-    relevance_score: float
+    relevance_score: float | None
     overall_confidence: float
+    relevance_applicable: bool = True
 
-    def to_log_payload(self) -> dict[str, float]:
+    def to_log_payload(self) -> dict[str, Any]:
         return {
             "evidence_score": round(self.evidence_score, 3),
             "coherence_score": round(self.coherence_score, 3),
-            "relevance_score": round(self.relevance_score, 3),
+            "relevance_score": (
+                None if self.relevance_score is None
+                else round(self.relevance_score, 3)
+            ),
+            "relevance_applicable": self.relevance_applicable,
             "overall_confidence": round(self.overall_confidence, 3),
         }
 
@@ -246,14 +298,24 @@ def compute_vector(
 ) -> ConfidenceVector:
     e = evidence_score(report)
     c = coherence_score(disagreements)
-    r = relevance_score(question, answer)
-    overall = _weighted_geometric_mean(
-        [e, c, r],
-        [_W_EVIDENCE, _W_COHERENCE, _W_RELEVANCE],
-    )
+    applicable = relevance_applicable(question, answer)
+    r = relevance_score(question, answer) if applicable else None
+    if applicable:
+        overall = _weighted_geometric_mean(
+            [e, c, r or 0.0],
+            [_W_EVIDENCE, _W_COHERENCE, _W_RELEVANCE],
+        )
+    else:
+        # Dropped, not defaulted. Substituting 0.5 would invent an observation
+        # and substituting 0.0 would let an unmeasured axis punish the answer;
+        # the remaining axes are renormalised so they still mean what they say.
+        overall = _weighted_geometric_mean(
+            [e, c], [_W_EVIDENCE, _W_COHERENCE]
+        )
     return ConfidenceVector(
         evidence_score=e,
         coherence_score=c,
         relevance_score=r,
         overall_confidence=overall,
+        relevance_applicable=applicable,
     )
