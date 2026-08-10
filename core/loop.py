@@ -31,7 +31,7 @@ from core.file_request_intent import (
 )
 from core.ids import new_id
 from core.replan import ReplanTrigger
-from core.run_context import run_scope
+from core.run_context import identity_provenance, run_scope
 
 if TYPE_CHECKING:
     from core.approval_inbox import ApprovalInbox
@@ -211,7 +211,15 @@ class AgentLoop(
         identity is bound before any cycle work and released even if the cycle
         raises. The body lives in `_run_inner`.
         """
-        with run_scope(new_id("run"), task_id):
+        with run_scope(new_id("run"), task_id) as _ctx:
+            # Ребро происхождения ПЕРВЫМ событием прогона: пока связи не было,
+            # система не могла сказать, какое исполнение чей журнал (2026-08-10).
+            self.log.log("run_identity", identity_provenance(
+                trace_id=str(getattr(self.log, "trace_id", "")),
+                run_id=_ctx.run_id,
+                task_id=_ctx.task_id,
+                session_id=getattr(self.memory, "session_id", None),
+            ))
             try:
                 return self._run_inner(
                     user_question=user_question,

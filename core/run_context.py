@@ -16,6 +16,12 @@ stays correct if the serialising lock in `api/server.py` is ever removed.
 Deliberately NOT here: `TraceLogger.trace_id`. That is created once per agent
 in `build_agent`, so it identifies a *session*, not a run — every task drained
 by one autonomous agent shares it.
+
+That distinction was written down here and NOWHERE ELSE, which is how it failed
+on 2026-08-10: asked what was executing, the agent held `run_id` from its model
+events and `trace_id` from its log and could not connect them, because no event
+ever stated the connection. `identity_provenance` is that statement — the edge
+a consumer can read instead of inferring identity from a file name.
 """
 from __future__ import annotations
 
@@ -41,6 +47,32 @@ _RUN_CONTEXT: ContextVar[RunContext | None] = ContextVar(
 def current_run() -> RunContext | None:
     """The active run's identity, or None outside any run."""
     return _RUN_CONTEXT.get()
+
+
+def identity_provenance(
+    *,
+    trace_id: str,
+    run_id: str,
+    task_id: str | None,
+    session_id: str | None,
+) -> dict[str, str | None]:
+    """The provenance edge binding one run to its session, log and memory.
+
+    Raises rather than emitting a half-empty edge: a record naming only one
+    side reads as a connection while proving nothing, which is worse than an
+    absent record because a consumer would trust it.
+    """
+    if not trace_id or not run_id:
+        raise ValueError(
+            "an identity edge needs both sides: "
+            f"trace_id={trace_id!r} run_id={run_id!r}"
+        )
+    return {
+        "trace_id": trace_id,
+        "run_id": run_id,
+        "task_id": task_id,
+        "session_id": session_id,
+    }
 
 
 @contextmanager

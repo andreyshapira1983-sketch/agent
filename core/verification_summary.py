@@ -240,7 +240,12 @@ def build_verification_summary(
             f"{TAIL_PREFIX} подтверждено {verified} из {examined} утверждений; "
             f"без внешнего подтверждения: {gap_total}; уверенность: {word}."
         )
+        # Применимость спрашивается ДО значения: между разными системами письма
+        # покрытие слов не измеряет соответствие задаче, и низкое число там —
+        # факт о клавиатуре, а не об ответе (замер 2026-08-10).
         _relevance = getattr(vector, "relevance_score", None)
+        if not getattr(vector, "relevance_applicable", True):
+            _relevance = None
         if _relevance is not None and _relevance < _LOW_RELEVANCE:
             tail += (
                 f" Соответствие вопросу: {_relevance:.2f} — ответ может отвечать "

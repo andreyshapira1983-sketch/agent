@@ -191,29 +191,55 @@ class TestComputeVector:
         assert v.overall_confidence < 0.2
 
     def test_irrelevant_drops_overall(self):
+        # ФИКСТУРА ИСПРАВЛЕНА 2026-08-10. Прежняя пара («столица франции» /
+        # "Apples bananas pears") была одновременно НЕ ПО ТЕМЕ и НАПИСАНА ДРУГИМ
+        # АЛФАВИТОМ, а старая ось этих случаев не различала — ровно тот дефект,
+        # что дал 0.009 живому ответу по существу. Намерение теста сохранено,
+        # а второй признак убран, чтобы он проверял именно то, что называет.
+        v = compute_vector(
+            report=_Report(total_chunks=4, verified_chunks=4),
+            disagreements=[],
+            question="столица франции",
+            answer="Яблоки бананы груши арбуз клубника.",
+        )
+        assert v.relevance_applicable
+        assert v.relevance_score == 0.0
+        # Even with verified evidence + coherent subsystems, zero
+        # relevance pulls overall down (weakest-link).
+        assert v.overall_confidence < 0.5
+
+    def test_a_cross_script_pair_is_not_scored_as_irrelevant(self):
+        """Второй случай прежней фикстуры, теперь названный своим именем."""
         v = compute_vector(
             report=_Report(total_chunks=4, verified_chunks=4),
             disagreements=[],
             question="столица франции",
             answer="Apples bananas pears watermelon strawberry.",
         )
-        assert v.relevance_score == 0.0
-        # Even with verified evidence + coherent subsystems, zero
-        # relevance pulls overall down (weakest-link).
-        assert v.overall_confidence < 0.5
+        assert not v.relevance_applicable
+        assert v.relevance_score is None
 
     def test_payload_is_jsonable(self):
         v = compute_vector(
             report=_Report(total_chunks=2, verified_chunks=2),
             disagreements=[],
-            question="x",
-            answer="x",
+            # Было "x"/"x": короче трёх знаков, токенизатор их выбрасывает, и
+            # пара оказывалась ПУСТОЙ с обеих сторон. Прежняя ось возвращала там
+            # 0.5 — выдуманное наблюдение; теперь это честное «не измеряли», и
+            # фикстуре нужно настоящее содержание, чтобы проверять форму записи.
+            question="столица франции",
+            answer="Столица франции — Париж.",
         )
         payload = v.to_log_payload()
         assert set(payload.keys()) == {
             "evidence_score", "coherence_score",
-            "relevance_score", "overall_confidence",
+            "relevance_score", "relevance_applicable", "overall_confidence",
         }
-        for v_ in payload.values():
+        # `relevance_applicable` — булево, и оно обязано быть в журнале рядом со
+        # значением: без него «0.0» и «не измеряли» снова станут неразличимы.
+        assert payload["relevance_applicable"] is True
+        for key, v_ in payload.items():
+            if key == "relevance_applicable":
+                continue
             assert isinstance(v_, float)
             assert 0.0 <= v_ <= 1.0
