@@ -221,6 +221,7 @@ class AgentLoopResponseDeciders:
         user_question: str,
         local_critique_active: bool,
         verifier_failure: bool,
+        completion_contract: Any = None,
     ) -> ResponseDraft:
         """The structural layer, and its failure path.
 
@@ -283,6 +284,7 @@ class AgentLoopResponseDeciders:
                 evidence_expected=_evidence_expected,
                 local_critique_active=local_critique_active,
                 verifier_failure=verifier_failure,
+                contract=completion_contract,
             )
             _stage = "log_enforcement"
             self.log.log("answer_enforcement", _enf.to_log_payload())
@@ -322,6 +324,9 @@ class AgentLoopResponseDeciders:
         replan_exhausted: bool,
         local_critique_active: bool,
         verifier_failure: bool,
+        # Параметром, не полем: состоянию с «completion» в имени запрещено
+        # переживать ход (`tests/test_completion_marker.py`), и запрет верен.
+        completion_contract: Any = None,
     ) -> ResponseDraft:
         """Черновик ответа после всех решателей, до композиции.
 

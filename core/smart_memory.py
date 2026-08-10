@@ -1112,6 +1112,12 @@ def procedure_credit_allowed(episode: EpisodeRecord) -> bool:
     One predicate, three callers — creation, the counter, and the feedback
     verdict — so those cannot drift into crediting on different grounds.
     """
+    # Третья ось, и она общая с допуском эпизода в использование. Прежде здесь
+    # стояли только две первые, и 2026-08-10 самоопровергнувшийся прогон,
+    # которому допуск уже отказали, тем же ходом повысил стояние активной
+    # процедуры. Предикат один на оба рубежа, чтобы они не разошлись снова.
+    if _answer_disqualified(episode):
+        return False
     return bool(
         effective_completion(episode) == "achieved"
         and episode.outcome == "success"
@@ -1390,9 +1396,25 @@ def effective_completion(episode: EpisodeRecord) -> CompletionState:
     return state if state in _COMPLETION_STATES else "unknown"  # type: ignore[return-value]
 
 
-#: Сигнал дефекта, которым цикл помечает ответ, опровергнувший сам себя.
-#: Ставит `core/loop_response_deciders.py` по находке `core/answer_contradiction`.
-_SELF_CONTRADICTION_SIGNAL = "self_contradiction"
+#: Сигналы дефекта, при которых ответ НЕЛЬЗЯ обращать в опыт — ни как эпизод,
+#: пригодный к использованию, ни как заслугу процедуры. Один список на оба
+#: рубежа сознательно: 2026-08-10 они разошлись, и самоопровергнувшийся прогон,
+#: помеченный `usage_eligible=False`, тем же ходом поднял счётчик успехов
+#: единственной активной процедуры. Порознь эти предикаты уже расходились;
+#: общее имя — единственное, что мешает им разойтись снова.
+#:
+#: Сюда попадает только то, что говорит о ЛОЖНОСТИ ответа. Скажем,
+#: `reasoning_action_mismatch` — расхождение плана и рассуждения, чужая ошибка
+#: для процедуры, и MIR-057 уже запретил дебетовать её за слабые цитаты
+#: синтезатора. Список растёт по доказанному вреду, не по подозрению.
+DISQUALIFYING_DEFECT_SIGNALS: frozenset[str] = frozenset({"self_contradiction"})
+
+
+def _answer_disqualified(episode: EpisodeRecord) -> bool:
+    """Опровергал ли этот ответ сам себя — единый вопрос для обоих рубежей."""
+    return bool(
+        DISQUALIFYING_DEFECT_SIGNALS & set(episode.defect_signals or ())
+    )
 
 
 def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
@@ -1435,7 +1457,7 @@ def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
     # completion achieved, verified_chunks 14, качество 1.0 — потому что
     # верификация меряет разрешимость ссылки, а не истинность референта
     # (MIR-060). Ложь попала в обучение не в обход правил, а по ним.
-    if _SELF_CONTRADICTION_SIGNAL in (episode.defect_signals or ()):
+    if _answer_disqualified(episode):
         return False
     if "lesson" in episode.tags:
         return True
