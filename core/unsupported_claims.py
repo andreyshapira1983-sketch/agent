@@ -38,9 +38,10 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
+from core.answer_contradiction import contradicted_claims
 from core.low_evidence_policy import evaluate_low_evidence_policy
 
 FEATURE_FLAG = "enforce_unsupported_world_claims"
@@ -55,6 +56,7 @@ EnforcementOutcome = Literal[
     "citation_parse_failure",
     "local_critique_preserved",
     "unsupported_world_claims",
+    "self_contradicted",
 ]
 
 # Categorical / absolute phrasing that should not ship as bare world fact
@@ -90,6 +92,9 @@ class EnforcementResult:
     mode: str = "off"
     notes: tuple[str, ...] = field(default_factory=tuple)
     low_evidence_payload: dict[str, Any] | None = None
+    #: Предметы, утверждённые и снятые в одном ответе. Отдельным полем, а не
+    #: строкой в `notes`: потребитель обучения обязан читать их машинно.
+    contradictions: tuple[Any, ...] = field(default_factory=tuple)
 
     def to_log_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -102,6 +107,10 @@ class EnforcementResult:
         }
         if self.low_evidence_payload is not None:
             payload["low_evidence"] = self.low_evidence_payload
+        if self.contradictions:
+            payload["contradictions"] = [
+                c.to_log_payload() for c in self.contradictions
+            ]
         return payload
 
 
@@ -194,6 +203,74 @@ def _count_categorical_unsupported(report: Any) -> int:
 
 
 def apply_answer_enforcement(
+    *,
+    answer: str,
+    report: Any | None,
+    question: str = "",
+    evidence_expected: bool = True,
+    local_critique_active: bool = False,
+    verifier_failure: bool = False,
+    mode: str | None = None,
+) -> EnforcementResult:
+    """Рубеж принятия ответа: прежние исходы плюс очная ставка разделов.
+
+    Противоречие ищется ОДИН раз и прикладывается к любому исходу — иначе оно
+    терялось бы всякий раз, когда более сильное правило (усечение по нехватке
+    улик, мягкий отказ верификатора) забирало исход себе. Собственным исходом
+    `self_contradicted` оно становится только там, где иначе стояло бы `none`:
+    более сильное действие уже принято, и переименовывать его нечестно.
+
+    Не зависит от флага раскатки: «утверждено и снято в одном ответе» — это
+    свойство текста, а не эвристика, которую выкатывают постепенно.
+    """
+    found = ()
+    try:
+        found = contradicted_claims(answer)
+    except Exception:  # обнаружитель не имеет права уронить ход
+        found = ()
+    result = _enforce_without_contradictions(
+        answer=answer,
+        report=report,
+        question=question,
+        evidence_expected=evidence_expected,
+        local_critique_active=local_critique_active,
+        verifier_failure=verifier_failure,
+        mode=mode,
+    )
+    if not found:
+        return result
+    if result.outcome != "none":
+        return replace(result, contradictions=found)
+
+    locale = "ru" if (_looks_russian(question) or _looks_russian(answer)) else "en"
+    note = _contradiction_note(found, locale)
+    return replace(
+        result,
+        outcome="self_contradicted",
+        answer=result.answer + note,
+        applied=True,
+        would_change_answer=True,
+        reason=f"asserted_and_denied_in_one_answer={len(found)}",
+        contradictions=found,
+    )
+
+
+def _contradiction_note(found: tuple[Any, ...], locale: str) -> str:
+    """Называет предмет спора. Ответ не удаляется: оператору нужны обе стороны."""
+    subjects = ", ".join(c.subject for c in found[:3])
+    if locale == "ru":
+        return (
+            f"\n\n⚠️ Противоречие внутри ответа: {subjects} — "
+            "утверждено в разделе фактов и объявлено недоказанным в разделе "
+            "непроверенного. Утверждение не принято как факт."
+        )
+    return (
+        f"\n\n⚠️ Self-contradiction: {subjects} — asserted as fact and "
+        "declared unproven in the same answer. Not accepted as established."
+    )
+
+
+def _enforce_without_contradictions(
     *,
     answer: str,
     report: Any | None,

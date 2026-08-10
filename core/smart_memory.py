@@ -1390,6 +1390,11 @@ def effective_completion(episode: EpisodeRecord) -> CompletionState:
     return state if state in _COMPLETION_STATES else "unknown"  # type: ignore[return-value]
 
 
+#: Сигнал дефекта, которым цикл помечает ответ, опровергнувший сам себя.
+#: Ставит `core/loop_response_deciders.py` по находке `core/answer_contradiction`.
+_SELF_CONTRADICTION_SIGNAL = "self_contradiction"
+
+
 def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
     """Decide whether a freshly banked episode may steer later answers.
 
@@ -1424,6 +1429,14 @@ def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
     No threshold constant appears here on purpose — every rule reads a fact
     the verifier measured, so there is no number to tune or to justify.
     """
+    # ПЕРЕД всеми остальными осями, включая исключение для урока: ответ,
+    # который сам себя опроверг, не становится опытом ни на каком основании.
+    # 2026-08-10 такой ответ прошёл КАЖДУЮ проверку ниже — outcome success,
+    # completion achieved, verified_chunks 14, качество 1.0 — потому что
+    # верификация меряет разрешимость ссылки, а не истинность референта
+    # (MIR-060). Ложь попала в обучение не в обход правил, а по ним.
+    if _SELF_CONTRADICTION_SIGNAL in (episode.defect_signals or ()):
+        return False
     if "lesson" in episode.tags:
         return True
     if episode.outcome != "success":
