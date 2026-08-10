@@ -261,13 +261,21 @@ def derive_completion_contract(
     the caller to raise with the operator.
     """
     text = question or ""
-    tokens = tuple(normalize_text(text).split())
+    # Долги читаются ТОЛЬКО из требующих предложений. Запрещающие вырезаются
+    # первыми: 2026-08-10 измерено шесть из шести, где `Do not create X` давало
+    # долг «X обязан существовать», а `Не исправляй Y` — «Y обязан измениться».
+    # Единственное обязательство того живого прогона (`tests_green`) пришло из
+    # фразы «…merely to make the test pass», стоявшей внутри запрета. Запрет при
+    # этом никуда не девается — он остаётся в `unsupported_deliverables`, и
+    # читается по ПОЛНОМУ тексту, а не по этому усечению.
+    demanding = demanding_text(text)
+    tokens = tuple(normalize_text(demanding).split())
     action = _action_for(tokens)
 
     obligations: list[ContractObligation] = []
     ambiguities: list[str] = []
 
-    named = list(paths_mentioned(text))
+    named = list(paths_mentioned(demanding))
 
     # A request that both reads and changes, over MORE THAN ONE path, cannot
     # be attributed: "прочитай A.py и исправь B.py" would otherwise owe a
@@ -337,7 +345,7 @@ def derive_completion_contract(
     # limit is recorded in MIR-067 and is a derivation problem, not a rule to
     # bolt on here.
 
-    if _TESTS_PASS_RE.search(text):
+    if _TESTS_PASS_RE.search(demanding):
         obligations.append(ContractObligation(
             deliverable="tests_green",
             target="",
@@ -350,6 +358,43 @@ def derive_completion_contract(
         ambiguities=tuple(ambiguities),
         unsupported_deliverables=_unsupported_in(text),
     )
+
+
+#: Запрещающее предложение. Маркер обязан стоять ПЕРЕД глаголом действия,
+#: иначе «создай файл, если он не существует» прочиталось бы как запрет.
+#: Латиница, кириллица и транслит порознь: оператор пишет всеми тремя.
+_PROHIBITING_CLAUSE_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:do\s+not|don't|never)"
+    r"|(?:не|ни)\s+(?:\w+\s+){0,2}?(?:созда|напиш|измен|исправ|почин|трог|"
+    r"меняй|модифиц|удал|добав|коммить|запуска|обновля|правь)"
+    r"|(?:ne)\s+(?:\w+\s+){0,2}?(?:sozda|napish|izmen|isprav|pochin|trog|menyay)"
+    r")",
+    re.IGNORECASE,
+)
+
+#: Границы предложений и однородных частей. Точка с запятой и тире разделяют
+#: «сделай A; не трогай B» — без них запрет утащил бы за собой и требование.
+_CLAUSE_SPLIT_RE = re.compile(r"(?:(?<=[.!?;\n])\s+|\s+—\s+)")
+
+
+def demanding_text(text: str) -> str:
+    """Текст без запрещающих предложений — из него и читаются долги.
+
+    Отрицание не входило в область видимости извлекателя, и это давало не
+    неполноту, а ИНВЕРСИЮ: запрет становился ровно тем долгом, который
+    запрещает. Последствие поведенческое — послушание запрету доходило до
+    `assemble_completion_verdict` как `obligation_silently_missing` и понижало
+    вердикт прогона.
+
+    Режется по предложениям, а не по всему тексту: «Создай A. Не трогай B.»
+    обязано сохранить долг по A.
+    """
+    kept = [
+        part for part in _CLAUSE_SPLIT_RE.split(text or "")
+        if part.strip() and not _PROHIBITING_CLAUSE_RE.match(part)
+    ]
+    return " ".join(kept)
 
 
 def _unsupported_in(text: str) -> tuple[UnsupportedDeliverable, ...]:
