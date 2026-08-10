@@ -347,6 +347,12 @@ def absent_literal_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | N
     """
     if prefix in {"user", "memory", "general-knowledge"}:
         return None
+    # Утверждение об отсутствии судит ПЯТЫЙ гейт, и по обратному правилу:
+    # там литерал в улике отсутствует именно потому, что его нет. Проверять
+    # его присутствием значило бы демотировать верное утверждение — ложное
+    # срабатывание, внесённое вместе с этим гейтом 2026-08-10.
+    if asserts_absence(chunk_text):
+        return None
     absent = literals_absent_from_excerpt(
         chunk_text, ev.excerpt or "", ev.source_id or ""
     )
@@ -358,5 +364,69 @@ def absent_literal_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | N
         expected=", ".join(sorted(absent)[:3]),
         actual="",
         explanation="утверждение называет то, чего нет в цитируемой улике",
+        computed_from=ev.source_id or "",
+    )
+
+
+#: Утверждение ОБ ОТСУТСТВИИ: «нет X», «X отсутствует», «не найдено X»,
+#: «not implemented», «no X exists». Маркер ищется по всему куску, а не в
+#: начале: отрицание в русском и английском стоит где угодно.
+_ABSENCE_ASSERTION_RE = re.compile(
+    r"(?:\bотсутству\w*|\bне\s+(?:найден\w*|реализован\w*|существу\w*|"
+    r"содерж\w*|определ\w*)|\bнет\b|\bни\s+одного\b"
+    r"|\bno\s+(?:\S+\s+){1,3}(?:exists?|found|implemented)|\bnot\s+(?:implemented|"
+    r"found|present|defined|exist)|\bdoes\s+not\s+(?:exist|contain|define)"
+    r"|\babsent\b|\bmissing\b)",
+    re.IGNORECASE,
+)
+
+#: Предмет утверждения об отсутствии: то, что названо ЯВНО — в кавычках,
+#: обратных апострофах, либо отличительным литералом. Прозаический предмет
+#: («нет обработки ошибок») сюда не попадает намеренно: это суждение о смысле,
+#: и ловить его сверкой подстрок значило бы выдумать судью.
+_NAMED_SUBJECT_RE = re.compile(r"[`\"']([A-Za-z_][A-Za-z0-9_.]{2,})[`\"']")
+
+
+def absence_subjects(claim: str) -> set[str]:
+    """Явно названные предметы утверждения об отсутствии."""
+    named = {m.group(1).lower() for m in _NAMED_SUBJECT_RE.finditer(claim or "")}
+    return named | salient_literals(_CITATION_TOKEN_RE.sub(" ", claim or ""))
+
+
+def asserts_absence(claim: str) -> bool:
+    """Утверждает ли кусок, что чего-то НЕТ."""
+    return bool(_ABSENCE_ASSERTION_RE.search(claim or ""))
+
+
+def absence_refuted_by_excerpt(claim: str, excerpt: str) -> bool:
+    """Опровергает ли цитируемая улика утверждение об отсутствии.
+
+    ОДНОСТОРОННЕ. Присутствие предмета в выдержке опровергает «его нет».
+    Отсутствие в выдержке не доказывает ничего: выдержка усечена по
+    построению, и трактовать её как полноту — ровно та ошибка, ради которой
+    гейт заводится («неполный поиск» выдан за «доказательство отсутствия»,
+    живой случай 2026-08-10).
+    """
+    if not claim or not excerpt or not asserts_absence(claim):
+        return False
+    body = excerpt.lower()
+    return any(subject in body for subject in absence_subjects(claim))
+
+
+def absence_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
+    """Причина демоции, если улика содержит то, чего утверждение не нашло."""
+    if prefix in {"user", "memory", "general-knowledge"}:
+        return None
+    if not absence_refuted_by_excerpt(chunk_text, ev.excerpt or ""):
+        return None
+    present = sorted(
+        s for s in absence_subjects(chunk_text) if s in (ev.excerpt or "").lower()
+    )
+    from .verifier_models import ClaimReason
+    return ClaimReason(
+        code="absence_refuted_by_evidence",
+        expected="",
+        actual=", ".join(present[:3]),
+        explanation="утверждение об отсутствии опровергнуто собственной уликой",
         computed_from=ev.source_id or "",
     )
