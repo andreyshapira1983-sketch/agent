@@ -59,6 +59,9 @@ class AgentLoopMemoryWrite:
         procedural_store: Any
         consolidation_store: Any
         write_policy: Any
+        # Берётся у `loop_sensor`: сбор аномалий — наблюдатель, и его
+        # сбой обязан попасть в журнал, а не в тишину.
+        _sensor_failed: Any
 
     def _unattended_run(self) -> bool:
         """True when nobody is at the keyboard for this run.
@@ -146,6 +149,30 @@ class AgentLoopMemoryWrite:
             self._audit_froze_agent_auto = False
             self.log.log("audit_read_only_disabled", {})
         return self.audit_read_only
+
+    def _log_causal_observation(self, episode: Any) -> None:
+        """Наблюдаемая аномалия — в журнал, и на этом машина останавливается.
+
+        Первая из трёх сущностей `core/causal_lesson.py`: что произошло, какие
+        детекторы сработали, на что можно опереться. Причина, нарушенный
+        инвариант и обобщаемое правило сюда НЕ пишутся — вывести их из сигнала
+        нельзя, и попытка это сделать была отвергнута оператором 2026-08-11
+        как обучение на именах ошибок вместо их причин.
+
+        В хранилище ничего не кладётся: кандидат не память, а запись о том, что
+        стоит расследовать. Тег `lesson` здесь не появляется ни при каких
+        условиях.
+        """
+        try:
+            from core.causal_lesson import observation_from_episode
+            candidate = observation_from_episode(
+                episode, trace_id=str(getattr(self.log, "trace_id", "") or "")
+            )
+            if candidate is None:
+                return
+            self.log.log("causal_observation", candidate.to_log_payload())
+        except Exception as exc:  # наблюдательный сенсор: сбой в журнал
+            self._sensor_failed("causal_observation", exc)
 
     def _record_experience_memory(
         self,
@@ -265,6 +292,8 @@ class AgentLoopMemoryWrite:
                 # save_once, not save: a run that reaches this site twice must
                 # bank one episode, not two. Bounded by the store's FIFO window.
                 written = self.episodic_store.save_once(episode)
+                if written:
+                    self._log_causal_observation(episode)
                 if not written:
                     self.log.log(
                         "episodic_memory_write_skipped",

@@ -97,6 +97,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "self_task_producer", "self_task_builder",
         "writer_completion",
         "self_improvement_issues", "incremental_splitter", "dependency_map",
+        "causal_lesson",
         "learning_planner", "value_review", "proposal_value_gate", "release_hygiene",
     ]),
     ("Model Management (§6 / §12)", "Model discovery, routing, usage accounting.", [
