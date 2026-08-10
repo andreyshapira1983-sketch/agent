@@ -85,7 +85,7 @@
           "uses": "format_replan_context(): whole list becomes planner prompt text"
         },
         {
-          "site": "core/loop_synthesis.py:235",
+          "site": "core/loop_synthesis.py:277",
           "role": "control",
           "uses": "<failure_context> block in the synthesis prompt",
           "gated_by": "core/loop_synthesis.py:637 — receives None unless st.replan_exhausted"

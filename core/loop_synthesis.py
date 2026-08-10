@@ -58,6 +58,7 @@ from core.referent_resolver import (
     is_show_only_directive,
 )
 from core.replan import ReplanTrigger
+from core.runtime_self import runtime_self_block
 from core.smart_memory import _COMPLETION_DECLARATIONS
 from core.synth_resilience import (
     SynthAttempt,
@@ -65,6 +66,19 @@ from core.synth_resilience import (
     run_synthesizer_ladder,
 )
 from core.user_profile import profile_to_prompt_block
+
+
+def _organ_map(agent: object) -> dict[str, object]:
+    """Органы, о наличии которых агент вправе сообщить как о факте."""
+    names = (
+        "memory", "persistent_store", "episodic_store", "procedural_store",
+        "source_registry_store", "user_profile_store", "approval_provider",
+    )
+    out: dict[str, object] = {}
+    for name in names:
+        key = "working_memory" if name == "memory" else name
+        out[key] = getattr(agent, name, None)
+    return out
 
 
 @dataclass
@@ -118,6 +132,9 @@ class AgentLoopSynthesis:
         last_provenance: Any
         last_role_context: Any
         last_user_profile: Any
+        # Читается только ради `session_id` в блоке фактов о рантайме: агент
+        # обязан уметь назвать свой сеанс, а не выводить его из подсказки.
+        memory: Any
         memory_record_lines: Any
         _synthesis_expects_contract_headers: Any
 
@@ -155,6 +172,26 @@ class AgentLoopSynthesis:
             # about `_sensor_failed` belongs to queue item A7, not here.
             self._sensor_failed("synthesis_contract_registry", exc)
             return SYSTEM_ANSWER
+
+    def _runtime_self_prompt_block(self) -> str:
+        """Блок фактов о себе, или пусто — сенсор не имеет права ронять ход."""
+        try:
+            from core.run_context import current_run
+            ctx = current_run()
+            block = runtime_self_block(
+                trace_id=str(getattr(self.log, "trace_id", "") or ""),
+                run_id=str(getattr(ctx, "run_id", "") or ""),
+                session_id=getattr(self.memory, "session_id", None),
+                stores=_organ_map(self),
+                durable_writes=getattr(self, "durable_writes", ()) or (),
+            )
+        except Exception as exc:  # наблюдательный сенсор: сбой журналируется
+            # Молча вернуть пустоту здесь — ровно тот порок, который храповик
+            # молчания и сторожит: оператор, читающий журнал, не узнал бы, что
+            # агент не смог назвать собственный состав.
+            self._sensor_failed("runtime_self", exc)
+            return ""
+        return f"{block}\n\n" if block else ""
 
     def _synthesize(
         self,
@@ -205,6 +242,11 @@ class AgentLoopSynthesis:
                 if self.last_user_profile is not None
                 else ""
             )
+            # Рядом с профилем ОПЕРАТОРА — проверяемые факты о СЕБЕ. До этого
+            # синтез знал, кто спрашивает, и не знал, что подключено у него
+            # самого; «кто ты» приходилось брать из строки подсказки
+            # (`SYSTEM_ANSWER`), а не из измерения. Персону блок не объявляет.
+            profile_block += self._runtime_self_prompt_block()
             # Layer 5 — inject active assumptions into synthesizer.
             _assumptions_src = getattr(self, "_run_assumptions_current", None)
             assumptions_block = (

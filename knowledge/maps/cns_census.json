@@ -145,6 +145,8 @@
     "loop_synthesis.py::AgentLoopSynthesis._resolve_synthesis_contract": [],
     "loop_synthesis.py::AgentLoopSynthesis._run_synthesizer_ladder": [],
     "loop_synthesis.py::AgentLoopSynthesis._synthesize": [],
+    "loop_synthesis.py::AgentLoopSynthesis._runtime_self_prompt_block": [],
+    "loop_synthesis.py::_organ_map": [],
     "loop_verification.py::AgentLoopVerification._verification_receipt_kwargs": [],
     "loop_verification.py::AgentLoopVerification._verify_draft": [],
     "loop_verify_replan.py::AgentLoopVerifyReplan._replan_on_refuted_claims": [],
@@ -453,6 +455,10 @@
     ],
     [
       "loop_synthesis.py::AgentLoopSynthesis._synthesize",
+      "loop_synthesis.py::AgentLoopSynthesis._runtime_self_prompt_block"
+    ],
+    [
+      "loop_synthesis.py::AgentLoopSynthesis._synthesize",
       "loop_synthesis.py::AgentLoopSynthesis._resolve_synthesis_contract"
     ],
     [
@@ -498,6 +504,10 @@
     [
       "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
       "loop_verify_replan.py::AgentLoopVerifyReplan._replan_on_refuted_claims"
+    ],
+    [
+      "loop_synthesis.py::AgentLoopSynthesis._runtime_self_prompt_block",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
     ]
   ]
 }

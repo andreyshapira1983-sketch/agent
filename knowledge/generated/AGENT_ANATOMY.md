@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 184 modules across 12 groups._
+_Total: 185 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -109,6 +109,7 @@ _Planning, verification, clarification, control loop._
 | `core/strategy_router` | Strategy Router: deliberation kernel layer BEFORE the LLM planner. |
 | `core/role_router` | Role / mode routing for the agent core. |
 | `core/prompt_registry` | §3.x Prompt Registry — centralised tracking of all LLM system prompts. |
+| `core/runtime_self` | Что агент знает о себе ИЗМЕРЕНИЕМ, а не из подсказки. |
 | `core/compactor` | Conversation history compaction (Anthropic 2025 — context engineering). |
 
 ## Memory & Knowledge Governance (§4)
