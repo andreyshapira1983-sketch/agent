@@ -367,9 +367,14 @@ def test_the_help_page_lists_every_command():
 
 
 def test_recorded_surface_sizes():
-    """The banner is still deliberately a subset -- only the help gap was fixed."""
+    """The banner is still deliberately a subset -- only the help gap was fixed.
+
+    71 -> 72 (2026-08-13): `:refresh-models` joined the banner beside its
+    read-only sibling — the visible half of the pair had steered the operator
+    to a usage refusal while the catalog stayed expired (R7).
+    """
     in_banner = sum(1 for spec in reg.COMMANDS if spec.in_startup_summary)
-    assert in_banner == 71
+    assert in_banner == 72
     assert len(reg.COMMANDS) == 92
     assert len(reg.all_tokens()) == 141
 

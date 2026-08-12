@@ -325,6 +325,11 @@ COMMANDS_CORE: tuple[CommandSpec, ...] = (
         category="Models & budget",
         handler_key="refresh_models",
         aliases=(":model-catalog-refresh", ":model-refresh",),
+        # 2026-08-13: в баннер, рядом с читающей половиной пары. Баннер
+        # рекламировал `:provider-catalog-refresh`, пряча команду, которая
+        # единственная умеет записать каталог, — оператор набрал видимую и
+        # получил отказ, каталог остался протухшим (R7).
+        in_startup_summary=True,
     ),
     CommandSpec(
         canonical=":model-discovery-audit",

@@ -201,6 +201,7 @@ BANNER_TOKENS: tuple[str, ...] = (
     ":architecture-audit",
     ":model-registry-audit",
     ":model-discovery-audit",
+    ":refresh-models",
     ":provider-catalog-refresh",
     ":approval-list",
     ":approval-triage",
