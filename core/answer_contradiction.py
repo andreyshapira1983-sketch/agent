@@ -88,6 +88,21 @@ def contradicted_claims(answer: str | None) -> tuple[Contradiction, ...]:
     denied = _subjects(denied_text)
     if not denied:
         return ()
+    # R9 (2026-08-13, живой ac75fc92): заявление о ГРАНИЦЕ знания — «не читал»,
+    # «данные не передавались» — не оспаривает утверждение о существовании.
+    # Противоречие — снятие того же суждения; предмет в строке-границе
+    # предметом спора не является. Иначе честность наказывается: лучший
+    # эпистемический ответ дня получил self_contradicted×4 и карантин.
+    boundary = re.compile(
+        r"не\s+чита|не\s+передав|данные\s+не|нет\s+данных|недоступ|"
+        r"не\s+запраш|not\s+read|not\s+provided|no\s+data", re.IGNORECASE)
+    denied_lines = [ln for ln in denied_text.splitlines() if ln.strip()]
+    denied = {
+        s for s in denied
+        if any(s in ln.lower() and not boundary.search(ln) for ln in denied_lines)
+    }
+    if not denied:
+        return ()
 
     found: list[Contradiction] = []
     seen: set[str] = set()

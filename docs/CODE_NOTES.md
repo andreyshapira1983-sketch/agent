@@ -494,3 +494,26 @@ roots closed at their owners:
 Known-open in the same family: reformatted literals (a date rewritten
 `01.08.2026` for `2026-08-01`) would still fire the literal gate; the numeric
 key:value hole (MIR-060 xfail) stays documented.
+
+## R8/R9: honesty must not be punished (2026-08-13, traces bd02fff1 / ac75fc92)
+
+Two of my own organs turned their teeth on honest answers the day they went
+live end-to-end.
+
+R8 — `verifier_utils.absent_literal_reason` refuted TRUE claims against
+budget-TRIMMED excerpts: `evidence_budget` cut the part carrying the literal
+(`kept 9617 of 12191`), and "absent from the cut" read as "absent from the
+source" — seven false REFUTED in one turn, honest answer quarantined. The
+fifth gate's own principle applied: an incomplete search proves no absence. A
+trimmed excerpt (the `[INTENT-BUDGET:`/`[TOTAL-BUDGET:` notice IS the flag,
+one definition in `evidence_budget`) may still prove presence, never absence.
+
+R9 — `answer_contradiction.contradicted_claims` matched SUBJECTS, not
+propositions: "файл есть в листинге" (Facts) plus "содержимое не читал"
+(Unverified) scored self_contradicted×4, the enforcement rewrote the body,
+and the epistemically best answer of the day banked partial/quarantined — the
+more honestly the agent scoped its ignorance, the harder it was punished. A
+knowledge-boundary line («не читал», «данные не передавались», no data) is
+not a denial; a subject appearing ONLY in boundary lines is not a dispute.
+The 2026-08-10 true-positive class («не подтвердилось, может быть неверным»)
+stays caught — the guard test carries both directions.

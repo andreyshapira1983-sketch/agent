@@ -353,6 +353,12 @@ def absent_literal_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | N
     # срабатывание, внесённое вместе с этим гейтом 2026-08-10.
     if asserts_absence(chunk_text):
         return None
+    # R8 (2026-08-13, живой bd02fff1): усечённая бюджетом улика не доказывает
+    # отсутствия — литерал мог жить в отрезанной части (семь ложных REFUTED за
+    # один ход). Присутствие в вырезке она доказывает по-прежнему.
+    excerpt_raw = ev.excerpt or ""
+    if "[INTENT-BUDGET:" in excerpt_raw or "[TOTAL-BUDGET:" in excerpt_raw:
+        return None
     absent = literals_absent_from_excerpt(
         chunk_text, ev.excerpt or "", ev.source_id or ""
     )
