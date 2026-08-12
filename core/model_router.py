@@ -1418,9 +1418,19 @@ class ModelRouter:
         Returns "" when nothing was declared, which is the only honest case for
         a ``no_model:`` skip.
         """
-        for spec in self.registry.list():
-            if _normalise_provider(spec.provider) == provider and spec.model:
-                return spec.model
+        # Операторские спеки раньше встроенных, доступные по цене — раньше
+        # запертых потолком (R7 2026-08-12, docs/CODE_NOTES.md «Refresh before
+        # adapt»): builtin затенял конфиг, а без цены первым стал бы frontier.
+        specs = [
+            s for s in self.registry.list()
+            if _normalise_provider(s.provider) == provider and s.model
+        ]
+        specs.sort(key=lambda s: (
+            not self._tier_model_within_cost_limit(provider, s.model),
+            s.source == "builtin",
+        ))
+        if specs:
+            return specs[0].model
         from core.llm import _default_model
 
         return (_default_model(provider) or "").strip()
@@ -1464,8 +1474,10 @@ class ModelRouter:
                 skipped.append(f"provider_unavailable:{norm}")
                 continue
             tier_model = tier_model_for(tier, norm)
+            model_source = "catalog"
             if not tier_model and operator_named:
                 tier_model = self._declared_model_for(norm)
+                model_source = "declared"
             if not tier_model:
                 skipped.append(f"no_model:{norm}")
                 continue
@@ -1475,7 +1487,12 @@ class ModelRouter:
                 # quietly overspending.
                 skipped.append(f"cost_limit:{norm}")
                 continue
-            return norm, f"complexity:{tier_value}:{norm}", skipped
+            reason = f"complexity:{tier_value}:{norm}"
+            if model_source == "declared":
+                # Запаска признаётся в журнале: в probe_r1 она была неотличима
+                # от каталожной, и протухание было невидимым (R7).
+                reason += "|model_source:declared"
+            return norm, reason, skipped
         return None, None, skipped
 
     def _tier_model_within_cost_limit(self, provider: str, model: str) -> bool:

@@ -403,3 +403,65 @@ with an amplifying marker — arithmetic gate does not parse that shape, salient
 literals exclude bare numbers by design. MIR-060 xfail continues to document
 the class; extending `claim_arithmetic` to key-value equality is its own
 repair with its own fail-before.
+
+## Refresh before adapt — the catalog outage that silently swapped every model (R7, 2026-08-12)
+
+Blind acceptance run probe_r1, proven by an exhaustive scan of every retained
+trace journal: **all 34 model calls in the window executed on
+`claude-sonnet-4-5` and `gpt-4o-mini`, zero on the configured
+`claude-sonnet-5`** — while `session_start` advertised sonnet-5 and
+`config/model_catalog.json` correctly named it the standard-tier model.
+
+The authority chain that produced this, every edge measured:
+
+1. the catalog's `updated_at` was 15 days old against a 7-day TTL, so
+   `_load_catalog()` refused it (`core/model_catalog.py:211`) — the catalog was
+   CORRECT and expired, not stale in content;
+2. `tier_model_for` returned "" and, because the operator names tier providers
+   (`AGENT_TIER_PROVIDERS_*` in the daemon .env — the same vars
+   `tests/conftest.py` strips per test), the router fell to
+   `_declared_model_for(provider)`;
+3. that helper took the FIRST registry spec for the provider, and the registry
+   is assembled builtins-first (`model_router.py:291`), so the hardcoded
+   `anthropic-default: claude-sonnet-4-5` and `openai-default-small:
+   gpt-4o-mini` shadowed the operator's own `config/model_registry.json`
+   sonnet-5 declarations;
+4. the route reason (`complexity:standard:anthropic`) looked IDENTICAL whether
+   the model came from a live catalog or from the builtin fallback, so the
+   whole degradation was invisible in the journal — the deep tier has an
+   honest `deep_downgraded:catalog_expired` diagnosis, light/standard had
+   nothing.
+
+Operator ruling: an autonomous agent maintains its own catalog freshness.
+**Refresh → verify → adapt**, in that order; adapting to a dead list is the
+disorder («бардак») this note exists to prevent recurring.
+
+What changed, at existing owners:
+
+- `core/model_catalog.py` — `ensure_fresh_catalog()`: a DEAD (expired or
+  missing) catalog triggers ONE refresh attempt per process, only when
+  credentials exist, with an `AGENT_CATALOG_AUTOREFRESH=0` kill-switch;
+  `tier_model_for` consults it before falling through. The test suite runs
+  with the switch off (`tests/conftest.py`), autorefresh tests re-enable it
+  against stubbed `refresh_catalog`.
+- `core/model_router.py` `_declared_model_for` — operator-declared specs now
+  outrank builtins, and within each group models inside `AGENT_MODEL_MAX_COST`
+  outrank models the ceiling locks away. The second key was measured, not
+  guessed: with builtins merely demoted, the first operator spec became the
+  frontier Opus that the registry deliberately parks behind the ceiling
+  ("raise the ceiling to release it").
+- `core/model_router.py` `_resolve_tier_provider` — a declared-fallback model
+  confesses itself: `…|model_source:declared` in the route reason, so the next
+  catalog outage is a visible event in the ledger instead of a silent swap.
+
+Live counterfactual on the real config files (probe environment shape:
+expired catalog, named tier providers, cost ceiling `medium`): standard
+resolves `claude-sonnet-5` with the confessing reason — the same inputs that
+produced 26 live sonnet-4-5 calls before the fix. The full end-to-end proof is
+one live run away: the first `for_task` with real keys refreshes the catalog
+stamp and routing follows the catalog itself.
+
+Not claimed: no evidence the agent modified its own routing; the builtins are
+repo code that simply never moved when the config did. The two probe env vars
+are confirmed by the conftest comment documenting the same variables breaking
+routing tests from the operator's .env.
