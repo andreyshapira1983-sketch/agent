@@ -430,3 +430,79 @@ def absence_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
         explanation="утверждение об отсутствии опровергнуто собственной уликой",
         computed_from=ev.source_id or "",
     )
+
+
+# ── R2/R3 (2026-08-13, probe_r1) ──────────────────────────────────────────────
+
+_COUNT_WORDS: dict[str, int] = {
+    "один": 1, "одна": 1, "две": 2, "два": 2, "три": 3, "четыре": 4,
+    "пять": 5, "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10,
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+}
+
+#: Число (цифрой или ИМЕННО числительным — свободная словесная ветка ловила
+#: любое слово, и нулевой матч съедал скобки) + существительное + перечисление
+#: в скобках того же предложения; точка в зазоре запрещена.
+_ENUM_COUNT_RE = re.compile(
+    r"(?:\b(\d{1,2})\b|\b(" + "|".join(_COUNT_WORDS) + r")\b)\s+[\wЀ-ӿ-]+"
+    r"[^().\n]{0,60}\(([^()]{2,200})\)",
+    re.IGNORECASE,
+)
+
+#: Пункт, который предложение само же отвергло, — не перечислен, а исключён.
+_ENUM_EXCLUDED_RE = re.compile(
+    r"не\s+подход|не\s+подошл|не\s+входит|исключ|not\s+match|excluded",
+    re.IGNORECASE,
+)
+
+
+def enumeration_count_reason(text: str) -> Any:
+    """R2: заявленный счёт против СОБСТВЕННОГО перечисления того же предложения.
+
+    Живой случай B1 (probe_r1): «пять полок (A1, B2, C4, D0)» и «три позиции
+    (…, stator-6: 7 шт. не подходит)» ушли `unverified` и забанковались
+    success/eligible — счёт не покрывал ни один гейт. Противоречие внутреннее,
+    улике о нём нечего сказать, поэтому иск не снимается подтверждённой
+    цитатой (ветка в `verifier_core`). Молчит на всём, чего не распознал.
+    """
+    from .verifier_models import ClaimReason
+
+    for m in _ENUM_COUNT_RE.finditer(text or ""):
+        claimed = int(m.group(1)) if m.group(1) else _COUNT_WORDS.get((m.group(2) or "").lower(), 0)
+        if claimed < 2:
+            continue
+        items = [p.strip() for p in re.split(r"[;,]", m.group(3)) if p.strip()]
+        if len(items) < 2:
+            continue
+        counted = sum(1 for item in items if not _ENUM_EXCLUDED_RE.search(item))
+        if counted != claimed:
+            return ClaimReason(
+                code="count_mismatch",
+                expected=str(claimed),
+                actual=str(counted),
+                explanation=(
+                    "заявленный счёт противоречит собственному перечислению "
+                    "в том же предложении"
+                ),
+                computed_from="собственное перечисление куска",
+            )
+    return None
+
+
+def literal_covered_by_union(expected: str, evidences: list[Any]) -> bool:
+    """R3: литерал накрыт ОБЪЕДИНЕНИЕМ процитированных улик (текст + адрес).
+
+    Живой случай B3: перекрёстное утверждение цитировало обе улики по половине,
+    а гейт литералов мерил каждую цитату против всего куска и опроверг истину
+    дважды зеркально (`expected=notes_a` из notes_b и наоборот).
+    """
+    needle = (expected or "").strip().lower()
+    if not needle:
+        return False
+    for ev in evidences or []:
+        if needle in (getattr(ev, "excerpt", "") or "").lower():
+            return True
+        if needle in (getattr(ev, "source_id", "") or "").lower():
+            return True
+    return False

@@ -465,3 +465,32 @@ Not claimed: no evidence the agent modified its own routing; the builtins are
 repo code that simply never moved when the config did. The two probe env vars
 are confirmed by the conftest comment documenting the same variables breaking
 routing tests from the operator's .env.
+
+## R2/R3: the count that contradicted itself, and the cross-source claim refuted twice (2026-08-13)
+
+probe_r1, B1 (`trace_4f295f8f`): the conclusion claimed "пять полок" listing
+four, and "три позиции" listing two with the third rejected in the same
+sentence — both shipped `unverified`, banked success/eligible. Three separate
+roots closed at their owners:
+
+- `verifier_utils.enumeration_count_reason` (R2) — a claimed cardinal (digit
+  or RU/EN number word) contradicting the chunk's OWN parenthesized
+  enumeration is `count_mismatch` → `refuted`. Items the sentence itself
+  rejects («не подходит») are excluded from the count. The claim is internal,
+  so a resolved citation does NOT clear it (`verifier_core` keeps the reason
+  through `any_matched`): the evidence knows nothing about the sentence's
+  argument with itself.
+- `_SENTENCE_SPLIT_RE` (verifier_patterns) — a dot before a LOWERCASE letter,
+  Latin or Cyrillic, is an abbreviation, not a sentence boundary. «шт. не»
+  was split mid-parenthetical, hiding B1's enumeration from any chunk-level
+  gate — the same cross-script blindness class as the relevance axis.
+- `verifier_utils.literal_covered_by_union` (R3, live B3 `trace_9cd331c`) —
+  the absent-literal gate now steps aside when the missing literal is covered
+  by the UNION of the chunk's cited evidences (excerpt + source_id). A
+  cross-source claim cites two sources for two halves; testing each citation
+  against the whole chunk refuted a true statement twice, mirror-wise, and —
+  after the REFUTED polarity repair — quarantined a correct answer.
+
+Known-open in the same family: reformatted literals (a date rewritten
+`01.08.2026` for `2026-08-01`) would still fire the literal gate; the numeric
+key:value hole (MIR-060 xfail) stays documented.
