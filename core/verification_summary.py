@@ -67,6 +67,10 @@ _VERDICT_RU: dict[str, str] = {
     ),
     "subagent_asserted": "только слова субагента, квитанции инструмента нет",
     "receipt_missing": "цитата есть, но квитанция инструмента не найдена",
+    "refuted": (
+        "ОПРОВЕРГНУТО собственной уликой: процитированный источник "
+        "говорит иное"
+    ),
 }
 
 #: Verdicts that stay OUT of point 4: `verified` is the confirmed bucket,

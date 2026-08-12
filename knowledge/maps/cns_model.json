@@ -91,12 +91,12 @@
           "gated_by": "core/loop_synthesis.py:637 — receives None unless st.replan_exhausted"
         },
         {
-          "site": "core/loop_run_tail.py:301",
+          "site": "core/loop_run_tail.py:306",
           "role": "control",
           "uses": "policy_blocked triggers -> denied_tools for the obligation arbiter"
         },
         {
-          "site": "core/loop_run_tail.py:315",
+          "site": "core/loop_run_tail.py:320",
           "role": "control",
           "uses": "failure codes -> obligation arbiter"
         },

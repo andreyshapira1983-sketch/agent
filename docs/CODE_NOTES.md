@@ -350,3 +350,56 @@ the real words are recorded.
 
 Scope deliberately stops at conversational messages. An explicitly typed `:`
 command (`cli/command_dispatch.py`) is not a conversational turn and stays out.
+
+## REFUTED is a polarity, not a shade of unverified — 2026-08-12
+
+Live case, `trace_d322a875`, turn 3: the verifier's content gates proved three
+claims did not follow from the evidence they cited (`claims_refuted_by_content`)
+— and the answer shipped unchanged, the episode banked `success` with
+`usage_eligible=True`, and a procedural candidate was minted from it. The
+session's own audit then located the exact loss: a refuted chunk was demoted
+into `topic_supported_but_claim_unverified`, the same class as merely-unchecked,
+and from there every decider read only verified/weak ratios. The operator named
+the invariant: *five good claims do not make one known lie less false.*
+
+The class boundary already existed in the code and was reused, not invented:
+`ClaimReason` is set only by the gates that PROVE a contradiction (arithmetic
+over the cited excerpt, a salient literal absent from it, an absence claim its
+own excerpt refutes). Demotions that carry no proof — memory independence,
+unsupported figures — keep their old class: an incomplete excerpt does not
+prove falsehood.
+
+What changed, all at existing owners:
+
+- `core/verifier_core.py` — a chunk whose `ClaimReason` survives gets verdict
+  `refuted`, the marker `[claim-refuted]` (the old `[claim-figure-unverified]`
+  read as "unchecked" to the operator — polarity lost in the user-visible
+  channel too), and its own `refuted_chunks` counter. A claim verified by
+  ANOTHER of its citations clears the reason: the gate compared against one
+  source of two, and a residual reason would have made
+  `_replan_on_refuted_claims` count verified chunks as refuted.
+- `core/loop_run_tail.py` — `refuted_chunks` joins `weak_chunks` (for the
+  outcome ratio) and, separately, raises the defect signal `content_refuted`:
+  the fact, not the fraction.
+- `core/smart_memory.py` — `content_refuted` joins
+  `DISQUALIFYING_DEFECT_SIGNALS`, so both learning gates (episode eligibility
+  and procedure credit) refuse the run in one shared place.
+- `core/low_evidence_policy.py` — refuted counts toward `unverified_total`;
+  those chunks sat in `topic_supported` before, and splitting the polarity out
+  must not have lifted the evidence floor.
+- `core/verification_summary.py` — the new verdict gets its Russian line; the
+  wording guard would rightly have refused a bucket that explains nothing.
+
+Deliberately NOT done here: no unconditional replan on refutation. The trigger
+`claim_refuted` still only shapes a replan another failure starts. Whether a
+proven-false claim should force a retry is a separate decision with a real
+cost model (every refutation would buy another model call); what could not
+wait is the learning contamination — a known lie banking as reusable
+experience.
+
+The numeric hole stays open and is now precisely mapped: a bare-number claim
+("the limit is 42" against `limit: 17`) passes every gate and lands `verified`
+with an amplifying marker — arithmetic gate does not parse that shape, salient
+literals exclude bare numbers by design. MIR-060 xfail continues to document
+the class; extending `claim_arithmetic` to key-value equality is its own
+repair with its own fail-before.

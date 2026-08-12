@@ -90,6 +90,13 @@ class VerificationReport:
     #: truth — so this is its own counter, never folded into `verified`, and
     #: it neither grants full evidence score nor banks a clean success alone.
     user_asserted_chunks: int = 0
+    #: Claims a content gate PROVED do not follow from the evidence they cite
+    #: (a `ClaimReason` names what was expected and what was found). Operator
+    #: ruling 2026-08-12: refuted is a polarity, not a shade of unverified —
+    #: folding it into `topic_supported...` let five good claims dilute one
+    #: known lie all the way into `usage_eligible=True` (live turn 3,
+    #: trace_d322a875).
+    refuted_chunks: int = 0
 
     def to_log_payload(self) -> dict[str, Any]:
         return {
@@ -104,6 +111,7 @@ class VerificationReport:
             "receipt_missing_chunks": self.receipt_missing_chunks,
             "dialogue_supported_chunks": self.dialogue_supported_chunks,
             "user_asserted_chunks": self.user_asserted_chunks,
+            "refuted_chunks": self.refuted_chunks,
             "fully_unverified": self.fully_unverified,
             "chain_was_empty": self.chain_was_empty,
             "malformed_output": self.malformed_output,

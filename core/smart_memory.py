@@ -1414,11 +1414,13 @@ def effective_completion(episode: EpisodeRecord) -> CompletionState:
 #: единственной активной процедуры. Порознь эти предикаты уже расходились;
 #: общее имя — единственное, что мешает им разойтись снова.
 #:
-#: Сюда попадает только то, что говорит о ЛОЖНОСТИ ответа. Скажем,
-#: `reasoning_action_mismatch` — расхождение плана и рассуждения, чужая ошибка
-#: для процедуры, и MIR-057 уже запретил дебетовать её за слабые цитаты
-#: синтезатора. Список растёт по доказанному вреду, не по подозрению.
-DISQUALIFYING_DEFECT_SIGNALS: frozenset[str] = frozenset({"self_contradiction"})
+#: Сюда попадает только то, что говорит о ЛОЖНОСТИ ответа, и список растёт по
+#: доказанному вреду, не по подозрению: `reasoning_action_mismatch` — чужая
+#: ошибка для процедуры (MIR-057), а `content_refuted` — тот же вред другим
+#: судьёй (2026-08-12, docs/CODE_NOTES.md «REFUTED is a polarity»).
+DISQUALIFYING_DEFECT_SIGNALS: frozenset[str] = frozenset(
+    {"self_contradiction", "content_refuted"}
+)
 
 
 def _answer_disqualified(episode: EpisodeRecord) -> bool:

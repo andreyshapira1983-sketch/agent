@@ -363,8 +363,13 @@ def evaluate_low_evidence_policy(
     # counters, not absent from the trigger math. Its main weight lands in
     # episode banking (`weak_chunks`) and the evidence-support score.
     user_asserted = int(getattr(report, "user_asserted_chunks", 0) or 0)
+    # Опровергнутое содержимым (2026-08-12) давит на пол улик не слабее
+    # непроверенного: раньше эти куски сидели в `topic_supported` и уже
+    # входили в сумму — выделение полярности не должно было их из неё вынуть.
+    refuted = int(getattr(report, "refuted_chunks", 0) or 0)
     unverified_total = (
         unverified + cited_unmatched + topic_supported + subagent_asserted
+        + refuted
     )
     supported = verified + dialogue
     supported_ratio = (supported / total) if total > 0 else 0.0
