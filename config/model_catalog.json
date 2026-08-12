@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-07-28T19:14:56.479850+00:00",
+  "updated_at": "2026-08-12T21:12:45.467892+00:00",
   "providers": {
     "anthropic": {
       "models": [
@@ -42,10 +42,6 @@
         {
           "id": "claude-sonnet-4-5-20250929",
           "tier": "standard"
-        },
-        {
-          "id": "claude-opus-4-1-20250805",
-          "tier": "deep"
         }
       ],
       "tier_best": {

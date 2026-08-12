@@ -274,6 +274,10 @@ def _neutralize_operator_model_env(monkeypatch, tmp_path_factory):
     empty_registry = tmp_path_factory.getbasetemp() / "empty_model_registry.json"
     empty_registry.write_text('{"models": []}\n', encoding="utf-8")
     monkeypatch.setenv("AGENT_MODEL_REGISTRY_PATH", str(empty_registry))
+    # Автообновление мёртвого каталога — сетевой вызов и запись в config/;
+    # набор живёт с выключателем, а тесты автообновления включают его сами
+    # (fixture выполняется до тела теста, его setenv выигрывает).
+    monkeypatch.setenv("AGENT_CATALOG_AUTOREFRESH", "0")
 
 
 # Deliberately not a key shape any provider would accept: it must satisfy a

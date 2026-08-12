@@ -377,6 +377,55 @@ def refresh_catalog(
     return catalog
 
 
+# ── autorefresh: обновление прежде подстройки ─────────────────────────────────
+
+#: Одна попытка на процесс: неудачное обновление не молотит по сети на каждый
+#: вызов маршрутизатора. Тесты сбрасывают флаг через monkeypatch.
+_AUTOREFRESH_DONE = False
+
+
+def _autorefresh_enabled() -> bool:
+    raw = (os.getenv("AGENT_CATALOG_AUTOREFRESH") or "").strip().lower()
+    return raw not in ("0", "false", "off", "no")
+
+
+def _credentialed_providers() -> list[str]:
+    """Провайдеры, к которым ЕСТЬ ключи: без ключей не бывает и сети."""
+    out = []
+    if os.getenv("ANTHROPIC_API_KEY", "").strip():
+        out.append("anthropic")
+    if os.getenv("OPENAI_API_KEY", "").strip():
+        out.append("openai")
+    return out
+
+
+def ensure_fresh_catalog() -> str:
+    """Мёртвый каталог сначала пытаются обновить — и только потом обходят.
+
+    Постановление оператора 2026-08-12 (R7): протухший список — сигнал
+    «обнови», а не разрешение молча подстроиться под зашитые дефолты; probe_r1
+    исполнился целиком на builtin-моделях при правильном, но просроченном
+    каталоге. Подробности: docs/CODE_NOTES.md «Refresh before adapt».
+    """
+    global _AUTOREFRESH_DONE  # noqa: PLW0603 — одна попытка на процесс и есть контракт
+    if _load_catalog() is not None:
+        return "fresh"
+    if not _autorefresh_enabled():
+        return "disabled"
+    if _AUTOREFRESH_DONE:
+        return "already_attempted"
+    _AUTOREFRESH_DONE = True
+    providers = _credentialed_providers()
+    if not providers:
+        return "no_credentials"
+    try:
+        refresh_catalog(providers=providers)
+    except Exception as exc:  # noqa: BLE001 — сбой сети не роняет маршрутизацию
+        logger.warning("catalog autorefresh failed: %s", exc)
+        return f"refresh_failed:{type(exc).__name__}"
+    return "refreshed"
+
+
 # ── main public function ──────────────────────────────────────────────────────
 
 def tier_model_for(tier: ComplexityTier, provider: str) -> str:
@@ -384,7 +433,8 @@ def tier_model_for(tier: ComplexityTier, provider: str) -> str:
 
     Lookup order:
       1. env var  AGENT_MODEL_TIER_{LIGHT|STANDARD|DEEP}  (operator override)
-      2. config/model_catalog.json  (written by :refresh-models)
+      2. config/model_catalog.json — a DEAD cache is first refreshed once
+         (``ensure_fresh_catalog``), then re-read; refresh before adapt
       3. ""  → caller falls through to for_role() default
 
     No model names are hardcoded. Returns "" if nothing is configured.
@@ -396,8 +446,11 @@ def tier_model_for(tier: ComplexityTier, provider: str) -> str:
         if override:
             return override
 
-    # 2. catalog cache
+    # 2. catalog cache; смерть кэша — повод обновить, не повод подстроиться
     catalog = _load_catalog()
+    if catalog is None:
+        ensure_fresh_catalog()
+        catalog = _load_catalog()
     if catalog:
         provider_data = catalog.get("providers", {}).get(provider, {})
         model = provider_data.get("tier_best", {}).get(tier.value, "")
