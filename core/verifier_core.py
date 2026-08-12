@@ -33,9 +33,11 @@ from .verifier_utils import (
     _tool_citation_for,
     absence_reason,
     absent_literal_reason,
+    enumeration_count_reason,
     extract_statistical_figures,
     is_statistical_claim,
     is_structural_chunk,
+    literal_covered_by_union,
     match_citation,
     parse_citations,
     split_into_chunks,
@@ -128,7 +130,11 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
             annotated_chunks.append(chunk_text)
             continue
         cits = parse_citations(chunk_text)
-        chunk_reason: ClaimReason | None = None
+        # R2 (2026-08-13): внутренний гейт — заявленный счёт против собственного
+        # перечисления. Улика о споре предложения с самим собой ничего не знает,
+        # поэтому подтверждённая цитата этот иск НЕ снимает (ветка ниже).
+        chunk_reason: ClaimReason | None = enumeration_count_reason(chunk_text)
+        chunk_evs: list[Any] = []
         matched_ids: list[str] = []
         verdict: str
         annotated = chunk_text
@@ -214,6 +220,7 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                         )
                     continue
                 strict_ok = True
+                chunk_evs.append(ev)
                 if not _memory_citation_is_independent(ev):
                     # The citation resolves — the record exists and matches the
                     # id — but resolution is not verification. An agent-auto
@@ -234,7 +241,7 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                 arith = evaluate_claim_arithmetic(chunk_text, ev.excerpt or "")
                 if arith.refutes:
                     strict_ok = False
-                    chunk_reason = ClaimReason(
+                    chunk_reason = chunk_reason or ClaimReason(
                         code=arith.code, expected=arith.expected,
                         actual=arith.actual, explanation=arith.explanation,
                         computed_from=arith.computed_from,
@@ -267,7 +274,18 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                 else:
                     any_topic_only = True
                     topic_only_replacements.append((c.raw, f"[topic-only:{c.prefix}{body_part}]"))
-            if any_matched:
+            # R3 (2026-08-13, живой B3): литералы куска накрываются ОБЪЕДИНЕНИЕМ
+            # процитированных улик (текст + адрес), а не каждой порознь —
+            # перекрёстное утверждение цитирует два источника по половине.
+            if (
+                chunk_reason is not None
+                and chunk_reason.code == "cited_literal_absent"
+                and literal_covered_by_union(chunk_reason.expected, chunk_evs)
+            ):
+                chunk_reason = None
+            if any_matched and not (
+                chunk_reason is not None and chunk_reason.code == "count_mismatch"
+            ):
                 verdict = "verified"
                 verified += 1
                 # Иск снят: другая из процитированных улик подтвердила кусок.
