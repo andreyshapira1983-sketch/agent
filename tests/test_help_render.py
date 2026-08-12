@@ -95,6 +95,19 @@ def test_rendered_command_lines_use_the_registry_description():
     assert checked >= 80, f"only {checked} lines render from the registry"
 
 
+def test_the_banner_does_not_hide_the_writing_half_of_the_catalog_pair():
+    """ЖИВОЙ СЛУЧАЙ 2026-08-12: баннер рекламировал read-only разведку
+    (`:provider-catalog-refresh`), пряча пишущую команду, к которой та сама
+    отсылает. Оператор набрал видимую — получил отказ usage; каталог остался
+    протухшим, и все 34 вызова probe_r1 ушли на зашитые модели (R7).
+
+    Инвариант выбора: если в баннере есть команда каталога, пишущая половина
+    пары обязана быть видима вместе с читающей.
+    """
+    assert ":refresh-models" in help_module.BANNER_TOKENS
+    assert ":provider-catalog-refresh" in help_module.BANNER_TOKENS
+
+
 def test_banner_tokens_agree_with_the_registry_flag():
     """The banner is a deliberate subset; `in_startup_summary` must match it.
 
@@ -108,8 +121,9 @@ def test_banner_tokens_agree_with_the_registry_flag():
     flagged = {spec for spec in reg.COMMANDS if spec.in_startup_summary}
     resolved = {reg.lookup(token) for token in help_module.BANNER_TOKENS} - {None}
     assert resolved == flagged
-    assert len(flagged) == 71
-    assert len(help_module.BANNER_TOKENS) == 72
+    # 71/72 -> 72/73 (2026-08-13): `:refresh-models` вошёл в баннер (R7).
+    assert len(flagged) == 72
+    assert len(help_module.BANNER_TOKENS) == 73
 
 
 # ── shape of the layout itself ───────────────────────────────────────────────

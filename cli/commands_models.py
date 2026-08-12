@@ -158,7 +158,13 @@ def _handle_refresh_models(rest: str, agent: AgentLoop) -> bool:
                 print(f"             (others: {', '.join(others[:4])})", file=sys.stderr)
 
     print("\n── Catalog saved → config/model_catalog.json ───────────────────────", file=sys.stderr)
-    print("  The agent picks these models up automatically on its next start.", file=sys.stderr)
+    # Не «после перезапуска»: tier_model_for читает каталог на каждом вызове,
+    # и уже ТЕКУЩАЯ сессия маршрутизирует по нему со следующего хода (R7).
+    print(
+        "  The agent picks these models up immediately — the running session "
+        "routes by them from its next call.",
+        file=sys.stderr,
+    )
     print("  To override a tier, set it in .env:", file=sys.stderr)
     print("    AGENT_MODEL_TIER_LIGHT    = <model-id>", file=sys.stderr)
     print("    AGENT_MODEL_TIER_STANDARD = <model-id>", file=sys.stderr)

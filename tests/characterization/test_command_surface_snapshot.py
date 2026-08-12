@@ -54,10 +54,13 @@ FROZEN = {
     # 96 at 9daa9bf; 98 after the two documented help gaps were closed
     # (`:refresh-models` and `:help` itself were added to the page).
     "help_tokens": 99,
-    # 72 tokens are printed, but one of them (`:task-begin`) is a REPL block
-    # token rather than a dispatched command — see the divergence tests below.
-    "startup_tokens": 72,
-    "startup_dispatched_tokens": 71,
+    # One printed token (`:task-begin`) is a REPL block token rather than a
+    # dispatched command — see the divergence tests below.
+    # 72/71 -> 73/72 (2026-08-13): `:refresh-models` joined the banner beside
+    # its read-only sibling — the visible half of the catalog pair had steered
+    # the operator to a usage refusal while the catalog stayed expired (R7).
+    "startup_tokens": 73,
+    "startup_dispatched_tokens": 72,
     "nl_intent_kinds": 23,
 }
 
