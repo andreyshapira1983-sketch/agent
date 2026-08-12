@@ -307,3 +307,46 @@ inside `LLM` for non-streaming providers.
 
 The file-size ratchet ceiling moved 1800 → 1860 for this: the billed method
 must live on the wrapper, so the growth is the fix, not drift.
+
+## [cli/intent_bridge.py](../cli/intent_bridge.py) — the route answered, and erased the turn
+
+**2026-08-12,** live session `trace_d322a875`. The operator sent six messages.
+Two were caught by the deterministic operator-intent matcher: a request to
+locate the episodic store went to `implementation_plan` (its text contains a
+`/` and the stem «реализац», which is the whole match), and a request to
+inspect the store's constructor went to `smart_memory_status` (the literal
+"episodic memory"). Neither answered what was asked — that is a routing defect
+in its own right, and it is not what this note is about.
+
+What this note is about is what happened next. The session history has exactly
+one writer: the run tail (`core/loop_run_tail.py`, `memory.record_turn`). A
+routed message never reaches it — the handler answers, `handle_conversational_
+operator_input` returns `True`, and `cli/repl.py` does `continue`. So the
+message was answered and then did not exist. The next planner saw
+`turns_visible=1` after three operator messages, wrote "the previous step is
+not visible in context", and the dependent experiment stalled with nothing
+wrong on its own side. Asked afterwards to list every request in the session,
+the agent counted **four** where there had been six — and the two it lost were
+precisely the two a route had handled.
+
+Invariant: *an operator message and the reply given to it belong to the session
+record regardless of which path answered.* Choosing a route may change who
+answers; it may not delete the exchange.
+
+`_record_routed_turn` closes it at the boundary that owns the gap — the bridge
+is the only place that knows both the operator's text and that something
+answered outside the loop. It writes through the existing `record_turn` and
+emits the existing `memory_write` event with `answered_outside_the_loop: True`,
+so the two producers stay distinguishable in the journal.
+
+**What it carries, and what it does not.** For a command route it records the
+question and *which command answered* — not the report body. The handlers print
+to stdout, and capturing that stream would hide the prompts of the handlers
+that wait for operator input. That is enough for both observed failures: the
+next planner sees the question again, and it also sees why no
+`POSSIBLE/IMPOSSIBLE/UNKNOWN` verdict exists in the conversation. The local
+"reply only with:" path is different — its answer text is known right there, so
+the real words are recorded.
+
+Scope deliberately stops at conversational messages. An explicitly typed `:`
+command (`cli/command_dispatch.py`) is not a conversational turn and stays out.
