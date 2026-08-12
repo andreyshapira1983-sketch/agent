@@ -97,7 +97,7 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
     if not all_chunks_text:
         return VerificationReport(total_chunks=0, verified_chunks=0, unverified_chunks=0, cited_but_unmatched_chunks=0, self_declared_chunks=0, structural_chunks=0, chunks=(), annotated_answer=answer, fully_unverified=True, chain_was_empty=chain_empty, disclaimer=(DISCLAIMER_NO_CHAIN if chain_empty else DISCLAIMER_FULLY_UNVERIFIED))
     examined_chunks: list[ClaimChunk] = []
-    verified = unverified = cited_unmatched = topic_supported = memory_only_unmatched = self_declared = structural = 0
+    verified = unverified = cited_unmatched = topic_supported = memory_only_unmatched = self_declared = structural = refuted = 0
     dialogue_supported = 0
     # Operator ruling 2026-08-03 (MIR-028): the user's words confirm only that
     # the user said it — never the content's objective truth. Support that
@@ -270,8 +270,18 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
             if any_matched:
                 verdict = "verified"
                 verified += 1
+                # Иск снят: другая из процитированных улик подтвердила кусок.
+                chunk_reason = None
                 for raw, rewrite in topic_only_replacements + dialogue_replacements + user_asserted_replacements:
                     annotated = annotated.replace(raw, rewrite)
+            elif chunk_reason is not None:
+                # Полярность: доказанная ложь — не разновидность «не подтверждено»
+                # (2026-08-12, docs/CODE_NOTES.md «REFUTED is a polarity»).
+                verdict = "refuted"
+                refuted += 1
+                for raw, rewrite in topic_only_replacements:
+                    annotated = annotated.replace(raw, rewrite)
+                annotated = annotated.rstrip() + " [claim-refuted]"
             elif any_dialogue:
                 verdict = "dialogue_supported"
                 dialogue_supported += 1
@@ -393,4 +403,4 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
         disclaimer = DISCLAIMER_ALL_SELF_DECLARED
     if disclaimer is not None:
         annotated_answer = annotated_answer.rstrip() + "\n\n" + disclaimer
-    return VerificationReport(total_chunks=len(examined_chunks), verified_chunks=verified, unverified_chunks=unverified, cited_but_unmatched_chunks=cited_unmatched, self_declared_chunks=self_declared, structural_chunks=structural, chunks=tuple(examined_chunks), annotated_answer=annotated_answer, fully_unverified=fully_unverified, chain_was_empty=chain_empty, disclaimer=disclaimer, malformed_output=malformed_output, topic_supported_but_claim_unverified_chunks=topic_supported, subagent_asserted_chunks=subagent_asserted, receipt_missing_chunks=receipt_missing, dialogue_supported_chunks=dialogue_supported, user_asserted_chunks=user_asserted)
+    return VerificationReport(total_chunks=len(examined_chunks), verified_chunks=verified, unverified_chunks=unverified, cited_but_unmatched_chunks=cited_unmatched, self_declared_chunks=self_declared, structural_chunks=structural, chunks=tuple(examined_chunks), annotated_answer=annotated_answer, fully_unverified=fully_unverified, chain_was_empty=chain_empty, disclaimer=disclaimer, malformed_output=malformed_output, topic_supported_but_claim_unverified_chunks=topic_supported, subagent_asserted_chunks=subagent_asserted, receipt_missing_chunks=receipt_missing, dialogue_supported_chunks=dialogue_supported, user_asserted_chunks=user_asserted, refuted_chunks=refuted)

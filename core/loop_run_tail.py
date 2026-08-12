@@ -221,7 +221,12 @@ class AgentLoopRunTail:
                 # counted weak, so the episode lands `partial` when user-echo
                 # is all (or most of) what the answer leans on.
                 + verification.user_asserted_chunks
+                + verification.refuted_chunks
             )
+            # Опровергнутое — не доля, а факт: сигнал дисквалифицирует эпизод
+            # из опыта и кредита (см. docs/CODE_NOTES.md, «REFUTED is a polarity»).
+            if verification.refuted_chunks:
+                self._defect_signals.append("content_refuted")
         # Layer 4 — update user profile from this interaction.
         if may_profile and self.user_profile_store is not None:
             try:
