@@ -7,6 +7,10 @@ message is really a request, and it may only **cancel** the routing -- kernel
 decides, model advises. Anything unmatched falls through to the normal agent loop
 untouched.
 
+A route answers *instead of* the loop, never *outside the conversation*:
+``_record_routed_turn`` puts the exchange into the session record, because the
+loop tail that normally writes it never runs here.
+
 Extracted verbatim from ``main.py``. Import these names from here: the
 ``main.py`` re-exports that used to mirror them were removed in Phase 7, and a
 fake for any of them belongs on this module, where the call sites resolve it.
@@ -110,11 +114,38 @@ def _local_operator_reply(text: str, agent: AgentLoop | None = None) -> str | No
     return answer
 
 
+def _record_routed_turn(agent: AgentLoop, question: str, answer: str) -> None:
+    """Ход, отвеченный в обход цикла, всё равно принадлежит истории сессии.
+
+    Историю пишет хвост прогона; отвечая здесь, мы этот хвост не запускаем — и
+    сообщение оператора исчезало вместе с фактом, что на него ответили
+    (`docs/CODE_NOTES.md`, «Маршрут ответил — и стёр ход»).
+    """
+    memory = getattr(agent, "memory", None)
+    if memory is None:
+        return
+    try:
+        turn = memory.record_turn(
+            question=question, planner_reasoning="", tools_used=[],
+            artifact_labels=[], answer=answer,
+        )
+    except Exception as exc:  # noqa: BLE001 — потеря хода видна, а не молчалива
+        agent.log.log("routed_turn_not_recorded", {"error": repr(exc)})
+        return
+    agent.log.log(
+        "memory_write",
+        {"session_id": memory.session_id, "turn_id": turn.id,
+         "turn_index": turn.index, "tools_used": [], "labels": [],
+         "answered_outside_the_loop": True},
+    )
+
+
 def _handle_local_operator_reply(text: str, agent: AgentLoop) -> bool:
     answer = _local_operator_reply(text, agent)
     if answer is None:
         return False
     print("\n" + format_human_response(answer) + "\n")
+    _record_routed_turn(agent, text, answer)
     return True
 
 
@@ -177,7 +208,17 @@ def handle_conversational_operator_input(text: str, agent: AgentLoop, workspace:
         f"(operator intent: {intent.kind}; internal={intent.command})",
         file=sys.stderr,
     )
-    return _dispatch_operator_intent(intent, agent, workspace, original_text=text)
+    handled = _dispatch_operator_intent(intent, agent, workspace, original_text=text)
+    if handled:
+        # Не тело отчёта, а ФАКТ: о чём спросили и какая команда ответила.
+        # Тело печатают обработчики в stdout, и перехват вывода сломал бы те из
+        # них, что ждут ввода оператора.
+        _record_routed_turn(
+            agent, text,
+            f"(ответ дан локальной командой {intent.command}; "
+            f"её вывод — в журнале прогона, не в этом ходе)",
+        )
+    return handled
 
 
 def _dispatch_operator_intent(

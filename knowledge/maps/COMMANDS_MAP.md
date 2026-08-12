@@ -229,6 +229,20 @@ Matchers are kept deliberately conservative: broadening one has regressed the
 planner before, so every matcher carries paired negative tests in
 `tests/test_operator_intent*.py`.
 
+### A routed turn still enters the session record
+
+Answering through a route does **not** remove the exchange from the
+conversation. `_record_routed_turn` (`cli/intent_bridge.py`) appends the
+operator's message and the name of the command that answered it, through the
+same `WorkingMemory.record_turn` the agent loop uses, and emits `memory_write`
+with `answered_outside_the_loop: True` so the two writers stay distinguishable.
+Until 2026-08-12 it did not: a routed message was answered and then did not
+exist, the next planner saw no such turn, and a session recap under-counted the
+operator's own requests (`docs/CODE_NOTES.md`, "the route answered, and erased
+the turn"). The report body is not carried — only the question and the command
+that took it. Explicitly typed `:` commands are not conversational turns and
+stay out.
+
 ## Help
 
 | Command | Purpose |
