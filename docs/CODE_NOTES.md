@@ -570,3 +570,12 @@ The cut at CREATION (`evidence.py:_truncate`, MAX_EXCERPT_CHARS=800) appends
 `...[truncated]` — a third marker the R8 guard did not know. One line: the
 absence gate now also stands aside for `...[truncated]` tails. Refuted counts
 across the three runs: 7 → 5 → 3 → expected 0-1 of this family.
+
+## R9 addendum: the boundary vocabulary learns the operator's fourth run (2026-08-13, trace 51596f82)
+
+Refuted counts converged 7 → 5 → 3 → 0 across four identical self-inspection
+runs — and the last false signal standing was R9 in new words: «дан с
+пропущенными разделами (omitted) — часть логики не видна» flagged
+self_contradicted×2 and quarantined the series' best answer. The boundary
+vocabulary now knows «не видн», «не показан», «пропущенн», «не предоставл»,
+«omitted», «not shown». The 2026-08-10 true-positive class stays caught.
