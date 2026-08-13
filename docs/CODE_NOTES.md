@@ -604,3 +604,14 @@ tools, no memory. `is_local_critique_eligible` now requires supplied-material
 markers for `user_text` (newline, quotes, or a presenter colon that survives
 directive stripping). Both directions pinned: a task clause is not supplied
 text; «Вот фрагмент: …» still is.
+
+## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
+
+My own R1 note overstated: "an empty unit becomes an ambiguity → needs_
+clarification through the existing wiring" — the flag had NO consumer. Live
+proof: a 37k-char journal paste derived `needs_clarification=True`, the run
+proceeded anyway and burned 225 cost units on a plan instead of asking. A
+sixth gate (`_contract_ambiguity_gate`, own gate — the transplanted bodies
+stay verbatim) turns the contract's first ambiguity into a question BEFORE
+planning, under the same `clarification_enabled` key and resumed-run skip.
+The operator's rule "ask, do not guess" now has its executor.
