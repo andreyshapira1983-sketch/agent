@@ -50,3 +50,33 @@ def test_header_units_still_win() -> None:
     """Существующее поведение заголовков не тронуто."""
     text = "Задание.\n\n# U01 — Разбор\nтекст\n\n# U02 — Сборка\nтекст\n"
     assert [u.identifier for u in requested_units(text)] == ["U01", "U02"]
+
+
+def test_the_ambiguity_actually_asks(tmp_path) -> None:
+    """R1b (живой 407a46c8): `needs_clarification=True` журналировался, а ход
+    ехал дальше — у флага не было потребителя; моё «через существующую
+    проводку» было завышением. Двусмысленный контракт обязан СПРОСИТЬ до
+    планирования."""
+    from pathlib import Path
+
+    from core.ids import new_trace_id
+    from core.logger import TraceLogger
+    from core.loop import AgentLoop
+    from core.memory import WorkingMemory
+    from core.policy import PolicyGate
+    from tests.conftest import FakeLLM, FakePlanner
+    from tools.base import ToolRegistry
+
+    registry = ToolRegistry()
+    planner = FakePlanner(sources=[])
+    agent = AgentLoop(
+        registry=registry, policy=PolicyGate(registry),
+        llm=FakeLLM(responses=["x"] * 4),
+        logger=TraceLogger(trace_id=new_trace_id(),
+                           log_dir=Path(tmp_path) / "logs", verbose=False),
+        planner=planner, memory=WorkingMemory(), max_replan_attempts=1,
+    )
+    answer = agent.run(_B2_OBSERVED)
+    assert planner.calls == [], "двусмысленный контракт дошёл до планировщика"
+    assert "S3" in answer, answer
+

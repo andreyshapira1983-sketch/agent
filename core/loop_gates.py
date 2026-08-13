@@ -148,6 +148,29 @@ class AgentLoopGates:
                 return _clarif.question
         return None
 
+    def _contract_ambiguity_gate(self, contract: Any) -> str | None:
+        """Шестые ворота (R1b, 2026-08-13): двусмысленный контракт спрашивает.
+
+        `needs_clarification=True` журналировался, а ход ехал дальше: у флага
+        не было потребителя (живой 407a46c8 — 37k-вставка журнала сожгла 225
+        юнитов вместо вопроса). Правило оператора «ask, do not guess» получает
+        исполнителя: первая двусмысленность становится вопросом до планирования.
+        """
+        if not self.clarification_enabled:
+            return None
+        ambiguities = tuple(getattr(contract, "ambiguities", ()) or ())
+        if not ambiguities:
+            return None
+        question_text = f"Уточнение перед выполнением: {ambiguities[0]}"
+        self.log.log("clarification_request", {
+            "question": question_text,
+            "findings": [{"kind": "contract_ambiguity",
+                          "evidence": a[:120], "confidence": 1.0}
+                         for a in ambiguities[:3]],
+        })
+        self._stream_on_token = None
+        return question_text
+
     def _prior_step_gate(self, user_question: str) -> str | None:
         """Пятые ворота (R5, 2026-08-13): предыдущий шаг, которого нет.
 
