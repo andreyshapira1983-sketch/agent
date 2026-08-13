@@ -23,7 +23,9 @@ The loop is::
                               |
                        campaign ledger
                               |
-                  stop on: budget | 3 idle in a row | max cycles
+                  stop on: budget | no-progress streak | max cycles
+                  (a pure-observation streak completes as healthy_idle;
+                   a streak with repeats stops as a stall)
 
 Hard guarantees (the whole point of this layer):
 
@@ -34,8 +36,11 @@ Hard guarantees (the whole point of this layer):
   actual cycle pacing (including idle cycles) is driven by
   ``cycle_pause_seconds``; nothing re-reads ``next_check_at`` to skip or delay
   a cycle.
-* ``max_idle_streak`` consecutive idle cycles stops the campaign with a report
-  ("3 empty cycles -> stop and ask the operator").
+* ``max_idle_streak`` consecutive no-progress cycles ends the campaign with a
+  report — as ``healthy_idle`` (status ``completed``) when every cycle in the
+  streak was a pure priority-0 observation, or as ``idle_stall`` /
+  ``no_progress_stall`` (status ``stopped``) when the streak contains repeat
+  cycles: work was wanted and went nowhere, ask the operator.
 * The campaign opens NO new effect path. A useful cycle runs through the
   existing :class:`~core.autonomous_runtime.AutonomousRuntime`, which already
   routes every effect through PolicyGate + the approval inbox. Dry-run is the
@@ -119,6 +124,12 @@ def run_campaign(
     records: list[CampaignCycleRecord] = []
     attempted_signatures: set[str] = set()
     idle_streak = 0
+    # Does the current no-progress streak contain repeat cycles? A streak of
+    # pure priority-0 observations means the world was checked and found
+    # healthy; a streak with repeats means work was wanted and went nowhere.
+    # The two deserve different stop reasons (measured 2026-08-13: a healthy
+    # dry-run reported «idle_stall», which reads as a failure).
+    streak_repeats = False
     llm_calls_used = 0
     cost_units_used = 0
     proposals = 0
@@ -230,14 +241,27 @@ def run_campaign(
                 consecutive_errors = 0
 
                 if idle_streak >= config.max_idle_streak:
-                    stop_reason = f"idle_stall:{idle_streak}_consecutive_idle_cycles"
-                    status = "stopped"
+                    if streak_repeats:
+                        stop_reason = (
+                            f"idle_stall:{idle_streak}_consecutive_idle_cycles"
+                        )
+                        status = "stopped"
+                    else:
+                        # Good news must not wear a failure's name: every cycle
+                        # in the streak observed and found nothing warranting
+                        # action, so the campaign is done, not stalled.
+                        stop_reason = (
+                            f"healthy_idle:{idle_streak}"
+                            "_checks_found_nothing_to_do"
+                        )
+                        status = "completed"
                     break
                 continue
 
             signature = action.action
             if signature in attempted_signatures:
                 idle_streak += 1
+                streak_repeats = True
                 repeat_cycles += 1
                 record = CampaignCycleRecord(
                     cycle=cycle,
@@ -270,6 +294,7 @@ def run_campaign(
                 continue
 
             idle_streak = 0
+            streak_repeats = False
             attempted_signatures.add(signature)
             useful_cycles += 1
             outcome = execute(
