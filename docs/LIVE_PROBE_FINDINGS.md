@@ -213,6 +213,9 @@ findings below are amplifiers of this loop.
   provided source."` (`core/loop_methods2.py:436`), even when the planner decides
   no sources/tools are needed → the synthesizer must cite sources that were never
   collected. Root of the "provided materials" phrasing (LPF-020).
+  *(FIXED 2026-08-13: `core/loop_observe.py::_interpret` now issues a criterion
+  conditional on collected evidence — cite what was collected, label the rest
+  unverified, never invent; pinned by `tests/test_goal_criterion_is_satisfiable.py`.)*
 - **LPF-008 — fabricated citations get positive evidence credit.**
   `compute_confidence` (`core/confidence_gate.py`) = `(verified*1.0 + cited*0.5 +
   unverified*-0.25)/total`. `cited_but_unmatched` chunks (i.e. citations that
