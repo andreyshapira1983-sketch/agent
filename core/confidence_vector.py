@@ -22,8 +22,10 @@ Axes:
   fully unverified) — i.e. when
   :func:`core.subsystem_disagreement.detect_disagreements` fires.
 * ``relevance_score`` — alignment between the answer and the user
-  question. Deterministic Jaccard-style overlap on tokenised
-  question vs. answer text after stopword removal. No LLM call.
+  question. Deterministic coverage of the question's TOPIC tokens by the
+  answer's content tokens (stopwords, indefinite pronouns and their
+  satellites removed). No LLM call. Applicability is asked before the
+  value: cross-script pairs and topicless prompts are not measured.
 
 The three combine into ``overall_confidence`` via a weighted geometric
 mean, so a near-zero score on any axis collapses the overall — a
@@ -76,7 +78,7 @@ _STOPWORDS_RU = frozenset({
     "по", "но", "они", "к", "у", "ты", "из", "за", "то", "же",
     "вы", "так", "его", "её", "ее", "мы", "был", "была", "было",
     "были", "есть", "будет", "или", "если", "только", "там", "тут",
-    "ли", "бы", "о", "об", "для", "от", "до", "при", "со", "с",
+    "ли", "бы", "о", "об", "про", "для", "от", "до", "при", "со", "с",
     "вот", "ну", "да", "нет", "уже", "ещё", "еще",
     # Interrogatives / determiners.
     "какой", "какая", "какие", "каком", "какую", "каких", "каким",
@@ -92,7 +94,29 @@ _STOPWORDS_RU = frozenset({
 })
 _STOPWORDS = _STOPWORDS_EN | _STOPWORDS_RU
 
-_TOKEN_RE = re.compile(r"[\w']+", re.UNICODE)
+# Hyphenated words stay whole. Splitting on the hyphen used to shred
+# "что-нибудь" into "что" (stopword) + "нибудь", and the orphaned particle
+# then passed for question content that no answer could ever cover.
+_TOKEN_RE = re.compile(r"[\w']+(?:-[\w']+)*", re.UNICODE)
+
+# Indefinite pronouns: placeholders for "any referent at all". A question
+# built on one asks for a KIND of reply, not about a thing in the world.
+# Russian forms are stem-suffix products, so a pattern beats a list; the
+# English ones are a closed set.
+_INDEFINITE_RU_RE = re.compile(
+    r"^(что|чего|чему|чем|чём|кто|кого|кому|кем|ком"
+    r"|как|куда|где|когда"
+    r"|какой|какая|какое|какие|какого|какую|каких|каким|какими"
+    r"|чё|че)-(нибудь|либо|то|нить)$"
+)
+_INDEFINITE_EN = frozenset({
+    "something", "anything", "someone", "anyone", "somebody", "anybody",
+    "whatever", "whatsoever",
+})
+
+
+def _is_indefinite(token: str) -> bool:
+    return token in _INDEFINITE_EN or bool(_INDEFINITE_RU_RE.match(token))
 
 # Morphological fuzzy-match tuning. Two tokens are treated as the same
 # content word when they share a long common prefix — this collapses
@@ -115,6 +139,29 @@ def _tokenise(text: str) -> set[str]:
             continue
         out.add(m)
     return out
+
+
+def _question_topic_tokens(question: str) -> set[str]:
+    """Question tokens that name a TOPIC — what coverage is allowed to count.
+
+    An indefinite pronoun is a placeholder with two satellites: the verb
+    governing it right before («посоветуй что-нибудь», "give me anything")
+    and the descriptor right after («что-нибудь умное», "something smart") —
+    the verb frames the request and the descriptor describes the desired
+    ANSWER; neither names a subject the answer must mention. All three are
+    dropped before the usual stopword filter. The drop is structural — any
+    word in those slots is excluded, so no list of request verbs or
+    adjectives has to be maintained phrase by phrase.
+    """
+    if not question:
+        return set()
+    ordered = _TOKEN_RE.findall(question.lower())
+    dropped: set[int] = set()
+    for i, tok in enumerate(ordered):
+        if _is_indefinite(tok):
+            dropped.update((i - 1, i, i + 1))
+    kept = (t for i, t in enumerate(ordered) if i not in dropped)
+    return {t for t in kept if len(t) >= 3 and t not in _STOPWORDS}
 
 
 def evidence_score(report: Any) -> float:
@@ -180,13 +227,14 @@ def relevance_score(question: str | None, answer: str | None) -> float:
     we cannot judge alignment in either direction, so we stay neutral
     rather than punish a short answer to a vague prompt.
 
-    Coverage is the fraction of question content words the answer
-    addresses. Matching is fuzzy on a shared prefix (see :func:`_same_word`)
-    so inflected forms — pervasive in Russian and common in English
-    plurals — are not miscounted as misses, which previously pinned the
-    score near ~0.3 even for on-topic answers.
+    Coverage is the fraction of question TOPIC words the answer
+    addresses (see :func:`_question_topic_tokens` — indefinite pronouns and
+    their descriptors are not topics). Matching is fuzzy on a shared prefix
+    (see :func:`_same_word`) so inflected forms — pervasive in Russian and
+    common in English plurals — are not miscounted as misses, which
+    previously pinned the score near ~0.3 even for on-topic answers.
     """
-    q_tokens = _tokenise(question or "")
+    q_tokens = _question_topic_tokens(question or "")
     a_tokens = _tokenise(answer or "")
     if not q_tokens or not a_tokens:
         return 0.5
@@ -235,8 +283,20 @@ def relevance_applicable(question: str | None, answer: str | None) -> bool:
     none, so the number is not a low relevance — it is no measurement at all,
     and the honest report of a measurement that did not happen is that it did
     not happen.
+
+    MEASURED 2026-08-13, same class, new form: «скажи что-нибудь умное» scored
+    0.0 against an on-topic reply and the operator was told the answer «может
+    отвечать не на заданный вопрос». The question names no topic — «умное»
+    describes the reply being requested, «что-нибудь» is a placeholder — so
+    there is nothing for coverage to cover and the zero was, again, not a
+    finding about the answer. Applicability therefore asks TWO questions,
+    both before the value: same writing system, and does the question name a
+    topic at all (:func:`_question_topic_tokens`).
     """
-    q_script = _script_of(_tokenise(question or ""))
+    q_topic = _question_topic_tokens(question or "")
+    if not q_topic:
+        return False
+    q_script = _script_of(sorted(q_topic))
     a_script = _script_of(_tokenise(answer or ""))
     if q_script == "none" or a_script == "none":
         return False
