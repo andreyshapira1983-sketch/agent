@@ -539,3 +539,14 @@ not a universal routing doctrine); the stem «реализац» left the implem
 loose branch («в текущей реализации» is an adverbial, not an order); and
 code-shape markers («конструктор», «.py», «в коде»…) veto the
 smart-memory-status route before its strong phrases fire.
+
+## R3 addendum: the union searched a comma-glued needle (2026-08-13, trace a5813910)
+
+`absent_literal_reason` joins up to three missing literals with ", " into one
+`expected` string. `literal_covered_by_union` searched that GLUED string as a
+single substring — it could never match, so the union cleared nothing, and a
+live self-inspection run took four false `[claim-refuted]` on true claims that
+merely named several files. Each literal is now sought separately across the
+union (excerpt + source_id); all must be covered to lift the reason. Known
+still open (R8b, next session): chain excerpts capped at CREATION carry no
+budget notice, so the trimmed-excerpt guard cannot see that truncation.

@@ -503,12 +503,15 @@ def literal_covered_by_union(expected: str, evidences: list[Any]) -> bool:
     а гейт литералов мерил каждую цитату против всего куска и опроверг истину
     дважды зеркально (`expected=notes_a` из notes_b и наоборот).
     """
-    needle = (expected or "").strip().lower()
-    if not needle:
+    # `expected` — склейка до трёх литералов через ", " (см. absent_literal_
+    # reason): живой прогон a5813910 показал, что поиск склейки как одной
+    # подстроки не находил НИЧЕГО, и объединение не снимало ни одного иска.
+    needles = [n.strip().lower() for n in (expected or "").split(",") if n.strip()]
+    if not needles:
         return False
-    for ev in evidences or []:
-        if needle in (getattr(ev, "excerpt", "") or "").lower():
-            return True
-        if needle in (getattr(ev, "source_id", "") or "").lower():
-            return True
-    return False
+    haystacks = [
+        (getattr(ev, "excerpt", "") or "").lower()
+        + "\n" + (getattr(ev, "source_id", "") or "").lower()
+        for ev in evidences or []
+    ]
+    return all(any(n in h for h in haystacks) for n in needles)

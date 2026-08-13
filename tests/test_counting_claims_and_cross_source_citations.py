@@ -58,6 +58,30 @@ def test_a_cross_source_claim_is_covered_by_the_union() -> None:
     ]
 
 
+def test_a_multi_literal_claim_is_covered_part_by_part() -> None:
+    """Живой a5813910: reason склеивает до трёх литералов через запятую, и
+    поиск склейки целиком не находил ничего — объединение не снимало исков.
+    Каждый литерал ищется отдельно; адрес источника — тоже улика."""
+    answer = (
+        "Conclusion: сравнение notes_a.md и notes_b.md сделано. "
+        "[file:probe_r1/notes_a.md] [file:probe_r1/notes_b.md]\n"
+        "Facts:\n"
+        "- Файлы notes_a.md и notes_b.md различаются датой "
+        "[file:probe_r1/notes_a.md] [file:probe_r1/notes_b.md]\n"
+        "Sources:\n1. file:probe_r1/notes_a.md - a\n2. file:probe_r1/notes_b.md - b\n"
+        "Confidence: high\nUnverified: nothing\n"
+    )
+    report = verify(
+        answer=answer,
+        chain=_chain(_file("probe_r1/notes_a.md", "версия 2026-08-01\n"),
+                     _file("probe_r1/notes_b.md", "версия 2026-08-09\n")),
+        user_question="что различается",
+    )
+    assert report.refuted_chunks == 0, [
+        (c.verdict, getattr(c.reason, "expected", None)) for c in report.chunks
+    ]
+
+
 def test_a_single_source_lie_is_still_refuted() -> None:
     """ПРЕДОХРАНИТЕЛЬ R3: класс MIR-060 №2 не открывается обратно."""
     answer = (
