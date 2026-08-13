@@ -78,13 +78,23 @@ _DECLARED_DELETED_FIELDS = frozenset({"_planner_cache"})
 #: сдвинула бы всё после неё. Это проверяется отдельно, ниже.
 _DECLARED_ADDED_PARAMS = ("pending_clarification_path",)
 
+#: Санкционированные добавления ПОЛЕЙ (не параметров). 2026-08-13: вердикт
+#: применимости улик (`last_evidence_support`) хранится рядом с
+#: `last_verification`, чтобы сводка проверки читала то же решение, что
+#: журналировал наблюдатель, — иначе хвост объявлял «уверенность: нулевая»
+#: ходу, которому улики не полагались (трасса da0f132b).
+_DECLARED_ADDED_FIELDS = frozenset({"last_evidence_support"})
+
 
 def _mentions_deleted(stmt: ast.stmt) -> bool:
     return any(name in ast.unparse(stmt) for name in _DECLARED_DELETED_FIELDS)
 
 
 def _mentions_added(stmt: ast.stmt) -> bool:
-    return any(name in ast.unparse(stmt) for name in _DECLARED_ADDED_PARAMS)
+    return any(
+        name in ast.unparse(stmt)
+        for name in (*_DECLARED_ADDED_PARAMS, *_DECLARED_ADDED_FIELDS)
+    )
 
 
 def test_logic_moved_symbol_for_symbol():

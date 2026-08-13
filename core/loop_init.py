@@ -291,6 +291,10 @@ class AgentLoopInit:
         from core.verifier import VerificationReport as _VR
 
         self.last_verification: _VR | None = None
+        # Applicability verdict from `evaluate_evidence_support`, set beside
+        # the verification report each turn; the verification summary reads it
+        # so «нет улик» and «улики не требовались» stay distinguishable.
+        self.last_evidence_support: Any = None
         self.last_referent_decision: ReferentDecision | None = None
         # Issue #119 — was this turn a conversational correction / request to
         # explain the agent's own previous reply? Decided per turn, exposed so

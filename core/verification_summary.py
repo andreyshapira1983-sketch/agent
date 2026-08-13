@@ -159,6 +159,7 @@ def build_verification_summary(
     report: VerificationReport,
     chain: ProvenanceChain | None = None,
     vector: object | None = None,
+    evidence_support: object | None = None,
 ) -> VerificationSummary:
     """Compose the five points from the verifier's own numbers. Pure.
 
@@ -167,9 +168,26 @@ def build_verification_summary(
     RATHER THAN MERGED: citation integrity and task relevance answer different
     questions, and folding them into a single word would destroy the very
     information this argument exists to carry.
+
+    ``evidence_support`` is the applicability verdict from
+    :func:`core.evidence_support.evaluate_evidence_support`. MEASURED
+    2026-08-13: a small-talk turn logged ``no_evidence_expected`` and the tail
+    still told the operator «уверенность: нулевая» — the very conflation of
+    "no evidence was owed" with "owed and missing" that module was rewritten
+    to stop making, resurrected one consumer downstream. When the verdict
+    says no evidence was owed (and no citation was fabricated), point 5 and
+    the tail say that instead of a zero.
     """
     examined = sum(1 for c in report.chunks if c.verdict != "structural")
     verified = report.verified_chunks
+    no_evidence_owed = bool(
+        evidence_support is not None
+        and not getattr(evidence_support, "applicable", True)
+        and getattr(evidence_support, "reason", "") == "no_evidence_expected"
+        and not getattr(
+            evidence_support, "citation_integrity_violation", False
+        )
+    )
 
     # (1) Что проверял.
     if examined == 0:
@@ -235,18 +253,35 @@ def build_verification_summary(
 
     # (5) Насколько уверен.
     word, confidence = _confidence_wording(verified, examined)
+    if no_evidence_owed and examined > 0:
+        # «Нулевая уверенность» — приговор для хода, который был должен улики
+        # и не принёс. Ход, который улик не был должен, приговора не заслужил.
+        confidence = (
+            "не применимо — внешнее подтверждение на этом ходе не требовалось"
+        )
 
     if examined == 0:
         tail = ""
+    elif no_evidence_owed:
+        gap_total = sum(count for _v, count in gaps)
+        tail = (
+            f"{TAIL_PREFIX} внешнее подтверждение этому ответу не требовалось "
+            f"(синтез/общие знания); утверждений без внешних источников: "
+            f"{gap_total} — для такой задачи это норма."
+        )
     else:
         gap_total = sum(count for _v, count in gaps)
         tail = (
             f"{TAIL_PREFIX} подтверждено {verified} из {examined} утверждений; "
             f"без внешнего подтверждения: {gap_total}; уверенность: {word}."
         )
+
+    if tail:
         # Применимость спрашивается ДО значения: между разными системами письма
         # покрытие слов не измеряет соответствие задаче, и низкое число там —
-        # факт о клавиатуре, а не об ответе (замер 2026-08-10).
+        # факт о клавиатуре, а не об ответе (замер 2026-08-10). Ось релевантности
+        # ортогональна уликам, поэтому предупреждение живёт и в хвосте
+        # «подтверждение не требовалось».
         _relevance = getattr(vector, "relevance_score", None)
         if not getattr(vector, "relevance_applicable", True):
             _relevance = None

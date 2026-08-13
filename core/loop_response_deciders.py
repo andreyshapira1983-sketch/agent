@@ -81,6 +81,7 @@ class AgentLoopResponseDeciders:
         last_self_analysis: Any
         last_source_ranking: Any
         last_confidence_vector: Any
+        last_evidence_support: Any
         last_role_context: Any
         # Заводит `core/loop.py` за ход, дописывает `core/loop_attempt.py`.
         # Отсюда сюда кладётся `self_contradiction` — единственная дорога от
@@ -347,7 +348,10 @@ class AgentLoopResponseDeciders:
             try:
                 _vsummary = build_verification_summary(
                     self.last_verification, chain=self.last_provenance,
-                    vector=self.last_confidence_vector)
+                    vector=self.last_confidence_vector,
+                    evidence_support=getattr(
+                        self, "last_evidence_support", None
+                    ))
                 self.log.log(
                     "verification_explained", _vsummary.to_log_payload()
                 )

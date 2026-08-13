@@ -40,7 +40,7 @@ WATCH: dict[str, int] = {
     "core/loop_step_execution.py:AgentLoopStepExecution._execute_step": 568,
     "agent_tick.py:run_tick": 474,
     "core/loop_synthesis.py:AgentLoopSynthesis._synthesize": 430,  # уехал целиком из core/loop.py
-    "core/loop_response_deciders.py:AgentLoopResponseDeciders._build_response_draft": 157,  # +3 (2026-08-10): контракт завершения приходит сюда параметром — распознанный и непроверяемый запрет обязан дойти до оператора, а не умереть в журнале.
+    "core/loop_response_deciders.py:AgentLoopResponseDeciders._build_response_draft": 160,  # +3 (2026-08-10): контракт завершения приходит сюда параметром — распознанный и непроверяемый запрет обязан дойти до оператора, а не умереть в журнале. +3 (2026-08-13): вердикт применимости улик передаётся композитору сводки — иначе хвост объявлял «нулевую уверенность» ходу, которому улики не полагались.
     "core/self_build_producer.py:produce_self_apply_proposal": 375,
     "core/campaign.py:run_campaign": 350,
     "cli/command_dispatch.py:handle_meta_command": 349,
@@ -54,7 +54,7 @@ WATCH: dict[str, int] = {
     "app/bootstrap.py:build_agent": 246,
     "core/loop_memory_write.py:AgentLoopMemoryWrite._record_experience_memory": 246,
     "core/referent_resolver.py:ReferentResolver.resolve": 240,
-    "core/loop_init.py:AgentLoopInit.__init__": 238,  # уехал целиком из core/loop.py
+    "core/loop_init.py:AgentLoopInit.__init__": 239,  # уехал целиком из core/loop.py; +1 (2026-08-13): поле last_evidence_support — вердикт применимости улик живёт рядом с отчётом проверки.
     "core/self_apply_lane.py:run_self_apply_lane": 235,
     "core/model_router.py:ModelRouter.for_task": 227,
     "core/loop_memory_read.py:AgentLoopMemoryRead._retrieve_experience_memory": 218,
