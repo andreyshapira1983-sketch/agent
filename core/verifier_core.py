@@ -280,7 +280,10 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
             if (
                 chunk_reason is not None
                 and chunk_reason.code == "cited_literal_absent"
-                and literal_covered_by_union(chunk_reason.expected, chunk_evs)
+                and literal_covered_by_union(
+                    chunk_reason.expected, chunk_evs,
+                    [e.source_id for e in chain.evidences],
+                )
             ):
                 chunk_reason = None
             if any_matched and not (

@@ -550,3 +550,14 @@ merely named several files. Each literal is now sought separately across the
 union (excerpt + source_id); all must be covered to lift the reason. Known
 still open (R8b, next session): chain excerpts capped at CREATION carry no
 budget notice, so the trimmed-excerpt guard cannot see that truncation.
+
+## R3 addendum 2: an address of the chain covers a name (2026-08-13, trace 0d88ba79)
+
+A chunk citing ONE file while naming other modules read in the SAME cycle was
+still refuted: the union deliberately spans only the chunk's own citations.
+Rule added at the same owner: a missing literal matching the SOURCE_ID of any
+chain evidence is covered — its referent was actually opened this cycle.
+Addresses only, never foreign excerpts' text: excerpt contents would launder
+values back in (MIR-060). Remaining false-positive class stays R8b: excerpts
+capped at creation carry no budget notice (`disqualifying_defect_signals,
+mir-057, mir-060` all live in smart_memory.py yet sat past the cut).
