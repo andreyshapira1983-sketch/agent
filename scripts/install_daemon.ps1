@@ -64,7 +64,10 @@ if ($Uninstall) {
 
 # ── Resolve Python interpreter ────────────────────────────────────────────────
 $VenvPython = Join-Path $Workspace ".venv\Scripts\python.exe"
-$SysPython  = (Get-Command python -ErrorAction SilentlyContinue)?.Source
+# Windows PowerShell 5.1 has no `?.` (null-conditional): the installer must
+# parse on the stock `powershell` engine, not only pwsh 7 (live fail 2026-08-13).
+$SysPythonCmd = Get-Command python -ErrorAction SilentlyContinue
+$SysPython  = if ($SysPythonCmd) { $SysPythonCmd.Source } else { $null }
 
 if (Test-Path $VenvPython) {
     $PythonExe = $VenvPython
