@@ -443,9 +443,13 @@ def _matches_source_review(text: str) -> bool:
     filename_markers = (".py", ".md", ".txt", "\\", "/")
     if _has_any_loose(text, source_review_terms):
         return True
-    return _has_any_loose(text, filename_markers) and _has_any_loose(
-        text,
-        ("сравни", "сравнить", "review", "compare"),
+    # R6 (2026-08-13, живой A3): «Сравни a.md и b.md и перечисли различия» —
+    # содержательная задача, не заказ плана ревью. Мягкая ветка требует слова
+    # о ПЛАНЕ/РЕВЬЮ, а не голого императива над файловыми объектами.
+    return (
+        _has_any_loose(text, filename_markers)
+        and _has_any_loose(text, ("сравни", "сравнить", "review", "compare"))
+        and _has_any_loose(text, ("план", "plan", "ревью"))
     )
 
 
@@ -462,11 +466,12 @@ def _matches_implementation_plan(text: str) -> bool:
     filename_markers = (".py", ".md", ".txt", "\\", "/")
     if _has_any_loose(text, planning_terms):
         return True
+    # R6 (2026-08-13, живой d322a875/Q2): «в текущей реализации» — обстоятельство
+    # места, не заказ плана; стем «реализац» изъят из мягкой ветки.
     return _has_any_loose(text, filename_markers) and _has_any_loose(
         text,
         (
             "план",
-            "реализац",
             "implementation",
             "менять",
             "тесты",
@@ -978,6 +983,15 @@ def _looks_like_engineering_change_request(text: str) -> bool:
 
 
 def _matches_smart_memory_status(text: str) -> bool:
+    # R6 (2026-08-13, живой d322a875/Q3): «проверь конструктор episodic memory
+    # store» — вопрос об УСТРОЙСТВЕ кода, не о состоянии памяти; статус ему
+    # не ответ. Признаки кода снимают маршрут раньше сильных фраз.
+    if _has_any_loose(
+        text,
+        ("конструктор", "constructor", ".py", "исходный код",
+         "source code", "в коде", "production-код"),
+    ):
+        return False
     if _has_any_loose(
         text,
         (

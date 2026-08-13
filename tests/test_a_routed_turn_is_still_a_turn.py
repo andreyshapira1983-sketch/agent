@@ -43,10 +43,14 @@ from core.policy import PolicyGate
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
 
-#: Дословно из живого прогона. `кода/runtime` даёт `/`, «реализации» даёт
-#: «реализац» — этой пары хватает, чтобы исследовательский вопрос уехал в план
-#: реализации. Никакой модели на этом пути нет: маршрут детерминированный.
-_HIJACKED = (
+#: ЗАКОННО маршрутизируемая фраза (позитивный контрол implementation_plan).
+#: Прежняя фикстура — живой перехват Q2 — закрыта ремонтом R6 2026-08-13:
+#: стем «реализац» изъят из мягкой ветки, и вопрос ушёл бы в цикл. Инвариант
+#: файла от этого не меняется: ЛЮБОЙ маршрутизированный ход остаётся в истории.
+_ROUTED = "Составь точный план реализации Operator Task Layer"
+
+#: Живой перехват 2026-08-12 (Q2, d322a875) — теперь регрессия ремонта R6.
+_FORMERLY_HIJACKED = (
     "Найди фактическое место хранения episodic memory в текущей реализации. "
     "Не угадывай по документации. Дай путь и конкретное evidence из кода/runtime."
 )
@@ -74,15 +78,14 @@ def agent(tmp_path: Path) -> AgentLoop:
     )
 
 
-def test_the_hijack_itself_is_still_here() -> None:
-    """ПРЕДУСЛОВИЕ, не починка: перехват маршрута — отдельный дефект.
+def test_the_original_hijack_is_gone() -> None:
+    """Прежний перехват Q2 закрыт ремонтом R6 (2026-08-13) — и не вернётся.
 
-    Этот тест НЕ утверждает, что так правильно. Он закрепляет, что случай
-    воспроизводим без модели, и покраснеет, когда маршрутизацию починят
-    отдельно — тогда описание выше придётся переписать честно.
+    Первая версия этого теста закрепляла сам перехват как предусловие и
+    покраснела в момент починки — ровно так, как обещало её описание.
     """
-    intent = route_operator_intent(_HIJACKED)
-    assert intent is not None and intent.kind == "implementation_plan"
+    intent = route_operator_intent(_FORMERLY_HIJACKED)
+    assert intent is None or intent.kind != "implementation_plan", intent
 
 
 def test_a_routed_question_stays_in_the_session(agent: AgentLoop, tmp_path: Path) -> None:
@@ -91,14 +94,14 @@ def test_a_routed_question_stays_in_the_session(agent: AgentLoop, tmp_path: Path
     before = len(agent.memory.turns)
 
     assert intent_bridge.handle_conversational_operator_input(
-        _HIJACKED, agent, tmp_path
+        _ROUTED, agent, tmp_path
     ) is True
 
     assert len(agent.memory.turns) == before + 1, (
         "маршрут ответил и стёр ход: следующий планировщик не узнает, что "
         "оператор вообще спрашивал"
     )
-    assert "episodic memory" in agent.memory.turns[-1].question
+    assert "Operator Task Layer" in agent.memory.turns[-1].question
 
 
 def test_the_next_planner_sees_it(agent: AgentLoop, tmp_path: Path) -> None:
@@ -107,9 +110,9 @@ def test_the_next_planner_sees_it(agent: AgentLoop, tmp_path: Path) -> None:
     Присутствие в списке ничего не стоит, если сборка контекста его не берёт —
     именно это расхождение и наблюдалось живьём.
     """
-    intent_bridge.handle_conversational_operator_input(_HIJACKED, agent, tmp_path)
+    intent_bridge.handle_conversational_operator_input(_ROUTED, agent, tmp_path)
     context = agent.memory.conversation_context(max_turns=5)
-    assert "episodic memory" in context, context
+    assert "Operator Task Layer" in context, context
 
 
 def test_the_answering_command_is_named(agent: AgentLoop, tmp_path: Path) -> None:
@@ -119,7 +122,7 @@ def test_the_answering_command_is_named(agent: AgentLoop, tmp_path: Path) -> Non
     снова застрянет. Записанное имя — это готовое объяснение, почему
     `POSSIBLE/IMPOSSIBLE/UNKNOWN` в разговоре не появился.
     """
-    intent_bridge.handle_conversational_operator_input(_HIJACKED, agent, tmp_path)
+    intent_bridge.handle_conversational_operator_input(_ROUTED, agent, tmp_path)
     turn = agent.memory.turns[-1]
     assert ":implementation-plan" in turn.answer, turn.answer
 
@@ -158,7 +161,7 @@ def test_the_operators_own_falsification(agent: AgentLoop, tmp_path: Path) -> No
     """
     session = [
         "Это диагностический прогон, ничего не изменяй.",
-        _HIJACKED,
+        _FORMERLY_HIJACKED,  # после R6 идёт циклом — и всё равно в истории
         ("Проверь реальный конструктор episodic memory store. Можно ли создать "
          "полностью изолированный временный store? Ответ только POSSIBLE, "
          "IMPOSSIBLE или UNKNOWN."),
@@ -189,5 +192,5 @@ def test_no_memory_no_crash(tmp_path: Path) -> None:
         planner=FakePlanner(sources=[]), memory=None, max_replan_attempts=1,
     )
     assert intent_bridge.handle_conversational_operator_input(
-        _HIJACKED, agent, tmp_path
+        _ROUTED, agent, tmp_path
     ) is True
