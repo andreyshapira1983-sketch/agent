@@ -208,6 +208,7 @@ class AgentLoopVerification:
         # uses further down, so observer and enforcer cannot hold opposite
         # opinions about whether evidence was owed on this turn.
         try:
+            self.last_evidence_support = None  # never a previous run's verdict
             _ev_expected = is_evidence_expected(
                 role=getattr(self.last_role_context, "role", ""),
                 chain_was_empty=bool(
@@ -221,6 +222,11 @@ class AgentLoopVerification:
             _support = evaluate_evidence_support(
                 report, evidence_expected=_ev_expected
             )
+            # Kept on the loop, not only logged: the verification summary must
+            # read the same applicability verdict, or it reports «уверенность:
+            # нулевая» for a turn this very block ruled owed no evidence
+            # (measured live 2026-08-13 on a small-talk turn).
+            self.last_evidence_support = _support
             self.log.log("evidence_support", _support.to_log_payload())
         except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
             self._sensor_failed("evidence_support", exc)

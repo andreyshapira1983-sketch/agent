@@ -1001,7 +1001,7 @@
     "_root": {
       "site": "core/loop_init.py::AgentLoopInit.__init__",
       "size_lines": 231,
-      "self_fields": 64,
+      "self_fields": 65,
       "note": "Invisible to the node census: the discovery rule skips dunders as plumbing, so the single place where the nervous system's state is created is outside the map. Per the operator's map (model error 4), an assignment proves the initialization site, not ownership.",
       "proven": [
         "initialization_site"
@@ -1020,8 +1020,8 @@
     "_rule_history": "Two false results were produced and corrected before this snapshot was written. The first pass counted `self.X` in every class, so fields named llm/log/policy/registry looked per-run because OTHER classes assign their own. The second missed getattr access and declared `durable_writes` and `experience_retrieval` dead — both are live, read at core/loop_memory_write.py:114 and core/loop_memory_read.py:200 through getattr with a literal name.",
     "by_lifetime": {
       "per_run": {
-        "count": 25,
-        "meaning": "written somewhere in the perimeter during a run, so the value does not survive as constructed"
+        "count": 26,
+        "meaning": "written somewhere in the perimeter during a run, so the value does not survive as constructed. +1 on 2026-08-13: `last_evidence_support` — the applicability verdict from evaluate_evidence_support, kept beside last_verification so the verification summary reads the same ruling the observer logged; reset to None at the start of each evidence-support pass in loop_verification."
       },
       "read_only_in_perimeter": {
         "count": 36,

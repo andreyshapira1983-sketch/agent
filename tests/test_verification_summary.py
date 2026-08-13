@@ -342,8 +342,9 @@ class TestLoopWiring:
 
         # The stub must accept what the CALLER passes, or the failure this test
         # measures becomes a TypeError from the signature rather than the
-        # RuntimeError from the body. `vector` joined the call on 2026-08-09.
-        def _boom(report, chain=None, vector=None):
+        # RuntimeError from the body. `vector` joined the call on 2026-08-09,
+        # `evidence_support` on 2026-08-13.
+        def _boom(report, chain=None, vector=None, evidence_support=None):
             raise RuntimeError("схема вердиктов изменилась")
 
         monkeypatch.setattr(deciders_mod, "build_verification_summary", _boom)
