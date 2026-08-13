@@ -496,7 +496,11 @@ def enumeration_count_reason(text: str) -> Any:
     return None
 
 
-def literal_covered_by_union(expected: str, evidences: list[Any]) -> bool:
+def literal_covered_by_union(
+    expected: str,
+    evidences: list[Any],
+    chain_source_ids: list[str] | None = None,
+) -> bool:
     """R3: литерал накрыт ОБЪЕДИНЕНИЕМ процитированных улик (текст + адрес).
 
     Живой случай B3: перекрёстное утверждение цитировало обе улики по половине,
@@ -514,4 +518,9 @@ def literal_covered_by_union(expected: str, evidences: list[Any]) -> bool:
         + "\n" + (getattr(ev, "source_id", "") or "").lower()
         for ev in evidences or []
     ]
+    # Живой 0d88ba79: кусок цитировал ОДИН файл, называя другие, прочитанные
+    # тем же ходом. Литерал, совпадающий с АДРЕСОМ улики цепи, не выдуман —
+    # его референт открывался. Только адреса, не тексты: содержимое чужой
+    # улики отмывало бы значения обратно (MIR-060).
+    haystacks.extend((sid or "").lower() for sid in chain_source_ids or [])
     return all(any(n in h for h in haystacks) for n in needles)

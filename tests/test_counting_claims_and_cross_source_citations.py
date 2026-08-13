@@ -82,6 +82,28 @@ def test_a_multi_literal_claim_is_covered_part_by_part() -> None:
     ]
 
 
+def test_naming_another_evidence_of_the_chain_is_not_a_fabrication() -> None:
+    """Живой 0d88ba79: кусок цитирует ОДИН файл, называя другой, прочитанный
+    тем же ходом. Адрес улики цепи покрывает литерал; чужие тексты — нет."""
+    answer = (
+        "Conclusion: self_repair строже, чем learning_planner. "
+        "[file:core/self_repair.py]\n"
+        "Facts:\n- В отличие от learning_planner, файл self_repair требует "
+        "готового предложения [file:core/self_repair.py]\n"
+        "Sources:\n1. file:core/self_repair.py - sr\n"
+        "Confidence: high\nUnverified: nothing\n"
+    )
+    report = verify(
+        answer=answer,
+        chain=_chain(_file("core/self_repair.py", "requires a proposal\n"),
+                     _file("core/learning_planner.py", "ranks sources\n")),
+        user_question="кто строже",
+    )
+    assert report.refuted_chunks == 0, [
+        (c.verdict, getattr(c.reason, "expected", None)) for c in report.chunks
+    ]
+
+
 def test_a_single_source_lie_is_still_refuted() -> None:
     """ПРЕДОХРАНИТЕЛЬ R3: класс MIR-060 №2 не открывается обратно."""
     answer = (
