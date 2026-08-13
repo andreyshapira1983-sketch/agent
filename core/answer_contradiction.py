@@ -95,7 +95,7 @@ def contradicted_claims(answer: str | None) -> tuple[Contradiction, ...]:
     # эпистемический ответ дня получил self_contradicted×4 и карантин.
     boundary = re.compile(
         r"не\s+чита|не\s+передав|данные\s+не|нет\s+данных|недоступ|не\s+запраш|"
-        r"не\s+видн|не\s+показан|пропущенн|не\s+предоставл|omitted|"
+        r"не\s+видн|не\s+показан|пропущен|не\s+предоставл|не\s+целиком|omitted|"
         r"not\s+read|not\s+provided|no\s+data|not\s+shown", re.IGNORECASE)
     denied_lines = [ln for ln in denied_text.splitlines() if ln.strip()]
     denied = {
