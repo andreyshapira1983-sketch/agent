@@ -301,6 +301,9 @@ class AgentLoopResponseDeciders:
             # исходу: более сильное действие могло забрать исход себе.
             if getattr(_enf, "contradictions", ()):
                 self._defect_signals.append("self_contradiction")
+            # R4: фабрикация цитат — тот же класс ложности, судья другой.
+            if _enf.outcome == "citation_integrity":
+                self._defect_signals.append("citation_fabricated")
             _stage = "set_body"
             if _enf.applied:
                 draft.set_body(_enf.answer, by="answer_enforcement")

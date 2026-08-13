@@ -39,17 +39,20 @@ _ENV_MODE = "AGENT_REFERENT_RESOLVER"
 
 
 def referent_resolver_mode() -> str:
-    """Return ``off`` (default), ``shadow`` (log only), or ``on``.
+    """Return ``on`` (default), ``shadow`` (log only), or ``off``.
 
-    ``shadow`` logs decisions only. ``on`` enables the local-critique answer
-    path when :func:`is_local_critique_eligible` is true (PR2).
+    Постановление оператора 2026-08-13 (R5): орган включён рождением, а не
+    переменной, которую никто не выставлял. Выключенный резолвер стоил живого
+    хода: анафора «результат предыдущего шага» при пустой истории пошла в
+    планирование и взяла чужое число из опыта под видом диалога. ``off`` и
+    ``shadow`` остаются операторскими переключателями.
     """
     raw = (os.getenv(_ENV_MODE) or "").strip().lower()
-    if raw in ("on", "true", "1", "yes"):
-        return "on"
+    if raw in ("off", "false", "0", "no"):
+        return "off"
     if raw == "shadow":
         return "shadow"
-    return "off"
+    return "on"
 
 
 # Kinds that can be critiqued without a tool read (PR2). file_hint / path → PR4.
@@ -148,7 +151,19 @@ def is_local_critique_eligible(decision: ReferentDecision) -> bool:
         return False
     if decision.primary.kind not in LOCAL_CRITIQUE_KINDS:
         return False
-    if not (decision.analysis_target_excerpt or "").strip():
+    target = (decision.analysis_target_excerpt or "").strip()
+    if not target:
+        return False
+    # R5 (2026-08-13, включение default-on вскрыло): «текст пользователя» —
+    # это ПРИНЕСЁННЫЙ текст (многострочный или в кавычках), а не хвост самой
+    # формулировки задачи. «Проанализируй архитектуру проекта…» резолвился в
+    # user_text из собственного дополнения, и критика-без-объекта съедала
+    # содержательную задачу: без роли, без инструментов, без памяти.
+    # Маркеры принесённости: перевод строки, кавычки или двоеточие-презентация
+    # («Вот фрагмент: …» переживает срез директив и несёт двоеточие).
+    if decision.primary.kind == "user_text" and "\n" not in target and not any(
+        q in target for q in ('"', "«", "“", "'", ":")
+    ):
         return False
     return is_critique_directive(decision.directive_excerpt or "")
 

@@ -201,7 +201,8 @@ def test_shadow_would_change_but_keeps_default_synth(
 
 
 def test_off_mode_unchanged(workspace: Path, monkeypatch):
-    monkeypatch.delenv("AGENT_REFERENT_RESOLVER", raising=False)
+    # R5 2026-08-13: default стал "on"; off — явный операторский ключ.
+    monkeypatch.setenv("AGENT_REFERENT_RESOLVER", "off")
     llm = FakeLLM(
         responses=[
             ("Conclusion: ok\nFacts:\n- x [general-knowledge]\nSources: gk\n"

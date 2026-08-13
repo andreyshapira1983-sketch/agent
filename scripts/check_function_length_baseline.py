@@ -78,6 +78,7 @@ WATCH: dict[str, int] = {
     "core/self_task_producer.py:produce_coding_task": 167,
     "core/role_router.py:RoleRouter.route": 163,
     "core/low_evidence_policy.py:evaluate_low_evidence_policy": 161,
+    "core/unsupported_claims.py:_enforce_without_contradictions": 170,  # замер 164 + запас (2026-08-13, R4): терминальная ветка сфабрикованных цитат живёт на рубеже принятия ответа — постановление оператора
     "core/planner.py:LLMPlanner.plan": 159,
     # 2026-08-05, MIR-077: measured 149 -> 152. It sat one line under the 150
     # report threshold and crossed it when its two broad handlers were made to

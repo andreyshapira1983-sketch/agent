@@ -31,11 +31,16 @@ def test_feature_flag_defaults_off():
     assert FEATURE_FLAG_DEFAULT is False
 
 
-def test_referent_resolver_mode_default_off(monkeypatch):
+def test_referent_resolver_mode_default_on(monkeypatch):
+    """Постановление оператора 2026-08-13 (R5): орган включён рождением.
+
+    Прежний default-off стоил живого хода: анафора при пустой истории взяла
+    чужое число из опыта под видом диалога. off/shadow остались ключами.
+    """
     monkeypatch.delenv("AGENT_REFERENT_RESOLVER", raising=False)
     from core.referent_resolver import referent_resolver_mode
 
-    assert referent_resolver_mode() == "off"
+    assert referent_resolver_mode() == "on"
 
 
 def test_referent_resolver_mode_shadow_and_on(monkeypatch):

@@ -370,7 +370,7 @@ class AgentLoop(
 
         # Never re-gated on a resumed run: the trigger lives in the ORIGINAL
         # text, which no longer changes, so asking again can only ask forever.
-        _decided = None if _resumed else self._clarification_gate(user_question)
+        _decided = None if _resumed else (self._prior_step_gate(user_question) or self._clarification_gate(user_question))
         if _decided is not None:
             self._park_clarification(user_question)  # what it asked ABOUT
             return _decided

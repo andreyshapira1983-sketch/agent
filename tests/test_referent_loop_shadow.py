@@ -43,7 +43,8 @@ def _agent(workspace: Path) -> tuple[AgentLoop, Path]:
 
 
 def test_referent_shadow_off_emits_no_event(workspace: Path, monkeypatch):
-    monkeypatch.delenv("AGENT_REFERENT_RESOLVER", raising=False)
+    # R5 2026-08-13: default стал "on"; off — явный операторский ключ.
+    monkeypatch.setenv("AGENT_REFERENT_RESOLVER", "off")
     agent, log_path = _agent(workspace)
     agent.run("покажи слабые стороны этого")
     kinds = [e["event"] for e in _events(log_path)]
