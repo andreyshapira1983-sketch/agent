@@ -198,7 +198,17 @@ class AgentLoopObserve:
 
     def _interpret(self, observation: Observation) -> Goal:
         question = observation.content["question"]
+        # LPF-007: the criterion used to demand «citing every claim back to a
+        # provided source» on EVERY turn — including turns where no sources
+        # are collected at all (small talk, pure synthesis). A duty to cite
+        # what was never provided is a duty to fabricate; the criterion below
+        # is conditional on evidence actually existing, so it is satisfiable
+        # on every turn without lying on any.
         return Goal(
             description=f"Answer the question: {question}",
-            success_criteria="A grounded answer citing every claim back to a provided source.",
+            success_criteria=(
+                "A direct answer; claims backed by collected evidence cite "
+                "their sources, claims without a collected source are "
+                "presented as unverified — citations are never invented."
+            ),
         )
