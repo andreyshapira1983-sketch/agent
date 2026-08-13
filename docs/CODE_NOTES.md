@@ -615,3 +615,35 @@ sixth gate (`_contract_ambiguity_gate`, own gate — the transplanted bodies
 stay verbatim) turns the contract's first ambiguity into a question BEFORE
 planning, under the same `clarification_enabled` key and resumed-run skip.
 The operator's rule "ask, do not guess" now has its executor.
+
+## The chit-chat turn: four honesty defects from one trace (2026-08-13, trace da0f132b)
+
+«Скажи что-нибудь умное» went through the whole pipeline and the operator got
+a scare tail: «уверенность: нулевая… Соответствие вопросу: 0.00». Four roots,
+two of them the SAME class the 2026-08-10 cross-script fix caught — a
+measurement that did not apply, reported as a measurement:
+
+1. **Relevance on a topicless prompt** (`confidence_vector`). The tokenizer
+   shredded «что-нибудь» at the hyphen and the orphaned particle passed for
+   question content; «умное» describes the desired reply, not a topic.
+   Hyphenated tokens now stay whole, and applicability asks a second question
+   before the value: does the question name a topic at all? The indefinite
+   pronoun's slots (governing verb before, descriptor after) are dropped
+   structurally — no per-phrase adjective/verb lists. Unseen forms of the
+   class are pinned in `tests/test_relevance_topicless_prompts.py`.
+2. **The tail called a no-debt turn a zero** (`verification_summary`).
+   `evidence_support` ruled `no_evidence_expected` and the tail still said
+   «уверенность: нулевая» — the exact conflation that module's rewrite exists
+   to prevent, resurrected one consumer downstream. The loop now keeps
+   `last_evidence_support` beside the report and the composer says
+   «внешнее подтверждение не требовалось». Fabricated citations forfeit the
+   softer wording; a real evidence debtor still reads «нулевая».
+3. **LPF-007 criterion demanded the uncollected** (`loop_observe._interpret`).
+   Every goal promised «citing every claim back to a provided source», so a
+   turn with no sources owed fabrication. The criterion is now conditional:
+   cite what was collected, label the rest unverified, never invent.
+4. **Good news wore a failure's name** (`campaign`). A pure priority-0
+   observation streak ended as «idle_stall / stopped» — on a healthy project
+   the default-paced campaign always died with a stall on its lips. A pure
+   streak now completes as `healthy_idle`; a streak containing repeat cycles
+   (work wanted, went nowhere) still stops as a stall.

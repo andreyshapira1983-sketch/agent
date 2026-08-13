@@ -163,7 +163,11 @@ class TestIdleNeverSpends:
 # ============================================================
 
 class TestIdleStall:
-    def test_three_idle_in_a_row_stops_campaign(self):
+    def test_three_healthy_idle_in_a_row_completes_the_campaign(self):
+        # A streak of pure priority-0 observations means the world was checked
+        # and found healthy. Measured 2026-08-13: this used to report
+        # «status=stopped stop_reason=idle_stall», good news wearing a
+        # failure's name.
         gather = _ScriptedGather([_observe()])
         result = run_campaign(
             CampaignConfig(max_cycles=10, max_idle_streak=3),
@@ -174,12 +178,13 @@ class TestIdleStall:
             ledger=CampaignLedger(),
             now_fn=_fixed_now,
         )
-        assert result.status == "stopped"
-        assert result.stop_reason.startswith("idle_stall:3")
+        assert result.status == "completed"
+        assert result.stop_reason.startswith("healthy_idle:3")
         assert result.cycles_run == 3
 
     def test_useful_cycle_resets_idle_streak(self):
-        # idle, useful, idle, idle, idle -> stop at the 3rd consecutive idle.
+        # idle, useful, idle, idle, idle -> ends at the 3rd consecutive idle;
+        # the post-work streak is pure observation, so it is a healthy finish.
         gather = _ScriptedGather([
             _observe(), _useful(), _observe(), _observe(), _observe(),
         ])
@@ -196,13 +201,33 @@ class TestIdleStall:
             ledger=CampaignLedger(),
             now_fn=_fixed_now,
         )
-        assert result.status == "stopped"
-        assert result.stop_reason.startswith("idle_stall:3")
+        assert result.status == "completed"
+        assert result.stop_reason.startswith("healthy_idle:3")
         assert result.cycles_run == 5
         assert result.totals["useful_cycles"] == 1
         assert result.totals["idle_cycles"] == 4
         assert result.totals["proposals"] == 1
         assert execute.calls == 1
+
+    def test_a_streak_containing_repeats_is_still_a_stall(self):
+        # useful, repeat, idle, idle -> the streak reaching the limit contains
+        # a repeat: work was wanted and went nowhere. That is a stall, and the
+        # healthy wording must not absorb it.
+        gather = _ScriptedGather([
+            _useful("fix_a"), _useful("fix_a"), _observe(), _observe(),
+        ])
+        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        result = run_campaign(
+            CampaignConfig(max_cycles=10, max_idle_streak=3, max_llm_calls=0),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=execute,
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+        assert result.status == "stopped"
+        assert result.stop_reason.startswith("idle_stall:3")
 
 
 # ============================================================
