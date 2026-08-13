@@ -357,7 +357,8 @@ def absent_literal_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | N
     # отсутствия — литерал мог жить в отрезанной части (семь ложных REFUTED за
     # один ход). Присутствие в вырезке она доказывает по-прежнему.
     excerpt_raw = ev.excerpt or ""
-    if "[INTENT-BUDGET:" in excerpt_raw or "[TOTAL-BUDGET:" in excerpt_raw:
+    if ("[INTENT-BUDGET:" in excerpt_raw or "[TOTAL-BUDGET:" in excerpt_raw
+            or excerpt_raw.rstrip().endswith("...[truncated]")):  # R8b: срез при создании, evidence.py:_truncate
         return None
     absent = literals_absent_from_excerpt(
         chunk_text, ev.excerpt or "", ev.source_id or ""

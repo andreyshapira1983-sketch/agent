@@ -561,3 +561,12 @@ Addresses only, never foreign excerpts' text: excerpt contents would launder
 values back in (MIR-060). Remaining false-positive class stays R8b: excerpts
 capped at creation carry no budget notice (`disqualifying_defect_signals,
 mir-057, mir-060` all live in smart_memory.py yet sat past the cut).
+
+## R8b closed: the creation-time cap had its own marker all along (2026-08-13, trace e488cd85)
+
+Three straight self-inspection runs kept refuting TRUE claims (`mir-003`,
+`disqualifying_defect_signals`…) whose literals live past the excerpt cut.
+The cut at CREATION (`evidence.py:_truncate`, MAX_EXCERPT_CHARS=800) appends
+`...[truncated]` — a third marker the R8 guard did not know. One line: the
+absence gate now also stands aside for `...[truncated]` tails. Refuted counts
+across the three runs: 7 → 5 → 3 → expected 0-1 of this family.
