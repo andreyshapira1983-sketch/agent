@@ -151,7 +151,8 @@
     "loop_verification.py::AgentLoopVerification._verification_receipt_kwargs": [],
     "loop_verification.py::AgentLoopVerification._verify_draft": [],
     "loop_verify_replan.py::AgentLoopVerifyReplan._replan_on_refuted_claims": [],
-    "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer": []
+    "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer": [],
+    "loop_gates.py::AgentLoopGates._prior_step_gate": []
   },
   "edges": [
     [
@@ -517,6 +518,10 @@
     [
       "loop_memory_write.py::AgentLoopMemoryWrite._log_causal_observation",
       "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_gates.py::AgentLoopGates._prior_step_gate"
     ]
   ]
 }

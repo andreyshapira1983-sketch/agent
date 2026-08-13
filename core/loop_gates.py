@@ -25,11 +25,21 @@ None` на провал сквозь. Это и пинится в `tests/test_lo
 """
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover — только для подписи
     from core.clarification_policy import ClarificationResult
     from core.operational_domain import DomainResult
+
+
+#: Узкие маркеры ссылки на предыдущий шаг (R5): «результат предыдущего шага»,
+#: «previous step/result». Нарочно не общая анафора.
+_PRIOR_STEP_RE = re.compile(
+    r"(?i)предыдущ\w*\s+(?:шаг|запрос|ответ|результат)"
+    r"|результат\w*\s+предыдущ|прошл\w*\s+шаг"
+    r"|previous\s+(?:step|result|answer)"
+)
 
 
 class AgentLoopGates:
@@ -137,6 +147,37 @@ class AgentLoopGates:
                 self._stream_on_token = None
                 return _clarif.question
         return None
+
+    def _prior_step_gate(self, user_question: str) -> str | None:
+        """Пятые ворота (R5, 2026-08-13): предыдущий шаг, которого нет.
+
+        Отдельные ворота, а не вставка в `_clarification_gate`: перенесённые
+        тела дословны и охраняются `tests/test_loop_gates_split.py`. Узкий
+        маркер (не общий `_ANAPHORA_RE` резолвера — тот ловит любые «это»);
+        антецедент — живая история; `AGENT_REFERENT_RESOLVER=off` глушит.
+        """
+        from core.referent_resolver import referent_resolver_mode
+        if not self.clarification_enabled:
+            return None
+        if referent_resolver_mode() == "off":
+            return None
+        if not _PRIOR_STEP_RE.search(user_question or ""):
+            return None
+        memory = getattr(self, "memory", None)
+        if memory is not None and getattr(memory, "turns", None):
+            return None
+        question_text = (
+            "В этой сессии ещё нет предыдущего шага — уточните, какой "
+            "результат использовать."
+        )
+        self.log.log("clarification_request", {
+            "question": question_text,
+            "findings": [{"kind": "prior_turn_no_antecedent",
+                          "evidence": user_question[:120],
+                          "confidence": 1.0}],
+        })
+        self._stream_on_token = None
+        return question_text
 
     def _episodic_fast_path(
         self,

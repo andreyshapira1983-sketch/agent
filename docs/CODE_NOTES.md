@@ -579,3 +579,28 @@ runs — and the last false signal standing was R9 in new words: «дан с
 self_contradicted×2 and quarantined the series' best answer. The boundary
 vocabulary now knows «не видн», «не показан», «пропущенн», «не предоставл»,
 «omitted», «not shown». The 2026-08-10 true-positive class stays caught.
+
+## R4/R5: fabricated citations are terminal, and the resolver wakes up (2026-08-13, operator rulings)
+
+R4 — a citation the evidence chain cannot resolve (fabricated ==
+`cited_but_unmatched`, one definition in `evidence_support`) is now TERMINAL
+at the acceptance boundary (`unsupported_claims`): the body is withheld and
+replaced by an honest note, mode-independently — fabrication is a property of
+the text, not a rollout heuristic. The live warrant: R-E1's «36 × 3 = 108»
+with two [dialogue:previous] citations to a dialogue that never existed
+shipped untouched. The outcome bridges to `citation_fabricated`
+(loop_response_deciders) which joins DISQUALIFYING_DEFECT_SIGNALS.
+
+R5 — `referent_resolver_mode` defaults to **on** (off/shadow stay operator
+keys), and a fifth gate `_prior_step_gate` (its own gate, NOT an insertion
+into the verbatim-pinned `_clarification_gate` body) asks before planning
+when the turn references a previous step and the session has none.
+
+Enabling the dormant organ immediately exposed why it likely stayed off:
+a critique verb plus the TASK'S OWN CLAUSE resolved to `user_text`
+(«проанализируй архитектуру проекта…» → target = its own object), and the
+local-critique path ate a genuine tool-needing task — no role context, no
+tools, no memory. `is_local_critique_eligible` now requires supplied-material
+markers for `user_text` (newline, quotes, or a presenter colon that survives
+directive stripping). Both directions pinned: a task clause is not supplied
+text; «Вот фрагмент: …» still is.

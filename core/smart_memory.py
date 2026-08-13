@@ -1419,7 +1419,7 @@ def effective_completion(episode: EpisodeRecord) -> CompletionState:
 #: ошибка для процедуры (MIR-057), а `content_refuted` — тот же вред другим
 #: судьёй (2026-08-12, docs/CODE_NOTES.md «REFUTED is a polarity»).
 DISQUALIFYING_DEFECT_SIGNALS: frozenset[str] = frozenset(
-    {"self_contradiction", "content_refuted"}
+    {"self_contradiction", "content_refuted", "citation_fabricated"}
 )
 
 

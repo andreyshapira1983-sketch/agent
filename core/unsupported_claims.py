@@ -57,6 +57,7 @@ EnforcementOutcome = Literal[
     "local_critique_preserved",
     "unsupported_world_claims",
     "self_contradicted",
+    "citation_integrity",
 ]
 
 # Categorical / absolute phrasing that should not ship as bare world fact
@@ -366,6 +367,36 @@ def _enforce_without_contradictions(
             reason="malformed_output_contract",
             mode=mode_s,
             notes=("soft_fail_keep_draft",),
+        )
+
+    # R4 (постановление оператора 2026-08-13): сфабрикованные цитаты
+    # ТЕРМИНАЛЬНЫ. Живой R-E1: «36 × 3 = 108» с двумя [dialogue:previous] на
+    # несуществовавший диалог ушёл как есть — усечение не добрало кусков, а
+    # ветки для фабрикации не было. Свойство текста, не эвристика: рубеж
+    # не зависит от режима раскатки. Определение одно, из evidence_support:
+    # fabricated == cited_but_unmatched.
+    fabricated = int(getattr(report, "cited_but_unmatched_chunks", 0) or 0)
+    if evidence_expected and fabricated > 0:
+        if locale == "ru":
+            note = (
+                "Ответ не отправлен: он ссылался на источники, которых нет в "
+                f"цепочке улик этого хода ({fabricated} неразрешившихся "
+                "цитат). Честного подтверждения у утверждений не было."
+            )
+        else:
+            note = (
+                "Answer withheld: it cited sources absent from this cycle's "
+                f"evidence chain ({fabricated} unresolved citations). The "
+                "claims carried no honest support."
+            )
+        return EnforcementResult(
+            outcome="citation_integrity",
+            answer=note,
+            applied=True,
+            would_change_answer=True,
+            reason=f"fabricated_citations={fabricated}",
+            mode=mode_s,
+            notes=("fabricated_citation_terminal",),
         )
 
     # Invariant: resolved local critique must not become empty-Facts rewrite.
