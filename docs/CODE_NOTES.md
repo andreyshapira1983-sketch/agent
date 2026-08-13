@@ -517,3 +517,25 @@ knowledge-boundary line («не читал», «данные не передав
 not a denial; a subject appearing ONLY in boundary lines is not a dispute.
 The 2026-08-10 true-positive class («не подтвердилось, может быть неверным»)
 stays caught — the guard test carries both directions.
+
+## R1/R6: units survive a broken paste, and a task is not an order for a plan (2026-08-13)
+
+R1 — probe_r1's multi-line cards reached `observe` already corrupted: the
+markdown `#` markers were absent and the final unit body was missing
+(`observe` verbatim). Who corrupted them — terminal, paste, REPL, shell — is
+a separate open question; what is proven is that the corruption occurred
+upstream of `completion_contract`. The
+unit extractor knew only markdown headers, so «Три части… S1 — … S2 — …
+S3 —» carried zero units, obligations=[], and the visibly EMPTY «S3 —
+Сравнение» died silently: achieved 4/4, usage_eligible=True — a channel-Б
+FALSE DONE. Now `completion_contract` reads full-line plain labels (two or
+more — a single labelled line stays prose), and a unit declared with no body
+becomes an ambiguity → `needs_clarification`, through the existing wiring.
+
+R6 — three live hijacks stopped at the matchers, positive controls pinned:
+comparison of concrete file operands without an explicit planning/review
+word must not classify as a control-plane planning request (the proven class;
+not a universal routing doctrine); the stem «реализац» left the implementation-plan
+loose branch («в текущей реализации» is an adverbial, not an order); and
+code-shape markers («конструктор», «.py», «в коде»…) veto the
+smart-memory-status route before its strong phrases fire.

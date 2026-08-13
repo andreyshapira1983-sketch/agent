@@ -207,11 +207,29 @@ _UNIT_LABEL_RE = re.compile(
 )
 
 
+#: R1 (2026-08-13, живой B2): вставка теряла `#`, и помеченные единицы
+#: становились невидимыми. Полная строка вида «S1 — Ключи» — единица и без
+#: решётки, но только когда таких строк ДВЕ и больше: одиночная — проза.
+_PLAIN_UNIT_RE = re.compile(
+    r"^\s{0,3}((?:[A-Za-zА-Яа-я]{1,4}\d{1,3})"
+    r"\s*[—–:-]\s+\S.*?)\s*$",
+    re.MULTILINE,
+)
+
+
 def requested_units(text: str) -> tuple[RequestedUnit, ...]:
     """Единицы задания в порядке их появления, без повторов."""
+    units = _units_from(_REQUESTED_UNIT_RE, text)
+    if units:
+        return units
+    plain = _units_from(_PLAIN_UNIT_RE, text)
+    return plain if len(plain) >= 2 else ()
+
+
+def _units_from(pattern: re.Pattern[str], text: str) -> tuple[RequestedUnit, ...]:
     seen: set[str] = set()
     out: list[RequestedUnit] = []
-    for match in _REQUESTED_UNIT_RE.finditer(text or ""):
+    for match in pattern.finditer(text or ""):
         title = " ".join(match.group(1).split())
         key = title.casefold()
         if key not in seen:
@@ -221,6 +239,30 @@ def requested_units(text: str) -> tuple[RequestedUnit, ...]:
                 title=title, identifier=label.group(1) if label else ""
             ))
     return tuple(out)
+
+
+def _units_without_body(text: str) -> tuple[str, ...]:
+    """Идентификаторы единиц, за строкой которых нет ни одной строки задания."""
+    if not requested_units(text):
+        return ()
+    lines = (text or "").splitlines()
+
+    def _ident(line: str) -> str | None:
+        for pattern in (_REQUESTED_UNIT_RE, _PLAIN_UNIT_RE):
+            m = pattern.match(line)
+            if m:
+                label = _UNIT_LABEL_RE.match(" ".join(m.group(1).split()))
+                return label.group(1) if label else None
+        return None
+
+    empty: list[str] = []
+    marks = [(i, _ident(ln)) for i, ln in enumerate(lines)]
+    unit_rows = [(i, ident) for i, ident in marks if ident]
+    for pos, (row, ident) in enumerate(unit_rows):
+        end = unit_rows[pos + 1][0] if pos + 1 < len(unit_rows) else len(lines)
+        if not any(ln.strip() for ln in lines[row + 1:end]):
+            empty.append(ident)
+    return tuple(empty)
 
 
 def unaddressed_units(contract: Any, answer: str) -> tuple[str, ...]:
@@ -449,6 +491,15 @@ def derive_completion_contract(
             verification=VERIFICATION_METHODS["tests_green"],
             derived_from="the request requires the tests to pass",
         ))
+
+    # R1: единица, объявленная без содержания («S3 — Сравнение» последней
+    # строкой обрезанной вставки), — вопрос оператору, не молчание: живой B2
+    # закрыл её achieved 4/4, не сказав ни слова.
+    for ident in _units_without_body(text):
+        ambiguities.append(
+            f"единица «{ident}» объявлена, но не содержит задания — "
+            "спросить, что в ней требуется"
+        )
 
     return CompletionContract(
         obligations=tuple(obligations),
