@@ -109,7 +109,16 @@ class LLMPlanner:
     #   * answers exactly the "introspection" use case that motivated
     #     this exception (see MVP-14.4.x notes).
     # Any other file requires the user to pass `--file <path>`.
-    DEFAULT_SELF_DOCUMENTATION_PATHS: tuple[str, ...] = ("README.md", "tools/")
+    # README.md was deleted on 2026-08-06 (f6d071a) and this allowlist kept
+    # pointing at it for eight days: rule 11 planned `file_read README.md`,
+    # the read returned FileNotFoundError, and — because a failed read never
+    # enters the provenance chain — the agent could only answer "cannot be
+    # determined" to every question about itself. Measured live 2026-08-14.
+    # The successor is GENERATED from core/ and guarded against drift by
+    # scripts/agent_anatomy_check.py, so it cannot rot the same way unnoticed.
+    DEFAULT_SELF_DOCUMENTATION_PATHS: tuple[str, ...] = (
+        "knowledge/generated/AGENT_ANATOMY.md", "tools/",
+    )
 
     def __init__(
         self,
@@ -366,9 +375,9 @@ class LLMPlanner:
             project_memory_block = (
                 "[PROJECT_STATUS_MEMORY=preferred — long_term_memory already "
                 "contains recent project/status records. Do NOT plan "
-                "file_read README.md for live project status. README.md may "
-                "only be used when the user explicitly asks for README or "
-                "architecture/reference facts.]\n"
+                "file_read knowledge/generated/AGENT_ANATOMY.md for live "
+                "project status. The anatomy map may only be used when the "
+                "user explicitly asks for architecture/reference facts.]\n"
             )
         doctrine_docs_block = ""
         # Every "read docs/X first" directive is gated on file_read actually
@@ -422,8 +431,9 @@ class LLMPlanner:
                 "verifier, verified/unverified chunks, or source registry, start "
                 "with core/verifier.py, tests/test_verifier.py, "
                 "tests/test_evidence_support.py, and "
-                "tests/test_confidence_vector.py. Do NOT use README.md or "
-                "list_dir tools/ as primary evidence for confidence-gate internals.]\n"
+                "tests/test_confidence_vector.py. Do NOT use "
+                "knowledge/generated/AGENT_ANATOMY.md or list_dir tools/ as "
+                "primary evidence for confidence-gate internals.]\n"
             )
         # Replan context sits between history and question — close enough
         # to the question to be salient, but separated from old turns so

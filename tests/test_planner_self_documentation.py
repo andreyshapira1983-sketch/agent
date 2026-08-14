@@ -67,19 +67,44 @@ def _run(planner: LLMPlanner, steps: list[dict[str, Any]], hint: str | None):
 # ============================================================
 
 class TestDefaultAllowlist:
-    def test_default_contains_readme(self, workspace: Path):
-        p = _planner(workspace)
-        assert "README.md" in p.self_documentation_paths
+    def test_every_allowlisted_path_exists_in_this_repository(self):
+        """The guard that was missing for eight days.
 
-    def test_readme_passes_without_hint(self, workspace: Path):
+        README.md was deleted on 2026-08-06 and stayed in this allowlist until
+        2026-08-14. Rule 11 planned `file_read README.md`, the read raised
+        FileNotFoundError, and a failed read never enters the provenance chain —
+        so every question the agent was asked about itself came back "cannot be
+        determined". Measured on four live runs.
+
+        Asserted against the real repository, not a tmp workspace: the point is
+        that the shipped default names things that are actually here.
+        """
+        repo = Path(__file__).resolve().parent.parent
+        missing = [
+            rel for rel in LLMPlanner.DEFAULT_SELF_DOCUMENTATION_PATHS
+            if not (repo / rel.rstrip("/")).exists()
+        ]
+        assert not missing, (
+            "the planner may read these without a --file hint, and they do not "
+            f"exist: {missing}. A read the planner is told to make and that "
+            "always fails is worse than no rule at all — the failure is not "
+            "evidence, so the agent cannot even report it."
+        )
+
+    def test_default_contains_the_generated_anatomy_map(self, workspace: Path):
+        p = _planner(workspace)
+        assert "knowledge/generated/AGENT_ANATOMY.md" in p.self_documentation_paths
+
+    def test_anatomy_map_passes_without_hint(self, workspace: Path):
         p = _planner(workspace)
         sources, warnings = _run(
             p,
-            [{"tool": "file_read", "arguments": {"path": "README.md"}}],
+            [{"tool": "file_read",
+              "arguments": {"path": "knowledge/generated/AGENT_ANATOMY.md"}}],
             hint=None,
         )
         assert len(sources) == 1
-        assert sources[0]["arguments"]["path"] == "README.md"
+        assert sources[0]["arguments"]["path"] == "knowledge/generated/AGENT_ANATOMY.md"
         # No "no --file hint" warning was emitted.
         assert not any("no --file hint" in w for w in warnings)
 
