@@ -1,7 +1,7 @@
 {
   "_comment": "The four entities the node/edge census cannot hold. Entities and their names come from the operator's map (autonomous_agent_nervous_system_ru, slide 05); statuses come from docs/NERVE_PROTOCOL.ru.md. Nodes and call_edges stay in cns_census.json and are referenced by id from here. An empty list or the literal UNPROVEN means not proven; there is no N/A.",
   "structural_snapshot_taken": "2026-08-07",
-  "ledger_updated": "2026-08-08",
+  "ledger_updated": "2026-08-14",
   "_dating_note": "One 'taken' date used to head this file and had gone stale: it dated the 2026-08-07 structural walk while arcs and clusters were being rewritten on 2026-08-08. The file is two things and now says so. structural_snapshot_taken dates the static halves — state_carriers, state_initialization, decision_boundaries — which are re-derived only by a fresh walk of the code. ledger_updated dates the living halves — signal_flows and path_ledger — which change with every cluster closed; each arc carries its own dated evidence, so this field is a freshness hint, not a source of truth.",
   "_status_vocabulary": {
     "effect_scale": [
@@ -1267,7 +1267,41 @@
       {
         "id": "C16",
         "scope": "autonomous contour: agent_tick -> runtime -> task queue -> budget guard -> same loop; task_id retry semantics",
-        "status": "UNPROVEN"
+        "status": "UNPROVEN",
+        "opened": "2026-08-14",
+        "knowability": {
+          "_question": "The operator's question, asked before any classification: after launch and with no operator input, can this contour choose useful work? Three sub-questions, three answers from code and from the live workspace.",
+          "where_the_contour_gets_work": "EXACTLY ONE call site in the repository puts a task into the queue: core/scheduler.py:217, inside SchedulerStore.tick(), and it converts a DUE SCHEDULE into a task. Schedules have exactly one producer, SchedulerStore.add (core/scheduler.py:142), reached only from _handle_schedule_add (app/task_scheduler_cli.py:300) — the operator's :schedule-add. Enumerated, not assumed: no enqueue exists in api/server.py (the file holds no queue reference at all), none in the campaign path, none in self-build, and none in agent_tick.py itself. So every unit of autonomous work traces back to an operator command.",
+          "what_the_contour_holds_when_it_starts": "Measured on the live workspace 2026-08-14, not read off comments: data/runtime_schedules.jsonl is 0 rows, and TaskQueueStore.pending() against the real store returns 0 tasks (13 rows present, none pending — pending() honours run_after and status). Step 1 of run_tick therefore enqueues nothing and step 2 claims nothing. build_agent sits inside the `else` of `if not pending_tasks`, so with an empty queue the agent is never built, AutonomousRuntime is never constructed, and the loop never runs. The tick logs no_pending_tasks and performs only the approval-inbox check. This is the shipped configuration, not a broken one.",
+          "was_the_choice_of_work_knowable": "YES, mechanically. select_best_next_action (core/best_next_action.py:102) is pure — it takes structured signals and returns exactly one BestNextAction, always, including 'just observe'. Its consumers are cli/commands_approval.py:143 (an operator command) and core/campaign_io.py:72 (the --campaign mode). It is NOT reached from agent_tick.py or run_tick. So the deciding value is computable at precisely the point where the tick concludes it has nothing to do, and no arc carries it there. Its own docstring forbids the other half: 'pure and advisory ... never executes the action'.",
+          "what_this_does_not_establish": "That any of it is a defect. The contour was SPECIFIED as scheduler-driven: agent_tick.py's header states the six steps of a tick and step 1 is 'load scheduler store -> find schedules that are due'. Choosing work is not among the six. Making the tick a consumer of best_next_action would be a contract change and is the operator's call. No defect claimed, no runtime change in this unit."
+        },
+        "census": {
+          "entry": "docker/daemon_loop.py:38 builds [python, agent_tick.py, --workspace, <ws>] — no --campaign flag, so the production daemon always enters run_tick, never run_paced_campaign (agent_tick.py:1239).",
+          "modules": [
+            "agent_tick.py (1486)",
+            "core/autonomous_runtime.py (1495)",
+            "core/scheduler.py",
+            "core/task_queue.py",
+            "core/task_lifecycle.py"
+          ],
+          "stores": {
+            "data/runtime_schedules.jsonl": "0 rows (2026-08-14)",
+            "data/runtime_tasks.jsonl": "13 rows, pending()=0 (2026-08-14)",
+            "data/daemon.lock": "0 rows",
+            "data/incidents.jsonl": "absent"
+          },
+          "two_store_defect_closed": "The tick and the CLI address the SAME files — SCHEDULES_PATH (agent_tick.py:63) and DEFAULT_RUNTIME_SCHEDULES_PATH (app/bootstrap.py:47) both resolve to data/runtime_schedules.jsonl; TASK_QUEUE_PATH (agent_tick.py:75) is DEFAULT_RUNTIME_TASKS_PATH (core/task_queue.py:32). Verified this pass, since the historical failure here was a task pending in one store and invisible to the process meant to run it.",
+          "default_posture": "AGENT_TICK_DRY_RUN defaults to '1' (agent_tick.py header) and the live status reads 'Mode: dry_run (effects=disabled)'. An autonomous contour forbidden effects is an observer; whether to lift that is a separate operator decision from wiring the work-choice arc."
+        },
+        "candidate_arcs": [
+          "best_next_action -> tick work selection: UNPROVEN and, as of this walk, ABSENT — no call site. The first bite to write is the one that fails today.",
+          "schedule due -> task enqueued (core/scheduler.py:217): delivery unbitten; the only producer arc in the contour.",
+          "budget guard -> run refusal: _check_budget_kill_switch (agent_tick.py:145) returns 0 early; the arc from a tripped counter to a skipped run is unbitten.",
+          "task_id retry semantics: apply_run_outcome / apply_run_exception (core/task_lifecycle.py) map run status onto queue status; the named scope of C16 and untouched here.",
+          "dry_run override: run_tick forces config.dry_run=True when the CLI flag is set (agent_tick.py, dataclasses.replace); the arc from flag to a runtime that honours it is unbitten."
+        ],
+        "next_unit": "Bite the producer arc first (schedule -> task), because it is the only one that exists; then the budget guard. The work-choice arc cannot be bitten — there is nothing to break — so it is recorded as ABSENT rather than UNPROVEN, and closing it needs the operator's contract decision, not a test."
       },
       {
         "id": "C17",
