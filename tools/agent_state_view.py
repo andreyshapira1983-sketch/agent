@@ -283,29 +283,53 @@ def open_defects() -> dict:
     assistant and the agent argued from the same list instead of each keeping
     its own.
 
-    That file was deleted from the repository on 2026-08-06, and this function
-    has returned `{"error": "missing"}` on every call since — verified, not
-    assumed. It is left in place rather than removed because the contract still
-    holds the day a registry comes back; until then the error IS the honest
-    answer, and it says which store is absent.
+    That file was deleted from the repository on 2026-08-06 and this function
+    returned `{"error": "missing"}` on every call for nine days — verified, not
+    assumed. It was left in place rather than removed because the contract still
+    held the day a registry came back. It came back on 2026-08-14.
+
+    **The status line is parsed by `scripts/registry_tally.py`, never here.**
+    Restoring the registry exposed why that matters: this function used to carry
+    its own regex, `` \\*\\*Status:\\*\\*\\s*`?(\\w+)`? ``, which cannot match a
+    bold-wrapped verdict — and 16 entries write `**Status:** **`fixed`**`. Each
+    of those parsed as `?`, `?` is not in the closed set, so every one was
+    reported OPEN: `open_count` said 55 where the registry held 39. Two readers
+    of one field, one of them wrong, and the wrong one was the one an assistant
+    saw. The tally script's parser is the single reader now, so this view cannot
+    drift from the count the build checks.
     """
     path = REPO / "docs" / "audit" / "MASTER_ISSUE_REGISTRY.md"
     if not path.exists():
         return {"error": "missing", "store": path.name}
     import re
+    import sys
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         return {"error": type(exc).__name__, "store": path.name,
                 "detail": str(exc)[:200]}
+    scripts_dir = str(REPO / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    from registry_tally import _STATUS  # the canonical Status-line parser
+
     blocks = re.split(r"^### (MIR-\d+) — (.+)$", text, flags=re.MULTILINE)
     out: list[dict] = []
+    unparsed: list[str] = []
     for i in range(1, len(blocks), 3):
-        status = re.search(r"\*\*Status:\*\*\s*`?(\w+)`?", blocks[i + 2])
-        state = status.group(1) if status else "?"
+        status = _STATUS.search(blocks[i + 2])
+        if status is None:
+            # Reported, never guessed: an entry whose status cannot be read is
+            # not silently filed as open — that is the failure just repaired.
+            unparsed.append(blocks[i])
+            continue
+        state = status.group(1)
         if state in ("fixed", "diagnosis_corrected"):
             continue
         out.append({"id": blocks[i], "title": blocks[i + 1].strip()[:120],
                     "status": state})
-    return {"open_count": len(out), "defects": out}
+    result: dict = {"open_count": len(out), "defects": out}
+    if unparsed:
+        result["unparsed"] = unparsed
+    return result
 
