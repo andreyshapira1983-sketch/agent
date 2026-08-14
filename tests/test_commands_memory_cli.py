@@ -66,6 +66,10 @@ class HygieneAgent:
         self.calls.append(("episodic", dry_run))
         return ["e1", "e2"]
 
+    def dedupe_episodic(self, *, dry_run):
+        self.calls.append(("episodic_dedupe", dry_run))
+        return ["e3"]
+
     def cleanup_backups(self, workspace, *, dry_run):
         self.calls.append(("backups", dry_run))
         return rep(deleted=["a.bak"], kept=["b.bak"], scanned=2, keep_last=3, max_age_days=7)
@@ -94,14 +98,16 @@ def test_bulk_hygiene_passes_the_same_dry_run_to_every_step(
 
     steps = [name for name, _ in hygiene_agent.calls]
     flags = {flag for _, flag in hygiene_agent.calls}
-    assert steps == ["expire", "dedupe", "episodic", "backups"], "documented order"
+    assert steps == [
+        "expire", "dedupe", "episodic", "episodic_dedupe", "backups",
+    ], "documented order"
     assert flags == {expected_dry}, "one stray real deletion inside a dry run is the bug this catches"
 
     err = capsys.readouterr().err
     assert f"hygiene (dry_run={expected_dry})" in err
     assert "expire   : 1 record(s) past TTL" in err
     assert "dedupe   : 1 near-duplicate(s) collapsed (1 group(s))" in err
-    assert "episodic : 2 stale episode(s) pruned" in err
+    assert "episodic : 2 stale episode(s) pruned, 1 repeat(s) collapsed" in err
     assert "backups  : 1 old .bak.<ts> file(s) removed (scanned 2)" in err
 
 

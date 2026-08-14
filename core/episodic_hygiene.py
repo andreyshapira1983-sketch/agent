@@ -225,3 +225,74 @@ def stale_candidates(
         pairs.append((ep, score_staleness(ep, now)))
     pairs.sort(key=lambda pair: pair[1], reverse=True)
     return pairs[: max(0, limit)]
+
+
+# ---------------------------------------------------------------------------
+# Duplicates
+# ---------------------------------------------------------------------------
+#
+# `save_once` dedupes by episode id, and every tick mints a fresh one, so a gate
+# that blocks the same way each tick banks a new identical record forever.
+# Measured 2026-08-14: 14 byte-identical `dirty_tree_wait` episodes over 14 days.
+# Why it matters and why persistent memory did not have this hole:
+# docs/CODE_NOTES.md, "Episodic duplicates".
+
+def _duplicate_key(ep: EpisodeRecord) -> tuple[str, str, str, str]:
+    """What makes two episodes the same lesson rather than two lessons."""
+    return (
+        (ep.goal or "").strip(),
+        (ep.question or "").strip(),
+        (ep.summary or "").strip(),
+        (ep.outcome or "").strip(),
+    )
+
+
+def select_duplicate_episodes(episodes: Sequence[EpisodeRecord]) -> list[str]:
+    """IDs of every episode but the newest of each identical group.
+
+    Protected episodes are never selected, matching `select_for_pruning`: a
+    lesson tagged by hand outranks this rule. An empty summary is not a key —
+    those records carry no lesson to collapse and are left to age out.
+    """
+    newest: dict[tuple[str, str, str, str], str] = {}
+    seen: dict[tuple[str, str, str, str], list[str]] = {}
+    for ep in episodes:
+        if set(ep.tags or ()) & EpisodicMemoryStore.PROTECTED_TAGS:
+            continue
+        key = _duplicate_key(ep)
+        if not key[2]:
+            continue
+        seen.setdefault(key, []).append(ep.id)
+        newest[key] = ep.id
+    victims: list[str] = []
+    for key, ids in seen.items():
+        victims.extend(i for i in ids if i != newest[key])
+    return victims
+
+
+def collapse_duplicate_episodes(
+    store: EpisodicMemoryStore, *, dry_run: bool = False,
+) -> list[str]:
+    """Keep one copy of each repeated episode. Returns the IDs dropped."""
+    from core.state_integrity import (
+        read_state_jsonl_unlocked,
+        rewrite_state_jsonl_unlocked,
+        state_file_lock,
+    )
+
+    with state_file_lock(store.path):
+        rows = read_state_jsonl_unlocked(store.path)
+        episodes: list[EpisodeRecord] = []
+        for row in rows:
+            try:
+                episodes.append(EpisodeRecord.from_dict(row))
+            except (TypeError, ValueError):
+                continue
+        victims = select_duplicate_episodes(episodes)
+        if victims and not dry_run:
+            dropped = set(victims)
+            rewrite_state_jsonl_unlocked(
+                store.path,
+                [r for r in rows if r.get("id") not in dropped],
+            )
+    return victims

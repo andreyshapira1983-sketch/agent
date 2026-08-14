@@ -96,6 +96,7 @@ def build_agent(
     """
     if with_experience is None:
         with_experience = with_memory
+    trace_id = new_trace_id()
     registry = ToolRegistry()
     registry.register(FileReadTool(workspace_root=workspace))
     registry.register(ListDirTool(workspace_root=workspace))
@@ -106,7 +107,7 @@ def build_agent(
     registry.register(CurrentTimeTool())
     # MVP-13.1 — self-repair diagnostic primitives.
     registry.register(RunTestsTool(workspace_root=workspace))
-    registry.register(ReadLogsTool(workspace_root=workspace))
+    registry.register(ReadLogsTool(workspace_root=workspace, live_trace_id=trace_id))
     registry.register(DiffFileTool(workspace_root=workspace))
     # MVP-14.2 — evidence layer: turn web pointers into verifiable sources.
     registry.register(WebFetchTool())
@@ -114,7 +115,6 @@ def build_agent(
     # Academic paper search — Semantic Scholar Graph API (no key needed).
     registry.register(SemanticScholarSearchTool())
 
-    trace_id = new_trace_id()
     logger = TraceLogger(trace_id=trace_id, log_dir=workspace / "logs", verbose=True)
 
     policy = PolicyGate(registry)

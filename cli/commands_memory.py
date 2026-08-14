@@ -79,13 +79,15 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         exp = agent.expire_persistent(dry_run=dry_run)
         dup = agent.dedupe_persistent(dry_run=dry_run)
         epi = agent.prune_episodic(dry_run=dry_run)
+        edu = agent.dedupe_episodic(dry_run=dry_run)
         bak = agent.cleanup_backups(workspace, dry_run=dry_run)
         print(
             f"hygiene (dry_run={dry_run}):\n"
             f"  expire   : {len(exp.expired)} record(s) past TTL\n"
             f"  dedupe   : {len(dup.deleted)} near-duplicate(s) collapsed "
             f"({len(dup.groups)} group(s))\n"
-            f"  episodic : {len(epi)} stale episode(s) pruned\n"
+            f"  episodic : {len(epi)} stale episode(s) pruned, "
+            f"{len(edu)} repeat(s) collapsed\n"
             f"  backups  : {len(bak.deleted)} old .bak.<ts> file(s) removed "
             f"(scanned {bak.scanned})",
             file=sys.stderr,
