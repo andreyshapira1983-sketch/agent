@@ -351,3 +351,44 @@ def test_the_journal_tail_is_bounded_by_matches_not_by_rows(tmp_path: Path,
     assert plans["events_matched"] == 3
     assert len(plans["events"]) == 2, "хвост должен считать совпадения, а не строки"
     assert [e["payload"]["i"] for e in plans["events"]] == [100, 200]
+
+
+def test_the_defect_view_and_the_build_count_read_the_status_line_the_same_way():
+    """One field, one reader — the view may not disagree with the tally.
+
+    Measured 2026-08-14, the hour the registry was restored: the view carried
+    its own regex, ``\\*\\*Status:\\*\\*\\s*`?(\\w+)`?``, which cannot match a
+    bold-wrapped verdict. 16 entries write ``**Status:** **`fixed`**``; each
+    parsed as ``?``, ``?`` is not in the closed set, so all 16 were reported
+    OPEN and ``open_count`` said 55 where the registry held 39. The build
+    checked the other parser and stayed green throughout.
+
+    So the assertion is equality with the derived count, not a literal: a
+    number written here would be the third opinion about the same field.
+    """
+    import sys
+
+    scripts = str(_REPO / "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import registry_tally
+
+    view = _module().open_defects()
+    if "error" in view:                       # no registry in the tree
+        pytest.skip(f"registry absent: {view}")
+
+    by_status, unparsed = registry_tally.parse(
+        registry_tally.REGISTRY.read_text(encoding="utf-8")
+    )
+    assert not unparsed, f"tally could not read a Status line: {unparsed}"
+    assert view.get("unparsed", []) == [], (
+        "the view failed to read a Status line and must say so rather than "
+        f"file it as open: {view.get('unparsed')}"
+    )
+
+    closed = {"fixed", "diagnosis_corrected"}
+    derived = sum(len(v) for s, v in by_status.items() if s not in closed)
+    assert view["open_count"] == derived, (
+        f"the MCP view reports {view['open_count']} open defects, the build's "
+        f"own tally derives {derived} — two readers of one Status field"
+    )
