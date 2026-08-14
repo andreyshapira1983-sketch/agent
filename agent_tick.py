@@ -229,6 +229,19 @@ def _dry_run_visibility(
     }
 
 
+def _log_idle_tick(workspace: Path) -> None:
+    """Empty queue: say so, then what the agent would do anyway. Sensor, not
+    gate — decision in `core.self_build_memory.idle_self_direction`."""
+    _log_tick(workspace, {"event": "no_pending_tasks"})
+    try:
+        from core.self_build_memory import idle_self_direction
+        _log_tick(workspace, {"event": "self_direction",
+                              **idle_self_direction(workspace)})
+    except Exception as exc:  # noqa: BLE001
+        _log_tick(workspace, {"event": "self_direction_error",
+                              "error": f"{type(exc).__name__}: {exc}"})
+
+
 def _classify_test_health(tests_result: dict | None) -> str:
     """Map a ``tests_result`` payload to a single honest health verdict.
 
@@ -918,7 +931,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
 
         if not pending_tasks:
             if _consumer_lock is not None:
-                _log_tick(workspace, {"event": "no_pending_tasks"})
+                _log_idle_tick(workspace)
             # Still check approval inbox below
         else:
             agent = build_agent(
