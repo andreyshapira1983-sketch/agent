@@ -77,6 +77,40 @@ ALL_FAILURE_TYPES: tuple[FailureType, ...] = (
     "unknown",
 )
 
+#: Failures that describe the WORLD rather than the agent's own retry
+#: machinery. The distinction earns its keep at one place: a turn that failed a
+#: step and still answered must be able to SAY what failed, because the user's
+#: question may have been about exactly that ("does this file exist?"). A turn
+#: whose planner produced unparseable JSON and then recovered has nothing to
+#: tell the user — that is bookkeeping.
+#:
+#: Added 2026-08-14, measured: `file_read README.md` raised FileNotFoundError
+#: beside a step that worked, so the attempt "succeeded" and the failure was
+#: dropped; asked whether the file exists, the agent could only answer "cannot
+#: be determined". The tool had told it.
+#:
+#: Deliberately NOT here: `plan_parse_failed`, `unresolved_citation`,
+#: `claim_refuted`, `verify_failed`, `unknown` — internal outcomes whose
+#: disclosure on a recovered run is noise, and whose withholding while replan
+#: is unexhausted is pinned by
+#: `tests/test_failure_history_reaches_arbitration.py`.
+WORLD_FACING_FAILURE_TYPES: frozenset[str] = frozenset({
+    "tool_error",
+    "file_not_found",
+    "web_empty",
+    "timeout",
+    "approval_deny",
+    "approval_abort",
+    "approval_unavailable",
+    "policy_blocked",
+    "injection_blocked",
+})
+
+
+def world_facing_failures(triggers: list[ReplanTrigger] | None) -> list[ReplanTrigger]:
+    """The subset a turn may disclose even when it went on to answer."""
+    return [t for t in (triggers or []) if t.code in WORLD_FACING_FAILURE_TYPES]
+
 
 # ---------------------------------------------------------------------------
 # ReplanTrigger — the structured failure record the loop collects

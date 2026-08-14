@@ -143,6 +143,42 @@ class _DeclaredDeletions(ast.NodeTransformer):
         return node
 
 
+class _DeclaredMoves(ast.NodeTransformer):
+    """Санкционированные ПЕРЕСТАНОВКИ — по одной, поимённо.
+
+    2026-08-14. `st.failure_history.extend(attempt_failures)` стоял НИЖЕ
+    успешного `break`, поэтому попытка, где один шаг упал, а другой дал
+    артефакт, выбрасывала свои триггеры целиком: они оставались только в
+    журнале. Замер на живом прогоне — `file_read README.md` вернул
+    FileNotFoundError рядом с удачным шагом, и агент на вопрос «существует ли
+    файл» мог ответить только «подтвердить нельзя». Пробел был записан
+    2026-08-09 в `tests/test_partial_attempt_failure_reporting.py`, и его
+    формулировка называет ровно этот `break`.
+
+    Строка переехала ВЫШЕ ветвления. Здесь та же перестановка применяется к
+    ИСТОРИЧЕСКОМУ телу, чтобы сверка продолжала держать всё остальное символ
+    в символ: объявленная правка, а не расширение допуска.
+    """
+
+    _EXTEND = "st.failure_history.extend(attempt_failures)"
+
+    def visit_While(self, node: ast.While):
+        node = self.generic_visit(node)
+        body = list(node.body)
+        for i, stmt in enumerate(body):
+            if not (isinstance(stmt, ast.If) and i + 1 < len(body)):
+                continue
+            nxt = body[i + 1]
+            if ast.unparse(nxt).strip() != self._EXTEND:
+                continue
+            if not any(isinstance(s, ast.Break) for s in stmt.body):
+                continue
+            body[i], body[i + 1] = nxt, stmt
+            node.body = body
+            return node
+        return node
+
+
 def test_the_loop_moved_under_one_declared_substitution():
     """История + объявленная подстановка = то, что лежит в новом модуле."""
     old_src = _history()
@@ -163,8 +199,10 @@ def test_the_loop_moved_under_one_declared_substitution():
     assert new_loop is not None, "в новом методе должен быть ровно один `while True`"
 
     expected = ast.fix_missing_locations(
-        _DeclaredDeletions().visit(
-            _Substitute().visit(ast.parse(ast.unparse(old_loop)))
+        _DeclaredMoves().visit(
+            _DeclaredDeletions().visit(
+                _Substitute().visit(ast.parse(ast.unparse(old_loop)))
+            )
         )
     )
     got = ast.parse(ast.unparse(new_loop))
