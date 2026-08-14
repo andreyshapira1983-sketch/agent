@@ -600,6 +600,22 @@ class KnowledgePipeline:
                     },
                 })
                 continue
+            if claim_source_is_untrusted(claim.text):
+                # Barred, not merely rejected: this text tried to give orders.
+                result.memory_rejected += 1
+                result.decisions.append({
+                    "claim_id": claim.id,
+                    "source_id": claim.source_id,
+                    "knowledge_decision": {
+                        "decision": "reject",
+                        "reasons": [
+                            ("injection guard flagged the claim text; "
+                             "an instruction is not a fact"),
+                        ],
+                        "policy_id": "injection_guard",
+                    },
+                })
+                continue
             source = registry.get_source(claim.source_id)
             decision = self.write_policy.decide(claim, source=source)
             row: dict[str, Any] = {
@@ -630,6 +646,27 @@ class KnowledgePipeline:
                 result.memory_rejected += 1
             result.decisions.append(row)
         return result
+
+
+
+def claim_source_is_untrusted(text: str) -> bool:
+    """True when the injection guard refuses this text.
+
+    `blocked` only, deliberately. The pre-existing `override` pattern matches
+    the bare word "command", so `suspicious` would bar ordinary technical prose
+    — measured: it flagged "If a command is not here, it does not exist" out of
+    the operator's own store.
+
+    The durable half of the 2026-08-14 attack. The agent correctly ignored an
+    order planted in a workspace file — and the pipeline then banked the order's
+    own sentences as `fact`/`source-backed` at confidence 0.85, where keyword
+    retrieval re-injects them on later turns. Refusing in the moment is not
+    enough when memory outlives the turn. See docs/CODE_NOTES.md, "Injection
+    through a workspace file".
+    """
+    from core.injection_guard import scan_for_injection
+
+    return scan_for_injection(text or "").is_blocked
 
 
 def _sentences(text: str) -> list[str]:
