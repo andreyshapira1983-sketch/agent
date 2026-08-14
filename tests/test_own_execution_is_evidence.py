@@ -153,3 +153,48 @@ def test_a_real_run_shows_the_process_facts_to_the_synthesiser(tmp_path):
     assert [e.kind for e in agent.last_provenance.evidences] == ["file"], (
         "the runtime pool leaked into the provenance chain"
     )
+
+
+# ── the permission half: the contract must name what the model may ground on ──
+
+def test_the_output_contract_grants_and_bounds_the_runtime_prefix():
+    """Built and reachable is not the same as permitted.
+
+    Measured 2026-08-14, after the pool was wired: asked what it runs on, the
+    agent answered correctly from `<runtime_self>` and cited
+    `[general-knowledge]` — `sources=['general-knowledge']`, three claims with
+    no external source. The mechanism resolved; nothing told the model it was
+    allowed to use it. `<runtime_self>` appeared nowhere in SYSTEM_ANSWER, the
+    same gap `<host_environment>` had before MIR-013 gave it a named rule.
+
+    The two limits are asserted, not just the permission. Granting without them
+    is how MIR-013 happened in reverse: `host_tools` injected AS evidence forced
+    strict-evidence mode on every turn and broke general-knowledge answers.
+    """
+    from core.answer_format import SYSTEM_ANSWER
+
+    text = SYSTEM_ANSWER
+    assert "<runtime_self>" in text, "the contract never names the block"
+    assert "[runtime:" in text, "the citation grammar omits the prefix"
+
+    lowered = text.casefold()
+    assert "never about the world" in lowered or "never for a world fact" in lowered, (
+        "a runtime fact must be barred from supporting a claim about the world"
+    )
+    assert "does not mean evidence was gathered" in lowered, (
+        "without this, a turn carrying only <runtime_self> reads as an "
+        "evidence turn and general-knowledge answers break — MIR-013 in reverse"
+    )
+
+
+def test_the_contract_still_forbids_citing_the_two_context_blocks():
+    """The neighbours keep their rule; the new permission is narrow."""
+    from core.answer_format import SYSTEM_ANSWER
+
+    lowered = SYSTEM_ANSWER.casefold()
+    assert "<host_environment>" in SYSTEM_ANSWER
+    assert "never cite it" in lowered
+    assert "<failure_context>" in SYSTEM_ANSWER, (
+        "the failure block reaches the prompt since 2026-08-14 and the contract "
+        "must say it is context, not a source"
+    )
