@@ -103,6 +103,11 @@ class AgentLoopHygiene:
             dry_run=dry_run,
         )
 
+    def dedupe_episodic(self, *, dry_run: bool = False) -> list[str]:
+        return hygiene.dedupe_episodic(
+            log=self.log, episodic_store=self.episodic_store, dry_run=dry_run,
+        )
+
     def prune_episodic(
         self,
         *,

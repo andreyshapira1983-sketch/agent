@@ -36,10 +36,15 @@ DEFAULT_LAST_N = 50
 MAX_LAST_N = 500
 MAX_EVENT_FILTER = 20      # how many distinct event names a caller may filter on
 
-# Mirrors `core.loop.new_trace_id` which emits `run_<hex8>`.
-# Accepting both hex and a wider safe pattern keeps the tool resilient
-# to a future change in the trace-id format.
+# Accepting a wider safe pattern than `core.ids.new_trace_id` currently emits
+# keeps an explicitly-passed trace_id resilient to a format change.
 _TRACE_ID_FILENAME_RE = re.compile(r"^[a-zA-Z0-9_-]+\.jsonl$")
+
+# Which files in `logs/` TraceLogger itself wrote. `core.ids.new_trace_id` emits
+# `trace_<hex>`; `run_<hex>` is the pre-2026-08-10 name and is still on disk.
+# Everything else there (checkpoints_*, daemon_tick, ad-hoc captures) is another
+# store, and picking one to diagnose from reports the wrong subsystem.
+_SESSION_LOG_STEM_RE = re.compile(r"^(?:trace|run)_[0-9a-zA-Z]+$")
 
 
 # ---------------------------------------------------------------------------
@@ -54,19 +59,23 @@ class ReadLogsTool(Tool):
         "Read the agent's own JSONL audit log to diagnose errors. "
         "Returns the last N events (default 50, max 500), optionally "
         "filtered by event name (e.g. ['error','replan']). If trace_id "
-        "is omitted, reads the most-recently-modified log file. Use "
-        "this as the agent's primary self-diagnostic surface. "
-        "Risk: read_only."
+        "is omitted, reads the most recent session log OTHER than the one "
+        "this run is writing — the current run's outcome is not in it yet. "
+        "`is_live_session` says which you got. Use this as the agent's "
+        "primary self-diagnostic surface. Risk: read_only."
     )
     risk: Risk = "read_only"
 
-    def __init__(self, workspace_root: Path):
+    def __init__(self, workspace_root: Path, live_trace_id: str | None = None):
         if not workspace_root.is_dir():
             raise ValueError(
                 f"workspace_root must be an existing directory, got {workspace_root}"
             )
         self.workspace_root = workspace_root.resolve()
         self.log_dir = self.workspace_root / "logs"
+        # The session log this agent is appending to right now. Excluded from the
+        # no-trace_id default, because a run cannot read its own outcome.
+        self.live_trace_id = live_trace_id
 
     def risk_for(self, arguments: dict[str, Any]) -> Risk:
         return "read_only"
@@ -113,6 +122,8 @@ class ReadLogsTool(Tool):
                 "total_events": 0,
                 "filtered": filter_set is not None,
                 "events": [],
+                "is_live_session": False,
+                "skipped_live": False,
                 "compensation_plan": _NOOP_PLAN,
             }
 
@@ -134,6 +145,7 @@ class ReadLogsTool(Tool):
         except ValueError:
             rel_log = str(target_path)
 
+        is_live = bool(self.live_trace_id) and target_path.stem == self.live_trace_id
         return {
             "trace_id": target_path.stem,
             "log_file": rel_log,
@@ -141,6 +153,10 @@ class ReadLogsTool(Tool):
             "total_events": total,
             "filtered": filter_set is not None,
             "events": events_safe,
+            # Which run this diagnosis is about. Reading the caller's own
+            # unfinished trace answers a different question than it looks like.
+            "is_live_session": is_live,
+            "skipped_live": bool(self.live_trace_id) and trace_id is None and not is_live,
             "compensation_plan": _NOOP_PLAN,
         }
 
@@ -153,7 +169,8 @@ class ReadLogsTool(Tool):
             return False, ["read_logs output must be a dict"]
         required = {
             "trace_id", "log_file", "events_returned", "total_events",
-            "filtered", "events", "compensation_plan",
+            "filtered", "events", "is_live_session", "skipped_live",
+            "compensation_plan",
         }
         missing = required - output.keys()
         if missing:
@@ -209,11 +226,22 @@ class ReadLogsTool(Tool):
                 ) from None
             return resolved if resolved.is_file() else None
 
-        # No trace_id given — pick the most recently modified .jsonl.
-        candidates = [p for p in self.log_dir.iterdir() if p.suffix == ".jsonl" and p.is_file()]
+        # No trace_id given — the most recent session log that can hold an
+        # answer. `logs/` also holds checkpoints and other stores; those are
+        # never event logs. The live session's own trace is the last resort:
+        # while it is being written it cannot contain this run's outcome.
+        candidates = [
+            p for p in self.log_dir.iterdir()
+            if p.suffix == ".jsonl" and p.is_file()
+            and _SESSION_LOG_STEM_RE.match(p.stem)
+        ]
         if not candidates:
             return None
         candidates.sort(key=lambda p: p.stat().st_mtime)
+        if self.live_trace_id:
+            past = [p for p in candidates if p.stem != self.live_trace_id]
+            if past:
+                return past[-1]
         return candidates[-1]
 
     @staticmethod

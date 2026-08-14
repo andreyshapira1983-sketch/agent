@@ -681,3 +681,78 @@ was already in this module. It reads the heartbeat itself through
 `core.heartbeat_io`, which `core/` may import (INV-1); `agent_tick.py` keeps
 only the thin wire, and that wire is a sensor, not a gate — a failure is
 logged as `self_direction_error` and the tick continues.
+
+## read_logs and the live trace
+
+`tools/read_logs.py` is the agent's primary self-diagnostic surface: asked what
+went wrong, the planner reaches for it. Until 2026-08-14 it answered the wrong
+question, silently.
+
+With no `trace_id` it picked the most-recently-modified `.jsonl` in `logs/`.
+During a run that file is *the trace this run is writing* — the logger appends
+to it as the tool executes. So the instrument for looking at past failures
+always handed back the present, which by construction cannot contain the
+outcome being asked about. Measured live three times in a row on 2026-08-14:
+asked «что тебе мешает работать», the agent got `total_events: 30,
+events_returned: 0` from its own in-flight trace, concluded the *filter* was
+broken, and on the follow-up run read its own trace again — this time seeing
+the Anthropic credit error from the same run and reporting that as the cause of
+the filtering. Its own relevance check caught the miss (`relevance_score=0.00`).
+
+The agent could not diagnose this on its own: the instrument was the defect.
+Every look showed it itself.
+
+Two things were wrong and both are fixed:
+
+- **Wrong file.** The no-`trace_id` branch applied no name pattern at all,
+  though the module docstring claims one is enforced. `logs/` is a mixed store —
+  164 `checkpoints_*` files, `daemon_tick.jsonl`, ad-hoc captures — and any of
+  them could win the mtime race. Only `trace_<id>` / `run_<id>` (the pre-
+  2026-08-10 name, still on disk) are TraceLogger's own. Related: MIR-070, the
+  same "diagnostic tool and signal source are different stores" shape, closed
+  for the campaign path but not for the tool.
+- **Own trace preferred.** `ReadLogsTool` now takes `live_trace_id` from
+  `app/bootstrap.py` (the id is minted before the registry so it can be passed
+  in) and skips it when any earlier session log exists. It is still the fallback
+  when nothing else is there — a first run has no past, and returning nothing
+  would be worse.
+
+Silence was half the defect, so the result now says which run it is about:
+`is_live_session` and `skipped_live` are part of the output contract, checked by
+`validate_output`. A stale line in the tool description — "reads the
+most-recently-modified log file", which the planner reads — was corrected too.
+
+## Episodic duplicates
+
+Persistent memory has had `dedupe_persistent` (similarity ≥ 0.85) since early
+on. Episodic memory had no duplicate notion at all: `prune_stale_episodes`
+selects by age, quality and staleness, and `EpisodicMemoryStore.save_once`
+guards the episode **id**, which every tick mints fresh. So a gate that blocks
+the same way each tick banks a new identical record forever.
+
+Measured on the operator's live store 2026-08-14 (200 episodes):
+
+    x14  self-build dirty_tree_wait: git working tree is not clean   (08-01 → 08-14)
+    x13  (run aborted before completion), empty summary
+    x 6  self-build no_grounded_target: split target 'core/smart_me…'
+    x 3  self-build critic_veto: confidence 0.00 below threshold
+
+21 of 200 records were repeats, all `usage_eligible=True`, i.e. offered to
+retrieval as if they were 21 separate lessons. Fourteen copies of one blocked
+gate crowd the retrieval window and teach nothing the first copy did not.
+
+`select_duplicate_episodes` keeps the newest of each identical (goal, question,
+summary, outcome) group. Three deliberate exemptions: protected tags (`lesson`,
+`bug-fix`, `regression-guard`) are never touched, matching `select_for_pruning`;
+an empty summary is not a key, so the 13 aborted runs age out rather than being
+collapsed into one — they carry no lesson to keep; and a different goal with the
+same summary stays two records, because the goal is part of what was learned.
+
+`collapse_duplicate_episodes` rewrites the store under the same file lock the
+pruner uses. It is a sensor first — `dry_run=True` reports and changes nothing.
+Wired as `dedupe_episodic` through `core/loop_hygiene.py` into the `:memory
+hygiene` sweep, next to the persistent twin.
+
+Not fixed here: the daemon keeps banking the repeat in the first place. The gate
+runs before any model call and consults no memory — correct for a gate, but it
+means the sweep is cleaning up after a producer that will do it again next tick.

@@ -255,6 +255,25 @@ def prune_episodic(
     return pruned_ids
 
 
+def dedupe_episodic(*, log: Any, episodic_store: Any, dry_run: bool = False) -> list[str]:
+    """Keep one copy of each repeated episode.
+
+    The episodic twin of `dedupe_persistent`: `save_once` guards ids, not
+    content, so a gate blocking the same way each tick banked a fresh identical
+    record. Returns the IDs dropped (or, dry-run, that would be).
+    """
+    if episodic_store is None:
+        log.log("episodic_memory_dedupe",
+                {"dropped": 0, "dry_run": dry_run, "skipped_reason": "no store"})
+        return []
+    from core.episodic_hygiene import collapse_duplicate_episodes
+
+    dropped = collapse_duplicate_episodes(episodic_store, dry_run=dry_run)
+    log.log("episodic_memory_dedupe",
+            {"dropped": len(dropped), "dry_run": dry_run, "ids": dropped})
+    return dropped
+
+
 def summarise_persistent(
     tag: str,
     *,

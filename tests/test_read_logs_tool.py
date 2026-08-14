@@ -269,6 +269,8 @@ class TestValidateOutput:
             "total_events": 1,
             "filtered": False,
             "events": [{"event": "planner"}],
+            "is_live_session": False,
+            "skipped_live": False,
             "compensation_plan": {"id": "x", "actions": [], "tool_name": "t", "description": "d"},
         }
 
