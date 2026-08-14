@@ -94,6 +94,11 @@ _KIND_TO_CLASS: dict[str, EvidenceClass] = {
     "memory": "external_world",
     "user_explicit": "external_world",
     "log_event": "trace",
+    # This run measuring itself. `trace`, not `external_world`: it says what
+    # the agent IS running on, never what is true outside it. Added 2026-08-14
+    # so a claim about the agent's own body can be verified instead of landing
+    # in the same "cannot be determined" as everything else about itself.
+    "runtime": "trace",
     "session_dialogue": "session_dialogue",
 }
 

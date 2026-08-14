@@ -39,6 +39,33 @@ _ORGAN_ORDER: tuple[str, ...] = (
 )
 
 
+def process_facts() -> dict[str, str]:
+    """Чем агент ИСПОЛНЯЕТСЯ — измеренное, не выведенное.
+
+    Заведено 2026-08-14. До этого модуль знал семь хранилищ и не знал, что он
+    процесс Python. Замер: на вопрос «ты видишь Python?» агент выполнил
+    `where python`, обыскал диск и нашёл интерпретатор — **работая на нём**, —
+    и честно приписал, что работоспособность не проверял. Доказательство
+    работоспособности — он сам; предъявить его было нечем, потому что
+    собственное исполнение не проходило ни через один инструмент.
+
+    Здесь только то, что интерпретатор сообщает о себе. Ни версии пакетов, ни
+    состава окружения: чем длиннее список, тем выше шанс, что часть его
+    протухнет молча, а этот модуль существует ради обратного.
+    """
+    import os
+    import platform
+    import sys
+
+    return {
+        "interpreter": sys.executable or "(unknown)",
+        "python_version": platform.python_version(),
+        "platform": sys.platform,
+        "pid": str(os.getpid()),
+        "cwd": os.getcwd(),
+    }
+
+
 def runtime_self_block(
     *,
     trace_id: str,
@@ -61,6 +88,11 @@ def runtime_self_block(
         "чем ты являешься, здесь не сказано — сказано, что подключено.",
         f"  run_id={run_id} trace_id={trace_id} session_id={session_id or 'нет'}",
     ]
+
+    # Тело — перед органами: «на чём я исполняюсь» первичнее, чем «что ко мне
+    # подключено». Цитируется как [runtime:<поле>].
+    for key, value in process_facts().items():
+        lines.append(f"  {key}: {value}")
 
     named = set(stores)
     for organ in (*_ORGAN_ORDER, *sorted(named - set(_ORGAN_ORDER))):

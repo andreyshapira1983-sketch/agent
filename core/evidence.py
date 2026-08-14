@@ -54,6 +54,7 @@ EvidenceKind = Literal[
     "memory",           # memory record retrieved from working / persistent store
     "session_dialogue", # verbatim earlier turn of THIS session (issue #119)
     "user_explicit",    # :remember / explicit consent / direct user command
+    "runtime",          # this process measuring ITSELF — interpreter, pid, cwd
     "llm_claim",        # LLM-generated text WITHOUT external grounding
     "unknown",          # last-resort bucket
 ]
@@ -61,7 +62,7 @@ EvidenceKind = Literal[
 ALL_EVIDENCE_KINDS: tuple[EvidenceKind, ...] = (
     "file", "web_page", "web_search_hit", "tool_output", "test_result",
     "log_event", "shell_output", "diff_preview", "memory",
-    "session_dialogue", "user_explicit", "llm_claim", "unknown",
+    "session_dialogue", "user_explicit", "runtime", "llm_claim", "unknown",
 )
 
 
@@ -76,6 +77,13 @@ ALL_EVIDENCE_KINDS: tuple[EvidenceKind, ...] = (
 #   > llm-claim > unknown
 DEFAULT_CONFIDENCE: dict[EvidenceKind, float] = {
     "user_explicit":    1.00,
+    # The process reading its own interpreter, version, pid and cwd. Ranked
+    # beside a test result and above a workspace file on purpose: a file can be
+    # stale the moment after it is read, while these were measured by the very
+    # process answering, and its own existence is what makes them true. The
+    # scope is narrow — this run only — and `core/evidence_classes.py` keeps it
+    # in the `trace` class so it can never confirm a claim about the world.
+    "runtime":          0.95,
     "test_result":      0.95,
     "file":             0.90,
     "log_event":        0.90,
