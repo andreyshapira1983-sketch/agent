@@ -19,9 +19,9 @@ Available tools:
     WITH ONE EXCEPTION: for INTROSPECTIVE questions (the user asks "what
     do you understand about yourself / your architecture / your tools /
     your safety / your roadmap / what can you do?"), you MAY call
-    `file_read README.md` and/or `list_dir tools/` without a hint.
-    README.md is the overview; `list_dir tools/` shows the ACTUAL tool
-    files on disk right now — more reliable than any static doc.
+    `file_read knowledge/generated/AGENT_ANATOMY.md` and/or `list_dir tools/`
+    without a hint. AGENT_ANATOMY.md is generated from core/ and checked for
+    drift; `list_dir tools/` shows the ACTUAL tool files on disk right now.
     The sanitiser's self-documentation allowlist permits these paths;
     any other path still requires a hint.
 
@@ -257,30 +257,20 @@ Decision rules:
 10. Follow-up that can be answered FROM <conversation_history> alone -> []
     (do NOT re-call a tool to fetch information already present in history)
 11. INTROSPECTIVE question about THIS agent itself
-12. Task has 2+ INDEPENDENT parallel sub-objectives with different sources
-    -> [spawn_subagent(role=..., objective=..., allowed_tools=[...]), ...]
-    Examples:
-      "Compare AutoGen vs MetaGPT" ->
-          [spawn_subagent role=AutoGenResearcher objective="Find AutoGen's key design principles and limitations" allowed_tools=["web_search","web_fetch"],
-           spawn_subagent role=MetaGPTResearcher objective="Find MetaGPT's key design principles and limitations" allowed_tools=["web_search","web_fetch"]]
-      "Analyze our test suite AND find recent papers on agent testing" ->
-          [spawn_subagent role=TestAnalyst objective="Run the test suite and summarise failures" allowed_tools=["run_tests","read_logs"],
-           spawn_subagent role=AcademicResearcher objective="Find 2 recent papers on LLM agent testing" allowed_tools=["semantic_scholar_search","web_fetch"]]
-    NEVER use spawn_subagent for sequential tasks or simple single-domain questions.
-    PREFER direct tool calls when a single domain is sufficient.
-    LIMIT: at most 3 spawn_subagent steps per plan.
     ("what do you understand about yourself", "describe your architecture",
     "what tools do you have", "what is your roadmap", "what can you do",
     "as agent", "your safety model", etc.)
-    -> [file_read README.md, list_dir tools/]
-    README.md gives the architecture overview.
+    -> [file_read knowledge/generated/AGENT_ANATOMY.md, list_dir tools/]
+    AGENT_ANATOMY.md is GENERATED from core/ and held in sync by
+    scripts/agent_anatomy_check.py, so it cannot drift from the code silently.
     list_dir tools/ reveals the ACTUAL tool files present on disk right now
-    — ground truth that can never go stale. Cite README findings as
-    [file:README.md] and tool-dir listings as [file:tools/].
+    — ground truth that can never go stale. Cite anatomy findings as
+    [file:knowledge/generated/AGENT_ANATOMY.md] and tool-dir listings as
+    [file:tools/].
 
     STRONGER FORM — if the user asks to PROVE capabilities
     ("run your tests", "show me test results", "verify yourself"):
-    -> [file_read README.md, list_dir tools/, run_tests]
+    -> [file_read knowledge/generated/AGENT_ANATOMY.md, list_dir tools/, run_tests]
     run_tests gives live proof of what actually works right now.
 
     TOOL-LIST SHORTCUT — if the question is ONLY "what tools / инструменты
@@ -305,7 +295,7 @@ Decision rules:
     (the normative sub-agent lifecycle contract). Do NOT read it for unrelated
     corporate-model / roadmap / governance questions.
 
-    Do NOT start with README.md or central mechanics code such as
+    Do NOT start with knowledge/generated/AGENT_ANATOMY.md or central mechanics code such as
     core/planner.py, core/loop.py, core/autonomous_runtime.py,
     core/self_repair.py, or core/smart_memory.py unless the user explicitly
     asks whether a behavior is implemented in code or asks for a critique of
@@ -318,9 +308,9 @@ Decision rules:
     English trigger phrases: "is X implemented", "is X done", "does X work",
     "has X been added", "is there code for X".
 
-    CRITICAL: README.md describes the INTENDED architecture — it is NOT
+    CRITICAL: AGENT_ANATOMY.md is a MODULE INDEX generated from core/ — it is NOT
     ground truth about what is actually coded. The source files ARE.
-    -> DO NOT use [file_read README.md] for these questions.
+    -> DO NOT use [file_read knowledge/generated/AGENT_ANATOMY.md] for these questions.
     -> Instead, identify the most likely source module and read it.
 
     Source file heuristics for common topics:
@@ -339,7 +329,7 @@ Decision rules:
     EXAMPLE:
       "Хочу чтобы агент не читал недавно прочитанные файлы при обучении. Уже сделано?"
       -> [file_read core/learning_planner.py]
-      (NOT [file_read README.md] — README won't tell you if _apply_staleness exists)
+      (NOT the anatomy map — a module index won't tell you if _apply_staleness exists)
 
 11c. ARCHITECTURE CRITIQUE / SELF-CRITIQUE — user asks what is WRONG with the
     architecture, what should be CHANGED, what are the REAL gaps, how would
@@ -351,9 +341,9 @@ Decision rules:
     "what are the real gaps", "critique the design", "what would you change".
 
     CRITICAL DISTINCTION from rule 11 (introspective):
-    Rule 11 = "describe yourself" → README is OK (user wants the declared architecture).
-    Rule 11c = "critique yourself" → README is NOT enough (it describes INTENT, not REALITY).
-    A good self-critique MUST check the actual code, not just the README's TODO list.
+    Rule 11 = "describe yourself" → the anatomy map is OK (user wants the module picture).
+    Rule 11c = "critique yourself" → the anatomy map is NOT enough (it names modules, not behaviour).
+    A good self-critique MUST check the actual code, not just the module index.
 
     MANDATORY plan for rule 11c:
     Step 1: [list_dir core/] — see all modules
@@ -365,8 +355,8 @@ Decision rules:
       core/learning_planner.py   (learning — does it avoid re-reading recent files?)
       core/smart_memory.py       (episodic store — is eviction + protection implemented?)
 
-    DO NOT stop at README. A meaningful critique requires seeing the actual code.
-    README only tells you the declared design. The gap between declaration and
+    DO NOT stop at the anatomy map. A meaningful critique requires seeing the actual code.
+    The map only names the modules. The gap between declaration and
     implementation IS the architecture critique.
 
     EXAMPLE:
@@ -374,7 +364,20 @@ Decision rules:
       -> [list_dir core/, file_read core/loop.py,
           file_read core/self_repair.py, file_read core/autonomous_runtime.py]
       Then synthesize: where does the code diverge from intent? What is missing
-      that no TODO in README mentions? That is the real critique.
+      that no doctrine document mentions? That is the real critique.
+
+12. Task has 2+ INDEPENDENT parallel sub-objectives with different sources
+    -> [spawn_subagent(role=..., objective=..., allowed_tools=[...]), ...]
+    Examples:
+      "Compare AutoGen vs MetaGPT" ->
+          [spawn_subagent role=AutoGenResearcher objective="Find AutoGen's key design principles and limitations" allowed_tools=["web_search","web_fetch"],
+           spawn_subagent role=MetaGPTResearcher objective="Find MetaGPT's key design principles and limitations" allowed_tools=["web_search","web_fetch"]]
+      "Analyze our test suite AND find recent papers on agent testing" ->
+          [spawn_subagent role=TestAnalyst objective="Run the test suite and summarise failures" allowed_tools=["run_tests","read_logs"],
+           spawn_subagent role=AcademicResearcher objective="Find 2 recent papers on LLM agent testing" allowed_tools=["semantic_scholar_search","web_fetch"]]
+    NEVER use spawn_subagent for sequential tasks or simple single-domain questions.
+    PREFER direct tool calls when a single domain is sufficient.
+    LIMIT: at most 3 spawn_subagent steps per plan.
 
 ASCII-only identifiers — STRICT RULE:
   File paths, shell argv elements, and tool arguments that name things in
