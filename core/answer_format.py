@@ -415,7 +415,13 @@ def format_allowed_citations_block(
     lines.append("</allowed_citations>")
     return "\n".join(lines) + "\n\n" if len(lines) > 2 else ""
 
-def format_artifact(tool_name: str | None, output: Any, *, question: str = "") -> str:
+def format_artifact(
+    tool_name: str | None,
+    output: Any,
+    *,
+    question: str = "",
+    self_documentation: bool = False,
+) -> str:
     """Render a tool output into a stable string the LLM can ground on.
 
     File content is passed through :func:`core.evidence_budget.budget_file_content`
@@ -440,7 +446,9 @@ def format_artifact(tool_name: str | None, output: Any, *, question: str = "") -
         return "\n".join(lines)
     if tool_name == "file_read" and isinstance(output, str):
         from core.evidence_budget import budget_file_content
-        return budget_file_content(output, question=question)
+        return budget_file_content(
+            output, question=question, self_documentation=self_documentation,
+        )
     if tool_name == "list_dir" and isinstance(output, str):
         return output
     # Fallback: stringify whatever came back.

@@ -218,7 +218,11 @@ def test_the_map_states_the_numbers_the_census_computes() -> None:
         "with_properties": with_properties,
         "without": len(census["nodes"]) - with_properties,
     }
-    topology = re.search(r"находит \*\*(\d+) узл(?:а|ов) и (\d+) рёбер\*\*", text)
+    # `узел` as well as `узла|узлов`: 81 takes the nominative singular in
+    # Russian, and the count crossed into that form on 2026-08-14. A ratchet
+    # that reads by shape must accept every shape the language produces, or it
+    # forces ungrammatical prose to keep itself green.
+    topology = re.search(r"находит \*\*(\d+) (?:узел|узл(?:а|ов)) и (\d+) рёбер\*\*", text)
     status = re.search(
         r"\*\*(\d+) узлов из (\d+)\*\* имеют хотя бы одно доказанное свойство, "
         r"\*\*(\d+)\*\* — ни одного", text)

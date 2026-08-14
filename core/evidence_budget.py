@@ -45,6 +45,18 @@ from collections.abc import Set as AbstractSet
 EVIDENCE_FILE_CHARS:  int = 12_000   # per-artifact ceiling
 EVIDENCE_TOTAL_CHARS: int = 32_000   # total ceiling across all artifacts
 
+# Ceiling for the agent's OWN self-documentation (the planner's hint-free
+# allowlist). Higher than the ordinary per-file limit, and the reason is
+# measured: `knowledge/generated/AGENT_ANATOMY.md` is 19 163 chars, so the
+# 12 000 limit cut 37 % of it. Asked «Опиши свою архитектуру» — a Russian
+# question against an English index — `extract_relevant` found no keyword
+# match, fell back to head+tail, and the middle it dropped was the whole
+# `## Memory & Knowledge Governance` group plus `core/runtime_self`. The
+# agent then described its architecture with the memory layer missing.
+# The total budget below still governs; this only stops a SECOND gate from
+# mutilating the one file the agent is told to read to know itself.
+EVIDENCE_SELF_DOC_CHARS: int = 32_000
+
 # Label under which the `<long_term_memory>` block enters the total budget.
 # Defined here, next to the budget it competes in, so the loop and the tests
 # name the same block instead of repeating a string literal.
@@ -56,6 +68,14 @@ def _file_chars() -> int:
         return max(1, int(os.getenv("AGENT_EVIDENCE_FILE_CHARS", str(EVIDENCE_FILE_CHARS))))
     except ValueError:
         return EVIDENCE_FILE_CHARS
+
+
+def _self_doc_chars() -> int:
+    try:
+        return max(1, int(os.getenv("AGENT_EVIDENCE_SELF_DOC_CHARS",
+                                    str(EVIDENCE_SELF_DOC_CHARS))))
+    except ValueError:
+        return EVIDENCE_SELF_DOC_CHARS
 
 
 def _total_chars() -> int:
@@ -402,13 +422,21 @@ def apply_total_budget(
 
 # ── convenience: apply per-artifact limit ────────────────────────────────────
 
-def budget_file_content(content: str, *, question: str = "") -> str:
-    """Apply AGENT_EVIDENCE_FILE_CHARS budget to a single file artifact.
+def budget_file_content(
+    content: str, *, question: str = "", self_documentation: bool = False,
+) -> str:
+    """Apply the per-artifact budget to a single file artifact.
 
     If the content fits, return unchanged. Otherwise call extract_relevant()
     with the per-file limit and the current question.
+
+    ``self_documentation`` raises the ceiling to AGENT_EVIDENCE_SELF_DOC_CHARS
+    for the files the planner may read without a hint — see the constant for
+    the measurement that forced it. The caller decides, not this module: the
+    allowlist lives with the planner and this file imports nothing from
+    ``core`` (INV-1, core imports downward only).
     """
-    limit = _file_chars()
+    limit = _self_doc_chars() if self_documentation else _file_chars()
     if len(content) <= limit:
         return content
     return extract_relevant(content, question=question, budget=limit)
