@@ -153,6 +153,43 @@ def _tokenise_citation_body(body: str) -> list[str]:
     return [t for t in raw if len(t) >= _MIN_TOKEN_LEN and t not in _TOKEN_STOPWORDS]
 
 
+def _normalise_path(text: str) -> str:
+    """One spelling for one file: POSIX separators, no `./`, no trailing slash."""
+    out = text.replace("\\", "/").strip().casefold()
+    while out.startswith("./"):
+        out = out[2:]
+    while "//" in out:
+        out = out.replace("//", "/")
+    return out.rstrip("/")
+
+
+def same_file(cited: str, source_id: str) -> bool:
+    """Do a citation body and an evidence label name the SAME file?
+
+    Measured 2026-08-14 — one file, three spellings, 4 of 9 pairs failed to
+    match, and asymmetrically: the plain substring rule finds the short form
+    inside the long one and never the reverse. Live consequence: the agent
+    wrote `README.md`, was asked about
+    `C:\\Users\\andre\\Projects\\agent\\README.md`, and reported it had
+    evidence only for the first — about a file it had just created itself.
+
+    Suffix at a SEGMENT boundary, not containment. Strictly tighter than what
+    it replaces: `sub/x.txt` no longer matches `other/sub/x.txt` by accident of
+    characters, while `x.txt` and `./x.txt` and an absolute path ending in the
+    same segments become one file — which is what they are.
+
+    Not resolved against the workspace root on purpose: the root is not known
+    here, and it is not needed. The sanitiser drops absolute paths from tool
+    arguments (`core/step_sanitizer.py`), so a label is always relative; only
+    the CITATION varies, and a suffix test settles that without new plumbing.
+    """
+    a = _normalise_path(cited)
+    b = _normalise_path(source_id.split(":", 1)[-1] if ":" in source_id else source_id)
+    if not a or not b:
+        return False
+    return a == b or a.endswith("/" + b) or b.endswith("/" + a)
+
+
 def runtime_evidence_pool() -> list[Evidence]:
     """What this process measured about itself, as citable Evidence.
 
@@ -200,6 +237,14 @@ def match_citation(citation: Citation, chain: ProvenanceChain) -> Evidence | Non
         return candidates[0]
     body_lower = citation.body.lower()
     for ev in candidates:
+        # A file citation is compared AS A PATH: one file may be written
+        # `x.txt`, `./x.txt` or with the workspace prefix, and those are the
+        # same file. Every other prefix keeps the substring rule — a web query
+        # or a memory id is a string, not a path.
+        if citation.prefix == "file":
+            if same_file(citation.body, ev.source_id):
+                return ev
+            continue
         if body_lower in ev.source_id.lower():
             return ev
     if citation.prefix in _NO_TOKEN_FALLBACK_PREFIXES:
