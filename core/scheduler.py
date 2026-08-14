@@ -118,9 +118,21 @@ class ScheduleTickReport:
     enqueued_count: int
     task_ids: tuple[str, ...]
     schedule_ids: tuple[str, ...]
+    #: How many schedules the store held when this tick ran — every record, not
+    #: only the due ones. Deliberately has NO default: the store knows the number
+    #: and a producer that cannot state it must say so at the call site rather
+    #: than silently emit 0.
+    #:
+    #: Added 2026-08-14 (C16). Without it one journal line answered three
+    #: different questions identically — no schedules configured at all, which is
+    #: the live workspace today; schedules present with none due; and a severed
+    #: wire. The operator's question is "why is my agent doing nothing?", and
+    #: `due_count=0` alone cannot tell an unconfigured daemon from a patient one.
+    total_count: int
 
     def to_dict(self) -> dict:
         return {
+            "total_count": self.total_count,
             "due_count": self.due_count,
             "enqueued_count": self.enqueued_count,
             "task_ids": list(self.task_ids),
@@ -128,8 +140,11 @@ class ScheduleTickReport:
         }
 
     def user_summary(self) -> str:
+        if self.total_count == 0:
+            return "(scheduler tick: no schedules configured — nothing to run)"
         return (
-            f"(scheduler tick: due={self.due_count}; "
+            f"(scheduler tick: {self.total_count} schedule(s); "
+            f"due={self.due_count}; "
             f"enqueued={self.enqueued_count}; tasks={list(self.task_ids)})"
         )
 
@@ -233,6 +248,7 @@ class SchedulerStore:
             self._save_unlocked(updated)
 
         return ScheduleTickReport(
+            total_count=len(schedules),
             due_count=len(due_schedules),
             enqueued_count=len(task_ids),
             task_ids=tuple(task_ids),
