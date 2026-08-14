@@ -370,6 +370,14 @@ def claim_from_evidence(
         metadata={
             "evidence_id": evidence.id,
             "evidence_kind": evidence.kind,
+            # Provenance, so a reader never has to guess from the wording.
+            # `Evidence.claim` is ALWAYS written by us — "Directory listing of
+            # workspace path X", "Test run verdict: …", "Proposed change to …",
+            # fifteen templates in `evidence_from_tool_result` plus the
+            # ingestion ones — while the source's own words live in `excerpt`.
+            # A label for a tool result is not an assertion about the world,
+            # and the write policy refuses it on that ground.
+            "extraction": "evidence_claim",
         },
     )
 
@@ -377,6 +385,17 @@ def claim_from_evidence(
 def source_type_from_evidence(evidence: Evidence) -> SourceType:
     kind = evidence.kind
     if kind == "file":
+        # A directory listing carries kind="file" so its `[file:<path>]`
+        # citation resolves — but it is a snapshot of a folder's shape at one
+        # moment, not a document that states anything. Typing it `file` let the
+        # knowledge pipeline bank «Directory listing of workspace path
+        # knowledge/» and the bare filename «self-audit-lessons.md» as durable
+        # facts at confidence 0.85 (measured on the operator's store,
+        # 2026-08-14). `tool_output` is already in the non-asserting set, which
+        # is the same doctrine `file_write` follows two branches above: an
+        # action, and now an observation, are not sources of truth.
+        if evidence.obtained_via == "list_dir":
+            return "tool_output"
         return "file"
     if evidence.obtained_via == "rss_fetch":
         return "article"

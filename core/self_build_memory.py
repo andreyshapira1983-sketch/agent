@@ -294,11 +294,27 @@ def _recent_self_improvement_events(
                 term in lowered
                 for term in ("self-apply", "self-build", "self-split", "splitter", "mixin", "repair")
             )
-            failed = getattr(episode, "outcome", "") == "failed" or any(
-                term in lowered
-                for term in ("rolled_back", "rollback", "failed", "rejected", "duplicate base class", "too many lines")
-            )
-            if self_improvement and failed:
+            # `outcome` is the structural fact; the wording is the author's
+            # choice. The table this replaced listed rolled_back / rollback /
+            # failed / rejected / duplicate base class / too many lines, so a
+            # self-build run that timed out, was refused by policy, or came
+            # back empty was lost — three such shapes measured 2026-08-15.
+            # `partial` counts: a repair that half-happened is exactly what a
+            # durable issue is for. Measured on the live store, this moves the
+            # admitted set 23 -> 42 of 200, and the registry collapses repeats
+            # by fingerprint, so it is a wider net rather than a flood.
+            failed = getattr(episode, "outcome", "") != "success"
+            # The run's own detectors are a first-class route in, independent
+            # of the word table above. A word table decides intent from
+            # vocabulary, and a fabricated citation says none of these words:
+            # measured 2026-08-14, the agent invented four sources, its verifier
+            # caught it (`citation_fabricated`) and nothing durable recorded it,
+            # so the defect could never be counted and repetition never noticed.
+            signals = [str(s) for s in (getattr(episode, "defect_signals", None) or [])]
+            if signals:
+                add(getattr(episode, "created_at", ""),
+                    f"detectors {', '.join(signals)}: {text}")
+            elif self_improvement and failed:
                 add(getattr(episode, "created_at", ""), text)
     except Exception:  # noqa: BLE001 — advisory history must never break CLI
         pass
