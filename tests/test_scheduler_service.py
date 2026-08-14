@@ -449,7 +449,8 @@ class _VanishingStore:
     def tick(self, *, task_queue, now, limit=None):
         self.tick_calls += 1
         return ScheduleTickReport(
-            due_count=0, enqueued_count=0, task_ids=(), schedule_ids=()
+            total_count=0, due_count=0, enqueued_count=0,
+            task_ids=(), schedule_ids=(),
         )
 
 
