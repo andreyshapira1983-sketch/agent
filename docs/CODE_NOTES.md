@@ -647,3 +647,37 @@ measurement that did not apply, reported as a measurement:
    the default-paced campaign always died with a stall on its lips. A pure
    streak now completes as `healthy_idle`; a streak containing repeat cycles
    (work wanted, went nowhere) still stops as a stall.
+
+## Idle self-direction
+
+`core.self_build_memory.idle_self_direction`, wired from `agent_tick._log_idle_tick`.
+
+Until 2026-08-14 an idle daemon tick wrote one line — `no_pending_tasks` — and
+went home. Both halves of a better answer were already built and simply
+unreachable from the daemon: `sync_self_improvement_issue_registry` turns the
+agent's own logged failures into durable issues, and
+`core.best_next_action.select_best_next_action` picks the single most pressing
+one. Both were called from ONE place, `cli/commands_approval.py` — an operator
+command. So the agent could notice its own defects only when a human asked.
+Measured before the fix: `data/self_improvement_issues.jsonl` held four issues,
+every one `open`, untouched since 2026-08-01. After: the registry grew 4 -> 6
+on the first unprompted tick.
+
+Two constraints shape the code:
+
+- **Proposes, never acts.** `select_best_next_action` is pure by its own
+  contract — "the agent is expected to PROPOSE this action, not perform it" —
+  and applying anything stays behind the four rights §9 of
+  CENTRAL_AGENT_GOVERNANCE reserves to the human: merge, the budget
+  kill-switch, approval of irreversible/external actions, deep escalation.
+- **Costs no model call.** A tick fires every 30 minutes. The sync reads
+  `episodic_store` and nothing else; no agent is built, so the model router is
+  never dragged in. `tests/test_the_idle_tick_directs_itself.py` pins this by
+  making `bootstrap.build_agent` raise.
+
+It lives in `core/` rather than in `agent_tick.py` because the entry point is
+not where decision logic belongs, and half the machinery — the registry sync —
+was already in this module. It reads the heartbeat itself through
+`core.heartbeat_io`, which `core/` may import (INV-1); `agent_tick.py` keeps
+only the thin wire, and that wire is a sensor, not a gate — a failure is
+logged as `self_direction_error` and the tick continues.

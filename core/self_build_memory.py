@@ -394,3 +394,46 @@ def sync_self_improvement_issue_registry(
                 action=str(record.get("action") or ""), evidence=record["text"],
             )
     return registry
+
+
+def idle_self_direction(workspace: Path, heartbeat: dict | None = None) -> dict:
+    """What the agent would do next when nobody queued anything for it.
+
+    Proposes only; never acts. Costs no model call. `heartbeat=None` means
+    read it here. Why it exists: docs/CODE_NOTES.md, "Idle self-direction".
+    """
+    from core.best_next_action import format_best_next_action, select_best_next_action
+    from core.heartbeat_io import heartbeat_age_seconds, is_stale, read_heartbeat
+    from core.smart_memory import EpisodicMemoryStore
+
+    if heartbeat is None:
+        heartbeat = read_heartbeat(workspace)
+
+    class _EpisodesOnly:
+        """The one attribute the sync reads — see `_recent_self_improvement_events`."""
+
+        def __init__(self, store: Any) -> None:
+            self.episodic_store = store
+
+    store = EpisodicMemoryStore(workspace / "data" / "episodic_memory.jsonl")
+    registry = sync_self_improvement_issue_registry(_EpisodesOnly(store), workspace)
+    open_issues = tuple(issue.to_dict() for issue in registry.unresolved())
+
+    hb = heartbeat or {}
+    action = select_best_next_action(
+        result_status=str(hb.get("result_status") or "none"),
+        tests_health=str(hb.get("tests_health") or "none"),
+        dry_run_streak=int(hb.get("dry_run_streak") or 0),
+        heartbeat_missing=heartbeat is None,
+        heartbeat_stale=is_stale(heartbeat_age_seconds(heartbeat)),
+        last_event=str(hb.get("event") or ""),
+        inbox_pending=int(hb.get("inbox_pending_after") or 0),
+        self_improvement_registry_available=True,
+        open_self_improvement_issues=open_issues,
+    )
+    return {
+        "open_issues": len(open_issues),
+        "action": getattr(action, "action", ""),
+        "severity": getattr(action, "severity", ""),
+        "summary": format_best_next_action(action)[:400],
+    }
