@@ -148,6 +148,7 @@
     "loop_synthesis.py::AgentLoopSynthesis._synthesize": [],
     "loop_synthesis.py::AgentLoopSynthesis._runtime_self_prompt_block": [],
     "loop_synthesis.py::_organ_map": [],
+    "loop_synthesis.py::_artifact_blocks": [],
     "loop_verification.py::AgentLoopVerification._verification_receipt_kwargs": [],
     "loop_verification.py::AgentLoopVerification._verify_draft": [],
     "loop_verify_replan.py::AgentLoopVerifyReplan._replan_on_refuted_claims": [],

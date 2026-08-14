@@ -85,10 +85,11 @@
           "uses": "format_replan_context(): whole list becomes planner prompt text"
         },
         {
-          "site": "core/loop_synthesis.py:277",
+          "site": "core/loop_synthesis.py:300",
           "role": "control",
           "uses": "<failure_context> block in the synthesis prompt",
-          "gated_by": "core/loop_synthesis.py:637 — receives None unless st.replan_exhausted"
+          "gated_by": "core/loop_synthesis.py:697 — receives None unless st.replan_exhausted",
+          "_anchor_correction": "read :277 until 2026-08-14, shifted +23 when _artifact_blocks was extracted out of _synthesize to keep it under the function-length ratchet. Caught by tests/test_cns_anchor_integrity.py. The gated_by anchor was ALSO wrong and had been since before this edit — it read :637 while the gate sat at :679 on HEAD, off by 42 lines. That one the integrity test did NOT catch: it validates `site` and not `gated_by`, so a gate anchor may rot unwatched. Recorded rather than silently fixed."
         },
         {
           "site": "core/loop_run_tail.py:306",

@@ -118,6 +118,29 @@ class SynthesisState:
     OUTPUTS: ClassVar[frozenset[str]] = frozenset({"draft_answer", "_declared"})
 
 
+def _artifact_blocks(
+    artifacts: dict[str, dict], *, question: str,
+) -> list[tuple[str, str]]:
+    """Render each artifact for the prompt, sparing the agent's own description.
+
+    The files the planner may read WITHOUT a `--file` hint are the agent's
+    self-documentation, and they get the taller ceiling: trimming them is how
+    the agent came to describe its own architecture with the whole memory layer
+    missing and no way to know it was gone (see `EVIDENCE_SELF_DOC_CHARS`).
+    """
+    from core.planner import LLMPlanner
+
+    self_doc = {p.rstrip("/") for p in LLMPlanner.DEFAULT_SELF_DOCUMENTATION_PATHS}
+    blocks: list[tuple[str, str]] = []
+    for label, art in artifacts.items():
+        target = str(label).split(":", 1)[-1].strip()
+        blocks.append((label, format_artifact(
+            art["tool"], art["output"], question=question,
+            self_documentation=target in self_doc,
+        )))
+    return blocks
+
+
 class AgentLoopSynthesis:
     """Фаза «Ответ»: сборка промпта синтезатора и вызов модели.
 
@@ -354,12 +377,7 @@ class AgentLoopSynthesis:
                 rebuild_trimmed_memory,
                 total_trims,
             )
-            raw_blocks: list[tuple[str, str]] = []
-            for label, art in artifacts.items():
-                formatted = format_artifact(
-                    art["tool"], art["output"], question=question
-                )
-                raw_blocks.append((label, formatted))
+            raw_blocks = _artifact_blocks(artifacts, question=question)
 
             # Long-term memory competes for the SAME budget as the evidence
             # collected this cycle. It used to be concatenated into the prompt

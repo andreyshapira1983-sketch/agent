@@ -675,3 +675,48 @@ def test_total_trims_reports_every_cut_block(monkeypatch):
     for label, kept, original in trims:
         assert label in {"a", "b"}
         assert 0 < kept < original
+
+
+# ── the agent's own self-description must survive whole ──────────────────────
+
+def test_the_anatomy_map_is_not_mutilated_when_the_operator_asks_in_russian():
+    """Measured 2026-08-14 on the live agent, asked «Опиши свою архитектуру».
+
+    The map is 19 163 chars against a 12 000 per-file ceiling. The question is
+    Russian, the index is English, so `extract_relevant` found no keyword match
+    and fell back to head+tail — and the middle it dropped was the entire
+    `## Memory & Knowledge Governance` group plus `core/runtime_self`, the very
+    module by which the agent knows itself. The agent then described its own
+    architecture with the memory layer missing, and could not know it was gone.
+
+    Both poles are asserted: the flag must restore the section AND the default
+    must still cut it, or the test would pass on a change that does nothing.
+    """
+    from pathlib import Path
+
+    from core.evidence_budget import budget_file_content
+    from core.planner import LLMPlanner
+
+    repo = Path(__file__).resolve().parent.parent
+    rel = "knowledge/generated/AGENT_ANATOMY.md"
+    assert rel in LLMPlanner.DEFAULT_SELF_DOCUMENTATION_PATHS, (
+        "this test guards the hint-free self-documentation path; if the "
+        "allowlist moved, point it at the new one"
+    )
+    text = (repo / rel).read_text(encoding="utf-8")
+    question = "Опиши свою архитектуру."
+    marker = "## Memory & Knowledge Governance"
+    assert marker in text, "the generated map no longer has this section"
+
+    trimmed = budget_file_content(text, question=question)
+    whole = budget_file_content(text, question=question, self_documentation=True)
+
+    assert marker not in trimmed, (
+        "the ordinary per-file ceiling no longer cuts this section — if the map "
+        "shrank below the limit the measurement is stale, re-take it"
+    )
+    assert whole == text, (
+        "the agent's own anatomy must reach the synthesiser whole; it lost "
+        f"{len(text) - len(whole)} chars"
+    )
+    assert "core/runtime_self" in whole
