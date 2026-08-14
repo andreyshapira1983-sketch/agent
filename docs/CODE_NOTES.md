@@ -756,3 +756,27 @@ hygiene` sweep, next to the persistent twin.
 Not fixed here: the daemon keeps banking the repeat in the first place. The gate
 runs before any model call and consults no memory — correct for a gate, but it
 means the sweep is cleaning up after a producer that will do it again next tick.
+
+## docker/ was outside every production root
+
+`scripts/architecture_invariants.py` scans `_PRODUCTION_ROOTS` for INV-2
+(orphaned modules) and INV-3 (documented env flags exist in code). `docker/` was
+not among them, though `docker/daemon_loop.py` is the supervisor that repeats
+`agent_tick.py` — the continuous-autonomy path documented in OPERATIONS.md.
+
+Found 2026-08-14 while measuring whether four uncommitted files were
+load-bearing. With `compose.yaml` moved aside, INV-3 reported
+`AGENT_DOCKER_TICK_TIMEOUT_SECONDS` as documented-but-read-by-nobody — while
+`docker/daemon_loop.py:94` reads it. The invariant had been passing because
+`compose.yaml` happened to name the flag in its environment block, and the
+checker reads `compose.yaml`/`Dockerfile` as extra text. A coincidence in a
+config file was standing in for coverage.
+
+`docker` added to `_PRODUCTION_ROOTS`. Verified the fix is not cosmetic by
+removing `compose.yaml` again afterwards: all four invariants still hold, so the
+flag is now seen where it is actually read.
+
+The removal probe's other numbers, for the record: with `Dockerfile`,
+`compose.yaml`, `install.cmd` and `probe_r1/` all moved aside, the suite was
+**7647 passed, 2 failed** — and both failures were this one invariant. Nothing
+else in the repository depends on any of them.
