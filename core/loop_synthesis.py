@@ -57,7 +57,7 @@ from core.referent_resolver import (
     citation_token_for_referent,
     is_show_only_directive,
 )
-from core.replan import ReplanTrigger
+from core.replan import ReplanTrigger, world_facing_failures
 from core.runtime_self import runtime_self_block
 from core.smart_memory import _COMPLETION_DECLARATIONS
 from core.synth_resilience import (
@@ -299,8 +299,15 @@ class AgentLoopSynthesis:
         failure_block = ""
         if failure_history:
             lines = ["<failure_context>"]
+            # No claim about replan exhaustion: since 2026-08-14 this block also
+            # carries the failures of an attempt that SUCCEEDED on another step,
+            # where nothing was exhausted. Each entry states its own `attempt=N`,
+            # which is the fact; the old sentence asserted a status the list no
+            # longer implies.
             lines.append(
-                "Re-planning was exhausted after every attempt failed."
+                "Steps that failed this turn. This is a FACT about the turn: "
+                "say what did not work and why. It is context, NOT evidence — "
+                "do not cite it as a source."
             )
             for trig in failure_history:
                 lines.append(
@@ -557,11 +564,10 @@ class AgentLoopSynthesis:
             extra_guidance = ""
             if failure_history:
                 extra_guidance = (
-                    "Re-planning was exhausted. Use the <failure_context> "
-                    "block to write an honest Conclusion: state plainly that "
-                    "the agent could not collect evidence, list what was "
-                    "tried (one bullet per attempt), and put the unmet "
-                    "information need under Unverified. Cite each fact as "
+                    "Use the <failure_context> block to write an honest "
+                    "Conclusion: state plainly what could not be collected, "
+                    "list what was tried (one bullet per attempt), and put the "
+                    "unmet information need under Unverified. Cite each fact as "
                     "[general-knowledge] when relying on prior knowledge."
                 )
             user_prompt = (
@@ -694,7 +700,20 @@ class AgentLoopSynthesis:
                 history=st.history,
                 persistent_block=st.persistent_block,
                 cycle_findings=list(self._cycle_findings),
-                failure_history=st.failure_history if st.replan_exhausted else None,
+                # Every failed step, not only the ones that survived to replan
+                # exhaustion. Until 2026-08-14 this read `if st.replan_exhausted
+                # else None`, so a plan that failed a step and still produced an
+                # answer told the synthesiser nothing about the failure.
+                # Measured live: `file_read README.md` raised FileNotFoundError,
+                # the loop dropped it, and the agent — asked whether the file
+                # exists — could only answer "cannot be determined". The tool
+                # had told it. Nothing carried the answer to synthesis.
+                # `<failure_context>` is not an `<evidence>` block, so this
+                # gives the failure a voice without giving it citation power.
+                failure_history=(
+                    st.failure_history if st.replan_exhausted
+                    else world_facing_failures(st.failure_history)
+                ),
                 llm=_synth_llm,
                 # Shrink the prompt/output on the adapted attempt — this is the
                 # recovery for a request the model "could not finish".

@@ -47,8 +47,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.policy import PolicyGate
@@ -147,16 +145,17 @@ def test_no_artifact_is_invented_for_the_denied_step(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "KNOWN GAP, measured 2026-08-09 and banked rather than fixed: a run "
-        "denied its only tool is indistinguishable from a run that needed no "
-        "tool at every consumer except the journal. When this XPASSes, the "
-        "behaviour changed — replace the marker with a plain assertion and "
-        "record which mechanism closed it."
-    ),
-)
+#: CLOSED 2026-08-14, and the marker is replaced rather than deleted so the
+#: mechanism is on the record. The gap was banked on 2026-08-09: a run denied
+#: its only tool looked, everywhere but the journal, like a run that needed no
+#: tool. What closed it: `core/loop_attempt.py` recorded `attempt_failures`
+#: into `st.failure_history` only on the FAILURE side of the attempt loop —
+#: below the success `break`. The extend now happens before that branch, so an
+#: attempt carries its triggers whatever its own verdict, and
+#: `<failure_context>` reaches synthesis on a partially-failed plan.
+#: Found while chasing a different symptom: `file_read README.md` raised
+#: FileNotFoundError beside a step that worked, and the agent asked whether the
+#: file exists could only answer "cannot be determined".
 def test_a_denied_run_differs_from_a_no_tool_run_somewhere_outside_the_journal(
     tmp_path: Path,
 ) -> None:

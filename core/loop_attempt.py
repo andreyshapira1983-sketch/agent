@@ -438,14 +438,22 @@ class AgentLoopAttempt:
             # answer is intentional) or at least one artifact came through.
             # `plan_parse_failed` is NOT success — empty `sources` came from
             # a JSON parse failure, not from the planner choosing zero tools.
+            # Record what failed BEFORE deciding whether the attempt as a whole
+            # succeeded. Until 2026-08-14 this line sat below the success
+            # `break`, so an attempt where one step failed and another produced
+            # an artifact discarded its triggers entirely — they lived only in
+            # the journal. Measured live: `file_read README.md` raised
+            # FileNotFoundError beside a step that worked, and the agent asked
+            # whether the file exists could only answer "cannot be determined".
+            # Banked as a KNOWN GAP on 2026-08-09 by
+            # tests/test_partial_attempt_failure_reporting.py, which named this
+            # exact `break`. One list, one place, both outcomes.
+            st.failure_history.extend(attempt_failures)
+
             if (not st.plan.steps and not plan_parse_failed) or attempt_artifacts:
                 st.artifacts = attempt_artifacts
                 st.chain = attempt_chain
                 break
-
-            # Failure: this attempt produced nothing usable. Carry the
-            # triggers forward and ask the policy what to do next.
-            st.failure_history.extend(attempt_failures)
 
             # MAST FM-1.5 — stagnation check: same failure signature twice
             # in a row means the loop is looping. Observational only.
