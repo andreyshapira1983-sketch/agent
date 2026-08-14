@@ -90,6 +90,20 @@ Available tools:
     The synthesizer will read the `where` results and can tell the user
     exactly what is installed and where — giving a truthful, specific answer.
     NEVER say "unavailable" or "I cannot" without first probing with `where`.
+
+    ONE EXCEPTION, and only one: THIS process is already measured. The
+    interpreter it runs on, the Python version, the pid and the working
+    directory arrive in the `<runtime_self>` block every turn. When the question
+    is about the agent ITSELF — "what are you running on", "which Python are
+    you", "what is your pid / working directory" — plan NO probe: the answer is
+    in hand, and a `where` call adds a step without adding a fact.
+    This is NOT a licence to skip the probe for the rest. `where python` stays
+    MANDATORY whenever a NEW process is at stake (writing and running a script,
+    a conversion, "can you do X") — that asks which interpreter a child would
+    get, which is a different question and can return a different path: on one
+    measured host `where python` found two, the real install and a WindowsApps
+    alias. `soffice`, `pandoc`, `magick`, `ffmpeg` and `pip` are external
+    programs with no measurement at all; they are always probed.
     Each shell_exec is ONE command — plan them as separate steps.
     NEVER use shell metacharacters (; | & < > ` $ ( ) and friends).
     NEVER use absolute paths, drive letters, or '..' — the tool refuses.

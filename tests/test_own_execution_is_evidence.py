@@ -198,3 +198,35 @@ def test_the_contract_still_forbids_citing_the_two_context_blocks():
         "the failure block reaches the prompt since 2026-08-14 and the contract "
         "must say it is context, not a source"
     )
+
+
+def test_the_probe_rule_knows_the_process_is_already_measured():
+    """The planner must not shell out for a fact it was handed.
+
+    Measured 2026-08-14: asked for its pid and working directory, the planner
+    ran `whoami` and `hostname` — both returned `andre` — while `<runtime_self>`
+    already carried both facts. The rule is not at fault for existing: it dates
+    from the initial commit, a month before any self-measurement existed, when
+    asking the host was the only honest route. The overlap was created the day
+    `process_facts()` landed, and hunting that echo is the same discipline the
+    rest of this repo applies to a renamed module.
+
+    The exception is narrow on purpose, and the test pins the narrowness: five
+    external programs keep their mandatory probe, and `where python` survives
+    for the case it actually answers — which interpreter a CHILD process gets,
+    a different question from `sys.executable` and one that has returned a
+    different path on this very host.
+    """
+    from core.planner_prompt import PLANNER_SYSTEM
+
+    text = PLANNER_SYSTEM
+    assert "<runtime_self>" in text, (
+        "the probe rule never mentions the block that already holds the answer"
+    )
+    lowered = text.casefold()
+    assert "plan no probe" in lowered, "the exception is stated but not actionable"
+    assert "mandatory" in lowered, "the rule lost its force for the other cases"
+    for external in ("soffice", "pandoc", "magick", "ffmpeg", "pip"):
+        assert external in lowered, (
+            f"{external} lost its probe — it has no measurement to fall back on"
+        )
