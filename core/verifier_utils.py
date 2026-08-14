@@ -153,8 +153,42 @@ def _tokenise_citation_body(body: str) -> list[str]:
     return [t for t in raw if len(t) >= _MIN_TOKEN_LEN and t not in _TOKEN_STOPWORDS]
 
 
+def runtime_evidence_pool() -> list[Evidence]:
+    """What this process measured about itself, as citable Evidence.
+
+    Built on demand and NOT folded into the provenance chain. The first attempt
+    did fold it, and 21 tests said why that is wrong: the chain is counted and
+    ordered, and its contracts are real — a failed step yields no evidence, a
+    `file_write` yields none, a zero-step plan yields an EMPTY chain. Five
+    always-present entries break every one of those, and they also destroy
+    `chain_was_empty`, which separates "the agent looked and found nothing" from
+    "the agent did not look".
+
+    So the runtime facts get their own pool, on the pattern `web` already uses
+    below: a prefix may draw on candidates the chain does not hold.
+    """
+    from core.evidence import make_evidence
+    from core.runtime_self import process_facts
+
+    return [
+        make_evidence(
+            kind="runtime",
+            source_id=f"runtime:{key}",
+            obtained_via="process_self_measurement",
+            claim=f"This run's {key}",
+            excerpt=str(value),
+        )
+        for key, value in process_facts().items()
+    ]
+
+
 def match_citation(citation: Citation, chain: ProvenanceChain) -> Evidence | None:
     candidates = chain.by_kind(citation.expected_kind)  # type: ignore[arg-type]
+    if citation.prefix == "runtime":
+        # Measured, not gathered: the process reading its own interpreter,
+        # version, pid and cwd. Its own execution is the proof, and until
+        # 2026-08-14 there was no channel through which it could be offered.
+        candidates = list(candidates) + runtime_evidence_pool()
     if citation.prefix == "web":
         search_hits = chain.by_kind("web_search_hit")  # type: ignore[arg-type]
         if search_hits:

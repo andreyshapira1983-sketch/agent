@@ -19,6 +19,10 @@ CITATION_PREFIXES: dict[str, str] = {
     # Verbatim earlier turn of this session (issue #119). Resolves only to
     # dialogue-scoped claims; see core/evidence_classes.py.
     "dialogue": "session_dialogue",
+    # Facts this process measured about itself: interpreter, version, pid, cwd.
+    # `[runtime:python_version]`. Trace-class, so it supports claims about the
+    # agent's own execution and never a claim about the world.
+    "runtime": "runtime",
     "user": "user_explicit",
     "general-knowledge": "llm_claim",
 }
