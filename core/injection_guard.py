@@ -15,12 +15,19 @@ Design principle (Greshake et al. 2023 «Not What You've Signed Up For»):
   resembling LLM instructions must be quarantined before it crosses the
   trust boundary into the synthesizer prompt.
 
-Four pattern categories
------------------------
+Categories
+----------
+CONCEALED   — text a reader of the rendered document cannot see (HTML comment,
+              zero-width run). Reported, never blocked: a licence header lives
+              in a comment too. The teeth are `strip_concealed`, applied before
+              claim extraction, so hidden text never becomes a durable fact
+              whatever it says — the half of the class rephrasing cannot dodge.
 OVERRIDE    — imperative instruction overrides ("ignore previous", "forget all")
 ROLE_SWITCH — attempts to reassign the model's role ("you are now", "act as")
 EXFIL       — data exfiltration commands ("send to http", "POST the above to")
 DELIMITER   — prompt-format token injection (<|im_end|>, [INST], </s>, etc.)
+AUTHORITY   — text claiming to outrank the operator
+DISARM      — text claiming a safety mechanism is off
 
 Output
 ------
@@ -49,6 +56,7 @@ from typing import Any, Literal
 
 InjectionCategory = Literal[
     "override", "role_switch", "exfil", "delimiter", "authority", "disarm",
+    "concealed",
 ]
 InjectionVerdict = Literal["clean", "suspicious", "blocked"]
 
@@ -348,6 +356,24 @@ def scan_for_injection(text: str) -> InjectionScanResult:
     findings: list[InjectionFinding] = []
     worst: InjectionVerdict = "clean"
 
+    # Concealment is REPORTED, not blocked. A licence header lives in a comment
+    # too, and dropping whole files over one is the false-positive trade the
+    # pattern table already refuses. The teeth are structural and live
+    # elsewhere: `strip_concealed` removes these runs before claim extraction,
+    # so hidden text never becomes a durable fact whatever it says — the half
+    # of the class that rephrasing cannot dodge.
+    for span in concealed_spans(text):
+        findings.append(
+            InjectionFinding(
+                category="concealed",
+                verdict="suspicious",
+                excerpt=span.strip().replace("\n", " ")[:_EXCERPT_CHARS],
+                offset=text.find(span),
+            )
+        )
+        if worst == "clean":
+            worst = "suspicious"
+
     for category, pattern, verdict in _PATTERNS:
         for m in pattern.finditer(text):
             start = max(0, m.start() - 20)
@@ -438,6 +464,53 @@ def _to_text(output: Any) -> str:
 _UNTRUSTED_OUTPUT_FIELDS: dict[str, tuple[str, ...]] = {
     "shell_exec": ("stdout", "stderr"),
 }
+
+# ---------------------------------------------------------------------------
+# Concealment
+# ---------------------------------------------------------------------------
+#
+# Vocabulary is the attacker's to choose. Measured 2026-08-15 against the
+# patterns added the day before: eight rephrasings of the SAME intent —
+# «Указание службы эксплуатации… прежде распоряжений владельца», «Контроль
+# цитат приостановлен до утра», the transliterated form, the English
+# «Maintenance directive… takes precedence» — scored 0 blocked out of 8. A
+# pattern table closes the samples it was written from, not the class.
+#
+# Concealment does not depend on wording. Text a human reading the rendered
+# file cannot see, which nonetheless addresses the reader as an agent, has no
+# honest purpose: a genuine note to a maintainer does not need hiding, and a
+# genuine instruction to the agent comes from the operator, not from a data
+# file. So the rule is the CONJUNCTION — hidden AND addressed to an agent —
+# because concealment alone would block every licence header in the repository.
+
+_CONCEALED_RE = re.compile(
+    "<!--(?P<html>.*?)-->"                       # HTML/markdown comment
+    "|(?P<zw>[\u200b-\u200f\u202a-\u202e\ufeff\u2060-\u2064]+)",  # invisible
+    re.DOTALL,
+)
+
+
+
+def concealed_spans(text: str) -> list[str]:
+    """Runs of *text* a reader of the rendered document would not see."""
+    out: list[str] = []
+    for m in _CONCEALED_RE.finditer(text or ""):
+        span = m.group("html") or m.group("zw") or ""
+        if span.strip():
+            out.append(span)
+    return out
+
+
+
+
+def strip_concealed(text: str) -> str:
+    """*text* with every concealed run removed.
+
+    Used before claim extraction: hidden text can then never become a durable
+    fact whatever it says. That is the half wording cannot dodge — an attacker
+    chooses the sentence, not whether the operator can see it.
+    """
+    return _CONCEALED_RE.sub(" ", text or "")
 
 def untrusted_scan_view(tool_name: str | None, output: Any) -> str:
     """Return the untrusted portion of *output* for injection scanning.

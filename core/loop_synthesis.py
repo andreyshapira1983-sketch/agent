@@ -141,6 +141,92 @@ def _artifact_blocks(
     return blocks
 
 
+def _log_budget_trim(
+    log: Any,
+    *,
+    trimmed_blocks: list[tuple[str, str]],
+    was_trimmed: bool,
+    memory_trimmed: bool,
+    memory_payload: str,
+    memory_label: str,
+    long_term_block: str,
+    memory_has_records: bool,
+    surviving_memory_ids: set[str] | None,
+    artifacts: dict[str, Any],
+) -> None:
+    """Journal what the total budget cut, and who disagreed about it.
+
+    Lifted out of `_synthesize` for the function-length ratchet; the body is
+    a verbatim move. Sensor only — nothing here changes the prompt.
+    """
+    from core.evidence_budget import total_trims
+
+    if was_trimmed:
+        # Parsed once; feeds both the trim event and the starvation
+        # detector below (review round #286).
+        _trims = total_trims(trimmed_blocks)
+        log.log(
+            "evidence_budget_trim",
+            {
+                "labels": [lbl for lbl, _ in trimmed_blocks],
+                # NOTE: since memory joined the budget this total
+                # includes the memory block — not comparable with
+                # totals logged before that change.
+                "total_chars": sum(len(c) for _, c in trimmed_blocks),
+                # Which side paid, and whether memory existed at all —
+                # `memory_trimmed: False` alone cannot say that.
+                "memory_trimmed": memory_trimmed,
+                "memory_chars": len(memory_payload),
+                # What actually reached the model: `persistent_memory_inject`
+                # fires BEFORE the budget and counts records the model
+                # may never have seen.
+                # A drop notice is not kept memory: it says the opposite.
+                "memory_chars_kept": (
+                    len(long_term_block.strip()) if memory_has_records else 0
+                ),
+                "memory_ids_kept": sorted(surviving_memory_ids)
+                if surviving_memory_ids is not None
+                else None,
+                # Per-block cut sizes, parsed back from the trim
+                # notices — without them a starved block is invisible
+                # in the trace (MIR-073).
+                "trims": [
+                    {"label": lbl, "kept": kept, "original": orig}
+                    for lbl, kept, orig in _trims
+                ],
+            },
+        )
+        # MIR-073: the planner chose these sources; if the budget
+        # squeezed one to a sliver, that is two deciders contradicting
+        # each other — journal it on the existing disagreement channel
+        # instead of continuing as if nothing happened. Logging only,
+        # per the operator's sensor policy.
+        try:
+            from core.subsystem_disagreement import (
+                detect_budget_starvation,
+            )
+            for _ev in detect_budget_starvation(
+                _trims,
+                planned_labels=set(artifacts.keys()),
+                memory_label=memory_label,
+            ):
+                log.log("subsystem_disagreement", _ev)
+        except Exception as _sd_exc:
+            # A broken detector must not break the turn — but its
+            # failure must not be invisible either (review round
+            # #286, same rule as verification_explained_failed).
+            try:
+                log.log(
+                    "subsystem_disagreement_error",
+                    {
+                        "error_type": type(_sd_exc).__name__,
+                        "error": str(_sd_exc)[:300],
+                    },
+                )
+            except Exception:
+                pass
+
+
 class AgentLoopSynthesis:
     """Фаза «Ответ»: сборка промпта синтезатора и вызов модели.
 
@@ -382,7 +468,6 @@ class AgentLoopSynthesis:
                 MEMORY_OPEN_TAG,
                 apply_total_budget,
                 rebuild_trimmed_memory,
-                total_trims,
             )
             raw_blocks = _artifact_blocks(artifacts, question=question)
 
@@ -436,67 +521,24 @@ class AgentLoopSynthesis:
                     )
                 long_term_block = f"{memory_block}\n\n" if memory_block else ""
 
-            if was_trimmed:
-                # Parsed once; feeds both the trim event and the starvation
-                # detector below (review round #286).
-                _trims = total_trims(trimmed_blocks)
-                self.log.log(
-                    "evidence_budget_trim",
-                    {
-                        "labels": [lbl for lbl, _ in trimmed_blocks],
-                        # NOTE: since memory joined the budget this total
-                        # includes the memory block — not comparable with
-                        # totals logged before that change.
-                        "total_chars": sum(len(c) for _, c in trimmed_blocks),
-                        # Which side paid, and whether memory existed at all —
-                        # `memory_trimmed: False` alone cannot say that.
-                        "memory_trimmed": memory_trimmed,
-                        "memory_chars": len(memory_payload),
-                        # What actually reached the model: `persistent_memory_inject`
-                        # fires BEFORE the budget and counts records the model
-                        # may never have seen.
-                        "memory_chars_kept": len(long_term_block.strip()),
-                        "memory_ids_kept": sorted(surviving_memory_ids)
-                        if surviving_memory_ids is not None
-                        else None,
-                        # Per-block cut sizes, parsed back from the trim
-                        # notices — without them a starved block is invisible
-                        # in the trace (MIR-073).
-                        "trims": [
-                            {"label": lbl, "kept": kept, "original": orig}
-                            for lbl, kept, orig in _trims
-                        ],
-                    },
-                )
-                # MIR-073: the planner chose these sources; if the budget
-                # squeezed one to a sliver, that is two deciders contradicting
-                # each other — journal it on the existing disagreement channel
-                # instead of continuing as if nothing happened. Logging only,
-                # per the operator's sensor policy.
-                try:
-                    from core.subsystem_disagreement import (
-                        detect_budget_starvation,
-                    )
-                    for _ev in detect_budget_starvation(
-                        _trims,
-                        planned_labels=set(artifacts.keys()),
-                        memory_label=memory_label,
-                    ):
-                        self.log.log("subsystem_disagreement", _ev)
-                except Exception as _sd_exc:
-                    # A broken detector must not break the turn — but its
-                    # failure must not be invisible either (review round
-                    # #286, same rule as verification_explained_failed).
-                    try:
-                        self.log.log(
-                            "subsystem_disagreement_error",
-                            {
-                                "error_type": type(_sd_exc).__name__,
-                                "error": str(_sd_exc)[:300],
-                            },
-                        )
-                    except Exception:
-                        pass
+            # The one truth two consumers need: did any WHOLE record reach the
+            # model. `None` means memory was never trimmed, so all of them did.
+            memory_has_records = bool(long_term_block.strip()) and (
+                surviving_memory_ids is None or bool(surviving_memory_ids)
+            )
+
+            _log_budget_trim(
+                self.log,
+                trimmed_blocks=trimmed_blocks,
+                was_trimmed=was_trimmed,
+                memory_trimmed=memory_trimmed,
+                memory_payload=memory_payload,
+                memory_label=memory_label,
+                long_term_block=long_term_block,
+                memory_has_records=memory_has_records,
+                surviving_memory_ids=surviving_memory_ids,
+                artifacts=artifacts,
+            )
 
             blocks: list[str] = [
                 f'<evidence source="{lbl}">\n{content}\n</evidence>'
@@ -548,10 +590,14 @@ class AgentLoopSynthesis:
                 # Only offered when the block is actually in the prompt: the
                 # budget can drop it entirely, and describing how to cite an
                 # absent block is an invitation to cite nothing.
+                # Records, not characters. Since a dropped block leaves a notice
+                # saying so (MIR-092), a non-empty block no longer implies a
+                # citable record — and offering the label over a drop notice is
+                # the same invitation to cite nothing, one step subtler.
                 + (
                     " If long_term_memory contains a relevant record you may "
                     "cite it with source label [memory:<record_id>]."
-                    if long_term_block.strip()
+                    if memory_has_records
                     else ""
                 )
             )

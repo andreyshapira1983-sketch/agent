@@ -275,6 +275,22 @@ def _trim_notice(new_len: int, old_len: int, budget: int) -> str:
     )
 
 
+def _drop_notice(old_len: int) -> str:
+    """The notice left where a block was dropped whole.
+
+    It used to be the empty string, and that silence was itself the defect:
+    asked «что ты помнишь», the agent had three records retrieved (822 chars)
+    and answered that it has no access to its memory. True of the prompt —
+    the block had been demoted, spent first and dropped — but indistinguishable
+    from having no memory at all. Kept far shorter than one record, so the
+    reason for dropping (do not pay for a useless stub) still holds.
+    """
+    return (
+        f"[TOTAL-BUDGET: dropped whole — {old_len} chars did not fit; "
+        f"content unavailable this turn, nothing here is quotable]"
+    )
+
+
 def apply_total_budget(
     blocks: list[tuple[str, str]],
     *,
@@ -404,8 +420,12 @@ def apply_total_budget(
             # "whole items or an honest zero".
             floor_useful = _useful_floors.get(label)
             if floor_useful is not None and new_len < floor_useful:
-                result[biggest] = (label, "")
-                sizes[biggest]  = 0
+                # Dropped, but not silently: `kepts` stays 0 so every reader
+                # still sees "nothing survived", while the prompt says so out
+                # loud instead of leaving a hole.
+                dropped = _drop_notice(len(originals[biggest]))
+                result[biggest] = (label, dropped)
+                sizes[biggest]  = len(dropped)
                 kepts[biggest]  = 0
                 was_trimmed = True
                 continue
@@ -455,6 +475,13 @@ _TRIM_NOTICE_RE = re.compile(
     r"\n\.\.\.\[TOTAL-BUDGET: trimmed to (\d+) of (\d+) chars "
 )
 
+# A block dropped whole reports kept=0 through the same reader, so
+# `evidence_budget_trim` still says «822 -> 0» instead of omitting the block
+# and leaving the operator to infer what happened to it.
+_DROP_NOTICE_RE = re.compile(
+    r"\[TOTAL-BUDGET: dropped whole — (\d+) chars did not fit"
+)
+
 
 def total_trims(blocks: list[tuple[str, str]]) -> list[tuple[str, int, int]]:
     """(label, kept_chars, original_chars) for every total-budget-trimmed block.
@@ -472,6 +499,12 @@ def total_trims(blocks: list[tuple[str, str]]) -> list[tuple[str, int, int]]:
             pass
         if m is not None:
             out.append((label, int(m.group(1)), int(m.group(2))))
+            continue
+        drop_match = None
+        for match in _DROP_NOTICE_RE.finditer(content):
+            drop_match = match
+        if drop_match is not None:
+            out.append((label, 0, int(drop_match.group(1))))
     return out
 
 
@@ -520,6 +553,15 @@ def rebuild_trimmed_memory(
     # Assigned inside the body (not an empty `for x in ...: pass`) so the
     # intent is visible to linters, without materialising every match the
     # way a list would.
+    # The drop notice is the one non-record content that IS accounted for: the
+    # budget wrote it deliberately, in place of a block it spent to nothing.
+    # Fail-closed exists so unexplainable memory never reaches the model; this
+    # is the opposite case, and returning "" here would silently discard the
+    # very sentence that stops "dropped" reading as "never existed".
+    drop = _DROP_NOTICE_RE.search(trimmed)
+    if drop is not None and int(drop.group(1)) == len(original):
+        return trimmed, set()
+
     notice_match = None
     for match in _TRIM_NOTICE_RE.finditer(trimmed):
         notice_match = match

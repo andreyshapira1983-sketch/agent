@@ -145,7 +145,15 @@ class ClaimExtractor:
         if _is_meaningful_claim(evidence.claim):
             claims.append(claim_from_evidence(evidence, source_id=source.id, rank=rank))
 
-        for sentence in _sentences(evidence.excerpt):
+        # Hidden text never becomes a claim — structural, so it does not depend
+        # on the attacker's wording. Measured 2026-08-15: eight rephrasings of
+        # the same planted order scored 0 blocked out of 8 against the pattern
+        # table, while every one of them sat in an HTML comment the operator
+        # would never see in the rendered file. See docs/CODE_NOTES.md,
+        # "Concealment, not vocabulary".
+        from core.injection_guard import strip_concealed
+
+        for sentence in _sentences(strip_concealed(evidence.excerpt)):
             if len(claims) >= self.max_claims_per_source:
                 break
             if not self._accept_sentence(sentence):
@@ -431,6 +439,27 @@ class KnowledgeWritePolicy:
                 "reject",
                 ((f"claim is promotional hype (no checkable substance): "
                  f"{'; '.join(_th.reasons[:2])}"),),
+            )
+        # A label WE wrote for a tool result is not an assertion about the
+        # world. `Evidence.claim` is framework-authored in every case — fifteen
+        # templates in `evidence_from_tool_result` plus the ingestion ones —
+        # while the source's own words live in `excerpt`. Decided on provenance,
+        # not vocabulary: `_is_meaningful_claim` blacklists six opening phrases,
+        # so which label survived depended on whether two authors happened to
+        # pick the same first words. Measured 2026-08-15: «Fetched RSS/Atom feed
+        # …» and «User explicitly directed» reached `save`; nine others were
+        # stopped by unrelated gates, which is luck, not a rule.
+        # `getattr`, not attribute access: `decide` is fed duck-typed claims by
+        # callers and tests, and a missing optional field must skip this check,
+        # not crash the write path.
+        if (getattr(claim, "metadata", None) or {}).get("extraction") == "evidence_claim":
+            return KnowledgeWriteDecision(
+                "reject",
+                (
+                    ("claim is our own label for a tool result, not an "
+                     "assertion by the source (source words live in the "
+                     "excerpt)"),
+                ),
             )
         if claim.status in {"unverified", "conflicted"}:
             return KnowledgeWriteDecision("reject", (f"claim status is {claim.status}",))
