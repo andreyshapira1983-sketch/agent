@@ -54,7 +54,16 @@ DOCS = REPO / "docs"
 _FORBIDDEN_CORE_IMPORTS = ("cli", "app", "main", "agent_tick")
 
 #: Directories whose imports count as "production reachability" for INV-2.
-_PRODUCTION_ROOTS = ("core", "cli", "app", "api", "tools", "project_intelligence")
+_PRODUCTION_ROOTS = (
+    "core", "cli", "app", "api", "tools", "project_intelligence",
+    # `docker/daemon_loop.py` is the supervisor that repeats agent_tick, i.e.
+    # the continuous-autonomy path — production code that was outside every
+    # root. Found 2026-08-14 by removing compose.yaml: INV-3 then reported
+    # AGENT_DOCKER_TICK_TIMEOUT_SECONDS as read by nobody, though
+    # docker/daemon_loop.py:94 reads it. compose.yaml naming the flag had been
+    # covering the hole by coincidence.
+    "docker",
+)
 _PRODUCTION_FILES = ("agent_tick.py", "main.py")
 
 #: Modules exempt from INV-2 with a stated reason. Keep this list short and
