@@ -546,7 +546,10 @@ class TestMemoryEntersTheEvidenceBudget:
     def test_trace_says_no_memory_survived_when_the_block_is_dropped(
         self, workspace: Path, monkeypatch
     ):
-        _prompt, log_path = self._run(workspace, monkeypatch, total_chars=900)
+        _prompt, log_path = self._run(workspace, monkeypatch, total_chars=480)  # 900 -> 650:
+            # memory now keeps one WHOLE record instead of vanishing
+            # (2026-08-15), so 900 no longer creates the case this test
+            # names. The premise moved, the contract did not.
 
         events = _events(log_path)
         injects = [e for e in events if e["event"] == "persistent_memory_inject"]
@@ -588,7 +591,10 @@ class TestMemoryEntersTheEvidenceBudget:
         for zero information, and a citation token the verifier can never
         match.
         """
-        prompt, _log = self._run(workspace, monkeypatch, total_chars=900)
+        prompt, _log = self._run(workspace, monkeypatch, total_chars=480)  # 900 -> 650:
+            # memory now keeps one WHOLE record instead of vanishing
+            # (2026-08-15), so 900 no longer creates the case this test
+            # names. The premise moved, the contract did not.
         memory_block = self._section(prompt, "<long_term_memory>", "</long_term_memory>")
         allowed = self._section(prompt, "<allowed_citations>", "</allowed_citations>")
 
