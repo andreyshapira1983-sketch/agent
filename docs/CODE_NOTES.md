@@ -2354,3 +2354,37 @@ run had happened — a predicted number presented as a measured one. The actual
 measurement, run immediately after, is above. The prediction erred low, but
 that is luck, not absolution: the class of error is claiming verification that
 has not occurred, the exact thing this codebase spends its days catching.
+
+## A diagnosis that dies in a digest
+
+The fourth goal run of 2026-08-15 quoted a real defect from a real trace —
+reasoning_action_mismatch, its most frequent one — with 6 of 6 claims verified.
+The campaign then compressed the whole thing into a 160-character `artifact`
+digest and moved on, exactly as it had with the three runs before it. Every
+piece of the repair machinery existed; the verified diagnosis simply never
+reached it.
+
+The wire lives in `_propose_repair_from_diagnosis` (core/campaign_io.py), and
+four structural conditions must all hold before it does anything:
+
+* the action is `improve_failure_to_idea_pipeline` — a health-pass never
+  promised a repair;
+* the campaign is NOT dry-run — an inbox item is a durable effect;
+* the verification FULLY confirmed the diagnosis (`verified == examined`, the
+  same standard that silences the relevance proxy) — a partially grounded text
+  has not earned a patch;
+* the diagnosis names an existing repository `.py`, existence asked of the
+  disk via `workspace_paths_named` — it was a regex over prose that once filed
+  reasoning.py and citation.py into the registry.
+
+Then the EXISTING rails take over, none bypassed: `propose_repair` with its
+own confidence gates writes the patch; `build_self_apply_payload` shapes it; a
+durable `self_apply_lane.run` item waits for the human (§9); `:self-apply-run`
+executes with full pytest and rollback. The wire itself executes nothing, and
+a declined generation is surfaced as `repair_declined:<status>` rather than
+silence — the operator sees that the transition happened and where it stopped.
+
+Named limits: the first named file is chosen when the diagnosis names several
+— arbitrary within an honest set; one proposal per campaign action; the patch
+quality is the fallback model's until credits return, which is what the
+generator's gates and the human review are for.
