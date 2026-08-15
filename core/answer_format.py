@@ -440,6 +440,40 @@ def format_allowed_citations_block(
     lines.append("</allowed_citations>")
     return "\n".join(lines) + "\n\n" if len(lines) > 2 else ""
 
+
+def number_lines(content: str, *, original: str | None = None) -> str:
+    """Prefix each line with its TRUE 1-based number in *original*, for the
+    prompt only.
+
+    When *original* is given, *content* is an excerpt of it and numbers are
+    recovered by walking the original forward, so a line keeps the address it
+    has in the file rather than its position in the excerpt. Lines the budget
+    inserted itself (the trim notice) belong to no file line and stay bare.
+    """
+    lines = (content or "").splitlines()
+    if not lines:
+        return content or ""
+    source = (original or content or "").splitlines()
+    width = max(2, len(str(len(source))))
+
+    out: list[str] = []
+    cursor = 0
+    for line in lines:
+        number: int | None = None
+        if original is None:
+            number = len(out) + 1
+        else:
+            for idx in range(cursor, len(source)):
+                if source[idx] == line:
+                    number, cursor = idx + 1, idx + 1
+                    break
+        gutter = f"{number:>{width}}" if number else " " * width
+        out.append(f"{gutter}\t{line}")
+    numbered = "\n".join(out)
+    return numbered + ("\n" if (content or "").endswith("\n") else "")
+
+
+
 def format_artifact(
     tool_name: str | None,
     output: Any,
@@ -471,6 +505,17 @@ def format_artifact(
         return "\n".join(lines)
     if tool_name == "file_read" and isinstance(output, str):
         from core.evidence_budget import budget_file_content
+        # Numbered HERE and nowhere else. The model is asked for «какая строка»
+        # and `file_read` returns bare text, so every number it gave was counted
+        # by eye: measured 2026-08-15, it answered 164 and 382 where the truth
+        # was 385 and 450. The evidence record keeps the raw text — it is
+        # quoted, matched against citations and split into claims, and a number
+        # wedged in there becomes part of a durable claim (the MIR-097 shape).
+        #
+        # Before the budget, not after: the per-file budget extracts the
+        # question-relevant part rather than the head, so a number attached
+        # afterwards would name the line's position in the excerpt instead of
+        # in the file — a lie exactly where precision was the point.
         return budget_file_content(
             output, question=question, self_documentation=self_documentation,
         )
