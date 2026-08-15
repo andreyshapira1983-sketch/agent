@@ -104,18 +104,33 @@ def _field(obj: Any, name: str) -> str:
     return str(getattr(obj, name, "") or "").strip()
 
 
-def _has_pending_task(inbox: Any) -> bool:
-    """True when an unresolved Stage-A task item already waits for a human."""
+def _unresolved_task(inbox: Any) -> Any | None:
+    """Незакрытая заявка Stage-A, если она есть, — САМА, а не «да/нет».
+
+    Незакрытыми считаются два разных состояния, и это верно: `pending` ждёт
+    решения, `approved` решена и не исполнена — работа в обоих случаях не
+    сделана. Врало сообщение: оно называло любую из них «pending».
+
+    Живой случай 2026-08-15: оператор увидел «a pending … item already exists»,
+    открыл `:approval-list pending` — пусто, отклонил всё, что нашёл, и упёрся
+    в ту же стену; блокировала `ain_5755a5a5`, одобренная 2026-08-03 и не
+    исполненная. В списке `pending` её нет по определению, и найти её по
+    подсказке было нельзя. Двенадцать дней глухой стены.
+
+    Поэтому возвращается сам предмет: назвать блокиратор может только тот, кто
+    его нашёл. Зачем: docs/CODE_NOTES.md, «The wall that would not say its
+    name».
+    """
     try:
         items = inbox.list()
     except Exception:  # noqa: BLE001
-        return False
+        return None
     for item in items:
         if getattr(item, "operation", "") != SELF_TASK_OPERATION:
             continue
         if getattr(item, "status", "") in ("pending", "approved"):
-            return True
-    return False
+            return item
+    return None
 
 
 # ── the task builder (LLM) ──────────────────────────────────────────────────
@@ -398,12 +413,18 @@ def produce_coding_task(
     gates.append("budget")
 
     # ── gate 3: a Stage-A task already waits for a human ─────────────────────
-    if _has_pending_task(inbox):
+    blocking_task = _unresolved_task(inbox)
+    if blocking_task is not None:
+        _id, _status = getattr(blocking_task, "id", "?"), getattr(blocking_task, "status", "?")
         return ProducerReport(
             status="task_wait",
-            reason="a pending self_build_task.approve item already exists",
+            reason=f"self_build_task.approve {_id} is {_status} and not executed",
             checked_gates=gates + ["task"],
-            next_human_action="Resolve the existing task approval first.",
+            next_human_action=(
+                f":self-task-build to execute it, or :approval-deny {_id}"
+                if _status == "approved"
+                else f":approval-approve {_id} or :approval-deny {_id}"
+            ),
         )
     gates.append("task")
 

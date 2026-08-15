@@ -2194,3 +2194,36 @@ First unattended run in this repository that chose its own work, received
 permission, and acted on it. What it produced is a separate question — it
 reported honestly that it could not complete the goal because reading logs
 returned an empty set.
+
+## The wall that would not say its name
+
+The operator ran `:self-task-propose` and got:
+
+    reason: a pending self_build_task.approve item already exists
+    next:   Resolve the existing task approval first.
+
+He opened `:approval-list pending` — empty. He denied everything he could find
+and ran it again. Same wall. He repeated `:approval-list denied` a dozen times
+looking for something that was never in either list.
+
+The gate itself was right: `_has_pending_task` counted `pending` AND `approved`,
+because both mean the work is not done. The MESSAGE was wrong — it called both
+of them "pending". The blocker was `ain_5755a5a5`, **approved** on 2026-08-03
+and never executed. An approved item does not appear in the pending list by
+definition, so the hint sent him to the one place it could not be.
+
+Twelve days of a wall that refused to name itself. Same class as everything else
+here — a label describing a state other than the one that was checked — and this
+time the cost was measured in the operator's afternoon.
+
+The gate now returns the ITEM, not a boolean, because only whoever found the
+blocker can name it:
+
+    reason: self_build_task.approve ain_5755a5a5fcfcd94dae87c2eb8dc7f056 is
+            approved and not executed
+    next:   :self-task-build to execute it, or :approval-deny ain_5755a5a5...
+
+The next action is branched on the actual status: an approved item can be
+executed, a pending one only decided. Denying it moved the producer past this
+gate for the first time — `checked_gates=[kill_switch, budget, task,
+dirty_tree]` — onto the next honest blocker.
