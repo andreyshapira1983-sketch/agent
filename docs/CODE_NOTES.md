@@ -1402,3 +1402,50 @@ because `docs/path/tools.md` is a real file and `path/to/your/file.py` is not.
 Pinned by seven UNSEEN shapes alongside the three measured ones, per the
 operator's rule, and by eight real paths from this repository — a guard that
 stops those is worse than no guard.
+
+## The method that could not survive the turn
+
+Told to find where its own signal is raised, the agent used `grep` correctly —
+`shell_exec ['grep','-n','reasoning_action_mismatch','core/loop.py']`. The next
+turn, told to widen the search, it abandoned grep and read four files guessed
+from a directory listing. All four wrong. It had a working method one turn
+earlier and did not carry it across the boundary.
+
+The mechanism for carrying it exists — procedural memory — and it was sealed.
+Measured on the live store: **30 of 31 procedures were `candidate`, one
+`active`.**
+
+The circle, exactly:
+
+    born a candidate
+      → candidates were withheld from the planner (maturity gate, MIR-003 A4)
+      → never offered means never applied
+      → causal credit is computed ONLY over offered procedures
+        (`resolve_used_procedures(selected=…)`)
+      → no credit means success_count stays 0
+      → promotion needs 2 credited successes
+      → stays a candidate
+
+Nothing could ever leave. The `active` one predates the gate.
+
+The gate conflated two different things: **visibility** and **credit**. The
+operator's ruling of 2026-08-02 — «совпадение не польза; кредит только за
+причинно подтверждённую пользу» — governs CREDIT, and it is untouched: being
+shown to the planner grants no standing. Only the visibility half changed.
+
+So a candidate now surfaces, ranked strictly below anything proven (proven is
+the FIRST sort key, so an unproven procedure never displaces a proven one — the
+thing the gate was built to prevent). `obsolete` and `needs_review` stay out:
+those are decisions already taken, and visibility does not reopen them.
+
+`tests/test_smart_memory.py` had anticipated this in a comment written
+2026-08-02: «Restoring promotion through the loop (offering candidates so they
+can be causally credited) is the next piece; here the procedure correctly never
+surfaces.» That next piece is this change, and the test now runs the full
+closure — offered → workflow executed → causally credited → promoted — instead
+of asserting the sealed state.
+
+Five tests moved from the old contract to the new one. Each kept its real
+intent; what changed is that "a candidate is invisible" turned out to be
+self-defeating rather than protective, and that is now on the record with the
+number that proved it.

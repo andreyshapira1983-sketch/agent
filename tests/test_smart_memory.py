@@ -415,13 +415,26 @@ def test_new_procedure_is_born_candidate_not_active(workspace: Path) -> None:
     assert proc.status == "candidate"
 
 
-def test_candidate_procedure_is_not_offered_to_planning(workspace: Path) -> None:
-    """A `candidate` must not participate in ordinary planning retrieval.
+def test_a_candidate_is_offered_but_never_outranks_a_proven_one(
+    workspace: Path,
+) -> None:
+    """Переписано 2026-08-15: прежнее правило было замкнутым кругом.
 
-    ``ProceduralMemoryStore.search`` is the only path that injects procedures
-    into the planner (`core/loop_methods2.py:354`). An unproven candidate must
-    not surface there, or a one-off success would steer later plans before it
-    earned the right to.
+    Здесь стояло «кандидат не участвует в выборке» — и это оказалось
+    самоблокировкой: причинный кредит начисляется только ПРЕДЛОЖЕННЫМ
+    процедурам (`resolve_used_procedures` работает по `selected`), повышение
+    требует двух зачтённых успехов, а кандидату успехов не начисляли, потому
+    что его не предлагали. Замер на живом хранилище: 30 процедур из 31 —
+    `candidate`, одна `active`.
+
+    Живое следствие: агент нашёл верный метод (`grep`) одним ходом, а
+    следующим спланировал четыре слепых чтения. Метод не пережил ход, потому
+    что механизм, которым он должен был переживать, был заперт.
+
+    Намерение затвора сохранено и проверяется ниже: неподтверждённое не
+    вытесняет подтверждённое. Правило оператора 2026-08-02 «совпадение не
+    польза, кредит только за причинно подтверждённую пользу» не тронуто —
+    поменялась ВИДИМОСТЬ, а не кредит.
     """
     store = ProceduralMemoryStore(workspace / "procedures.jsonl")
     store.upsert_from_episode(
@@ -434,10 +447,26 @@ def test_candidate_procedure_is_not_offered_to_planning(workspace: Path) -> None
             verified_chunks=3,
         )
     )
-    # It IS stored (auditable) ...
     assert store.count() == 1
-    # ... but it is NOT offered to planning while it is a candidate.
-    assert store.search("read the doc file_read") == []
+    # Предлагается — иначе применить его нельзя никогда...
+    offered = store.search("read the doc file_read")
+    assert offered and offered[0].status == "candidate"
+
+    # ...но доказанная процедура с тем же совпадением идёт первой.
+    from core.smart_memory import ProcedureRecord
+
+    store.rewrite([
+        *store.load(),
+        ProcedureRecord(
+            name="read the doc via file_read, proven",
+            workflow_key="tools:file_read->file_read",
+            trigger_tags=("file_read", "read", "doc"),
+            steps=("Situation: read the doc", "Run tool: file_read"),
+            status="active",
+            confidence=0.7,
+        ),
+    ])
+    assert store.search("read the doc file_read")[0].status == "active"
 
 
 def test_second_independent_success_promotes_candidate_to_active(
@@ -472,7 +501,9 @@ def test_second_independent_success_promotes_candidate_to_active(
     assert created1 is True
     assert p1.success_count == 0  # born unproven — creation is not a use
     assert p1.status == "candidate"
-    assert store.search("read the doc file_read") == []  # not yet planned with
+    # Предлагается как кандидат (2026-08-15): иначе применить и зачесть его
+    # нельзя никогда. Проверяемое здесь — что СТАТУС остаётся candidate.
+    assert store.search("read the doc file_read")[0].status == "candidate"
 
     # A second matching run consolidates but does NOT promote by tool-set match
     # (operator ruling 2026-08-02).
@@ -671,15 +702,33 @@ def test_experience_memory_is_injected_into_next_planner_call(workspace: Path, m
     events = _events(log_path)
     inject = [e for e in events if e["event"] == "experience_memory_inject"]
     # Operator ruling 2026-08-02: a procedure is promoted only by confirmed
-    # useful application, never by a repeated tool-set match. Repeating the same
-    # workflow across cycles no longer promotes the candidate, so it stays
-    # unoffered — honest-empty rather than falsely-active. Restoring promotion
-    # through the loop (offering candidates so they can be causally credited) is
-    # the next piece; here the procedure correctly never surfaces.
-    assert inject[1]["payload"]["procedures_selected"] == 0   # candidate, not credited
-    assert inject[2]["payload"]["procedures_selected"] == 0   # still candidate — no tool-set promotion
-    # The candidate exclusion is now visible in the journal (PR #260):
-    assert inject[2]["payload"]["procedures_rejected_by"].get("excluded_candidate", 0) >= 1
+    # useful application, never by a repeated tool-set match. That ruling is
+    # untouched — it governs CREDIT.
+    #
+    # «The next piece» named in this very comment was built on 2026-08-15:
+    # offering candidates so they CAN be causally credited. Until then the loop
+    # was closed — credit needs selection, selection excluded candidates,
+    # promotion needs credit — and 30 of 31 procedures in the live store sat in
+    # it. Live cost: the agent used `grep` correctly one turn and planned four
+    # blind reads the next, because the mechanism for carrying a method across a
+    # turn was sealed.
+    #
+    # So a candidate now SURFACES, ranked below anything proven. What it must
+    # never do is arrive already credited, and that is what is asserted here.
+    assert inject[1]["payload"]["procedures_selected"] >= 1   # offered…
+    assert inject[2]["payload"]["procedures_selected"] >= 1
+    # И вот замыкание целиком: предложена -> её workflow исполнен -> причинный
+    # кредит -> повышение. Это тот самый путь, который правило 2026-08-02
+    # сохраняло («кредит только через used_procedure_ids»), и он снова
+    # проходим. Заголовок этого теста описывал именно такой третий цикл.
+    procedures = agent.procedural_store.load()
+    assert procedures, "the candidate should exist to be offered at all"
+    assert any(p.status == "active" for p in procedures), (
+        "предложение не привело к кредиту — круг всё ещё замкнут"
+    )
+    assert all(p.success_count >= 1 for p in procedures if p.status == "active"), (
+        "процедура стала активной, не заработав ни одного зачтённого успеха"
+    )
 
 
 def test_smart_memory_cli_commands(workspace: Path, capsys) -> None:
