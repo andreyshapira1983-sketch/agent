@@ -229,8 +229,15 @@ def _propose_doctrine_draft(
     target = doc_target_from_goal(goal)
     if not target:
         return "doc_declined:no_target_doc"
-    if (Path(workspace) / target).exists():
-        return "doc_declined:doc_exists"
+    existing = ""
+    target_file = Path(workspace) / target
+    if target_file.exists():
+        # Наполнять разрешено ТОЛЬКО файл, сам несущий баннер DRAFT в шапке
+        # (скелет -> протокол, команда оператора 2026-08-15). Действующий
+        # документ без баннера — отдельное решение, не черновик.
+        existing = target_file.read_text(encoding="utf-8")
+        if "DRAFT" not in "\n".join(existing.splitlines()[:5]):
+            return "doc_declined:doc_exists"
     charter = Path(workspace) / "knowledge" / "doctrine" / "future" / "CORPORATE_MODEL.md"
     charter_text = charter.read_text(encoding="utf-8") if charter.is_file() else ""
     system = (
@@ -242,6 +249,11 @@ def _propose_doctrine_draft(
     )
     user = (
         f"Document to draft: {target}\nGoal: {goal}\n\n"
+        + (
+            "Current DRAFT skeleton to FILL — keep its structure and write "
+            f"the complete content it demands:\n{existing}\n\n"
+            if existing else ""
+        )
         + (f"The charter it serves:\n{charter_text}" if charter_text else "")
     )
     try:
