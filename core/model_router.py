@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from core.llm import LLM
-from core.model_catalog import peer_model_at_same_tier
+from core.model_outcomes import substitute_model
 from core.model_usage import (
     ModelUsageLedger,
     usage_from_llm_or_estimate,
@@ -505,9 +505,9 @@ class UsageTrackedLLM:
         if nxt is None:
             return None
         try:
-            # Имя — прежнего провайдера, УРОВЕНЬ — задачи: с None подменяющий
-            # брал дефолт и standard падал в light (docs/CODE_NOTES.md).
-            return self._llm_factory(nxt, peer_model_at_same_tier(self.model, nxt))
+            # Замер первым, карта уровней полом (docs/CODE_NOTES.md).
+            return self._llm_factory(nxt, substitute_model(
+                role=self.role, provider=nxt, current_model=self.model))
         except Exception:  # pragma: no cover - defensive
             return None
 

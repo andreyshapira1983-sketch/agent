@@ -1944,3 +1944,55 @@ map as a floor for the case with no measurements yet.
 
 That is not built. What is built stops a silent downgrade; it does not make the
 choice earned.
+
+## Which model earns the role
+
+Model choice ran on names. The catalog calls both `claude-sonnet-5` and
+`gpt-5.6-terra` "standard", so the tier map treats them as equals — a fact about
+naming families, not about this agent's work.
+
+The fact was lying next to it, unjoined. `data/model_usage.jsonl` records role,
+provider and model for every call; the episode records the outcome of that same
+run — how many claims verified, which detectors fired. The shared key is
+`run_id`. Measured over 150 runs that both files know:
+
+    claude-sonnet-4-5   67% of answers fully verified   (63 runs)
+    gpt-5.4-nano        50%                             (10 runs)
+    claude-sonnet-5     36%                             (28 runs)
+    gpt-4o-mini         15%                             (46 runs)
+
+A 4.5× spread. And a light-tier model beats a standard-tier one on this agent's
+own work, which is precisely what a name-based map cannot see.
+
+Counting rules that matter. A provider refusal is not charged to the model — it
+is a fact about the operator's account, and 73 of them landed on one day. A run
+counts once per role however many calls it made, or a verbose run would outweigh
+a short one. Below `MIN_RUNS` the selector stays silent, and silence returns the
+caller to the tier map: deciding from three cases is worse than deciding by
+family.
+
+### Experience outlives the world
+
+The operator saw the hole immediately: a router that reads only its own history
+votes on a world that may have moved. The check was cheap and the demonstration
+was already in the data — the strongest measurement in the table,
+`claude-sonnet-4-5` at 67% over 63 runs, names a model **the current catalog no
+longer lists**. The catalog itself was fresh (2 days, TTL 7). What was stale was
+the experience.
+
+So a measured preference must survive a look at what the provider offers now,
+and `offered_models()` asks the catalog — refreshing it first when expired,
+which is the "check the world before deciding" step. An empty observation means
+"not observed", not "nothing offered": that distinction decides a model.
+
+### What was NOT built, and why
+
+The operator's chain continues past this point — capabilities the current task
+needs, prices and limits, what changed, official docs as fact about an
+interface, vendor marketing as a hypothesis to test rather than a truth. All of
+that is right, and none of it is here.
+
+What is here is the one rung whose evidence already existed in this repository:
+own outcomes, intersected with the current model list. Everything above it needs
+a tower that has not yet proved why it exists — and the standard for building
+one is the same as everywhere in this file: a measurement first, then the code.

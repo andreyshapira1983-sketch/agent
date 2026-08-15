@@ -533,3 +533,29 @@ def peer_model_at_same_tier(model: str | None, provider: str) -> str | None:
         return tier_model_for(classify_model(str(model)), provider) or None
     except Exception:  # noqa: BLE001 — каталог ходит в сеть; отказоустойчивость
         return None    # важнее любой его беды, и None здесь = прежнее поведение
+
+
+def offered_models(provider: str) -> frozenset[str]:
+    """Что провайдер предлагает СЕЙЧАС, по последнему наблюдению мира.
+
+    Каталог — не украшение, а снимок внешнего мира: его строит
+    `discover_catalog` запросом к самим провайдерам. Здесь он спрашивается
+    затем, чтобы собственный опыт агента не голосовал за модель, которой уже
+    нет: живой замер 2026-08-15 показал `claude-sonnet-4-5` с 67% полностью
+    подтверждённых на 63 прогонах — сильнейшее свидетельство в таблице — и
+    этого имени в текущем каталоге больше нет.
+
+    Пустое множество значит «мир не наблюдён», и вызывающий обязан толковать
+    это как «не знаю», а не как «ничего не предлагают»: разница между
+    незнанием и отрицанием здесь стоит выбора модели.
+
+    Зачем: docs/CODE_NOTES.md, «Which model earns the role».
+    """
+    if catalog_freshness().get("expired"):
+        ensure_fresh_catalog()
+    catalog = _load_catalog() or {}
+    models = (catalog.get("providers", {}).get(provider, {}) or {}).get("models", [])
+    return frozenset(
+        str(m.get("id") or "") for m in models
+        if isinstance(m, dict) and m.get("id")
+    )
