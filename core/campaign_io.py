@@ -95,6 +95,92 @@ def _default_gather_signals(agent: Any, workspace: Any, approval_inbox: Any) -> 
     return {"heartbeat": hb, "age": age, "triage": triage, "action": action}
 
 
+def _propose_repair_from_diagnosis(
+    *, agent: Any, workspace: Any, config: CampaignConfig,
+    action: BestNextAction, answer: str, approval_inbox: Any,
+) -> str | None:
+    """Подтверждённый диагноз становится долговременной заявкой на ремонт.
+
+    Четыре условия, каждое структурное, и все обязаны сойтись:
+
+    * действие — про собственный дефект (`improve_failure_to_idea_pipeline`):
+      health-pass и прочие действия ремонта не обещали;
+    * не dry-run: заявка в очереди — долговременный эффект;
+    * проверка ПОЛНОСТЬЮ подтвердила диагноз (тот же стандарт, что снимает
+      прокси релевантности): частично обоснованный текст патча не заслуживает;
+    * диагноз называет существующий .py в репозитории — существование
+      спрашивается у диска (`workspace_paths_named`), не у регулярки: именно
+      регулярка по прозе завела в реестр reasoning.py и citation.py.
+
+    Дальше — существующие рубежи без изъятий: генератор со своими гейтами
+    уверенности, заявка `self_apply_lane.run` в очереди, решение человека
+    (§9), лента с полным pytest и откатом. Здесь ничего не исполняется.
+    """
+    if action.action != "improve_failure_to_idea_pipeline" or config.dry_run:
+        return None
+    if not answer or approval_inbox is None:
+        return None
+    ver = getattr(agent, "last_verification", None)
+    examined = int(getattr(ver, "total_chunks", 0) or 0)
+    verified = int(getattr(ver, "verified_chunks", 0) or 0)
+    if examined == 0 or verified != examined:
+        return None
+    try:
+        from core.workspace_reference import workspace_paths_named
+
+        targets = [
+            p for p in workspace_paths_named(answer)
+            if p.endswith(".py") and not p.startswith("tests/")
+        ]
+    except Exception:  # noqa: BLE001 — извлечение адресов не роняет кампанию
+        targets = []
+    if not targets:
+        return None
+    target = targets[0]
+    try:
+        gen = agent.propose_repair(
+            target_path=target,
+            workspace_root=Path(workspace),
+            extra_context=answer[:4000],
+        )
+        if not getattr(gen, "ok", False):
+            _log(agent, "campaign_repair_not_proposed", {
+                "target": target, "status": getattr(gen, "status", "?"),
+            })
+            return f"repair_declined:{getattr(gen, 'status', '?')}"
+        from core.self_apply_bridge import build_self_apply_payload
+
+        prop = gen.proposal
+        payload = build_self_apply_payload(
+            files=[{"path": prop.path, "content": prop.proposed_content}],
+            reason=(prop.reason or gen.diagnosis or "")[:500],
+            evidence=tuple(gen.evidence or ())[:6],
+            test_paths=tuple(prop.test_paths or ("tests",)),
+            test_pattern=prop.test_pattern,
+            origin="campaign_diagnosis",
+        )
+        item = approval_inbox.add(
+            operation="self_apply_lane.run",
+            summary=f"campaign repair proposal for {prop.path}",
+            risk="reversible",
+            reasons=(f"diagnosis verified {verified}/{examined}",
+                     f"target={prop.path}"),
+            payload=payload,
+            dedup_key=f"self_apply:{prop.path}:campaign_diagnosis",
+        )
+        _log(agent, "campaign_repair_proposed", {
+            "approval_id": item.id, "target": prop.path,
+            "confidence": gen.confidence,
+        })
+    except Exception as exc:  # noqa: BLE001 — провод не вправе ронять кампанию
+        _log(agent, "campaign_repair_proposal_failed", {
+            "target": target, "error": str(exc)[:200],
+        })
+        return None
+    else:
+        return f"repair_proposed:{item.id}"
+
+
 def _open_self_improvement_issues(workspace: Path) -> tuple[tuple[dict, ...], bool]:
     """Открытые самонайденные дефекты и признак «реестр вообще читается».
 
@@ -226,14 +312,27 @@ def _default_execute_action(
         pending = 0
     proposal = f"approvals_pending={pending}" if pending else None
     artifact = None
+    goal_answer = ""
     for task_report in getattr(report, "tasks", []) or []:
         if getattr(task_report.task, "kind", "") == "goal":
             answer = (task_report.details or {}).get("answer")
             if answer:
-                digest = " ".join(str(answer).split())[:160]
+                goal_answer = str(answer)
+                digest = " ".join(goal_answer.split())[:160]
                 if digest:
                     artifact = f"reasoning: {digest}"
             break
+    # Переход «диагноз -> ремонт». До 2026-08-15 подтверждённый диагноз умирал
+    # здесь в 160-значном дайджесте: четвёртый прогон дня процитировал свой
+    # дефект из настоящей трассы, получил 6 из 6 подтверждённых — и кампания
+    # выбросила это, как и три прогона до него.
+    # Зачем и границы: docs/CODE_NOTES.md, «A diagnosis that dies in a digest».
+    repaired = _propose_repair_from_diagnosis(
+        agent=agent, workspace=workspace, config=config,
+        action=action, answer=goal_answer, approval_inbox=approval_inbox,
+    )
+    if repaired:
+        proposal = f"{proposal}; {repaired}" if proposal else repaired
     return CampaignActionOutcome(
         result=report.status,
         llm_calls_spent=max(0, llm_after - llm_before),
