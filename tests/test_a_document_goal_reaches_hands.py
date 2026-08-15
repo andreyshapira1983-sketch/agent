@@ -145,6 +145,40 @@ def test_a_fence_wrapped_generation_is_unwrapped(tmp_path):
     assert file["content"].rstrip().endswith("Tail.")
 
 
+def test_a_draft_bannered_file_may_be_filled(tmp_path):
+    """Скелет → протокол (команда оператора 2026-08-15): файл, сам несущий
+    баннер DRAFT, разрешено наполнять; текущий скелет уезжает модели в
+    подсказку, чтобы наполнение шло по его же структуре.
+    """
+    target = tmp_path / "knowledge" / "doctrine" / "future" / "MEMORY_LIFECYCLE_CONTRACT.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        "# STATUS: DRAFT / TARGET (not implemented)\n\n## Required sections\n",
+        encoding="utf-8",
+    )
+
+    class _Capturing:
+        def __init__(self) -> None:
+            self.user = ""
+
+        def complete(self, *, system: str, user: str, **_kw) -> str:
+            self.user = user
+            return "# STATUS: DRAFT / TARGET\n\nFilled protocol.\n"
+
+    llm = _Capturing()
+    inbox = _Inbox()
+
+    note = _propose_doctrine_draft(
+        agent=_agent(llm), workspace=tmp_path, goal=_DOC_GOAL,
+        approval_inbox=inbox,
+    )
+
+    assert note == "doc_draft_proposed:ain_doc_draft"
+    assert "Required sections" in llm.user, "скелет показан модели"
+    (file,) = inbox.items[0]["payload"]["files"]
+    assert "Filled protocol" in file["content"]
+
+
 def test_an_existing_document_is_not_overwritten(tmp_path):
     target = tmp_path / "knowledge" / "doctrine" / "future" / "MEMORY_LIFECYCLE_CONTRACT.md"
     target.parent.mkdir(parents=True, exist_ok=True)
