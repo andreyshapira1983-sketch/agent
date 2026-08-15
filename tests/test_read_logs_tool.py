@@ -271,6 +271,10 @@ class TestValidateOutput:
             "events": [{"event": "planner"}],
             "is_live_session": False,
             "skipped_live": False,
+            # 2026-08-15: сколько трасс просмотрено при поиске по фильтру —
+            # отличает «пусто здесь» от «пусто во всей недавней истории»
+            # (docs/CODE_NOTES.md, «Recency is not relevance»).
+            "traces_searched": 1,
             "compensation_plan": {"id": "x", "actions": [], "tool_name": "t", "description": "d"},
         }
 

@@ -46,6 +46,12 @@ _TRACE_ID_FILENAME_RE = re.compile(r"^[a-zA-Z0-9_-]+\.jsonl$")
 # store, and picking one to diagnose from reports the wrong subsystem.
 _SESSION_LOG_STEM_RE = re.compile(r"^(?:trace|run)_[0-9a-zA-Z]+$")
 
+# Сколько прошлых трасс просматривается в поисках запрошенных событий, прежде
+# чем честно сказать «в недавней истории этого нет». Ограничение держит вызов
+# ограниченным по работе: дальше вглубь — это уже археология, и ей положено
+# идти через явный trace_id.
+MAX_TRACE_SCAN = 15
+
 
 # ---------------------------------------------------------------------------
 # Tool
@@ -59,10 +65,11 @@ class ReadLogsTool(Tool):
         "Read the agent's own JSONL audit log to diagnose errors. "
         "Returns the last N events (default 50, max 500), optionally "
         "filtered by event name (e.g. ['error','replan']). If trace_id "
-        "is omitted, reads the most recent session log OTHER than the one "
-        "this run is writing — the current run's outcome is not in it yet. "
-        "`is_live_session` says which you got. Use this as the agent's "
-        "primary self-diagnostic surface. Risk: read_only."
+        "is omitted, reads the most recent PAST session log — and when an "
+        "event_filter is given, the most recent past log that CONTAINS such "
+        "events. events_returned=0 with traces_searched>1 means no such "
+        "events exist in recent history at all, not just in one file. Use "
+        "this as the agent's primary self-diagnostic surface. Risk: read_only."
     )
     risk: Risk = "read_only"
 
@@ -113,7 +120,22 @@ class ReadLogsTool(Tool):
                 cleaned.append(name)
             filter_set = set(cleaned)
 
-        target_path = self._resolve_log_path(trace_id)
+        # Свежесть — не то же самое, что уместность. Живой случай 2026-08-15:
+        # автономный прогон спросил `event_filter=['error']`, получил самую
+        # свежую прошлую трассу — пять служебных строк сессии, где оператор
+        # кликал по очереди одобрений, — и встал: «нужные для диагностики
+        # события недоступны». Ошибки при этом лежали в соседних трассах.
+        # Поэтому при фильтре и без явного адреса выбирается новейшая трасса,
+        # СОДЕРЖАЩАЯ запрошенное; `traces_searched` отличает «нет в этой» от
+        # «нет в недавней истории вообще». Явный trace_id — адрес, и ответ
+        # обязан быть про него, пустой или нет.
+        # Зачем: docs/CODE_NOTES.md, «Recency is not relevance».
+        traces_searched = 1
+        if trace_id is None and filter_set is not None:
+            target_path, events_all, traces_searched = self._newest_trace_with(filter_set)
+        else:
+            target_path = self._resolve_log_path(trace_id)
+            events_all = self._read_jsonl(target_path) if target_path else []
         if target_path is None:
             return {
                 "trace_id": trace_id or "",
@@ -124,10 +146,9 @@ class ReadLogsTool(Tool):
                 "events": [],
                 "is_live_session": False,
                 "skipped_live": False,
+                "traces_searched": traces_searched,
                 "compensation_plan": _NOOP_PLAN,
             }
-
-        events_all = self._read_jsonl(target_path)
         total = len(events_all)
         if filter_set is not None:
             events_filtered = [e for e in events_all if e.get("event") in filter_set]
@@ -157,6 +178,9 @@ class ReadLogsTool(Tool):
             # unfinished trace answers a different question than it looks like.
             "is_live_session": is_live,
             "skipped_live": bool(self.live_trace_id) and trace_id is None and not is_live,
+            # >1 при пустых events означает: запрошенных событий нет во всей
+            # просмотренной истории, а не только в возвращённой трассе.
+            "traces_searched": traces_searched,
             "compensation_plan": _NOOP_PLAN,
         }
 
@@ -170,7 +194,7 @@ class ReadLogsTool(Tool):
         required = {
             "trace_id", "log_file", "events_returned", "total_events",
             "filtered", "events", "is_live_session", "skipped_live",
-            "compensation_plan",
+            "traces_searched", "compensation_plan",
         }
         missing = required - output.keys()
         if missing:
@@ -186,6 +210,8 @@ class ReadLogsTool(Tool):
             return False, ["events_returned > total_events with no filter"]
         if not isinstance(output["filtered"], bool):
             return False, ["filtered must be a bool"]
+        if not isinstance(output["traces_searched"], int) or output["traces_searched"] < 0:
+            return False, ["traces_searched must be a non-negative int"]
         if not isinstance(output["compensation_plan"], dict):
             return False, ["compensation_plan must be a dict"]
         return True, []
@@ -243,6 +269,39 @@ class ReadLogsTool(Tool):
             if past:
                 return past[-1]
         return candidates[-1]
+
+    def _newest_trace_with(
+        self, filter_set: set[str]
+    ) -> tuple[Path | None, list[dict[str, Any]], int]:
+        """Новейшая ПРОШЛАЯ трасса, где запрошенные события есть.
+
+        Возвращает (путь, все её события, сколько трасс просмотрено). Когда
+        совпадений нет ни в одной из просмотренных, возвращается новейшая
+        прошлая — как и раньше, — но `traces_searched` несёт правду о том, что
+        пусто не «здесь», а везде, куда смотрели. Живая трасса исключена по той
+        же причине, что и всюду: своего исхода в ней ещё нет.
+        """
+        candidates = [
+            p for p in (self.log_dir.iterdir() if self.log_dir.is_dir() else [])
+            if p.suffix == ".jsonl" and p.is_file()
+            and _SESSION_LOG_STEM_RE.match(p.stem)
+            and p.stem != (self.live_trace_id or "")
+        ]
+        candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        candidates = candidates[:MAX_TRACE_SCAN]
+        if not candidates:
+            fallback = self._resolve_log_path(None)
+            events = self._read_jsonl(fallback) if fallback else []
+            return fallback, events, 1 if fallback else 0
+
+        newest_events: list[dict[str, Any]] | None = None
+        for i, path in enumerate(candidates):
+            events = self._read_jsonl(path)
+            if newest_events is None:
+                newest_events = events
+            if any(e.get("event") in filter_set for e in events):
+                return path, events, i + 1
+        return candidates[0], newest_events or [], len(candidates)
 
     @staticmethod
     def _read_jsonl(path: Path) -> list[dict[str, Any]]:
