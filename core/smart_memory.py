@@ -7,7 +7,6 @@ to procedures and surface stale knowledge risks.
 """
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -23,6 +22,7 @@ from core.state_integrity import (
     rewrite_state_jsonl_unlocked,
     state_file_lock,
 )
+from core.topic_tokens import FLAT, TokenSalience, topic_tokens
 
 EpisodeOutcome = Literal["success", "partial", "failed"]
 
@@ -149,20 +149,10 @@ def _smoothed_confidence(success_count: int, failure_count: int) -> float:
     return round(numerator / denominator, 3)
 
 
-def _tokens(text: str) -> set[str]:
-    # Разделяет ЛЮБОЙ не-буквенно-цифровой знак, а не перечисленные пять. Живой
-    # замер 2026-08-15: `reasoning_action_mismatch,` с запятой не совпадал ни с
-    # чем, и подбор решали «где», «это», «все». Почему так и чем мерялось:
-    # docs/CODE_NOTES.md, «A comma is not a letter».
-    return {
-        token.casefold()
-        for token in re.split(r"[\W_]+", str(text or ""), flags=re.UNICODE)
-        # Keep tokens over 2 chars, OR any token bearing a digit — short numeric
-        # / alphanumeric tokens ("17", "23", "v2", "3d") are real match signal
-        # that the length floor alone silently dropped (CORE-10). Purely
-        # short alphabetic (stopword-like) tokens still fall through.
-        if len(token.strip()) > 2 or any(ch.isdigit() for ch in token)
-    }
+#: Резка живёт в `core/topic_tokens.py` вместе с весом слова: это одна работа —
+#: превратить текст в разрешающий сигнал. Имя оставлено прежним, его зовут из
+#: двух десятков мест этого файла.
+_tokens = topic_tokens
 
 
 @dataclass(frozen=True)
@@ -1025,7 +1015,7 @@ class ProceduralMemoryStore:
         return self.search_with_report(query, limit=limit).procedures
 
     def search_with_report(
-        self, query: str, *, limit: int = 3
+        self, query: str, *, limit: int = 3, salience: TokenSalience = FLAT
     ) -> ProcedureSearchResult:
         """Same as `search`, but it also reports why the store's other procedures
         did not surface — symmetric with `EpisodicMemoryStore.search_with_report`.
@@ -1044,7 +1034,7 @@ class ProceduralMemoryStore:
                 procedures=[],
                 rejected_by={"no_query_tokens": len(procedures)} if procedures else {},
             )
-        scored: list[tuple[int, int, ProcedureRecord]] = []
+        scored: list[tuple[float, int, ProcedureRecord]] = []
         excluded_retired = 0
         no_overlap = 0
         for proc in procedures:
@@ -1055,13 +1045,19 @@ class ProceduralMemoryStore:
                 excluded_retired += 1
                 continue
             haystack = " ".join([proc.name, " ".join(proc.trigger_tags), " ".join(proc.steps)])
-            score = len(q_tokens & _tokens(haystack))
+            # Взвешенно, а не штуками: три служебных слова не должны обходить
+            # одно имя сигнала. Без корпуса вес плоский и счёт прежний.
+            score = salience.overlap(q_tokens, _tokens(haystack))
             if score:
                 scored.append((score, 0 if proc.status == "candidate" else 1, proc))
             else:
                 no_overlap += 1
-        # Доказанность — ПЕРВЫЙ ключ: неподтверждённое не вытесняет подтверждённое.
-        scored.sort(key=lambda item: (item[1], item[0], item[2].confidence,
+        # Уместность первой, зрелость — при РАВНОЙ уместности. Затвор охранял
+        # «неподтверждённое не вытесняет подтверждённое», и это сохранено там,
+        # где вопрос зрелости и живёт. Поверх темы он давал другое: единственная
+        # доказанная запись забирала первое место при любом совпадении, и на
+        # живом хранилище это стоило 24 пункта точности (37% против 61%).
+        scored.sort(key=lambda item: (item[0], item[1], item[2].confidence,
                                       item[2].updated_at), reverse=True)
         selected = [proc for _score, _proven, proc in scored[:limit]]
         rejected_by = {
