@@ -455,6 +455,21 @@ def _matches_source_review(text: str) -> bool:
     )
 
 
+
+def _has_any_whole_word(text: str, terms: tuple[str, ...]) -> bool:
+    """`_has_any_loose` restricted to whole words.
+
+    A term that only appears INSIDE a longer word is not that term: «планировщик»
+    is a component name, not the noun «план». Used where a soft branch would
+    otherwise route on a coincidence of letters.
+    """
+    lowered = (text or "").casefold()
+    return any(
+        re.search(rf"(?<!\w){re.escape(term.casefold())}(?!\w)", lowered)
+        for term in terms
+    )
+
+
 def _matches_implementation_plan(text: str) -> bool:
     planning_terms = (
         "implementation plan",
@@ -470,13 +485,25 @@ def _matches_implementation_plan(text: str) -> bool:
         return True
     # R6 (2026-08-13, живой d322a875/Q2): «в текущей реализации» — обстоятельство
     # места, не заказ плана; стем «реализац» изъят из мягкой ветки.
-    return _has_any_loose(text, filename_markers) and _has_any_loose(
+    #
+    # 2026-08-15: изъятие одного стема класс не закрыло. «план» ловился ПОДСТРОКОЙ
+    # внутри «планировщик» — имени собственного узла агента и самого частого
+    # слова в разговоре о его устройстве, — и «Открой core/loop.py и посмотри на
+    # планировщика» уходило в `:implementation-plan`: 8 событий, модель не звали.
+    # Мягкая ветка сверяет ЦЕЛЫЕ слова: подстрока внутри другого слова — не
+    # заказ плана. Сильная ветка выше не тронута, поэтому «какие файлы менять»
+    # и «план реализации» маршрутизируются как прежде.
+    # «менять» и «тесты» изъяты 2026-08-15: обычные слова технического вопроса.
+    # «Посмотри docs/OPERATIONS.md, какие тесты там упомянуты» — вопрос на
+    # чтение, а не заказ плана. Проверено: без них 87 тестов маршрутизации
+    # проходят, потому что сильная ветка выше уже держит явные формы —
+    # «какие файлы менять», «какие тесты добавить». Мягкая ветка остаётся для
+    # прямого «план»/«implementation» рядом с путём, целым словом.
+    return _has_any_loose(text, filename_markers) and _has_any_whole_word(
         text,
         (
             "план",
             "implementation",
-            "менять",
-            "тесты",
         ),
     )
 

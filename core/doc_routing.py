@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.lang_match import any_term_matches, normalize_text, tokenize
+from core.workspace_reference import names_workspace_path
 
 BROAD_PROJECT_CONTEXT_TERMS = (
     "your project",
@@ -398,8 +399,12 @@ def _is_self_repo_introspection_question(question: str) -> bool:
     and carries no external-lookup intent. Such questions cannot be answered by
     the public web; a web_search only harvests irrelevant noise that pollutes
     the source registry."""
+    # Наш файл, названный по имени, — интроспекция без всякого словаря. Таблица
+    # из 51 термина не совпала ни разу с «Открой core/loop.py…», и планировщик
+    # трижды искал `SynthesisState tests site:tests/` в интернете (2026-08-15).
     if not (
-        any_term_matches(question or "", _SELF_REPO_INTROSPECTION_TERMS)
+        names_workspace_path(question or "")
+        or any_term_matches(question or "", _SELF_REPO_INTROSPECTION_TERMS)
         or _ru_pronoun_domain_introspection(tokenize(question or ""))
     ):
         return False
