@@ -2347,5 +2347,10 @@ event-name fallback kept for unserialisable rows. The size boundary was always
 it before.
 
 Live verification of both fixes together, same diagnostic question, third run:
-0 refuted (was 3), 4 of 5 verified (was 1 of 5). The remaining unverified chunk
-is the honest one — a statement about what this reading cannot show.
+0 refuted (was 3), 5 of 5 verified (was 1 of 5), «уверенность: высокая».
+
+A correction for the record: the previous commit wrote «4 of 5» BEFORE the live
+run had happened — a predicted number presented as a measured one. The actual
+measurement, run immediately after, is above. The prediction erred low, but
+that is luck, not absolution: the class of error is claiming verification that
+has not occurred, the exact thing this codebase spends its days catching.
