@@ -50,16 +50,18 @@ def test_no_model_means_no_guess():
     assert _peer_model_at_same_tier("", "openai") is None
 
 
-def test_the_router_asks_for_the_peer_rather_than_passing_none():
-    """Вторая половина дороги: найти равного мало, надо его передать.
+def test_the_router_never_passes_none_again():
+    """Вторая половина дороги: найти замену мало, надо её передать.
 
-    До правки здесь стояло `self._llm_factory(nxt, None)` — из-за чего
-    подменяющий провайдер брал свой дефолт.
+    До 2026-08-15 здесь стояло `self._llm_factory(nxt, None)`, и подменяющий
+    провайдер брал свой дефолт. Кто именно выбирает замену, с тех пор изменилось
+    ещё раз — сначала карта уровней, затем замер поверх неё
+    (tests/test_which_model_earns_the_role.py). Здесь держится то, что не
+    зависит от выбирающего: None сюда больше не уходит.
     """
     import inspect
 
     from core.model_router import UsageTrackedLLM
 
     source = inspect.getsource(UsageTrackedLLM._failover_llm)
-    assert "peer_model_at_same_tier(self.model, nxt)" in source
     assert "self._llm_factory(nxt, None)" not in source
