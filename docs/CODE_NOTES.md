@@ -2430,3 +2430,41 @@ two-week-old stash (`before syncing main`, made with untracked files) into the
 tree. The untracked trio materialised; the tracked half conflicted and kept the
 stash entry alive. Files deleted; the operator's stash left untouched. Lesson:
 a pop after a failed push carries someone else's load.
+
+## The critic that read strings
+
+The first proposal branch A ever delivered live (ain_31874b06) was denied by
+the operator on review, for three defects the Stage A critic had passed:
+
+* `assert x in {...} or x == x` — a tautology, true for any outcome; the sieve
+  only knew the literal string `assert True`;
+* `RepairProposal(test_files=…, evidence_verified=…)` — keyword arguments the
+  real constructor does not have, so the test raises TypeError today AND after
+  any implementation: it has no green state and is not an acceptance test;
+* a test about an invented gap in self_repair, while the 6/6 diagnosis was
+  about reasoning_action_mismatch — the frame said REPRODUCE, the model
+  wandered.
+
+The critic read strings. It now reads structure:
+
+* **Tautology, by AST**: an assert whose expression is provably always-true —
+  a constant, a reflexive compare (X==X, X<=X, X>=X, X in X), or an Or with
+  any such operand. Real comparisons of different things are untouched.
+* **Phantom kwargs, by real signatures**: keyword calls to names imported from
+  importable modules are checked against `inspect.signature`. Any doubt —
+  **kwargs, unresolvable import, attribute calls — is silence: the sieve only
+  subtracts garbage, it never blocks on uncertainty.
+* **Diagnosis linkage, for `verified_diagnosis` only**: the test must mention
+  at least one CODE carrier from the diagnosis (snake_case, CamelCase, dotted
+  path). Prose words match by accident and are not judges; a diagnosis with no
+  code carriers cannot judge and is not asked to.
+
+The system-level reading is the honest one: the human gate did its §9 job —
+garbage stopped before code was touched — and the critic's job is to make that
+gate rare, not redundant. All three sins of the denied proposal now die in the
+critic, named individually; a sound reproducing test passes.
+
+Also paid, again, the heredoc tax: a `\b` written through a shell heredoc
+arrived as a literal backspace character inside the regex — the exact trap the
+project memory warns about. Fixed via targeted line replacement; the lesson
+stands: regexes go through the editor, not through heredocs.
