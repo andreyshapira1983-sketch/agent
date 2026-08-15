@@ -335,6 +335,29 @@ class ReflectionEngine:
                 sample = str(payload.get("message") or "")[:200]
                 key = ("error", code)
 
+            elif event_type == "causal_observation":
+                # Собственные детекторы агента. До 2026-08-15 рефлексия их не
+                # видела: она считала только падения — ошибку инструмента,
+                # перепланирование, провал задачи, `error`. Живой замер того
+                # дня: 1318 событий просмотрено, 0 закономерностей, при том что
+                # `reasoning_action_mismatch` к тому часу сработал девять раз.
+                # Ничего не падало — и учиться было якобы не на чем.
+                # Каждый сигнал ведром отдельно: один ход поднимает несколько,
+                # и «mismatch девять раз» — не то же самое, что «девять ходов
+                # с каким-нибудь дефектом».
+                for signal in payload.get("defect_signals") or ():
+                    label = str(signal)
+                    bucket = buckets.setdefault(
+                        ("defect_signal", label),
+                        {"count": 0, "sample": "", "trace_ids": []},
+                    )
+                    bucket["count"] += 1
+                    if not bucket["sample"]:
+                        bucket["sample"] = str(payload.get("observed_mismatch") or "")[:200]
+                    if trace_id and trace_id not in bucket["trace_ids"]:
+                        bucket["trace_ids"].append(trace_id)
+                continue
+
             if key is None:
                 continue
 

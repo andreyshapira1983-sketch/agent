@@ -1770,3 +1770,67 @@ and the episode was banked as a success that later retrieval can reuse.
 `reasoning_action_mismatch` and `user_contract_unrepresented` fired;
 `self_contradiction` did not. An answer that says a mechanism both exists and
 does not exist passed every gate.
+
+## Reflection was blind to its own detectors
+
+`ReflectionEngine._extract_patterns` bucketed exactly four kinds of event: a
+tool result with `status=error`, a replan, a failed autonomous task, and an
+`error` event. All four are CRASHES. The agent's own detectors —
+`reasoning_action_mismatch`, `citation_fabricated`, `self_contradiction`,
+`obligation_silently_missing`, `user_contract_unrepresented` — are logged as
+`causal_observation` and were not among them.
+
+Measured live 2026-08-15: `logs_scanned=30, events_scanned=1619,
+patterns_found=[], lessons_count=0` — on a day when `reasoning_action_mismatch`
+had already fired nine times. Nothing had crashed, so there was officially
+nothing to learn from. The agent could only learn from falling over, never from
+being wrong.
+
+With `causal_observation` bucketed per signal, the same log window yields
+`reasoning_action_mismatch` ×10, `citation_fabricated` ×3, `self_contradiction`
+×2 — and the live run after the fix produced 5 lessons and saved 5 memory
+records where it had produced none.
+
+Each signal gets its own bucket. One turn raises several, and "mismatch nine
+times" is a different fact from "nine turns with some defect"; a merged bucket
+would produce a lesson about nothing. The repeat threshold is untouched: one
+occurrence is an observation, not a pattern — the same line failures already
+had.
+
+The lessons themselves are thin ("There is a recurring mismatch between
+reasoning actions and expected outcomes"), with empty `rule` fields. That is
+what the fallback model writes. The nerve is connected; what flows through it is
+a separate question.
+
+## Self-contradiction: measured, and refused
+
+Not fixed, on purpose, and the reason is worth more than a shipped rule.
+
+The live finding contained «предложение не применяется» (the mechanism works)
+and «не предусмотрены меры по предотвращению применения» (the mechanism is
+absent) in one answer. `core/answer_contradiction.py` did not fire because it
+cross-examines Facts against Unverified, and `Unverified: Ничего` — the
+contradiction was inside Facts, on an axis the module does not have.
+
+Two candidate rules were built and measured over the 200 stored answers:
+
+* **polarity clash on a shared stem** — catches the measured case, flags 72 of
+  200. The samples are not contradictions: «нет опыта эксплуатации» against
+  «найдено несколько статей» share a stem by accident.
+* **absence claim about a file that was read** — misses the measured case and
+  still flags 31 of 200.
+
+A third line of evidence agrees, and it predates both. `ConflictResolver`
+already detects contradictions over a shared subject, and it deliberately skips
+code sources: «reading them as propositions produced only false positives
+(MIR-054)». It also requires two independent sources, which one answer
+contradicting itself never has.
+
+Three independent measurements say the same thing: contradiction between free
+Russian sentences is not decidable by word matching here. Shipping either
+candidate would be the word-table-over-structural-fact defect that this file
+records losing everywhere else. The gap stays open and named.
+
+Note for whoever picks this up: `self_contradiction` DOES fire — twice in the
+same log window. The detector works on its own axis. What is missing is an axis,
+not a detector.
