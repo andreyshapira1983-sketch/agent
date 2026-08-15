@@ -1841,10 +1841,11 @@ Two autonomous runs on 2026-08-15, right after reflection was given sight of its
 own detectors. It wrote ten lessons naming nine files. **None of the nine
 exist.**
 
-    core/reasoning.py          core/citation.py           core/user_contract.py
-    core/logical_consistency.py  core/obligation_management.py
-    core/file_management.py    core/obligation_tracking.py
-    core/citation_management.py  core/logical_coherence.py
+    core/reasoning.py — does not exist        core/citation.py — does not exist
+    core/user_contract.py — does not exist    core/logical_consistency.py — does not exist
+    core/obligation_management.py — does not exist   core/file_management.py — does not exist
+    core/obligation_tracking.py — does not exist     core/citation_management.py — does not exist
+    core/logical_coherence.py — does not exist
 
 The real modules are named differently — `reasoning_action_check.py`,
 `answer_contradiction.py`, `completion_contract.py`, `completion_obligation.py`.
@@ -1852,11 +1853,12 @@ The model invented plausible names from the signal names.
 
 The second run is the part worth keeping. Memory retrieval offered those lessons
 back (`records_selected=3`), and the agent acted on them: it read
-`core/reasoning.py`, `core/citation.py`, `core/user_contract.py`, found nothing,
+`core/reasoning.py`, `core/citation.py`, `core/user_contract.py` — none of these exist —
+found nothing,
 and concluded «в коде не обнаружены файлы, указанные в запросе» — attributing to
 the request the names its own memory had supplied. Reflection then drew a NEW
 lesson from that failure: «The agent fails to find the user_contract.py file,
-suggesting a potential misconfiguration», focus `core/file_management.py`,
+suggesting a potential misconfiguration», focus `core/file_management.py`, which does not exist either,
 confidence **0.9** — the highest of the batch, about a file that also does not
 exist. A defect derived from its own fabrication, banked more confidently than
 anything real.
@@ -1886,9 +1888,9 @@ memory.
 
 `learning_plan` is now `None` on those runs. It is built from the focus areas of
 `learn_more`/`repair` lessons, and with the invented ones removed there is
-nothing left to build from. The previous plan was «study core/reasoning.py,
-core/file_management.py…» — a plan to study files that do not exist, which is
-worse than no plan. But the honest statement is that this path produces nothing
+nothing left to build from. The previous plan named
+core/reasoning.py and core/file_management.py, which do not exist, so it was
+a plan to study nothing, which is worse than no plan. But the honest statement is that this path produces nothing
 until the model names a real file, and that gap is now visible instead of being
 filled with fiction.
 
@@ -1897,3 +1899,48 @@ operator decision, through the store's own `delete` so integrity hashes stay
 consistent; a copy was taken first. The selection criterion was exact and
 checked record by record: tagged `lesson`, naming a repository path, and that
 path absent from disk. Ten matched, nothing else did.
+
+## Failover kept the provider and threw away the tier
+
+Asked why the agent's own lessons read like a small model wrote them, the answer
+was in the router, not in the prompt.
+
+`_failover_llm` passed `None` as the model:
+
+    # Drop the model so the substitute provider's own default is used
+    return self._llm_factory(nxt, None)
+
+The comment is right about the name — `claude-sonnet-5` means nothing to
+OpenAI — and wrong about what to do with the TIER. The substitute provider took
+its own default, so a `standard`-tier planner call landed on `gpt-4o-mini`,
+which the catalog classifies `light`. That happened on every call of 2026-08-15:
+73 anthropic refusals, 73 substitutions, all one tier down.
+
+The catalog already knew the answer. `config/model_catalog.json` carries
+`tier_best` per provider — openai `standard` is `gpt-5.6-terra` — and
+`tier_model_for()` has read it since it was written. Its only consumer was the
+`:models` display command. Another producer with no consumer, in the place where
+model quality is decided.
+
+`peer_model_at_same_tier` lives in `core/model_catalog.py`, not in the router:
+its two dependencies (`classify_model`, `tier_model_for`) are there, and the
+router only needs to ask. `None` is returned deliberately when the tier cannot
+be told or the catalog is silent about the provider — that is the previous
+behaviour, and answering with a default beats not answering at all.
+
+### The limit of this fix, stated plainly
+
+The operator named it immediately: this is still a STATIC rule. "standard on
+anthropic ≈ standard on openai" is a naming heuristic — `classify_model` matches
+family keywords — not a measured fact about which model does this agent's work
+better. Nothing here consults an outcome.
+
+The data for the measured version already exists and is unjoined:
+`data/model_usage.jsonl` records role/provider/model per call, and each episode
+records `outcome`, `verified_chunks`, `answer_quality_score` and
+`defect_signals`. Joining them per model would say which model actually produces
+verified answers for which role — and that is what should choose, with the tier
+map as a floor for the case with no measurements yet.
+
+That is not built. What is built stops a silent downgrade; it does not make the
+choice earned.

@@ -518,3 +518,18 @@ def catalog_summary() -> dict[str, Any]:
             "tier_best":   pdata.get("tier_best", {}),
         }
     return result
+
+
+def peer_model_at_same_tier(model: str | None, provider: str) -> str | None:
+    """Равный по уровню у нового провайдера, или None — тогда его дефолт.
+
+    Отказ провайдера — не повод понижать задачу; None означает «уровень не
+    определить», и это прежнее поведение, а не поломка. Замер и цена:
+    docs/CODE_NOTES.md, «Failover kept the provider and threw away the tier».
+    """
+    if not model:
+        return None
+    try:
+        return tier_model_for(classify_model(str(model)), provider) or None
+    except Exception:  # noqa: BLE001 — каталог ходит в сеть; отказоустойчивость
+        return None    # важнее любой его беды, и None здесь = прежнее поведение

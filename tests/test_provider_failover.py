@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pytest
 
+from core.model_catalog import classify_model
 from core.model_router import (
     ModelRoute,
     UsageTrackedLLM,
@@ -293,7 +294,11 @@ def test_local_connection_error_failovers_to_openai(monkeypatch):
 
     def factory(provider, model):
         assert provider == "openai"
-        assert model is None
+        # С 2026-08-15 сюда приходит РАВНЫЙ ПО УРОВНЮ, а не None: подмена
+        # провайдера перестала понижать задачу до дефолта нового провайдера
+        # (docs/CODE_NOTES.md, «Failover kept the provider and threw away the
+        # tier»). `qwen-local` — уровень standard, значит и замена standard.
+        assert classify_model(model) is classify_model("qwen-local")
         return backup
 
     ledger = _FakeLedger()
