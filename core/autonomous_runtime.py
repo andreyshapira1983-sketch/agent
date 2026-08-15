@@ -7,10 +7,9 @@ approval items instead of silently crossing a risky boundary.
 """
 from __future__ import annotations
 
-import logging
-
 import hashlib
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass, field

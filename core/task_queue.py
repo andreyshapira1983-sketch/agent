@@ -31,6 +31,34 @@ logger = logging.getLogger(__name__)
 #: block of default paths there still reads as one list.
 DEFAULT_RUNTIME_TASKS_PATH = Path("data") / "runtime_tasks.jsonl"
 
+#: Единственный путь, на котором за ходом сидит человек. Всё остальное —
+#: `runtime`, `daemon`, `self_apply`, `cli` — работа без присмотра, и новый путь
+#: попадёт сюда же: очередь скорее сохранит лишнее, чем потеряет работу.
+INTERACTIVE_GATEWAY_PATH = "repl"
+
+
+def checkpoint_is_resumable_work(gateway_path: str | None) -> bool:
+    """Стоит ли парковать прерванный ход как работу.
+
+    Прерванный `:auto-run` возобновлять надо: его никто не ждёт у экрана.
+    Прерванную реплику — нет: оператор сидит здесь и наберёт её заново.
+
+    Замер 2026-08-15: в очереди работ лежало 14 приостановленных «задач», из них
+    `Answer the question: привет`, `что ты чувствуешь когда ты неправ` и один
+    вставленный кусок лога. Очередь, которая кормит автономный режим, была
+    заполнена разговором.
+
+    Различие структурное, а не по тексту вопроса: `gateway_path` уже говорит,
+    на каком пути шёл ход, и рантайм ставит его сам (`autonomous_runtime`).
+    Судить по словам реплики значило бы гадать, чем «привет» отличается от
+    «почини X» — а это и есть тот разбор по словарю, который здесь всюду
+    проигрывает структурному факту.
+
+    Зачем: docs/CODE_NOTES.md, «The work queue was full of conversation».
+    """
+    return str(gateway_path or INTERACTIVE_GATEWAY_PATH) != INTERACTIVE_GATEWAY_PATH
+
+
 RuntimeTaskKind = Literal["auto_run", "resume_checkpoint"]
 RuntimeTaskStatus = Literal[
     "pending", "running", "done", "failed", "cancelled", "paused", "blocked"
