@@ -73,17 +73,28 @@ def test_other_absence_shapes_are_refuted(claim: str) -> None:
     assert "verified" not in _verdicts(claim, excerpt)
 
 
-def test_a_true_absence_claim_survives() -> None:
-    """ПРЕДОХРАНИТЕЛЬ: честное отсутствие не наказывается.
+def test_a_true_absence_claim_is_neither_refuted_nor_certified() -> None:
+    """ПРЕДОХРАНИТЕЛЬ жив, но третьим состоянием, а не сертификатом.
 
-    Предмета в выдержке нет — гейт молчит, и утверждение живёт по прежним
-    правилам. Иначе починка запретила бы говорить «этого здесь нет».
+    Опасение, ради которого этот тест писался, в силе: честное «этого здесь
+    нет» наказывать нельзя, иначе агент разучится говорить о границах. Гейт
+    опровержения на нём по-прежнему молчит.
+
+    Но и `verified` тут быть не может, и это следует из соседнего теста
+    `test_the_gate_only_subtracts`: выдержка усечена по построению. Здесь она
+    в две строки — из двух строк не выводится, чего в файле нет. С 2026-08-15
+    такое утверждение получает `topic_supported_but_claim_unverified`:
+    источник по теме, сертификата у утверждения нет. Это не наказание — в
+    `unverified_chunks` оно не попадает, и ответ неподтверждённым не считается
+    (docs/CODE_NOTES.md, «Absence was certified by a resolved citation»).
     """
     verdicts = _verdicts(
         'В файле отсутствует поле с именем `quantum_flux`.',
         "def decide_usage_eligibility(ep): ...\nusage_eligible: bool | None = None\n",
     )
-    assert "verified" in verdicts, f"истинное отсутствие демотировано: {verdicts}"
+    assert "refuted" not in verdicts, f"честное отсутствие объявлено ложью: {verdicts}"
+    assert "verified" not in verdicts, f"отсутствие сертифицировано выдержкой: {verdicts}"
+    assert "topic_supported_but_claim_unverified" in verdicts
 
 
 def test_a_positive_claim_is_untouched() -> None:
@@ -105,7 +116,11 @@ def test_prose_absence_without_a_named_subject_is_silent() -> None:
         "В этом модуле нет настоящей обработки ошибок.",
         "def decide_usage_eligibility(ep): ...\n",
     )
-    assert "verified" in verdicts
+    # Гейт ОПРОВЕРЖЕНИЯ молчит: названного предмета нет, судить не о чем.
+    # Сертификата тоже нет — это утверждение об отсутствии, а выдержкой
+    # отсутствие не доказывается ни при каком предмете.
+    assert "refuted" not in verdicts
+    assert "verified" not in verdicts
 
 
 def test_the_gate_only_subtracts() -> None:

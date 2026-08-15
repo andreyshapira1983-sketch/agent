@@ -1996,3 +1996,64 @@ What is here is the one rung whose evidence already existed in this repository:
 own outcomes, intersected with the current model list. Everything above it needs
 a tower that has not yet proved why it exists — and the standard for building
 one is the same as everywhere in this file: a measurement first, then the code.
+
+## Absence was certified by a resolved citation
+
+The operator asked to fix the contradiction axis. Three attempts to detect
+contradiction between free Russian sentences failed, and the third failure named
+the reason precisely enough to move the work somewhere useful.
+
+### Why contradiction-by-text is not buildable here
+
+    candidate 1  polarity clash on a shared stem      catches it, 72 of 200 noise
+    candidate 2  absence claim about a read file      misses it, 31 of 200 noise
+    candidate 3  polarity clash on a CODE carrier     misses it, 28 of 200 noise
+
+The third missed for a reason no pattern can fix. The measured answer contains
+both «предложение **не применяется**» — a negated OUTCOME, meaning the mechanism
+WORKS — and «**не предусмотрены** меры» — a negated MECHANISM, meaning it is
+absent. A regex sees «не …ется» in both. The difference is semantic, and it is
+exactly the difference that decides whether there is a contradiction.
+
+A fourth line of evidence agrees and predates all three: `ConflictResolver`
+already skips code sources because «reading them as propositions produced only
+false positives (MIR-054)».
+
+### The axis that was actually missing
+
+Not contradiction — CERTIFICATION. The false claim was stamped `verified`
+because its citation resolved. MIR-060 names this: `_find_semantic_support` is
+reachable only when nothing matched, so for exactly the claims that need
+evaluating the entailment check never runs.
+
+And the rule that closes it was already written in this repository, in the
+docstring of `absence_refuted_by_excerpt`:
+
+> Отсутствие в выдержке не доказывает ничего: выдержка усечена по построению.
+
+That rule was enforced in ONE direction. It stopped an excerpt from *refuting*
+a claim; it never stopped one from *certifying* an absence. Gate (d) demotes an
+absence claim when the excerpt contains what the claim says is missing. Gate (e)
+is its other half: an absence claim gets no certificate at all.
+
+The asymmetry that makes this shippable where contradiction detection was not: a
+false positive here does not accuse the agent of anything. It declines to
+certify — the claim becomes `topic_supported_but_claim_unverified`, which is not
+counted as unsupported and is not called a lie. The cost of over-firing is a
+missing stamp; for contradiction detection it was a false accusation, and 72 of
+200 made that unusable.
+
+The ambiguity that killed candidate 3 is harmless here for the same reason:
+whether «не применяется» negates the outcome or the mechanism, neither reading
+is provable from a truncated excerpt.
+
+Measured on the corpus: 9.4% of claim lines (233 of 2466) are negative, spread
+over 75 of 200 answers. Suite impact: three tests, two of which are the
+neighbouring absence contract and now assert the third state.
+
+### What is still open
+
+The contradiction axis itself. `self_contradiction` fires on its own axis —
+twice in the same log window — and the missing pair (two asserting claims
+disagreeing) has no detector and, on this evidence, no text-based one is
+available. Naming it is worth more than shipping the 72-of-200 rule.

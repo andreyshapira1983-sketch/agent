@@ -459,9 +459,17 @@ def absent_literal_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | N
 #: начале: отрицание в русском и английском стоит где угодно.
 _ABSENCE_ASSERTION_RE = re.compile(
     r"(?:\bотсутству\w*|\bне\s+(?:найден\w*|реализован\w*|существу\w*|"
-    r"содерж\w*|определ\w*)|\bнет\b|\bни\s+одного\b"
+    # +2026-08-15: глаголы отсутствия МЕХАНИЗМА. Живой прогон доложил «код не
+    # обрабатывает случаи низкой уверенности» и «не предусмотрены меры» — та же
+    # форма, что «не реализовано», и шаблон её не знал.
+    r"содерж\w*|определ\w*|предусмотр\w*|обрабатыва\w*|поддержива\w*|"
+    r"учитыва\w*)|\bнет\b|\bни\s+одного\b"
     r"|\bno\s+(?:\S+\s+){1,3}(?:exists?|found|implemented)|\bnot\s+(?:implemented|"
-    r"found|present|defined|exist)|\bdoes\s+not\s+(?:exist|contain|define)"
+    # +2026-08-15: английская сторона догоняет русскую — те же глаголы
+    # отсутствия механизма, и `no handling` без завершающего глагола.
+    r"found|present|defined|exist)|\bdoes\s+not\s+(?:exist|contain|define|"
+    r"implement|handle|support|check)"
+    r"|\bno\s+(?:handling|support|validation|check|mechanism)\b"
     r"|\babsent\b|\bmissing\b)",
     re.IGNORECASE,
 )
@@ -604,3 +612,28 @@ def literal_covered_by_union(
     # улики отмывало бы значения обратно (MIR-060).
     haystacks.extend((sid or "").lower() for sid in chain_source_ids or [])
     return all(any(n in h for h in haystacks) for n in needles)
+
+
+def absence_certifiable(claim: str, excerpt: str) -> bool:
+    """Можно ли вообще СЕРТИФИЦИРОВАТЬ утверждение об отсутствии выдержкой.
+
+    Нельзя, и это не мнение, а следствие правила, которое соседняя
+    `absence_refuted_by_excerpt` уже записала: «выдержка усечена по построению,
+    и трактовать её как полноту — ошибка». Правило применялось односторонне —
+    к опровержению — и не применялось к подтверждению. Из-за этого утверждение
+    «в коде нет обработки X», сославшееся на реальный файл, получало `verified`
+    просто потому, что ССЫЛКА РАЗРЕШИЛАСЬ (MIR-060: resolution short-circuits
+    evaluation).
+
+    Живой случай 2026-08-15: автономный прогон доложил, что
+    `SelfRepairController.run` не обрабатывает низкую уверенность. Обработка
+    есть — `core/self_repair.py:117` ставит `low_confidence` и выходит, — но
+    утверждение прошло как подтверждённое, и эпизод записан успехом.
+
+    Возвращает False всегда, когда кусок утверждает отсутствие: сертификата у
+    такого утверждения быть не может ни при какой выдержке. Опровержение
+    остаётся возможным и сильнее — им занимается `absence_reason`.
+
+    Зачем: docs/CODE_NOTES.md, «Absence was certified by a resolved citation».
+    """
+    return not asserts_absence(claim)
