@@ -121,9 +121,19 @@ def test_the_operator_is_not_told_the_answer_may_be_off_topic_across_scripts() -
 
 
 def test_the_operator_is_still_warned_when_the_measurement_is_valid() -> None:
-    """Ломка наоборот: заглушив ложные срабатывания, не заглушить истинные."""
+    """Ломка наоборот: заглушив ложные срабатывания, не заглушить истинные.
+
+    Отчёт здесь НЕ полностью подтверждён — намеренно. С 2026-08-15 полное
+    подтверждение само по себе снимает это предупреждение: улики хода
+    собирались под этот вопрос, и прокси по словам их не перебивает
+    (docs/CODE_NOTES.md, «The measure punished being answered»). Проверяемое
+    этим тестом — что при живом измерении предупреждение доходит — от того не
+    изменилось, изменилась только заглушка, которая это выражает.
+    """
+    report = _Report()
+    report.verified_chunks = 3
     summary = build_verification_summary(
-        _Report(),
+        report,
         chain=None,
         vector=ConfidenceVector(
             evidence_score=0.9, coherence_score=1.0,

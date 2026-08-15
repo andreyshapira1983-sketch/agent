@@ -279,13 +279,17 @@ def build_verification_summary(
     if tail:
         # Применимость спрашивается ДО значения: между разными системами письма
         # покрытие слов не измеряет соответствие задаче, и низкое число там —
-        # факт о клавиатуре, а не об ответе (замер 2026-08-10). Ось релевантности
-        # ортогональна уликам, поэтому предупреждение живёт и в хвосте
-        # «подтверждение не требовалось».
+        # факт о клавиатуре, а не об ответе (замер 2026-08-10). Ось ортогональна
+        # уликам, поэтому предупреждение живёт и в хвосте «не требовалось».
         _relevance = getattr(vector, "relevance_score", None)
         if not getattr(vector, "relevance_applicable", True):
             _relevance = None
-        if _relevance is not None and _relevance < _LOW_RELEVANCE:
+        # `verified != examined` — полное подтверждение снимает прокси: ответ
+        # построен на уликах, взятых под этот вопрос. Частичного мало; почему,
+        # чем мерялось и какой промах остался: docs/CODE_NOTES.md, «The measure
+        # punished being answered».
+        if (_relevance is not None and _relevance < _LOW_RELEVANCE
+                and verified != examined):
             tail += (
                 f" Соответствие вопросу: {_relevance:.2f} — ответ может отвечать "
                 "не на заданный вопрос."
