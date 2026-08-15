@@ -1137,3 +1137,37 @@ affordable and this becomes a two-line change.
 `tests/test_the_model_can_see_line_numbers.py` pins the helper AND pins that it
 is not wired, so the decision is a test rather than a memory. When the budget
 stops eating memory, delete that third test and pin the rendering instead.
+
+## Memory pays first, not last rites
+
+Memory is demoted in the total budget for a real reason: a months-old
+"Bug fixed…" record once survived the trim that removed the code disproving it,
+and the agent reported a fixed bug as current. Fresh evidence must outrank
+recollection.
+
+But demotion was implemented as *may be spent to nothing*, and that is a
+different rule. Measured live 2026-08-14: asked «что ты помнишь», three records
+were retrieved and formatted — 822 chars — and the block reached the model as
+**0**. The agent answered that it has no access to its memory, which was true of
+the prompt and reads to the operator as a broken memory system.
+
+The floor now distinguishes the two. In the first pass a demoted block's floor
+is its own `min_useful` — one whole record — so the surplus **cascades to the
+next block** exactly as MIR-073 made it cascade among normal blocks. Memory
+still pays first, and it still pays more than anything else; it simply cannot be
+annihilated while a whole record would fit. The relaxed pass restores the
+absolute floor, so a budget that genuinely cannot hold one record beside the
+evidence still drops the block whole and says so (MIR-092's notice).
+
+Measured on the same shape, one 754-char memory block against a 3 000-char file:
+
+    budget 2500 -> 283 kept, 1 record
+    budget  900 -> 282 kept, 1 record
+    budget  400 ->   0 kept, dropped with the notice
+
+Three tests moved their BUDGETS, not their assertions, and the distinction
+matters: each names a case ("a budget that leaves room for no whole record"),
+and the fix made that case unreachable at the old number. The new numbers were
+measured, not guessed — 480 for the integration pair, 900 for the drop-notice
+pair — and each is the point where the named case still occurs. A test whose
+premise has quietly stopped holding is worse than a red one.

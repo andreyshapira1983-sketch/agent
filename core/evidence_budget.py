@@ -291,6 +291,34 @@ def _drop_notice(old_len: int) -> str:
     )
 
 
+#: Never cut a block below this many chars.
+_MIN_CONTENT = 50
+
+
+def _block_floor(
+    label: str,
+    relaxed: bool,
+    *,
+    demoted: AbstractSet[str],
+    useful_floors: Mapping[str, int],
+    fair_min: int,
+) -> int:
+    """Smallest content size a block may be trimmed to on this pass.
+
+    A demoted block pays first, but not to nothing: the first pass floors it at
+    its own smallest indivisible item so the surplus cascades to the next block
+    instead of annihilating it. The relaxed pass restores the absolute floor, so
+    a budget that truly cannot hold one item still drops the block whole.
+    Why it matters: docs/CODE_NOTES.md, "Memory pays first, not last rites".
+    """
+    if label in demoted:
+        useful = useful_floors.get(label)
+        if relaxed or useful is None:
+            return _MIN_CONTENT
+        return max(_MIN_CONTENT, useful)
+    return _MIN_CONTENT if relaxed else fair_min
+
+
 def apply_total_budget(
     blocks: list[tuple[str, str]],
     *,
@@ -343,7 +371,6 @@ def apply_total_budget(
     # only makes a trim slightly deeper, never leaves the budget violated.
     # Notice = "\n...[TOTAL-BUDGET: trimmed to NNNNN of NNNNN chars to fit NNNNN-char total evidence budget]"
     _NOTICE_OVERHEAD = 120
-    _MIN_CONTENT     = 50          # never cut a block below this many chars
 
     # MIR-073 (measured live 2026-08-03): `target = old_len - excess` dumps the
     # ENTIRE overflow into one block, so the largest block — almost always the
@@ -372,15 +399,14 @@ def apply_total_budget(
     kepts = list(sizes)
 
     def _floor_for(index: int, relaxed: bool) -> int:
-        if relaxed or result[index][0] in demoted:
-            return _MIN_CONTENT
-        return _fair_min
+        return _block_floor(
+            result[index][0], relaxed,
+            demoted=demoted, useful_floors=_useful_floors, fair_min=_fair_min,
+        )
 
     def _smallest_possible(index: int, relaxed: bool) -> int:
-        """Size this block would have if trimmed as far as the floor allows."""
-        old = len(originals[index])
         floor = _floor_for(index, relaxed)
-        return floor + len(_trim_notice(floor, old, budget))
+        return floor + len(_trim_notice(floor, len(originals[index]), budget))
 
     for relaxed in (False, True):
         prev_total = sum(sizes) + 1  # sentinel to detect non-progress
