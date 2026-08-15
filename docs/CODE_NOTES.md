@@ -1626,3 +1626,56 @@ answer better. It makes the answer say what it is. The four
 `reasoning_action_mismatch` signals and the 0.08 relevance from that session are
 measurements of gpt-4o-mini, not of the agent, and should not be read as
 evidence about the agent's own behaviour.
+
+## The measure punished being answered
+
+The answer tail carried «Соответствие вопросу: 0.33 — ответ может отвечать не на
+заданный вопрос» under an answer that was correct, on topic, and verified 4 of 4.
+
+Measured over 200 stored episodes: of 45 answers whose every claim verified
+against evidence collected for that turn, 14 — **31%** — carried that warning.
+Four were read by hand and all four are plainly on topic:
+
+    «посмотри инструменты, конкретно…»  → lists tools/, 4/4 verified, 0.25
+    «что ты хотел бы улучшить в себе»   → names two gaps in its own code, 7/7, 0.18
+    «начни изучать файлы…»              → names three files studied, 13/13, 0.33
+
+The cause is in the questions. This operator writes conversational Russian full
+of second-person verbs — думаешь, помнишь, видишь, начни, знают — and a good
+answer answers them with facts rather than by echoing the verbs. Coverage of
+question words therefore falls exactly when the answer does its job.
+
+### What was tried and refused
+
+**Salience weighting** — the tool built earlier the same day. Refused, and the
+reason is worth keeping: in this corpus `core` weighs 2.13 and `знают` weighs
+5.30, the maximum. IDF measures *unusual*, and for someone working on one
+codebase the subject is the usual thing while the incidental phrasing is rare.
+The weighting is upside down for this purpose; on the bench it changed nothing.
+
+**Loosening the inflection match** (`мест`/`местах` fails at ratio 0.75, and so
+does `файлах`/`файлов`). This is a real defect in its own right, but as a fix
+here it only slides along one dial: false alarms 31%→20%, detection 44%→25%.
+Every stem-and-ending variant landed on the same trade. Left unfixed and
+recorded.
+
+### The bench that was nearly believed
+
+The first framing scored the gate at 0% false alarms — and it was circular: the
+"clean" label and the gate were the same signal (`verified > 0`). Numbers that
+good should be read as a warning about the experiment. What survives from the
+bench is the half that is not circular: the gate never fires on the murky set,
+so detection there is untouched at 44%. The evidence for the other half is the
+four episodes above, read by hand.
+
+### Where the line is drawn, and what it costs
+
+Not `verified > 0` but `verified == examined`. An existing test
+(`test_a_low_relevance_answer_says_so_in_the_operator_tail`) holds the harder
+case: 14 of 16 verified, and the answer is about something else. A turn's
+evidence chain gathers material on more than one subject, so an answer can be
+grounded in it and still address the wrong thing. Full verification closes that
+hole; partial does not.
+
+The cost is one known false alarm, kept deliberately: the live turn scoring 0.32
+with 2 of 3 verified was correct and is still warned about.
