@@ -120,3 +120,29 @@ def test_a_reason_cannot_flood_the_tail():
     ]
 
     assert len(substitution_notice(substituted_routes(rows, run_id="run_1"))) < 320
+
+
+def test_the_notice_survives_the_printer():
+    """Живая поломка 2026-08-15, ПОСЛЕ первой сборки: предупреждение легло в
+    черновик (`contributions=[…{'author': 'degraded_route', 'chars': 272}]`,
+    `rendered_chars=1556`) и не дошло до печати.
+
+    `format_human_response` собирает ответ по секциям и выбрасывает всё, чего
+    не узнала по фиксированному префиксу. На этом уже погибал хвост проверки —
+    ради этого и заведён `TAIL_PREFIX`. Тест держит живой путь целиком, потому
+    что все семь тестов выше были зелёными, когда оператор не увидел ни слова.
+    """
+    from core.answer_format import format_human_response
+
+    notice = substitution_notice(substituted_routes(_measured_session(), run_id="run_1"))
+    answer = (
+        "Conclusion: эпизодная память хранит случаи [general-knowledge]\n"
+        "Facts: - процедурная хранит способы [general-knowledge]\n"
+        "Sources: none\nConfidence: low\n"
+        f"{notice}"
+    )
+
+    printed = format_human_response(answer)
+
+    assert "gpt-4o-mini" in printed, "предупреждение снова не дошло до оператора"
+    assert "credit balance is too low" in printed

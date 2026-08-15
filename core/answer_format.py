@@ -20,6 +20,7 @@ import re
 from typing import Any
 
 from core.clarification_gate import ASK_BACK_PREFIX as _ASK_BACK_PREFIX
+from core.degraded_route import NOTICE_PREFIX as _SUBSTITUTED_MODEL_PREFIX
 from core.evidence import Evidence, ProvenanceChain
 from core.file_request_intent import extract_path_mentions, normalize_path_mention
 from core.verification_summary import TAIL_PREFIX as _VERIFICATION_TAIL_PREFIX
@@ -300,7 +301,8 @@ def format_human_response(answer: str) -> str:
         # (measured live, 2026-08-03) — so both are bucketed by their fixed
         # prefixes, independent of the current section.
         if stripped.startswith(
-            (_VERIFICATION_TAIL_PREFIX, _ASK_BACK_PREFIX)
+            (_VERIFICATION_TAIL_PREFIX, _ASK_BACK_PREFIX,
+             _SUBSTITUTED_MODEL_PREFIX)
         ):
             verification_tail_lines.append(stripped)
             continue
