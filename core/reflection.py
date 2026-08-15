@@ -19,6 +19,7 @@ This closes the loop that was previously only possible by a human:
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -28,6 +29,7 @@ from core.learning_planner import LearningPlan, LearningPlanner
 from core.llm import LLM
 from core.models import MemoryRecord
 from core.persistent_memory import PersistentMemoryStore
+from core.workspace_reference import names_workspace_path
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -146,6 +148,43 @@ class ReflectionReport:
 
 
 # ── Engine ────────────────────────────────────────────────────────────────────
+
+#: Похоже на адрес в репозитории, а не на название темы. Только для таких имён
+#: спрашивается диск: «general» или «memory subsystem» — не путь и проверке не
+#: подлежат.
+_PATH_SHAPED_RE = re.compile(r"[\w./\\-]+\.(?:py|md|json|jsonl|toml|yaml|yml)|/")
+
+
+def _checked_focus_area(focus: str, action: str) -> tuple[str, str]:
+    """Урок не вправе указывать на файл, которого нет.
+
+    Замерено на двух прогонах 2026-08-15: рефлексия записала десять уроков,
+    назвавших девять файлов, и НИ ОДИН из них не существует —
+    `core/reasoning.py`, `core/citation.py`, `core/user_contract.py`,
+    `core/file_management.py`… Настоящие модули называются иначе
+    (`reasoning_action_check.py`, `answer_contradiction.py`). Следующий прогон
+    достал эти уроки из памяти и пошёл читать выдуманные файлы, а не найдя их,
+    вывел новый «дефект» — уже об отсутствии выдуманного файла, с уверенностью
+    0.9. Круг замкнулся на вымысле.
+
+    Само наблюдение при этом верное: `reasoning_action_mismatch` действительно
+    сработал десять раз. Поэтому урок остаётся, а выдуманный адрес снимается —
+    и `repair` понижается до `monitor`: починка без цели не починка, и хранить
+    её как задачу значит звать следующий прогон в ту же пустоту.
+
+    Существование спрашивается у диска (`core/workspace_reference.py`), а не у
+    списка «правильных» имён: список устареет с первым переименованием.
+
+    Зачем и чем мерялось: docs/CODE_NOTES.md, «Lessons about files that do not
+    exist».
+    """
+    focus = focus.strip()
+    if not focus or not _PATH_SHAPED_RE.search(focus):
+        return focus, action
+    if names_workspace_path(focus):
+        return focus, action
+    return "", ("monitor" if action == "repair" else action)
+
 
 class ReflectionEngine:
     """Reads recent agent logs, extracts failure patterns, formulates lessons.
@@ -477,11 +516,14 @@ class ReflectionEngine:
             action = item.get("action", "monitor")
             if action not in ("learn_more", "repair", "monitor"):
                 action = "monitor"
+            focus, action = _checked_focus_area(
+                str(item.get("focus_area", ""))[:200], action,
+            )
             lessons.append(
                 Lesson(
                     insight=str(item.get("insight", ""))[:300],
                     action=action,  # type: ignore[arg-type]
-                    focus_area=str(item.get("focus_area", ""))[:200],
+                    focus_area=focus,
                     confidence=float(item.get("confidence") or 0.5),
                     pattern=patterns[idx] if idx < len(patterns) else None,
                 )
