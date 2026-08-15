@@ -51,10 +51,10 @@ WATCH: dict[str, int] = {
     # place a citation and its excerpt are both in hand. Extracting it would
     # move the gate away from the decision it feeds.
     "core/verifier_core.py:verify": 339,  # +3 (2026-08-13, вдогонку R3): адреса улик всей цепи передаются в union — литерал, совпадающий с адресом прочитанной этим же ходом улики, не выдуман (живой 0d88ba79).  # +16 (2026-08-13, R2/R3): внутренний счётный гейт (иск не снимается подтверждённой цитатой) и снятие иска литералов объединением улик — обе ветки живут в цепочке вердиктов, её владелец — эта функция (docs/CODE_NOTES.md).  # +10 (2026-08-12): вердикт `refuted` — доказанная ложь перестала быть разновидностью «не подтверждено»; ветка вердикта обязана жить в цепочке вердиктов, её владелец — эта функция (docs/CODE_NOTES.md «REFUTED is a polarity»).  # +6 (2026-08-10): пятый гейт содержания — утверждение об отсутствии, опровергнутое собственной уликой; тело в verifier_utils.  # +4 (2026-08-10): четвёртый гейт содержания (MIR-060, класс «литерал есть в утверждении и отсутствует в улике»); тело вынесено в verifier_utils, здесь только вопрос и ответ.
-    "app/bootstrap.py:build_agent": 246,
+    "app/bootstrap.py:build_agent": 250,  # 246 -> 250 (2026-08-15): импорт, создание и передача causal_store — без него наблюдение не переживало ход (MIR-096).
     "core/loop_memory_write.py:AgentLoopMemoryWrite._record_experience_memory": 246,
     "core/referent_resolver.py:ReferentResolver.resolve": 240,
-    "core/loop_init.py:AgentLoopInit.__init__": 240,  # уехал целиком из core/loop.py; +1 (2026-08-13): поле last_evidence_support — вердикт применимости улик живёт рядом с отчётом проверки. +1 (2026-08-15): поле last_confidence_vector — ось соответствия вопросу едет в эпизод, и читатель обязан получить гарантированное поле, а не значение по умолчанию.
+    "core/loop_init.py:AgentLoopInit.__init__": 242,  # уехал целиком из core/loop.py; +1 (2026-08-13): поле last_evidence_support — вердикт применимости улик живёт рядом с отчётом проверки. +1 (2026-08-15): поле last_confidence_vector — ось соответствия вопросу едет в эпизод, и читатель обязан получить гарантированное поле, а не значение по умолчанию. +2 (2026-08-15): параметр и поле `causal_store` — нижняя ступень причинной лестницы приходит извне, как все хранилища.
     "core/self_apply_lane.py:run_self_apply_lane": 235,
     "core/model_router.py:ModelRouter.for_task": 227,
     "core/loop_memory_read.py:AgentLoopMemoryRead._retrieve_experience_memory": 218,

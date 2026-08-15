@@ -65,6 +65,8 @@ class AgentLoopMemoryWrite:
         # Берётся у `loop_verification`: ось соответствия вопросу едет в эпизод
         # из того же вектора, который печатает предупреждение оператору.
         last_confidence_vector: Any
+        # Нижняя ступень причинной лестницы; None — хранилище не заведено.
+        causal_store: Any
 
     def _unattended_run(self) -> bool:
         """True when nobody is at the keyboard for this run.
@@ -173,7 +175,16 @@ class AgentLoopMemoryWrite:
             )
             if candidate is None:
                 return
-            self.log.log("causal_observation", candidate.to_log_payload())
+            payload = candidate.to_log_payload()
+            # Пережить ход: журнал показывает наблюдение человеку, хранилище
+            # оставляет его лестнице. Повтор схлопывается по отпечатку, и
+            # `occurrences` — то, чем дефект отличается от случайности.
+            store = getattr(self, "causal_store", None)
+            if store is not None and not self._durable_learning_suppressed("episode"):
+                rec = store.record(candidate)
+                payload["fingerprint"] = rec.fingerprint
+                payload["occurrences"] = rec.occurrences
+            self.log.log("causal_observation", payload)
         except Exception as exc:  # наблюдательный сенсор: сбой в журнал
             self._sensor_failed("causal_observation", exc)
 

@@ -76,7 +76,9 @@ _DECLARED_DELETED_FIELDS = frozenset({"_planner_cache"})
 #: каталога — путь, как и все хранилища, приходит извне. Добавка допустима
 #: ТОЛЬКО в хвосте подписи: конструктор зовут позиционно, и вставка в середину
 #: сдвинула бы всё после неё. Это проверяется отдельно, ниже.
-_DECLARED_ADDED_PARAMS = ("pending_clarification_path",)
+#: 2026-08-15: `causal_store` — хранилище нижней ступени причинной
+#: лестницы; приходит извне, как все прочие хранилища. Тоже В ХВОСТЕ.
+_DECLARED_ADDED_PARAMS = ("pending_clarification_path", "causal_store")
 
 #: Санкционированные добавления ПОЛЕЙ (не параметров). 2026-08-13: вердикт
 #: применимости улик (`last_evidence_support`) хранится рядом с
@@ -91,6 +93,7 @@ _DECLARED_ADDED_PARAMS = ("pending_clarification_path",)
 _DECLARED_ADDED_FIELDS = frozenset({
     "last_evidence_support",
     "last_confidence_vector",
+    "causal_store",
 })
 
 

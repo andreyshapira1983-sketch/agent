@@ -1260,3 +1260,59 @@ and that episode is quarantined anyway.
 The file ceiling moved 1924 -> 1940 rather than the comments being cut further.
 Twice today a ceiling was refused and the growth shrunk instead — but there the
 growth was commentary. Here it is mechanism: a field, its plumbing, and a gate.
+
+## The rung nobody could stand on
+
+`core/causal_lesson.py` documents five rungs in its own header, and `_ORDER`
+lists them: OBSERVED → EXPLAINED → ATTRIBUTED → GENERALIZED → LESSON.
+`state_of` returned GENERALIZED **zero times**. The scope check sat before the
+generalization check, so everything between ATTRIBUTED and LESSON collapsed into
+ATTRIBUTED and the declared rung was unreachable.
+
+The order was wrong in a way that mattered beyond tidiness. A scope can only be
+stated honestly AFTER the rule has held somewhere else — demanding it first asks
+the author to guess the область before seeing it. Scope is now the LAST
+condition, and GENERALIZED is what a rule holds when it survived an independent
+case but has not yet said where it applies.
+
+The module's header defines that rung as «правило проверено на СЛУЧАЕ, отличном
+от исходного» and calls it «единственная честная замена запрету
+самоподтверждения». That is now a state the machine can actually produce.
+
+## The first rung is surviving the turn
+
+`_record_causal_observation` said so itself: «В хранилище ничего не кладётся».
+Every observation the detectors produced was written to the journal and died
+there, so the ladder above it had no bottom step to stand on (MIR-096).
+
+`core/causal_store.py` holds exactly the bottom rung and nothing above it. Three
+decisions are deliberate:
+
+- **The fingerprint is the detector signals, not the text.** `observed_mismatch`
+  carries run names and changes every turn, so matching on it would file a fresh
+  row per repetition — the very defect MIR-090 measured as fourteen identical
+  `dirty_tree_wait` episodes teaching nothing. Repetition is the signal that a
+  defect is a class rather than an accident, and it must be readable as a number
+  instead of reconstructable by counting rows.
+- **Episode ids accumulate, bounded.** A later `GeneralizationTest` needs an
+  INDEPENDENT case to check a rule against; keeping one id would leave it no
+  choice, keeping all of them is hoarding.
+- **Nothing above OBSERVED can be written here.** A record means «стоит
+  расследовать», never «доказано». The tag `lesson` is earned through
+  `state_of`, and a test asserts the file never contains it.
+
+`tests/test_the_sensor_reaches_the_journal.py` was built on 2026-08-11 to go RED
+the day a consumer appeared. It did, and its description was rewritten rather
+than its assertion relaxed. The proven chain is now
+
+    AgentLoop → sensor → event → journal → STORE (survives the turn)
+
+and the tripwire moved to the next honest frontier: **nothing in production
+climbs**. No production path builds a `CausalClaim`, proposes competing
+explanations or runs an intervention, so `state_of` never rises above OBSERVED
+on a live turn. EXPLAINED, ATTRIBUTED, GENERALIZED and LESSON exist, are pinned
+by unit tests, and are reached by nobody.
+
+That boundary is where construction stops and the experiment begins — building
+the climb means an agent that hypothesises and intervenes, which is a research
+loop, not a wiring job.

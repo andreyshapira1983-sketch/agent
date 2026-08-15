@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 187 modules across 12 groups._
+_Total: 188 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -71,6 +71,7 @@ _Planning, verification, clarification, control loop._
 | `core/loop_init` | Сборка ``AgentLoop`` — конструктор, вырезанный из ``core/loop.py`` дословно. |
 | `core/loop_gates` | Ворота цикла: четыре места, где ход заканчивается, не начавшись. |
 | `core/planner` | LLM-driven Planner (§3 Cognitive Core: Planning). |
+| `core/causal_store` | Наблюдения переживают ход — первая перекладина причинной лестницы. |
 | `core/planner_prompt` | The planner's system prompt (§3 Cognitive Core: Planning). |
 | `core/plan_parsing` | Parsing of the planner LLM's raw output (§3 Cognitive Core: Planning). |
 | `core/doc_routing` | Question classification and governing-doc routing for the planner. |
