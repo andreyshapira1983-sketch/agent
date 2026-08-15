@@ -1369,3 +1369,36 @@ The ladder refused to advance, which is the whole point.
 **The climb ends at GENERALIZED.** Naming the область where a rule was proven is
 left to a human: the machine has only the cases it ran, and scope is a claim
 about a boundary. `name_scope` exists, and nothing calls it automatically.
+
+## A path is an address, not a template
+
+Three measured live on 2026-08-15, one per tool, one class — a plan carrying a
+template where the concrete thing belongs:
+
+    file_write  content   <updated content for core/loop.py with experience_block…>
+    file_write  path      your_file_path_here.txt
+    file_read   path      core/<identified_file>.py
+
+Content had been guarded since 2026-08-04. The address was guarded by nobody.
+
+The third one is what it cost. Told to explain its OWN defect signal, the agent
+ran `list_dir core/` — the listing that contains `loop_attempt.py`, where the
+signal is raised — and then read `core/<identified_file>.py`. It reported
+honestly that the file was missing and could not proceed. The wall stood exactly
+between OBSERVED and EXPLAINED: investigating a signal, it could not reach the
+code that produces it. Not a failure of reasoning; a failure to arrive.
+
+Two guards, deliberately NOT merged, and not merged with "file not found"
+either. A missing path is a typo or a moved file, and hunting for it is the
+right response. An unfilled template means the plan was never finished, and the
+cure is to go back and plan — not to search the repository for
+`<identified_file>.py`.
+
+The path check reads paths as paths, not prose: bracket substitutions
+(`<…>`, `{{…}}`, `${…}`), the `XXX` stand-in, and marks people write to mean
+"put something here". Segment names like `to` and `your` count only in pairs,
+because `docs/path/tools.md` is a real file and `path/to/your/file.py` is not.
+
+Pinned by seven UNSEEN shapes alongside the three measured ones, per the
+operator's rule, and by eight real paths from this repository — a guard that
+stops those is worse than no guard.

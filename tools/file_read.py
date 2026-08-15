@@ -89,6 +89,15 @@ class FileReadTool(Tool):
             )
         if not path.strip():
             raise PermissionError("file_read path must be non-empty")
+        # Заготовка вместо адреса — не «файл не найден», а недостроенный план:
+        # см. core/placeholder_text и docs/CODE_NOTES.md.
+        from core.placeholder_text import looks_like_unfilled_path
+
+        if looks_like_unfilled_path(path):
+            raise ValueError(
+                f"refusing to read an unfilled placeholder path: {path!r} — "
+                "the plan carries a template where an address belongs"
+            )
         local_path = self._local_path(path)
         target = (
             local_path.resolve()

@@ -147,6 +147,13 @@ class FileWriteTool(Tool):
                 f"content must be a string, got {type(content).__name__}"
             )
 
+        from core.placeholder_text import looks_like_unfilled_path
+
+        if looks_like_unfilled_path(path):
+            raise ValueError(
+                f"refusing to write to an unfilled placeholder path: {path!r} — "
+                "the plan carries a template where an address belongs"
+            )
         if _looks_like_unfilled_placeholder(content):
             raise ValueError(
                 "refusing to write an unfilled placeholder to disk: "
