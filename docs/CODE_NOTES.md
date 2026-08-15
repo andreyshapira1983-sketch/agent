@@ -1834,3 +1834,66 @@ records losing everywhere else. The gap stays open and named.
 Note for whoever picks this up: `self_contradiction` DOES fire — twice in the
 same log window. The detector works on its own axis. What is missing is an axis,
 not a detector.
+
+## Lessons about files that do not exist
+
+Two autonomous runs on 2026-08-15, right after reflection was given sight of its
+own detectors. It wrote ten lessons naming nine files. **None of the nine
+exist.**
+
+    core/reasoning.py          core/citation.py           core/user_contract.py
+    core/logical_consistency.py  core/obligation_management.py
+    core/file_management.py    core/obligation_tracking.py
+    core/citation_management.py  core/logical_coherence.py
+
+The real modules are named differently — `reasoning_action_check.py`,
+`answer_contradiction.py`, `completion_contract.py`, `completion_obligation.py`.
+The model invented plausible names from the signal names.
+
+The second run is the part worth keeping. Memory retrieval offered those lessons
+back (`records_selected=3`), and the agent acted on them: it read
+`core/reasoning.py`, `core/citation.py`, `core/user_contract.py`, found nothing,
+and concluded «в коде не обнаружены файлы, указанные в запросе» — attributing to
+the request the names its own memory had supplied. Reflection then drew a NEW
+lesson from that failure: «The agent fails to find the user_contract.py file,
+suggesting a potential misconfiguration», focus `core/file_management.py`,
+confidence **0.9** — the highest of the batch, about a file that also does not
+exist. A defect derived from its own fabrication, banked more confidently than
+anything real.
+
+That is the loop closing on nothing, and it is what the operator named earlier
+as the death variant: the agent becomes more confident rather than harder to
+deceive — including by its own past conclusions.
+
+### The check
+
+Existence is asked of the disk (`core/workspace_reference.py`, built the same
+day for a different consumer), never of a list of "correct" names — a list goes
+stale at the first rename. Only path-shaped focus areas are checked: «general»
+or «memory subsystem» name a topic, not an address, and asking the filesystem
+about them would throw away lessons for not being about a file.
+
+The insight survives; only the invented address is dropped. The observation
+behind it is true — `reasoning_action_mismatch` really did fire ten times. And
+`repair` is downgraded to `monitor`, because a repair with no target is not a
+repair, and storing it as one invites the next run into the same emptiness.
+
+Verified live after the fix: the model invented five focus areas again, all five
+were stripped, every `repair` became `monitor`, and nothing fabricated reached
+memory.
+
+### What it costs
+
+`learning_plan` is now `None` on those runs. It is built from the focus areas of
+`learn_more`/`repair` lessons, and with the invented ones removed there is
+nothing left to build from. The previous plan was «study core/reasoning.py,
+core/file_management.py…» — a plan to study files that do not exist, which is
+worse than no plan. But the honest statement is that this path produces nothing
+until the model names a real file, and that gap is now visible instead of being
+filled with fiction.
+
+The ten poisoned records were deleted from `data/persistent_memory.jsonl` by
+operator decision, through the store's own `delete` so integrity hashes stay
+consistent; a copy was taken first. The selection criterion was exact and
+checked record by record: tagged `lesson`, naming a repository path, and that
+path absent from disk. Ten matched, nothing else did.
