@@ -7,12 +7,13 @@
 занимал один `_run_inner`. После этого куска: 3174 и 1981.
 
 Здесь живёт участок между синтезом и композицией: сырой ответ становится
-``ResponseDraft``, и шесть решателей высказываются о нём — объяснение
+``ResponseDraft``, и семь решателей высказываются о нём — объяснение
 проверки (MIR-069), сильный причинный кредит памяти (MIR-074), переспрос при
 нулевой проверке самоанализа (MIR-075), политика ранжировщика источников,
-гейт уточнений при исчерпанном перепланировании и структурное принуждение
-ответа. Каждый либо переписывает утверждения (``set_body``), либо навешивает
-что-то о них (``add_notice``); склейка — одна, в ``render()`` у вызывающего.
+гейт уточнений при исчерпанном перепланировании, структурное принуждение
+ответа и раскрытие подменённой модели. Каждый либо переписывает утверждения
+(``set_body``), либо навешивает что-то о них (``add_notice``); склейка — одна,
+в ``render()`` у вызывающего.
 До черновика все писали в одну переменную и побеждал последний, из-за чего
 усечение могло удалить уточняющие вопросы, которые цикл только что решил
 задать (измерено; см. `core/response_draft.py`).
@@ -30,9 +31,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from core.answer_format import file_scope_notice
+from core.degraded_route import substituted_routes, substitution_notice
 from core.low_evidence_policy import is_evidence_expected
 from core.output_policy import apply_ranker_output_policy
 from core.response_draft import ResponseDraft
+from core.run_context import current_run
 from core.unsupported_claims import apply_answer_enforcement
 from core.verification_summary import build_verification_summary
 
@@ -131,6 +134,48 @@ class AgentLoopResponseDeciders:
                 f"answer-safety check failed at {stage} and the safe refusal "
                 "could not be built; the unverified draft is not returned"
             ) from build_exc
+
+    def _disclose_substituted_model(self, draft: Any) -> None:
+        """Сказать в ОТВЕТЕ, если его написал запасной поставщик.
+
+        Живой сеанс 2026-08-15: десять отказов Anthropic подряд, все пять ходов
+        написал `gpt-4o-mini`, и оператор пять ходов принимал его отговорки
+        («я не могу читать», «я не могу обучаться») за свойства своего агента.
+        Маршрут был записан двадцать один раз — в журнале, которого читатель
+        ответа не видит.
+
+        Читается из леджера расходов: маршрут каждого вызова там уже есть, и
+        второй источник той же правды смог бы с ним разойтись.
+
+        Зачем: docs/CODE_NOTES.md, «The answer was not written by the model you
+        chose».
+        """
+        try:
+            ledger = getattr(getattr(self, "model_router", None), "usage_ledger", None)
+            routes = substituted_routes(
+                getattr(ledger, "records", None),
+                run_id=getattr(current_run(), "run_id", None),
+            )
+            notice = substitution_notice(routes)
+            if not notice:
+                return
+            self.log.log("model_substituted", {
+                "roles": [r.role for r in routes],
+                "answered": sorted({r.answered for r in routes}),
+                "intended": sorted({r.intended for r in routes}),
+                "refusals": sum(r.refusals for r in routes),
+            })
+            draft.add_notice(
+                author="degraded_route", channel="append", text=notice,
+            )
+        except (AttributeError, TypeError, ValueError) as exc:
+            # Узко и намеренно: сюда попадает только кривая запись леджера или
+            # черновик без `add_notice`. Предупреждение не вправе ронять ответ,
+            # но и молчать о своём провале не вправе — иначе на месте дефекта,
+            # который оно закрывает, окажется оно само.
+            self.log.log("model_substitution_disclosure_failed", {
+                "error_type": type(exc).__name__, "error": str(exc)[:300],
+            })
 
     def _credit_memory_records_used_in_the_answer(self) -> None:
         """Strong causal credit for memory that actually held up.
@@ -376,6 +421,7 @@ class AgentLoopResponseDeciders:
                 except Exception:
                     pass
 
+        self._disclose_substituted_model(draft)
         self._credit_memory_records_used_in_the_answer()
 
         # MIR-075: ask back instead of only philosophising unsupported. Fires

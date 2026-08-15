@@ -40,7 +40,7 @@ WATCH: dict[str, int] = {
     "core/loop_step_execution.py:AgentLoopStepExecution._execute_step": 568,
     "agent_tick.py:run_tick": 474,
     "core/loop_synthesis.py:AgentLoopSynthesis._synthesize": 390,  # уехал целиком из core/loop.py
-    "core/loop_response_deciders.py:AgentLoopResponseDeciders._build_response_draft": 160,  # +3 (2026-08-10): контракт завершения приходит сюда параметром — распознанный и непроверяемый запрет обязан дойти до оператора, а не умереть в журнале. +3 (2026-08-13): вердикт применимости улик передаётся композитору сводки — иначе хвост объявлял «нулевую уверенность» ходу, которому улики не полагались.
+    "core/loop_response_deciders.py:AgentLoopResponseDeciders._build_response_draft": 161,  # +3 (2026-08-10): контракт завершения приходит сюда параметром — распознанный и непроверяемый запрет обязан дойти до оператора, а не умереть в журнале. +3 (2026-08-13): вердикт применимости улик передаётся композитору сводки — иначе хвост объявлял «нулевую уверенность» ходу, которому улики не полагались.  # +1 (2026-08-15): седьмой решатель — раскрытие подмены модели. Рост это сам контракт: ответ обязан говорить, кем он написан, когда его написал не выбранный маршрутом поставщик (docs/CODE_NOTES.md, «The answer was not written by the model you chose»).
     "core/self_build_producer.py:produce_self_apply_proposal": 375,
     "core/campaign.py:run_campaign": 360,  # +10 (2026-08-13): чистый стрик наблюдений завершается как healthy_idle, стрик с повторами — по-прежнему стойло; хорошая новость перестала носить имя сбоя.
     "cli/command_dispatch.py:handle_meta_command": 349,

@@ -118,6 +118,7 @@
     "loop_repair.py::AgentLoopRepair.rollback": [],
     "loop_response_deciders.py::AgentLoopResponseDeciders._build_response_draft": [],
     "loop_response_deciders.py::AgentLoopResponseDeciders._credit_memory_records_used_in_the_answer": [],
+    "loop_response_deciders.py::AgentLoopResponseDeciders._disclose_substituted_model": [],
     "loop_response_deciders.py::AgentLoopResponseDeciders._enforce_answer_safety": [],
     "loop_response_deciders.py::AgentLoopResponseDeciders._safe_answer_after_enforcement_failure": [],
     "loop_run_tail.py::AgentLoopRunTail._check_completion_obligations": [
@@ -403,6 +404,10 @@
     [
       "loop_response_deciders.py::AgentLoopResponseDeciders._build_response_draft",
       "loop_response_deciders.py::AgentLoopResponseDeciders._credit_memory_records_used_in_the_answer"
+    ],
+    [
+      "loop_response_deciders.py::AgentLoopResponseDeciders._build_response_draft",
+      "loop_response_deciders.py::AgentLoopResponseDeciders._disclose_substituted_model"
     ],
     [
       "loop_response_deciders.py::AgentLoopResponseDeciders._build_response_draft",
