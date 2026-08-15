@@ -177,30 +177,42 @@ def blocking_reason(claim: CausalClaim) -> str:
 
     Пустая строка означает «дальше некуда»: либо это уже урок, либо
     опровержение. Пропуск обязан быть читаемым, иначе он неотличим от полноты.
+
+    Список, а не цепочка `if`: порядок и есть лестница, и он читается сверху
+    вниз одним взглядом. `state_of` разбирает возвращённую причину по началу
+    строки, поэтому тексты здесь — часть контракта.
     """
     if claim.refuted_reason.strip():
         return ""
-    if not claim.observation.evidence_refs:
-        return "нет улик наблюдения"
     alive = [e for e in claim.explanations if e.alive]
-    if len(claim.explanations) < 2:
-        return "нужны конкурирующие объяснения, минимум два"
-    if not claim.chosen.strip():
-        return "не выбрано объяснение"
-    if len(alive) > 1:
-        return "соперники не разобраны: живых объяснений больше одного"
-    if not claim.violated_invariant.strip():
-        return "не назван нарушенный инвариант"
-    if claim.intervention is None or not claim.intervention.proves_cause:
-        return "причина не доказана вмешательством"
-    if not claim.generalized_rule.strip():
-        return "не сформулировано обобщаемое правило"
-    if claim.generalization is None:
-        return "правило не проверено на новом случае"
-    if not claim.generalization.independent:
-        return "проверка обобщения идёт по исходному случаю"
-    if not claim.generalization.held:
-        return "правило не выдержало проверку на новом случае"
+    gen = claim.generalization
+    checks: tuple[tuple[bool, str], ...] = (
+        (not claim.observation.evidence_refs,
+         "нет улик наблюдения"),
+        (len(claim.explanations) < 2,
+         "нужны конкурирующие объяснения, минимум два"),
+        (not claim.chosen.strip(),
+         "не выбрано объяснение"),
+        (len(alive) > 1,
+         "соперники не разобраны: живых объяснений больше одного"),
+        (not claim.violated_invariant.strip(),
+         "не назван нарушенный инвариант"),
+        (claim.intervention is None or not claim.intervention.proves_cause,
+         "причина не доказана вмешательством"),
+        (not claim.generalized_rule.strip(),
+         "не сформулировано обобщаемое правило"),
+        (not claim.scope.strip(),
+         "не названа область применимости правила"),
+        (gen is None,
+         "правило не проверено на новом случае"),
+        (gen is not None and not gen.independent,
+         "проверка обобщения идёт по исходному случаю"),
+        (gen is not None and not gen.held,
+         "правило не выдержало проверку на новом случае"),
+    )
+    for failed, reason in checks:
+        if failed:
+            return reason
     return ""
 
 
@@ -211,7 +223,8 @@ def state_of(claim: CausalClaim) -> CausalState:
     reason = blocking_reason(claim)
     if not reason:
         return "LESSON"
-    if reason.startswith(("не сформулировано", "правило не проверено",
+    if reason.startswith(("не сформулировано", "не названа область",
+                          "правило не проверено",
                           "проверка обобщения", "правило не выдержало")):
         return "ATTRIBUTED"
     if reason.startswith(("не назван", "причина не доказана")):
@@ -222,6 +235,37 @@ def state_of(claim: CausalClaim) -> CausalState:
 def is_lesson(claim: CausalClaim) -> bool:
     """Заслужило ли утверждение право влиять на будущие планы."""
     return state_of(claim) == "LESSON"
+
+
+
+def proven_cases(claim: CausalClaim) -> tuple[str, ...]:
+    """Случаи, на которых правило показано. Больше их нет — остальное перенос."""
+    if claim.refuted_reason.strip():
+        return ()
+    gen = claim.generalization
+    if gen is None:
+        return ()
+    return tuple(dict.fromkeys(
+        ref for ref in (gen.origin_ref.strip(), gen.case_ref.strip()) if ref
+    ))
+
+
+def applies_to(claim: CausalClaim, *, case_ref: str) -> bool:
+    """Проверен ли урок на ЭТОМ случае.
+
+    Не совпадение слов, а перечень: правило показано на порождающем случае и
+    подтверждено на независимом, и это вся его доказанная область. Третий
+    случай — экстраполяция, и вызывающий обязан решить это сам, а не
+    унаследовать полномочия молча.
+
+    Живой пример в этом же репозитории: «память платит первой» выведено из
+    одного случая (устаревшая запись против свежего кода) и применялось ко
+    всем, включая «что ты помнишь», где обнуляло блок. Правило было верным там,
+    где доказано, и неверным снаружи; заметить это было некому.
+    """
+    if not is_lesson(claim):
+        return False
+    return case_ref.strip() in proven_cases(claim)
 
 
 def claim_tags(claim: CausalClaim) -> tuple[str, ...]:

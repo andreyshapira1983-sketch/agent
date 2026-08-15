@@ -1171,3 +1171,40 @@ and the fix made that case unreachable at the old number. The new numbers were
 measured, not guessed — 480 for the integration pair, 900 for the drop-notice
 pair — and each is the point where the named case still occurs. A test whose
 premise has quietly stopped holding is worse than a red one.
+
+## A lesson carries the scope it was proven in
+
+`CausalClaim.scope` existed as a field and was read by nobody — the shape this
+repository keeps producing: the mechanism is declared, the check is not wired.
+
+The cost is in this repository, not in theory. «Memory pays first» was derived
+from ONE incident — a stale "Bug fixed…" record outliving the code disproving
+it — and applied to every turn thereafter, including «что ты помнишь», where it
+zeroed the block and taught the agent it has no past. The rule was right in the
+case that produced it and wrong outside it, and nothing was obliged to notice,
+because the scope it held in was never written down. It took two days and a
+manual audit to find.
+
+Scope is now a condition of being a lesson:
+
+- `blocking_reason` refuses a rule with no stated область; the claim stays
+  `ATTRIBUTED` and says why. A rule proven somewhere is not a rule proven
+  everywhere, and a rule that cannot name where it was proven has not been.
+- `proven_cases` lists what the rule actually stood on: the originating case
+  and the independent one it held against. That is the whole demonstrated
+  область — an enumeration, not a similarity of words, so no phrasing widens it.
+- `applies_to(claim, case_ref=…)` answers whether the lesson is proven HERE. A
+  third case is extrapolation, and the caller must decide that knowingly
+  instead of inheriting authority silently. A refuted claim applies nowhere.
+
+What this changes about unlearning: it stops being a separate faculty someone
+must remember to exercise. A rule that meets a case outside its область does not
+"defend the past" — it simply does not apply there, and that is visible in the
+same turn rather than two days later.
+
+`blocking_reason` became a list of (condition, reason) pairs in the same change.
+The order IS the ladder and now reads top to bottom at a glance; `state_of`
+parses the returned reason by prefix, so those texts are part of the contract.
+
+Not built here: the agent produces only `OBSERVED` (MIR-096). Scope is required
+now, but there is as yet nobody to require it of.
