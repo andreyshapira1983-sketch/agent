@@ -1050,3 +1050,55 @@ Absence is proven by covering the search space: a defined scope, a known source
 set, coverage complete enough for that scope, and no matching producer, consumer
 or reference within it. None of MIR-060's three recorded fix directions reach
 this: all three still look for something to attach.
+
+## A path is a fact, a word is a guess
+
+Two routing decisions were made by vocabulary while a structural fact sat
+unused in the same string: does the text name something that exists in this
+repository?
+
+**The interception.** `"Открой core/loop.py и посмотри на планировщика."` routed
+to `:implementation-plan` — eight events, no model call, the agent never asked.
+`"Открой core/loop.py и почини строку 554."` reached it. One word apart. The
+soft branch of `_matches_implementation_plan` fired on a path plus the substring
+«план», which lives inside «планировщик» — the name of the agent's own node and
+the commonest word in any conversation about its architecture. The more
+precisely the operator described the system, the more certainly the input layer
+answered for it.
+
+A comment on the line above proved the class was already known: on 2026-08-13
+the stem «реализац» was removed after a live intercept. One stem out, «план»
+left in. Fitted to its sample.
+
+Two changes, both measured rather than argued:
+
+- The soft branch matches WHOLE WORDS (`_has_any_whole_word`). A substring
+  inside a longer word is a coincidence of letters, not a request.
+- «менять» and «тесты» left the soft term list. Probed first: with them removed,
+  87 routing tests still pass, because the strong branch above already holds the
+  explicit forms «какие файлы менять» and «какие тесты добавить». So they bought
+  nothing and cost «Посмотри docs/OPERATIONS.md, какие тесты там упомянуты» —
+  a read question — being taken as an order for a plan.
+
+The line that survives is defensible: an explicit request routes, a passing
+mention does not.
+
+**The web search.** `_drop_web_lookup_for_introspection` exists precisely to stop
+the agent searching the public web for its own code, and its table holds 51
+phrases. A task naming `core/loop.py`, `SynthesisState` and `tests/` matched
+none, so the planner searched for `SynthesisState tests site:tests/` three
+identical times and exhausted its replan budget.
+
+`core/workspace_reference.py` answers the question the table was approximating:
+`names_workspace_path` extracts path-shaped tokens and asks the filesystem
+whether we own them. Existence is the whole point — `numpy.py` in a question
+about the public web is a word, `core/loop.py` is this repository — so no
+phrasing evades it and none false-fires. It joins the introspection predicate as
+a first-class route in; the 51 terms stay as the fallback for questions that
+name no path.
+
+Deliberately NOT applied to the plan router. Tried first and reverted: an
+existing test asserts that «Проверь .\main.py и .\core\operator_intent.py и
+скажи какие файлы менять» IS an implementation-plan request, and it is right —
+a request can name paths and still order a plan. The path fact answers "can the
+public web help", not "what does the operator want".
