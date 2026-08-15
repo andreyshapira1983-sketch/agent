@@ -2322,3 +2322,30 @@ The reverse guard was nearly vacuous: the first test harness cited
 without ever reaching the gates they claimed to test. Caught because the
 reverse test failed for the wrong reason; the harness now uses the resolving
 `file:` label from the proven neighbour harness.
+
+## The excerpt that was a table of contents
+
+The quotation fix above survived its unit tests and still left three
+`[claim-refuted]` marks on the live run. Chased instead of explained away, the
+residue turned out to be a SECOND mechanism, upstream of both gates:
+
+    excerpt_lines.append(f"{ev.get('event','?')}: {ev.get('ts','')}")
+
+The read_logs evidence excerpt carried only event names and timestamps —
+`error: ` and nothing else. The payload — the error message, `recoverable:
+False`, the counters — was thrown away before the verifier ever saw it. So any
+TRUE claim about the CONTENT of a log record was refuted by gate (c),
+`cited_literal_absent`: its distinctive literals were missing from the evidence
+by construction. A field named `excerpt` was delivering a table of contents —
+the same class as `related_files` holding regex scrapings: the producer puts
+less into the field than its name promises, and every consumer downstream
+inherits the lie.
+
+The excerpt now carries each event as compact JSON (payload included), with the
+event-name fallback kept for unserialisable rows. The size boundary was always
+`make_evidence`'s `_truncate` at MAX_EXCERPT_CHARS; content just never reached
+it before.
+
+Live verification of both fixes together, same diagnostic question, third run:
+0 refuted (was 3), 4 of 5 verified (was 1 of 5). The remaining unverified chunk
+is the honest one — a statement about what this reading cannot show.
