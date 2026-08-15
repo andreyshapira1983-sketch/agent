@@ -1431,6 +1431,13 @@ def _parse_args() -> argparse.Namespace:
         help="Campaign goal (only used with --campaign).",
     )
     parser.add_argument(
+        "--charter",
+        action="store_true",
+        help="Let the agent pick its own campaign goal from the charter "
+             "(knowledge/doctrine/future/CORPORATE_MODEL.md) instead of --goal. "
+             "A declined pick exits with the named gate, not a fallback goal.",
+    )
+    parser.add_argument(
         "--max-cycles",
         type=int,
         default=24,
@@ -1483,11 +1490,27 @@ if __name__ == "__main__":
     if os.environ.get("AGENT_TICK_DRY_RUN", "1").strip().lower() in {"0", "false", "no"}:
         dry = False
 
+    goal = args.goal
+    if args.campaign and args.charter:
+        # Цель выбирает агент — от хартии; отказ выходит с названными воротами,
+        # а не подменяется целью по умолчанию (см. core/charter_goal.py).
+        from core.charter_goal import propose_charter_goal
+        from core.model_router import ModelRouter
+
+        pick = propose_charter_goal(ModelRouter.from_env().for_role("planner"), ws)
+        if pick.status != "proposed":
+            print(f"[CHARTER] no goal: {pick.reason}")
+            sys.exit(3)
+        print(f"[CHARTER] goal: {pick.goal}")
+        print(f"[CHARTER] anchored to: {pick.charter_quote!r}")
+        print(f"[CHARTER] success check: {pick.success_check}")
+        goal = pick.goal
+
     if args.campaign:
         sys.exit(run_paced_campaign(
             ws,
             dry_run=dry,
-            goal=args.goal,
+            goal=goal,
             max_cycles=args.max_cycles,
             cycle_pause_seconds=args.cycle_pause_seconds,
             max_wall_clock_seconds=args.max_wall_clock_seconds,
