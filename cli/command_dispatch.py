@@ -156,6 +156,10 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
         _print_persistent(agent)
         return True
 
+    if head == ":causal":
+        from cli.commands_causal import _handle_causal
+        return _handle_causal(rest.strip(), agent)
+
     if head in {":smart-memory", ":memory-status"}:
         return _handle_smart_memory(rest.strip(), agent)
 

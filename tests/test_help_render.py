@@ -122,8 +122,9 @@ def test_banner_tokens_agree_with_the_registry_flag():
     resolved = {reg.lookup(token) for token in help_module.BANNER_TOKENS} - {None}
     assert resolved == flagged
     # 71/72 -> 72/73 (2026-08-13): `:refresh-models` вошёл в баннер (R7).
-    assert len(flagged) == 72
-    assert len(help_module.BANNER_TOKENS) == 73
+    # 72/73 -> 73/74 (2026-08-15): `:causal` — водитель причинной лестницы.
+    assert len(flagged) == 73
+    assert len(help_module.BANNER_TOKENS) == 74
 
 
 # ── shape of the layout itself ───────────────────────────────────────────────
@@ -133,10 +134,10 @@ def test_layout_entry_kinds_are_known_and_counted():
     for entry in help_module.HELP_LAYOUT:
         kinds[entry[0]] = kinds.get(entry[0], 0) + 1
     assert set(kinds) == {"cmd", "raw", "blank"}
-    # Frozen shape: 83 lines render from the registry, 44 are verbatim (24
+    # Frozen shape: 84 lines render from the registry, 44 are verbatim (24
     # `flags:` continuations, 9 irregular command lines, 2 non-command lines,
     # 7 prose lines, 2 headings), 1 blank separates the two blocks.
-    assert kinds == {"cmd": 83, "raw": 44, "blank": 1}
+    assert kinds == {"cmd": 84, "raw": 44, "blank": 1}  # +1: :causal (2026-08-15)
 
 
 def test_help_module_imports_only_the_registry():

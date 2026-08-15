@@ -372,11 +372,15 @@ def test_recorded_surface_sizes():
     71 -> 72 (2026-08-13): `:refresh-models` joined the banner beside its
     read-only sibling — the visible half of the pair had steered the operator
     to a usage refusal while the catalog stayed expired (R7).
+
+    72 -> 73 (2026-08-15): `:causal` — водитель причинной лестницы. Виден в
+    баннере намеренно: подъём начинается с гипотез, а выдвигает их сегодня
+    только оператор, и команда, которой нет на виду, не будет вызвана.
     """
     in_banner = sum(1 for spec in reg.COMMANDS if spec.in_startup_summary)
-    assert in_banner == 72
-    assert len(reg.COMMANDS) == 92
-    assert len(reg.all_tokens()) == 141
+    assert in_banner == 73
+    assert len(reg.COMMANDS) == 93
+    assert len(reg.all_tokens()) == 142
 
 
 # ── deliberate exclusions ────────────────────────────────────────────────────
