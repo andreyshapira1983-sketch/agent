@@ -197,6 +197,18 @@ def _propose_repair_from_diagnosis(
         return f"repair_proposed:{item.id}"
 
 
+def _unwrap_outer_fence(text: str) -> str:
+    """Снять ОДНУ внешнюю markdown-ограду, если модель обернула ею весь ответ.
+
+    Живой грех первого черновика (ain_848a6f8f, 2026-08-15): ```md вокруг
+    всего документа вопреки инструкции. Внутренние ограды не трогаются.
+    """
+    lines = text.strip().splitlines()
+    if len(lines) >= 2 and lines[0].startswith("```") and lines[-1].strip() == "```":
+        return "\n".join(lines[1:-1]).strip()
+    return text
+
+
 def _propose_doctrine_draft(
     *, agent: Any, workspace: Any, goal: str, approval_inbox: Any,
 ) -> str | None:
@@ -242,6 +254,7 @@ def _propose_doctrine_draft(
         return "doc_declined:generation_error"
     if not draft:
         return "doc_declined:empty_draft"
+    draft = _unwrap_outer_fence(draft)
     from core.self_apply_bridge import build_self_apply_payload
 
     payload = build_self_apply_payload(

@@ -120,6 +120,31 @@ def test_a_draft_becomes_an_approval_item_not_a_file(tmp_path):
     assert not target.exists(), "на диск без человека не пишется ничего"
 
 
+def test_a_fence_wrapped_generation_is_unwrapped(tmp_path):
+    """Живой грех первого черновика (ain_848a6f8f): модель обернула документ
+    в ```md-ограду вопреки инструкции, и ограда ехала в файл. Одна внешняя
+    ограда снимается; ограды ВНУТРИ документа не трогаются.
+    """
+    class _Fenced:
+        def complete(self, **_kw) -> str:
+            return (
+                "```md\n# Doc — DRAFT\n\nA code sample:\n"
+                "```python\nx = 1\n```\n\nTail.\n```"
+            )
+
+    inbox = _Inbox()
+    note = _propose_doctrine_draft(
+        agent=_agent(_Fenced()), workspace=tmp_path, goal=_DOC_GOAL,
+        approval_inbox=inbox,
+    )
+
+    assert note.startswith("doc_draft_proposed")
+    (file,) = inbox.items[0]["payload"]["files"]
+    assert file["content"].startswith("# Doc — DRAFT")
+    assert "```python" in file["content"], "внутренние ограды не тронуты"
+    assert file["content"].rstrip().endswith("Tail.")
+
+
 def test_an_existing_document_is_not_overwritten(tmp_path):
     target = tmp_path / "knowledge" / "doctrine" / "future" / "MEMORY_LIFECYCLE_CONTRACT.md"
     target.parent.mkdir(parents=True, exist_ok=True)
