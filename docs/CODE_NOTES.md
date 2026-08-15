@@ -2487,3 +2487,29 @@ signature check, not by a rule fitted to the known case. The generator, not
 the sieve, is now the bottleneck: nano hallucinated constructor kwargs in two
 of three Stage A runs. That is a model-quality fact, and it feeds the next
 piece of work — router exploration of unmeasured same-tier models.
+
+## The measurement that locked itself in
+
+`substitute_model` was built to ask the measurement first and the tier map
+only when the measurement is silent. Correct — and self-sealing. The measured
+winner takes every failover call, so it alone accumulates runs; a peer that
+was never tried never reaches MIN_RUNS, its table row stays silent forever,
+and "measurement first" guarantees it is never chosen. Exploitation without
+exploration is a lock-in, not a preference.
+
+Live shape, 2026-08-15: with Anthropic refusing on credits, every failover
+went to `gpt-5.4-nano` (65% fully verified on 34 runs) while `gpt-5.6-terra`
+— the catalog's best standard-tier model behind the same OpenAI key — had not
+a single verdict-bearing run. The same hunt showed why this matters: nano
+hallucinated constructor kwargs in two of three Stage A attempts; the critic
+held, but the generator is the bottleneck, and the router had structurally
+disqualified every stronger candidate from ever being measured.
+
+The fix is a scouting window (`scout_model` + `scout_window`): one 600-second
+bucket in four, the failover hands the call to the same-tier peer that still
+lacks MIN_RUNS verdicts. Deterministic by the clock — no randomness, same
+moment same answer, testable without seeding. Boundaries, each carrying its
+own reason: a peer that reached MIN_RUNS is judged by the table, not the
+window (scouting ends where measurement begins); with nothing measured the
+floor already returns the peer, so the window changes nothing there; the
+measured winner keeps three buckets of four and remains the workhorse.
