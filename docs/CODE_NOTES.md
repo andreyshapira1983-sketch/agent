@@ -2468,3 +2468,22 @@ Also paid, again, the heredoc tax: a `\b` written through a shell heredoc
 arrived as a literal backspace character inside the regex — the exact trap the
 project memory warns about. Fixed via targeted line replacement; the lesson
 stands: regexes go through the editor, not through heredocs.
+
+### Live measurement, 2026-08-15 hunt (6 campaign attempts, gpt-5.4-nano)
+
+Three of six attempts produced a fully verified diagnosis (5/5). None reached
+the operator's queue, and that is the fix working, not failing:
+
+* attempt 3: Stage A invented `RepairProposal(test_args=…)` — vetoed by the
+  signature check;
+* attempt 6: invented `RepairProposal(test_selector=…)` — vetoed the same way;
+* attempt 5: grounded target `core/loop.py` — declined by the pre-existing
+  low-risk gate (`no_task`).
+
+`test_args` and `test_selector` are the falsification evidence: neither name
+appears anywhere in the critic — both are UNSEEN forms of the class the
+operator-denied proposal (`test_files`) belonged to, killed by the general
+signature check, not by a rule fitted to the known case. The generator, not
+the sieve, is now the bottleneck: nano hallucinated constructor kwargs in two
+of three Stage A runs. That is a model-quality fact, and it feeds the next
+piece of work — router exploration of unmeasured same-tier models.
