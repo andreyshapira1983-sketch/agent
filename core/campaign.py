@@ -203,7 +203,14 @@ def run_campaign(
             break
 
         try:
-            signals = gather(agent, workspace, approval_inbox)
+            # Цель передаётся сборщику сигналов: документная цель обязана быть
+            # видима выбирателю действий (живой замер 2026-08-15 — голова
+            # выбрала «напиши контракт», руки сделали привычный ремонт).
+            # Старые инжектированные сборщики трёх аргументов не ломаются.
+            try:
+                signals = gather(agent, workspace, approval_inbox, goal=config.goal)
+            except TypeError:
+                signals = gather(agent, workspace, approval_inbox)
             action: BestNextAction = signals["action"]
             now = now_fn()
 

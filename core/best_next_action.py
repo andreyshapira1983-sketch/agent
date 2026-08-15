@@ -20,6 +20,7 @@ same signals always yield the same advice.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -39,6 +40,9 @@ _P_DAEMON_DOWN = 100      # heartbeat missing/stale: agent may not be running
 _P_TICK_ERROR = 90        # last tick raised: the loop itself is broken
 _P_TESTS_FAIL = 80        # concrete failing tests: minimal repair is provable
 _P_TESTS_INCONCLUSIVE = 60  # timed-out/unknown: must not be read as healthy
+_P_CHARTER_DOCUMENT = 58  # the campaign goal itself asks for a doctrine draft:
+#   above the durable-issue habit (55) — live 2026-08-15 the head chose "draft
+#   the contract" and the hands did habitual repair — below health alarms (60+)
 _P_SELF_IMPROVEMENT_FAILURE = 55  # recent rollback/rejection despite clean health
 _P_INBOX_DEBT = 50        # duplicate proposals accumulating into admin debt
 _P_DRY_RUN_STUCK = 40     # many dry-run ticks: never applied anything, ask why
@@ -99,8 +103,55 @@ class BestNextAction:
         }
 
 
+#: Глагол черновика + имя .md в цели — иначе цель не документная.
+_DRAFT_VERB_RE = re.compile(
+    r"\b(draft|write|compose|напиш|черновик|состав)", re.IGNORECASE
+)
+_DOC_NAME_RE = re.compile(r"[\w/.\-]+\.md\b")
+
+
+def doc_target_from_goal(goal: str) -> str:
+    """Repo-путь документа, который цель просит написать, или "".
+
+    Явный путь в цели сохраняется; голое имя едет в knowledge/doctrine/future/
+    — дом целевых (ещё не действующих) документов доктрины.
+    """
+    text = str(goal or "")
+    if not _DRAFT_VERB_RE.search(text):
+        return ""
+    match = _DOC_NAME_RE.search(text)
+    if not match:
+        return ""
+    name = match.group(0).strip("'\"")
+    if "/" in name:
+        return name
+    return f"knowledge/doctrine/future/{name}"
+
+
+def _candidate_charter_document(goal: str) -> BestNextAction | None:
+    target = doc_target_from_goal(goal)
+    if not target:
+        return None
+    return BestNextAction(
+        action="draft_doctrine_document",
+        title=f"Draft {target.rsplit('/', 1)[-1]} as the campaign goal asks",
+        severity="medium",
+        priority=_P_CHARTER_DOCUMENT,
+        reason=(
+            "The campaign goal itself asks for a doctrine document; drafting "
+            "it IS the work, not a distraction from repair."
+        ),
+        evidence=(f"target document: {target}", f"goal: {goal[:200]}"),
+        unknowns=("whether the draft survives human review",),
+        risk="read_only",
+        recommended_command=None,
+        confidence=0.7,
+    )
+
+
 def select_best_next_action(
     *,
+    goal: str = "",
     result_status: str = "none",
     tests_health: str = "none",
     dry_run_streak: int = 0,
@@ -135,6 +186,10 @@ def select_best_next_action(
     returns an honest ``observe`` action rather than inventing busywork.
     """
     candidates: list[BestNextAction] = []
+
+    document = _candidate_charter_document(goal)
+    if document is not None:
+        candidates.append(document)
 
     daemon = _candidate_daemon(heartbeat_missing, heartbeat_stale, heartbeat_age_seconds, last_event)
     if daemon is not None:

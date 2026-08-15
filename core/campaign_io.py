@@ -50,7 +50,9 @@ def _action_focused_goal(goal: str, action: BestNextAction) -> str:
     return " ".join(parts)
 
 
-def _default_gather_signals(agent: Any, workspace: Any, approval_inbox: Any) -> dict[str, Any]:
+def _default_gather_signals(
+    agent: Any, workspace: Any, approval_inbox: Any, goal: str = "",
+) -> dict[str, Any]:
     from core.alert_ack import AlertAckStore
     from core.approval_inbox import ApprovalInbox
     from core.approval_triage import triage_inbox
@@ -78,6 +80,7 @@ def _default_gather_signals(agent: Any, workspace: Any, approval_inbox: Any) -> 
     # Зачем: docs/CODE_NOTES.md, «The unattended path was the blind one».
     open_issues, registry_available = _open_self_improvement_issues(ws)
     action = select_best_next_action(
+        goal=goal,
         result_status=str(hb.get("result_status", "none")),
         tests_health=str(hb.get("tests_health", "none")),
         dry_run_streak=int(hb.get("dry_run_streak", 0) or 0),
@@ -192,6 +195,75 @@ def _propose_repair_from_diagnosis(
         return None
     else:
         return f"repair_proposed:{item.id}"
+
+
+def _propose_doctrine_draft(
+    *, agent: Any, workspace: Any, goal: str, approval_inbox: Any,
+) -> str | None:
+    """Документная цель становится черновиком в очереди — не файлом на диске.
+
+    Живой замер 2026-08-15: первая хартийная кампания выбрала целью «напиши
+    MEMORY_LIFECYCLE_CONTRACT.md», а исполнилось привычное действие ремонта —
+    в каталоге не было документных рук. Здесь эти руки: генерация полного
+    markdown-черновика и заявка `self_apply_lane.run` — решение человека,
+    лента с полным сьютом и откатом; сам этот код на диск не пишет ничего.
+
+    Отказы честные и поимённые: no_target_doc (цель не называет документ),
+    doc_exists (перезапись существующего — отдельное решение, не черновик),
+    empty_draft (модель промолчала).
+    """
+    from core.best_next_action import doc_target_from_goal
+
+    target = doc_target_from_goal(goal)
+    if not target:
+        return "doc_declined:no_target_doc"
+    if (Path(workspace) / target).exists():
+        return "doc_declined:doc_exists"
+    charter = Path(workspace) / "knowledge" / "doctrine" / "future" / "CORPORATE_MODEL.md"
+    charter_text = charter.read_text(encoding="utf-8") if charter.is_file() else ""
+    system = (
+        "You are drafting a doctrine document for your own repository. Write "
+        "the COMPLETE markdown document and nothing else. It must open with a "
+        "STATUS banner naming itself DRAFT / TARGET (not implemented), honor "
+        "the charter's hard invariants (human-reserved authority stays), and "
+        "never claim a capability exists in code unless you can name the module."
+    )
+    user = (
+        f"Document to draft: {target}\nGoal: {goal}\n\n"
+        + (f"The charter it serves:\n{charter_text}" if charter_text else "")
+    )
+    try:
+        draft = str(agent.llm.complete(
+            system=system, user=user, max_tokens=6000, temperature=0.4,
+        ) or "").strip()
+    except Exception as exc:  # noqa: BLE001 — провод не вправе ронять кампанию
+        _log(agent, "campaign_doc_draft_failed", {"target": target,
+                                                  "error": str(exc)[:200]})
+        return "doc_declined:generation_error"
+    if not draft:
+        return "doc_declined:empty_draft"
+    from core.self_apply_bridge import build_self_apply_payload
+
+    payload = build_self_apply_payload(
+        files=[{"path": target, "content": draft + ("\n" if not draft.endswith("\n") else "")}],
+        reason=f"charter campaign goal: {goal[:300]}",
+        evidence=(f"goal: {goal[:200]}", f"target: {target}"),
+        test_paths=("tests",),
+        test_pattern=None,
+        origin="campaign_doctrine_draft",
+    )
+    item = approval_inbox.add(
+        operation="self_apply_lane.run",
+        summary=f"doctrine draft for {target}",
+        risk="reversible",
+        reasons=(f"goal-driven doctrine draft, {len(draft)} chars",),
+        payload=payload,
+        dedup_key=f"self_apply:{target}:campaign_doctrine_draft",
+    )
+    _log(agent, "campaign_doc_draft_proposed", {
+        "approval_id": item.id, "target": target, "chars": len(draft),
+    })
+    return f"doc_draft_proposed:{item.id}"
 
 
 def _propose_failing_test_from_diagnosis(
@@ -397,6 +469,15 @@ def _default_execute_action(
     )
     if repaired:
         proposal = f"{proposal}; {repaired}" if proposal else repaired
+    # Документные руки: цель, просящая документ доктрины, рождает черновик
+    # заявкой в очередь — см. _propose_doctrine_draft.
+    if action.action == "draft_doctrine_document" and not config.dry_run:
+        drafted = _propose_doctrine_draft(
+            agent=agent, workspace=workspace, goal=config.goal,
+            approval_inbox=approval_inbox,
+        )
+        if drafted:
+            proposal = f"{proposal}; {drafted}" if proposal else drafted
     return CampaignActionOutcome(
         result=report.status,
         llm_calls_spent=max(0, llm_after - llm_before),
