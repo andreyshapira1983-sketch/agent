@@ -32,6 +32,7 @@ Design choices pinned by the test suite:
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -478,10 +479,16 @@ def evidence_from_tool_result(
                 excerpt="",
                 confidence=0.30,
             )
+        # Содержимое события, не только имя: «error: <ts>» выбрасывало payload и
+        # гейт (c) опровергал верные пересказы (docs/CODE_NOTES.md). Объём — make_evidence.
         excerpt_lines: list[str] = []
         for ev in events[:20]:
-            if isinstance(ev, dict):
-                excerpt_lines.append(f"{ev.get('event','?')}: {ev.get('ts','')}")
+            if not isinstance(ev, dict):
+                continue
+            try:
+                excerpt_lines.append(json.dumps(ev, ensure_ascii=False, default=str))
+            except (TypeError, ValueError):
+                excerpt_lines.append(f"{ev.get('event', '?')}: {ev.get('ts', '')}")
         return make_evidence(
             kind="log_event",
             source_id=f"log_event:{trace}:{len(events)}",
