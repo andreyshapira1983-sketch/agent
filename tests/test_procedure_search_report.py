@@ -53,11 +53,17 @@ def test_a_candidate_only_store_reports_why_zero_surfaced(tmp_path: Path):
 
     result = store.search_with_report("what functions does core/x define")
 
+    # 2026-08-15: кандидаты предлагаются. Прежде здесь стоял ноль, и он был
+    # замкнутым кругом: кредит только предложенным, повышение только за кредит.
+    # Отличие «ноль по совпадению» от «ноль по зрелости» сохранено — просто
+    # второго рода нулей больше не бывает.
     assert isinstance(result, ProcedureSearchResult)
-    assert result.procedures == []
-    assert result.rejected_by.get("excluded_candidate") == 2
-    # The distinction that was invisible before: this is NOT a no-overlap zero.
-    assert "no_overlap" not in result.rejected_by
+    assert len(result.procedures) == 1
+    assert result.procedures[0].status == "candidate"
+    # Второй кандидат отсеян по СОВПАДЕНИЮ, а не по зрелости, и отчёт это
+    # по-прежнему различает — ради чего он и заводился.
+    assert result.rejected_by.get("no_overlap") == 1
+    assert "excluded_candidate" not in result.rejected_by
 
 
 def test_no_overlap_is_distinct_from_the_maturity_gate(tmp_path: Path):
@@ -81,8 +87,11 @@ def test_an_active_matching_procedure_still_surfaces(tmp_path: Path):
 
     result = store.search_with_report("list the functions")
 
-    assert [p.name for p in result.procedures] == ["read and enumerate functions"]
-    assert result.rejected_by.get("excluded_candidate") == 1
+    # Доказанная идёт первой — ради этого затвор и заводился. Кандидат теперь
+    # тоже виден, но НИКОГДА не впереди (2026-08-15).
+    assert result.procedures[0].name == "read and enumerate functions"
+    assert result.procedures[0].status == "active"
+    assert any(p.status == "candidate" for p in result.procedures)
 
 
 def test_search_still_returns_a_bare_list_for_existing_callers(tmp_path: Path):

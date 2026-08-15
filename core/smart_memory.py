@@ -1047,28 +1047,29 @@ class ProceduralMemoryStore:
                 procedures=[],
                 rejected_by={"no_query_tokens": len(procedures)} if procedures else {},
             )
-        scored: list[tuple[int, ProcedureRecord]] = []
-        excluded_candidate = 0
+        scored: list[tuple[int, int, ProcedureRecord]] = []
+        excluded_retired = 0
         no_overlap = 0
         for proc in procedures:
-            # A `candidate` is unproven and must not steer planning until a
-            # second independent success promotes it (MIR-003 A4 maturity gate).
-            # This is the sole path that injects procedures into the planner
-            # (`core/loop_methods2.py`), so the exclusion belongs here.
-            if proc.status == "candidate":
-                excluded_candidate += 1
+            # Кандидат ПОКАЗЫВАЕТСЯ: затвор зрелости смешивал видимость с
+            # кредитом и запирал круг. Почему и чем это мерялось:
+            # docs/CODE_NOTES.md, «The method that could not survive the turn».
+            if proc.status in {"obsolete", "needs_review"}:
+                excluded_retired += 1
                 continue
             haystack = " ".join([proc.name, " ".join(proc.trigger_tags), " ".join(proc.steps)])
             score = len(q_tokens & _tokens(haystack))
             if score:
-                scored.append((score, proc))
+                scored.append((score, 0 if proc.status == "candidate" else 1, proc))
             else:
                 no_overlap += 1
-        scored.sort(key=lambda item: (item[0], item[1].confidence, item[1].updated_at), reverse=True)
-        selected = [proc for _score, proc in scored[:limit]]
+        # Доказанность — ПЕРВЫЙ ключ: неподтверждённое не вытесняет подтверждённое.
+        scored.sort(key=lambda item: (item[1], item[0], item[2].confidence,
+                                      item[2].updated_at), reverse=True)
+        selected = [proc for _score, _proven, proc in scored[:limit]]
         rejected_by = {
             k: v for k, v in (
-                ("excluded_candidate", excluded_candidate),
+                ("excluded_retired", excluded_retired),
                 ("no_overlap", no_overlap),
                 ("over_limit", len(scored) - len(selected)),
             ) if v > 0
