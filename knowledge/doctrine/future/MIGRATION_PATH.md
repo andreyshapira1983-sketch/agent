@@ -1,4 +1,3 @@
-```md
 # STATUS: DRAFT / TARGET (not implemented)
 # knowledge/doctrine/future/MIGRATION_PATH.md
 
@@ -281,5 +280,3 @@ Changes to this doctrine require:
 - maintaining the “no implementation claims” rule
 
 Any proposed modifications should be treated as governance-rule updates for doctrine—reasoned, logged, and human-approved under the same authority constraints described in the charter.
-
-```
