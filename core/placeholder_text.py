@@ -62,9 +62,36 @@ _PATH_PLACEHOLDER_MARKS: tuple[str, ...] = (
 )
 
 
+#: Маркер незавершённой работы В САМОМ НАЧАЛЕ содержимого. Проверяется только у
+#: ОДНОСТРОЧНОГО содержимого: файл, который целиком состоит из одной строки
+#: «TODO: …», — заготовка по построению, а `# TODO: …` первой строкой обычного
+#: файла — законный комментарий, и его трогать нельзя.
+_WHOLE_FILE_TODO_RE = re.compile(r"^(?:TODO|FIXME|XXX|HACK)\b\s*[:\-—]", re.IGNORECASE)
+
+
 def looks_like_unfilled_content(content: str) -> bool:
-    """True, когда всё содержимое — одна незаполненная заготовка."""
+    """True, когда всё содержимое — одна незаполненная заготовка.
+
+    Две формы, обе измерены на живых вызовах `file_write` (31 в истории, 7 из
+    них однострочных):
+
+        <updated content for core/loop.py …>          угловая заготовка
+        TODO: executor заполняет после diff_file; …   записка конвейеру
+
+    Вторая появилась 2026-08-15: автономный прогон попытался записать её в
+    `core/loop.py` — в собственный управляющий цикл. Остановил его не этот
+    страж, а случайно висевшая заявка на одобрение.
+
+    Законные однострочные из того же корпуса (`verified-result`,
+    «Correction: The variable responsible for …») маркером не начинаются и
+    проходят.
+
+    Зачем и чем мерялось: docs/CODE_NOTES.md, «A note to the pipeline is not
+    file content».
+    """
     stripped = (content or "").strip()
+    if "\n" not in stripped and _WHOLE_FILE_TODO_RE.match(stripped):
+        return True
     if not SINGLE_TAG_RE.match(stripped):
         return False
     inner = stripped[1:-1]

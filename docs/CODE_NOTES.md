@@ -2057,3 +2057,44 @@ The contradiction axis itself. `self_contradiction` fires on its own axis —
 twice in the same log window — and the missing pair (two asserting claims
 disagreeing) has no detector and, on this evidence, no text-based one is
 available. Naming it is worth more than shipping the 72-of-200 rule.
+
+## A note to the pipeline is not file content
+
+An autonomous run on 2026-08-15 aimed `file_write` at `core/loop.py` — the
+agent's own control loop — with this as the whole content:
+
+    TODO: executor заполняет после diff_file; вставляет исправленный код
+    с конкретным багфикс-изменением и без затрагивания не связанных мест.
+
+The repository survived, and not because of the guard built for this. The
+gateway hard-stopped on `readiness_blocker: 1 approval item(s) pending` — a
+leftover approval from an earlier run. Two more gates stood behind it (an
+existing file is `irreversible`, so policy escalates, and no auto-approver was
+attached), so it would not have landed. But the dedicated guard was blind: it
+only knew the angle-bracket form.
+
+### The corpus decided the rule
+
+31 `file_write` calls in the log history, 7 of them single-line:
+
+    <preserve existing content read in step 1 and append …>   placeholder, caught
+    <updated content for core/loop.py …>                      placeholder, caught
+    <updated content for core/loop_synthesis.py …>            placeholder, caught
+    Добавление experience_block в файл. → your_file_path_here.txt   path caught it
+    TODO: executor заполняет после diff_file; …               NOT caught
+    verified-result                                           REAL
+    Correction: The variable responsible for … is …           REAL
+
+So the rule has to separate one line from two, and both real ones are ordinary
+prose that happens to be short. The discriminator is the marker at the very
+start — TODO/FIXME/XXX/HACK — and it is judged only on SINGLE-LINE content.
+That second half is the whole safety of it: `# TODO: refactor later` as the
+first line of a real module is a legitimate comment, and a file whose ENTIRE
+content is one TODO line is a stub by construction.
+
+### The limit
+
+A placeholder that neither wears angle brackets nor opens with a marker still
+passes. «Добавление experience_block в файл.» is exactly that shape, and only
+its unfilled PATH caught it that day. Two guards cover two forms; there is no
+claim here that they cover the class.

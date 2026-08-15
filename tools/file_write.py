@@ -147,14 +147,21 @@ class FileWriteTool(Tool):
                 f"content must be a string, got {type(content).__name__}"
             )
 
-        from core.placeholder_text import looks_like_unfilled_path
+        from core.placeholder_text import (
+            looks_like_unfilled_content,
+            looks_like_unfilled_path,
+        )
 
         if looks_like_unfilled_path(path):
             raise ValueError(
                 f"refusing to write to an unfilled placeholder path: {path!r} — "
                 "the plan carries a template where an address belongs"
             )
-        if _looks_like_unfilled_placeholder(content):
+        # Два стража, а не один: местный знает угловую форму, общий — ещё и
+        # записку конвейеру («TODO: executor заполняет…»), которой местный не
+        # знал, когда автономный прогон нацелился ею в core/loop.py
+        # (docs/CODE_NOTES.md, «A note to the pipeline is not file content»).
+        if _looks_like_unfilled_placeholder(content) or looks_like_unfilled_content(content):
             raise ValueError(
                 "refusing to write an unfilled placeholder to disk: "
                 f"{content.strip()!r}. Synthesize the real content first, "
