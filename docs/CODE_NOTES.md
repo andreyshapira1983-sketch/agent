@@ -1102,3 +1102,38 @@ existing test asserts that «Проверь .\main.py и .\core\operator_intent.
 скажи какие файлы менять» IS an implementation-plan request, and it is right —
 a request can name paths and still order a plan. The path fact answers "can the
 public web help", not "what does the operator want".
+
+## Numbers cost what memory was already starved of
+
+Asked «какая строка», the agent answered 164 and 382 where the truth was 385 and
+450. It was not lying: `file_read` returns bare text, so any number it gives is
+counted by eye over a string it cannot index. Nothing catches a wrong one either
+— the citation `[file:core/loop_synthesis.py]` resolves whatever number rides on
+it (MIR-060).
+
+`core.answer_format.number_lines` was written to close that: a gutter of true
+1-based numbers, and — the hard half — an excerpt keeps the addresses it has in
+the FILE, not its position in the excerpt, recovered by walking the original
+forward. It is tested and it works.
+
+**It is deliberately not wired**, and three attempts to wire it are why.
+
+The gutter costs ~8.6% on a real file (measured on `core/loop.py`, 35 342 ->
+38 386 chars). Every one of those characters comes out of the same total budget,
+and long-term memory is spent FIRST by design — so the price lands exactly on
+the block that MIR-092 already measured reaching the model as **822 -> 0**.
+
+Attempt 1, numbering before the budget: six integration tests went red, all of
+them memory losing what it had. Attempt 2, numbering after the budget with
+recovered indices: the same, because the gutter still grows the block. Attempt
+3, numbering only files the budget did not cut: still red, because a file that
+fits its OWN budget can still push the TOTAL over, and memory pays again.
+
+The third failure is the answer. Line numbers cannot be bought for free, and the
+only currency on offer is the agent's own recollection — the thing MIR-096 says
+is already broken end to end. Fix the starvation first; then the gutter is
+affordable and this becomes a two-line change.
+
+`tests/test_the_model_can_see_line_numbers.py` pins the helper AND pins that it
+is not wired, so the decision is a test rather than a memory. When the budget
+stops eating memory, delete that third test and pin the rendering instead.
