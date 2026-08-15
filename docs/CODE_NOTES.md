@@ -2596,3 +2596,37 @@ prompt mechanically (`include_real_signatures` exists and is tested), but the
 first lesson ships with no machine action, because the measurement showed the
 prompt lever does not pay — enforcement lives in the critic. The lever stays
 for a stronger model to re-test.
+
+## The charter replaces the push
+
+Every campaign goal so far was typed by the operator — "его толкают и дают
+что-то делать". The operator's decision (2026-08-15): the agent should push
+off from the charter (knowledge/doctrine/future/CORPORATE_MODEL.md) and name
+its own next bounded step. Freedom stays proportional to reversibility:
+choosing a goal is thought and is free; the chosen goal enters the SAME
+campaign machinery with the same single-use effect grants and §9 rights.
+
+`core/charter_goal.py` judges picks structurally, not by taste: the goal must
+anchor in a verbatim line of the charter, must not repeat a recent
+campaign-ledger goal (token-Jaccard), must not widen the agent's own authority
+(the charter's hard invariant, enforced as defence in depth — the policy gates
+downstream stand as they stood), and must carry a success check — a goal
+without a check is a wish. A declined pick exits with the named gate, never a
+silent fallback goal.
+
+The anchor gate earned its shape live: asked to QUOTE the charter verbatim,
+the failover model paraphrased 4 times out of 4 — honest retellings, zero
+verbatim anchors. The fix is not loosening the gate (that is the
+fabricated-citation lane) but changing the model's job from copyist to
+pointer: the charter supplies numbered anchor lines, the model picks a number,
+and verbatimness is guaranteed by construction rather than by the model's
+diligence. After the change: 3 of 3 live picks passed, all anchored.
+
+And the first thing the agent chose for itself, three times out of three, was
+to CONCRETIZE its own charter — draft the MEMORY_LIFECYCLE_CONTRACT.md the
+charter names as a missing companion. The operator's same-day observation that
+the charter is too abstract arrived independently; the machine's first
+self-chosen goal agrees with him.
+
+Entry point: `agent_tick.py --campaign --charter` (goal resolved by the agent,
+printed with its anchor and success check before the run).

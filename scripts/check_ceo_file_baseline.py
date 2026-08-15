@@ -30,7 +30,10 @@ WATCH: dict[str, int] = {
     "core/loop.py": 761,                  # разбор на модули (правило оператора: потолок 2000): −828 строк ушло в core/loop_step_execution, −234 в core/loop_response_deciders, −423 в core/loop_synthesis, −106 в core/loop_evidence_chain, −123 в core/loop_verification, −122 в core/loop_observe, −165 в core/loop_run_tail, −57 и −63 в loop_evidence_chain/loop_context, −375 в core/loop_attempt, −341 в core/loop_verify_replan, −254 в core/loop_init, −84 в core/loop_synthesis, −158 мелких методов, −139 ворот в core/loop_gates, −97 пролога и обязательств; оркестратор +8 (2026-08-10): ребро происхождения прогона — обёртка `run` владеет идентичностью прогона, и записывать связь run_id/trace_id/session_id обязана она, а не сосед. +8 ещё: журнал без trace_id ребра не даёт, и это отсутствие названо явно (`run_identity_unavailable`) — иначе «связи нет» и «связь не записали» снова неразличимы. +1: контракт завершения передаётся в рубеж принятия ответа run-локалью.
     "main.py": 2000,                       # 47 today; the old extraction's win
     "core/planner.py": 560,                # measured 516 after piece 5 (host-tools context out)
-    "agent_tick.py": 1500,                 # measured 1458; aspiration 1300
+    "agent_tick.py": 1525,                 # measured 1522 (2026-08-15: --charter
+    # flag + charter goal resolution — the agent picks its own campaign goal,
+    # operator decision "строй хартию"); aspiration 1300 stands: the resolver
+    # body lives in core/charter_goal.py, only the wiring is here
     # 2026-08-05, MIR-077: 1397 -> 1483. Ten broad handlers here were the
     # largest single concentration of the invisible-failure class; each now
     # journals its failure or says why silence is right. The file is further
