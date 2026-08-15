@@ -7,6 +7,7 @@ to procedures and surface stale knowledge risks.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -149,17 +150,13 @@ def _smoothed_confidence(success_count: int, failure_count: int) -> float:
 
 
 def _tokens(text: str) -> set[str]:
-    normalized = (
-        str(text or "")
-        .replace("\\", " ")
-        .replace("/", " ")
-        .replace("_", " ")
-        .replace("-", " ")
-        .replace(".", " ")
-    )
+    # Разделяет ЛЮБОЙ не-буквенно-цифровой знак, а не перечисленные пять. Живой
+    # замер 2026-08-15: `reasoning_action_mismatch,` с запятой не совпадал ни с
+    # чем, и подбор решали «где», «это», «все». Почему так и чем мерялось:
+    # docs/CODE_NOTES.md, «A comma is not a letter».
     return {
         token.casefold()
-        for token in normalized.split()
+        for token in re.split(r"[\W_]+", str(text or ""), flags=re.UNICODE)
         # Keep tokens over 2 chars, OR any token bearing a digit — short numeric
         # / alphanumeric tokens ("17", "23", "v2", "3d") are real match signal
         # that the length floor alone silently dropped (CORE-10). Purely

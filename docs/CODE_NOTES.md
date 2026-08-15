@@ -1449,3 +1449,54 @@ Five tests moved from the old contract to the new one. Each kept its real
 intent; what changed is that "a candidate is invisible" turned out to be
 self-defeating rather than protective, and that is now on the record with the
 number that proved it.
+
+## A comma is not a letter
+
+`_tokens` in `core/smart_memory.py` normalised five characters — `\ / _ - .` —
+and split on whitespace. Every other punctuation mark stayed glued to its word.
+Measured live on 2026-08-15 against the 31-record procedural store:
+
+    query "…сигнал reasoning_action_mismatch, и покажи строку."
+    tokens: ['action', 'core', 'mismatch,', 'reasoning', 'где', 'найди,', …]
+
+`mismatch,` matched nothing, and neither did `core,` in the next turn's query.
+What decided the winner instead was `все`, `где`, `это` — three function words,
+score 3. The topic contributed nothing at all.
+
+With the separator changed to any non-alphanumeric character, the same query's
+best match rose from 3 hits to 7 — `action`, `mismatch`, `reasoning`,
+`рождается`, `найди`, `core`, `где` — and the record it picked is about that
+same signal. The subject started deciding.
+
+### Two repairs that were measured and NOT shipped
+
+Both were proposed here and both lost to measurement. Recording them so the
+next reader does not re-derive them as fresh ideas.
+
+**Rarity weighting (IDF over the store).** The reasoning was that a word every
+record shares distinguishes nothing. The store disagrees: `это` and `где` occur
+in 5 of 31 records — they are RARE here. Thirty-one documents is far too small a
+corpus for frequency to discover a language's function words, so the weighting
+demoted nothing and mostly reshuffled noise.
+
+**Subject-before-prose ranking.** Parse the `Evidence gathered:` step, treat
+those tokens as the run's subject, and rank subject hits above prose hits. On a
+four-query bench it took the useful procedure out of the offered set in three of
+four cases. The principle is sound and the measurement refused it; it is not
+shipped.
+
+The bench itself was also wrong, and that is the more useful lesson. Its
+criterion — "a `shell_exec` workflow is in the top three" — is a proxy, and it
+scored the punctuation fix as a REGRESSION on one query. Looking at that query
+by hand showed the opposite: the fix had promoted a genuinely on-topic record to
+first place and pushed out a record that matched on the single word `где`. A
+proxy that disagrees with the thing it stands for is evidence about the proxy.
+
+### What was not the wall
+
+The finding that started this — "procedure tags are tool names, topic is
+missing" — was wrong, and the way it was wrong is worth keeping. It came from
+printing the first five records of the store. Those are the oldest. All four
+untopical records predate 2026-08-02, when commit d0b891e began folding question
+tokens into `trigger_tags`; every record created since carries its subject. The
+sample was ordered by age and read as if it were representative.
