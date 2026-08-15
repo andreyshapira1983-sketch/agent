@@ -54,7 +54,7 @@ WATCH: dict[str, int] = {
     "app/bootstrap.py:build_agent": 246,
     "core/loop_memory_write.py:AgentLoopMemoryWrite._record_experience_memory": 246,
     "core/referent_resolver.py:ReferentResolver.resolve": 240,
-    "core/loop_init.py:AgentLoopInit.__init__": 239,  # уехал целиком из core/loop.py; +1 (2026-08-13): поле last_evidence_support — вердикт применимости улик живёт рядом с отчётом проверки.
+    "core/loop_init.py:AgentLoopInit.__init__": 240,  # уехал целиком из core/loop.py; +1 (2026-08-13): поле last_evidence_support — вердикт применимости улик живёт рядом с отчётом проверки. +1 (2026-08-15): поле last_confidence_vector — ось соответствия вопросу едет в эпизод, и читатель обязан получить гарантированное поле, а не значение по умолчанию.
     "core/self_apply_lane.py:run_self_apply_lane": 235,
     "core/model_router.py:ModelRouter.for_task": 227,
     "core/loop_memory_read.py:AgentLoopMemoryRead._retrieve_experience_memory": 218,

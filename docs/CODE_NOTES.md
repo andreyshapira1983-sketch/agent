@@ -1208,3 +1208,55 @@ parses the returned reason by prefix, so those texts are part of the contract.
 
 Not built here: the agent produces only `OBSERVED` (MIR-096). Scope is required
 now, but there is as yet nobody to require it of.
+
+## Cited, scored, admitted — and off topic
+
+Given the minimal assignment «используй документацию Python как источник
+гипотез и проверяй их на своей системе», the agent ran one search for the
+literal phrase «official Python documentation» and reported that documentation
+exists, is updated, and has tutorials. Nothing about its own implementation,
+nothing tested, no scoped lesson.
+
+The episode was banked `outcome=success`, `answer_quality_score=0.8`,
+`usage_eligible=True`, `defect_signals=[]`.
+
+The score is not a judgement of the answer. It is
+
+    verified / (verified + unverified + weak)   =  4 / 5  =  0.8
+
+— the fraction of chunks whose citation RESOLVED. The search really did return
+pages about Python docs, so the citations were honest and the answer was empty.
+
+The same turn measured `relevance_score = 0.321` and printed «ответ может
+отвечать не на заданный вопрос» to the operator. The word `relevance` did not
+appear in `core/smart_memory.py` even once. Admission asked five questions —
+disqualified, outcome, completion, memory-sourced labels, `verified_chunks > 0`
+— and not one of them asks whether the episode answered its own question.
+
+So one quantity, "a citation resolved", was buying three different things:
+confidence in the answer, the episode's quality score, and a place in reusable
+experience. The quantity that measures whether the answer is about the question
+bought nothing. That is worse than a silent signal: the record goes into
+experience carrying 0.8 and an admission stamp while 0.32 sits beside it.
+
+`EpisodeRecord.relevance_score` is the third axis, and `decide_usage_eligibility`
+consults it. Three things are deliberate:
+
+- **The threshold is not invented.** `_LOW_RELEVANCE = 0.35` already exists for
+  the operator warning, derived from two production runs that answered a
+  question nobody asked (0.051 and 0.231). One line for both consumers: a lower
+  bar for memory would mean the system considers an answer good enough for
+  itself and not for the human.
+- **The axis only ever subtracts.** `None` means never measured — legacy rows
+  and turns where the axis does not apply — and an absent measurement is not a
+  failing one.
+- **It is wired to the live writer**, taking the figure from the SAME vector
+  that prints the operator warning. A declared-and-unfilled field is exactly
+  what `CausalClaim.scope` had been until earlier the same day.
+
+The aborted-run writer passes nothing on purpose: there is no answer to compare,
+and that episode is quarantined anyway.
+
+The file ceiling moved 1924 -> 1940 rather than the comments being cut further.
+Twice today a ceiling was refused and the growth shrunk instead — but there the
+growth was commentary. Here it is mechanism: a field, its plumbing, and a gate.

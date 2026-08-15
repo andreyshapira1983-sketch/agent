@@ -62,6 +62,9 @@ class AgentLoopMemoryWrite:
         # Берётся у `loop_sensor`: сбор аномалий — наблюдатель, и его
         # сбой обязан попасть в журнал, а не в тишину.
         _sensor_failed: Any
+        # Берётся у `loop_verification`: ось соответствия вопросу едет в эпизод
+        # из того же вектора, который печатает предупреждение оператору.
+        last_confidence_vector: Any
 
     def _unattended_run(self) -> bool:
         """True when nobody is at the keyboard for this run.
@@ -238,6 +241,10 @@ class AgentLoopMemoryWrite:
                 verified_chunks=verified_chunks,
                 unverified_chunks=unverified_chunks,
                 weak_chunks=weak_chunks,
+                # Тот же вектор, что печатает предупреждение оператору. Зачем:
+                # docs/CODE_NOTES.md, «Cited, scored, admitted — and off topic».
+                relevance_score=getattr(
+                    self.last_confidence_vector, "relevance_score", None),
                 replan_exhausted=replan_exhausted,
                 run_id=run.run_id if run else "",
                 task_id=(run.task_id or "") if run else "",

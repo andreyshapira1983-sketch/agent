@@ -190,6 +190,9 @@ class EpisodeRecord:
     # None when no evidence chunks were seen at all — the fraction is undefined,
     # NOT perfect. Computed from the chunk counts; not stored in the JSONL.
     answer_quality_score: float | None = None
+    #: Про тот ли вопрос ответ. `None` = не измеряли, и это НЕ провал. Зачем:
+    #: docs/CODE_NOTES.md, «Cited, scored, admitted — and off topic».
+    relevance_score: float | None = None
     tags: tuple[str, ...] = ()
     # Full answer text — stored verbatim for the episodic fast path.
     # Empty string for episodes created before this field was added.
@@ -1487,6 +1490,12 @@ def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
         return False
     if any(str(label).startswith("memory:") for label in episode.source_labels):
         return False
+    # Третья ось: первые две спрашивают, устояли ли утверждения, эта — про тот
+    # ли они вопрос. Порог общий с предупреждением оператору, из замера.
+    from core.verification_summary import _LOW_RELEVANCE
+
+    if episode.relevance_score is not None and episode.relevance_score < _LOW_RELEVANCE:
+        return False
     return episode.verified_chunks > 0
 
 
@@ -1621,6 +1630,7 @@ def episode_from_agent_cycle(
     used_procedure_ids: tuple[str, ...] | None = None,
     declared_completion: str | None = None,
     defect_signals: Iterable[str] | None = None,
+    relevance_score: float | None = None,
     on_audit: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> EpisodeRecord:
     """Build an episode from one finished cycle.
@@ -1687,6 +1697,7 @@ def episode_from_agent_cycle(
         weak_chunks=weak,
         replan_exhausted=bool(replan_exhausted),
         answer_quality_score=_compute_quality_score(verified, unverified, weak),
+        relevance_score=relevance_score,
         tags=tags,
         task_id=str(task_id or ""),
         run_id=str(run_id or ""),
