@@ -301,6 +301,7 @@ class AgentLoopInit:
         # tests and operators can see why dialogue evidence was (not) admitted.
         self.last_self_analysis: SelfAnalysisDecision | None = None
         # MVP-14.3/14.3x — trust metadata over the Evidence chain.
+        self.last_confidence_vector: Any = None  # читает запись памяти
         # Source ranking is logged/exposed, and Ranker-to-Output Policy uses
         # it to cap confidence for unsuitable realtime sources.
         self.last_source_ranking: SourceRankingReport | None = None

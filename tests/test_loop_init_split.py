@@ -83,7 +83,15 @@ _DECLARED_ADDED_PARAMS = ("pending_clarification_path",)
 #: `last_verification`, чтобы сводка проверки читала то же решение, что
 #: журналировал наблюдатель, — иначе хвост объявлял «уверенность: нулевая»
 #: ходу, которому улики не полагались (трасса da0f132b).
-_DECLARED_ADDED_FIELDS = frozenset({"last_evidence_support"})
+#: 2026-08-15: `last_confidence_vector` — ось соответствия вопросу едет из
+#: него в эпизод, и допуск в опыт её спрашивает. Гарантируется здесь, а не
+#: значением по умолчанию у читателя: упавший проверяющий до своей
+#: установки не доходит, а значение по умолчанию прятало бы поле, которое
+#: никто не гарантирует (tests/test_cross_mixin_fields_are_guaranteed).
+_DECLARED_ADDED_FIELDS = frozenset({
+    "last_evidence_support",
+    "last_confidence_vector",
+})
 
 
 def _mentions_deleted(stmt: ast.stmt) -> bool:
