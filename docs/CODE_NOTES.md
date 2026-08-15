@@ -2552,3 +2552,47 @@ lane's classifier stay, so config/, secrets, lockfiles and non-repo paths
 remain closed to everyone. Stage B keeps its own gates: when the first blessed
 core test arrives, widening BUILD authority will be its own decision, made at
 that gate, not smuggled through this one.
+
+## Observations are not lessons
+
+The memory audit of 2026-08-15 found plenty of raw material (21 causal
+observations, 30 registry defects, all from live runs) condensing into almost
+nothing: the ladder above OBSERVED had no store and no delivery, so nothing the
+agent noticed could ever change what it does next (MIR-096's other half).
+
+The operator's safeguard, stated before any code: observations must NOT
+condense into "truth". "nano invented a RepairProposal kwarg three times" does
+not become "LESSON: nano cannot write tests" — it becomes a hypothesis, then an
+intervention, then an independent-case check, then a scope, and only the full
+ladder earns delivery. `core/causal_claim_store.py` persists claims whole and
+recomputes state on every read; `distilled_lessons` is the single door to the
+planner and returns only LESSON-state claims, as directives ("how to change the
+next action"), not memoirs.
+
+The first live climb then demonstrated why the safeguard exists — on its
+author. The obvious hypothesis "the model invents kwargs because the prompt
+never shows real signatures" reached LESSON on a weak prediction, and died on
+the strong one: with the pinned model and live file content, the baseline arm
+invented a FOURTH unseen name (`test_arguments`), and the signatures arm still
+invented — `action_id` passed to ApprovalDecision, whose real signature WAS in
+the prompt (a cross-class mixup: the field belongs to ApprovalRequest, listed
+right below). Signature display redirects invention; it does not eliminate it.
+The claim is REFUTED and stays visible.
+
+What survived is the operator's original directive, now measured: parameters
+remembered by the model are untrusted input REGARDLESS of prompt content; the
+guard that works is structural verification of every call against runtime
+signatures before proposal — the Stage A critic. Five distinct instances, all
+caught, none reaching the queue since deployment: test_files (operator-denied,
+pre-fix), test_args, test_selector (live vetoes), test_arguments and the
+action_id mixup (offline meter). That claim climbed the same ladder on measured
+rungs and is the store's first LESSON. Behavior A: a phantom-kwarg test reached
+the operator and cost a human review. Behavior B: four phantom attempts since,
+zero reached the queue.
+
+Delivery is wired but deliberately modest: `produce_coding_task` hands
+distilled lessons to the task builder; a card's `machine_action` can change the
+prompt mechanically (`include_real_signatures` exists and is tested), but the
+first lesson ships with no machine action, because the measurement showed the
+prompt lever does not pay — enforcement lives in the critic. The lever stays
+for a stronger model to re-test.

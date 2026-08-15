@@ -33,6 +33,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from core.causal_claim_store import distilled_lessons
 from core.self_apply_lane import FileChange, _normalize_rel, classify_patch_risk
 from core.self_build_producer import (
     _DEFAULT_CONFIDENCE_THRESHOLD,
@@ -191,12 +192,77 @@ _SOURCE_FRAMES: dict[str, tuple[str, str]] = {
 }
 
 
+def _signature_block(impl_path: str, *, max_lines: int = 40) -> str:
+    """Настоящие сигнатуры публичных вызываемых объектов модуля-цели.
+
+    Источник правды — работающий код через `inspect`, не память модели.
+    Любое сомнение (модуль не импортируется, сигнатура не читается) — молчание:
+    блок либо честный, либо его нет.
+    """
+    import importlib
+    import inspect
+
+    dotted = impl_path.replace("\\", "/").removesuffix(".py").replace("/", ".")
+    try:
+        module = importlib.import_module(dotted)
+    except Exception:  # noqa: BLE001 — сомнение = молчание
+        return ""
+    lines: list[str] = []
+    for name in sorted(vars(module)):
+        if name.startswith("_") or len(lines) >= max_lines:
+            continue
+        obj = getattr(module, name)
+        origin = str(getattr(obj, "__module__", "") or "")
+        # Свои реэкспорты — часть API поверхности модуля (RepairProposal живёт в
+        # self_repair_models и реэкспортирован в self_repair); чужое — шум.
+        own = origin == dotted or origin.split(".", 1)[0] in (
+            "core", "tools", "cli", "app",
+        )
+        if not callable(obj) or not own:
+            continue
+        try:
+            lines.append(f"{name}{inspect.signature(obj)}")
+        except (ValueError, TypeError):
+            continue
+    return "\n".join(lines)
+
+
+def _lesson_prompt_parts(
+    lessons: tuple[Any, ...], impl_path: str,
+) -> tuple[str, str]:
+    """(добавка к system, добавка к user) из выжимок уроков.
+
+    Урок меняет ПЛАН механически: `machine_action == "include_real_signatures"`
+    кладёт в подсказку настоящие сигнатуры цели, а не надежду, что модель
+    прочтёт прозу. Пустое хранилище — прежняя подсказка (поведение A).
+    """
+    if not lessons:
+        return "", ""
+    directives = "\n".join(
+        f"- {card.directive} [scope: {card.scope}]" for card in lessons
+    )
+    system_add = (
+        "\nLESSONS from your own verified past (each survived hypothesis, "
+        "intervention and an independent-case check):\n" + directives
+    )
+    user_add = ""
+    if any(card.machine_action == "include_real_signatures" for card in lessons):
+        block = _signature_block(impl_path)
+        if block:
+            user_add = (
+                "\n\nReal signatures from the running code (the source of "
+                "truth — call ONLY with these parameters):\n" + block
+            )
+    return system_add, user_add
+
+
 def _task_builder_generate(
     llm: Any, *, impl_path: str, quote: str, evidence_ref: str, current_content: str,
-    source_kind: str = "code_todo",
+    source_kind: str = "code_todo", lessons: tuple[Any, ...] = (),
 ) -> RoleOutput:
     """Ask the model for a task spec + a failing acceptance test (never code)."""
     frame, quote_label = _SOURCE_FRAMES.get(source_kind, _SOURCE_FRAMES["code_todo"])
+    lesson_system, lesson_user = _lesson_prompt_parts(lessons, impl_path)
     system = (
         "You are the Task Author on a self-build team. You are given "
         f"{frame} and the file's current content. "
@@ -214,12 +280,14 @@ def _task_builder_generate(
         '"test_path": "tests/test_<name>.py", '
         '"test_lines": ["import ...", "def test_...():", "    assert ..."], '
         '"confidence": <0..1>}.'
+        + lesson_system
     )
     user = (
         f"Implementation file: {impl_path}\n"
         f"Evidence (file:line): {evidence_ref}\n"
         f"{quote_label}: {quote}\n\n"
         f"Current content of {impl_path}:\n{current_content or '(empty)'}"
+        + lesson_user
     )
     parsed = _llm_json(llm, system=system, user=user, max_tokens=4000)
     if not parsed:
@@ -657,6 +725,7 @@ def produce_coding_task(
         evidence_ref=evidence_ref,
         current_content=current_content,
         source_kind=source_kind,
+        lessons=distilled_lessons(workspace),
     )
     roles.append(builder)
     if builder.decision != "built":
