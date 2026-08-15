@@ -110,6 +110,7 @@ class AgentLoopInit:
         # одного типа. В хвосте ни один прежний вызов не меняет смысла.
         # Объявлено в `tests/test_loop_init_split.py` поимённо.
         pending_clarification_path: Path | None = None,
+        causal_store: Any = None,  # тоже в хвост, причина выше
     ):
         self.registry = registry
         self.policy = policy
@@ -167,6 +168,7 @@ class AgentLoopInit:
         self.episodic_store = episodic_store
         self.procedural_store = procedural_store
         self.consolidation_store = consolidation_store
+        self.causal_store = causal_store
         self.knowledge_auto_write = bool(knowledge_auto_write)
         # When None, escalated actions are blocked outright (safe default).
         self.approval_provider = approval_provider

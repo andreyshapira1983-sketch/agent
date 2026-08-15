@@ -52,6 +52,8 @@ DEFAULT_PROCEDURAL_MEMORY_PATH = Path("data") / "procedural_memory.jsonl"
 DEFAULT_MEMORY_CONSOLIDATION_PATH = Path("data") / "memory_consolidation.jsonl"
 DEFAULT_USER_PROFILE_PATH = Path("data") / "user_profile.jsonl"
 DEFAULT_ASSUMPTIONS_PATH = Path("data") / "assumptions.jsonl"  # Layer 5
+#: Нижняя ступень причинной лестницы: наблюдение переживает ход.
+DEFAULT_CAUSAL_PATH = Path("data") / "causal_observations.jsonl"
 #: Where a clarification parks the question it asked ABOUT, so the operator's
 #: reply is added to that question instead of replacing it. Survives the
 #: process because the agent that asks and the agent that hears the answer
@@ -183,6 +185,7 @@ def build_agent(
     episodic_store: EpisodicMemoryStore | None = None
     procedural_store: ProceduralMemoryStore | None = None
     consolidation_store: MemoryConsolidationStore | None = None
+    causal_store = None
     if with_persistent:
         full_path = persistent_path or (workspace / DEFAULT_PERSISTENT_PATH)
         persistent_store = PersistentMemoryStore(full_path)
@@ -205,6 +208,8 @@ def build_agent(
         consolidation_store = MemoryConsolidationStore(
             workspace / DEFAULT_MEMORY_CONSOLIDATION_PATH
         )
+        from core.causal_store import CausalObservationStore
+        causal_store = CausalObservationStore(workspace / DEFAULT_CAUSAL_PATH)
 
     logger.log(
         "session_start",
@@ -296,6 +301,7 @@ def build_agent(
         episodic_store=episodic_store,
         procedural_store=procedural_store,
         consolidation_store=consolidation_store,
+        causal_store=causal_store,
         knowledge_auto_write=_env_bool("AGENT_KNOWLEDGE_AUTO_WRITE", True),
         approval_provider=approval_provider,
         user_profile_store=user_profile_store,

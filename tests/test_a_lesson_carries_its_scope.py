@@ -60,7 +60,10 @@ def test_a_rule_without_a_stated_scope_is_not_a_lesson():
     unscoped = _claim(scope="")
 
     assert not is_lesson(unscoped)
-    assert state_of(unscoped) == "ATTRIBUTED"
+    # GENERALIZED, не ATTRIBUTED: ступень стала достижимой в тот же день,
+    # когда область стала последним условием. Утверждение теста — «без
+    # области это не урок» — не изменилось, уточнилась ступень.
+    assert state_of(unscoped) == "GENERALIZED"
     assert "область" in blocking_reason(unscoped)
     assert "lesson" not in claim_tags(unscoped)
 

@@ -201,14 +201,18 @@ def blocking_reason(claim: CausalClaim) -> str:
          "причина не доказана вмешательством"),
         (not claim.generalized_rule.strip(),
          "не сформулировано обобщаемое правило"),
-        (not claim.scope.strip(),
-         "не названа область применимости правила"),
         (gen is None,
          "правило не проверено на новом случае"),
         (gen is not None and not gen.independent,
          "проверка обобщения идёт по исходному случаю"),
         (gen is not None and not gen.held,
          "правило не выдержало проверку на новом случае"),
+        # Область — ПОСЛЕДНЯЯ ступень, и порядок здесь содержательный: честно
+        # назвать область можно только после того, как правило где-то ещё
+        # выдержало. Требовать её раньше — просить угадать границу, не увидев
+        # её. См. docs/CODE_NOTES.md, «The rung nobody could stand on».
+        (not claim.scope.strip(),
+         "не названа область применимости правила"),
     )
     for failed, reason in checks:
         if failed:
@@ -223,8 +227,9 @@ def state_of(claim: CausalClaim) -> CausalState:
     reason = blocking_reason(claim)
     if not reason:
         return "LESSON"
-    if reason.startswith(("не сформулировано", "не названа область",
-                          "правило не проверено",
+    if reason.startswith("не названа область"):
+        return "GENERALIZED"
+    if reason.startswith(("не сформулировано", "правило не проверено",
                           "проверка обобщения", "правило не выдержало")):
         return "ATTRIBUTED"
     if reason.startswith(("не назван", "причина не доказана")):

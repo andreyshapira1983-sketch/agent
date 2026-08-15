@@ -530,6 +530,10 @@
     [
       "loop.py::AgentLoop._run_inner",
       "loop_gates.py::AgentLoopGates._contract_ambiguity_gate"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._log_causal_observation",
+      "loop_memory_write.py::AgentLoopMemoryWrite._durable_learning_suppressed"
     ]
   ]
 }

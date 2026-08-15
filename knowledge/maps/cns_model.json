@@ -1004,7 +1004,7 @@
     "_root": {
       "site": "core/loop_init.py::AgentLoopInit.__init__",
       "size_lines": 231,
-      "self_fields": 66,
+      "self_fields": 67,
       "note": "Invisible to the node census: the discovery rule skips dunders as plumbing, so the single place where the nervous system's state is created is outside the map. Per the operator's map (model error 4), an assignment proves the initialization site, not ownership.",
       "proven": [
         "initialization_site"
@@ -1027,8 +1027,8 @@
         "meaning": "written somewhere in the perimeter during a run, so the value does not survive as constructed. +1 on 2026-08-13: `last_evidence_support` — the applicability verdict from evaluate_evidence_support, kept beside last_verification so the verification summary reads the same ruling the observer logged; reset to None at the start of each evidence-support pass in loop_verification. +1 on 2026-08-15: `last_confidence_vector` — the relevance axis rides from it into the episode, so the reader needs a guaranteed field rather than a default that would hide unguaranteed state; loop_verification resets it per run, and a crashed verifier never reaches that line, which is why the constructor owns it."
       },
       "read_only_in_perimeter": {
-        "count": 36,
-        "meaning": "organs and configuration: the loop reads them, never reassigns. +1 on 2026-08-09 (second iteration of the clarification repair): `pending_clarification_path` — where the question a clarification was raised about waits for a reply the ASKING PROCESS will not live to hear. Injected like every other store, because AgentLoop does not know its workspace; `None` disables carry-forward, which is the one-shot profile."
+        "count": 37,
+        "meaning": "organs and configuration: the loop reads them, never reassigns. +1 on 2026-08-09 (second iteration of the clarification repair): `pending_clarification_path` — where the question a clarification was raised about waits for a reply the ASKING PROCESS will not live to hear. Injected like every other store, because AgentLoop does not know its workspace; `None` disables carry-forward, which is the one-shot profile. +1 on 2026-08-15: `causal_store` — the bottom rung of the causal ladder, built by bootstrap like every other store, so an observation survives the turn instead of dying in the journal (MIR-096)."
       },
       "outside_only": {
         "count": 1,
