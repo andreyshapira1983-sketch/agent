@@ -2227,3 +2227,39 @@ The next action is branched on the actual status: an approved item can be
 executed, a pending one only decided. Denying it moved the producer past this
 gate for the first time — `checked_gates=[kill_switch, budget, task,
 dirty_tree]` — onto the next honest blocker.
+
+## Recency is not relevance
+
+The circle the operator laughed about, closed. The whole two-day session began
+with the agent failing to diagnose itself because it read the wrong logs; the
+first autonomous campaign then found the same wall on its own and named it:
+`read_logs` returned 0 events at `total_events=5`, and the run stopped with
+«нужные для диагностики события недоступны в этом прогоне».
+
+The morning fix (MIR-089) taught `_resolve_log_path` not to read the LIVE
+trace. What remained was the second half: it picked the newest PAST trace by
+mtime, regardless of content. The newest past trace was five housekeeping lines
+of the session where the operator clicked through the approval inbox. The
+errors sat in the traces next to it.
+
+Now, when a filter is given and no trace_id is, the tool walks past traces
+newest-first and returns the newest one that CONTAINS matching events. Verified
+against the real workspace immediately: `event_filter=['error']` searched 8
+traces and returned the agent's own `FileNotFoundError: core/diagnostics.py` —
+the defect it manufactured yesterday — where the old code returned an empty
+housekeeping trace.
+
+The distinctions that hold the rule together:
+
+* **An explicit trace_id is an address.** The answer is about that trace, empty
+  or not; substituting a "better" one would answer a different question.
+* **No filter — old behaviour.** Without a filter, relevance is undefined and
+  the newest past trace is the right answer.
+* **«Нет нигде» is not «нет здесь».** `traces_searched` in the output makes the
+  two answers different: 0 events with traces_searched>1 means recent history
+  holds none of the requested events at all. That is the honest state the
+  operator asked the fix to preserve.
+* **The scan is bounded** (MAX_TRACE_SCAN=15): deeper is archaeology, and
+  archaeology gets an explicit trace_id.
+* **The live trace stays excluded** even when it contains matching events —
+  MIR-089's reason is unchanged: this run's outcome is not in it yet.
