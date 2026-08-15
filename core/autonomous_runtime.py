@@ -12,7 +12,7 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 from core.actuation_gateway import GatewayPath, gateway_path_from_receipt
@@ -464,6 +464,16 @@ class AutonomousRuntime:
             "include_tests": config.include_tests,
         })
 
+        # Прежде чем просить — спросить, не дано ли уже: «да» оператора никто
+        # не читал, и каждый прогон заводил новую заявку с тем же ключом.
+        # Разрешение ОДНОРАЗОВОЕ (executed) — право §9 остаётся у человека.
+        # docs/CODE_NOTES.md, «The approval nobody read».
+        if not config.dry_run and not config.effects_approved:
+            granted = self._granted_effects_approval(config)
+            if granted is not None:
+                config = replace(config, effects_approved=True)
+                self.approval_inbox.mark_executed(granted.id)
+                self._log("autonomous_effects_granted", {"approval_id": granted.id})
         if not config.dry_run and not config.effects_approved:
             _pending_before = {i.id for i in self.approval_inbox.pending()}
             item = self.approval_inbox.add(
@@ -495,10 +505,7 @@ class AutonomousRuntime:
                 # so a raw-text key would stop matching exactly when the goal
                 # carries a secret (review round #284), and long/sensitive goal
                 # text has no business living inside a durable key.
-                dedup_key=(
-                    "autonomous_runtime.allow_effects:"
-                    + hashlib.sha256(config.goal.encode("utf-8")).hexdigest()[:16]
-                ),
+                dedup_key=self._effects_dedup_key(config.goal),
             )
             if item.id not in _pending_before:
                 # A dedup hit adds nothing and must not burn request budget
@@ -1277,6 +1284,27 @@ class AutonomousRuntime:
             if isinstance(entry, dict):
                 out.append(entry)
         return out
+
+    def _granted_effects_approval(self, config: AutonomousRuntimeConfig):
+        """Одобренное разрешение ДЛЯ ЭТОЙ ЖЕ цели, или None.
+
+        Сверка по тому же ключу, которым заявка заводится: одобрение цели A не
+        разрешает цель B. Берётся самое старое подходящее.
+        """
+        key = self._effects_dedup_key(config.goal)
+        return next(
+            (i for i in self.approval_inbox.list(status="approved")
+             if i.operation == "autonomous_runtime.allow_effects"
+             and (i.payload or {}).get("dedup_key") == key),
+            None,
+        )
+
+    @staticmethod
+    def _effects_dedup_key(goal: str) -> str:
+        """Один ключ на цель — им и заводят заявку, и находят её одобренной."""
+        digest = hashlib.sha256(goal.encode("utf-8")).hexdigest()[:16]
+        return f"autonomous_runtime.allow_effects:{digest}"
+
 
     def _build_queue(self, config: AutonomousRuntimeConfig) -> list[AutonomousTask]:
         tasks = [

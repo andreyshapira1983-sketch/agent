@@ -2145,3 +2145,52 @@ signals rather than to an invented zero.
 The campaign now has work to choose. Whether its choice is good, and whether
 acting on it produces anything, is the next measurement — not something this
 wire establishes.
+
+## The approval nobody read
+
+The operator approved the campaign's request for effects and ran it again. It
+blocked again — on a NEW request id, `ain_bea806cc…`, where he had just approved
+`ain_369d8fdb…`.
+
+The dedup keys of the two were IDENTICAL:
+`autonomous_runtime.allow_effects:ef9f5b73c2a997bd`. Nothing had drifted. The
+guard that suppresses duplicates only looks at PENDING items — an approved item
+stops deduping by design — and the campaign never checked whether an approval
+existed.
+
+`effects_approved=True` was set in exactly one place in the repository:
+`cli/commands_approval.py`, inside `:approval-run`. The campaign does not go
+there. So the loop was closed:
+
+    campaign asks   -> blocks
+    human approves  -> the answer sits in the inbox
+    campaign asks   -> blocks again, new id, same key
+
+The human's "yes" was a letter to nobody. This is the same class as everything
+else in this file — a value produced and never consulted where the decision is
+made — and it sat on the last link between the operator's permission and the
+agent's autonomy.
+
+### One key, both directions
+
+`_effects_dedup_key` now builds the key for BOTH the request and the lookup. They
+were the same expression written twice; if they had drifted, the approval would
+have gone silently unread again, which is exactly how this defect reads.
+
+The grant is single-use: consumed approvals are marked `executed`. The §9 right
+to decide each run stays with the human — what changed is that the decision is
+now read. An approval for goal A does not unlock goal B: the lookup matches on
+the goal's key, not on the operation alone.
+
+### Measured after the fix
+
+    cycle 1  result=completed  llm_calls=4  cost_units=15
+             status -> learn -> goal, all three executed
+    cycle 2  REPEAT (no LLM, skipped)
+    cycle 3  REPEAT (no LLM, skipped)
+    campaign_stop status=completed
+
+First unattended run in this repository that chose its own work, received
+permission, and acted on it. What it produced is a separate question — it
+reported honestly that it could not complete the goal because reading logs
+returned an empty set.
