@@ -36,6 +36,12 @@ _MESSAGE_RE = re.compile(r"'message':\s*'([^']{4,400})'")
 #: то, ради чего он написан.
 _MAX_REASON = 160
 
+#: Неизменное начало строки. `format_human_response` собирает ответ по секциям
+#: и выбрасывает всё, чего не узнала по фиксированному префиксу — на этом уже
+#: погибал хвост проверки (см. `TAIL_PREFIX`), и на этом же живьём 2026-08-15
+#: погибло это предупреждение: в черновик оно попало, до печати не дошло.
+NOTICE_PREFIX = "⚠️ Отвечала запасная модель"
+
 
 @dataclass(frozen=True)
 class SubstitutedRoute:
@@ -109,7 +115,7 @@ def substitution_notice(routes: tuple[SubstitutedRoute, ...]) -> str:
     refusals = sum(r.refusals for r in routes)
     reason = next((r.reason for r in routes if r.reason), "")
     notice = (
-        f"⚠️ Отвечала запасная модель {', '.join(answered)} — основная "
+        f"{NOTICE_PREFIX} {', '.join(answered)} — основная "
         f"{', '.join(intended)} недоступна"
     )
     if refusals:

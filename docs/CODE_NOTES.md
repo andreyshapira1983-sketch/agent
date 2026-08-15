@@ -1605,6 +1605,20 @@ answers it while «недоступна» does not. The message lives only insid
 exception's repr, so it is extracted by pattern with the exception class as
 fallback, and capped — the tail is read by a person.
 
+### Green tests, and the operator still saw nothing
+
+The first build shipped with seven passing tests and failed live. The
+journal said `contributions=[…{'author': 'degraded_route', 'chars': 272}]`
+and `rendered_chars=1556` — the notice was in the draft and in the rendered
+string. It never reached the screen.
+
+`format_human_response` reassembles the answer by section and drops any line
+it does not recognise by a fixed prefix. The verification tail died on this
+exact edge before, which is why `TAIL_PREFIX` exists; the same trap, one
+consumer further along, caught the same class of thing again. The notice now
+has `NOTICE_PREFIX`, registered beside it, and a test that runs the printer
+rather than the builder.
+
 ### What this does not fix
 
 Nothing here restores the primary model, and nothing here makes a fallback
