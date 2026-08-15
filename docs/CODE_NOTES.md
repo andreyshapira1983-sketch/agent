@@ -1729,3 +1729,44 @@ The suite drives the real `_persist_resumable_budget_stop` against a real
 every budget window set to 0 (unlimited) the stop cannot be provoked without
 changing the operator's config, and provoking it that way would be testing the
 config, not the guard.
+
+## The approved goal that never ran
+
+The effects gate was opened on 2026-08-15 by operator decision, and the first
+goal-directed run found this immediately.
+
+`AutonomousRuntimeConfig.include_goal` defaults to `False`, and `_build_queue`
+only appends the `goal` task when it is true. The gate wrote the approval
+payload as `goal`, `dry_run`, `limit`, `include_tests`, `learning_limit` — and
+dropped `include_goal`. `:approval-run` rebuilt the config from that payload, so
+the flag fell back to its default.
+
+The consequence sat on the only path from human approval to autonomous action: a
+human approved "do X", and a health pass ran instead — status, learn, tests. The
+goal text survived only far enough to influence which files the ingest step
+read. Measured on the first run: `tasks=3`, no `goal` among them.
+
+Same class as everything else in this file — a value computed and never
+consulted where the decision is made.
+
+Payloads written before this carry no such field, so the default stays `False`
+for them: a human approved what they were shown at the time, and changing that
+retroactively would approve something else on their behalf.
+
+### What the goal run then produced
+
+Worth recording, because it is the honest answer to "what will it find on its
+own". It read `core/loop.py` and `core/self_repair.py` and reported a defect:
+low-confidence repair proposals are not handled.
+
+The finding is wrong. `core/self_repair.py:117` sets `low_confidence`, records a
+blocked step, logs the gate and returns; a second gate at line 206 does the same
+for measured confidence after tests. The answer's own Fact 1 describes that
+mechanism correctly, and its Conclusion and Fact 2 assert the opposite — a
+contradiction inside one answer.
+
+Four of six claims verified, `outcome=success`, `answer_quality_score=0.667`,
+and the episode was banked as a success that later retrieval can reuse.
+`reasoning_action_mismatch` and `user_contract_unrepresented` fired;
+`self_contradiction` did not. An answer that says a mechanism both exists and
+does not exist passed every gate.
