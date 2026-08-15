@@ -2513,3 +2513,21 @@ own reason: a peer that reached MIN_RUNS is judged by the table, not the
 window (scouting ends where measurement begins); with nothing measured the
 floor already returns the peer, so the window changes nothing there; the
 measured winner keeps three buckets of four and remains the workhorse.
+
+### The clock window failed its first live burst (same day)
+
+Hunt 3 ran on the freshly committed scout (first failover 16:12:44Z, commit
+16:11:08Z) and falsified the window design immediately: all 12 failover
+decisions landed inside one closed 30-minute stretch, because the entire
+hunt's decisions spanned four minutes. This agent's workload is bursty; a
+share of wall time is not a share of decisions, and a burst shorter than the
+closed stretch can miss the window entirely — the scout got zero calls in the
+very experiment built to feed it. (A 16:00:18Z pick of nano inside an open
+window was investigated and is not a defect: that process started 15:50:16Z,
+before the scout existed on disk, and ran the old code from memory.)
+
+The turn is now counted in runs, not clock time (`scout_turn`): every
+SCOUT_PERIOD-th verdict-bearing run in the (role, provider) table hands the
+next decision to the scout. A burst cannot skip the turn, because the count
+grows by the runs themselves. Same determinism, same boundaries; the clock
+window and its `now` parameter are gone.

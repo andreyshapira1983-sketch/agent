@@ -7,9 +7,10 @@ from __future__ import annotations
 import core.model_outcomes as mo
 from core.model_outcomes import (
     MIN_RUNS,
+    SCOUT_PERIOD,
     measure_model_outcomes,
     scout_model,
-    scout_window,
+    scout_turn,
     substitute_model,
 )
 
@@ -21,12 +22,12 @@ _UNMEASURED_PEER = "gpt-5.6-terra"
 
 def _corpus(model: str, n: int = MIN_RUNS):
     usage = [
-        {"run_id": f"r{i}", "role": "planner", "provider": "openai",
+        {"run_id": f"{model}-{i}", "role": "planner", "provider": "openai",
          "model": model, "status": "success"}
         for i in range(n)
     ]
     episodes = [
-        {"run_id": f"r{i}", "verified_chunks": 3, "unverified_chunks": 0,
+        {"run_id": f"{model}-{i}", "verified_chunks": 3, "unverified_chunks": 0,
          "defect_signals": []}
         for i in range(n)
     ]
@@ -37,8 +38,6 @@ def _outcomes(*models_runs: tuple[str, int]):
     usage, episodes = [], []
     for model, n in models_runs:
         u, e = _corpus(model, n)
-        for i, (uu, ee) in enumerate(zip(u, e, strict=True)):
-            uu["run_id"] = ee["run_id"] = f"{model}-{i}"
         usage += u
         episodes += e
     return measure_model_outcomes(usage, episodes)
@@ -65,7 +64,7 @@ def test_an_unmeasured_peer_is_named_as_scout(monkeypatch):
 
 def test_a_measured_peer_is_not_scouted(monkeypatch):
     """Разведка кончается там, где начинается замер: набрал прогоны — дальше
-    решает таблица, а не окно.
+    решает таблица, а не очередь.
     """
     _pin_world(monkeypatch)
 
@@ -100,42 +99,59 @@ def test_no_peer_means_no_scout(monkeypatch):
     assert picked is None
 
 
-def test_the_window_opens_one_bucket_in_four():
-    """Детерминировано по часам, без датчика случайности: ~10 минут разведки
-    из каждых 40, и тот же момент времени даёт тот же ответ.
+def test_the_turn_is_counted_in_runs_not_in_clock_time():
+    """Ломка первой конструкции, живой замер 2026-08-15: окно по настенным
+    часам (10 минут из 40) пропустило ВСЮ охоту №3 — 12 failover-решений за
+    4 минуты, все в закрытом отрезке, разведчик не получил ни одного вызова.
+    Нагрузка живёт вспышками, и доля времени не равна доле решений. Ход
+    разведчика считается по числу прогонов в таблице: каждый SCOUT_PERIOD-й
+    прогон отдаёт следующее решение разведчику — вспышка не может проскочить
+    мимо, потому что счёт растёт самими прогонами.
     """
-    assert scout_window(0.0) is True
-    assert scout_window(600.0) is False
-    assert scout_window(1200.0) is False
-    assert scout_window(1800.0) is False
-    assert scout_window(2400.0) is True
+    on_turn = _outcomes((_MEASURED, SCOUT_PERIOD * 2))
+    off_turn = _outcomes((_MEASURED, SCOUT_PERIOD * 2 + 1))
+
+    assert scout_turn(on_turn, role="planner", provider="openai") is True
+    assert scout_turn(off_turn, role="planner", provider="openai") is False
 
 
-def test_substitute_sends_the_scout_inside_the_window(monkeypatch):
+def test_other_roles_and_providers_do_not_advance_the_turn():
+    """Счёт у каждой пары роль+провайдер свой, как и сама таблица."""
+    usage, episodes = _corpus(_MEASURED, SCOUT_PERIOD * 2)
+    for i in range(3):
+        usage.append({"run_id": f"s{i}", "role": "synthesizer",
+                      "provider": "openai", "model": _MEASURED,
+                      "status": "success"})
+        episodes.append({"run_id": f"s{i}", "verified_chunks": 1,
+                         "unverified_chunks": 0, "defect_signals": []})
+    outcomes = measure_model_outcomes(usage, episodes)
+
+    assert scout_turn(outcomes, role="planner", provider="openai") is True
+
+
+def test_substitute_sends_the_scout_on_its_turn(monkeypatch):
     _pin_world(monkeypatch)
     monkeypatch.setattr(
         mo, "measured_outcomes",
-        lambda _w=None: _outcomes((_MEASURED, MIN_RUNS)),
+        lambda _w=None: _outcomes((_MEASURED, SCOUT_PERIOD * 2)),
     )
 
     picked = substitute_model(
-        role="planner", provider="openai",
-        current_model="claude-sonnet-5", now=0.0,
+        role="planner", provider="openai", current_model="claude-sonnet-5",
     )
 
     assert picked == _UNMEASURED_PEER
 
 
-def test_substitute_keeps_the_measured_winner_outside_the_window(monkeypatch):
+def test_substitute_keeps_the_measured_winner_off_turn(monkeypatch):
     _pin_world(monkeypatch)
     monkeypatch.setattr(
         mo, "measured_outcomes",
-        lambda _w=None: _outcomes((_MEASURED, MIN_RUNS)),
+        lambda _w=None: _outcomes((_MEASURED, SCOUT_PERIOD * 2 + 1)),
     )
 
     picked = substitute_model(
-        role="planner", provider="openai",
-        current_model="claude-sonnet-5", now=600.0,
+        role="planner", provider="openai", current_model="claude-sonnet-5",
     )
 
     assert picked == _MEASURED
@@ -143,16 +159,16 @@ def test_substitute_keeps_the_measured_winner_outside_the_window(monkeypatch):
 
 def test_the_floor_is_untouched_when_nothing_is_measured(monkeypatch):
     """Без замеров разведке нечего разведывать особым путём: пол (карта
-    уровней) и так отдаёт ровесника, в окне и вне окна одинаково.
+    уровней) и так отдаёт ровесника.
     """
     _pin_world(monkeypatch)
     monkeypatch.setattr(mo, "measured_outcomes", lambda _w=None: ())
 
-    for now in (0.0, 600.0):
-        assert substitute_model(
-            role="planner", provider="openai",
-            current_model="claude-sonnet-5", now=now,
-        ) == _UNMEASURED_PEER
+    picked = substitute_model(
+        role="planner", provider="openai", current_model="claude-sonnet-5",
+    )
+
+    assert picked == _UNMEASURED_PEER
 
 
 def test_the_live_selection_carries_the_scout():
@@ -163,4 +179,4 @@ def test_the_live_selection_carries_the_scout():
 
     source = inspect.getsource(substitute_model)
     assert "scout_model(" in source
-    assert "scout_window(" in source
+    assert "scout_turn(" in source
