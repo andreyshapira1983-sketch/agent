@@ -1316,3 +1316,56 @@ by unit tests, and are reached by nobody.
 That boundary is where construction stops and the experiment begins — building
 the climb means an agent that hypothesises and intervenes, which is a research
 loop, not a wiring job.
+
+## The climb, and where it stops being wiring
+
+`core/causal_lesson.py` judges; `core/causal_climb.py` moves. The split is
+deliberate — the judge must not depend on who is playing.
+
+**The rule the module exists for:** `Intervention.observed` is filled ONLY from
+what a runner returned. A string cannot be passed in. That is not API taste: if
+"what was observed" can be written, then ATTRIBUTED means «I am confident», and
+this ladder exists to refuse exactly that. A runner that measured nothing raises
+rather than recording an empty observation.
+
+A prediction that did not come true REFUTES the claim instead of parking it.
+Hiding a failed prediction would teach the system that a bad hypothesis is
+cheaper than an honest one.
+
+Self-confirmation raises too: checking a rule on the case that produced it is a
+caller error, not a negative result. Returning «did not hold» would confuse a
+prohibition with an outcome.
+
+**What is mechanism and what is judgement.** Mechanism: checking conditions,
+running the intervention, comparing prediction against measurement, refusing
+self-confirmation. Judgement: the hypotheses themselves. `propose_explanation`
+only formats what an author proposed. The module never invents an explanation
+and never picks between them — a choice with no rival is precisely what the
+EXPLAINED rung strikes at.
+
+**Why the operator drives it first.** `cli/commands_causal.py` is the driver,
+and it is the operator's on purpose. Measured live 2026-08-15: given the
+assignment to form hypotheses from the Python docs and test them against its own
+system, the agent searched for the phrase «official Python documentation» and
+reported that documentation exists. It does not yet convert an observation into
+a hypothesis about itself. Letting the model invent hypotheses anyway would
+produce ATTRIBUTED meaning «the model is confident», which is the failure this
+whole ladder is built to catch.
+
+**INV-2 caught this module before it shipped**: «a decider that cannot run» —
+a climb with no driver is the same producer-without-consumer shape this session
+spent the day repairing, and I had just built a fresh instance of it. The
+command is the answer to that, not decoration.
+
+Live on the first real data:
+
+    cobs_e2057bb502c2  x2  OBSERVED
+        не хватает: нужны конкурирующие объяснения, минимум два
+    …two hypotheses fed…
+        не хватает: соперники не разобраны: живых объяснений больше одного
+
+The ladder refused to advance, which is the whole point.
+
+**The climb ends at GENERALIZED.** Naming the область where a rule was proven is
+left to a human: the machine has only the cases it ran, and scope is a claim
+about a boundary. `name_scope` exists, and nothing calls it automatically.

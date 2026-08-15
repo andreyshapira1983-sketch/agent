@@ -64,6 +64,14 @@ COMMANDS_CORE: tuple[CommandSpec, ...] = (
         in_startup_summary=True,
     ),
     CommandSpec(
+        canonical=":causal",
+        description="показать причинную лестницу и выдвинуть гипотезы",
+        category="Memory",
+        handler_key="causal",
+        usage="[гипотеза|гипотеза]",
+        in_startup_summary=True,
+    ),
+    CommandSpec(
         canonical=":memory-consolidate",
         description="link episodes to reusable procedures now",
         category="Memory",

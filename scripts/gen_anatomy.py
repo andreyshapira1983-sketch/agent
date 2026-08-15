@@ -47,7 +47,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "loop_response_deciders", "loop_synthesis", "loop_evidence_chain",
         "loop_verification", "loop_observe", "loop_run_tail", "loop_context",
         "loop_attempt", "loop_verify_replan", "loop_init", "loop_gates",
-        "planner", "causal_store", "planner_prompt", "plan_parsing", "doc_routing", "host_tools_context", "step_sanitizer", "verifier", "verifier_core", "verifier_models", "verifier_patterns", "verification_summary", "sensor_journal",
+        "planner", "causal_store", "causal_climb", "planner_prompt", "plan_parsing", "doc_routing", "host_tools_context", "step_sanitizer", "verifier", "verifier_core", "verifier_models", "verifier_patterns", "verification_summary", "sensor_journal",
         "verifier_utils", "claim_arithmetic", "replan", "reflection", "clarification_gate",
         "clarification_policy", "pending_clarification", "answer_contradiction",
         "instruction_conflict_gate", "directive_extractor",
