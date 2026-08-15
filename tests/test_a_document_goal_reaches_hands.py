@@ -159,10 +159,11 @@ def test_a_draft_bannered_file_may_be_filled(tmp_path):
 
     class _Capturing:
         def __init__(self) -> None:
+            self.system = ""
             self.user = ""
 
         def complete(self, *, system: str, user: str, **_kw) -> str:
-            self.user = user
+            self.system, self.user = system, user
             return "# STATUS: DRAFT / TARGET\n\nFilled protocol.\n"
 
     llm = _Capturing()
@@ -175,6 +176,10 @@ def test_a_draft_bannered_file_may_be_filled(tmp_path):
 
     assert note == "doc_draft_proposed:ain_doc_draft"
     assert "Required sections" in llm.user, "скелет показан модели"
+    assert "do NOT restate" in llm.system, (
+        "живой замер ain_2edf62f4: без запрета пересказа модель вернула "
+        "скелет с 89% дословных совпадений вместо содержания"
+    )
     (file,) = inbox.items[0]["payload"]["files"]
     assert "Filled protocol" in file["content"]
 

@@ -246,6 +246,17 @@ def _propose_doctrine_draft(
         "STATUS banner naming itself DRAFT / TARGET (not implemented), honor "
         "the charter's hard invariants (human-reserved authority stays), and "
         "never claim a capability exists in code unless you can name the module."
+        + (
+            # Живой замер 2026-08-15 (ain_2edf62f4): «наполнение» совпало со
+            # скелетом на 89% — модель пересказала требования вместо содержания.
+            " You are FILLING an existing skeleton: do NOT restate its section "
+            "requirements or normative 'must include/define' rules — REPLACE "
+            "each of them with the actual content it demands: real tables with "
+            "filled rows, concrete decision rules, named phases with their "
+            "conditions. A sentence that describes what the section should "
+            "contain, instead of containing it, is a failure."
+            if existing else ""
+        )
     )
     user = (
         f"Document to draft: {target}\nGoal: {goal}\n\n"
