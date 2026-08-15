@@ -2630,3 +2630,28 @@ self-chosen goal agrees with him.
 
 Entry point: `agent_tick.py --campaign --charter` (goal resolved by the agent,
 printed with its anchor and success check before the run).
+
+## The head chose, the hands didn't know how
+
+The first charter campaign (2026-08-15) measured the next gap within the hour
+of the charter shipping. The agent picked its own goal — three times out of
+three it chose to draft the MEMORY_LIFECYCLE_CONTRACT.md its charter names as
+missing — and then the campaign executed... the habitual repair action.
+`select_best_next_action` never saw the goal: its candidates are all
+state-driven (heartbeat, tests, issues, inbox), so the durable-issue habit at
+priority 55 won regardless of what the goal asked. The head chose; the hands
+only knew repair.
+
+Two additions close it. The selector now receives the goal and offers
+`draft_doctrine_document` (priority 58: above the repair habit, below health
+alarms — a broken loop still outranks paperwork) when the goal names an .md
+document with a drafting verb; a bare document name lands in
+knowledge/doctrine/future/, an explicit path is kept. And the executor grew
+document hands (`_propose_doctrine_draft`): generate the complete draft, ship
+it as a `self_apply_lane.run` approval item — human decision, full-suite lane,
+rollback; the wire itself writes nothing to disk. Refusals are named:
+no_target_doc, doc_exists (overwriting is a different decision, not a draft),
+empty_draft, generation_error.
+
+The injected gather_signals seam keeps three-argument callers working
+(TypeError tolerance), because test doubles predate the goal parameter.
