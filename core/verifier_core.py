@@ -31,6 +31,7 @@ from .verifier_utils import (
     _merge_citation_only_chunks,
     _output_contract_header_name,
     _tool_citation_for,
+    absence_certifiable,
     absence_reason,
     absent_literal_reason,
     enumeration_count_reason,
@@ -286,7 +287,11 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                 )
             ):
                 chunk_reason = None
-            if any_matched and not (
+            # MIR-060 (e): у утверждения об ОТСУТСТВИИ сертификата быть не
+            # может — гейт (d) его опровергает, этот не даёт подтвердить
+            # (docs/CODE_NOTES.md, «Absence was certified by a resolved citation»).
+            _abs_uncert = any_matched and not absence_certifiable(chunk_text, "")
+            if any_matched and not _abs_uncert and not (
                 chunk_reason is not None and chunk_reason.code == "count_mismatch"
             ):
                 verdict = "verified"
@@ -295,6 +300,12 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                 chunk_reason = None
                 for raw, rewrite in topic_only_replacements + dialogue_replacements + user_asserted_replacements:
                     annotated = annotated.replace(raw, rewrite)
+            elif _abs_uncert and chunk_reason is None:
+                # Ниже опровержения намеренно: опровергнутое — доказанная ложь,
+                # а это лишь несертифицируемое.
+                verdict = "topic_supported_but_claim_unverified"
+                topic_supported += 1
+                annotated = annotated.rstrip() + " [absence-unverifiable]"
             elif chunk_reason is not None:
                 # Полярность: доказанная ложь — не разновидность «не подтверждено»
                 # (2026-08-12, docs/CODE_NOTES.md «REFUTED is a polarity»).
