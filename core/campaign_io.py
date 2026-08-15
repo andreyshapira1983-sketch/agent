@@ -69,6 +69,14 @@ def _default_gather_signals(agent: Any, workspace: Any, approval_inbox: Any) -> 
     triage = triage_inbox(inbox.pending())
     ack_store = AlertAckStore(path=ws / "data" / "alert_acknowledgements.jsonl")
     acknowledged = ack_store.active_actions()
+    # Собственный список дефектов. Без него непригляданный путь был слеп ровно
+    # на то, ради чего заведён: живой прогон 2026-08-15 остановился с
+    # «healthy_idle: nothing warrants action», держа ШЕСТЬ открытых
+    # самонайденных дефектов. Кандидат под них в выбирателе есть
+    # (`_candidate_open_self_improvement_issue`), но вход ему давал только
+    # REPL — то есть путь, где человек и так смотрит.
+    # Зачем: docs/CODE_NOTES.md, «The unattended path was the blind one».
+    open_issues, registry_available = _open_self_improvement_issues(ws)
     action = select_best_next_action(
         result_status=str(hb.get("result_status", "none")),
         tests_health=str(hb.get("tests_health", "none")),
@@ -81,8 +89,28 @@ def _default_gather_signals(agent: Any, workspace: Any, approval_inbox: Any) -> 
         triage=triage,
         inbox_pending=triage.total_pending,
         acknowledged=acknowledged,
+        self_improvement_registry_available=registry_available,
+        open_self_improvement_issues=open_issues,
     )
     return {"heartbeat": hb, "age": age, "triage": triage, "action": action}
+
+
+def _open_self_improvement_issues(workspace: Path) -> tuple[tuple[dict, ...], bool]:
+    """Открытые самонайденные дефекты и признак «реестр вообще читается».
+
+    Отдельной функцией, потому что хранилище может не открыться, а совет обязан
+    выйти в любом случае: пустой список тогда честно означает «не знаю», и
+    выбиратель падает на прежние признаки, а не на выдуманный ноль.
+    """
+    try:
+        from core.self_improvement_issues import SelfImprovementIssueRegistry
+
+        registry = SelfImprovementIssueRegistry(
+            path=workspace / "data" / "self_improvement_issues.jsonl"
+        )
+        return tuple(i.to_dict() for i in registry.unresolved()), bool(registry.list())
+    except Exception:  # noqa: BLE001 — совет важнее, чем причина его неполноты
+        return (), False
 
 
 def _execute_daemon_liveness_probe(workspace: Any) -> CampaignActionOutcome:

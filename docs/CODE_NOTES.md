@@ -2098,3 +2098,50 @@ A placeholder that neither wears angle brackets nor opens with a marker still
 passes. «Добавление experience_block в файл.» is exactly that shape, and only
 its unfilled PATH caught it that day. Two guards cover two forms; there is no
 claim here that they cover the class.
+
+## The unattended path was the blind one
+
+The operator started the campaign himself:
+
+    python agent_tick.py --campaign --goal "найди и почини свои дефекты" \
+        --max-cycles 5 --cycle-pause-seconds 60 --allow-effects
+
+It ran three cycles, spent **zero** LLM calls, and stopped honestly:
+
+    stop_reason=healthy_idle:3_checks_found_nothing_to_do
+    "No failing tests, no errors, no inbox debt, and the daemon is live:
+     nothing warrants action now."
+
+Every word of that is true about the things it looked at. It was holding six
+open self-found defects at the time.
+
+### The same selector, two callers, two worlds
+
+`select_best_next_action` already has a candidate for exactly this —
+`_candidate_open_self_improvement_issue`. It needs three arguments:
+
+    self_improvement_registry_available
+    open_self_improvement_issues
+    recent_self_improvement_failures
+
+`cli/commands_approval.py` passes all three. `core/campaign_io.py` passed none.
+So the REPL — the path where a human is watching anyway — saw the full picture,
+and the campaign — the only path that runs WITHOUT a human — was blind on
+precisely the material it exists to act on. The inversion is the finding.
+
+With the list passed, the same state on the same data now yields:
+
+    improve_failure_to_idea_pipeline  priority=55
+    durable issue sii_f578370c524e6697 status=open
+    detectors reasoning_action_mismatch, user_contract_unrepresented
+
+`_open_self_improvement_issues` returns an empty tuple AND
+`registry_available=False` when the store cannot be read, so "cannot read" and
+"nothing there" stay distinguishable — the selector then falls back to the older
+signals rather than to an invented zero.
+
+### What this does not claim
+
+The campaign now has work to choose. Whether its choice is good, and whether
+acting on it produces anything, is the next measurement — not something this
+wire establishes.
