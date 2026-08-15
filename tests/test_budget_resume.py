@@ -123,11 +123,21 @@ def test_completed_cycle_checkpoints_its_plan_and_executed_steps(workspace: Path
     )
 
 
-def _agent_with_exhausted_model_budget(workspace: Path) -> tuple[AgentLoop, FakeLLM]:
+def _agent_with_exhausted_model_budget(
+    workspace: Path, *, gateway_path: str = "repl",
+) -> tuple[AgentLoop, FakeLLM]:
+    """`gateway_path` — на каком пути шёл прерванный ход.
+
+    С 2026-08-15 очередь работ принимает только непригляданную работу: реплику
+    оператор наберёт заново, а очередь кормит автономный режим (см.
+    `core.task_queue.checkpoint_is_resumable_work`). Контрольная точка пишется
+    на любом пути, и `--resume <trace_id>` читает именно её, а не очередь.
+    """
     llm = FakeLLM(responses=['{"reasoning":"no tools","sources":[]}'])
     agent = _build_guarded_agent(
         workspace, llm, ModelUsageLimits(max_calls=1), preused_calls=1
     )
+    agent.gateway_path = gateway_path
     return agent, llm
 
 
@@ -176,19 +186,22 @@ def test_budget_denial_before_planner_persists_resumable_checkpoint_and_task(
     assert paused["blocked_model"]["limit"] == 1
     assert paused["timestamp"]
 
+    # Ход шёл в диалоге, и в очередь РАБОТ он не попадает: она кормит
+    # автономный режим, а прерванную реплику оператор наберёт заново. Точка
+    # выше проверена — возобновление через `--resume` читает её, не очередь.
     queue = TaskQueueStore(workspace / "data" / "runtime_tasks.jsonl")
-    tasks = queue.list(status="paused")
-    assert len(tasks) == 1
-    assert tasks[0].kind == "resume_checkpoint"
-    assert tasks[0].last_report is not None
-    assert tasks[0].last_report["trace_id"] == agent.log.trace_id
-    assert tasks[0].last_report["stop_reason"] == "budget_exhausted"
+    assert queue.list(status="paused") == []
+    # Что припаркованный отчёт несёт trace_id и причину остановки, проверяется
+    # там, где строка теперь и возникает:
+    # tests/test_the_work_queue_is_not_a_chat_log.py.
 
+    # Подсказку про `--resume` печатал `:task-list` из очереди — из той самой
+    # строки, которой у диалога больше нет. Её печатает сам страж, иначе
+    # оператор потерял бы единственное место, где узнавал о возможности.
     assert handle_meta_command(":task-list paused", agent, workspace) is True
     assert handle_meta_command(":queue-status", agent, workspace) is True
     out = capsys.readouterr()
-    assert f"resume={agent.log.trace_id}" in out.err
-    assert '"resumable"' in out.err
+    assert f"--resume {agent.log.trace_id}" in out.err
     assert agent.log.path.read_text(encoding="utf-8").count("model_budget_blocked") == 1
 
 
@@ -235,7 +248,7 @@ def test_budget_stop_in_synthesis_saves_the_synthesis_phase(workspace: Path):
     assert ctx.paused["current_phase"] == "synthesis"
     assert ctx.paused["blocked_model"]["role"] == "synthesizer"
     queue = TaskQueueStore(workspace / "data" / "runtime_tasks.jsonl")
-    assert len(queue.list(status="paused")) == 1
+    assert queue.list(status="paused") == []  # диалог, не работа
 
 
 def test_budget_stop_in_verify_replan_saves_the_verification_phase(workspace: Path):
@@ -312,7 +325,6 @@ def test_streamed_cycle_is_blocked_and_paused_on_an_exhausted_budget(workspace: 
     """
     from core.checkpoint import CheckpointLoader
     from core.model_usage import ModelBudgetExceeded
-
     from tests.conftest import StreamingFakeLLM
 
     llm = StreamingFakeLLM(
@@ -370,7 +382,9 @@ def test_successful_resume_retires_the_paused_task(workspace: Path):
     """
     from cli.resume import resolve_resume
 
-    agent, _llm = _agent_with_exhausted_model_budget(workspace)
+    # Непригляданный путь: именно ради него очередь и заведена — за
+    # прерванным `:auto-run` никто не следит и сам его не перезапустит.
+    agent, _llm = _agent_with_exhausted_model_budget(workspace, gateway_path="runtime")
     _run_agent_with_budget_guard(
         agent,
         user_question="Explain the repository status",
@@ -415,7 +429,9 @@ def test_resume_that_pauses_again_keeps_the_old_task(workspace: Path):
     """
     from cli.resume import resolve_resume
 
-    agent, _llm = _agent_with_exhausted_model_budget(workspace)
+    # Непригляданный путь: именно ради него очередь и заведена — за
+    # прерванным `:auto-run` никто не следит и сам его не перезапустит.
+    agent, _llm = _agent_with_exhausted_model_budget(workspace, gateway_path="runtime")
     _run_agent_with_budget_guard(
         agent,
         user_question="Explain the repository status",

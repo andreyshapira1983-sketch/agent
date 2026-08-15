@@ -1679,3 +1679,53 @@ hole; partial does not.
 
 The cost is one known false alarm, kept deliberately: the live turn scoring 0.32
 with 2 of 3 verified was correct and is still warned about.
+
+## The work queue was full of conversation
+
+The queue that feeds unattended work held 16 rows on 2026-08-15: 14 paused, 2
+done. Among the paused ones:
+
+    Answer the question: привет
+    Answer the question: что ты чувствуешь когда ты неправ и тебе стыдно?
+    Answer the question: >>[STRA] strategy_classified  strategy=general_question
+
+Nothing autonomous had ever run, and this is one of the reasons: even with the
+effects gate open, the queue would have fed it dialogue.
+
+### How conversation got in
+
+Not through a bug. `app/budget_guard.py` turns a `ModelBudgetExceeded` into a
+resumable pause: it writes a checkpoint and parks a `resume_checkpoint` task so
+the work can continue later. That is right for work. It never asked whether the
+interrupted thing WAS work, so every chat turn cut short by the budget became a
+durable autonomous task.
+
+### The distinction is structural, not lexical
+
+`gateway_path` already says which path a run is on — `repl` by default
+(`core/loop_init.py`), set to `runtime`/`daemon` by the autonomous runtime
+itself. A turn interrupted on `repl` had a human sitting in front of it, and
+that human will retype the question; nothing about it belongs in a queue.
+
+Judging by the text of the question would mean guessing how «привет» differs
+from «почини X» — the word-table-instead-of-structural-fact pattern that loses
+everywhere else in this codebase.
+
+Unknown paths count as work. The error is one stray row in one direction and a
+silently dropped task in the other.
+
+### What the change cost, and what closed it
+
+`--resume <trace_id>` reads the CHECKPOINT (`cli/resume.py`), not the queue, so
+resuming an interrupted chat turn still works. But the hint that told the
+operator it was possible — `resume=<trace_id>` — was printed by `:task-list`
+from the queue row that no longer exists. The guard now prints it directly.
+That, not the queue row, was the part the operator actually needed.
+
+### Verification
+
+The suite drives the real `_persist_resumable_budget_stop` against a real
+`TaskQueueStore` on disk, on both paths. It is not a live end-to-end run: with
+every budget window set to 0 (unlimited) the stop cannot be provoked without
+changing the operator's config, and provoking it that way would be testing the
+config, not the guard.

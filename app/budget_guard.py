@@ -13,12 +13,14 @@ removed with the rest of the compatibility block in Phase 7.
 """
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from app.task_scheduler_cli import _task_queue_for
 from core.model_usage import ModelBudgetExceeded
+from core.task_queue import INTERACTIVE_GATEWAY_PATH, checkpoint_is_resumable_work
 
 if TYPE_CHECKING:  # heavy import, only needed for annotations
     from core.loop import AgentLoop
@@ -230,6 +232,26 @@ def _persist_resumable_budget_stop(
 
     resolved_workspace = _workspace_from_agent(agent, workspace)
     if resolved_workspace is None:
+        return
+    # Реплику в очередь работ не кладём: оператор сидит здесь и наберёт её
+    # заново, а очередь кормит непригляданный режим. Контрольная точка выше
+    # записана в любом случае — возобновить ход вручную по-прежнему можно.
+    gateway_path = getattr(agent, "gateway_path", INTERACTIVE_GATEWAY_PATH)
+    if not checkpoint_is_resumable_work(gateway_path):
+        agent.log.log("resumable_task_not_queued", {
+            "gateway_path": str(gateway_path),
+            "reason": "interrupted turn was a live conversation, not unattended work",
+            "stop_reason": payload.get("stop_reason"),
+        })
+        # Подсказку `resume=<trace>` печатал `:task-list` из очереди — то есть
+        # ровно та строка, которую здесь больше не заводят. Без этой печати
+        # оператор потерял бы единственное место, где узнавал, что ход можно
+        # продолжить: точка сохранена, продолжать есть что.
+        print(
+            f"[resume] ход прерван ({payload.get('stop_reason')}); "
+            f"продолжить: --resume {payload.get('trace_id') or trace_id}",
+            file=sys.stderr,
+        )
         return
     try:
         task = _task_queue_for(agent, resolved_workspace).add_paused_checkpoint(
