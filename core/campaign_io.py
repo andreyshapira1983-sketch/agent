@@ -144,10 +144,23 @@ def _propose_repair_from_diagnosis(
             extra_context=answer[:4000],
         )
         if not getattr(gen, "ok", False):
+            status = getattr(gen, "status", "?")
             _log(agent, "campaign_repair_not_proposed", {
-                "target": target, "status": getattr(gen, "status", "?"),
+                "target": target, "status": status,
             })
-            return f"repair_declined:{getattr(gen, 'status', '?')}"
+            if status == "no_failing_tests":
+                # Ветка А. Ремонтник чинит только красное, и это его принцип
+                # («refusing to invent a repair»). Дефект без красного теста
+                # сперва ЗАРАБАТЫВАЕТ тест: Stage A формулирует задачу и
+                # падающий приёмочный тест, человек благословляет тест до
+                # существования реализации. Замер: 6 попыток охоты, дважды
+                # диагноз 4/4 и 5/5 — и оба раза честный отказ ремонтника.
+                note = _propose_failing_test_from_diagnosis(
+                    agent=agent, workspace=workspace, target=target,
+                    answer=answer, approval_inbox=approval_inbox,
+                )
+                return f"repair_declined:{status}; {note}"
+            return f"repair_declined:{status}"
         from core.self_apply_bridge import build_self_apply_payload
 
         prop = gen.proposal
@@ -179,6 +192,57 @@ def _propose_repair_from_diagnosis(
         return None
     else:
         return f"repair_proposed:{item.id}"
+
+
+def _propose_failing_test_from_diagnosis(
+    *, agent: Any, workspace: Any, target: str, answer: str, approval_inbox: Any,
+) -> str:
+    """Диагноз без красного теста едет в Stage A — за тестом, не за патчем.
+
+    Кандидат синтезируется из уже проверенного: адрес существует (проверен
+    диском выше), диагноз подтверждён целиком. Все гейты Stage A действуют без
+    изъятий — kill-switch, бюджет, одна задача в полёте, чистое дерево, критик
+    теста; человек благословляет тест до реализации (§9, анти-жульничество).
+    """
+    from types import SimpleNamespace
+
+    from core.self_task_producer import produce_coding_task
+
+    try:
+        from core.safe_vcs import SafeVCS
+
+        vcs = SafeVCS(Path(workspace))
+    except Exception:  # noqa: BLE001 — без VCS гейт дерева просто не спросится
+        vcs = None
+    try:
+        report = produce_coding_task(
+            workspace=workspace,
+            inbox=approval_inbox,
+            llm=getattr(agent, "llm", None),
+            vcs=vcs,
+            task_selector=lambda: SimpleNamespace(
+                target_path=target,
+                problem_quote=" ".join(answer.split())[:400],
+                evidence_ref=f"verified_diagnosis:{getattr(getattr(agent, 'log', None), 'trace_id', '?')}",
+            ),
+            source_kind="verified_diagnosis",
+        )
+    except Exception as exc:  # noqa: BLE001 — провод не вправе ронять кампанию
+        _log(agent, "campaign_test_proposal_failed", {
+            "target": target, "error": str(exc)[:200],
+        })
+        return "test_proposal_error"
+    status = getattr(report, "status", "?")
+    if status == "proposed":
+        _log(agent, "campaign_test_proposed", {
+            "approval_id": report.approval_id, "target": target,
+        })
+        return f"test_proposed:{report.approval_id}"
+    _log(agent, "campaign_test_not_proposed", {
+        "target": target, "status": status,
+        "reason": str(getattr(report, "reason", ""))[:160],
+    })
+    return f"test_declined:{status}"
 
 
 def _open_self_improvement_issues(workspace: Path) -> tuple[tuple[dict, ...], bool]:

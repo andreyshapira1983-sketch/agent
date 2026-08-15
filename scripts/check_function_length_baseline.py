@@ -75,7 +75,7 @@ WATCH: dict[str, int] = {
     "core/self_repair.py:SelfRepairController._execute_tool": 170,
     "core/autonomous_runtime.py:AutonomousRuntime._task_propose": 167,
     "core/memory_policy.py:MemoryWritePolicy.decide": 167,
-    "core/self_task_producer.py:produce_coding_task": 167,
+    "core/self_task_producer.py:produce_coding_task": 169,  # +2 (2026-08-15): второй источник улик — verified_diagnosis. У самонайденных дефектов агента нет красного теста, и ремонтник им честно отказывает (no_failing_tests); их лента — Stage A: сначала падающий тест, благословлённый человеком (docs/CODE_NOTES.md «A diagnosis earns a test, not a patch»). Рост — сам контракт: параметр и его проброс.
     "core/role_router.py:RoleRouter.route": 163,
     "core/low_evidence_policy.py:evaluate_low_evidence_policy": 161,
     "core/unsupported_claims.py:_enforce_without_contradictions": 170,  # замер 164 + запас (2026-08-13, R4): терминальная ветка сфабрикованных цитат живёт на рубеже принятия ответа — постановление оператора
