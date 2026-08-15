@@ -82,6 +82,20 @@ _NON_COMMAND_TOKENS = {
 #: correct documentation, not drift.
 _PLANNED_MARKERS = ("proposed", "missing test", "planned", "should be added", "to be written")
 
+#: Путь, названный ИМЕННО ПОТОМУ, что его не существует. Отдельно от
+#: `_PLANNED_MARKERS`: «запланирован» и «выдуман» — разные вещи, и складывать их
+#: значило бы записать вымысел в намерение.
+#:
+#: Категория заведена 2026-08-15: рефлексия сочинила девять имён модулей
+#: (`reasoning`, `citation`, `user_contract`…), следующий прогон пошёл их
+#: читать, и разбор в docs/CODE_NOTES.md обязан назвать их дословно — иначе
+#: запись о вымысле нечитаема. Фраза требуется В ТОЙ ЖЕ СТРОКЕ, что и путь:
+#: заявление на весь абзац разрешило бы соседям тихо протащить живую ссылку.
+_NONEXISTENT_MARKERS = (
+    "does not exist", "do not exist", "none of these exist",
+    "не существует", "не существуют", "выдуман",
+)
+
 #: Files that were RENAMED, old path -> new path.
 #:
 #: A dated audit document that says "the defect was in `core/foo.py`" stays true
@@ -359,6 +373,10 @@ def main(argv: list[str] | None = None) -> int:
                     lowered = line.lower()
                     if any(marker in lowered for marker in _PLANNED_MARKERS):
                         planned_paths += 1   # documented as not existing yet
+                    elif any(marker in lowered for marker in _NONEXISTENT_MARKERS):
+                        # Назван потому, что его нет: разбор вымысла обязан
+                        # цитировать имя дословно.
+                        planned_paths += 1
                     else:
                         missing_paths.append(f"{rel_doc}:{lineno}  {path_text}")
                     continue
