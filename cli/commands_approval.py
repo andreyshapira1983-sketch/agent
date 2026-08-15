@@ -475,6 +475,13 @@ def _handle_approval_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             limit=max(1, int(payload.get("limit", 5))),
             include_tests=_payload_bool(payload.get("include_tests"), default=True),
             learning_limit=max(1, int(payload.get("learning_limit", 5))),
+            # Одобряли ЦЕЛЬ — она и должна выполниться. Умолчание False
+            # оставлено ради заявок, записанных до 2026-08-15: у них поля нет,
+            # и прежнее поведение (health-pass) для них не меняется.
+            include_goal=_payload_bool(payload.get("include_goal"), default=False),
+            include_proposals=_payload_bool(
+                payload.get("include_proposals"), default=False
+            ),
         )
     except (TypeError, ValueError) as exc:
         print(f"(approval run failed: invalid payload: {exc})", file=sys.stderr)

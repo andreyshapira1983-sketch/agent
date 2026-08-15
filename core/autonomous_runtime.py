@@ -480,6 +480,11 @@ class AutonomousRuntime:
                     "limit": config.limit,
                     "include_tests": config.include_tests,
                     "learning_limit": config.learning_limit,
+                    # Без этих двух одобренный прогон терял ЦЕЛЬ и вырождался
+                    # в health-pass: docs/CODE_NOTES.md, «The approved goal
+                    # that never ran».
+                    "include_goal": config.include_goal,
+                    "include_proposals": config.include_proposals,
                 },
                 # MIR-072 (measured live 2026-08-03): sixteen `:work-session`
                 # retries piled up sixteen identical pending items because this
