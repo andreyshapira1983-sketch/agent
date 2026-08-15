@@ -2421,8 +2421,9 @@ Stage B builds to green through the self-apply lane with rollback.
 
 ### An unrelated catch from the same hour
 
-Three files (`jsonl_parser.py`, `tests/test_jsonl_parser.py`, `result.txt`)
-appeared at the repo root with no trace logging them. Chased before assuming:
+Three files — `jsonl_parser.py`, a test twin for it under `tests/`, and
+`result.txt`, none of which exist any more (deleted below) — appeared with no
+trace logging them. Chased before assuming:
 not the agent, not pytest, not an intruder — a `git stash pop` of mine, issued
 after its paired `push` had FAILED on a pathspec, popped the OPERATOR'S
 two-week-old stash (`before syncing main`, made with untracked files) into the
