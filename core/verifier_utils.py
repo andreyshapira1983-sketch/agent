@@ -487,9 +487,43 @@ def absence_subjects(claim: str) -> set[str]:
     return named | salient_literals(_CITATION_TOKEN_RE.sub(" ", claim or ""))
 
 
+#: Материал, произнесённый ЧУЖИМ голосом внутри утверждения: спаны в обратных
+#: апострофах, «ёлочках» и прямых кавычках, и хвост сообщения исключения — от
+#: имени класса (`FileNotFoundError`, `ModuleNotFoundError`…) до конца
+#: предложения. Это цитаты, а не суждения ответа.
+_QUOTED_SPAN_RE = re.compile(
+    r"`[^`\n]*`"
+    r"|«[^»\n]*»"
+    r'|"[^"\n]*"'
+    r"|\b[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception|Warning)\b[^.;\n]*",
+)
+
+
+def _own_voice(claim: str) -> str:
+    """Текст утверждения без цитат и хвостов сообщений об ошибках."""
+    return _QUOTED_SPAN_RE.sub(" ", claim or "")
+
+
 def asserts_absence(claim: str) -> bool:
-    """Утверждает ли кусок, что чего-то НЕТ."""
-    return bool(_ABSENCE_ASSERTION_RE.search(claim or ""))
+    """Утверждает ли кусок СВОИМ ГОЛОСОМ, что чего-то нет.
+
+    Цитата — не утверждение. Живой замер 2026-08-15: правдивый пересказ
+    собственной записанной ошибки — «…с сообщением вида FileNotFoundError:
+    File not found: core/diagnostics.py» — читался как заявление агента, что
+    файла нет; имя файла при этом неизбежно лежит в улике, внутри той же
+    цитаты, и гейт (d) опровергал ВЕРНОЕ утверждение, а гейт (e) вешал на него
+    `[absence-unverifiable]`. «Событие записано» и «файла нет» — разные
+    суждения, и различает их голос: маркер отсутствия должен стоять вне
+    кавычек и вне хвоста исключения.
+
+    Названная граница: отсутствие, высказанное в одном предложении ПОСЛЕ имени
+    исключения («после ValueError файл не найден»), срезается вместе с
+    хвостом и не распознаётся. Гейты только вычитают, поэтому промах
+    возвращает кусок к прежним правилам, а не создаёт ложный сертификат.
+
+    Зачем: docs/CODE_NOTES.md, «A quotation is not an assertion».
+    """
+    return bool(_ABSENCE_ASSERTION_RE.search(_own_voice(claim)))
 
 
 def absence_refuted_by_excerpt(claim: str, excerpt: str) -> bool:

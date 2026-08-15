@@ -2245,8 +2245,9 @@ errors sat in the traces next to it.
 Now, when a filter is given and no trace_id is, the tool walks past traces
 newest-first and returns the newest one that CONTAINS matching events. Verified
 against the real workspace immediately: `event_filter=['error']` searched 8
-traces and returned the agent's own `FileNotFoundError: core/diagnostics.py` —
-the defect it manufactured yesterday — where the old code returned an empty
+traces and returned the agent's own FileNotFoundError about
+core/diagnostics.py, a file that does not exist — the defect it manufactured
+yesterday — where the old code returned an empty
 housekeeping trace.
 
 The distinctions that hold the rule together:
@@ -2270,7 +2271,8 @@ The verified live run above carried three `[claim-refuted]` marks on factually
 TRUE statements. Chased to the cause, reproduced in isolation:
 
     claim   «В журнале найдено событие error … FileNotFoundError: File not
-            found: core/diagnostics.py»
+            found: core/diagnostics.py» (the file does not exist — that was
+            the recorded error)
     excerpt the log line holding that same message
 
     asserts_absence(claim)                 -> True   ("not found" matches)
@@ -2286,3 +2288,37 @@ same shape with `[absence-unverifiable]`.
 A claim that an EVENT was recorded is not a claim that a FILE is absent. The
 gates need to distinguish quotation from assertion. Recorded, not fixed here:
 this turn was the read_logs hole, and it is closed.
+
+## A quotation is not an assertion
+
+The three `[claim-refuted]` marks from the previous section, fixed the same day.
+
+The mechanism, reproduced in isolation before touching anything: a claim that
+QUOTES a recorded error — «…с сообщением вида FileNotFoundError: File not
+found: …» — matched `_ABSENCE_ASSERTION_RE` on the "not found" inside the
+quoted message. Gate (d) then found the quoted filename in the evidence —
+inside the very message being quoted — and ruled a TRUE report refuted. Gate
+(e) hit the same shape with `[absence-unverifiable]`. Truthfully reporting
+one's own logged errors was structurally punished, on the diagnostic surface
+that the read_logs fix had just opened.
+
+The discriminator is voice, not vocabulary. `asserts_absence` now strips
+material spoken in someone else's voice before looking for absence markers:
+spans in backticks, «ёлочки», straight quotes, and exception-message tails
+(from a `...Error`/`...Exception`/`...Warning` class name to the end of the
+sentence). An absence assertion must survive in the claim's OWN voice. One
+regex feeds both gates, so (d) and (e) got the fix together.
+
+«Событие записано» and «файла нет» are different judgements; a claim reporting
+the first is not making the second.
+
+Named limit: absence stated in the same sentence AFTER an exception name —
+«после ValueError файл не найден» — is cut away with the tail and goes
+unrecognised. The gates only subtract, so the miss returns the chunk to the
+old rules rather than minting a false certificate.
+
+The reverse guard was nearly vacuous: the first test harness cited
+`[read_logs:latest]`, which never resolved, so both live-path tests were green
+without ever reaching the gates they claimed to test. Caught because the
+reverse test failed for the wrong reason; the harness now uses the resolving
+`file:` label from the proven neighbour harness.
