@@ -28,7 +28,6 @@
 from __future__ import annotations
 
 import json
-import time
 from collections.abc import Container, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -167,20 +166,30 @@ def preferred_model(
     return ranked[0].model
 
 
-#: Разведочное окно: одно ведро из четырёх, т.е. ~10 минут из каждых 40 отказный
-#: путь отдаёт незамеренному ровеснику — достаточно, чтобы таблица набирала
-#: MIN_RUNS за дни, а не никогда; мало настолько, чтобы измеренный победитель
-#: оставался рабочей лошадью.
-_SCOUT_BUCKET_SECONDS = 600
+#: Каждый четвёртый прогон таблицы отдаёт следующее решение разведчику: хватает,
+#: чтобы незамеренный ровесник набирал MIN_RUNS за дни, а не никогда; мало
+#: настолько, чтобы измеренный победитель оставался рабочей лошадью.
 SCOUT_PERIOD = 4
 
 
-def scout_window(now: float | None = None) -> bool:
-    """Открыто ли разведочное окно. Детерминировано по часам, без случайности:
-    тот же момент времени даёт тот же ответ, и тест не зависит от датчика.
+def scout_turn(
+    outcomes: Iterable[ModelOutcome], *, role: str, provider: str,
+    period: int = SCOUT_PERIOD,
+) -> bool:
+    """Чей ход — разведчика или победителя. По счёту прогонов, не по часам.
+
+    Первая конструкция была окном по настенным часам (10 минут из каждых 40) и
+    сломалась на первом же живом замере 2026-08-15: охота №3 уложила все 12
+    failover-решений в 4 минуты внутри закрытого отрезка, и разведчик не
+    получил ни одного вызова. Нагрузка этого агента живёт вспышками, а доля
+    времени не равна доле решений. Счёт по прогонам вспышка проскочить не
+    может: он растёт самими прогонами.
     """
-    stamp = time.time() if now is None else now
-    return int(stamp // _SCOUT_BUCKET_SECONDS) % SCOUT_PERIOD == 0
+    material = sum(
+        o.runs for o in outcomes
+        if o.role == role and o.provider == provider
+    )
+    return material % period == 0
 
 
 def scout_model(
@@ -260,7 +269,7 @@ def measured_outcomes(workspace: Path | None = None) -> tuple[ModelOutcome, ...]
 
 def substitute_model(
     *, role: str, provider: str, current_model: str | None,
-    workspace: Path | None = None, now: float | None = None,
+    workspace: Path | None = None,
 ) -> str | None:
     """Кем заменить `current_model` у нового провайдера.
 
@@ -272,9 +281,9 @@ def substitute_model(
     Карта остаётся полом: пока прогонов меньше `MIN_RUNS`, доля не отличима от
     случайности, и правило по уровню лучше, чем правило по трём случаям.
 
-    Поверх обоих правил — разведка (`scout_model`): в разведочном окне отказ
-    отдаётся незамеренному ровеснику, чтобы у замера появлялся материал и
-    таблица не запирала сама себя на первом победителе.
+    Поверх обоих правил — разведка (`scout_model`): на ходу разведчика
+    (`scout_turn`) отказ отдаётся незамеренному ровеснику, чтобы у замера
+    появлялся материал и таблица не запирала сама себя на первом победителе.
     """
     try:
         outcomes = measured_outcomes(workspace)
@@ -288,7 +297,8 @@ def substitute_model(
         scout = scout_model(
             outcomes, role=role, provider=provider, current_model=current_model,
         )
-        if scout and scout != measured and scout_window(now):
+        if scout and scout != measured and scout_turn(
+                outcomes, role=role, provider=provider):
             return scout
         return measured
     return peer_model_at_same_tier(current_model, provider)
