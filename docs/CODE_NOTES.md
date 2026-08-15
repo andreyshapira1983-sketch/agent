@@ -1500,3 +1500,63 @@ printing the first five records of the store. Those are the oldest. All four
 untopical records predate 2026-08-02, when commit d0b891e began folding question
 tokens into `trigger_tags`; every record created since carries its subject. The
 sample was ordered by age and read as if it were representative.
+
+## Resolving power
+
+After the comma fix the retriever matched far more records (6 of 31 became 27
+of 31 on a live query) but decided between them by a margin of one word. Best
+match: three shared tokens. Breadth grew; the ability to tell records apart did
+not.
+
+### The bench, and why this one can be trusted
+
+The previous section records a bench whose criterion was invented and turned out
+to disagree with the thing it stood for. This one takes its ground truth from
+the store itself: a token occurring in exactly ONE record belongs to that record
+unambiguously. Build a query from an ordinary operator phrase plus that token,
+and the correct answer is known without anyone's opinion about relevance. 1116
+cases from the live store, four phrasings each.
+
+Measured, top-1 accuracy through the shipped code path:
+
+    12.2%   before (flat count, maturity as first sort key)
+    37.0%   + weighting by rarity in the operator's speech
+    60.7%   + relevance as first sort key, maturity as tiebreaker
+
+### Rarity, in the corpus where rarity means something
+
+The previous section rejected IDF, and that rejection was right for the corpus
+it was computed over. Over 31 procedures, `это` and `где` occur 5 times — they
+are RARE there, and weighting by that changes nothing. Over the 200 episodes of
+what the operator actually said, they are ordinary and a signal name is not.
+
+The corpus is questions only. Answers were written by the model, and its own
+explanatory vocabulary would make ordinary exactly the words it uses to explain.
+
+Two degenerate cases are guarded structurally, not by a constant. `log(N/df)`
+gives zero to a token present in every document, and zero does not mean "weighs
+little", it means "does not exist" — a corpus of one episode zeroed every word
+and retrieval stopped finding anything at all. `log((N+1)/df)` keeps every
+weight positive. A token absent from the corpus weighs the most: the operator
+never said it, so it arrived with this task.
+
+### Compound names are kept whole as well as split
+
+`evidence_budget_trim` split into three ordinary words matches any record
+holding the word `evidence`. The whole name is emitted too, so a record that
+knows the subject scores above one that shares a fragment. Worth +1.3 points on
+its own; kept because it is also what makes the split safe.
+
+### Maturity stopped overriding the subject
+
+One commit earlier, "proven first, always" was made the first sort key, with a
+test asserting it. Measured here, it cost 24 points: with 30 candidates and one
+proven record, the proven one took first place whenever it shared any token at
+all, however small. What the gate was protecting — an unproven procedure must
+not displace a proven one — lives at comparable relevance, and there it still
+holds. Ordering is now (relevance, maturity, confidence, recency).
+
+### Rejected again, with numbers
+
+Normalising the score by record length: 17.5% against 30.4% for the baseline it
+was meant to improve. Long records are not less relevant; they are older.

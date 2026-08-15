@@ -28,6 +28,7 @@ from core.smart_memory import (
     format_experience_context,
     is_usage_eligible,
 )
+from core.topic_tokens import FLAT, TokenSalience, build_salience
 
 
 def _merge_rejection_reasons(*reports: dict[str, int]) -> dict[str, int]:
@@ -171,6 +172,30 @@ class AgentLoopMemoryRead:
 
         return f"{MEMORY_OPEN_TAG}\n{formatted}\n{MEMORY_CLOSE_TAG}"
 
+    def _question_salience(self) -> TokenSalience:
+        """Насколько редко оператор произносит слово — по его же вопросам.
+
+        Корпус здесь, а не в хранилище процедур, потому что редкость меряется
+        по речи, а процедур слишком мало, чтобы речь по ним узнать: живой замер
+        2026-08-15 показал, что по тридцати одной записи «это» и «где» выходят
+        РЕДКИМИ. Ответы в корпус не идут — их писала модель, и её обороты
+        сделали бы обыденными как раз те слова, которыми она объясняет.
+
+        Замер и отвергнутые варианты: docs/CODE_NOTES.md, «Resolving power».
+        """
+        store = getattr(self, "episodic_store", None)
+        if store is None:
+            return FLAT
+        try:
+            return build_salience(ep.question for ep in store.load() if ep.question)
+        except (OSError, ValueError) as exc:
+            # Подбор не должен падать из-за корпуса: без него он просто считает
+            # штуками, как считал до этой правки. Но молча деградировать он не
+            # вправе — оператор увидит просевший подбор и не будет знать, что
+            # корпус не прочитался.
+            self.log.log("question_salience_unavailable", {"error": repr(exc)})
+            return FLAT
+
     def _retrieve_experience_memory(self, question: str) -> str:
         """Inject compact episodic/procedural memory into planning.
 
@@ -283,7 +308,9 @@ class AgentLoopMemoryRead:
                     # `selected - readmitted + sum(rejected_by) == candidates`.
                     readmitted += 1
         if self.procedural_store is not None:
-            proc_result = self.procedural_store.search_with_report(question, limit=3)
+            proc_result = self.procedural_store.search_with_report(
+                question, limit=3, salience=self._question_salience(),
+            )
             procedures = proc_result.procedures
             procedures_rejected_by = proc_result.rejected_by
         else:
