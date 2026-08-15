@@ -1002,3 +1002,51 @@ to the planner only. Not fixed here: moving it into the budget is the same
 design slice that was argued through for `<long_term_memory>`, and it deserves
 its own measurement rather than being changed in passing. Recorded so the
 asymmetry is on the record instead of being rediscovered.
+
+## The lesson had nowhere to go
+
+Nine live runs on 2026-08-15, memory-enabled lane, an explicit «Запомни этот
+случай». Stores before and after: persistent 89 -> 89, episodic 200 -> 200,
+procedural 27 -> 27, issues 6 -> 6. The agent said «Я запомню эту информацию».
+
+It did learn. The lesson it formulated names `failure_block` and
+`<failure_context>` exactly right. Four channels then refused it, each for a
+reason that is defensible alone:
+
+- the episode was written and quarantined (`usage_eligible=False`), so retrieval
+  will never offer it — and the store is at its 200 ceiling, so it also evicted
+  an older one;
+- no procedure, because `procedure_credit_allowed` requires `outcome ==
+  "success"`: a rule is born from success and never from an error;
+- nothing durable, because the knowledge pipeline had no claim to bank;
+- nothing in the registry, because the detector route added the same day syncs
+  on the idle tick, not on a chat turn.
+
+So the agent wrote `knowledge/corrections.md` itself. That was not a
+malfunction: every official door was shut and `file_write` was the one durable
+tool left. Shown that no code reads the file, it withdrew in a single turn —
+«создание этого файла является бессмысленным действием». The file was deleted;
+keeping it would have preserved a false architectural surface — a lesson that
+looks durable with no causal consumer. The defect is recorded as MIR-096, with
+the stage-by-stage ledger, because the file was the symptom and the closed path
+is the disease.
+
+## Rewarded for a citable falsehood, punished for a proven absence
+
+Within one hour the verifier scored both of these:
+
+    «_run_synthesizer_ladder передаёт модели прошлые неудачи»   FALSE  -> 3/3 verified, 0.836
+    «механизма прочитать corrections.md не существует»          TRUE   -> 0/5 verified, 0.028
+
+The false claim quoted strings that exist in the file, so its citations
+resolved. The true claim asserts an absence, and an absence has no line to
+quote. Same rule, opposite outcomes, and the wrong one won both times.
+
+This is MIR-060 seen from the other side, not a second defect. What it adds is
+the shape of the missing question. The verifier asks «can the fragment be
+attached?». It owes «is the observation sufficient for the claim to be true in
+the scope it asserts?» — and for a negative claim that cannot be a line at all.
+Absence is proven by covering the search space: a defined scope, a known source
+set, coverage complete enough for that scope, and no matching producer, consumer
+or reference within it. None of MIR-060's three recorded fix directions reach
+this: all three still look for something to attach.
