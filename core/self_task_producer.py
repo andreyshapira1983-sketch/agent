@@ -136,14 +136,38 @@ def _unresolved_task(inbox: Any) -> Any | None:
 # ── the task builder (LLM) ──────────────────────────────────────────────────
 
 
+#: Как представить источнику задачи его улику. Ключ — `source_kind`.
+#: 2026-08-15: у самонайденных дефектов агента нет красного теста (7928 passed
+#: при 30 открытых дефектах), и ремонтник честно отказывает им
+#: («no_failing_tests»). Их лента — эта: сначала падающий тест, благословлённый
+#: человеком, потом реализация. Рамка обязана называть улику своим именем —
+#: скармливать диагноз под видом «TODO-комментария» значит врать модели.
+_SOURCE_FRAMES: dict[str, tuple[str, str]] = {
+    "code_todo": (
+        "a real TODO/FIXME comment from a Python file",
+        "TODO/FIXME comment",
+    ),
+    "verified_diagnosis": (
+        (
+            "a VERIFIED self-diagnosis from the agent's own audit log: every "
+            "claim in it was independently confirmed against evidence. The "
+            "acceptance test must REPRODUCE the diagnosed defect"
+        ),
+        "Verified diagnosis",
+    ),
+}
+
+
 def _task_builder_generate(
-    llm: Any, *, impl_path: str, quote: str, evidence_ref: str, current_content: str
+    llm: Any, *, impl_path: str, quote: str, evidence_ref: str, current_content: str,
+    source_kind: str = "code_todo",
 ) -> RoleOutput:
     """Ask the model for a task spec + a failing acceptance test (never code)."""
+    frame, quote_label = _SOURCE_FRAMES.get(source_kind, _SOURCE_FRAMES["code_todo"])
     system = (
-        "You are the Task Author on a self-build team. You are given a real "
-        "TODO/FIXME comment from a Python file and the file's current content. "
-        "Propose ONE small, concrete coding task that resolves that comment, and "
+        "You are the Task Author on a self-build team. You are given "
+        f"{frame} and the file's current content. "
+        "Propose ONE small, concrete coding task that resolves it, and "
         "write a NEW pytest acceptance test that FAILS today and will PASS once "
         "the task is implemented. Do NOT write the implementation itself. The "
         "test must import from the given implementation module and assert real, "
@@ -161,7 +185,7 @@ def _task_builder_generate(
     user = (
         f"Implementation file: {impl_path}\n"
         f"Evidence (file:line): {evidence_ref}\n"
-        f"TODO/FIXME comment: {quote}\n\n"
+        f"{quote_label}: {quote}\n\n"
         f"Current content of {impl_path}:\n{current_content or '(empty)'}"
     )
     parsed = _llm_json(llm, system=system, user=user, max_tokens=4000)
@@ -379,6 +403,7 @@ def produce_coding_task(
     file_reader: Callable[[str], str | None] | None = None,
     confidence_threshold: float = _DEFAULT_CONFIDENCE_THRESHOLD,
     task_selector: Callable[[], Any] | None = None,
+    source_kind: str = "code_todo",
 ) -> ProducerReport:
     """Stage A: publish at most one grounded coding-task proposal for approval.
 
@@ -476,7 +501,7 @@ def produce_coding_task(
     )
 
     current_content = reader(impl_path) or ""
-    evidence = [f"code_todo: {evidence_ref}", f"TODO: {quote}"]
+    evidence = [f"{source_kind}: {evidence_ref}", f"quote: {quote}"]
 
     # ── task builder ────────────────────────────────────────────────────────
     builder = _task_builder_generate(
@@ -485,6 +510,7 @@ def produce_coding_task(
         quote=quote,
         evidence_ref=evidence_ref,
         current_content=current_content,
+        source_kind=source_kind,
     )
     roles.append(builder)
     if builder.decision != "built":

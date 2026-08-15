@@ -2388,3 +2388,44 @@ Named limits: the first named file is chosen when the diagnosis names several
 — arbitrary within an honest set; one proposal per campaign action; the patch
 quality is the fallback model's until credits return, which is what the
 generator's gates and the human review are for.
+
+## A diagnosis earns a test, not a patch
+
+The six-attempt hunt settled the question the repair wire raised. Twice the
+diagnosis fully verified (4/4, 5/5), the wire fired, and the repair generator
+declined both times with its own principle: «baseline tests are already green;
+refusing to invent a repair». That refusal is correct. The generator's proof of
+a defect is a red test; the agent's self-found defects are green-test
+behavioural ones — 7928 passed while reasoning_action_mismatch fired ten times.
+Two philosophies, both right, pointed at the wrong pair.
+
+The lane for green-test defects already existed: Stage A
+(`core/self_task_producer.py`) turns a defect into a task plus a FAILING
+acceptance test that a human blesses BEFORE any implementation exists — the
+anti-cheating guarantee. It fed only on `# TODO` comments, and the repository
+has none.
+
+Branch A, as the operator named it: on `no_failing_tests` the wire hands the
+verified diagnosis to Stage A as a second evidence source
+(`source_kind="verified_diagnosis"`). The prompt frame names the evidence for
+what it is — feeding a diagnosis disguised as a «TODO comment» would be lying
+to the model — and requires the acceptance test to REPRODUCE the diagnosed
+defect. Every Stage A gate stands untouched: kill-switch, budget, one task in
+flight, clean tree, the test critic, and the human blessing. The wire's notes
+stay visible end to end: `repair_declined:no_failing_tests; test_proposed:<id>`
+or `…; test_declined:<gate>`.
+
+So the full transition now reads: verified diagnosis → repair lane (if a test
+is already red) → otherwise Stage A (earn the failing test first) → human →
+Stage B builds to green through the self-apply lane with rollback.
+
+### An unrelated catch from the same hour
+
+Three files (`jsonl_parser.py`, `tests/test_jsonl_parser.py`, `result.txt`)
+appeared at the repo root with no trace logging them. Chased before assuming:
+not the agent, not pytest, not an intruder — a `git stash pop` of mine, issued
+after its paired `push` had FAILED on a pathspec, popped the OPERATOR'S
+two-week-old stash (`before syncing main`, made with untracked files) into the
+tree. The untracked trio materialised; the tracked half conflicted and kept the
+stash entry alive. Files deleted; the operator's stash left untouched. Lesson:
+a pop after a failed push carries someone else's load.
