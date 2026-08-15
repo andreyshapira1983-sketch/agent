@@ -103,7 +103,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ]),
     ("Model Management (§6 / §12)", "Model discovery, routing, usage accounting.", [
         "model_catalog", "model_discovery", "model_router", "model_usage",
-        "model_registry_audit",
+        "model_registry_audit", "degraded_route",
     ]),
     ("Multi-Agent / Subagents (§6)", "Subagent proposals, registry, execution, teams.", [
         "subagent_contract", "subagent_contract_audit", "subagent_memory_scope",

@@ -1560,3 +1560,55 @@ holds. Ordering is now (relevance, maturity, confidence, recency).
 
 Normalising the score by record length: 17.5% against 30.4% for the baseline it
 was meant to improve. Long records are not less relevant; they are older.
+
+## The answer was not written by the model you chose
+
+Live session 2026-08-15. Every Anthropic call returned HTTP 400:
+
+    'message': 'Your credit balance is too low to access the Anthropic API.'
+
+The router did what it is built to do — substituted `openai/gpt-4o-mini` and
+kept going. Ten refusals, ten substituted successes, five turns. The operator
+was told nothing.
+
+What he saw instead was his agent saying «я не могу читать», «я не могу
+самостоятельно обучаться», «я не обманываю себя» — and he spent five turns
+arguing with those claims, reasonably reading them as the agent's own position.
+They were a small fallback model's boilerplate. The same session logged
+`reasoning_action_mismatch` four times (the observation counter went 6→9) and
+task relevance of 0.13, 0.09, 0.12, 0.08.
+
+`route_reason=provider_failover:anthropic->openai` appears twenty-one times in
+the trace. The trace is not what the reader of an answer reads.
+
+### Why it goes in the answer tail
+
+The tail already carries facts of exactly this kind — «Соответствие вопросу:
+0.08» is not about any single claim's truth but about how much of the answer to
+trust. Who wrote it is the same kind of fact, and a stronger one.
+
+It is attached OUTSIDE the verification block, deliberately. A turn with no
+checkable claims produces no verification tail at all, and a turn with no
+checkable claims written by a downgraded model needs the warning just as much.
+
+### Read from the ledger, not from new wiring
+
+`ModelUsageLedger` already records `route_reason` per call, with `run_id` and
+the provider's error. A second source of the same truth could disagree with the
+first, so there is none: `core/degraded_route.py` reads the ledger's own rows.
+The `run_id` filter matters — the ledger outlives the turn, and yesterday's
+substitution must not mark today's answer.
+
+The refusal reason is quoted, not summarised to «недоступна». The operator's
+question was «скажи точно проблему по факту», and «credit balance is too low»
+answers it while «недоступна» does not. The message lives only inside the SDK
+exception's repr, so it is extracted by pattern with the exception class as
+fallback, and capped — the tail is read by a person.
+
+### What this does not fix
+
+Nothing here restores the primary model, and nothing here makes a fallback
+answer better. It makes the answer say what it is. The four
+`reasoning_action_mismatch` signals and the 0.08 relevance from that session are
+measurements of gpt-4o-mini, not of the agent, and should not be read as
+evidence about the agent's own behaviour.
