@@ -2531,3 +2531,24 @@ SCOUT_PERIOD-th verdict-bearing run in the (role, provider) table hands the
 next decision to the scout. A burst cannot skip the turn, because the count
 grows by the runs themselves. Same determinism, same boundaries; the clock
 window and its `now` parameter are gone.
+
+## The ladder opens to the organs it was built for
+
+Three hunts in one day produced a fully verified diagnosis of the same class
+(reasoning_action_mismatch, grounded in core/loop.py) — and all three died at
+the same wall: "grounded target 'core/loop.py' is not a low-risk editable
+file". The gate was borrowed from the code_todo lane, where Stage B will
+eventually EDIT the target, so critical organs are rightly closed. But Stage A
+on a verified diagnosis edits nothing: it produces one NEW failing test under
+tests/, and a human blesses that test before any implementation exists. Held
+to that gate, the ladder was structurally closed to defects in the core — the
+exact defects it was built to reach.
+
+Operator decision 2026-08-15: open Stage A to verified-diagnosis targets in
+critical organs. `_target_gate_for(source_kind)` picks the gate: code_todo
+keeps the full gate (critical-organ deny + low-risk classifier), and
+verified_diagnosis drops only the critical-organ deny — path hygiene and the
+lane's classifier stay, so config/, secrets, lockfiles and non-repo paths
+remain closed to everyone. Stage B keeps its own gates: when the first blessed
+core test arrives, widening BUILD authority will be its own decision, made at
+that gate, not smuggled through this one.

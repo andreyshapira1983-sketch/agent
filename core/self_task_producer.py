@@ -33,6 +33,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from core.self_apply_lane import FileChange, _normalize_rel, classify_patch_risk
 from core.self_build_producer import (
     _DEFAULT_CONFIDENCE_THRESHOLD,
     _MAX_CONTENT_BYTES,
@@ -59,6 +60,38 @@ TASK_PRODUCER_ORIGIN = "subagent_self_task_producer"
 # ``# TODO``/``# FIXME``/``# XXX`` comments. Broader sources (TECH_DEBT.md,
 # architecture audit) can be added later once the loop is proven.
 _CODE_TODO_SOURCE = "code_todo"
+
+
+def _is_diagnosis_target_allowed(target: str) -> bool:
+    """Stage A acceptance for a VERIFIED-diagnosis target: critical organs open.
+
+    Operator decision 2026-08-15: a fully verified self-diagnosis may ground in
+    a critical organ (core/loop.py, ...) because Stage A produces only a NEW
+    failing test under tests/ — nothing edits the target at this stage, a human
+    blesses the test before any implementation exists, and Stage B keeps its own
+    gates. Path hygiene and the lane's low-risk classifier still apply: config/,
+    secrets, lockfiles, non-repo paths stay closed. Story: docs/CODE_NOTES.md,
+    "The ladder opens to the organs it was built for".
+    """
+    rel = str(target or "").replace("\\", "/").strip()
+    if not rel:
+        return False
+    canonical = _normalize_rel(rel)
+    if canonical is None:
+        return False
+    ok, _reason, _rejected = classify_patch_risk(
+        [FileChange(path=canonical, content="pass\n")]
+    )
+    return bool(ok)
+
+
+def _target_gate_for(source_kind: str) -> Callable[[str], bool]:
+    """Диагнозу открыты органы ядра (решение оператора 2026-08-15), TODO — нет:
+    ветка А кладёт только новый тест в tests/, цель на этом шаге не редактируется.
+    """
+    if source_kind == "verified_diagnosis":
+        return _is_diagnosis_target_allowed
+    return _is_self_build_target_allowed
 
 
 def decode_frozen_test(payload: dict[str, Any]) -> str:
@@ -387,7 +420,7 @@ def _task_critic_review(
         veto.append(
             f"impl_path {impl_path!r} does not match grounded target {norm_target!r}"
         )
-    elif not _is_self_build_target_allowed(impl_path):
+    elif not _target_gate_for(source_kind)(impl_path):
         veto.append(f"impl_path {impl_path!r} is not a low-risk editable file")
 
     if not test_path:
@@ -596,7 +629,7 @@ def produce_coding_task(
     impl_path = _field(candidate, "target_path").replace("\\", "/")
     quote = _field(candidate, "problem_quote")
     evidence_ref = _field(candidate, "evidence_ref")
-    if not _is_self_build_target_allowed(impl_path):
+    if not _target_gate_for(source_kind)(impl_path):
         return ProducerReport(
             status="no_task",
             reason=f"grounded target {impl_path!r} is not a low-risk editable file",
