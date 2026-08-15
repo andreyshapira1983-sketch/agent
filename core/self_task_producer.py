@@ -267,12 +267,111 @@ def _has_meaningful_assert(test_content: str) -> bool:
     return bool(meaningful)
 
 
+def _vacuous_assert_reason(tree: ast.AST) -> str | None:
+    """Тавтология в assert: истинно при любом исходе — линейка без делений.
+
+    Живой случай 2026-08-15 (заявка ain_31874b06, отклонена оператором):
+    `assert report.status in {...} or report.status == report.status` прошёл
+    сито, ловившее только литеральный `assert True`. Правило структурное:
+    сравнение узла с самим собой (X == X, X <= X, X >= X, X in X) всегда
+    истинно, и BoolOp-Or с таким операндом обесценивает весь assert.
+    """
+
+    def always_true(node: ast.expr) -> bool:
+        if isinstance(node, ast.Constant):
+            return bool(node.value)
+        if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
+            return any(always_true(v) for v in node.values)
+        if isinstance(node, ast.Compare) and len(node.comparators) == 1:
+            same = ast.dump(node.left) == ast.dump(node.comparators[0])
+            reflexive = (ast.Eq, ast.LtE, ast.GtE, ast.In)
+            return same and isinstance(node.ops[0], reflexive)
+        return False
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assert) and always_true(node.test):
+            return f"tautological assertion: `{ast.unparse(node.test)}` is always true"
+    return None
+
+
+def _phantom_kwargs_reason(tree: ast.AST) -> str | None:
+    """Именованный аргумент, которого нет у настоящего вызываемого.
+
+    Тест, строящий `RepairProposal(test_files=...)` при конструкторе без такого
+    поля, падает TypeError сегодня И после любой реализации — у него нет
+    зелёного состояния, это не приёмочный тест. Сверка идёт с НАСТОЯЩЕЙ
+    сигнатурой через importlib; любое сомнение (динамика, **kwargs, чужой
+    модуль, не импортируется) — молчание: сито только вычитает мусор и никогда
+    не блокирует на неуверенности.
+    """
+    import importlib
+    import inspect as _inspect
+
+    imported: dict[str, Any] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            for alias in node.names:
+                try:
+                    mod = importlib.import_module(node.module)
+                    imported[alias.asname or alias.name] = getattr(
+                        mod, alias.name, None
+                    )
+                except Exception:  # noqa: BLE001, S112 — сомнение = молчание:
+                    continue      # сито вычитает мусор, не блокирует на неуверенности
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            continue
+        target = imported.get(node.func.id)
+        if target is None:
+            continue
+        try:
+            params = _inspect.signature(target).parameters
+        except (TypeError, ValueError):
+            continue
+        if any(p.kind is _inspect.Parameter.VAR_KEYWORD for p in params.values()):
+            continue
+        for kw in node.keywords:
+            if kw.arg is not None and kw.arg not in params:
+                return (
+                    f"call {node.func.id}(...) passes keyword {kw.arg!r} "
+                    f"that the real signature does not accept"
+                )
+    return None
+
+
+def _diagnosis_linkage_reason(test_content: str, quote: str) -> str | None:
+    """Тест по диагнозу обязан упоминать хоть один его кодовый носитель.
+
+    Рамка требует REPRODUCE the diagnosed defect; живой тест про
+    reasoning_action_mismatch не содержал ни одного токена диагноза и проверял
+    выдуманный пробел. Носители — только кодовые имена (snake_case, CamelCase,
+    пути): прозаические слова совпадают случайно и судьями не являются.
+    """
+    carriers = {
+        m.group(0)
+        for m in re.finditer(
+            r"[A-Za-z][\w]*(?:[_.][A-Za-z][\w]*)+"
+            r"|\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+\b",
+            quote,
+        )
+        if len(m.group(0)) > 3
+    }
+    if not carriers:
+        return None  # диагнозу нечем связаться — судить не о чем
+    if any(c in test_content for c in carriers):
+        return None
+    sample = ", ".join(sorted(carriers)[:4])
+    return f"test mentions none of the diagnosis carriers ({sample}, ...)"
+
+
 def _task_critic_review(
     build: dict[str, Any],
     *,
     grounded_target: str,
     reader: Callable[[str], str | None],
     confidence_threshold: float,
+    quote: str = "",
+    source_kind: str = "code_todo",
 ) -> RoleOutput:
     """Reject garbage tasks BEFORE a human ever sees them. Any failure vetoes."""
     veto: list[str] = []
@@ -308,10 +407,24 @@ def _task_critic_review(
             veto.append("test content looks like a diff, not a full file")
         if len(test_content.encode("utf-8")) > _MAX_CONTENT_BYTES:
             veto.append("test content is too large")
+        tree = None
         try:
-            ast.parse(test_content)
+            tree = ast.parse(test_content)
         except SyntaxError as exc:
             veto.append(f"test does not parse: {exc.msg}")
+        if tree is not None:
+            # Живая заявка ain_31874b06 (2026-08-15, отклонена оператором)
+            # прошла строковое сито с тавтологией, фантомными kwargs и тестом
+            # не о диагнозе. Три структурные проверки — по AST и настоящим
+            # сигнатурам (docs/CODE_NOTES.md, «The critic that read strings»).
+            for reason in (
+                _vacuous_assert_reason(tree),
+                _phantom_kwargs_reason(tree),
+                _diagnosis_linkage_reason(test_content, quote)
+                if source_kind == "verified_diagnosis" else None,
+            ):
+                if reason:
+                    veto.append(reason)
         if "def test" not in test_content:
             veto.append("test content defines no test function")
         if "[REDACTED:" in test_content:
@@ -526,10 +639,9 @@ def produce_coding_task(
 
     # ── task critic ─────────────────────────────────────────────────────────
     critic = _task_critic_review(
-        builder.data,
-        grounded_target=impl_path,
-        reader=reader,
+        builder.data, grounded_target=impl_path, reader=reader,
         confidence_threshold=confidence_threshold,
+        quote=quote, source_kind=source_kind,
     )
     roles.append(critic)
     if critic.decision == "veto":
