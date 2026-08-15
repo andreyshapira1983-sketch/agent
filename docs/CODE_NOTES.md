@@ -2263,3 +2263,26 @@ The distinctions that hold the rule together:
   archaeology gets an explicit trace_id.
 * **The live trace stays excluded** even when it contains matching events —
   MIR-089's reason is unchanged: this run's outcome is not in it yet.
+
+### Side-catch of the live verification: quoting an error is punished as claiming an absence
+
+The verified live run above carried three `[claim-refuted]` marks on factually
+TRUE statements. Chased to the cause, reproduced in isolation:
+
+    claim   «В журнале найдено событие error … FileNotFoundError: File not
+            found: core/diagnostics.py»
+    excerpt the log line holding that same message
+
+    asserts_absence(claim)                 -> True   ("not found" matches)
+    absence_refuted_by_excerpt(claim, ...) -> True   (the filename is in the excerpt)
+
+Gate (d) reads the quoted error message as the AGENT asserting the file is
+absent, then finds the filename in the evidence — inside the very message being
+quoted — and rules the claim refuted. Quoting a recorded FileNotFoundError
+inevitably places the "missing" subject into the evidence, so truthfully
+reporting one's own logged errors is structurally punished. Gate (e) bites the
+same shape with `[absence-unverifiable]`.
+
+A claim that an EVENT was recorded is not a claim that a FILE is absent. The
+gates need to distinguish quotation from assertion. Recorded, not fixed here:
+this turn was the read_logs hole, and it is closed.
