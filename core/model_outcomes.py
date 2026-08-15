@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Container, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -166,6 +167,52 @@ def preferred_model(
     return ranked[0].model
 
 
+#: Разведочное окно: одно ведро из четырёх, т.е. ~10 минут из каждых 40 отказный
+#: путь отдаёт незамеренному ровеснику — достаточно, чтобы таблица набирала
+#: MIN_RUNS за дни, а не никогда; мало настолько, чтобы измеренный победитель
+#: оставался рабочей лошадью.
+_SCOUT_BUCKET_SECONDS = 600
+SCOUT_PERIOD = 4
+
+
+def scout_window(now: float | None = None) -> bool:
+    """Открыто ли разведочное окно. Детерминировано по часам, без случайности:
+    тот же момент времени даёт тот же ответ, и тест не зависит от датчика.
+    """
+    stamp = time.time() if now is None else now
+    return int(stamp // _SCOUT_BUCKET_SECONDS) % SCOUT_PERIOD == 0
+
+
+def scout_model(
+    outcomes: Iterable[ModelOutcome],
+    *,
+    role: str,
+    provider: str,
+    current_model: str | None,
+    min_runs: int = MIN_RUNS,
+) -> str | None:
+    """Незамеренный ровесник по уровню — кандидат на разведку, или None.
+
+    Замер, который всегда выигрывает, отрезает себе материал: победитель
+    получает все прогоны, ровесник — ни одного, и его строка таблицы молчит
+    вечно. Живой пример 2026-08-15: gpt-5.4-nano (65% на 34 прогонах) выигрывал
+    каждый отказ, а gpt-5.6-terra — лучшая standard-модель того же ключа — не
+    имела ни одного прогона с вердиктом и потому не могла быть предпочтена
+    никогда. Эксплуатация без разведки — самозапирание.
+
+    Разведка кончается там, где начинается замер: набравший `min_runs`
+    ровесник дальше судится таблицей, а не окном.
+    """
+    peer = peer_model_at_same_tier(current_model, provider)
+    if not peer:
+        return None
+    for outcome in outcomes:
+        if (outcome.role == role and outcome.provider == provider
+                and outcome.model == peer and outcome.runs >= min_runs):
+            return None
+    return peer
+
+
 # ── Подключение к выбору замены ──────────────────────────────────────────────
 # Ниже — единственное место, где замер встречается с картой уровней. Порядок
 # важен и он весь смысл: измеренное предпочтение ПЕРВЫМ, карта имён — полом на
@@ -213,7 +260,7 @@ def measured_outcomes(workspace: Path | None = None) -> tuple[ModelOutcome, ...]
 
 def substitute_model(
     *, role: str, provider: str, current_model: str | None,
-    workspace: Path | None = None,
+    workspace: Path | None = None, now: float | None = None,
 ) -> str | None:
     """Кем заменить `current_model` у нового провайдера.
 
@@ -224,14 +271,24 @@ def substitute_model(
 
     Карта остаётся полом: пока прогонов меньше `MIN_RUNS`, доля не отличима от
     случайности, и правило по уровню лучше, чем правило по трём случаям.
+
+    Поверх обоих правил — разведка (`scout_model`): в разведочном окне отказ
+    отдаётся незамеренному ровеснику, чтобы у замера появлялся материал и
+    таблица не запирала сама себя на первом победителе.
     """
     try:
+        outcomes = measured_outcomes(workspace)
         measured = preferred_model(
-            measured_outcomes(workspace), role=role, provider=provider,
+            outcomes, role=role, provider=provider,
             offered=offered_models(provider) or None,
         )
     except OSError:
-        measured = None
+        outcomes, measured = (), None
     if measured:
+        scout = scout_model(
+            outcomes, role=role, provider=provider, current_model=current_model,
+        )
+        if scout and scout != measured and scout_window(now):
+            return scout
         return measured
     return peer_model_at_same_tier(current_model, provider)
