@@ -99,41 +99,58 @@ def test_no_peer_means_no_scout(monkeypatch):
     assert picked is None
 
 
-def test_the_turn_is_counted_in_runs_not_in_clock_time():
-    """Ломка первой конструкции, живой замер 2026-08-15: окно по настенным
-    часам (10 минут из 40) пропустило ВСЮ охоту №3 — 12 failover-решений за
-    4 минуты, все в закрытом отрезке, разведчик не получил ни одного вызова.
-    Нагрузка живёт вспышками, и доля времени не равна доле решений. Ход
-    разведчика считается по числу прогонов в таблице: каждый SCOUT_PERIOD-й
-    прогон отдаёт следующее решение разведчику — вспышка не может проскочить
-    мимо, потому что счёт растёт самими прогонами.
+def test_the_turn_advances_with_decisions_not_with_the_capped_table():
+    """Две фальсификации одной конструкции. Первая (2026-08-15): окно по
+    настенным часам пропустило всю охоту — вспышка короче закрытого отрезка.
+    Вторая (2026-08-16): счёт по прогонам таблицы замер НАВСЕГДА — таблица
+    питается кольцевым буфером эпизодов (потолок 200), плюс прогон — минус
+    вытесненный, mat=110 на шести решениях трёх попыток подряд, остаток %4
+    не меняется, ход не выпадает никогда. Часы хода обязаны быть монотонными:
+    считаются РЕШЕНИЯ по append-only журналу вызовов.
     """
-    on_turn = _outcomes((_MEASURED, SCOUT_PERIOD * 2))
-    off_turn = _outcomes((_MEASURED, SCOUT_PERIOD * 2 + 1))
-
-    assert scout_turn(on_turn, role="planner", provider="openai") is True
-    assert scout_turn(off_turn, role="planner", provider="openai") is False
+    assert scout_turn(SCOUT_PERIOD * 2) is True
+    assert scout_turn(SCOUT_PERIOD * 2 + 1) is False
+    assert scout_turn(0) is True, "первое решение в истории — ход разведчика"
 
 
-def test_other_roles_and_providers_do_not_advance_the_turn():
-    """Счёт у каждой пары роль+провайдер свой, как и сама таблица."""
-    usage, episodes = _corpus(_MEASURED, SCOUT_PERIOD * 2)
-    for i in range(3):
-        usage.append({"run_id": f"s{i}", "role": "synthesizer",
-                      "provider": "openai", "model": _MEASURED,
-                      "status": "success"})
-        episodes.append({"run_id": f"s{i}", "verified_chunks": 1,
-                         "unverified_chunks": 0, "defect_signals": []})
-    outcomes = measure_model_outcomes(usage, episodes)
+def test_decisions_are_counted_per_role_from_the_ledger(tmp_path):
+    """Счёт у каждой пары роль+провайдер свой; один прогон — одно решение,
+    сколько бы вызовов подменённая модель в нём ни сделала.
+    """
+    import json
 
-    assert scout_turn(outcomes, role="planner", provider="openai") is True
+    from core.model_outcomes import failover_decisions
+
+    ledger = tmp_path / "data" / "model_usage.jsonl"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {"role": "planner", "provider": "openai", "run_id": "r1",
+         "route_reason": "provider_failover:anthropic->openai|x", "status": "success"},
+        {"role": "planner", "provider": "openai", "run_id": "r1",
+         "route_reason": "provider_failover:anthropic->openai|x", "status": "success"},
+        {"role": "planner", "provider": "openai", "run_id": "r2",
+         "route_reason": "provider_failover:anthropic->openai|x", "status": "success"},
+        {"role": "synthesizer", "provider": "openai", "run_id": "r3",
+         "route_reason": "provider_failover:anthropic->openai|x", "status": "success"},
+        {"role": "planner", "provider": "openai", "run_id": "r4",
+         "route_reason": "policy:balanced", "status": "success"},
+    ]
+    ledger.write_text(
+        "".join(json.dumps({"payload": r}) + "\n" for r in rows), encoding="utf-8",
+    )
+
+    assert failover_decisions(tmp_path, role="planner", provider="openai") == 2
+    assert failover_decisions(tmp_path, role="synthesizer", provider="openai") == 1
 
 
 def test_substitute_sends_the_scout_on_its_turn(monkeypatch):
     _pin_world(monkeypatch)
     monkeypatch.setattr(
         mo, "measured_outcomes",
-        lambda _w=None: _outcomes((_MEASURED, SCOUT_PERIOD * 2)),
+        lambda _w=None: _outcomes((_MEASURED, MIN_RUNS)),
+    )
+    monkeypatch.setattr(
+        mo, "failover_decisions", lambda *_a, **_k: SCOUT_PERIOD * 2,
     )
 
     picked = substitute_model(
@@ -147,7 +164,10 @@ def test_substitute_keeps_the_measured_winner_off_turn(monkeypatch):
     _pin_world(monkeypatch)
     monkeypatch.setattr(
         mo, "measured_outcomes",
-        lambda _w=None: _outcomes((_MEASURED, SCOUT_PERIOD * 2 + 1)),
+        lambda _w=None: _outcomes((_MEASURED, MIN_RUNS)),
+    )
+    monkeypatch.setattr(
+        mo, "failover_decisions", lambda *_a, **_k: SCOUT_PERIOD * 2 + 1,
     )
 
     picked = substitute_model(
@@ -196,20 +216,22 @@ def test_the_substitution_names_its_reason(monkeypatch):
     _pin_world(monkeypatch)
     monkeypatch.setattr(
         mo, "measured_outcomes",
-        lambda _w=None: _outcomes((_MEASURED, SCOUT_PERIOD * 2)),
+        lambda _w=None: _outcomes((_MEASURED, MIN_RUNS)),
+    )
+    monkeypatch.setattr(
+        mo, "failover_decisions", lambda *_a, **_k: SCOUT_PERIOD * 2,
     )
     model, reason = substitute_model_with_reason(
         role="planner", provider="openai", current_model="claude-sonnet-5",
     )
     assert model == _UNMEASURED_PEER
-    assert "scout" in reason and "mat=8" in reason
+    assert "scout" in reason and "dec=8" in reason
 
     monkeypatch.setattr(
-        mo, "measured_outcomes",
-        lambda _w=None: _outcomes((_MEASURED, SCOUT_PERIOD * 2 + 1)),
+        mo, "failover_decisions", lambda *_a, **_k: SCOUT_PERIOD * 2 + 1,
     )
     model, reason = substitute_model_with_reason(
         role="planner", provider="openai", current_model="claude-sonnet-5",
     )
     assert model == _MEASURED
-    assert "measured" in reason and "mat=9" in reason
+    assert "measured" in reason and "dec=9" in reason

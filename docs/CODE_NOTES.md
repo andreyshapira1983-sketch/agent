@@ -2747,3 +2747,22 @@ output); one tool result yields at most ONE evidence; a failed ToolResult
 yields none — an error is the absence of a source, not a weaker source;
 content_hash is sha256 of the excerpt; confidence stores the post-modifier
 value ("Evidence layer design").
+
+## The scout's clock froze with the ring buffer
+
+The instrumented hunt (3 attempts, 2026-08-16) returned the same reading six
+times: `measured:nano(mat=110,off-turn)` — the material never moved while the
+hunt itself added measured runs. The cause is structural: the measurement
+table is fed by the episodic store, and smart_memory caps that store at 200
+episodes FIFO. At capacity every new verdict-bearing run evicts an old one;
+the table's total plateaus forever, the `%4` residue never changes, and the
+run-counted scout turn — built to survive bursts — never opens again. Second
+falsification of the same design: the clock window died to burstiness, the
+run count died to the memory cap.
+
+The turn's clock must be MONOTONE. `failover_decisions` counts substitution
+decisions from the append-only usage ledger (one run — one decision, however
+many calls the substituted model made; rows without run_id count singly), and
+`scout_turn` takes that plain count. The decision-reason instrument that
+exposed the freeze (`substitute_model_with_reason` → route_reason) stays: it
+turned a two-hunt mystery into a six-line diagnosis.
