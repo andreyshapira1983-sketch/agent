@@ -143,3 +143,26 @@ def test_study_unblocks_only_the_web_on_the_goal_path():
     assert "python_probe" in blocked
     assert _goal_block_set(unblock_tools=frozenset(), include_tests=True) == \
         _AUTONOMOUS_GOAL_BLOCKED_TOOLS
+
+
+def test_verified_and_topic_only_citations_are_read_too(tmp_path):
+    """Живой обрыв цепочки (первый прогон автомата, 2026-08-16): к моменту
+    жатвы верификатор уже переписал [web:x] в [verified:web:x]/[topic-only:…],
+    и жнец, знающий только сырую орфографию, отказал с no_web_citations при
+    состоявшемся чтении.
+    """
+    answer = (
+        "Контрольные точки сохраняют состояние [verified:web:LangGraph "
+        "checkpoints обзор] и это применимо частично "
+        "[topic-only:web_search:восстановление прогонов]."
+    )
+
+    note = _propose_hypothesis_from_study(
+        agent=SimpleNamespace(llm=_CondenserLLM(), log=None),
+        workspace=tmp_path, goal=_STUDY_GOAL, answer=answer,
+    )
+
+    assert note.startswith("hypothesis_recorded:")
+    ((claim, _extra),) = load_claims(tmp_path)
+    refs = " ".join(claim.observation.evidence_refs)
+    assert "LangGraph" in refs
