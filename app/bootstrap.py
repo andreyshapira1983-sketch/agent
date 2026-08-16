@@ -31,6 +31,7 @@ from tools.diff_file import DiffFileTool
 from tools.file_read import FileReadTool
 from tools.file_write import FileWriteTool
 from tools.list_dir import ListDirTool
+from tools.python_probe import PythonProbeTool
 from tools.read_logs import ReadLogsTool
 from tools.rss_fetch import RssFetchTool
 from tools.run_tests import RunTestsTool
@@ -105,6 +106,8 @@ def build_agent(
     registry.register(WebSearchTool())
     registry.register(FileWriteTool(workspace_root=workspace))
     registry.register(ShellExecTool(workspace_root=workspace))
+    # Лаборатория: замер собственной среды экспериментом (см. tools/python_probe.py).
+    registry.register(PythonProbeTool())
     # Pure clock primitive — keeps the agent from guessing today's date.
     registry.register(CurrentTimeTool())
     # MVP-13.1 — self-repair diagnostic primitives.
