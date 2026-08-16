@@ -2784,3 +2784,23 @@ turn per line — needed no fix: the block instruments (`<<< … >>>`,
 `:task-begin … :task-end`, backslash continuation) already work over pipes
 and are pinned by tests/characterization/test_repl_input_modes.py. The
 resolution is recorded, and probes now use them.
+
+## One yes a week
+
+Every non-dry campaign run demanded its own one-time approval — correct for
+stage 0, and structurally incompatible with "поставить на автомат": the
+operator's live 24h experiment (2026-08-16) ran a daemon that could propose
+but never act, because nobody was there to say the per-goal "yes".
+
+The standing grant is one approval item (operation
+`autonomous_runtime.standing_grant`) with an expiry and a daily run cap in
+its payload. The effects gate consults it AFTER the per-goal grant and BEFORE
+creating a new request: an approved, unexpired grant with remaining daily
+capacity lets the run through and appends one consumption row to
+data/standing_grant_usage.jsonl (the ledger is the truth of "how many
+today"). The grant is deliberately NOT marked executed — standing means it
+lives until expiry or revocation. Boundaries, each tested: a pending grant
+powers nothing (§9 — a request is not a yes); an expired grant powers
+nothing; an exhausted daily cap returns the OLD world — a one-time request —
+rather than a silent pass; §9 rights (merge, kill switch, irreversible
+approvals) are untouched, and the kill switch still outranks everything.
