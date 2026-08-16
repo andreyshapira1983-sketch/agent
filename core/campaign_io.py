@@ -306,7 +306,13 @@ def _propose_doctrine_draft(
 
 #: Инлайн-цитаты веба в проверенном ответе — единственный источник ссылок
 #: гипотезы: живой урок конденсатора 2026-08-16 — модель выдумала «Page 12».
-_WEB_CITATION_RE = re.compile(r"\[(?:web|web_fetch|web_search)[:\s]([^\]]{4,200})\]")
+#: Обе орфографии: сырая [web:x] и переписанная верификатором
+#: [verified:web:x]/[topic-only:web:x] — жнец работает ПОСЛЕ проверки (живой
+#: обрыв цепочки на первом прогоне автомата: no_web_citations при
+#: состоявшемся чтении).
+_WEB_CITATION_RE = re.compile(
+    r"\[(?:verified:|topic-only:)?(?:web|web_fetch|web_search)[:\s]([^\]]{4,200})\]"
+)
 
 
 def _propose_hypothesis_from_study(
