@@ -92,6 +92,22 @@ _AUTONOMOUS_GOAL_BLOCKED_TOOLS: frozenset[str] = frozenset(
 )
 
 
+#: Что вообще МОЖНО разблокировать целевому прогону: только чтение веба, и
+#: только явным полем конфига (учебное действие под стоячим грантом, решение
+#: оператора 2026-08-16). spawn_subagent и python_probe этим полем не
+#: разблокируемы по построению — им нужны собственные ворота.
+_UNBLOCKABLE_TOOLS: frozenset[str] = frozenset({"web_search", "web_fetch"})
+
+
+def _goal_block_set(
+    *, unblock_tools: frozenset[str], include_tests: bool,
+) -> frozenset[str]:
+    """Список блокировок целевого пути с учётом узкой разблокировки."""
+    tests_block = _NO_TESTS_BLOCKED_TOOLS if not include_tests else frozenset()
+    allowed = _UNBLOCKABLE_TOOLS & unblock_tools
+    return (_AUTONOMOUS_GOAL_BLOCKED_TOOLS - allowed) | tests_block
+
+
 def _rotation_index(modulus: int, *, bucket_seconds: int = 600) -> int:
     return int(time.time() // bucket_seconds) % max(modulus, 1)
 
@@ -203,6 +219,8 @@ class AutonomousRuntimeConfig:
     goal: str = "project health"
     dry_run: bool = True
     effects_approved: bool = False
+    #: Узкая разблокировка целевого пути (пересекается с _UNBLOCKABLE_TOOLS).
+    unblock_tools: frozenset[str] = frozenset()
     limit: int = 5
     include_tests: bool = True
     include_goal: bool = False
@@ -942,8 +960,13 @@ class AutonomousRuntime:
         """
         policy = getattr(self.agent, "policy", None)
         has_block_support = policy is not None and hasattr(policy, "blocked_tools")
-        tests_block = _NO_TESTS_BLOCKED_TOOLS if not config.include_tests else frozenset()
-        to_block = _AUTONOMOUS_GOAL_BLOCKED_TOOLS | tests_block
+        to_block = _goal_block_set(
+            unblock_tools=config.unblock_tools, include_tests=config.include_tests,
+        )
+        if config.unblock_tools:
+            self._log("goal_tools_unblocked", {
+                "unblocked": sorted(_UNBLOCKABLE_TOOLS & config.unblock_tools),
+            })
         block = has_block_support and bool(to_block)
         previous_blocked = getattr(policy, "blocked_tools", None) if block else None
         previous_gateway_dry_run = bool(getattr(self.agent, "gateway_dry_run", False))

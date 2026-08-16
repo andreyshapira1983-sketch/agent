@@ -4,6 +4,8 @@ Extracted from `core/campaign` by autonomous self-build module split.
 """
 from __future__ import annotations
 
+import hashlib
+import re
 from pathlib import Path
 from typing import Any
 
@@ -302,6 +304,68 @@ def _propose_doctrine_draft(
     return f"doc_draft_proposed:{item.id}"
 
 
+#: Инлайн-цитаты веба в проверенном ответе — единственный источник ссылок
+#: гипотезы: живой урок конденсатора 2026-08-16 — модель выдумала «Page 12».
+_WEB_CITATION_RE = re.compile(r"\[(?:web|web_fetch|web_search)[:\s]([^\]]{4,200})\]")
+
+
+def _propose_hypothesis_from_study(
+    *, agent: Any, workspace: Any, goal: str, answer: str,
+) -> str:
+    """Чтение внешнего мира оставляет ГИПОТЕЗУ нижней ступени — не истину.
+
+    Конденсация — отдельный узкий вызов (замер 2026-08-16: хвостовой блок в
+    длинном контракте nano роняет 3 раза из 3, короткий одиночный — держит).
+    Ссылки берутся из инлайн-цитат ответа, проверенных верификатором; выдумка
+    модели в поле «ИСТОЧНИК» — только справка. Права урока запись не получает:
+    только полная лестница (docs/CODE_NOTES.md, «Reading leaves a hypothesis»).
+    """
+    refs = tuple(dict.fromkeys(
+        m.group(1).strip() for m in _WEB_CITATION_RE.finditer(answer or "")
+    ))
+    if not refs:
+        return "hypothesis_declined:no_web_citations"
+    try:
+        raw = str(agent.llm.complete(
+            system=(
+                "From the analysis below produce EXACTLY four lines:\n"
+                "ГИПОТЕЗА: <one testable claim - which external idea could "
+                "improve which SPECIFIC mechanism of THIS system (name the "
+                "module)>\nПРОВЕРКА: <which experiment or measurement decides "
+                "it>\nИСТОЧНИК: <the page you rely on>\nСТАТУС: не проверено"
+            ),
+            user=(answer or "")[:4000], max_tokens=400, temperature=0.3,
+        ) or "")
+    except Exception as exc:  # noqa: BLE001 — провод не вправе ронять кампанию
+        _log(agent, "campaign_hypothesis_failed", {"error": str(exc)[:200]})
+        return "hypothesis_declined:condenser_error"
+    lines = {ln.split(":", 1)[0].strip().upper(): ln.split(":", 1)[1].strip()
+             for ln in raw.splitlines() if ":" in ln}
+    hypothesis = lines.get("ГИПОТЕЗА", "")
+    if not hypothesis:
+        return "hypothesis_declined:no_block"
+    from core.causal_claim_store import save_claim
+    from core.causal_lesson import CausalClaim, Observation
+
+    trace_id = str(getattr(getattr(agent, "log", None), "trace_id", "") or "")
+    claim = CausalClaim(observation=Observation(
+        episode_id=f"ep-study-{hashlib.sha256(goal.encode('utf-8')).hexdigest()[:12]}",
+        trace_id=trace_id,
+        run_id="campaign_study",
+        defect_signals=("external_idea_candidate",),
+        evidence_refs=tuple(f"web:{r}" for r in refs[:6]),
+        observed_mismatch=(
+            f"{hypothesis} || Проверка, названная автором: "
+            f"{lines.get('ПРОВЕРКА', '')}"
+        ),
+    ))
+    key = save_claim(claim, workspace=workspace)
+    _log(agent, "campaign_hypothesis_recorded", {
+        "claim_key": key, "sources": list(refs[:3]),
+    })
+    return f"hypothesis_recorded:{key}"
+
+
 def _propose_failing_test_from_diagnosis(
     *, agent: Any, workspace: Any, target: str, answer: str, approval_inbox: Any,
 ) -> str:
@@ -474,6 +538,13 @@ def _default_execute_action(
             include_goal=True,
             budgets=BudgetLimits(max_agent_runs=1),
             enable_reflection=False,
+            # Учебному действию открывается ровно веб (узкая разблокировка,
+            # решение оператора 2026-08-16; поле пересекается с
+            # _UNBLOCKABLE_TOOLS и ничего другого открыть не может).
+            unblock_tools=(
+                frozenset({"web_search", "web_fetch"})
+                if action.action == "study_external_source" else frozenset()
+            ),
         )
     )
     llm_after, cost_after = _cost_totals(agent)
@@ -505,6 +576,14 @@ def _default_execute_action(
     )
     if repaired:
         proposal = f"{proposal}; {repaired}" if proposal else repaired
+    # Учебные руки: чтение внешнего мира оставляет гипотезу нижней ступени.
+    if action.action == "study_external_source" and not config.dry_run:
+        studied = _propose_hypothesis_from_study(
+            agent=agent, workspace=workspace, goal=config.goal,
+            answer=goal_answer,
+        )
+        if studied:
+            proposal = f"{proposal}; {studied}" if proposal else studied
     # Документные руки: цель, просящая документ доктрины, рождает черновик
     # заявкой в очередь — см. _propose_doctrine_draft.
     if action.action == "draft_doctrine_document" and not config.dry_run:

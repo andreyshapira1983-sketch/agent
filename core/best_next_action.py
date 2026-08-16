@@ -43,6 +43,9 @@ _P_TESTS_INCONCLUSIVE = 60  # timed-out/unknown: must not be read as healthy
 _P_CHARTER_DOCUMENT = 58  # the campaign goal itself asks for a doctrine draft:
 #   above the durable-issue habit (55) — live 2026-08-15 the head chose "draft
 #   the contract" and the hands did habitual repair — below health alarms (60+)
+_P_EXTERNAL_STUDY = 57    # the goal asks to STUDY the outside world: above the
+#   repair habit (55), below the doc goal (58) — a request to write is more
+#   concrete than a request to read
 _P_SELF_IMPROVEMENT_FAILURE = 55  # recent rollback/rejection despite clean health
 _P_INBOX_DEBT = 50        # duplicate proposals accumulating into admin debt
 _P_DRY_RUN_STUCK = 40     # many dry-run ticks: never applied anything, ask why
@@ -128,6 +131,34 @@ def doc_target_from_goal(goal: str) -> str:
     return f"knowledge/doctrine/future/{name}"
 
 
+#: Учебная цель: глагол изучения + внешний мир. Решение оператора 2026-08-16
+#: («строй автомат»): чтение внешнего мира — законная работа кампании.
+_STUDY_VERB_RE = re.compile(r"\b(изучи|прочитай|почитай|посмотри|study|read|research)",
+                            re.IGNORECASE)
+_OUTSIDE_RE = re.compile(r"интернет|сайт|http|www\.|в вебе|\bweb\b", re.IGNORECASE)
+
+
+def _candidate_external_study(goal: str) -> BestNextAction | None:
+    text = str(goal or "")
+    if not (_STUDY_VERB_RE.search(text) and _OUTSIDE_RE.search(text)):
+        return None
+    return BestNextAction(
+        action="study_external_source",
+        title="Study the external source the campaign goal names",
+        severity="medium",
+        priority=_P_EXTERNAL_STUDY,
+        reason=(
+            "The campaign goal itself asks to study the outside world; the "
+            "outcome is a HYPOTHESIS in the claim store, never a truth."
+        ),
+        evidence=(f"goal: {text[:200]}",),
+        unknowns=("whether the reading yields a testable hypothesis",),
+        risk="read_only",
+        recommended_command=None,
+        confidence=0.7,
+    )
+
+
 def _candidate_charter_document(goal: str) -> BestNextAction | None:
     target = doc_target_from_goal(goal)
     if not target:
@@ -190,6 +221,10 @@ def select_best_next_action(
     document = _candidate_charter_document(goal)
     if document is not None:
         candidates.append(document)
+
+    study = _candidate_external_study(goal)
+    if study is not None:
+        candidates.append(study)
 
     daemon = _candidate_daemon(heartbeat_missing, heartbeat_stale, heartbeat_age_seconds, last_event)
     if daemon is not None:
