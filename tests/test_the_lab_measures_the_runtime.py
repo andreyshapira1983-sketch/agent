@@ -100,3 +100,31 @@ def test_the_unattended_path_keeps_the_lab_closed():
     from core.autonomous_runtime import _AUTONOMOUS_GOAL_BLOCKED_TOOLS
 
     assert "python_probe" in _AUTONOMOUS_GOAL_BLOCKED_TOOLS
+
+
+def test_the_doorman_admits_a_lab_step():
+    """Проба №3 (2026-08-16): планировщик, выучив карту, СПЛАНИРОВАЛ
+    эксперимент — и швейцар выбросил шаг: «tool 'python_probe' has no
+    sanitiser». У каждой руки должен быть свой пропуск.
+    """
+    from core.step_sanitizer import sanitize_step
+
+    warnings: list[str] = []
+    step = sanitize_step(
+        "python_probe", {"code": "from itertools import batched"},
+        None, 0, warnings,
+    )
+
+    assert step is not None, warnings
+    assert step["tool"] == "python_probe"
+    assert step["arguments"]["code"] == "from itertools import batched"
+
+
+def test_the_doorman_still_rejects_shapeless_lab_steps():
+    from core.step_sanitizer import sanitize_step
+
+    for bad in ({}, {"code": ""}, {"code": "x" * 5000},
+                {"code": "print(1)", "timeout_seconds": 999}):
+        warnings: list[str] = []
+        assert sanitize_step("python_probe", bad, None, 0, warnings) is None
+        assert warnings, bad

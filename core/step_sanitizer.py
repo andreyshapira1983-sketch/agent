@@ -101,6 +101,49 @@ def _shell_label(argv: list[str]) -> str:
     return f"{head} #{digest}"
 
 
+#: Потолок кода эксперимента: замер — не программа (tools/python_probe.py).
+_PROBE_CODE_CAP = 4000
+
+
+def _sanitize_python_probe(
+    args: dict[str, Any], idx: int, warnings: list[str],
+) -> dict[str, Any] | None:
+    """Пропуск лаборатории: форма шага. Глубину (AST-гейт эффектов, контейнер)
+    судит сам инструмент — здесь только «код есть, размер и таймаут вменяемы».
+    Живой повод 2026-08-16 (проба №3): планировщик, выучив карту, спланировал
+    эксперимент — и шаг умер с «no sanitiser, dropped». У руки не было пропуска.
+    """
+    code = args.get("code")
+    if not isinstance(code, str) or not code.strip():
+        warnings.append(f"step[{idx}]: python_probe without code, dropped")
+        return None
+    if len(code) > _PROBE_CODE_CAP:
+        warnings.append(
+            f"step[{idx}]: python_probe code too long "
+            f"({len(code)} > {_PROBE_CODE_CAP}), dropped"
+        )
+        return None
+    arguments: dict[str, Any] = {"code": code}
+    timeout = args.get("timeout_seconds")
+    if timeout is not None:
+        if not isinstance(timeout, int) or not 1 <= timeout <= 60:
+            warnings.append(
+                f"step[{idx}]: python_probe timeout_seconds must be 1..60, dropped"
+            )
+            return None
+        arguments["timeout_seconds"] = timeout
+    first = code.strip().splitlines()[0][:50]
+    return {
+        "tool": "python_probe",
+        "arguments": arguments,
+        "label": f"python_probe:{first}",
+        "expected_outcome": (
+            "Measured behaviour of THIS runtime: exit_code/stdout/stderr of a "
+            "small experiment; a failing snippet is itself the answer."
+        ),
+    }
+
+
 def sanitize_step(
     tool_name: str,
     args: dict[str, Any],
@@ -336,6 +379,10 @@ def sanitize_step(
                 "approval."
             ),
         }
+
+    # ----- лаборатория (2026-08-16) -----
+    if tool_name == "python_probe":
+        return _sanitize_python_probe(args, idx, warnings)
 
     # ----- MVP-14.2 web_fetch -----
     if tool_name == "web_fetch":
