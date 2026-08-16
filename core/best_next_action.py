@@ -149,7 +149,10 @@ def _candidate_external_study(goal: str) -> BestNextAction | None:
         priority=_P_EXTERNAL_STUDY,
         reason=(
             "The campaign goal itself asks to study the outside world; the "
-            "outcome is a HYPOTHESIS in the claim store, never a truth."
+            "outcome is a HYPOTHESIS in the claim store, never a truth. "
+            "Search, then FETCH the best page with web_fetch: search snippets "
+            "are not sources, and claims resting on them die at verification "
+            "(measured 2026-08-16: insufficient_for_realtime on snippet-only runs)."
         ),
         evidence=(f"goal: {text[:200]}",),
         unknowns=("whether the reading yields a testable hypothesis",),
