@@ -172,24 +172,44 @@ def preferred_model(
 SCOUT_PERIOD = 4
 
 
-def scout_turn(
-    outcomes: Iterable[ModelOutcome], *, role: str, provider: str,
-    period: int = SCOUT_PERIOD,
-) -> bool:
-    """Чей ход — разведчика или победителя. По счёту прогонов, не по часам.
+def scout_turn(decisions: int, *, period: int = SCOUT_PERIOD) -> bool:
+    """Чей ход — разведчика или победителя. По МОНОТОННОМУ счёту решений.
 
-    Первая конструкция была окном по настенным часам (10 минут из каждых 40) и
-    сломалась на первом же живом замере 2026-08-15: охота №3 уложила все 12
-    failover-решений в 4 минуты внутри закрытого отрезка, и разведчик не
-    получил ни одного вызова. Нагрузка этого агента живёт вспышками, а доля
-    времени не равна доле решений. Счёт по прогонам вспышка проскочить не
-    может: он растёт самими прогонами.
+    Две фальсификации одной конструкции. Первая (2026-08-15): окно по
+    настенным часам пропустило всю охоту — вспышка короче закрытого отрезка.
+    Вторая (2026-08-16): счёт по прогонам замерной таблицы замер НАВСЕГДА —
+    таблица питается кольцевым буфером эпизодов (потолок 200 в smart_memory),
+    плюс прогон — минус вытесненный, mat=110 на шести решениях трёх попыток
+    подряд, остаток %4 не менялся, ход не выпадал никогда. Часы хода обязаны
+    только расти: считаются решения по append-only журналу вызовов
+    (`failover_decisions`).
     """
-    material = sum(
-        o.runs for o in outcomes
-        if o.role == role and o.provider == provider
-    )
-    return material % period == 0
+    return decisions % period == 0
+
+
+def failover_decisions(
+    workspace: Path | None = None, *, role: str, provider: str,
+) -> int:
+    """Сколько failover-решений уже было у пары роль+провайдер. Монотонно.
+
+    Один прогон — одно решение, сколько бы вызовов подменённая модель в нём
+    ни сделала; строки без run_id считаются поштучно.
+    """
+    root = Path(workspace or ".")
+    runs: set[str] = set()
+    loose = 0
+    for row in _load_rows(root / "data" / "model_usage.jsonl"):
+        if (str(row.get("role") or "") != role
+                or str(row.get("provider") or "") != provider):
+            continue
+        if not str(row.get("route_reason") or "").startswith("provider_failover"):
+            continue
+        rid = str(row.get("run_id") or "")
+        if rid:
+            runs.add(rid)
+        else:
+            loose += 1
+    return len(runs) + loose
 
 
 def scout_model(
@@ -317,13 +337,13 @@ def substitute_model_with_reason(
         scout = scout_model(
             outcomes, role=role, provider=provider, current_model=current_model,
         )
-        if scout and scout != measured and scout_turn(
-                outcomes, role=role, provider=provider):
-            return scout, f"scout:{scout}(mat={material})"
+        decisions = failover_decisions(workspace, role=role, provider=provider)
+        if scout and scout != measured and scout_turn(decisions):
+            return scout, f"scout:{scout}(mat={material},dec={decisions})"
         why = (
             "off-turn" if scout and scout != measured
             else ("no-scout-candidate" if not scout else "scout==measured")
         )
-        return measured, f"measured:{measured}(mat={material},{why})"
+        return measured, f"measured:{measured}(mat={material},dec={decisions},{why})"
     peer = peer_model_at_same_tier(current_model, provider)
     return peer, f"floor:{peer}(mat={material})"
