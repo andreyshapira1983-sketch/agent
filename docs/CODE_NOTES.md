@@ -2687,3 +2687,29 @@ extractor refuses to mint claims from truncated fragments (same family as
 mojibake and code fragments), and `_subject_value` returns None for truncated
 text, so already-stored fragments stop manufacturing conflicts without data
 surgery.
+
+## The stowaway claim
+
+The epistemic probe (2026-08-16, trace_3bb22486) produced the right verdict
+for the wrong ledger. The answer's key chunk was compound: "the docs say
+'Added in version 3.12' AND this environment runs Python 3.11.9". The cited
+evidence — the fetched itertools page — knew about 3.12 and nothing about
+3.11.9; no collected evidence anywhere contained the string 3.11. The
+verifier reported 6 of 6 verified. The verifiable half of the chunk carried
+the unverifiable half through: a stowaway riding a valid citation. The
+version happened to be TRUE (3.11.9 is the common Windows build of 3.11) —
+verified-by-luck, which is exactly what the fourth gate exists to forbid.
+
+Root cause, one line: `_SALIENT_LITERAL_RE` did not treat dotted versions as
+distinctive literals — `salient_literals("...Python 3.11.9...")` returned an
+empty set, so the cited-literal-absent gate had nothing to check. The regex
+now includes version TRIPLETS (`\d+(?:\.\d+){2,}` — two dots or more). Bare
+numbers and decimals (`3.12`, `0.795`) deliberately stay out: counts, sums
+and comparisons belong to `evaluate_claim_arithmetic`, and a second judge
+over the same territory would fight the first. A triplet is not a quantity —
+it is a NAME, same family as `claude-sonnet-4-5` and commit SHAs already in
+the set.
+
+Boundaries held by tests: a version the evidence does name still verifies;
+decimals are not demoted; the live stowaway shape is demoted by the union
+gate like any other absent literal.
