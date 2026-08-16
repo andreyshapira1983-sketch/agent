@@ -177,6 +177,39 @@ def test_the_live_selection_carries_the_scout():
     """
     import inspect
 
-    source = inspect.getsource(substitute_model)
+    from core.model_outcomes import substitute_model_with_reason
+
+    source = inspect.getsource(substitute_model_with_reason)
     assert "scout_model(" in source
     assert "scout_turn(" in source
+    assert "substitute_model_with_reason(" in inspect.getsource(substitute_model)
+
+
+def test_the_substitution_names_its_reason(monkeypatch):
+    """Живой разрыв 2026-08-16 (охота №9): при материале 108 (%4=0, ход
+    разведчика открыт) выбран nano, и по journal нельзя сказать почему —
+    решение молчало. Замена обязана рассказывать себя: замер/разведка/пол
+    и материал на момент решения.
+    """
+    from core.model_outcomes import substitute_model_with_reason
+
+    _pin_world(monkeypatch)
+    monkeypatch.setattr(
+        mo, "measured_outcomes",
+        lambda _w=None: _outcomes((_MEASURED, SCOUT_PERIOD * 2)),
+    )
+    model, reason = substitute_model_with_reason(
+        role="planner", provider="openai", current_model="claude-sonnet-5",
+    )
+    assert model == _UNMEASURED_PEER
+    assert "scout" in reason and "mat=8" in reason
+
+    monkeypatch.setattr(
+        mo, "measured_outcomes",
+        lambda _w=None: _outcomes((_MEASURED, SCOUT_PERIOD * 2 + 1)),
+    )
+    model, reason = substitute_model_with_reason(
+        role="planner", provider="openai", current_model="claude-sonnet-5",
+    )
+    assert model == _MEASURED
+    assert "measured" in reason and "mat=9" in reason

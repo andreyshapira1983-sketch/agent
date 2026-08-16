@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any
 
 from core.llm import LLM
-from core.model_outcomes import substitute_model
 from core.model_usage import (
     ModelUsageLedger,
     usage_from_llm_or_estimate,
@@ -505,9 +504,15 @@ class UsageTrackedLLM:
         if nxt is None:
             return None
         try:
-            # Замер первым, карта уровней полом (docs/CODE_NOTES.md).
-            return self._llm_factory(nxt, substitute_model(
-                role=self.role, provider=nxt, current_model=self.model))
+            # Замер первым, карта уровней полом (docs/CODE_NOTES.md). Причина
+            # выбора запоминается и едет в route_reason: живой разрыв
+            # 2026-08-16 — молчаливое решение нельзя было расследовать.
+            from core.model_outcomes import substitute_model_with_reason
+
+            model, why = substitute_model_with_reason(
+                role=self.role, provider=nxt, current_model=self.model)
+            self._failover_choice_reason = why
+            return self._llm_factory(nxt, model)
         except Exception:  # pragma: no cover - defensive
             return None
 
@@ -713,6 +718,9 @@ class UsageTrackedLLM:
                         except Exception:  # pragma: no cover - defensive
                             pass
                     route_reason = f"provider_failover:{provider}->{self.provider}"
+                    choice = getattr(self, "_failover_choice_reason", "")
+                    if choice:
+                        route_reason += f"|{choice}"
                     continue
                 raise
             completed_at = utc_now_iso()

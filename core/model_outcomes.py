@@ -285,6 +285,22 @@ def substitute_model(
     (`scout_turn`) отказ отдаётся незамеренному ровеснику, чтобы у замера
     появлялся материал и таблица не запирала сама себя на первом победителе.
     """
+    return substitute_model_with_reason(
+        role=role, provider=provider, current_model=current_model,
+        workspace=workspace,
+    )[0]
+
+
+def substitute_model_with_reason(
+    *, role: str, provider: str, current_model: str | None,
+    workspace: Path | None = None,
+) -> tuple[str | None, str]:
+    """(модель, причина) — решение обязано рассказывать себя.
+
+    Живой разрыв 2026-08-16 (охота №9): при материале 108 (%4=0, ход
+    разведчика открыт) выбран nano, и журнал не мог сказать почему — решение
+    молчало. Причина едет в route_reason: замер/разведка/пол и материал.
+    """
     try:
         outcomes = measured_outcomes(workspace)
         measured = preferred_model(
@@ -293,12 +309,21 @@ def substitute_model(
         )
     except OSError:
         outcomes, measured = (), None
+    material = sum(
+        o.runs for o in outcomes
+        if o.role == role and o.provider == provider
+    )
     if measured:
         scout = scout_model(
             outcomes, role=role, provider=provider, current_model=current_model,
         )
         if scout and scout != measured and scout_turn(
                 outcomes, role=role, provider=provider):
-            return scout
-        return measured
-    return peer_model_at_same_tier(current_model, provider)
+            return scout, f"scout:{scout}(mat={material})"
+        why = (
+            "off-turn" if scout and scout != measured
+            else ("no-scout-candidate" if not scout else "scout==measured")
+        )
+        return measured, f"measured:{measured}(mat={material},{why})"
+    peer = peer_model_at_same_tier(current_model, provider)
+    return peer, f"floor:{peer}(mat={material})"
