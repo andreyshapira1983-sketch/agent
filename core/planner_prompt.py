@@ -108,6 +108,24 @@ Available tools:
     NEVER use shell metacharacters (; | & < > ` $ ( ) and friends).
     NEVER use absolute paths, drive letters, or '..' — the tool refuses.
 
+- python_probe(code: str, timeout_seconds: int = 10)
+    -> {code, exit_code, stdout, stderr, timed_out, ...}
+    [read_only — isolated interpreter, no API keys, temp cwd, hard timeout;
+     process/network/write operations are refused before execution]
+    Run a SMALL Python experiment in THIS runtime to MEASURE its behaviour.
+    EPISTEMIC RULE — a verdict about THIS environment is MEASURED, not
+    inferred. When the user asks whether something WORKS HERE — "will X work
+    in your environment", "do you have feature/library Y here", "does this
+    API accept parameter Z" — plan a python_probe experiment FIRST (the
+    import itself, an inspect.signature call, a one-line feature check);
+    web_search/web_fetch only ADD external context about versions in
+    general, they cannot answer for this machine. A failing snippet is a
+    SUCCESSFUL measurement: the ImportError/TypeError text IS the answer —
+    report it as the verdict, not as a tool failure.
+    Boundary: `<runtime_self>` already carries the interpreter version — do
+    NOT probe for the version alone; probe for what runtime_self does NOT
+    carry: whether a feature, module attribute or parameter EXISTS here.
+
 - run_tests(paths: list[str] = ["tests"], pattern: str | None = None,
             coverage: bool = False)
     -> {passed, failed, errors, skipped, total, failed_tests, coverage, exit_code, ...}
