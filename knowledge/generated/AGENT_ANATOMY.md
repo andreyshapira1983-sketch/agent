@@ -139,7 +139,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/ingestion_reports` | Ingestion result types: what a file, web or RSS ingest run reports back. |
 | `core/ingestion_utils` | Ingestion helpers: workspace-confined path resolution, project file walking, and text chunking. |
 | `core/structured_facts` | Structured fact extraction for tool outputs. |
-| `core/evidence` | MVP-14.1 — Evidence + Provenance model. |
+| `core/evidence` | Evidence + Provenance model: LLM — не источник истины; каждое утверждение ответа привязывается к типизированной записи Evidence. |
 | `core/evidence_classes` | Evidence classes — *what kind* of support a claim actually needs (issue #119). |
 | `core/evidence_budget` | Evidence Budget — caps context sent to the synthesizer LLM. |
 | `core/conflict_review` | Operator-facing conflict review for the Source Registry. |

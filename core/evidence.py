@@ -1,33 +1,7 @@
-"""MVP-14.1 — Evidence + Provenance model.
-
-The hard rule of this layer: **LLM is not a source of truth.** A claim
-the agent makes in its final answer must be tied back to a typed
-`Evidence` record — a file, a tool result, a fetched web page, a log
-event, a memory record explicitly tagged by the user, or, at worst,
-an unverified `llm_claim`. Verifier (MVP-14.4) uses this chain to
-annotate the answer with `[verified:...]` / `[unverified]` markers
-and to surface conflicts.
-
-Design choices pinned by the test suite:
-
-  - Evidence is built OUTSIDE the tool. Tools keep their existing
-    contracts; the AgentLoop inspects (tool_name, output) and produces
-    the typed record via :func:`evidence_from_tool_result`. This means
-    every tool's existing 30-100 unit tests stay valid — we only add a
-    parallel structure, never mutate the old one.
-  - One tool result → at most ONE Evidence. `web_search` collapses to a
-    single "top-N hits" record, `read_logs` to a single "N events"
-    record. Per-hit / per-event evidence is deferred until the Verifier
-    proves we need finer granularity.
-  - A failed `ToolResult` (status != success) yields no Evidence. An
-    error is the absence of a source, not a weaker source.
-  - `content_hash` is sha256 of the excerpt — a stable handle for
-    "same document?" reasoning that doesn't require keeping a full
-    file copy around.
-  - Confidence is a number in [0, 1] derived from a baseline table.
-    Modifiers (freshness decay for web pages, domain trust, presence
-    of secrets) will be applied in MVP-14.4 / a future SourceRanker;
-    the model here stores only the post-modifier value.
+"""Evidence + Provenance model: LLM — не источник истины; каждое утверждение
+ответа привязывается к типизированной записи Evidence. Одна выдача инструмента —
+максимум одна улика; ошибка инструмента — отсутствие источника, не слабый
+источник. Решения и их причины: docs/CODE_NOTES.md, «Evidence layer design».
 """
 from __future__ import annotations
 
@@ -277,6 +251,28 @@ def make_evidence(
 # Factory: (tool_name, output) -> Evidence
 # ---------------------------------------------------------------------------
 
+def _python_probe_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
+    """Улика эксперимента — его ИСХОД; код — вопрос, и в выдержку не входит.
+    См. docs/CODE_NOTES.md, «The experiment's question refuted its answer».
+    """
+    if not isinstance(output, dict):
+        return None
+    head = str(args.get("code") or output.get("code") or "").strip().splitlines()
+    outcome = (
+        f"exit_code: {output.get('exit_code')}\n"
+        f"timed_out: {output.get('timed_out', False)}\n"
+        f"stdout:\n{output.get('stdout') or ''}\n"
+        f"stderr:\n{output.get('stderr') or ''}"
+    )
+    return make_evidence(
+        kind="tool_output",
+        source_id="tool_output:python_probe",
+        obtained_via="python_probe",
+        claim=f"Measured outcome of a live experiment: {head[0][:80] if head else '?'}",
+        excerpt=outcome,
+    )
+
+
 def evidence_from_tool_result(
     *,
     tool_name: str,
@@ -284,20 +280,8 @@ def evidence_from_tool_result(
     output: Any,
     status: str = "success",
 ) -> Evidence | None:
-    """Inspect a tool's output and produce a typed Evidence.
-
-    Returns None when:
-      * the tool reported a non-success status (an error is the absence
-        of a source);
-      * the output shape can't form a meaningful evidence record (empty
-        result, malformed dict);
-      * the tool is one we deliberately don't credit as a source (e.g.
-        `file_write` is an action, not a source of truth — it has its
-        own audit event already).
-
-    This function is intentionally defensive: a malformed `output` that
-    somehow slipped past `validate_output` must NOT crash the loop. It
-    returns None and lets the loop continue.
+    """Типизированная улика из выдачи инструмента, либо None (ошибка/пустота/
+    инструмент-действие — не источник). Кривой output не роняет цикл.
     """
     if status != "success":
         return None
@@ -305,6 +289,10 @@ def evidence_from_tool_result(
         return None
 
     args = arguments or {}
+
+    # ---- python_probe (лаборатория) --------------------------------------
+    if tool_name == "python_probe":
+        return _python_probe_evidence(args, output)
 
     # ---- file_read --------------------------------------------------------
     if tool_name == "file_read":
