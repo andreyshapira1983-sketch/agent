@@ -605,6 +605,34 @@ markers for `user_text` (newline, quotes, or a presenter colon that survives
 directive stripping). Both directions pinned: a task clause is not supplied
 text; «Вот фрагмент: …» still is.
 
+## R6: a cross-time proof outranks the quote path (2026-08-17, operator exam run_59b740111)
+
+The operator's exam question — «Назови один урок … и покажи более поздний
+случай, где этот урок реально изменил твой план» — arrived wrapped in
+guillemets. The resolver saw an explicit quote, `is_local_critique_eligible`
+said yes, the planner was deliberately skipped (`tools_chosen=[]`,
+`planner_skipped_local_critique`), and nano invented four citations that the
+verifier then had to kill. The route that by construction cannot fetch
+historical evidence was chosen for a question whose whole subject IS a
+historical relation. Not a nano problem — a contract/route incompatibility.
+
+Per the operator's framing the fix is semantic, not keyword: when a directive
+demands proving a relation between the agent's own past and a later
+action/behaviour, a local-only path is insufficient by definition — the answer
+requires a temporal join over episodes, so the planner must run an
+evidence-producing plan. `demands_cross_time_proof` fires only on the
+conjunction of two halves: a self-history referent (урок / прошлый опыт /
+эпизод / прогон / ремонт / lesson / episode / prior run) AND a later-effect
+relation (более поздний / позже / впоследствии / измени- / повлия- / реально
+использ- / later / changed / influenced). Either half alone is ordinary
+critique material — «слабые стороны этого урока» still rides local critique.
+Both the directive excerpt and the analysis target are checked, because in
+the live failure the quote WAS the question (target 223 chars of a 225-char
+directive). Pinned by tests/test_a_history_proof_outranks_the_quote_path.py:
+the verbatim exam question, an unseen form of the class (repair → later
+behaviour change), and two controls proving brought-text and prior-turn
+critique still ride.
+
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
 My own R1 note overstated: "an empty unit becomes an ambiguity → needs_

@@ -101,6 +101,27 @@ _SHOW_ONLY_DIRECTIVE_RE = re.compile(
     r"(?i)\b(только\s+покажи|ничего\s+не\s+делай|only\s+show|do\s+not\s+do\s+anything)\b"
 )
 
+# Both halves must fire: a reference to the agent's own past AND a
+# later-effect relation. Either alone is ordinary critique material.
+_SELF_HISTORY_RE = re.compile(
+    r"(?i)урок|прошл\w*\s+опыт|собственн\w*\s+прошл|эпизод|прогон|ремонт"
+    r"|\blesson|past\s+experience|episode|prior\s+run|\brepair"
+)
+_LATER_EFFECT_RE = re.compile(
+    r"(?i)более\s+поздн|позже|позднее|впоследствии"
+    r"|после\s+(?:этого|того|чего|ремонт)"
+    r"|измени\w+|повлия\w+|реально\s+использ"
+    r"|later|subsequent|afterwards|changed|influenced"
+)
+
+
+def demands_cross_time_proof(text: str) -> bool:
+    """True when the directive asks to prove a relation between the agent's
+    own past (lesson / episode / repair) and a later action — a temporal
+    join no local-only path can supply. See CODE_NOTES «Referent resolver»."""
+    t = text or ""
+    return bool(_SELF_HISTORY_RE.search(t) and _LATER_EFFECT_RE.search(t))
+
 _PATH_RE = re.compile(
     r"(?ix)"
     # Leading guard: a match may not begin right after a word character, a
@@ -163,6 +184,13 @@ def is_local_critique_eligible(decision: ReferentDecision) -> bool:
     # («Вот фрагмент: …» переживает срез директив и несёт двоеточие).
     if decision.primary.kind == "user_text" and "\n" not in target and not any(
         q in target for q in ('"', "«", "“", "'", ":")
+    ):
+        return False
+    # R6 (2026-08-17, operator exam run_59b740111): a cross-time proof demand
+    # (own past -> later action) must reach the evidence-producing planner;
+    # the quote path took it with tools=[] and nano invented four citations.
+    if demands_cross_time_proof(decision.directive_excerpt or "") or (
+        demands_cross_time_proof(target)
     ):
         return False
     return is_critique_directive(decision.directive_excerpt or "")
