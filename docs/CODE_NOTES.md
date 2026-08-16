@@ -2804,3 +2804,23 @@ powers nothing (§9 — a request is not a yes); an expired grant powers
 nothing; an exhausted daily cap returns the OLD world — a one-time request —
 rather than a silent pass; §9 rights (merge, kill switch, irreversible
 approvals) are untouched, and the kill switch still outranks everything.
+
+## Reading leaves a hypothesis
+
+The automat's second and third pieces, one node: a campaign goal that asks to
+STUDY the outside world («изучи/прочитай … интернет/сайт») now selects the
+study_external_source action (priority 57 — above the repair habit, below the
+doc goal). The goal-path web block opens ONLY for this action and ONLY
+through the config field that intersects _UNBLOCKABLE_TOOLS —
+web_search/web_fetch and nothing else; spawn_subagent and python_probe are
+not unblockable by construction, and every unblock is journaled.
+
+After the read, condensation is a separate narrow call (measured 2026-08-16:
+a trailing block in a long contract dies on nano 3 of 3; a single-task prompt
+holds). The hypothesis lands in the claim store at the BOTTOM rung — an
+OBSERVED external_idea_candidate, never a lesson: distilled_lessons keeps
+ignoring it until the full ladder is climbed. Evidence refs come from the
+answer's verifier-checked inline web citations, not from the model's
+«ИСТОЧНИК» line — the condenser invented "Page 12" on its first live run and
+that lesson is structural now. An answer with no web citations records
+nothing (hypothesis_declined:no_web_citations): no reading — no hypothesis.
