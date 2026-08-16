@@ -169,7 +169,9 @@ def test_failover_switches_to_next_credentialed_provider(monkeypatch):
     assert statuses == ["error", "success"]
     assert ledger.records[0]["provider"] == "openai"
     assert ledger.records[1]["provider"] == "anthropic"
-    assert ledger.records[1]["route_reason"] == "provider_failover:openai->anthropic"
+    assert ledger.records[1]["route_reason"].startswith("provider_failover:openai->anthropic")
+    # 2026-08-16: замена рассказывает себя — причина выбора едет хвостом
+    assert "|" in ledger.records[1]["route_reason"]
     # the wrapper now points at the working provider
     assert tracked.provider == "anthropic"
 
@@ -311,7 +313,7 @@ def test_local_connection_error_failovers_to_openai(monkeypatch):
     assert [r["status"] for r in ledger.records] == ["error", "success"]
     assert ledger.records[0]["provider"] == "local"
     assert ledger.records[1]["provider"] == "openai"
-    assert ledger.records[1]["route_reason"] == "provider_failover:local->openai"
+    assert ledger.records[1]["route_reason"].startswith("provider_failover:local->openai")
     assert tracked.provider == "openai"
 
 
@@ -329,7 +331,7 @@ def test_local_timeout_failovers_to_openai(monkeypatch):
     tracked = _tracked_local(primary, factory, ledger)
 
     assert tracked.complete(system="s", user="u") == "after-timeout"
-    assert ledger.records[1]["route_reason"] == "provider_failover:local->openai"
+    assert ledger.records[1]["route_reason"].startswith("provider_failover:local->openai")
 
 
 def test_openai_timeout_does_not_failover(monkeypatch):

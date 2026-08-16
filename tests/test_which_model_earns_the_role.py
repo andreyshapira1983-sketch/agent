@@ -121,7 +121,7 @@ def test_the_router_asks_the_measurement_before_the_tier_map():
     from core.model_router import UsageTrackedLLM
 
     source = inspect.getsource(UsageTrackedLLM._failover_llm)
-    assert "substitute_model(" in source
+    assert "substitute_model_with_reason(" in source
     assert "peer_model_at_same_tier" not in source
 
 
@@ -182,7 +182,7 @@ def test_the_live_selection_consults_the_world():
     """
     import inspect
 
-    from core.model_outcomes import substitute_model
+    from core.model_outcomes import substitute_model_with_reason
 
-    source = inspect.getsource(substitute_model)
+    source = inspect.getsource(substitute_model_with_reason)
     assert "offered_models(provider)" in source
