@@ -151,9 +151,15 @@ class ClaimExtractor:
         # table, while every one of them sat in an HTML comment the operator
         # would never see in the rendered file. See docs/CODE_NOTES.md,
         # "Concealment, not vocabulary".
-        from core.injection_guard import strip_concealed
+        from core.injection_guard import strip_concealed, strip_suspicious_annotation
 
-        for sentence in _sentences(strip_concealed(evidence.excerpt)):
+        # Голос охранника (обёртка annotate_suspicious) — аннотация для
+        # синтезатора, не содержимое источника: снимается до нарезки на
+        # предложения, иначе предупреждение становится «фактом» (живой прогон
+        # 2026-08-16: 7 записей в постоянную память).
+        for sentence in _sentences(
+            strip_suspicious_annotation(strip_concealed(evidence.excerpt))
+        ):
             if len(claims) >= self.max_claims_per_source:
                 break
             if not self._accept_sentence(sentence):
@@ -199,6 +205,9 @@ class ClaimExtractor:
         if _is_broken_encoding(text) or _looks_like_code_fragment(text):
             # Mojibake and raw source-code / CLI / mid-sentence fragments are not
             # facts — they are file chunks that flooded memory as distractors.
+            return False
+        if _is_truncated_text(text):
+            # Та же семья: обрезанное предложение — кусок файла, не факт.
             return False
         words = re.findall(r"[\w]+", text, flags=re.UNICODE)
         return len(words) >= 4
@@ -796,7 +805,18 @@ def _status_from_rank(rank: SourceRank | None) -> str:
     return "extracted"
 
 
+def _is_truncated_text(text: str) -> bool:
+    """Обрезок не утверждает ничего целого. Живой реестр 2026-08-16 читал
+    «...capability is comp...[truncated]» как другое значение того же субъекта
+    и чеканил ложный конфликт с целым предложением из зеркального документа.
+    """
+    tail = (text or "").rstrip()
+    return "[truncated]" in tail or tail.endswith(("...", "…"))
+
+
 def _subject_value(text: str) -> tuple[str, str] | None:
+    if _is_truncated_text(text):
+        return None
     compact = " ".join((text or "").strip().rstrip(".").split())
     if len(compact) < 8:
         return None

@@ -204,3 +204,54 @@ def test_short_value_containment_is_still_a_conflict() -> None:
     ])
     found = _conflicts(reg)
     assert len(found) == 1
+
+
+# ==========================================================================
+# 2026-08-16: обрезок предложения — не суждение (живой ложный конфликт).
+# ==========================================================================
+def test_a_truncated_fragment_of_the_same_sentence_is_not_a_conflict() -> None:
+    """Живой реестр 2026-08-16: «...capability is complete.» против
+    «...capability is comp...[truncated]» из зеркального документа — резолвер
+    прочёл обрезок как другое значение того же субъекта. Обрезанное
+    предложение не утверждает ничего целого и в сравнение не допускается.
+    """
+    reg = _registry([
+        ("docs/A.md", "article", "c1",
+         "The existence of a module is not proof that a capability is complete."),
+        ("docs/B.md", "article", "c2",
+         "The existence of a module is not proof that a capability is comp...[truncated]"),
+    ])
+
+    assert _conflicts(reg) == []
+
+
+def test_a_real_disagreement_between_prose_sources_still_fires() -> None:
+    """Улов не отдан: настоящие разногласия двух прозаических источников
+    по-прежнему поднимаются.
+    """
+    reg = _registry([
+        ("docs/A.md", "article", "c1", "The default timeout is 30 seconds."),
+        ("docs/B.md", "article", "c2", "The default timeout is 60 seconds."),
+    ])
+
+    assert len(_conflicts(reg)) == 1
+
+
+def test_the_extractor_does_not_mint_claims_from_truncated_fragments() -> None:
+    from core.evidence import ProvenanceChain, make_evidence
+    from core.knowledge_pipeline import KnowledgePipeline
+    from core.source_ranker import rank_chain
+
+    chain = ProvenanceChain()
+    chain.add(make_evidence(
+        kind="file", source_id="file:docs/X.md", obtained_via="file_read",
+        claim="Contents of workspace file X.md",
+        excerpt=("The registry keeps every source row. "
+                 "If a command is not here, ...[truncated]"),
+        confidence=0.9,
+    ))
+    registry, _ = KnowledgePipeline().build_registry(
+        chain, ranking=rank_chain(chain, question="what does the doc say"))
+
+    texts = " ".join(c.text for c in registry.claims)
+    assert "[truncated]" not in texts
