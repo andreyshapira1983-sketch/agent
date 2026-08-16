@@ -2766,3 +2766,21 @@ many calls the substituted model made; rows without run_id count singly), and
 `scout_turn` takes that plain count. The decision-reason instrument that
 exposed the freeze (`substitute_model_with_reason` → route_reason) stays: it
 turned a two-hunt mystery into a six-line diagnosis.
+
+## The outside world is not an internal command
+
+The hypothesis probe (2026-08-16) was hijacked by the keyword intent router:
+"Зайди в интернет и прочитай про CrewAI... архитектурную идею... ПРОВЕРКА:"
+matched architecture_audit ("архитектур*" + "провер*" — the latter from the
+requested block label «ПРОВЕРКА:»), the message became :architecture-audit,
+and the web reading never happened. The :task-begin bypass exists exactly for
+hijack-prone wording — but an operator asking a question must not need to
+know it. The matcher now refuses any message that sends the agent OUTSIDE
+(интернет/http/сайт/web markers): an external-world directive contradicts an
+internal read-only command by construction. Genuine audit asks are untouched.
+
+The sibling trap from the same probe — piped multiline input split into one
+turn per line — needed no fix: the block instruments (`<<< … >>>`,
+`:task-begin … :task-end`, backslash continuation) already work over pipes
+and are pinned by tests/characterization/test_repl_input_modes.py. The
+resolution is recorded, and probes now use them.

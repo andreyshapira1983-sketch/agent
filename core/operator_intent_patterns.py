@@ -807,12 +807,29 @@ def _matches_self_task_propose(text: str) -> bool:
     return debt and propose
 
 
+#: Сообщение, посылающее агента ВО ВНЕШНИЙ МИР, — не внутренняя команда.
+#: Живой перехват 2026-08-16: «Зайди в интернет и прочитай про CrewAI...
+#: архитектурную идею... ПРОВЕРКА:» угнан в :architecture-audit («архитектур*»
+#: + «провер*»), и чтение внешнего мира не случилось вовсе.
+_OUTSIDE_WORLD_MARKERS: tuple[str, ...] = (
+    "интернет", "internet", "http://", "https://", "www.",
+    "сайт", "в вебе", "web search", "web page",
+)
+
+
+def _sends_the_agent_outside(text: str) -> bool:
+    return _has_any_loose(text, _OUTSIDE_WORLD_MARKERS)
+
+
 def _matches_architecture_audit(text: str) -> bool:
     # Read-only architecture audit (layers / multi-agent gaps). Requires an
     # architecture term AND an audit/review verb so it never fires on a plain
     # "проверь проект" (project health) or a mere mention of architecture.
     # Must be routed BEFORE _matches_project_health, because
     # "проверь архитектуру проекта" also satisfies that broad project branch.
+    # A message that sends the agent OUTSIDE is never this internal command.
+    if _sends_the_agent_outside(text):
+        return False
     architecture = _has_any_loose(text, ("архитектур", "architecture", "architectural"))
     audit_verb = _has_any_loose(
         text,
