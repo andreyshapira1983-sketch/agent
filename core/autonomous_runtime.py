@@ -13,6 +13,8 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Literal
 
 from core.actuation_gateway import GatewayPath, gateway_path_from_receipt
@@ -92,6 +94,41 @@ _AUTONOMOUS_GOAL_BLOCKED_TOOLS: frozenset[str] = frozenset(
 
 def _rotation_index(modulus: int, *, bucket_seconds: int = 600) -> int:
     return int(time.time() // bucket_seconds) % max(modulus, 1)
+
+
+#: Журнал потребления стоячих грантов: одна строка — один пропущенный прогон.
+_STANDING_USAGE_FILE = "standing_grant_usage.jsonl"
+
+
+def _standing_usage_path(workspace: Any) -> Path:
+    return Path(workspace or ".") / "data" / _STANDING_USAGE_FILE
+
+
+def _record_standing_use(workspace: Any, grant_id: str) -> None:
+    """Одна строка журнала на один прогон, пропущенный стоячим грантом."""
+    from core.state_integrity import append_state_jsonl
+
+    path = _standing_usage_path(workspace)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    append_state_jsonl(path, [{
+        "grant_id": grant_id,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }])
+
+
+def standing_runs_today(workspace: Any, grant_id: str) -> int:
+    """Сколько прогонов этот грант пропустил сегодня (UTC). Журнал — истина."""
+    from core.state_integrity import read_state_jsonl
+
+    path = _standing_usage_path(workspace)
+    if not path.is_file():
+        return 0
+    today = datetime.now(timezone.utc).date().isoformat()
+    return sum(
+        1 for row in read_state_jsonl(path)
+        if str(row.get("grant_id")) == grant_id
+        and str(row.get("ts") or "").startswith(today)
+    )
 
 
 # --- Proposal hygiene: canonical signature + token-Jaccard semantic dedup ---
@@ -478,6 +515,19 @@ class AutonomousRuntime:
                 config = replace(config, effects_approved=True)
                 self.approval_inbox.mark_executed(granted.id)
                 self._log("autonomous_effects_granted", {"approval_id": granted.id})
+        # Стоячий грант: одно «да» на неделю питает автомат в стенах —
+        # дневной лимит прогонов, срок, журнал потребления; права §9 целы.
+        # Грант НЕ помечается executed: он живёт до истечения или отзыва.
+        # Зачем: docs/CODE_NOTES.md, «One yes a week».
+        if not config.dry_run and not config.effects_approved:
+            standing = self._active_standing_grant()
+            if standing is not None:
+                config = replace(config, effects_approved=True)
+                _record_standing_use(self.workspace, standing.id)
+                self._log("autonomous_effects_standing", {
+                    "approval_id": standing.id,
+                    "runs_today": standing_runs_today(self.workspace, standing.id),
+                })
         if not config.dry_run and not config.effects_approved:
             _pending_before = {i.id for i in self.approval_inbox.pending()}
             item = self.approval_inbox.add(
@@ -1288,6 +1338,34 @@ class AutonomousRuntime:
             if isinstance(entry, dict):
                 out.append(entry)
         return out
+
+    def _active_standing_grant(self):
+        """Действующий стоячий грант с остатком на сегодня, или None.
+
+        Действующий = одобрен человеком, не истёк, дневной лимит не исчерпан.
+        Заявка без «да» — не грант; исчерпанный лимит возвращает прежний мир
+        (разовую заявку), а не тихий пропуск.
+        """
+        now = datetime.now(timezone.utc)
+        for item in self.approval_inbox.list(status="approved"):
+            if item.operation != "autonomous_runtime.standing_grant":
+                continue
+            expires = str(item.expires_at or "")
+            try:
+                if expires and datetime.fromisoformat(expires) <= now:
+                    continue
+            except ValueError:
+                continue
+            cap = int((item.payload or {}).get("max_runs_per_day") or 0)
+            if cap <= 0:
+                continue
+            if standing_runs_today(self.workspace, item.id) >= cap:
+                self._log("standing_grant_exhausted", {
+                    "approval_id": item.id, "cap": cap,
+                })
+                continue
+            return item
+        return None
 
     def _granted_effects_approval(self, config: AutonomousRuntimeConfig):
         """Одобренное разрешение ДЛЯ ЭТОЙ ЖЕ цели, или None.
