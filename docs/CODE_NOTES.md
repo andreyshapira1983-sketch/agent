@@ -2713,3 +2713,37 @@ the set.
 Boundaries held by tests: a version the evidence does name still verifies;
 decimals are not demoted; the live stowaway shape is demoted by the union
 gate like any other absent literal.
+
+## The experiment's question refuted its answer
+
+Probe 4 (2026-08-16, trace_471e5543) closed the epistemic loop — planner
+planned the lab, the doorman admitted the step, the experiment printed
+`has batched: False`, the answer gave the first MEASURED verdict about this
+runtime — and the verifier stamped the measured chunks `[claim-refuted]`.
+
+Offline reproduction with the live chain named the mechanism: the probe's
+evidence excerpt embedded the WHOLE output dict, experiment code included.
+The model's probe code mentioned `itertools.batched` inside hasattr guards
+(`print('batched:', itertools.batched)` under `if hasattr(...)`), so the
+absence gate found the name in the evidence and ruled "absence refuted by
+its own evidence". The name lived in the QUESTION; the gate read it as the
+world's ANSWER.
+
+The fix is at the evidence boundary, not in the gate: an experiment's
+evidence IS its outcome. `_python_probe_evidence` builds the excerpt from
+exit_code / timed_out / stdout / stderr only; the code stays in the claim
+line as a label. stderr remains evidence — an ImportError is the world
+answering. After the fix the live chunks are no longer refuted; they land as
+topic-supported-but-unverified, because MIR-060(e) deliberately refuses to
+CERTIFY absence from an excerpt. Whether a complete, untruncated measurement
+should be allowed to certify absence in THIS environment is a real open
+question — noted, not smuggled in.
+
+Same session, operator's standing rule enforced on this file: the MVP-14.1
+module "book" and the fat docstrings moved here; contracts of 1-3 lines
+remain in code. Design decisions the old header pinned: evidence is built
+OUTSIDE tools (tools keep their contracts; the loop inspects tool_name +
+output); one tool result yields at most ONE evidence; a failed ToolResult
+yields none — an error is the absence of a source, not a weaker source;
+content_hash is sha256 of the excerpt; confidence stores the post-modifier
+value ("Evidence layer design").
