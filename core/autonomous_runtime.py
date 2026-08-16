@@ -82,6 +82,10 @@ _AUTONOMOUS_GOAL_BLOCKED_TOOLS: frozenset[str] = frozenset(
         "web_fetch",
         "rss_fetch",
         "semantic_scholar_search",
+        # python_probe: лаборатория исполняет код — безнадзорный путь остаётся
+        # repo-local и read-only; открывать ей этот путь — отдельное решение
+        # (одни ворота за раз), не побочный эффект её постройки 2026-08-16.
+        "python_probe",
     }
 )
 
