@@ -593,3 +593,32 @@ def test_a_social_turn_still_reaches_the_llm():
     operator report — that guard predates this fix and the fix must not defeat it.
     """
     assert route_operator_intent("привет, как дела, что ты уже умеешь?") is None
+
+
+def test_a_question_sent_to_the_outside_world_is_never_hijacked():
+    """Живой перехват 2026-08-16 (trace hypothesis_probe2): вопрос «Зайди в
+    интернет и прочитай про CrewAI... архитектурную идею... ПРОВЕРКА:...»
+    угнан в :architecture-audit — «архитектур*» + «провер*» совпали, и чтение
+    внешнего мира не случилось вовсе. Сообщение, посылающее агента НАРУЖУ
+    (интернет/сайт/URL), не бывает внутренней командой — оператор не обязан
+    знать про :task-begin, чтобы задать вопрос.
+    """
+    hijacked = (
+        "Зайди в интернет и прочитай, что такое CrewAI (мультиагентный "
+        "фреймворк). Извлеки его главную архитектурную идею и примерь к "
+        "СВОЕЙ системе. В конце блок: «ПРОВЕРКА: <какой замер решит>»."
+    )
+    assert route_operator_intent(hijacked) is None
+
+    for text in (
+        "Прочитай https://example.com/agents и сравни их аудит архитектуры с твоим",
+        "Найди в вебе обзор architecture review практик и оцени применимость",
+    ):
+        intent = route_operator_intent(text)
+        assert intent is None or intent.kind != "architecture_audit", text
+
+
+def test_a_genuine_audit_ask_still_routes():
+    """Улов не отдан: настоящая просьба об аудите идёт куда шла."""
+    intent = route_operator_intent("Проведи аудит архитектуры и покажи разрывы")
+    assert intent is not None and intent.kind == "architecture_audit"
