@@ -330,6 +330,13 @@ def _propose_hypothesis_from_study(
         m.group(1).strip() for m in _WEB_CITATION_RE.finditer(answer or "")
     ))
     if not refs:
+        # Прибор: молчаливый отказ нельзя расследовать (урок route_reason,
+        # 2026-08-16) — голова полученного текста едет в журнал.
+        _log(agent, "campaign_hypothesis_declined", {
+            "reason": "no_web_citations",
+            "answer_chars": len(answer or ""),
+            "answer_head": " ".join((answer or "").split())[:220],
+        })
         return "hypothesis_declined:no_web_citations"
     try:
         raw = str(agent.llm.complete(
