@@ -336,6 +336,9 @@ def _propose_hypothesis_from_study(
             "reason": "no_web_citations",
             "answer_chars": len(answer or ""),
             "answer_head": " ".join((answer or "").split())[:220],
+            "token_counts": {tok: (answer or "").count(tok) for tok in (
+                "[verified:", "[topic-only:", "[unverified", "[web",
+            )},
         })
         return "hypothesis_declined:no_web_citations"
     try:
