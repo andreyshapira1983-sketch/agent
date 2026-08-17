@@ -29,6 +29,27 @@ from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
 from tools.file_write import FileWriteTool
 
+#: Ambient operator pins the router genuinely honours. Live 2026-08-17: the
+#: engine exam pinned Sol/Terra via env and six of these tests went red
+#: INSIDE the exam session — both engines then reported "model routing is
+#: broken" as their main limitation. A test must build its own env, not
+#: inherit the operator's (тесты целят органы в полигоны).
+_AMBIENT_PIN_VARS = (
+    "AGENT_PROVIDER", "AGENT_MODEL",
+    "AGENT_PLANNER_PROVIDER", "AGENT_PLANNER_MODEL",
+    "AGENT_SYNTHESIZER_PROVIDER", "AGENT_SYNTHESIZER_MODEL",
+    "AGENT_REPAIR_PROVIDER", "AGENT_REPAIR_MODEL",
+    "AGENT_OPENAI_REASONING_EFFORT",
+    "AGENT_TIER_PROVIDERS_LIGHT", "AGENT_TIER_PROVIDERS_STANDARD",
+    "AGENT_TIER_PROVIDERS_DEEP",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean_ambient_pins(monkeypatch):
+    for name in _AMBIENT_PIN_VARS:
+        monkeypatch.delenv(name, raising=False)
+
 
 def _proposal_json() -> str:
     return json.dumps({
