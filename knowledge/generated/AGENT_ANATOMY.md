@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 198 modules across 12 groups._
+_Total: 199 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -21,6 +21,7 @@ _Operator-facing I/O, intent routing, output shaping._
 | `core/operator_intent` | Conversational routing for operator-control requests. |
 | `core/operator_intent_patterns` | Trigger phrases and matchers behind the no-LLM operator-intent router, including the one-inserted-word tolerance and the suppression guards that stay strict. |
 | `core/intent_understanding` | Intent understanding — the translator between plain human language and the autonomous agent's actions. |
+| `core/activity_decider` | Activity-type decider: the door must not choose the mind. |
 | `core/workspace_reference` | Does this text name something that exists in the workspace? |
 | `core/file_request_intent` | What kind of file request is this question? |
 | `core/answer_format` | Как ответ выглядит: контракт вывода, человеческая печать, цитаты. |

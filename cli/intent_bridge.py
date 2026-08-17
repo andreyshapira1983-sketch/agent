@@ -178,12 +178,90 @@ def _model_says_conversation(text: str, intent: OperatorIntent, agent: AgentLoop
     return decision.kind == "conversation" and decision.source == "model"
 
 
+def _start_persistent_goal(text: str, agent: AgentLoop, workspace: Path) -> bool:
+    """A spoken ongoing goal enters the C16 lane: the runtime task queue,
+    which daemon/scheduler ticks consume. Reversible by «останови …»."""
+    from app.task_scheduler_cli import _task_queue_for
+
+    task = _task_queue_for(agent, workspace).add(goal=text.strip())
+    agent.log.log("runtime_task_added", task.to_dict())
+    print(
+        f"(цель принята в работу: {task.id}; повезёт автомат — очередь задач "
+        f"C16, dry_run={task.dry_run}. Остановить: «останови …» или "
+        f":task-cancel {task.id})",
+        file=sys.stderr,
+    )
+    return True
+
+
+def _control_work_goals(text: str, agent: AgentLoop, workspace: Path) -> bool:
+    """Cancel queued/blocked work whose goal shares words with the order;
+    an empty match is reported honestly, nothing is guessed."""
+    from app.task_scheduler_cli import _task_queue_for
+
+    queue = _task_queue_for(agent, workspace)
+    order_tokens = _goal_tokens(text)
+    cancelled: list[str] = []
+    for task in queue.list(status="all"):
+        if task.status not in ("pending", "blocked"):
+            continue
+        if _tokens_overlap(order_tokens, _goal_tokens(task.goal)):
+            queue.cancel(task.id)
+            cancelled.append(task.id)
+    agent.log.log("goal_control_result", {
+        "order_preview": text[:120], "cancelled": cancelled,
+    })
+    if cancelled:
+        print(f"(остановлено: {', '.join(cancelled)})", file=sys.stderr)
+    else:
+        print(
+            "(похожих работ в очереди нет — ничего не остановлено; "
+            ":task-list покажет очередь)",
+            file=sys.stderr,
+        )
+    return True
+
+
+_GOAL_STOPWORDS = frozenset({
+    "останови", "прекрати", "приостанови", "возобнови", "отмени", "работу",
+    "работа", "цель", "задачу", "задача", "поставь", "паузу", "stop",
+    "pause", "cancel", "resume", "начни", "продолжай", "это", "как", "свою",
+})
+
+
+def _goal_tokens(text: str) -> set[str]:
+    words = re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9_]{4,}", (text or "").casefold())
+    return {w for w in words if w not in _GOAL_STOPWORDS}
+
+
+def _tokens_overlap(a: set[str], b: set[str]) -> bool:
+    """Shared 6-char prefix counts: «программированию» must find
+    «программировать» — Russian inflection, not different subjects."""
+    return any(
+        x[:6] == y[:6] for x in a for y in b if len(x) >= 6 and len(y) >= 6
+    )
+
+
 def handle_conversational_operator_input(text: str, agent: AgentLoop, workspace: Path) -> bool:
     strategy = classify_operator_strategy(text)
     agent.log.log(
         "strategy_classified",
         {"strategy": strategy.value, "text_preview": text[:120]},
     )
+    # The door must not choose the mind: activity type is decided BEFORE
+    # channel semantics. persistent_goal/goal_control are handled here;
+    # conversation/bounded_action fall through to the pinned routes.
+    from core.activity_decider import decide_activity
+
+    decision = decide_activity(text)
+    agent.log.log("activity_decision", {
+        "activity": decision.activity, "reason": decision.reason,
+        "text_preview": text[:120],
+    })
+    if decision.activity == "persistent_goal":
+        return _start_persistent_goal(text, agent, workspace)
+    if decision.activity == "goal_control":
+        return _control_work_goals(text, agent, workspace)
     intent = route_operator_intent(text)
     if intent is None:
         return False
