@@ -829,6 +829,24 @@ the veto (tests/test_the_door_does_not_choose_the_mind.py); proven live
 both ways in one session: spoken goal → rtask in the queue with a spoken
 way back; spoken stop → that task cancelled.
 
+First live contact found the courier delivering yesterday's waybill
+(operator's investigation order, same day): the goal stored in the queue
+read «…правдоподобная выдумка.Начни учиться…» — a PASTE TAIL glued to the
+freshly typed order with no separator. Producer → value → consumer traced
+before fixing: the app's own joiners are exonerated (both _coalesce_burst
+and the <<<>>> block join with \n; the chimera has none) — the glue
+happened BELOW the app, in the Windows console's line assembly: a paste
+without a trailing newline leaves its last line uncommitted in the console
+buffer, and the next typed utterance completes it; readline() hands the
+app one already-glued line, every consumer downstream is faithful. Two
+fixes at the decider's own altitude, not the console's: (1) an order LEADS
+the utterance — start/control verbs must match within the first 30 chars
+(_leads), which also un-hijacks the proof-demand question that verbs
+buried in an argument had turned into goal_control; (2) the acceptance
+message echoes the stored goal IN FULL, so a chimera is visible the moment
+it happens. The garbage task minted from the live chimera was cancelled
+(rtask_db7e2e38).
+
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
 My own R1 note overstated: "an empty unit becomes an ambiguity → needs_

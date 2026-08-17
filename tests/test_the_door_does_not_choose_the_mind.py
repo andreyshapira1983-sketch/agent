@@ -87,6 +87,45 @@ def test_inventory_wording_still_falls_through() -> None:
     assert d.activity in ("conversation", "bounded_action")
 
 
+# ── the console chimera (live, 04:22:56): an order hides mid-text ──────────
+
+#: Verbatim from runtime_task_added.goal, trace_68084781: the console glued
+#: a paste tail (no trailing newline) to the freshly typed order — «.Начни»
+#: with no separator. The app's own joiners are exonerated (both insert \n);
+#: the decider's duty is to refuse orders that do not LEAD the utterance.
+_LIVE_CHIMERA = (
+    "Если в результате выяснится, что ты пока не способен доказать "
+    "значительную часть заявленных возможностей, это считается лучшим "
+    "результатом, чем правдоподобная выдумка.Начни учиться программировать "
+    "и продолжай это как свою работу."
+)
+
+
+def test_the_live_chimera_is_not_an_order() -> None:
+    """An imperative buried past a paste tail must not mint a task: orders
+    lead the utterance, narratives mention verbs."""
+    d = decide_activity(_LIVE_CHIMERA)
+    assert d.activity == "conversation"
+
+
+def test_a_conditional_opener_is_not_control() -> None:
+    d = decide_activity(
+        "Если не получится — останови работу и расскажи почему")
+    assert d.activity == "conversation"
+
+
+def test_a_narrative_mentioning_verbs_mid_text_is_conversation() -> None:
+    d = decide_activity(
+        "Вчера я думал о том, что стоит начни... то есть начать учиться "
+        "и продолжай в том же духе — но это просто мысли про работу")
+    assert d.activity == "conversation"
+
+
+def test_a_polite_prefix_still_orders() -> None:
+    d = decide_activity("Пожалуйста, начни учиться Rust и продолжай это как свою работу")
+    assert d.activity == "persistent_goal"
+
+
 # ── the wiring: a decided goal actually enters the C16 lane ────────────────
 
 

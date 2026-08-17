@@ -60,6 +60,19 @@ class ActivityDecision:
     reason: str
 
 
+#: An order LEADS the utterance; a narrative mentions verbs mid-text. Live
+#: proof 2026-08-17 (trace_68084781): the console glued a paste tail to a
+#: typed order («…выдумка.Начни…») and the whole-text scan minted a task
+#: from the chimera; a proof-demand question was likewise hijacked into
+#: goal_control by verbs buried in its argument.
+_HEAD_CHARS = 30
+
+
+def _leads(pattern: re.Pattern[str], text: str) -> bool:
+    m = pattern.search(text)
+    return m is not None and m.start() < _HEAD_CHARS
+
+
 def decide_activity(text: str) -> ActivityDecision:
     """One decision, deterministic, before any channel semantics."""
     t = (text or "").strip()
@@ -68,13 +81,13 @@ def decide_activity(text: str) -> ActivityDecision:
     if _HYPOTHETICAL_RE.search(t):
         return ActivityDecision(
             "conversation", "hypothetical/musing framing vetoes launching")
-    if _CONTROL_RE.search(t) and _WORK_NOUN_RE.search(t):
+    if _leads(_CONTROL_RE, t) and _WORK_NOUN_RE.search(t):
         return ActivityDecision(
-            "goal_control", "control verb + work noun")
-    if _START_RE.search(t) and _CONTINUITY_RE.search(t):
+            "goal_control", "control verb leads + work noun")
+    if _leads(_START_RE, t) and _CONTINUITY_RE.search(t):
         return ActivityDecision(
-            "persistent_goal", "start verb + continuity contract")
-    if _IMMEDIATE_RE.search(t):
+            "persistent_goal", "start verb leads + continuity contract")
+    if _leads(_IMMEDIATE_RE, t):
         return ActivityDecision(
             "bounded_action", "do-it-now imperative; routed to the loop")
     return ActivityDecision("conversation", "default")
