@@ -396,6 +396,44 @@ def _vacuous_assert_reason(tree: ast.AST) -> str | None:
     return None
 
 
+_PHANTOM_SIGNAL = "phantom_signature_kwargs"
+_PHANTOM_REASON_MARK = "that the real signature does not accept"
+_PARSE_FAIL_MARK = "test does not parse"
+
+
+def _record_critic_measurement(
+    workspace: str | Path, lessons: tuple[Any, ...], critic: Any,
+) -> None:
+    """The critic IS the measuring instrument for the phantom-kwargs class.
+
+    One row per delivered lesson of that class: defect_recurred when phantoms
+    survived the armed generation, defect_absent otherwise. A generation the
+    instrument never examined (parse failure) is not a measurement.
+    """
+    if not lessons:
+        return
+    veto = list(critic.data.get("veto_reasons", []))
+    if any(_PARSE_FAIL_MARK in reason for reason in veto):
+        return
+    phantom = next((r for r in veto if _PHANTOM_REASON_MARK in r), "")
+    from core.causal_claim_store import load_claims
+    from core.lesson_provenance import record_lesson_measurement
+
+    signals = {
+        extra["key"]: claim.observation.defect_signals
+        for claim, extra in load_claims(workspace)
+    }
+    for card in lessons:
+        if _PHANTOM_SIGNAL not in signals.get(getattr(card, "key", ""), ()):
+            continue
+        record_lesson_measurement(
+            workspace, card.key,
+            instrument="self_task_producer.task_critic",
+            outcome="defect_recurred" if phantom else "defect_absent",
+            detail=phantom or "armed generation showed no phantom kwargs",
+        )
+
+
 def _phantom_kwargs_reason(tree: ast.AST) -> str | None:
     """Именованный аргумент, которого нет у настоящего вызываемого.
 
@@ -752,6 +790,7 @@ def produce_coding_task(
         quote=quote, source_kind=source_kind,
     )
     roles.append(critic)
+    _record_critic_measurement(workspace, lessons, critic)
     if critic.decision == "veto":
         return ProducerReport(
             status="task_veto",

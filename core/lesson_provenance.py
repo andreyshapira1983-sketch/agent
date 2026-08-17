@@ -20,6 +20,11 @@ from core.causal_claim_store import load_claims
 #: prompt (today: the Stage A task builder in core/self_task_producer.py).
 INJECTION_JOURNAL = Path("data") / "lesson_injections.jsonl"
 
+#: Measurement records: {id, ts, lesson_key, instrument, outcome, detail}.
+#: Written by :func:`record_lesson_measurement` — the hand of whoever
+#: actually measured (today: the Stage A critic), never the injector.
+MEASUREMENT_STORE = Path("data") / "lesson_measurements.jsonl"
+
 _EPISODIC = Path("data") / "episodic_memory.jsonl"
 
 _CHAIN = ("derived_from", "injected", "acted", "measured")
@@ -76,10 +81,18 @@ def _episode_exists(workspace: Path, episode_id: str) -> bool:
     )
 
 
-def _resolve_measurement_ref(workspace: Path, ref: str) -> bool:
+def _resolve_measurement_ref(workspace: Path, ref: str, lesson_key: str) -> bool:
     kind, _, ident = ref.partition(":")
     if kind == "episode" and ident:
         return _episode_exists(workspace, ident)
+    if kind == "measurement" and ident:
+        # The record must exist AND belong to the traced lesson — a
+        # measurement of another lesson cannot be borrowed.
+        return any(
+            str(row.get("id") or "") == ident
+            and str(row.get("lesson_key") or "") == lesson_key
+            for row in _read_jsonl(workspace / MEASUREMENT_STORE)
+        )
     return False
 
 
@@ -115,6 +128,39 @@ def record_lesson_injections(
     if rows:
         append_state_jsonl(Path(workspace) / INJECTION_JOURNAL, rows)
     return len(rows)
+
+
+def record_lesson_measurement(
+    workspace: str | Path,
+    lesson_key: str,
+    *,
+    instrument: str,
+    outcome: str,
+    detail: str = "",
+) -> str:
+    """Append a measurement record + its receipt; returns the measurement id.
+
+    Written by the hand that measured (never the injector). The receipt row
+    carries measurement_ref so the meter can lift `measured` to PROVEN.
+    """
+    import hashlib
+    from datetime import datetime, timezone
+
+    from core.state_integrity import append_state_jsonl
+
+    ts = datetime.now(timezone.utc).isoformat()
+    meas_id = "meas_" + hashlib.sha256(
+        f"{ts}|{lesson_key}|{instrument}|{outcome}".encode()
+    ).hexdigest()[:12]
+    append_state_jsonl(Path(workspace) / MEASUREMENT_STORE, [{
+        "id": meas_id, "ts": ts, "lesson_key": lesson_key,
+        "instrument": instrument, "outcome": outcome, "detail": detail,
+    }])
+    append_state_jsonl(Path(workspace) / INJECTION_JOURNAL, [{
+        "ts": ts, "lesson_key": lesson_key, "consumer": instrument,
+        "action_ref": "", "measurement_ref": f"measurement:{meas_id}",
+    }])
+    return meas_id
 
 
 def trace_lesson_provenance(workspace: str | Path, lesson_key: str) -> ProvenanceReport:
@@ -193,7 +239,8 @@ def trace_lesson_provenance(workspace: str | Path, lesson_key: str) -> Provenanc
             "acted", "ABSENT", "no receipt and no prose name any action"))
 
     resolved = tuple(
-        ref for ref in measurement_refs if _resolve_measurement_ref(ws, ref))
+        ref for ref in measurement_refs
+        if _resolve_measurement_ref(ws, ref, lesson_key))
     if resolved:
         links.append(ProvenanceLink(
             "measured", "PROVEN",
