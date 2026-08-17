@@ -77,6 +77,17 @@ def _reasoning_token_floor() -> int:
 
 _REASONING_TOKEN_FLOOR = _reasoning_token_floor()
 
+#: Valid OpenAI reasoning-effort levels; anything else degrades to "unset".
+_REASONING_EFFORT_LEVELS = frozenset({"minimal", "low", "medium", "high", "max"})
+
+
+def _reasoning_effort_kwargs() -> dict[str, str]:
+    """`reasoning_effort` kwargs for gpt-5+/o-series calls, from the operator's
+    AGENT_OPENAI_REASONING_EFFORT. Unset or invalid → {} (provider default);
+    read per call so an exam session can flip it without a process restart."""
+    level = (os.getenv("AGENT_OPENAI_REASONING_EFFORT", "") or "").strip().lower()
+    return {"reasoning_effort": level} if level in _REASONING_EFFORT_LEVELS else {}
+
 
 # How far a continuation round may escalate the per-leg budget when the
 # previous leg came back empty. Bounded so a model that never answers cannot
@@ -436,6 +447,7 @@ class LLM:
         }
         if self._is_o_series(model):
             kwargs["max_completion_tokens"] = max_tokens
+            kwargs.update(_reasoning_effort_kwargs())
         else:
             kwargs["max_tokens"] = max_tokens
             kwargs["temperature"] = temperature
@@ -634,6 +646,7 @@ class LLM:
                 model=model,
                 max_completion_tokens=self._reasoning_budget(max_tokens),
                 messages=messages,
+                **_reasoning_effort_kwargs(),
             )
         else:
             response = self._client.chat.completions.create(
