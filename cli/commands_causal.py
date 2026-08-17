@@ -35,6 +35,9 @@ def _handle_causal(rest: str, agent: Any) -> bool:
     отвечает, что теперь мешает. Ничего не сохраняется: это ход, а не запись,
     и подъём засчитывается только измерением (`run_intervention`).
     """
+    if rest.split(maxsplit=1)[:1] == ["provenance"]:
+        return _handle_provenance(rest.split(maxsplit=1)[1:] or [""], agent)
+
     store = getattr(agent, "causal_store", None)
     if store is None:
         print("причинное хранилище не подключено на этом пути", file=sys.stderr)
@@ -80,6 +83,30 @@ def _handle_causal(rest: str, agent: Any) -> bool:
             file=sys.stderr,
         )
     agent.log.log("causal_ladder_status", {"observations": len(records)})
+    return True
+
+
+def _handle_provenance(args: list[str], agent: Any) -> bool:
+    """`:causal provenance [ключ]` — цепь квитанций урока; замер, не рассказ."""
+    from core.causal_claim_store import load_claims
+    from core.lesson_provenance import trace_lesson_provenance
+
+    workspace = getattr(agent, "workspace", None) or "."
+    keys = args[0].split() if args and args[0] else []
+    if not keys:
+        keys = [extra["key"] for _c, extra in load_claims(workspace)]
+    if not keys:
+        print("утверждений в хранилище нет — мерить нечего", file=sys.stderr)
+        return True
+    for key in keys:
+        report = trace_lesson_provenance(workspace, key)
+        print(report.render(), file=sys.stderr)
+        agent.log.log("lesson_provenance_measured", {
+            "lesson_key": key,
+            "state": report.state,
+            "verdict": report.verdict,
+            "missing": list(report.missing),
+        })
     return True
 
 

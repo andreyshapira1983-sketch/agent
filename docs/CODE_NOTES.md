@@ -633,6 +633,32 @@ the verbatim exam question, an unseen form of the class (repair → later
 behaviour change), and two controls proving brought-text and prior-turn
 critique still ride.
 
+## The provenance meter reads receipts, not prose (2026-08-17, operator ruling)
+
+After the exam replay measured the gap live (the agent, with the right route
+and tools, honestly could not assemble «lesson → later action» because the
+chain is nowhere addressable), the operator ordered the METER built before
+any organ: «сначала замер, потом орган».
+
+`core/lesson_provenance.py` traces one lesson key through four links:
+derived_from (the origin episode is a RECORD in the episodic store, not a
+name), injected (a row in `data/lesson_injections.jsonl` — the delivery
+receipt contract; nobody writes it yet, and measuring that absence is the
+meter's first job), acted (the receipt names an action), measured (the
+receipt's measurement ref RESOLVES to a store record). Three statuses:
+PROVEN needs an independent machine receipt; the claim's own intervention
+prose is the claim testifying about itself — capped at SELF_DECLARED;
+nothing behind a link is ABSENT. Verdict is CAUSAL USE PROVEN only for a
+full chain of receipts; otherwise CAUSAL USE NOT PROVEN plus the named
+missing links. No creativity — the operator's words.
+
+First live reading (scripts/measure_lesson_provenance.py): all three claims
+in the store, including the one real LESSON (cclaim_dc87a06d4972, phantom
+signature kwargs), come out CAUSAL USE NOT PROVEN with zero PROVEN links —
+every named origin episode is a hand-written class name the episodic store
+does not hold, and delivery is structurally unobservable. That reading is
+the baseline the future delivery receipts will be measured against.
+
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
 My own R1 note overstated: "an empty unit becomes an ambiguity → needs_
