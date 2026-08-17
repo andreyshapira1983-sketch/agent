@@ -711,6 +711,33 @@ the live tree), and the debris files were removed whole (every row carried
 a fake approval id). The rule this pins: a test may aim an effectful organ
 only at a polygon, because organs grow new effects later.
 
+## A proof demand was answered by a declaration (2026-08-17, operator exam; class banked, not fixed)
+
+«Скажи что ты умеешь делать и ДОКАЖИ» → strategy=capability_check →
+runtime inventory outside the loop, tools_used=[]. The system answered
+"prove it" with a table of registered interfaces. Tool registered ≠ tool
+works; wired ≠ demonstrated — the map-is-not-movement invariant, now on
+the intent-classifier floor.
+
+Class measured live on three unseen formulations before any fix (operator:
+«сначала зафиксировать класс»). Result: the class is NARROW. The planner
+itself honours proof demands — «…интернетом? Докажи.» planned
+web_search+web_fetch with the reasoning «просит доказать — требует
+выполнения», and «…собственные уроки? Продемонстрируй.» planned
+lesson_provenance+read_logs. The two holes: (1) the capability-check
+shortcut matches inventory wording and never looks for a proof marker, so
+the head specimen reproduces deterministically; (2) with session history,
+«…свой runtime? Покажи.» fell into PRIOR-TURN local critique
+(tools=[], planner_skipped_local_critique) — «покажи» read as a critique
+directive over the previous answer. Same family as the R6 cross-time
+intercept: a contract demanding demonstration took a route that cannot
+demonstrate. Both banked as strict xfails in
+tests/test_a_proof_demand_is_not_answered_by_inventory.py with the desired
+contracts spelled out (proof marker => claim -> demonstration -> evidence;
+where a capability needs approval, the honest form is «I can take the path
+to the approval boundary, but cannot prove the effectful part without
+you»). When either XPASSes, replace the marker and record the mechanism.
+
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
 My own R1 note overstated: "an empty unit becomes an ambiguity → needs_
