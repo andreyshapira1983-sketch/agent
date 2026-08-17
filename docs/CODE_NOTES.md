@@ -738,6 +738,40 @@ where a capability needs approval, the honest form is «I can take the path
 to the approval boundary, but cannot prove the effectful part without
 you»). When either XPASSes, replace the marker and record the mechanism.
 
+## Recurrence buys reading, not investigation; a gap has no name (2026-08-17, banked)
+
+Operator exam: «построй некую модель — как будешь действовать?» → the
+requirement was understood (needs_clarification stayed False, correctly),
+competence to answer it was absent, and the answer masked that absence
+with governance recital — relevance 0.20, measured by the verifier. In the
+same trace reasoning_action_mismatch stood at occurrences=20.
+
+Two specimens, banked as SEPARATE strict xfails
+(tests/test_recurrence_and_knowledge_gap_are_banked.py) so fixing one
+symptom cannot quietly close the class:
+
+1. Recurrence → investigation. Our first hypothesis — «повторение никто
+   не потребляет» — was FALSIFIED by reading the code: the reflection
+   engine consumes repetition (min_occurrences=2) and its LearningPlan
+   files are genuinely ingested. Narrowed claim, now pinned: the consumer
+   converts a defect signal into READING, not into causal investigation
+   (no competing hypotheses, no discriminating measurement, no root
+   cause), and no consumer exists in the conversational loop. Unofficial
+   description, operator-approved for the project record: на двадцатого
+   вора через ту же дверь хозяин отвечает записью на заочные курсы
+   дверостроения.
+
+2. Ambiguity ≠ knowledge gap. The loop's clarification apparatus is rich;
+   the concept «понял-что, не-знаю-как» does not exist in any production
+   structure — the only "I don't know" the loop can express is
+   needs_clarification. The bank protects the semantic, not a design:
+   understood requirement + no measured ground for "I know how" must be
+   NAMEABLE as a knowledge gap and lead toward acquiring/verifying the
+   missing knowledge — not toward clarification, governance, or a
+   web-search reflex. A competence formula is deliberately NOT prescribed:
+   three similar successful episodes must not mint an expert on nuclear
+   reactors.
+
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
 My own R1 note overstated: "an empty unit becomes an ambiguity → needs_
