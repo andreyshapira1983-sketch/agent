@@ -772,6 +772,34 @@ symptom cannot quietly close the class:
    three similar successful episodes must not mint an expert on nuclear
    reactors.
 
+## One predicate, three meanings: the mint stamps, nobody weighs (2026-08-17, banked)
+
+Operator specimen: an episode that RECORDED a reasoning defect
+(reasoning_action_mismatch, run_d1775764) was still allowed to become
+material for a new skill — consolidation minted proc_88e7ebb7,
+created=true, credit not suppressed. Investigation verdict: NOT a breach —
+a proven OVERLOAD of one concept with three meanings (operator's words).
+The admission law behaved exactly as written: the falsehood list
+disqualifies only falsehood-proving signals and grows by proven harm;
+reasoning_action_mismatch is excluded with recorded reasoning (MIR-057),
+and the 2026-08-10 unification of the two argued boundaries is intact. The
+third boundary — MINTING a new skill — was never argued separately, and
+there the defense inverts: crediting an old procedure forgives it someone
+else's mismatch; minting a new one distils a recipe from a run whose
+actions diverged from its reasoning.
+
+The falsification trail is the valuable part, so it is kept verbatim in
+tests/test_minting_a_skill_has_no_judgement_of_its_own.py: v1 «дефект
+записан — материал допущен» (true, intentional); v2 «чеканка молчалива»
+(FALSIFIED — by the same error class this repo pins on its verifier:
+absence certified from a 200-char TRUNCATED excerpt; the full record
+carries «observed: reasoning_action_mismatch», stamped by
+lesson_from_episode); v3, narrowed and banked as a strict xfail: the stamp
+is prose without a reader — status and confidence at birth are identical
+for a defect-stamped and a clean skill, so provenance decorates, it does
+not weigh. Three green pins guard what already works: the stamp itself,
+free minting for clean runs, and the falsehood list refusing outright.
+
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
 My own R1 note overstated: "an empty unit becomes an ambiguity → needs_
