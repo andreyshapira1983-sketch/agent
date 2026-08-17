@@ -5,9 +5,11 @@ before any "organ" is built, build the METER. For a lesson key it must
 assemble the chain derived_from -> injected -> acted -> measured, where every
 link is PROVEN only by an independent machine receipt, prose inside the claim
 itself reaches at most SELF_DECLARED, and a link with nothing behind it is
-ABSENT. The verdict is CAUSAL USE PROVEN only when the whole chain is
-receipts; anything less says CAUSAL USE NOT PROVEN and names the missing
-links. No creativity.
+ABSENT. A full chain of receipts proves PROVENANCE, never EFFECT (operator
+ruling 2026-08-17: the action could have been clean without the lesson —
+effect needs a differentiating experiment), so the top verdict says
+exactly that; anything less says CAUSAL USE NOT PROVEN and names the
+missing links. No creativity.
 """
 from __future__ import annotations
 
@@ -135,13 +137,15 @@ def test_a_measurement_ref_must_itself_resolve(tmp_path: Path) -> None:
     assert _link(report, "measured").status == "ABSENT"
 
 
-def test_the_full_chain_of_receipts_is_the_only_proven_verdict(tmp_path: Path) -> None:
+def test_the_full_chain_proves_provenance_never_effect(tmp_path: Path) -> None:
+    """Even a complete chain of receipts must not claim causal effect: the
+    action could have been clean without the lesson."""
     _write_episode(tmp_path, "ep-origin")
     key = _mk_claim(tmp_path, episode_id="ep-origin")
     _write_injection(tmp_path, key, action_ref="task:tsk_1", measurement_ref="episode:ep-after")
     _write_episode(tmp_path, "ep-after")
     report = trace_lesson_provenance(tmp_path, key)
-    assert report.verdict == "CAUSAL USE PROVEN", [
+    assert report.verdict == "PROVENANCE PROVEN — CAUSAL EFFECT UNPROVEN", [
         (link.name, link.status, link.detail) for link in report.links
     ]
     assert not report.missing
