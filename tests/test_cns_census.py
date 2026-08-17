@@ -56,9 +56,11 @@ PROPERTIES = frozenset({
     "mutation_bite",      # that test demonstrably reddens on the defect
 })
 
-#: The perimeter as a number. A twentieth mixin widens the nervous system
-#: without widening anything that says so.
-EXPECTED_MIXINS = 19
+#: The perimeter as a number. A new loop_* file widens the nervous system
+#: without widening anything that says so. 19 → 21 (2026-08-17): the
+#: loop_synthesis split landed two satellites (state, helpers) — not mixins,
+#: but inside the discovery perimeter by name.
+EXPECTED_MIXINS = 21
 
 
 def _load() -> dict:

@@ -37,8 +37,11 @@ from tools.base import ToolRegistry
 _REPO = Path(__file__).resolve().parents[1]
 _CORE = _REPO / "core"
 
-#: Модули раскола. `loop` — хост, примесью не является.
-_NOT_MIXINS = frozenset({"loop"})
+#: Модули раскола. `loop` — хост, примесью не является. Спутники
+#: `loop_synthesis` (носитель состояния и свободные функции) классов-примесей
+#: не содержат и в AgentLoop не вмешиваются — их контракт держат
+#: tests/test_loop_synthesis_split.py и реэкспорты в самом `loop_synthesis`.
+_NOT_MIXINS = frozenset({"loop", "loop_synthesis_state", "loop_synthesis_helpers"})
 
 #: Примеси, у которых контракта хоста нет ПО УСТРОЙСТВУ, а не по недосмотру.
 #: `loop_init` — конструктор: он поля СОЗДАЁТ, а не берёт, поэтому объявлять
