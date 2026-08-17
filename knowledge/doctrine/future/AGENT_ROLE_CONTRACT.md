@@ -1,4 +1,4 @@
-# STATUS: FUTURE / TARGET (not implemented)
+# STATUS: DRAFT / TARGET (not implemented)
 # knowledge/doctrine/future/AGENT_ROLE_CONTRACT.md
 
 ## Purpose
