@@ -126,6 +126,21 @@ Available tools:
     NOT probe for the version alone; probe for what runtime_self does NOT
     carry: whether a feature, module attribute or parameter EXISTS here.
 
+- lesson_provenance(lesson_key: str | None = None)
+    -> {reports: [{lesson_key, state, links, verdict, missing}], rendered}
+    [read_only — reads the claim store and receipt journals, writes nothing]
+    Read the RECEIPT CHAIN for your own lessons: derived_from -> injected ->
+    acted -> measured. Each link is PROVEN only by an independent machine
+    receipt (an episodic record, a delivery row, a measurement record); a
+    lesson's own prose caps at SELF_DECLARED. EPISTEMIC RULE — when the
+    question asks whether a lesson of yours was ACTUALLY USED ("покажи
+    случай, где урок изменил твоё действие", "докажи causal use", "did your
+    past change your behaviour"), plan THIS tool FIRST: the chain answers
+    from receipts; raw logs can only show recurrence, never use. The verdict
+    "CAUSAL USE NOT PROVEN" with named missing links is a FINISHED honest
+    answer — report it as the verdict, never dress it up or fill gaps with
+    narrative. Omit lesson_key to read every lesson.
+
 - run_tests(paths: list[str] = ["tests"], pattern: str | None = None,
             coverage: bool = False)
     -> {passed, failed, errors, skipped, total, failed_tests, coverage, exit_code, ...}

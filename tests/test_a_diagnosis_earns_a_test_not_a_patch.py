@@ -89,14 +89,21 @@ def test_the_todo_frame_is_untouched():
     assert "TODO/FIXME comment" in llm.system
 
 
-def test_a_diagnosis_candidate_becomes_a_blessed_test_proposal():
+def test_a_diagnosis_candidate_becomes_a_blessed_test_proposal(tmp_path):
     """Полный Stage A на диагнозном кандидате: заявка `self_build_task.approve`
     с замороженным падающим тестом ждёт человека — реализации ещё нет.
+    (Полигон временный: продюсер теперь пишет квитанции впрыска уроков, и
+    workspace=\".\" оставлял бы тестовые строки в живых журналах.)
     """
     inbox = _Inbox()
+    (tmp_path / "core").mkdir()
+    (tmp_path / "core" / "reasoning_action_check.py").write_text(
+        "def check(executed, planned):\n    return executed\n",
+        encoding="utf-8")
+    (tmp_path / "tests").mkdir()
 
     report = produce_coding_task(
-        workspace=".", inbox=inbox, llm=_JsonLLM(),
+        workspace=tmp_path, inbox=inbox, llm=_JsonLLM(),
         task_selector=_candidate, source_kind="verified_diagnosis",
     )
 

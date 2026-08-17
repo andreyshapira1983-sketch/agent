@@ -144,6 +144,32 @@ def _sanitize_python_probe(
     }
 
 
+def _sanitize_lesson_provenance(
+    args: dict[str, Any], idx: int, warnings: list[str],
+) -> dict[str, Any] | None:
+    """Пропуск прибора: ключ урока — короткая строка или ничего (все уроки)."""
+    key = args.get("lesson_key")
+    arguments: dict[str, Any] = {}
+    if key is not None:
+        if not isinstance(key, str) or not key.strip() or len(key) > 64:
+            warnings.append(
+                f"step[{idx}]: lesson_provenance lesson_key must be a short "
+                "string, dropped"
+            )
+            return None
+        arguments["lesson_key"] = key.strip()
+    return {
+        "tool": "lesson_provenance",
+        "arguments": arguments,
+        "label": f"lesson_provenance:{arguments.get('lesson_key', 'all')}",
+        "expected_outcome": (
+            "The receipt chain per lesson (derived_from/injected/acted/"
+            "measured) with PROVEN/SELF_DECLARED/ABSENT per link and an "
+            "honest verdict."
+        ),
+    }
+
+
 def sanitize_step(
     tool_name: str,
     args: dict[str, Any],
@@ -383,6 +409,9 @@ def sanitize_step(
     # ----- лаборатория (2026-08-16) -----
     if tool_name == "python_probe":
         return _sanitize_python_probe(args, idx, warnings)
+
+    if tool_name == "lesson_provenance":
+        return _sanitize_lesson_provenance(args, idx, warnings)
 
     # ----- MVP-14.2 web_fetch -----
     if tool_name == "web_fetch":
