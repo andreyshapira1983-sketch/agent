@@ -16,13 +16,28 @@ ActivityType = Literal[
     "conversation", "bounded_action", "persistent_goal", "goal_control",
 ]
 
-#: Musing / thought-experiment framing. A veto over every other class: the
-#: operator's own safety border — «а представь…» must never mint a campaign.
+#: Musing / thought-experiment / meta-discussion framing. A veto over every
+#: other class: the operator's borders — «а представь…» must never mint a
+#: campaign, and DESCRIBING the mechanism («… → C16 создаёт задачу», «если я
+#: напишу …, что произойдёт?») is architecture talk, not an order.
 _HYPOTHETICAL_RE = re.compile(
     r"(?i)как бы ты|что ты думаешь|что бы ты|расскажи|представь|вообрази"
     r"|если бы|допустим|гипотетически"
-    r"|what do you think|how would you|tell me|imagine|hypothetically",
+    r"|→|=>|что произойдёт|если я (?:напишу|скажу)|должн[аоы]?\s+уметь"
+    r"|what do you think|how would you|tell me|imagine|hypothetically"
+    r"|what happens if|if i (?:write|say)|should be able",
 )
+
+#: Mention is not use (live specimen rtask_7879672a: a pasted diagram's
+#: quoted «"начни X и продолжай"» minted a real task). A verb inside any
+#: quoted/backticked span is somebody TALKING ABOUT the command.
+_QUOTE_SPAN_RE = re.compile(r'"[^"\n]{2,400}"|«[^»\n]{2,400}»|`[^`\n]{2,400}`')
+
+
+def _unquoted(text: str) -> str:
+    """The text with quoted/backticked spans blanked — only top-level words
+    can carry a directive."""
+    return _QUOTE_SPAN_RE.sub(lambda m: " " * len(m.group(0)), text)
 
 #: Launching work: BOTH halves must fire. A bare start verb («начни с того,
 #: что расскажи…») is not an ongoing contract.
@@ -74,20 +89,25 @@ def _leads(pattern: re.Pattern[str], text: str) -> bool:
 
 
 def decide_activity(text: str) -> ActivityDecision:
-    """One decision, deterministic, before any channel semantics."""
+    """One decision, deterministic, before any channel semantics.
+
+    Directives are read from the UNQUOTED text only: mention is not use —
+    a persistent goal is born from a top-level directive, never from a
+    quote, an example, code, or a description of expected behaviour."""
     t = (text or "").strip()
     if not t:
         return ActivityDecision("conversation", "empty input")
     if _HYPOTHETICAL_RE.search(t):
         return ActivityDecision(
-            "conversation", "hypothetical/musing framing vetoes launching")
-    if _leads(_CONTROL_RE, t) and _WORK_NOUN_RE.search(t):
+            "conversation", "hypothetical/meta framing vetoes launching")
+    top = _unquoted(t)
+    if _leads(_CONTROL_RE, top) and _WORK_NOUN_RE.search(top):
         return ActivityDecision(
             "goal_control", "control verb leads + work noun")
-    if _leads(_START_RE, t) and _CONTINUITY_RE.search(t):
+    if _leads(_START_RE, top) and _CONTINUITY_RE.search(top):
         return ActivityDecision(
             "persistent_goal", "start verb leads + continuity contract")
-    if _leads(_IMMEDIATE_RE, t):
+    if _leads(_IMMEDIATE_RE, top):
         return ActivityDecision(
             "bounded_action", "do-it-now imperative; routed to the loop")
     return ActivityDecision("conversation", "default")

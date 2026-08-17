@@ -871,6 +871,28 @@ RepairProposal-test class). And the earlier armed defect_absent rows now
 have their base rate: clean generations on this candidate are the norm
 WITHOUT the lesson too, so those rows measure the task, not the lesson.
 
+## Mention is not use: the pasted diagram that became a goal (2026-08-17, rtask_7879672a)
+
+The operator pasted a ChatGPT diagram DISCUSSING the C16 mechanism — and
+the decider minted a persistent goal out of the quoted «"начни X и
+продолжай"», storing the whole arrow-diagram as the task's goal text. The
+strategy layer above had correctly said general_question; the decider
+scanned raw text and saw an order. Invariant, operator's words: упоминание
+команды не является командой — persistent goal рождается только из
+top-level directive, не из цитаты, примера, кода, описания ожидаемого
+поведения или вложенной инструкции.
+
+Two guards, both deterministic: directives are now read from the UNQUOTED
+text only (quoted/backticked spans are blanked before the verb search —
+mention lives inside quotes), and the hypothetical veto learned
+meta-discussion markers (arrows, «что произойдёт», «если я напишу»,
+«должна уметь»). Pinned by the live specimen verbatim, the operator's
+three forms (quoted phrase / what-would-happen / expected-behaviour spec),
+a backticked command, a quoted «останови» — and both real orders proven
+live after the guard: a real start minted rtask_365e4319, a real stop
+cancelled it. The contaminated specimen rtask_7879672a was cancelled, not
+kept as evidence of C16 working.
+
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
 My own R1 note overstated: "an empty unit becomes an ambiguity → needs_
