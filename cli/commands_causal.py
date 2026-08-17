@@ -19,6 +19,7 @@ ATTRIBUTED, означающее «модель уверена».
 """
 from __future__ import annotations
 
+import pathlib
 import sys
 from typing import Any
 
@@ -37,6 +38,9 @@ def _handle_causal(rest: str, agent: Any) -> bool:
     """
     if rest.split(maxsplit=1)[:1] == ["provenance"]:
         return _handle_provenance(rest.split(maxsplit=1)[1:] or [""], agent)
+
+    if rest.split(maxsplit=1)[:1] == ["ab"]:
+        return _handle_ab_experiment(rest.split()[1:], agent)
 
     store = getattr(agent, "causal_store", None)
     if store is None:
@@ -107,6 +111,48 @@ def _handle_provenance(args: list[str], agent: Any) -> bool:
             "verdict": report.verdict,
             "missing": list(report.missing),
         })
+    return True
+
+
+def _handle_ab_experiment(args: list[str], agent: Any) -> bool:
+    """`:causal ab <ключ> [k]` — различающий эксперимент: урок OFF против ON
+    на настоящем кандидате из бэклога; вердикт подписывается измерением."""
+    from core.backlog_selector import load_backlog
+    from core.lesson_ab_experiment import run_lesson_ab_experiment
+
+    if not args:
+        print("Usage: :causal ab <lesson_key> [k]", file=sys.stderr)
+        return True
+    lesson_key = args[0]
+    k = int(args[1]) if len(args) > 1 and args[1].isdigit() else 4
+    workspace = getattr(agent, "workspace", None) or "."
+    candidate = next(
+        (c for c in load_backlog(workspace)
+         if str(getattr(c, "signal_source", "")) == "code_todo"),
+        None,
+    )
+    if candidate is None:
+        print("в бэклоге нет code_todo-кандидата — эксперименту не на чем "
+              "мерить; выдумывать задачу нельзя", file=sys.stderr)
+        return True
+    target = str(candidate.target_path)
+    try:
+        current = pathlib.Path(target).read_text(encoding="utf-8")
+    except OSError:
+        current = ""
+    report = run_lesson_ab_experiment(
+        workspace, agent.llm, lesson_key=lesson_key, k=k,
+        impl_path=target, quote=str(candidate.problem_quote),
+        evidence_ref=str(getattr(candidate, "evidence_ref", "") or target),
+        current_content=current,
+    )
+    print(report.render(), file=sys.stderr)
+    agent.log.log("lesson_ab_experiment", {
+        "lesson_key": lesson_key, "impl_path": target, "k": k,
+        "off_defects": report.off.defects, "off_measured": report.off.measured,
+        "on_defects": report.on.defects, "on_measured": report.on.measured,
+        "verdict": report.verdict, "measurement_id": report.measurement_id,
+    })
     return True
 
 

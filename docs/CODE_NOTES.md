@@ -847,6 +847,30 @@ message echoes the stored goal IN FULL, so a chimera is visible the moment
 it happens. The garbage task minted from the live chimera was cancelled
 (rtask_db7e2e38).
 
+## The differentiating experiment: lesson OFF vs ON (2026-08-17, operator design)
+
+The chain of receipts proves provenance, never effect — effect needs the
+counterfactual. core/lesson_ab_experiment.py runs the operator's design:
+same task class, same model, same candidate; arm A without the lesson,
+arm B with it; every generation judged by BOTH phantom instruments (call
+kwargs + attributes); a generation the instruments never examined (parse
+failure) is excluded, not counted. Verdict vocabulary is calibrated and
+closed: effect_observed / no_discrimination / lesson_insufficient /
+inverted / insufficient_measurements — one clean discrimination proves
+MECHANISM, never «эффект доказан навсегда». The verdict signs itself into
+the measurement store (instrument=ab_experiment). Door:
+`:causal ab <lesson_key> [k]`, candidate taken from the backlog's real
+code_todo — inventing a task to measure on is forbidden.
+
+First live run (k=4, nano, tools/lesson_provenance_tool.py TODO):
+**no_discrimination** — 0 phantoms in BOTH arms (meas_6cf34f351530). Two
+honest readings follow. The defect class is dormant on this task class,
+so the lesson's effect cannot be shown here — a discriminating task must
+be one that historically provokes the class (the 2026-08-15
+RepairProposal-test class). And the earlier armed defect_absent rows now
+have their base rate: clean generations on this candidate are the norm
+WITHOUT the lesson too, so those rows measure the task, not the lesson.
+
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
 My own R1 note overstated: "an empty unit becomes an ambiguity → needs_
