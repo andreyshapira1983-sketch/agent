@@ -44,7 +44,8 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         # B1: реализация уехала из двух примесей сюда; `agent` остался фасадом.
         "repair_commands", "memory_hygiene_commands",
         "loop_memory_read", "loop_memory_write",
-        "loop_response_deciders", "loop_synthesis", "loop_evidence_chain",
+        "loop_response_deciders", "loop_synthesis",
+        "loop_synthesis_state", "loop_synthesis_helpers", "loop_evidence_chain",
         "loop_verification", "loop_observe", "loop_run_tail", "loop_context",
         "loop_attempt", "loop_verify_replan", "loop_init", "loop_gates",
         "planner", "causal_store", "causal_climb", "causal_claim_store", "charter_goal", "placeholder_text", "planner_prompt", "plan_parsing", "doc_routing", "host_tools_context", "step_sanitizer", "verifier", "verifier_core", "verifier_models", "verifier_patterns", "verification_summary", "sensor_journal",

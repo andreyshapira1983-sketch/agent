@@ -87,11 +87,11 @@
           "_anchor_correction": "shifted 2026-08-14: st.failure_history.extend moved above the success `break` in the attempt loop, and core/replan.py gained WORLD_FACING_FAILURE_TYPES above these sites. Caught by tests/test_cns_anchor_integrity.py."
         },
         {
-          "site": "core/loop_synthesis.py:386",
+          "site": "core/loop_synthesis.py:234",
           "role": "control",
           "uses": "<failure_context> block in the synthesis prompt",
-          "gated_by": "core/loop_synthesis.py:697 — receives None unless st.replan_exhausted",
-          "_anchor_correction": "shifted 2026-08-15: _log_budget_trim lifted out of _synthesize for the function-length ratchet, moving every line below it. Caught by tests/test_cns_anchor_integrity.py."
+          "gated_by": "core/loop_synthesis.py:608 — receives the world-facing subset unless st.replan_exhausted",
+          "_anchor_correction": "shifted 2026-08-15: _log_budget_trim lifted out of _synthesize for the function-length ratchet, moving every line below it. Caught by tests/test_cns_anchor_integrity.py. Shifted again 2026-08-17: SynthesisState and helpers split into satellite modules (ain_c166 applied by hand), every line moved. Caught by the same guard."
         },
         {
           "site": "core/loop_run_tail.py:306",
@@ -279,7 +279,7 @@
           "does": "saves rich paused checkpoint (goal, steps done/remaining, blocked counter) and re-raises"
         },
         {
-          "site": "core/loop_synthesis.py:684",
+          "site": "core/loop_synthesis.py:532",
           "phase": "synthesis",
           "does": "same"
         },
@@ -323,7 +323,7 @@
     "on_token_streaming": {
       "producer": "run(on_token=...) at the entry edge; budget_guard builds the stdout callback (app/budget_guard.py:48)",
       "carrier": "instance attribute _stream_on_token (core/loop.py:286); cleared at end of run (loop.py:694) and by every early-deciding gate (loop_gates.py:86,110,188,245)",
-      "consumer": "loop_synthesis.py:566-571 — when set, synthesis calls stream_complete instead of complete",
+      "consumer": "loop_synthesis.py:524-531 — when set, synthesis calls stream_complete instead of complete",
       "effect_level": "L6 — probe 2026-08-08: tokens arrive at the callback and their concatenation equals the returned answer",
       "evidence": {
         "delivery_probe": "StreamingFakeLLM through the router: 3 chunks delivered, joined == answer",
@@ -367,7 +367,7 @@
       "producer": "_open_run (core/loop_context.py:247): store.load_or_default -> last_user_profile + user_profile_load event",
       "carrier": "instance field last_user_profile; refreshed per run at open, overwritten by the tail after the update write",
       "consumers": [
-        "synthesis prompt <user_profile> block (loop_synthesis.py:192,204) — style only",
+        "synthesis prompt <user_profile> block (loop_synthesis.py:186,198) — style only",
         "language bridge into assumption extraction (loop_context.py:274)",
         "tail update base (loop_run_tail.py:231) — closes the learning loop"
       ],
@@ -389,7 +389,7 @@
       "carrier": "_run_assumptions handed to AttemptState, _run_assumptions_current for synthesis, _run_assumptions into the tail",
       "consumers": [
         "attempt loop adds plan assumptions and logs assumptions_registered when non-empty (loop_attempt.py:374-380)",
-        "synthesis <assumptions> block (loop_synthesis.py:209)",
+        "synthesis <assumptions> block (loop_synthesis.py:207-213; was stale pre-split, pointed at 209 while Layer 5 sat at 359)",
         "tail: last_assumptions + archive write under may_assumptions (loop_run_tail.py:251)"
       ],
       "evidence": {
@@ -434,7 +434,7 @@
       "carrier": "_task_planner_llm / _task_synth_llm — return values threaded through AttemptState and SynthesisState",
       "consumers": [
         "planner.plan(llm=st._task_planner_llm) (core/loop_attempt.py:288)",
-        "_synthesize(llm=_synth_llm) via the ladder (core/loop_synthesis.py:638)",
+        "_synthesize(llm=_synth_llm) via the ladder (core/loop_synthesis.py:588)",
         "verify-replan planner call (core/loop_verify_replan.py:326) — bitten by M23"
       ],
       "evidence": {
@@ -1229,7 +1229,7 @@
       },
       {
         "id": "C10",
-        "scope": "synthesis ladder: SynthesisState, tier forcing, failure_history gated at loop_synthesis.py:637, streaming on_token (loop_synthesis)",
+        "scope": "synthesis ladder: SynthesisState, tier forcing, failure_history gated at loop_synthesis.py:607, streaming on_token (loop_synthesis)",
         "status": "UNPROVEN",
         "deferred_arcs_from_other_clusters": [
           "local_critique_active shapes the synthesis prompt via SynthesisState — candidate arc deferred here from C05, unbitten"
@@ -1917,7 +1917,7 @@
           "external": "none — no network, no credentials, no model call"
         },
         "consumers_and_what_each_reads": [
-          "core/loop_synthesis.py:240 — writes `code={trig.code}` into the <failure_context> block of the synthesis prompt. LIVE MODEL consumer: delivery is mock-observable, use is not.",
+          "core/loop_synthesis.py:248 — writes `code={trig.code}` into the <failure_context> block of the synthesis prompt. LIVE MODEL consumer: delivery is mock-observable, use is not.",
           "core/replan.py:543-556 — per-type budget: every code has its own max_occurrences (1 or 2) and its own advice text, so the codes are distinguishable by construction, not by convention.",
           "core/completion_obligation.py:250-253 — failure_codes are disclosure NEEDLES, substring-matched against the composed answer; a different code changes failed_but_reported vs silently_missing only when the answer contains the literal token.",
           "core/loop_run_tail.py:301 — only the policy_blocked code is singled out, for denied_tools."

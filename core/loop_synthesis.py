@@ -29,28 +29,35 @@ Nonce именно на попытку, а не на прогон: маркер,
 Класс подмешивается в ``AgentLoop``; состояние по-прежнему живёт на
 композированном цикле, а не здесь.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
+
+# Re-export moved helpers/state to keep the public API exactly as before.
+from .loop_synthesis_helpers import _artifact_blocks, _log_budget_trim, _organ_map
+from .loop_synthesis_state import SynthesisState
+
+if TYPE_CHECKING:  # pragma: no cover
+
+    from core.models import Goal
+    from core.referent_resolver import ReferentDecision
+    from core.synth_resilience import SynthAttempt
+
 
 from core.answer_format import (
     LOCAL_CRITIQUE_SYSTEM_ADDENDUM,
     SYSTEM_ANSWER,
     file_scope_notice,
     format_allowed_citations_block,
-    format_artifact,
     output_contract_requires_headers,
 )
-from core.completion_marker import (
-    marker_instruction as completion_marker_instruction,
-)
+from core.completion_marker import marker_instruction as completion_marker_instruction
 from core.completion_marker import new_nonce as new_completion_nonce
 from core.completion_marker import parse_completion_marker
 from core.model_router import ModelRole
 from core.model_usage import ModelBudgetExceeded
 from core.models import Goal
-from core.planner import PlannerOutput
 from core.redaction import redact_dlp_text
 from core.referent_resolver import (
     ReferentDecision,
@@ -66,165 +73,6 @@ from core.synth_resilience import (
     run_synthesizer_ladder,
 )
 from core.user_profile import profile_to_prompt_block
-
-
-def _organ_map(agent: object) -> dict[str, object]:
-    """Органы, о наличии которых агент вправе сообщить как о факте."""
-    names = (
-        "memory", "persistent_store", "episodic_store", "procedural_store",
-        "source_registry_store", "user_profile_store", "approval_provider",
-    )
-    out: dict[str, object] = {}
-    for name in names:
-        key = "working_memory" if name == "memory" else name
-        out[key] = getattr(agent, name, None)
-    return out
-
-
-@dataclass
-class SynthesisState:
-    """То, что вызов синтезатора носит с собой за один прогон.
-
-    Имена полей совпадают с прежними локальными именами `_run_inner` — это
-    условие проверяемости переноса: подстановка `имя -> st.имя` механическая,
-    и тест сверяет её с историей.
-    """
-
-    # ── Вход ─────────────────────────────────────────────────────────────
-    goal: Goal
-    user_question: str
-    file_hint: str | None
-    artifacts: dict[str, dict[str, Any]]
-    planner_out: PlannerOutput
-    plan: Any
-    history: str
-    persistent_block: str
-    failure_history: list[Any]
-    replan_exhausted: bool
-    cheap_path_active: bool
-    local_critique_active: bool
-    _task_synth_llm: Any
-    _cp: Any
-
-    # ── Выход ────────────────────────────────────────────────────────────
-    draft_answer: str = ""
-    #: Изменяемая ячейка, а не поле-строка: её пишет ЗАМЫКАНИЕ внутри
-    #: лестницы, и на каждой попытке заново. Прогонная, не на экземпляре:
-    #: `self._last_*` пережил бы прогон, а ранние выходы (реплей, отказ)
-    #: банкуют, сюда не заходя, — вердикт одного хода приписался бы эпизоду
-    #: следующего.
-    _declared: dict[str, str | None] | None = None
-
-    OUTPUTS: ClassVar[frozenset[str]] = frozenset({"draft_answer", "_declared"})
-
-
-def _artifact_blocks(
-    artifacts: dict[str, dict], *, question: str,
-) -> list[tuple[str, str]]:
-    """Render each artifact for the prompt, sparing the agent's own description.
-
-    The files the planner may read WITHOUT a `--file` hint are the agent's
-    self-documentation, and they get the taller ceiling: trimming them is how
-    the agent came to describe its own architecture with the whole memory layer
-    missing and no way to know it was gone (see `EVIDENCE_SELF_DOC_CHARS`).
-    """
-    from core.planner import LLMPlanner
-
-    self_doc = {p.rstrip("/") for p in LLMPlanner.DEFAULT_SELF_DOCUMENTATION_PATHS}
-    blocks: list[tuple[str, str]] = []
-    for label, art in artifacts.items():
-        target = str(label).split(":", 1)[-1].strip()
-        blocks.append((label, format_artifact(
-            art["tool"], art["output"], question=question,
-            self_documentation=target in self_doc,
-        )))
-    return blocks
-
-
-def _log_budget_trim(
-    log: Any,
-    *,
-    trimmed_blocks: list[tuple[str, str]],
-    was_trimmed: bool,
-    memory_trimmed: bool,
-    memory_payload: str,
-    memory_label: str,
-    long_term_block: str,
-    memory_has_records: bool,
-    surviving_memory_ids: set[str] | None,
-    artifacts: dict[str, Any],
-) -> None:
-    """Journal what the total budget cut, and who disagreed about it.
-
-    Lifted out of `_synthesize` for the function-length ratchet; the body is
-    a verbatim move. Sensor only — nothing here changes the prompt.
-    """
-    from core.evidence_budget import total_trims
-
-    if was_trimmed:
-        # Parsed once; feeds both the trim event and the starvation
-        # detector below (review round #286).
-        _trims = total_trims(trimmed_blocks)
-        log.log(
-            "evidence_budget_trim",
-            {
-                "labels": [lbl for lbl, _ in trimmed_blocks],
-                # NOTE: since memory joined the budget this total
-                # includes the memory block — not comparable with
-                # totals logged before that change.
-                "total_chars": sum(len(c) for _, c in trimmed_blocks),
-                # Which side paid, and whether memory existed at all —
-                # `memory_trimmed: False` alone cannot say that.
-                "memory_trimmed": memory_trimmed,
-                "memory_chars": len(memory_payload),
-                # What actually reached the model: `persistent_memory_inject`
-                # fires BEFORE the budget and counts records the model
-                # may never have seen.
-                # A drop notice is not kept memory: it says the opposite.
-                "memory_chars_kept": (
-                    len(long_term_block.strip()) if memory_has_records else 0
-                ),
-                "memory_ids_kept": sorted(surviving_memory_ids)
-                if surviving_memory_ids is not None
-                else None,
-                # Per-block cut sizes, parsed back from the trim
-                # notices — without them a starved block is invisible
-                # in the trace (MIR-073).
-                "trims": [
-                    {"label": lbl, "kept": kept, "original": orig}
-                    for lbl, kept, orig in _trims
-                ],
-            },
-        )
-        # MIR-073: the planner chose these sources; if the budget
-        # squeezed one to a sliver, that is two deciders contradicting
-        # each other — journal it on the existing disagreement channel
-        # instead of continuing as if nothing happened. Logging only,
-        # per the operator's sensor policy.
-        try:
-            from core.subsystem_disagreement import (
-                detect_budget_starvation,
-            )
-            for _ev in detect_budget_starvation(
-                _trims,
-                planned_labels=set(artifacts.keys()),
-                memory_label=memory_label,
-            ):
-                log.log("subsystem_disagreement", _ev)
-        except Exception as _sd_exc:
-            # A broken detector must not break the turn — but its
-            # failure must not be invisible either (review round
-            # #286, same rule as verification_explained_failed).
-            try:
-                log.log(
-                    "subsystem_disagreement_error",
-                    {
-                        "error_type": type(_sd_exc).__name__,
-                        "error": str(_sd_exc)[:300],
-                    },
-                )
-            except Exception:
-                pass
 
 
 class AgentLoopSynthesis:

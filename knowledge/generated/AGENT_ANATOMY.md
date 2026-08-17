@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 195 modules across 12 groups._
+_Total: 197 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -61,6 +61,8 @@ _Planning, verification, clarification, control loop._
 | `core/loop_memory_write` | Запись памяти циклом — и право на неё. |
 | `core/loop_response_deciders` | Черновик ответа и решатели над ним — вырезано из ``core/loop.py`` дословно. |
 | `core/loop_synthesis` | Синтез ответа — метод `_synthesize`, вырезанный из ``core/loop.py`` дословно. |
+| `core/loop_synthesis_state` | State holder for `core.loop_synthesis`. |
+| `core/loop_synthesis_helpers` | Helper functions used by `core.loop_synthesis.AgentLoopSynthesis`. |
 | `core/loop_evidence_chain` | Досборка цепочки улик — вырезано из ``core/loop.py`` дословно. |
 | `core/loop_verification` | Проверка черновика и сенсоры вокруг неё — вырезано из ``core/loop.py``. |
 | `core/loop_observe` | Наблюдение, разбор запроса и выбор модели — вырезано из ``core/loop.py``. |
