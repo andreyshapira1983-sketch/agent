@@ -800,6 +800,35 @@ for a defect-stamped and a clean skill, so provenance decorates, it does
 not weigh. Three green pins guard what already works: the stamp itself,
 free minting for clean runs, and the falsehood list refusing outright.
 
+## The door chose the mind — now a decider chooses first (2026-08-17, operator ruling, C16)
+
+Verified against the code before building: the chat brain's entire outcome
+space was {22 control-plane shortcuts} ∪ {produce an answer} — and the one
+matcher that RECOGNISED a task request (`_matches_inbox_task_request`)
+returned None, deliberately handing work intent to the answerer. «Начни
+учиться» could only become a recommendation; the work brain
+(best_next_action / charter / campaigns) was unreachable from language.
+One code organism, not one operating subject: the channel decided the
+semantics before the agent saw the intent.
+
+The fix is NOT one merged loop (the operator's own border: «а представь…»
+must never mint a campaign). core/activity_decider.py is a deterministic
+layer above the channel: conversation / bounded_action fall through
+untouched — every pinned shortcut and the answer loop keep their
+behaviour; persistent_goal (start verb AND continuity contract, both
+halves required) enters the C16 lane — TaskQueueStore.add, the same queue
+the autonomous runtime's ticks consume, dry_run default with effects still
+governed by the runtime's own gates; goal_control (control verb AND work
+noun) cancels matching queued work by 6-char-prefix token overlap
+(«программированию» must find «программировать» — inflection, not a
+different subject) and reports an empty match honestly. Hypothetical
+framing vetoes everything.
+
+Pinned by the operator's five canonical examples plus unseen forms and
+the veto (tests/test_the_door_does_not_choose_the_mind.py); proven live
+both ways in one session: spoken goal → rtask in the queue with a spoken
+way back; spoken stop → that task cancelled.
+
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
 My own R1 note overstated: "an empty unit becomes an ambiguity → needs_
