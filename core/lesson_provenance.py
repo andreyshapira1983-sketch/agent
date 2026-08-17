@@ -15,9 +15,9 @@ from typing import Any
 
 from core.causal_claim_store import load_claims
 
-#: The delivery receipt the meter reads. Nobody writes it yet — measuring
-#: that absence is the meter's first job; the future delivery code must
-#: append one row per lesson actually placed into a prompt.
+#: The delivery receipt the meter reads. Written by
+#: :func:`record_lesson_injections` at the moment lessons actually reach a
+#: prompt (today: the Stage A task builder in core/self_task_producer.py).
 INJECTION_JOURNAL = Path("data") / "lesson_injections.jsonl"
 
 _EPISODIC = Path("data") / "episodic_memory.jsonl"
@@ -81,6 +81,40 @@ def _resolve_measurement_ref(workspace: Path, ref: str) -> bool:
     if kind == "episode" and ident:
         return _episode_exists(workspace, ident)
     return False
+
+
+def record_lesson_injections(
+    workspace: str | Path,
+    lessons: tuple[Any, ...],
+    *,
+    consumer: str,
+    action_ref: str = "",
+    measurement_ref: str = "",
+) -> int:
+    """Append one delivery receipt per keyed lesson; returns rows written.
+
+    Called at the moment lessons actually reach a prompt — this row is what
+    lifts the meter's `injected` link out of ABSENT. Keyless cards are
+    skipped: a receipt without an identity proves nothing.
+    """
+    from datetime import datetime, timezone
+
+    from core.state_integrity import append_state_jsonl
+
+    rows = [
+        {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "lesson_key": card.key,
+            "consumer": consumer,
+            "action_ref": action_ref,
+            "measurement_ref": measurement_ref,
+        }
+        for card in lessons
+        if getattr(card, "key", "")
+    ]
+    if rows:
+        append_state_jsonl(Path(workspace) / INJECTION_JOURNAL, rows)
+    return len(rows)
 
 
 def trace_lesson_provenance(workspace: str | Path, lesson_key: str) -> ProvenanceReport:

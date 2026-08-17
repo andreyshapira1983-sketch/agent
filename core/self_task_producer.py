@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from core.causal_claim_store import distilled_lessons
+from core.lesson_provenance import record_lesson_injections
 from core.self_apply_lane import FileChange, _normalize_rel, classify_patch_risk
 from core.self_build_producer import (
     _DEFAULT_CONFIDENCE_THRESHOLD,
@@ -718,6 +719,7 @@ def produce_coding_task(
     evidence = [f"{source_kind}: {evidence_ref}", f"quote: {quote}"]
 
     # ── task builder ────────────────────────────────────────────────────────
+    lessons = distilled_lessons(workspace)
     builder = _task_builder_generate(
         llm,
         impl_path=impl_path,
@@ -725,9 +727,13 @@ def produce_coding_task(
         evidence_ref=evidence_ref,
         current_content=current_content,
         source_kind=source_kind,
-        lessons=distilled_lessons(workspace),
+        lessons=lessons,
     )
     roles.append(builder)
+    # The prompt has left: delivery is a fact regardless of the verdicts
+    # below, and the receipt is what makes causal use measurable at all.
+    record_lesson_injections(
+        workspace, lessons, consumer="self_task_producer.task_builder")
     if builder.decision != "built":
         return ProducerReport(
             status="task_veto",
@@ -761,6 +767,9 @@ def produce_coding_task(
     reporter = _task_reporter_publish(inbox, builder.data, evidence, evidence_ref)
     roles.append(reporter)
     approval_id = reporter.data["approval_id"]
+    record_lesson_injections(
+        workspace, lessons, consumer="self_task_producer.task_builder",
+        action_ref=f"approval:{approval_id}")
     return ProducerReport(
         status="proposed",
         reason=builder.data.get("task_summary") or builder.data.get("task_title") or "",

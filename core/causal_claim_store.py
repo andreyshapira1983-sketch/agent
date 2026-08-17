@@ -53,6 +53,8 @@ class LessonCard:
     machine_action: str = ""
     evidence: tuple[str, ...] = ()
     cases: tuple[str, ...] = ()
+    #: Store key (cclaim_…) — the identity a delivery receipt names.
+    key: str = ""
 
 
 def _claims_path(workspace: str | Path) -> Path:
@@ -213,5 +215,6 @@ def distilled_lessons(workspace: str | Path) -> tuple[LessonCard, ...]:
             machine_action=extra["machine_action"],
             evidence=claim.observation.evidence_refs,
             cases=proven_cases(claim),
+            key=extra["key"],
         ))
     return tuple(cards)

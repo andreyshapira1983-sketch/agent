@@ -657,7 +657,19 @@ in the store, including the one real LESSON (cclaim_dc87a06d4972, phantom
 signature kwargs), come out CAUSAL USE NOT PROVEN with zero PROVEN links —
 every named origin episode is a hand-written class name the episodic store
 does not hold, and delivery is structurally unobservable. That reading is
-the baseline the future delivery receipts will be measured against.
+the baseline the delivery receipts are measured against.
+
+Second step (same day, operator: «строй квитанцию впрыска»): the receipt
+writer. `record_lesson_injections` appends one row per KEYED lesson —
+`LessonCard` now carries its store key, because a receipt without an
+identity proves nothing — and the Stage A task builder writes it at two
+moments: right after the prompt leaves (delivery is a fact regardless of
+later vetoes) and again with `action_ref=approval:<id>` when the proposal
+is actually published. End-to-end pin: a LESSON in the store, one producer
+run, and the meter's `injected` and `acted` links measure PROVEN
+(tests/test_the_delivery_leaves_a_receipt.py). `measured` stays unproven
+until a later episode measures the defect gone — that link has no writer
+yet, deliberately.
 
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
