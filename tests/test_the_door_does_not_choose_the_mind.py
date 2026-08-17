@@ -126,6 +126,59 @@ def test_a_polite_prefix_still_orders() -> None:
     assert d.activity == "persistent_goal"
 
 
+# ── mention is not use (live specimen 2026-08-17, rtask_7879672a) ──────────
+# The operator pasted a ChatGPT diagram DISCUSSING the mechanism — and the
+# decider minted a persistent goal out of the quoted «"начни X и продолжай"».
+# Invariant, operator's words: упоминание команды не является командой;
+# persistent goal рождается только из top-level directive — не из цитаты,
+# примера, кода, описания ожидаемого поведения или вложенной инструкции.
+
+
+_LIVE_MENTION = (
+    '"начни X и продолжай" → C16 создаёт ПРАВИЛЬНУЮ задачу → daemon реально '
+    'подбирает именно её → выполняет первый шаг → сохраняет прогресс → через '
+    'следующий tick продолжает ту же работу'
+)
+
+
+def test_the_pasted_diagram_is_not_an_order() -> None:
+    d = decide_activity(_LIVE_MENTION)
+    assert d.activity == "conversation"
+
+
+def test_a_quoted_command_is_a_mention() -> None:
+    d = decide_activity('"начни учиться и продолжай как работу" — вот такая фраза')
+    assert d.activity == "conversation"
+
+
+def test_asking_what_would_happen_is_discussion() -> None:
+    d = decide_activity(
+        'Если я напишу "начни X и продолжай", что произойдёт?')
+    assert d.activity == "conversation"
+
+
+def test_describing_expected_behaviour_is_architecture_talk() -> None:
+    d = decide_activity(
+        'Система должна уметь: "начни X и продолжай" → создать persistent goal')
+    assert d.activity == "conversation"
+
+
+def test_a_backticked_command_is_code_not_an_order() -> None:
+    d = decide_activity("`начни сборку и продолжай` — так выглядит команда")
+    assert d.activity == "conversation"
+
+
+def test_a_real_order_still_orders_after_the_mention_guard() -> None:
+    d = decide_activity(
+        "Начни изучать асинхронный Python и продолжай это как свою работу")
+    assert d.activity == "persistent_goal"
+
+
+def test_a_quoted_stop_is_not_goal_control() -> None:
+    d = decide_activity('Фраза "останови обучение" снимает задачу из очереди')
+    assert d.activity == "conversation"
+
+
 # ── the wiring: a decided goal actually enters the C16 lane ────────────────
 
 
