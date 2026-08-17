@@ -185,10 +185,13 @@ def _start_persistent_goal(text: str, agent: AgentLoop, workspace: Path) -> bool
 
     task = _task_queue_for(agent, workspace).add(goal=text.strip())
     agent.log.log("runtime_task_added", task.to_dict())
+    # The goal is echoed IN FULL on purpose: the console once glued a paste
+    # tail to a typed order («…выдумка.Начни…», trace_68084781) and the
+    # operator had no way to see what the queue actually stored.
     print(
         f"(цель принята в работу: {task.id}; повезёт автомат — очередь задач "
-        f"C16, dry_run={task.dry_run}. Остановить: «останови …» или "
-        f":task-cancel {task.id})",
+        f"C16, dry_run={task.dry_run}.\n Понял так: «{task.goal}»\n "
+        f"Остановить: «останови …» или :task-cancel {task.id})",
         file=sys.stderr,
     )
     return True
