@@ -667,9 +667,22 @@ moments: right after the prompt leaves (delivery is a fact regardless of
 later vetoes) and again with `action_ref=approval:<id>` when the proposal
 is actually published. End-to-end pin: a LESSON in the store, one producer
 run, and the meter's `injected` and `acted` links measure PROVEN
-(tests/test_the_delivery_leaves_a_receipt.py). `measured` stays unproven
-until a later episode measures the defect gone — that link has no writer
-yet, deliberately.
+(tests/test_the_delivery_leaves_a_receipt.py).
+
+Third step (same day, operator: «строй писаря measured»): the measurement
+writer — and it is the hand of whoever MEASURED, never the injector. The
+Stage A critic already is the measuring instrument for the phantom-kwargs
+class (its structural signature sieve runs on every generation), so
+`_record_critic_measurement` writes `record_lesson_measurement` rows to
+data/lesson_measurements.jsonl: defect_absent when an armed generation
+shows no phantoms, defect_recurred when phantoms survived the lesson (that
+outcome is falsification material for the ladder, not shame). A parse
+failure means the instrument never ran — no row. The meter resolves
+measurement:<id> refs against the store AND requires the record's own
+lesson_key to match — a measurement of another lesson cannot be borrowed.
+Instrument matches defect-signal vocabulary EXACTLY: a lesson spelled
+"phantom_signature" is honestly not measured by an instrument for
+"phantom_signature_kwargs" (the live store's spelling).
 
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
