@@ -1,7 +1,7 @@
 Commands:
   :mem | :memory                  inspect working + persistent memory
   :smart-memory [--json]          inspect episodic/procedural/consolidation memory
-  :causal [гипотеза|гипотеза]     показать причинную лестницу и выдвинуть гипотезы
+  :causal [гипотезы|provenance]   показать причинную лестницу и выдвинуть гипотезы
   :memory-consolidate [--json]    link episodes to reusable procedures now
   :audit [on|off|status]          read-only audit mode: freeze all durable memory writes
   :clear                          wipe working memory only

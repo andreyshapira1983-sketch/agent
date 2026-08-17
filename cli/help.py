@@ -35,7 +35,7 @@ HELP_LAYOUT: tuple[tuple, ...] = (
     ("raw", "Commands:"),
     ("cmd", ":mem", ":mem | :memory", 34),
     ("cmd", ":smart-memory", ":smart-memory [--json]", 34),
-    ("cmd", ":causal", ":causal [гипотеза|гипотеза]", 34),
+    ("cmd", ":causal", ":causal [гипотезы|provenance]", 34),
     ("cmd", ":memory-consolidate", ":memory-consolidate [--json]", 34),
     ("cmd", ":audit", ":audit [on|off|status]", 34),
     ("cmd", ":clear", ":clear", 34),
