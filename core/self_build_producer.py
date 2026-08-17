@@ -980,6 +980,21 @@ def _builder_generate(
     )
 
 
+def _python_body_vetoes(label: str, body: str, *, report_parse: bool) -> list[str]:
+    """Parse + attribute-sieve vetoes for one python body.
+
+    The attribute subtype (meas_8fd5b4e5/meas_be27ac23): invented
+    claim.state shipped twice past the kwargs sieve. Doubt = silence."""
+    try:
+        ast.parse(body)
+    except SyntaxError as exc:
+        return [f"{label} does not parse: {exc.msg}"] if report_parse else []
+    from core.attribute_sieve import phantom_attribute_reason
+
+    reason = phantom_attribute_reason(body)
+    return [f"{label}: {reason}"] if reason else []
+
+
 def _critic_review(
     target: str,
     current_content: str,
@@ -1012,6 +1027,10 @@ def _critic_review(
         veto.append("generated content looks like a diff, not full content")
     if content and content == current_content:
         veto.append("generated content is identical to current file")
+    if content and target.lower().endswith(".py") and not _looks_like_diff(content):
+        # The extra-files loop below deliberately skips the target.
+        veto.extend(_python_body_vetoes(
+            f"target {target}", content, report_parse=False))
     if len(content.encode("utf-8")) > _MAX_CONTENT_BYTES:
         veto.append(
             f"generated content exceeds {_MAX_CONTENT_BYTES} bytes"
@@ -1049,10 +1068,8 @@ def _critic_review(
         if len(body.encode("utf-8")) > _MAX_CONTENT_BYTES:
             veto.append(f"file {path} exceeds {_MAX_CONTENT_BYTES} bytes")
         if path.lower().endswith(".py") and body and not _looks_like_diff(body):
-            try:
-                ast.parse(body)
-            except SyntaxError as exc:
-                veto.append(f"new file {path} does not parse: {exc.msg}")
+            veto.extend(_python_body_vetoes(
+                f"new file {path}", body, report_parse=True))
 
     ok, risk_reason, rejected = classify_patch_risk(
         [
