@@ -648,9 +648,15 @@ meter's first job), acted (the receipt names an action), measured (the
 receipt's measurement ref RESOLVES to a store record). Three statuses:
 PROVEN needs an independent machine receipt; the claim's own intervention
 prose is the claim testifying about itself — capped at SELF_DECLARED;
-nothing behind a link is ABSENT. Verdict is CAUSAL USE PROVEN only for a
-full chain of receipts; otherwise CAUSAL USE NOT PROVEN plus the named
-missing links. No creativity — the operator's words.
+nothing behind a link is ABSENT. A full chain yields «PROVENANCE PROVEN —
+CAUSAL EFFECT UNPROVEN» (operator ruling, same day: receipts prove
+exposure and a measured outcome after it, never that the lesson CAUSED the
+change — the action could have been clean without it; effect needs a
+differentiating experiment, lesson OFF vs ON on the same task class);
+anything less yields CAUSAL USE NOT PROVEN plus the named missing links.
+A defect_recurred row is likewise a reason to open falsification — lesson
+insufficient? scope too broad? not consumed? new subtype? — never an
+automatic LESSON FALSE. No creativity — the operator's words.
 
 First live reading (scripts/measure_lesson_provenance.py): all three claims
 in the store, including the one real LESSON (cclaim_dc87a06d4972, phantom

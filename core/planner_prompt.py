@@ -139,7 +139,13 @@ Available tools:
     from receipts; raw logs can only show recurrence, never use. The verdict
     "CAUSAL USE NOT PROVEN" with named missing links is a FINISHED honest
     answer — report it as the verdict, never dress it up or fill gaps with
-    narrative. Omit lesson_key to read every lesson.
+    narrative. CEILING — even a full chain proves PROVENANCE, not EFFECT
+    (the action could have been clean without the lesson); claiming "my
+    lesson changed my behaviour" requires a differentiating experiment the
+    chain alone cannot supply. A defect_recurred measurement is a reason to
+    doubt the lesson (insufficient? wrong scope? not consumed? new
+    subtype?), never an automatic verdict that it is false. Omit lesson_key
+    to read every lesson.
 
 - run_tests(paths: list[str] = ["tests"], pattern: str | None = None,
             coverage: bool = False)

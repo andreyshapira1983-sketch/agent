@@ -259,10 +259,17 @@ def trace_lesson_provenance(workspace: str | Path, lesson_key: str) -> Provenanc
             "measured", "ABSENT", "no receipt and no prose report any outcome"))
 
     missing = tuple(link.name for link in links if link.status != "PROVEN")
+    # Operator ruling 2026-08-17: a full chain of receipts proves PROVENANCE
+    # (exposure happened, an outcome was measured after it) — never EFFECT.
+    # The action could have been clean without the lesson; effect needs a
+    # differentiating experiment (lesson OFF vs ON on the same task class).
     return ProvenanceReport(
         lesson_key=lesson_key,
         state=state_of(claim),
         links=tuple(links),
-        verdict="CAUSAL USE PROVEN" if not missing else "CAUSAL USE NOT PROVEN",
+        verdict=(
+            "PROVENANCE PROVEN — CAUSAL EFFECT UNPROVEN" if not missing
+            else "CAUSAL USE NOT PROVEN"
+        ),
         missing=missing,
     )
