@@ -16,6 +16,9 @@ from core.lesson_provenance import trace_lesson_provenance
 
 def main(argv: list[str]) -> int:
     workspace = Path(__file__).resolve().parents[1]
+    # TODO: add a --lessons-only flag that traces only LESSON-state claims;
+    # the store also holds OBSERVED/REFUTED rows and the full sweep is noise
+    # when the operator asks specifically about distilled lessons.
     keys = argv or [extra["key"] for _c, extra in load_claims(workspace)]
     for key in keys:
         print(trace_lesson_provenance(workspace, key).render())
