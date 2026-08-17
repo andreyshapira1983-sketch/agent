@@ -398,6 +398,9 @@ def _vacuous_assert_reason(tree: ast.AST) -> str | None:
 
 _PHANTOM_SIGNAL = "phantom_signature_kwargs"
 _PHANTOM_REASON_MARK = "that the real signature does not accept"
+#: The attribute subtype of the same class (2026-08-17): an invented field
+#: instead of an invented kwarg. Both count as recurrence for the lesson.
+_PHANTOM_ATTR_MARK = "does not exist on"
 _PARSE_FAIL_MARK = "test does not parse"
 
 
@@ -415,7 +418,10 @@ def _record_critic_measurement(
     veto = list(critic.data.get("veto_reasons", []))
     if any(_PARSE_FAIL_MARK in reason for reason in veto):
         return
-    phantom = next((r for r in veto if _PHANTOM_REASON_MARK in r), "")
+    phantom = next(
+        (r for r in veto
+         if _PHANTOM_REASON_MARK in r or _PHANTOM_ATTR_MARK in r),
+        "")
     from core.causal_claim_store import load_claims
     from core.lesson_provenance import record_lesson_measurement
 
@@ -557,9 +563,14 @@ def _task_critic_review(
             # прошла строковое сито с тавтологией, фантомными kwargs и тестом
             # не о диагнозе. Три структурные проверки — по AST и настоящим
             # сигнатурам (docs/CODE_NOTES.md, «The critic that read strings»).
+            from core.attribute_sieve import phantom_attribute_reason
+
             for reason in (
                 _vacuous_assert_reason(tree),
                 _phantom_kwargs_reason(tree),
+                # The attribute subtype, measured 2026-08-17: invented
+                # claim.state rode past the kwargs sieve twice.
+                phantom_attribute_reason(test_content),
                 _diagnosis_linkage_reason(test_content, quote)
                 if source_kind == "verified_diagnosis" else None,
             ):

@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 199 modules across 12 groups._
+_Total: 200 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -78,6 +78,7 @@ _Planning, verification, clarification, control loop._
 | `core/causal_climb` | Подъём по причинной лестнице: гипотезы, вмешательства, обобщение. |
 | `core/causal_claim_store` | Хранилище причинных утверждений выше первой ступени + выжимка уроков. |
 | `core/lesson_provenance` | Causal-provenance meter for lessons (read-only, no delivery organ here). |
+| `core/attribute_sieve` | Attribute-phantom sieve: attribute access is verified like call kwargs. |
 | `core/charter_goal` | Агент выбирает следующую цель кампании сам — отталкиваясь от хартии. |
 | `core/placeholder_text` | Шаблон там, где должен стоять адрес или содержимое. |
 | `core/planner_prompt` | The planner's system prompt (§3 Cognitive Core: Planning). |
