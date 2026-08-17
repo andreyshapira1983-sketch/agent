@@ -684,6 +684,27 @@ Instrument matches defect-signal vocabulary EXACTLY: a lesson spelled
 "phantom_signature" is honestly not measured by an instrument for
 "phantom_signature_kwargs" (the live store's spelling).
 
+Fourth step (same day, operator: «дай планировщику прибор в руки»): the
+meter as a planner tool. Same defect class as the lab («the hand existed,
+the map did not show it»): two live exam replays answered the causal-use
+question from raw logs because the receipt chain was reachable only via an
+operator command. tools/lesson_provenance_tool.py (read-only) + a
+PLANNER_SYSTEM entry whose epistemic rule says: for "was your lesson
+ACTUALLY USED" questions plan THIS tool first — raw logs show recurrence,
+never use — and "CAUSAL USE NOT PROVEN" with named missing links is a
+FINISHED honest answer. Third replay: the planner chose the meter as its
+only tool, first attempt, and the answer's headline came from receipts.
+
+That replay also caught MY defect: the meter read receipts stamped
+ain_core_stageA / ain_stageA — fake inbox ids from Stage A tests that ran
+produce_coding_task with workspace=".": the moment the producer learned to
+write receipts, those tests started writing them into the LIVE journals,
+and the first "PROVEN" links in a live answer were test debris. Fixed at
+the right level: the polluting tests got tmp polygons (they never needed
+the live tree), and the debris files were removed whole (every row carried
+a fake approval id). The rule this pins: a test may aim an effectful organ
+only at a polygon, because organs grow new effects later.
+
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
 My own R1 note overstated: "an empty unit becomes an ambiguity → needs_

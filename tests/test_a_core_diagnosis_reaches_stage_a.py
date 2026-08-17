@@ -59,7 +59,19 @@ def _candidate(target: str = "core/loop.py"):
     )
 
 
-def test_a_core_grounded_diagnosis_is_not_turned_away():
+def _workspace(tmp_path):
+    """A tmp polygon: 2026-08-17 the live run of these tests left receipt
+    rows in the REAL data/ journals (workspace=\".\") — the producer now
+    writes lesson-injection receipts, so tests must not aim it at home."""
+    (tmp_path / "core").mkdir()
+    (tmp_path / "core" / "loop.py").write_text(
+        "def flags(executed, planned):\n    return executed\n",
+        encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    return tmp_path
+
+
+def test_a_core_grounded_diagnosis_is_not_turned_away(tmp_path):
     """Ветка А кладёт только новый тест в tests/ — на этом шаге цель никто не
     редактирует, тест благословляет человек, у Stage B свои ворота. Держать
     диагнозы ядра на воротах значит закрыть лестницу для самых ценных дефектов.
@@ -67,7 +79,7 @@ def test_a_core_grounded_diagnosis_is_not_turned_away():
     inbox = _Inbox()
 
     report = produce_coding_task(
-        workspace=".", inbox=inbox, llm=_JsonLLM(),
+        workspace=_workspace(tmp_path), inbox=inbox, llm=_JsonLLM(),
         task_selector=_candidate(), source_kind="verified_diagnosis",
     )
 
@@ -75,10 +87,10 @@ def test_a_core_grounded_diagnosis_is_not_turned_away():
     assert len(inbox.items) == 1
 
 
-def test_a_todo_candidate_is_still_turned_away_from_core():
+def test_a_todo_candidate_is_still_turned_away_from_core(tmp_path):
     """Улов не отдан: TODO-источнику органы ядра закрыты, как и были."""
     report = produce_coding_task(
-        workspace=".", inbox=_Inbox(), llm=_JsonLLM(),
+        workspace=_workspace(tmp_path), inbox=_Inbox(), llm=_JsonLLM(),
         task_selector=_candidate(),
     )
 

@@ -30,6 +30,7 @@ from tools.current_time import CurrentTimeTool
 from tools.diff_file import DiffFileTool
 from tools.file_read import FileReadTool
 from tools.file_write import FileWriteTool
+from tools.lesson_provenance_tool import LessonProvenanceTool
 from tools.list_dir import ListDirTool
 from tools.python_probe import PythonProbeTool
 from tools.read_logs import ReadLogsTool
@@ -108,6 +109,8 @@ def build_agent(
     registry.register(ShellExecTool(workspace_root=workspace))
     # Лаборатория: замер собственной среды экспериментом (см. tools/python_probe.py).
     registry.register(PythonProbeTool())
+    # Прибор причинного происхождения уроков (см. tools/lesson_provenance_tool.py).
+    registry.register(LessonProvenanceTool(workspace_root=str(workspace)))
     # Pure clock primitive — keeps the agent from guessing today's date.
     registry.register(CurrentTimeTool())
     # MVP-13.1 — self-repair diagnostic primitives.
