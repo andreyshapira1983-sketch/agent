@@ -63,6 +63,26 @@ TASK_PRODUCER_ORIGIN = "subagent_self_task_producer"
 # architecture audit) can be added later once the loop is proven.
 _CODE_TODO_SOURCE = "code_todo"
 
+#: Сигналы бэклога, из которых Stage A вправе взять работу.
+#: Решение оператора 2026-08-19: «пусть Stage A берёт самоизмеренные
+#: кандидаты» — до этого он ел ТОЛЬКО `code_todo`, то есть комментарий,
+#: набранный человеком, и проходил мимо всего, что агент измерил о себе сам.
+#: `architecture_audit` — его собственный read-only самоанализ (модуль-источник
+#: называет себя «проводом, которым агент находит себе работу из самоанализа»).
+#: `oversized_module` НЕ здесь и не по недосмотру: его цель — `split:<path>`,
+#: не файл для правки, а работа — раскол модуля, у которого свой производитель
+#: (лента самостройки, которую питает дорога хартии); контракт Stage A —
+#: «дефект зарабатывает падающий тест», а у предела размера уже есть храповик.
+_SELECTABLE_SIGNAL_SOURCES: frozenset[str] = frozenset({
+    _CODE_TODO_SOURCE,
+    "architecture_audit",
+})
+
+
+def _selectable_signal_sources() -> frozenset[str]:
+    """Классы сигналов, из которых Stage A вправе взять кандидата."""
+    return _SELECTABLE_SIGNAL_SOURCES
+
 
 def _is_diagnosis_target_allowed(target: str) -> bool:
     """Stage A acceptance for a VERIFIED-diagnosis target: critical organs open.
@@ -91,7 +111,12 @@ def _target_gate_for(source_kind: str) -> Callable[[str], bool]:
     """Диагнозу открыты органы ядра (решение оператора 2026-08-15), TODO — нет:
     ветка А кладёт только новый тест в tests/, цель на этом шаге не редактируется.
     """
-    if source_kind == "verified_diagnosis":
+    if source_kind in ("verified_diagnosis", "architecture_audit"):
+        # Самоанализ живёт в органах: находка аудита почти всегда указывает в
+        # core/. Основание то же, что записано у диагноза, и оно не ослаблено:
+        # Stage A кладёт ТОЛЬКО новый тест в tests/, цель не редактируется, а
+        # тест благословляет человек до того, как реализация существует.
+        # Гигиена путей (config/, секреты, локфайлы) остаётся закрытой.
         return _is_diagnosis_target_allowed
     return _is_self_build_target_allowed
 
@@ -123,10 +148,10 @@ def _default_task_selector(workspace: str | Path) -> Callable[[], Any]:
 
     def _select() -> Any:
         try:
-            from core.backlog_selector import load_backlog
+            from core import backlog_selector
 
-            for candidate in load_backlog(workspace):
-                if str(getattr(candidate, "signal_source", "")) == _CODE_TODO_SOURCE:
+            for candidate in backlog_selector.load_backlog(workspace):
+                if str(getattr(candidate, "signal_source", "")) in _SELECTABLE_SIGNAL_SOURCES:
                     return candidate
         except Exception:  # noqa: BLE001 — a broken selector must never break producer
             return None
@@ -189,6 +214,16 @@ _SOURCE_FRAMES: dict[str, tuple[str, str]] = {
             "acceptance test must REPRODUCE the diagnosed defect"
         ),
         "Verified diagnosis",
+    ),
+    "architecture_audit": (
+        (
+            "a PRIORITY GAP the agent's own read-only architecture audit found "
+            "in itself — nobody typed it; the audit measured the tree and "
+            "named this gap with its evidence files. The acceptance test must "
+            "REPRODUCE the gap, so it fails today and passes once the gap is "
+            "closed"
+        ),
+        "Architecture-audit gap",
     ),
 }
 

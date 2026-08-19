@@ -1,7 +1,8 @@
 """Regression test: app directory TODO/FIXME/XXX markers are discoverable.
 
 Verifies that the backlog selector scans app/*.py files for grounded TODO/FIXME/XXX
-markers and surfaces them as backlog candidates (TD-036 Phase 1 self-inspection).
+markers — authored by a person — and surfaces them as backlog candidates
+(TD-036 Phase 1 code-comment intake, not self-discovery).
 """
 from pathlib import Path
 from textwrap import dedent

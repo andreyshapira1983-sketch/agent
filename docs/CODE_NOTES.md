@@ -860,7 +860,10 @@ inverted / insufficient_measurements — one clean discrimination proves
 MECHANISM, never «эффект доказан навсегда». The verdict signs itself into
 the measurement store (instrument=ab_experiment). Door:
 `:causal ab <lesson_key> [k]`, candidate taken from the backlog's real
-code_todo — inventing a task to measure on is forbidden.
+code_todo — inventing a task to measure on is forbidden. (Correction,
+2026-08-19: that code_todo was itself PLANTED by an engineer the day
+before. The rule held — nothing was invented at measurement time — but the
+candidate was supplied, not found by the agent.)
 
 First live run (k=4, nano, tools/lesson_provenance_tool.py TODO):
 **no_discrimination** — 0 phantoms in BOTH arms (meas_6cf34f351530). Two
@@ -1026,11 +1029,27 @@ left load-bearing one floor below.
 
 With the TODO gone, Stage A picks NOTHING (measured) while the engineering
 road opened today — charter → backlog → self_build_producer — runs on the
-self-measured oversized-module signals. Banked as a specimen rather than
-fixed: letting Stage A read self-measured signals is an operator decision,
-and a wrong turn there lets the agent open coding tasks against its whole
-tree. tests/test_stage_a_eats_only_human_pushes.py pins today's truth and
-fails the moment the contract changes.
+self-measured oversized-module signals.
+
+**Decided the same evening** (operator: «пусть Stage A берёт самоизмеренные
+кандидаты»). Stage A's selector now accepts `architecture_audit` — the
+agent's own read-only self-analysis, whose source module calls itself «the
+wire that lets the agent find its own work from self-analysis» — alongside
+`code_todo`, and refuses `oversized_module` BY NAME: its target is
+`split:<path>` rather than a file to edit, and a module split has its own
+producer. An audit-sourced task gets the diagnosis-grade target gate for
+the identical recorded reason — Stage A writes only a new test under
+tests/, edits nothing, and a human blesses the test before any
+implementation exists; path hygiene stays closed.
+
+Measured immediately after: **the door opened onto an empty room.** The
+architecture audit currently reports 18/18 checks `present` and ZERO
+priority gaps, so Stage A still selects nothing. Two honest readings: the
+agent's self-analysis genuinely finds no structural gap right now, and —
+more useful — that audit checks the PRESENCE of 18 architectural elements,
+not their quality, which is why it stayed silent through an evening of
+real defects found by other means. Widening what self-analysis can notice
+is the next question, and it is a design question, not a wiring one.
 
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 

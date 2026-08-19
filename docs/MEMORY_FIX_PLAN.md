@@ -104,7 +104,7 @@ would bloat every turn, per the warning at planner.py:249), guarded by a
 doc-existence test. Members: `MEMORY_SYSTEM_AUDIT.md`, `self-audit-lessons.md`,
 and this plan.
 
-### B.4 The autonomous self-repair loop this enables
+### B.4 The self-repair loop this plan aims at (NOT yet wired)
 
 ```
 registry.unresolved()  →  the agent lists its own open problems
@@ -115,8 +115,12 @@ registry.unresolved()  →  the agent lists its own open problems
    →  :self-issue-verify flips the issue to `resolved`; a `lesson` episode banks why
 ```
 
-Every arrow already exists in code; this plan supplies the **inputs** (registered
-issues + lessons + readable doctrine) so the loop has real problems to chew on.
+Correction, 2026-08-19 — measured, not assumed: the SECOND arrow does not exist.
+`registry.unresolved()` is not one of `backlog_selector.load_backlog`'s sources,
+so no registered issue reaches Stage A; Stage A selects from `code_todo` and
+`architecture_audit` only. The remaining arrows do exist in code. This plan
+supplies inputs; wiring the registry into the selector is a separate operator
+decision, and until it is made this loop is a target, not a capability.
 
 ---
 
