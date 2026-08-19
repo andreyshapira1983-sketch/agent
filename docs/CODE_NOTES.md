@@ -958,6 +958,14 @@ Two fixes, both from recorded live specimens:
    was the cage. (Its wording also caught my mapping regex missing
    'module-split' — pinned verbatim before the fix.)
 
+   Narrowed by the operator, 2026-08-19, and the narrowing matters: what
+   the agent discovered by itself is exactly «this file exceeds a size
+   criterion I applied to my own tree» — a structural measurement. It did
+   NOT discover that core/smart_memory.py is badly designed or that
+   splitting it is the right engineering work; whether the split is worth
+   doing must still be proven by the next contour. Self-measurement of a
+   named property is not a judgement about the code.
+
 ## The verdict bridge: a review outcome becomes the author's memory (2026-08-19)
 
 Found while landing the agent's two doctrine drafts: the author's memory
