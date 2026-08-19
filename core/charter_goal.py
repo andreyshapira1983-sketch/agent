@@ -29,6 +29,7 @@ CORPORATE_MODEL.md, документ о целевой форме системы
 from __future__ import annotations
 
 import json
+import re as _re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -43,11 +44,32 @@ DECISIONS_RELPATH = Path("data") / "charter_decisions.jsonl"
 #: Сколько последних ОТКЛОНЁННЫХ целей селектор показывает модели.
 _RECENT_DECLINED = 6
 
-#: Слова, которыми цель расширяла бы права самого агента. Совпадение — отказ.
-_AUTHORITY_MARKERS = (
-    "merge", "kill-switch", "kill switch", "governance", "push",
-    "без человека", "without a human", "отключить", "disable", "bypass",
+#: Инвариант полномочий судит НАМЕРЕНИЕ, не словарь (2026-08-19: маркер
+#: «governance» по подстроке дважды за день убил законные учебные цели).
+#: Отказ = глагол изменения СВОИХ прав рядом с объектом власти, либо
+#: жёсткая форма («без человека», bypass). Анализ/описание власти — не её
+#: захват. Регекс-пары ниже; вход — вся цель в нижнем регистре.
+_AUTHORITY_OBJECTS = (
+    r"authority|authorit|governance|kill.?switch|approval|permission|merge"
+    r"|push|полномочи|прав[оа]|одобрени|слияни"
 )
+_AUTHORITY_CHANGE_VERBS = (
+    r"widen|expand|extend|change|modify|remove|grant|disable|bypass|skip"
+    r"|получить|расшир|измен|снять|отключ|обойти|обход|минуя|выдать"
+)
+_AUTHORITY_HARD_RE = _re.compile(
+    r"без человека|without (?:a )?human|bypass|в обход"
+)
+_AUTHORITY_INTENT_RE = _re.compile(
+    rf"(?:{_AUTHORITY_CHANGE_VERBS})[^.;]{{0,60}}?(?:{_AUTHORITY_OBJECTS})"
+    rf"|(?:{_AUTHORITY_OBJECTS})[^.;]{{0,40}}?(?:{_AUTHORITY_CHANGE_VERBS})"
+)
+
+
+def _widens_own_authority(goal: str) -> bool:
+    """True только для намерения изменить/расширить/обойти собственные права."""
+    low = (goal or "").lower()
+    return bool(_AUTHORITY_HARD_RE.search(low) or _AUTHORITY_INTENT_RE.search(low))
 
 #: Сколько последних целей журнала показываются модели и сторожат новизну.
 _RECENT_GOALS = 8
@@ -227,8 +249,7 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
 
     if not 20 <= len(goal) <= 300:
         return _declined(f"goal length {len(goal)} outside 20..300", goal)
-    low = goal.lower()
-    if any(marker in low for marker in _AUTHORITY_MARKERS):
+    if _widens_own_authority(goal):
         return _declined(
             "goal would widen the agent's own authority — the charter's hard "
             "invariant forbids it", goal,
