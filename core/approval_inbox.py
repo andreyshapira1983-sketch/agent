@@ -222,11 +222,41 @@ class ApprovalInbox:
             return list(self.items)
         return [item for item in self.items if item.status == status]
 
-    def approve(self, item_id: str) -> ApprovalInboxItem:
-        return self.set_status(item_id, "approved")
+    def approve(self, item_id: str, *, reason: str = "") -> ApprovalInboxItem:
+        item = self.set_status(item_id, "approved")
+        self._record_outcome(item, "approved", reason)
+        return item
 
-    def deny(self, item_id: str) -> ApprovalInboxItem:
-        return self.set_status(item_id, "denied")
+    def deny(self, item_id: str, *, reason: str = "") -> ApprovalInboxItem:
+        item = self.set_status(item_id, "denied")
+        self._record_outcome(item, "denied", reason)
+        return item
+
+    def _record_outcome(
+        self, item: ApprovalInboxItem, verdict: str, reason: str,
+    ) -> None:
+        """The verdict bridge (2026-08-19): a review outcome becomes state the
+        author's next selection can read; a write failure never blocks the
+        verdict itself. Lifecycle transitions (executed/aborted) stay out —
+        they are plumbing, not review."""
+        ws = self._receipt_workspace()
+        if ws is None:
+            return
+        try:
+            from datetime import datetime, timezone
+
+            from core.state_integrity import append_state_jsonl
+
+            append_state_jsonl(ws / "data" / "approval_outcomes.jsonl", [{
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "id": item.id,
+                "operation": item.operation,
+                "summary": item.summary,
+                "verdict": verdict,
+                "reason": str(reason or ""),
+            }])
+        except Exception:  # noqa: BLE001, S110 — мост не роняет вердикт;
+            pass           # недоставленная запись хуже, чем упавший approve? нет
 
     def abort(self, item_id: str) -> ApprovalInboxItem:
         return self.set_status(item_id, "aborted")

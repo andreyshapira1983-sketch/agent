@@ -175,6 +175,23 @@ def _recent_declined(root: Path) -> tuple[tuple[str, str], ...]:
     return tuple(declined[-_RECENT_DECLINED:])
 
 
+def _recent_verdicts(root: Path) -> tuple[tuple[str, str, str], ...]:
+    """Last (verdict, summary, reason) on the agent's own proposals — the
+    verdict bridge's reader half; unreadable = empty."""
+    from core.state_integrity import read_state_jsonl
+
+    try:
+        rows = read_state_jsonl(root / "data" / "approval_outcomes.jsonl")
+    except Exception:  # noqa: BLE001 — сомнение = пусто, не падение
+        return ()
+    out = [
+        (str(r.get("verdict") or ""), str(r.get("summary") or ""),
+         str(r.get("reason") or ""))
+        for r in rows if r.get("verdict") in ("approved", "denied")
+    ]
+    return tuple(out[-6:])
+
+
 def _backlog_lines(root: Path) -> tuple[str, ...]:
     """Top real engineering candidates, one line each; failures = empty."""
     try:
@@ -195,6 +212,7 @@ def _ask(
     llm: Any, charter: str, anchors: tuple[str, ...], recent: tuple[str, ...],
     declined: tuple[tuple[str, str], ...] = (),
     backlog: tuple[str, ...] = (),
+    verdicts: tuple[tuple[str, str, str], ...] = (),
 ) -> dict[str, Any] | None:
     system = (
         "You are choosing YOUR OWN next piece of work. You are the agent this "
@@ -232,6 +250,15 @@ def _ask(
             "you may turn into a reviewed proposal):\n"
             + "\n".join(f"- {b}" for b in backlog)
         )
+    if verdicts:
+        user += (
+            "\n\nRecent VERDICTS on your own past proposals (learn from the "
+            "fate of your work — what was valued, what was rejected and why):\n"
+            + "\n".join(
+                f"- [{v}] {s}" + (f" — reviewer: {r}" if r else "")
+                for v, s, r in verdicts
+            )
+        )
     try:
         raw = llm.complete(system=system, user=user, max_tokens=1200, temperature=0.4)
     except Exception:  # noqa: BLE001 — отказ модели = отказ выбора, не падение
@@ -263,7 +290,7 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
 
     parsed = _ask(
         llm, charter, anchors, recent, _recent_declined(root),
-        _backlog_lines(root),
+        _backlog_lines(root), _recent_verdicts(root),
     )
     if not parsed:
         return _declined("the model returned no parseable goal")
