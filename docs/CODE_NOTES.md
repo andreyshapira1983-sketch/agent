@@ -975,6 +975,36 @@ fate of your work». Not built (recorded as the next rung): non-binary
 feedback — strengths/weaknesses of the artifact, not just the verdict —
 and later usefulness («документ оказался полезен/бесполезен»).
 
+## Post-mortem of the 19:31 tick: the wrong brain, and a gate that judged phrasings (2026-08-19)
+
+Two defects, both found by dissecting one scheduled tick, both fixed
+narrowly and nothing else:
+
+1. **The selector ran on the default engine.** `load_dotenv` lives inside
+   `run_tick` and inside the campaign pacer; the charter block sits in
+   `main()` and runs before both — so every scheduled tick CHOSE ITS GOAL
+   on gpt-4o-mini (`route_reason=default`) while the campaign body ran on
+   the pinned gpt-5.6-sol. Every engine measurement of the goal-choosing
+   brain was invalid; «Sol thinks, Terra writes» was half false — Sol was
+   writing. Fixed by `_ensure_env_loaded(ws)` before the router is built
+   (ambient exports still outrank the file). Proof: a fresh process with
+   no ambient pins now logs `planner | gpt-5.6-sol | env:AGENT_PLANNER`.
+
+2. **Novelty judged phrasings, not work.** «split the oversized module
+   'core/model_router.py'» was declined as a repeat of the same sentence
+   about `core/smart_memory.py` — Jaccard 0.78, differing tokens
+   model/router/smart/memory. Engineering goals arrive from a template, so
+   the road opened at 15:50 and the old gate closed it at 19:31. Fixed by
+   IDENTITY, not by lowering the threshold: when both goals name a work
+   artifact, sameness of its basename decides (so `model_router.py` and
+   `core/model_router.py` are one work, and a reworded goal about the same
+   document is still a repeat — the gate got STRONGER there); when either
+   side names none, the untouched 0.6 token judge decides.
+
+Side note for the record: one of my own test expectations was wrong (a
+mixed pair scores 0.56, below threshold) — the code was right, the test
+was fixed to assert the honest behaviour.
+
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
 My own R1 note overstated: "an empty unit becomes an ambiguity → needs_

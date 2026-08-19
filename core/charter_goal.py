@@ -117,11 +117,40 @@ def _tokens(text: str) -> frozenset[str]:
     )
 
 
+#: Артефакт, НАД которым цель работает: её личность. Вскрытие 19:31
+#: (2026-08-19): инженерные цели приходят по шаблону, и два раскола разных
+#: модулей совпали на 0.78 — различались model/router/smart/memory. Судить
+#: надо предмет работы, а не формулировку; порог при этом не трогаем.
+_GOAL_IDENTITY_RE = _re.compile(
+    r"[\w/\\.-]+\.(?:py|md|jsonl|json|toml|yaml|yml|txt)\b"
+)
+
+
+def _goal_identity(goal: str) -> str:
+    """Basename файла, над которым цель работает, или "" — если не назван.
+
+    Basename, а не путь: «model_router.py» и «core/model_router.py» — одна
+    работа, и модель называет их вперемешку.
+    """
+    match = _GOAL_IDENTITY_RE.search(goal or "")
+    if not match:
+        return ""
+    name = match.group(0).replace("\\", "/").strip("'\"")
+    return name.rsplit("/", 1)[-1].casefold()
+
+
 def _repeats_recent(goal: str, recent: tuple[str, ...]) -> str:
     mine = _tokens(goal)
     if not mine:
         return ""
+    mine_id = _goal_identity(goal)
     for old in recent:
+        old_id = _goal_identity(old)
+        if mine_id and old_id:
+            # Обе цели назвали предмет: решает он, а не слова.
+            if mine_id == old_id:
+                return old
+            continue
         theirs = _tokens(old)
         if not theirs:
             continue
