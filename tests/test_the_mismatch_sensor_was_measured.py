@@ -7,8 +7,11 @@ of its output, so nobody reads its signal as a defect again without
 suspecting the sensor first.
 
 Measured over every `planner` event in logs/ — 268 real turns carrying both
-a reasoning text and a plan: the detector fires on 190 of them (71 %), and
-the accusations do not survive reading. First measured 2026-08-05 in
+a reasoning text and a plan: the detector FIRES on 190 of them (71 %). That
+is a firing rate, not an error rate: two accusations were read by hand and
+both were false, no ground truth was labelled, and the true false-positive
+rate over the other 188 is UNKNOWN. The case against enforcement rests on
+the structural half below, which needs no such rate. First measured 2026-08-05 in
 wip/mir-015-structural-justification (108 turns, 44 firings), a branch that
 never merged; re-measured against main before this file was written.
 
