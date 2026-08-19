@@ -12,12 +12,15 @@ Configuration comes from three places, in order:
 
 1. **Process environment variables** (highest).
 2. **`.env`** in the repository root — loaded via `python-dotenv` at startup.
-   Never commit `.env`; it is git-ignored and excluded from the Docker image.
+   Never commit `.env`; it is git-ignored.
 3. **JSON config files** under [`config/`](../config) for structured settings
    (budgets, model registry).
 
-`AGENT_PROVIDER=mock` is the safe default: no network, no keys, deterministic.
-Set a real provider only when you intend live model calls.
+`AGENT_PROVIDER=mock` is the safe SETTING — no network, no keys, deterministic —
+and it is what `.env.example` ships, so a fresh clone that copies the template
+runs offline. The CODE's fallback when the variable is unset is `anthropic`
+(`core/llm.py`), which needs a key: absent both, the first model call fails.
+Set a real provider deliberately, when you intend live calls.
 
 ## 2. Environment variables
 
@@ -25,7 +28,7 @@ Set a real provider only when you intend live model calls.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `AGENT_PROVIDER` | `mock` | Active provider: `mock` \| `openai` \| `anthropic` \| `huggingface` \| `local`. |
+| `AGENT_PROVIDER` | `anthropic` (code) / `mock` (in `.env.example`) | Active provider: `mock` \| `openai` \| `anthropic` \| `huggingface` \| `local`. |
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `HF_TOKEN` | — | Provider credentials (required when `AGENT_PROVIDER` is not `mock`). |
 | `AGENT_MODEL` | registry | Default model when the registry does not override. |
 | `AGENT_MODEL_POLICY` | `balanced` | Routing policy: `offline` \| `balanced` \| `quality` (see `:models`). |
@@ -37,7 +40,7 @@ Set a real provider only when you intend live model calls.
 
 | Variable | Example | Purpose |
 |---|---|---|
-| `LOCAL_LLM_BASE_URL` | `http://127.0.0.1:1234/v1` | Local server endpoint. In Docker use `http://host.docker.internal:1234/v1`. |
+| `LOCAL_LLM_BASE_URL` | `http://127.0.0.1:1234/v1` | Local server endpoint. |
 | `LOCAL_LLM_API_KEY` | `lm-studio` | Token the local server expects (often a placeholder). |
 | `LOCAL_LLM_MODEL` | `qwen-local` | Served model id. |
 | `LOCAL_LLM_LOAD_KEY` | `qwen/qwen3-4b-2507` | Model to autoload. |
@@ -60,14 +63,14 @@ Structured budgets live in [`config/budget_limits.json`](../config/budget_limits
 (template: `budget_limits.example.json`). Inspect at runtime with `:budget-status`
 / `:budget-window-status`; the day-budget kill-switch is `:budget-kill-switch`.
 
-### Unattended tick & Docker supervisor
+### Unattended tick & supervisor loop
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `AGENT_WORKSPACE` | `.` | Workspace root the tick/API operate on. |
 | `AGENT_TICK_DRY_RUN` | `1` (safe) | `1` = no real effects; `0` = live path (approval gates still apply). |
 | `AGENT_TICK_INTERVAL_SECONDS` | `1800` | Seconds between ticks under `docker/daemon_loop.py`. |
-| `AGENT_DOCKER_TICK_TIMEOUT_SECONDS` | ≈ `interval - 60` | Per-tick subprocess timeout; on timeout the supervisor records exit code 124. |
+| `AGENT_DOCKER_TICK_TIMEOUT_SECONDS` | ≈ `interval - 60` | Per-tick subprocess timeout in `docker/daemon_loop.py` (the name predates dropping the container packaging); on timeout the supervisor records exit code 124. |
 | `AGENT_AUTO_HYGIENE` | `shadow` | Unattended memory hygiene: `shadow` (log only) \| `on` (delete) \| `off`. |
 
 ### HTTP API (`api/server.py`)
@@ -103,8 +106,7 @@ implemented, so they configure a contract only.
 ## 4. Data & State (`data/`)
 
 Durable agent state is JSONL under `data/`. Each store has a matching `.lock`
-file (single-writer guard). Under Docker the repository is bind-mounted, so these
-survive image rebuilds and container replacement.
+file (single-writer guard).
 
 | Store | Holds |
 |---|---|
@@ -113,7 +115,7 @@ survive image rebuilds and container replacement.
 | `conflict_episodes.jsonl` | Instruction-conflict episodes (инструкция → конфликт → решение), append-only. |
 | `memory_consolidation.jsonl` | Consolidated/summarised memory. |
 | `source_registry.jsonl` | Ingested sources + extracted claims. |
-| `daemon_heartbeat.json` | Last-tick heartbeat the Docker healthcheck reads. |
+| `daemon_heartbeat.json` | Last-tick heartbeat; `agent_tick.py --status` and the liveness checks read it. |
 
 `data/` also holds runtime queues, approvals and budget-window state. **The whole
 directory is git-ignored** (`.gitignore` line 25 lists `data/`), so nothing in it

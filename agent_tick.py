@@ -18,7 +18,8 @@ What one tick does
 Environment variables
 ---------------------
 AGENT_WORKSPACE   path to workspace root (default: directory of this file)
-AGENT_PROVIDER    mock | openai | anthropic  (default: mock for safety)
+AGENT_PROVIDER    mock | openai | anthropic  (unset falls back to anthropic;
+                  .env.example ships mock so a fresh clone stays offline)
 AGENT_TICK_DRY_RUN  1 = never write real files, 0 = allow effects (default: 1)
 
 Usage
