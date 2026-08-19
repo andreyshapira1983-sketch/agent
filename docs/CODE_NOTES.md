@@ -1005,6 +1005,33 @@ Side note for the record: one of my own test expectations was wrong (a
 mixed pair scores 0.56, below threshold) — the code was right, the test
 was fixed to assert the honest behaviour.
 
+## The TODO was the push, and I wrote it (2026-08-19, operator ruling)
+
+I planted `# TODO: add a lessons_only argument` in
+tools/lesson_provenance_tool.py yesterday, transparently, to give Stage A a
+live candidate — and then spent an evening watching four generations die on
+my own planted task. The operator named it: «мы пытаемся реализовать
+автономного Агента, а не давать ему пинки под зад и писать какие-то ему
+задачи; он сам должен выбирать задачи». The TODO is deleted.
+
+The measurement underneath is worth more than the comment. Backlog today:
+12 SELF-measured candidates (oversized modules — the agent applying its own
+size rule to its own tree) and, until now, 1 human-typed code_todo. Stage
+A's default selector walks that backlog and accepts ONLY code_todo,
+ignoring all twelve. So the organ that opens coding tasks cannot start
+without a human first typing a comment into the source — the very
+mechanism core/charter_goal.py was built to end («его толкают и дают
+что-то делать», 2026-08-15). The push was removed at the goal layer and
+left load-bearing one floor below.
+
+With the TODO gone, Stage A picks NOTHING (measured) while the engineering
+road opened today — charter → backlog → self_build_producer — runs on the
+self-measured oversized-module signals. Banked as a specimen rather than
+fixed: letting Stage A read self-measured signals is an operator decision,
+and a wrong turn there lets the agent open coding tasks against its whole
+tree. tests/test_stage_a_eats_only_human_pushes.py pins today's truth and
+fails the moment the contract changes.
+
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
 My own R1 note overstated: "an empty unit becomes an ambiguity → needs_
