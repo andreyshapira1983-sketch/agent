@@ -168,6 +168,18 @@ def _impl_critic_review(
             ast.parse(content)
         except SyntaxError as exc:
             veto.append(f"implementation does not parse: {exc.msg}")
+        else:
+            # The attribute subtype, measured three times on this very file
+            # (meas_8fd5b4e5 / be27ac23 / df15479b): an invented field —
+            # `claim.state`, latterly wrapped in .value/.name fallbacks that
+            # return empty on real data. Stage A and self-build carried the
+            # sieve; this critic did not, so the third phantom shipped with
+            # veto_reasons=[]. Doubt stays silence: the sieve only subtracts.
+            from core.attribute_sieve import phantom_attribute_reason
+
+            attr_reason = phantom_attribute_reason(content)
+            if attr_reason:
+                veto.append(f"implementation {attr_reason}")
         if current_content.strip() and content.strip() == current_content.strip():
             veto.append("implementation is identical to the current file (no-op)")
     if confidence < confidence_threshold:
