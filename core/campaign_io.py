@@ -211,6 +211,50 @@ def _unwrap_outer_fence(text: str) -> str:
     return text
 
 
+def _propose_engineering_step(
+    *, agent: Any, workspace: Any, approval_inbox: Any,
+) -> str:
+    """Turn the top real backlog candidate into a self-build lane proposal.
+
+    The road charter → backlog (2026-08-19): the campaign may now PRODUCE an
+    engineering approval item; blessing, the lane and every downstream gate
+    stay human-owned. A refusal is surfaced by name, never hidden."""
+    from pathlib import Path as _Path
+
+    from core.budget_kill_switch import BudgetKillSwitch, default_path
+    from core.safe_vcs import SafeVCS
+    from core.self_build_producer import produce_self_apply_proposal
+
+    try:
+        kill_state = BudgetKillSwitch(
+            path=default_path(_Path(workspace))).status(None)
+    except Exception:  # noqa: BLE001 — статус рубильника не роняет шаг
+        kill_state = None
+    try:
+        report = produce_self_apply_proposal(
+            workspace=workspace,
+            inbox=approval_inbox,
+            llm=agent.model_router.for_role("synthesizer"),
+            vcs=SafeVCS(workspace=_Path(workspace)),
+            kill_switch=kill_state,
+            max_builder_attempts=2,
+        )
+    except Exception as exc:  # noqa: BLE001 — отказ именуется, не прячется
+        _log(agent, "campaign_engineering_error", {
+            "error_type": type(exc).__name__, "error": str(exc)[:200],
+        })
+        return f"engineering_error:{type(exc).__name__}"
+    status = str(getattr(report, "status", "?"))
+    approval_id = str(getattr(report, "approval_id", "") or "")
+    _log(agent, "campaign_engineering_proposed", {
+        "status": status, "approval_id": approval_id,
+        "target": str(getattr(report, "target_path", "") or ""),
+    })
+    if approval_id:
+        return f"engineering_proposed:{approval_id}"
+    return f"engineering_declined:{status}"
+
+
 def _propose_doctrine_draft(
     *, agent: Any, workspace: Any, goal: str, approval_inbox: Any,
 ) -> str | None:
@@ -609,6 +653,14 @@ def _default_execute_action(
         )
         if drafted:
             proposal = f"{proposal}; {drafted}" if proposal else drafted
+    # Инженерные руки: дорога хартия → бэклог (2026-08-19). Продукт — заявка
+    # ленты, все ворота ниже по течению стоят как стояли.
+    if action.action == "propose_engineering_task" and not config.dry_run:
+        engineered = _propose_engineering_step(
+            agent=agent, workspace=workspace, approval_inbox=approval_inbox,
+        )
+        if engineered:
+            proposal = f"{proposal}; {engineered}" if proposal else engineered
     return CampaignActionOutcome(
         result=report.status,
         llm_calls_spent=max(0, llm_after - llm_before),

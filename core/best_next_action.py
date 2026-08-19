@@ -40,6 +40,9 @@ _P_DAEMON_DOWN = 100      # heartbeat missing/stale: agent may not be running
 _P_TICK_ERROR = 90        # last tick raised: the loop itself is broken
 _P_TESTS_FAIL = 80        # concrete failing tests: minimal repair is provable
 _P_TESTS_INCONCLUSIVE = 60  # timed-out/unknown: must not be read as healthy
+_P_ENGINEERING_TASK = 59  # the campaign goal asks for engineering work: the
+                          # road charter -> backlog (2026-08-19); outranks the
+                          # document so a goal naming both builds, not writes.
 _P_CHARTER_DOCUMENT = 58  # the campaign goal itself asks for a doctrine draft:
 #   above the durable-issue habit (55) — live 2026-08-15 the head chose "draft
 #   the contract" and the hands did habitual repair — below health alarms (60+)
@@ -162,6 +165,38 @@ def _candidate_external_study(goal: str) -> BestNextAction | None:
     )
 
 
+#: Инженерная цель хартии: слова о бэклоге/расколе/падающем тесте/разрыве.
+_ENGINEERING_GOAL_RE = re.compile(
+    r"(?i)backlog|бэклог|self-build|failing.?test|падающ\w+ тест|proven gap"
+    r"|доказанн\w+ разрыв|раскол|split of|engineering candidate"
+    r"|инженерн\w+ кандидат",
+)
+
+
+def _candidate_engineering_task(goal: str) -> BestNextAction | None:
+    """Дорога от хартии к бэклогу (2026-08-19): цель, просящая инженерную
+    работу, рождает self-build/Stage A ЗАЯВКУ — язык и провод, не права."""
+    text = str(goal or "")
+    if not _ENGINEERING_GOAL_RE.search(text):
+        return None
+    return BestNextAction(
+        action="propose_engineering_task",
+        title="Turn a real backlog candidate into a reviewed proposal",
+        severity="medium",
+        priority=_P_ENGINEERING_TASK,
+        reason=(
+            "The campaign goal itself asks for engineering work; the product "
+            "is an approval item a human blesses — the lane and its gates "
+            "stay exactly as they are."
+        ),
+        evidence=(f"goal: {text[:200]}",),
+        unknowns=("whether the producer finds a grounded candidate",),
+        risk="reversible",
+        recommended_command=None,
+        confidence=0.7,
+    )
+
+
 def _candidate_charter_document(goal: str) -> BestNextAction | None:
     target = doc_target_from_goal(goal)
     if not target:
@@ -220,6 +255,10 @@ def select_best_next_action(
     returns an honest ``observe`` action rather than inventing busywork.
     """
     candidates: list[BestNextAction] = []
+
+    engineering = _candidate_engineering_task(goal)
+    if engineering is not None:
+        candidates.append(engineering)
 
     document = _candidate_charter_document(goal)
     if document is not None:
