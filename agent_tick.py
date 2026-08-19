@@ -1496,8 +1496,14 @@ if __name__ == "__main__":
         # а не подменяется целью по умолчанию (см. core/charter_goal.py).
         from core.charter_goal import propose_charter_goal
         from core.model_router import ModelRouter
+        from core.model_usage import ModelUsageLedger
 
-        pick = propose_charter_goal(ModelRouter.from_env().for_role("planner"), ws)
+        # Скрытый расход 2026-08-19: from_env() без леджера — вызовы Sol на
+        # выбор цели были настоящими деньгами, невидимыми для бухгалтерии.
+        _charter_router = ModelRouter.from_env(
+            usage_ledger=ModelUsageLedger(ws / "data" / "model_usage.jsonl"),
+        )
+        pick = propose_charter_goal(_charter_router.for_role("planner"), ws)
         if pick.status != "proposed":
             print(f"[CHARTER] no goal: {pick.reason}")
             sys.exit(3)
