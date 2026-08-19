@@ -31,9 +31,6 @@ class LessonProvenanceTool(Tool):
     def __init__(self, workspace_root: str = ".") -> None:
         self._workspace = workspace_root
 
-    # TODO: add a lessons_only argument that traces only LESSON-state claims;
-    # the store also holds OBSERVED/REFUTED rows and the full sweep is noise
-    # when the planner asks specifically about distilled lessons.
     def run(self, *, lesson_key: str | None = None, **_kw: Any) -> dict[str, Any]:
         from core.causal_claim_store import load_claims
         from core.lesson_provenance import trace_lesson_provenance
