@@ -1,6 +1,8 @@
-"""Tests for the code self-inspection backlog signal (self-perception organ).
+"""Tests for the code-comment backlog signal (human TODO/FIXME/XXX intake).
 
-The agent's first "eye": it reads its own editable source, turns TODO/FIXME/XXX
+The agent's first "eye" ON ITS OWN TREE — the markers themselves are typed by a
+person, so this channel ROUTES work someone flagged, it does not discover it:
+it reads its own editable source, turns TODO/FIXME/XXX
 comments into grounded, line-anchored backlog signals, and lets the existing
 selector rank them — without ever inventing work.
 """

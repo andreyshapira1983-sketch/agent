@@ -44,9 +44,11 @@ _SOURCE_BASE_SCORE = {
     "tech_debt": 2.0,
     "self_build_docs": 1.5,
     ARCHITECTURE_AUDIT_SOURCE: 1.25,
-    # The agent's own code self-inspection sits below human-authored debt, the
-    # docs pilot, and the structural audit, but above the advisory anatomy list:
-    # a concrete, line-anchored TODO is more actionable than an advisory heading.
+    # Code comments sit below the debt doc, the docs pilot and the structural
+    # audit, but above the advisory anatomy list: a concrete, line-anchored TODO
+    # is more actionable than an advisory heading. Note it is NOT a contrast
+    # between the agent's own findings and human-authored ones — both texts are
+    # written by a person; only the storage place differs (2026-08-19).
     CODE_TODO_SOURCE: 1.1,
     "anatomy": 1.0,
     # Oversized-module advisories sit at the very bottom: they are report-only

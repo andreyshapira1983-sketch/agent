@@ -313,11 +313,15 @@ def architecture_audit_candidates(
     return records, "\n".join(quotes)
 
 
-# ── Code self-inspection signal (self-perception organ) ───────────────────────
+# ── Code-comment signal: HUMAN-authored markers in the agent's own tree ───────
 # Source constant for backlog signals the agent derives by reading its OWN source
-# files and finding self-flagged problems (TODO/FIXME/XXX comments). This is the
-# first "eye": instead of only human docs or a presence checklist, the agent can
-# see concrete, line-anchored problems in the code it is allowed to edit.
+# files and finding markers SOMEBODY ELSE left there (TODO/FIXME/XXX comments).
+# The reading is the agent's; the finding of the problem is not — a person typed
+# the need. Correction of 2026-08-19: this block used to say "self-flagged
+# problems" and call itself a "self-perception organ", and that label is exactly
+# what let an engineer-planted TODO be read later as a self-measured signal. The
+# organ that genuinely measures is the oversized-module scanner, which applies
+# the agent's own size rule to the agent's own tree.
 CODE_TODO_SOURCE = "code_todo"
 
 # Keep the scan bounded and the emitted quote small: a runaway file of markers
