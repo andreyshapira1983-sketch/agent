@@ -14,6 +14,22 @@ LearningPlan whose files are actually ingested. The narrowed claim, which
 these tests pin: the consumer converts a defect signal into READING, not
 into causal investigation, and no consumer exists in the conversational
 loop at all.
+
+SECOND correction, 2026-08-19 evening — about the EXAMPLE, not the
+invariant. The recurring signal used to illustrate this bank,
+`reasoning_action_mismatch`, is itself substantially unreliable, and that
+was measured two weeks ago in a WIP branch that never merged
+(wip/mir-015-structural-justification, 2026-08-05: 44 firings over 108
+real planner turns, accusations that «do not survive reading»). Verified
+here today against main: the detector's keyword table knows 13 tools while
+the registry holds 15 — `file_write`, `python_probe` and
+`lesson_provenance` are invisible to it, so planning them is flagged by
+construction — and two entries it DOES hold (`self_repair`,
+`spawn_subagent`) name no registered tool at all, i.e. it accuses the
+planner of omitting steps it cannot produce. The invariant these tests
+protect is unchanged: repeated defect signals must open an investigation.
+What changes is what such an investigation should find FIRST — suspect the
+sensor before the reasoning.
 """
 from __future__ import annotations
 

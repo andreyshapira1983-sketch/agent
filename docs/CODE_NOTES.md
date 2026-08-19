@@ -1059,6 +1059,43 @@ not their quality, which is why it stayed silent through an evening of
 real defects found by other means. Widening what self-analysis can notice
 is the next question, and it is a design question, not a wiring one.
 
+## Two hanging PRs, and one of them held the measurement we needed (2026-08-19)
+
+The operator pointed at two open pull requests — #324
+(wip/mir-015-structural-justification, 2026-08-05) and #325
+(experiment/qm-entry-point, 2026-08-08) — opened automatically when the
+branches were pushed to preserve their unique work. Both CONFLICT with
+main, so neither is mergeable as it stands. #325 is a small entry-point
+experiment. #324 is not stale noise at all.
+
+#324 carries a MEASUREMENT of `reasoning_action_check` over 108 real
+planner turns: it fires on 44 of them, and the accusations «do not survive
+reading» — the keyword table has no entry for `file_write`, demands the
+literal phrase "list files" while the prose says "listing actual directory
+contents", and keys `file_read` on `"read "` WITH a trailing space so
+"reading core/loop.py" cannot match. It also proposes the honest
+replacement: `check_step_justification`, reading the per-step `rationale`
+the planner is asked for, a structural fact instead of a keyword guess.
+
+Verified today against main rather than trusted: the detector's table
+knows 13 tools while the registry holds 15 — `file_write`, `python_probe`
+and `lesson_provenance` are invisible to it, so planning them is flagged by
+construction — and two entries it does hold (`self_repair`,
+`spawn_subagent`) name no registered tool at all, i.e. it accuses the
+planner of omitting steps it could not produce. The document that recorded
+the measurement (`docs/audit/SENSOR_SIGNAL_MEASUREMENT.md`) does not exist
+in main, and MIR-015 in the registry still describes only the old
+understanding («observational only, no severity field»).
+
+Why this matters beyond tidiness: all evening we read
+`reasoning_action_mismatch` at occurrences=20 as a defect class worth
+investigating, and banked a specimen around it. The invariant stands —
+repeated signals must open an investigation — but the example was
+contaminated, and the correction is now written into that bank: an
+investigation of this recurrence should suspect the SENSOR before the
+reasoning. Knowledge measured two weeks ago sat unmerged in a branch and
+did not reach the place where it was needed.
+
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
 My own R1 note overstated: "an empty unit becomes an ambiguity → needs_
