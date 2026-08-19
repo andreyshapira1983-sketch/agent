@@ -12,10 +12,16 @@ those failures and their measurements lives in [docs/CODE_NOTES.md](docs/CODE_NO
 ## Quick start
 
 ```bash
+pip install -r requirements.txt
+cp .env.example .env      # ships AGENT_PROVIDER=mock — runs offline, no keys
 python main.py            # interactive REPL (type :help for commands)
 python agent_tick.py --status    # is the daemon alive, what awaits approval
 python agent_tick.py             # one bounded autonomous tick (dry-run)
 ```
+
+Without a `.env` the code's own default provider is `anthropic`, so the first
+command needs a key; the template above keeps a fresh clone offline until you
+choose otherwise.
 
 Requires Python 3.11+. Model keys via `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`;
 the router fails over between credentialed providers, keeps the capability

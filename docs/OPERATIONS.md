@@ -1,8 +1,7 @@
 # Operations, Troubleshooting & HTTP API
 
 > **Status of this document:** operator runbook for running the agent, driving
-> the HTTP API, and diagnosing failures. Container mechanics live in
-> `DOCKER.md`; configuration lives in
+> the HTTP API, and diagnosing failures. Configuration lives in
 > [`CONFIGURATION.md`](CONFIGURATION.md); the command surface lives in
 > [`COMMANDS_MAP.md`](../knowledge/maps/COMMANDS_MAP.md). Code wins on any disagreement.
 
@@ -13,7 +12,8 @@
 | Interactive REPL | `python main.py --workspace <dir>` | Human-operated agent; exit with `:quit`. |
 | One-shot | `python main.py --ask "..."` | Single question, no session memory. |
 | Unattended tick | `python agent_tick.py --workspace <dir>` | One bounded cycle; `--status` prints state without running. |
-| Docker supervisor | `docker compose up -d` | `docker/daemon_loop.py` repeats `agent_tick.py` every `AGENT_TICK_INTERVAL_SECONDS`. See `DOCKER.md`. |
+| Supervisor loop | `python docker/daemon_loop.py` | Repeats `agent_tick.py` every `AGENT_TICK_INTERVAL_SECONDS` (default 1800). Container packaging was dropped 2026-08-15; the loop script stayed. |
+| Scheduled ticks (Windows) | `scripts/install_daemon.ps1` | Registers a Task Scheduler entry that runs `agent_tick.py` on an interval. |
 | HTTP API | `uvicorn api.server:app` | JSON API (§2). Optional extra: `pip install fastapi uvicorn[standard]`. |
 
 All modes honour the same approval, budget, kill-switch, memory and dry-run
@@ -96,9 +96,9 @@ interleave the shared trace log, working memory and usage ledger. Consequences:
 | API exits: "AGENT_API_TOKEN … must be set" | Token unset | Set `AGENT_API_TOKEN` (§2.1). |
 | API returns 401 | Token mismatch | Confirm the `Authorization: Bearer` value matches the env. |
 | Tick "does nothing" / no effects | `AGENT_TICK_DRY_RUN=1` (default) | Expected in dry-run. Set `0` only after clean dry-run ticks. |
-| Docker container `unhealthy` | Stale `data/daemon_heartbeat.json` | `docker compose logs --tail 200 agent`; confirm ticks run and the interval is sane. |
+| Supervisor looks stuck | Stale `data/daemon_heartbeat.json` | `python agent_tick.py --status`; check the newest `logs/` trace and that the interval is sane. |
 | Model calls fail / "no key" | Provider/key not set | Set `AGENT_PROVIDER` + the matching key; `mock` needs none. |
-| Local LLM unreachable from Docker | `127.0.0.1` points at the container | Use `http://host.docker.internal:<port>/v1`. |
+| Local LLM unreachable | Wrong host/port in `LOCAL_LLM_BASE_URL` | Confirm the server is up and the URL points at it (e.g. `http://127.0.0.1:1234/v1`). |
 | Autonomy stops early | Day-budget kill-switch tripped | `:budget-kill-switch` to inspect, `--clear` to reset; review `:budget-window-status`. |
 | Memory looks wrong while investigating | Live writes contaminating the object | `:audit on` freezes all durable writes for the session. |
 
@@ -107,9 +107,10 @@ for correlation.
 
 ## 4. Recovery & incident basics
 
-- **Stop fast:** `docker compose stop` (SIGTERM → the supervisor exits after the
-  current tick, `stop_grace_period` 30s). For runaway spend, trip/inspect the
-  budget kill-switch.
+- **Stop fast:** stop the supervisor process (SIGTERM/Ctrl-C → it exits after the
+  current tick) or disable the scheduled task
+  (`schtasks /Change /TN <name> /DISABLE` on Windows). For runaway spend,
+  trip/inspect the budget kill-switch.
 - **State recovery:** JSONL stores are quarantine/recover-safe — prove a repair
   on an isolated copy first with `:state-store-drill`.
 - **Undo a self-applied change:** `:rollback` applies the latest compensation
@@ -117,5 +118,5 @@ for correlation.
 - **Diagnose after the fact:** find the failing `trace_id` in `logs/`; the API
   `500` body and the tick log both carry it.
 
-_Source of facts: `api/server.py`, `docker/daemon_loop.py`, `compose.yaml`, and
-`docs/DOCKER.md` on `main`. Code wins on any disagreement._
+_Source of facts: `api/server.py`, `docker/daemon_loop.py`, and
+`scripts/install_daemon.ps1` on `main`. Code wins on any disagreement._
