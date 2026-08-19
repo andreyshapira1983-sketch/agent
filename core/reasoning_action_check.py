@@ -12,6 +12,42 @@ against the chosen ``steps``. Two failure shapes are surfaced:
 
 This is observational only: it produces a report; it does not block the
 plan. Down the line a stricter mode could replan or demote confidence.
+
+MEASURED, and the number is the reason it must stay observational
+(2026-08-19, over every ``planner`` event in ``logs/`` — 268 real turns
+carrying both a reasoning text and a plan): **the detector fires on 190 of
+them, 71 %**. The accusations do not survive reading. Two examples pulled
+at random from that run, both flagged ``list_dir`` as unjustified: «inspect
+the relevant source code and recent audit evidence read-only» and
+«…план должен начинаться с web_search; при этом у вас в системе недоступны
+web_* инструменты…» — each argues plainly for the step it took, in words
+the keyword table does not carry.
+
+Where the noise comes from, in the code below:
+
+* 241 of 255 accusations are keyword misses on tools the table DOES know —
+  ``list_dir`` (114) demands the literal "list files"/"ls "/"каталог",
+  ``file_read`` (44) keys on ``"read "`` WITH a trailing space, so
+  "reading core/loop.py" cannot match;
+* 14 accuse tools the table has no entry for at all: the table knows 13
+  tools while the registry ships 15 — ``file_write``, ``python_probe`` and
+  ``lesson_provenance`` are invisible here, so planning them is flagged by
+  construction;
+* the reverse direction is worse than noisy: ``self_repair`` (4 firings)
+  sits in the table but exists in no registry, so the check accuses the
+  planner of omitting a step it cannot produce.
+
+The measurement is reproducible: iterate ``planner`` events in ``logs/``,
+call :func:`check_reasoning_actions` on ``reasoning`` + ``tools_chosen``,
+and count. tests/test_the_mismatch_sensor_was_measured.py pins the
+structural half so the table cannot drift further from the registry in
+silence. Provenance: first measured on 2026-08-05 in
+``wip/mir-015-structural-justification`` (108 turns, 44 firings), a branch
+that never merged; re-measured today against main before being written
+here. The branch also proposed a structural replacement — read the
+per-step ``rationale`` the planner is asked for instead of guessing from
+prose — which is NOT imported here: that is a behaviour change and a
+separate operator decision (MIR-015).
 """
 
 from __future__ import annotations
