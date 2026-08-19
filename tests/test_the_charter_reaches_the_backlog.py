@@ -51,6 +51,16 @@ def test_the_first_live_engineering_goal_maps(tmp_path: Path) -> None:
     assert a is not None and a.action == "propose_engineering_task"
 
 
+def test_the_scheduled_tick_goal_maps_too(tmp_path: Path) -> None:
+    """Verbatim from the 15:58 scheduled tick — the third vocabulary miss in
+    a day ('a plan to split the oversized module'). The mapping must be
+    structural: a named .py target plus engineering context, not keywords."""
+    a = _candidate_engineering_task(
+        "Propose a plan to split the oversized module 'core/smart_memory.py' "
+        "into focused modules to enhance maintainability and clarity.")
+    assert a is not None and a.action == "propose_engineering_task"
+
+
 def test_a_document_goal_is_not_engineering() -> None:
     assert _candidate_engineering_task(
         "Draft a proposal for the 'EVIDENCE_RECORD_SCHEMA.md' document") is None
