@@ -40,6 +40,17 @@ def test_a_russian_form_is_also_recognised() -> None:
     assert a is not None
 
 
+def test_the_first_live_engineering_goal_maps(tmp_path: Path) -> None:
+    """Verbatim: the first engineering goal Sol ever chose (2026-08-19,
+    the tick after the backlog became visible) must reach the hands."""
+    a = _candidate_engineering_task(
+        "Analyze core/smart_memory.py and produce a human-reviewed "
+        "module-split proposal with boundaries, dependency map, API "
+        "compatibility constraints, migration steps, and test plan; "
+        "make no code changes.")
+    assert a is not None and a.action == "propose_engineering_task"
+
+
 def test_a_document_goal_is_not_engineering() -> None:
     assert _candidate_engineering_task(
         "Draft a proposal for the 'EVIDENCE_RECORD_SCHEMA.md' document") is None
