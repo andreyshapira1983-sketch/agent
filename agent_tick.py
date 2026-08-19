@@ -769,12 +769,20 @@ def _self_build_status_line(sb_status: str, sb: dict) -> str:
     return line
 
 
+def _ensure_env_loaded(workspace: Path) -> None:
+    """Load ``<workspace>/.env`` if present. Ambient exports keep priority
+    (``load_dotenv`` never overrides), a missing file is silent, and calling
+    it twice is a no-op — so any entry point may load before it needs a pin."""
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(workspace) / ".env")
+
+
 # ── main tick ─────────────────────────────────────────────────────────────────
 
 def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     """Execute one daemon tick. Returns exit code (0 = ok, 1 = hard error)."""
-    from dotenv import load_dotenv
-    load_dotenv(workspace / ".env")
+    _ensure_env_loaded(workspace)
 
     # Full-suite budget; the basis lives with DEFAULT_TIMEOUT_SECONDS in
     # tools/run_tests.py. RunTestsTool reads this when given no explicit value.
@@ -1494,6 +1502,10 @@ if __name__ == "__main__":
     if args.campaign and args.charter:
         # Цель выбирает агент — от хартии; отказ выходит с названными воротами,
         # а не подменяется целью по умолчанию (см. core/charter_goal.py).
+        # .env грузится ЗДЕСЬ: `load_dotenv` живёт внутри run_tick и пейсера
+        # кампании, то есть ПОЗЖЕ этого блока — и все плановые тики выбирали
+        # цель на модели по умолчанию вместо закреплённой (вскрытие 19:31).
+        _ensure_env_loaded(ws)
         from core.charter_goal import propose_charter_goal
         from core.model_router import ModelRouter
         from core.model_usage import ModelUsageLedger
