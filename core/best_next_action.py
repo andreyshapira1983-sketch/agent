@@ -168,8 +168,8 @@ def _candidate_external_study(goal: str) -> BestNextAction | None:
 #: Инженерная цель хартии: слова о бэклоге/расколе/падающем тесте/разрыве.
 _ENGINEERING_GOAL_RE = re.compile(
     r"(?i)backlog|бэклог|self-build|failing.?test|падающ\w+ тест|proven gap"
-    r"|доказанн\w+ разрыв|раскол|split of|engineering candidate"
-    r"|инженерн\w+ кандидат",
+    r"|доказанн\w+ разрыв|раскол|module.?split|split (?:of|proposal|plan)"
+    r"|engineering candidate|инженерн\w+ кандидат|разбиени\w+ модул",
 )
 
 

@@ -929,6 +929,32 @@ unit-proven and will engage organically at the next real decline; whether
 a recurrence/reflection contour is needed AT ALL (#4) stays an open
 question the decisions store can now actually answer.
 
+## The cage opens: intent, not vocabulary; a road, not a wish (2026-08-19)
+
+The operator ended the observation early — the series was conclusive.
+Two fixes, both from recorded live specimens:
+
+1. The authority invariant judges INTENT. Two false positives in one day
+   (legitimate «Analyze existing governance frameworks…» and «…governance
+   process for memory admission» killed by the substring marker
+   'governance'). The invariant now requires a change-verb near an
+   authority object, or a hard form («без человека», bypass); analysing or
+   documenting authority is not seizing it. The pinned classics keep dying.
+
+2. The road from the charter to the engineering backlog. The attractor's
+   cage had two bars, both mine: the vocabulary («reading, analysing and
+   proposing») and the missing action. Now the charter prompt is SHOWN the
+   top of the real backlog and may name ONE candidate;
+   _candidate_engineering_task (priority 59 > document 58) maps such goals
+   to propose_engineering_task; the campaign hands call the self-build
+   producer — the product is an approval item, blessing stays human.
+   First live pick after the road opened, verbatim: «Analyze
+   core/smart_memory.py and produce a human-reviewed module-split proposal
+   … make no code changes.» — Sol chose the top backlog candidate on the
+   first sight of it, with the governance framing intact. The attractor
+   was the cage. (Its wording also caught my mapping regex missing
+   'module-split' — pinned verbatim before the fix.)
+
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
 My own R1 note overstated: "an empty unit becomes an ambiguity → needs_
