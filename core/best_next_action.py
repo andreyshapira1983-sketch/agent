@@ -171,13 +171,26 @@ _ENGINEERING_GOAL_RE = re.compile(
     r"|доказанн\w+ разрыв|раскол|module.?split|split (?:of|proposal|plan)"
     r"|engineering candidate|инженерн\w+ кандидат|разбиени\w+ модул",
 )
+#: Структурная половина (три словарных промаха за 2026-08-19): цель, которая
+#: НАЗЫВАЕТ .py-файл и говорит об инженерном действии над ним, — инженерная,
+#: какими бы словами её ни сформулировала модель.
+_PY_TARGET_RE = re.compile(r"\b[\w/\\.-]+\.py\b")
+_ENGINEERING_CONTEXT_RE = re.compile(
+    r"(?i)split|refactor|restructur|decompos|модул|module|раздели|разбей|почини|fix",
+)
+
+
+def _is_engineering_goal(text: str) -> bool:
+    if _ENGINEERING_GOAL_RE.search(text):
+        return True
+    return bool(_PY_TARGET_RE.search(text) and _ENGINEERING_CONTEXT_RE.search(text))
 
 
 def _candidate_engineering_task(goal: str) -> BestNextAction | None:
     """Дорога от хартии к бэклогу (2026-08-19): цель, просящая инженерную
     работу, рождает self-build/Stage A ЗАЯВКУ — язык и провод, не права."""
     text = str(goal or "")
-    if not _ENGINEERING_GOAL_RE.search(text):
+    if not _is_engineering_goal(text):
         return None
     return BestNextAction(
         action="propose_engineering_task",
