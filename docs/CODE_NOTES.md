@@ -1080,9 +1080,25 @@ the planner is asked for, a structural fact instead of a keyword guess.
 Verified today against main rather than trusted: the detector's table
 knows 13 tools while the registry holds 15 — `file_write`, `python_probe`
 and `lesson_provenance` are invisible to it, so planning them is flagged by
-construction — and two entries it does hold (`self_repair`,
-`spawn_subagent`) name no registered tool at all, i.e. it accuses the
-planner of omitting steps it could not produce. The document that recorded
+construction — and one entry it does hold (`self_repair`) names no
+registered tool at all, i.e. it accuses the planner of omitting a step it
+could not produce. (I first wrote «two entries, `self_repair` and
+`spawn_subagent`» here; `spawn_subagent` IS registered, and the test
+written to pin the claim rejected it — a guard catching its own author on
+the same day it was born.)
+
+Re-measured before transferring, and the fresh number is worse than the
+branch's: over 268 real planner turns in `logs/` the detector fires on
+**190, 71 %** (the branch measured 44 of 108 two weeks ago). 241 of 255
+accusations are keyword misses on tools the table DOES know. Two examples
+read at random, both flagged `list_dir`: «inspect the relevant source code
+and recent audit evidence read-only» and «…план должен начинаться с
+web_search; при этом у вас в системе недоступны web_* инструменты…» —
+each argues plainly for the step it took. The measurement now lives in the
+module's own docstring, in MIR-015, and in
+tests/test_the_mismatch_sensor_was_measured.py; the branch's proposed
+replacement detector was deliberately NOT imported (operator: «знание
+переносим → поведение не меняем»). The document that recorded
 the measurement (`docs/audit/SENSOR_SIGNAL_MEASUREMENT.md`) does not exist
 in main, and MIR-015 in the registry still describes only the old
 understanding («observational only, no severity field»).
