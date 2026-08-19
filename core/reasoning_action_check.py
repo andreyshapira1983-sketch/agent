@@ -16,14 +16,26 @@ plan. Down the line a stricter mode could replan or demote confidence.
 MEASURED, and the number is the reason it must stay observational
 (2026-08-19, over every ``planner`` event in ``logs/`` — 268 real turns
 carrying both a reasoning text and a plan): **the detector fires on 190 of
-them, 71 %**. The accusations do not survive reading. Two examples pulled
-at random from that run, both flagged ``list_dir`` as unjustified: «inspect
-the relevant source code and recent audit evidence read-only» and
-«…план должен начинаться с web_search; при этом у вас в системе недоступны
-web_* инструменты…» — each argues plainly for the step it took, in words
-the keyword table does not carry.
+them, 71 %**.
 
-Where the noise comes from, in the code below:
+Read that as a FIRING RATE, not an error rate — the distinction is the
+whole epistemic content of this note. What was and was not established:
+
+* FACT — it fires on 190 of 268 turns.
+* FACT — 241 of its 255 ``unjustified`` accusations land on tools whose
+  table entry is a narrow literal (see below), i.e. they are explained by
+  the table's shape rather than by anything about the plan.
+* FACT — exactly TWO accusations were adjudicated by reading them, and
+  both were false. Both flagged ``list_dir``: «inspect the relevant source
+  code and recent audit evidence read-only» and «…план должен начинаться с
+  web_search; при этом у вас в системе недоступны web_* инструменты…» —
+  each argues plainly for the step it took, in words the table lacks.
+* UNKNOWN — the true false-positive rate over all 190. No ground truth was
+  labelled, and 2 read cases do not license a rate.
+* SUPPORTED INFERENCE — putting an enforcement threshold on top of this is
+  unsafe while the structural defects below stand.
+
+Where the accusations concentrate, in the code below:
 
 * 241 of 255 accusations are keyword misses on tools the table DOES know —
   ``list_dir`` (114) demands the literal "list files"/"ls "/"каталог",

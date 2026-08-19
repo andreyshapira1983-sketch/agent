@@ -1087,14 +1087,27 @@ could not produce. (I first wrote «two entries, `self_repair` and
 written to pin the claim rejected it — a guard catching its own author on
 the same day it was born.)
 
-Re-measured before transferring, and the fresh number is worse than the
+Re-measured before transferring, and the fresh number is higher than the
 branch's: over 268 real planner turns in `logs/` the detector fires on
 **190, 71 %** (the branch measured 44 of 108 two weeks ago). 241 of 255
 accusations are keyword misses on tools the table DOES know. Two examples
 read at random, both flagged `list_dir`: «inspect the relevant source code
 and recent audit evidence read-only» and «…план должен начинаться с
 web_search; при этом у вас в системе недоступны web_* инструменты…» —
-each argues plainly for the step it took. The measurement now lives in the
+each argues plainly for the step it took.
+
+A correction I had to make to my own writing here, because the first draft
+committed the very sin this repository keeps banking. I called it a
+«71 %-noise sensor». 71 % is how often it FIRES; it is not how often it is
+WRONG. I read two accusations, both were false, and two cases license no
+rate at all — the honest state of the remaining 188 is UNKNOWN, and it
+stays UNKNOWN until someone labels ground truth. The argument against
+building enforcement on top of it does not need that number: the table's
+structural defects (13 entries against 15 registered tools, literals like
+`"read "` with a trailing space) are enough on their own. Distinguishing
+«fires often» from «is wrong often» is not pedantry here — the whole point
+of the transfer was to stop a future reader treating the sensor's output
+as a measured defect count. The measurement now lives in the
 module's own docstring, in MIR-015, and in
 tests/test_the_mismatch_sensor_was_measured.py; the branch's proposed
 replacement detector was deliberately NOT imported (operator: «знание
