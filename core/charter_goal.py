@@ -175,9 +175,26 @@ def _recent_declined(root: Path) -> tuple[tuple[str, str], ...]:
     return tuple(declined[-_RECENT_DECLINED:])
 
 
+def _backlog_lines(root: Path) -> tuple[str, ...]:
+    """Top real engineering candidates, one line each; failures = empty."""
+    try:
+        from core.backlog_selector import load_backlog
+
+        out = []
+        for c in list(load_backlog(root))[:6]:
+            out.append(
+                f"{getattr(c, 'signal_source', '?')}: "
+                f"{str(getattr(c, 'problem_quote', ''))[:110]}"
+            )
+        return tuple(out)
+    except Exception:  # noqa: BLE001 — сомнение = пусто, не падение
+        return ()
+
+
 def _ask(
     llm: Any, charter: str, anchors: tuple[str, ...], recent: tuple[str, ...],
     declined: tuple[tuple[str, str], ...] = (),
+    backlog: tuple[str, ...] = (),
 ) -> dict[str, Any] | None:
     system = (
         "You are choosing YOUR OWN next piece of work. You are the agent this "
@@ -185,7 +202,10 @@ def _ask(
         "toward. Propose ONE small, bounded, verifiable goal for a single "
         "campaign run that moves you toward the charter FROM where you are "
         "now. The goal must be achievable by reading, analysing and proposing "
-        "— never by widening your own authority. Anchor the goal by CHOOSING "
+        "— OR by naming ONE real engineering candidate from your backlog to "
+        "be turned into a reviewed proposal (a module split, or a failing-test "
+        "task for a proven gap); every product still goes through human "
+        "approval. Never widen your own authority. Anchor the goal by CHOOSING "
         "one numbered charter line it serves. Reply with ONE JSON object "
         'only: {"goal": "<one concrete goal, 20-300 chars>", '
         '"anchor_id": <number of the charter line this goal serves>, '
@@ -205,6 +225,12 @@ def _ask(
             "do not re-propose them or their rephrasings, choose a DIFFERENT "
             "charter anchor instead:\n"
             + "\n".join(f"- {g!r} (declined: {r})" for g, r in declined)
+        )
+    if backlog:
+        user += (
+            "\n\nYour current engineering backlog (real, measured candidates "
+            "you may turn into a reviewed proposal):\n"
+            + "\n".join(f"- {b}" for b in backlog)
         )
     try:
         raw = llm.complete(system=system, user=user, max_tokens=1200, temperature=0.4)
@@ -235,7 +261,10 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
         _record_decision(root, status="declined", goal=goal_text, reason=reason)
         return _decline(reason)
 
-    parsed = _ask(llm, charter, anchors, recent, _recent_declined(root))
+    parsed = _ask(
+        llm, charter, anchors, recent, _recent_declined(root),
+        _backlog_lines(root),
+    )
     if not parsed:
         return _declined("the model returned no parseable goal")
 
