@@ -955,6 +955,26 @@ Two fixes, both from recorded live specimens:
    was the cage. (Its wording also caught my mapping regex missing
    'module-split' — pinned verbatim before the fix.)
 
+## The verdict bridge: a review outcome becomes the author's memory (2026-08-19)
+
+Found while landing the agent's two doctrine drafts: the author's memory
+knew he WROTE the books (campaign episodes banked, usage_eligible=True),
+but nothing ever told him their FATE — approved/denied died in the inbox
+status field, denial reasons were not even capturable through the CLI, the
+goal selector read neither. Same family as Groundhog Day, on the positive
+side of the ledger: the fact must exist as state before behaviour can grow
+from it.
+
+The bridge, one writer + one reader like every fix this week: approve/deny
+now append {verdict, summary, reason} to data/approval_outcomes.jsonl
+(lifecycle transitions — executed/aborted — stay out: plumbing is not
+review; an in-memory inbox skips silently); `:approval-approve|deny <id>
+[причина]` carries the reviewer's reason; and the charter selector's
+prompt gains «Recent VERDICTS on your own past proposals — learn from the
+fate of your work». Not built (recorded as the next rung): non-binary
+feedback — strengths/weaknesses of the artifact, not just the verdict —
+and later usefulness («документ оказался полезен/бесполезен»).
+
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
 My own R1 note overstated: "an empty unit becomes an ambiguity → needs_

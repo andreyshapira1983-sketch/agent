@@ -380,16 +380,22 @@ def _handle_approval_decision(
     *,
     decision: str,
 ) -> bool:
-    item_id = rest.strip()
+    # Мост вердиктов (2026-08-19): всё после id — причина рецензента; она
+    # уезжает в approval_outcomes и станет опытом автора заявки.
+    item_id, _, reason = rest.strip().partition(" ")
+    reason = reason.strip()
     if not item_id:
-        print(f"Usage: :approval-{decision} <approval_id>", file=sys.stderr)
+        print(
+            f"Usage: :approval-{decision} <approval_id> [причина]",
+            file=sys.stderr,
+        )
         return True
     inbox = _approval_inbox_for(agent, workspace)
     try:
         if decision == "approve":
-            item = inbox.approve(item_id)
+            item = inbox.approve(item_id, reason=reason)
         elif decision == "deny":
-            item = inbox.deny(item_id)
+            item = inbox.deny(item_id, reason=reason)
         else:
             raise ValueError(f"unknown approval decision: {decision}")
     except KeyError as exc:
