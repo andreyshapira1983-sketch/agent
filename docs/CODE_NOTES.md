@@ -893,6 +893,42 @@ live after the guard: a real start minted rtask_365e4319, a real stop
 cancelled it. The contaminated specimen rtask_7879672a was cancelled, not
 kept as evidence of C16 working.
 
+## A rejection becomes memory, and the books stop lying (2026-08-19, Groundhog Day)
+
+Five-plus identical charter declines (2026-08-18/19) decomposed into the
+operator's three independent defects, fixed bottom-up with proofs:
+
+1. **The books lied by default.** agent_tick's charter path built
+   `ModelRouter.from_env()` with no usage ledger — Sol was called on every
+   "declining" tick (~4.5K input tokens each) and the spend was invisible.
+   Fixed: the charter router carries ModelUsageLedger; live proof — three
+   planner rows in model_usage.jsonl from three real charter calls. A
+   future cost-optimiser must never reason from incomplete books.
+
+2. **Decisions are memory citizens now (3a: the write).** Every charter
+   outcome — proposed or declined, with goal and reason — lands in
+   data/charter_decisions.jsonl. Before, the decline lived only in stdout:
+   producer present, state NONE, consumer NONE — so each tick asked the
+   same Sol the same byte-identical question («здравствуйте, я впервые
+   вижу эту дверь»). Even a garbage model reply leaves a row: the tick
+   happened, the memory must know it happened.
+
+3. **The selector receives them (3b: the read).** The ask prompt gains a
+   Recently-DECLINED section (goal + reason, choose a DIFFERENT anchor)
+   fed from the store; empty store adds no noise.
+
+The matched trial (#3) was disrupted by an honest surprise: three fresh
+live calls — still with NO declines visible, i.e. replications of the OLD
+regime — all escaped Groundhog Day with three novel goals (audit gap
+matrix, forensic artifact map, verification-independence checklist). So
+the five-decline series demonstrated a sticky regime, not a deterministic
+one: the escape probability was never zero, and the operator's warning
+that N same-state ticks are replications, not independent trials, cuts in
+both directions. The ON condition (declines visible in the prompt) is
+unit-proven and will engage organically at the next real decline; whether
+a recurrence/reflection contour is needed AT ALL (#4) stays an open
+question the decisions store can now actually answer.
+
 ## R1b: the ambiguity flag finally asks (2026-08-13, trace 407a46c8)
 
 My own R1 note overstated: "an empty unit becomes an ambiguity → needs_

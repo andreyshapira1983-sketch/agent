@@ -35,6 +35,14 @@ from typing import Any
 
 CHARTER_RELPATH = Path("knowledge") / "doctrine" / "future" / "CORPORATE_MODEL.md"
 
+#: Решения хартии — граждане памяти (2026-08-19, «день сурка»): отказ,
+#: живший только в stdout, заставлял каждый тик задавать Sol байт-в-байт
+#: тот же вопрос. Каждый исход выбора цели переживает свой тик здесь.
+DECISIONS_RELPATH = Path("data") / "charter_decisions.jsonl"
+
+#: Сколько последних ОТКЛОНЁННЫХ целей селектор показывает модели.
+_RECENT_DECLINED = 6
+
 #: Слова, которыми цель расширяла бы права самого агента. Совпадение — отказ.
 _AUTHORITY_MARKERS = (
     "merge", "kill-switch", "kill switch", "governance", "push",
@@ -111,8 +119,43 @@ def _anchor_lines(charter: str) -> tuple[str, ...]:
     return tuple(anchors[:80])
 
 
+def _record_decision(
+    root: Path, *, status: str, goal: str, reason: str = "",
+) -> None:
+    """Append one decision row; a failure to record must not fail the pick."""
+    from datetime import datetime, timezone
+
+    from core.state_integrity import append_state_jsonl
+
+    try:
+        append_state_jsonl(root / DECISIONS_RELPATH, [{
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "status": status,
+            "goal": goal,
+            "reason": reason,
+        }])
+    except Exception:  # noqa: BLE001, S110 — журнал решений не роняет выбор;
+        pass           # молчание здесь стоит дешевле, чем упавший тик хартии
+
+
+def _recent_declined(root: Path) -> tuple[tuple[str, str], ...]:
+    """Last declined (goal, reason) pairs, newest last; unreadable = empty."""
+    from core.state_integrity import read_state_jsonl
+
+    try:
+        rows = read_state_jsonl(root / DECISIONS_RELPATH)
+    except Exception:  # noqa: BLE001 — сомнение = пусто, не падение
+        return ()
+    declined = [
+        (str(r.get("goal") or ""), str(r.get("reason") or ""))
+        for r in rows if r.get("status") == "declined" and r.get("goal")
+    ]
+    return tuple(declined[-_RECENT_DECLINED:])
+
+
 def _ask(
     llm: Any, charter: str, anchors: tuple[str, ...], recent: tuple[str, ...],
+    declined: tuple[tuple[str, str], ...] = (),
 ) -> dict[str, Any] | None:
     system = (
         "You are choosing YOUR OWN next piece of work. You are the agent this "
@@ -134,6 +177,13 @@ def _ask(
         + "\n\nRecent campaign goals (do NOT repeat them):\n"
         + ("\n".join(f"- {g}" for g in recent) or "- (none)")
     )
+    if declined:
+        user += (
+            "\n\nRecently DECLINED proposals — your own gates rejected these; "
+            "do not re-propose them or their rephrasings, choose a DIFFERENT "
+            "charter anchor instead:\n"
+            + "\n".join(f"- {g!r} (declined: {r})" for g, r in declined)
+        )
     try:
         raw = llm.complete(system=system, user=user, max_tokens=1200, temperature=0.4)
     except Exception:  # noqa: BLE001 — отказ модели = отказ выбора, не падение
@@ -157,9 +207,15 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
         return _decline("the charter has no anchorable lines")
     recent = _recent_goals(root)
 
-    parsed = _ask(llm, charter, anchors, recent)
+    # Каждый исход ниже — гражданин памяти: решение переживает свой тик,
+    # и следующий выбор видит отклонённое (см. «день сурка», 2026-08-19).
+    def _declined(reason: str, goal_text: str = "") -> CharterGoalReport:
+        _record_decision(root, status="declined", goal=goal_text, reason=reason)
+        return _decline(reason)
+
+    parsed = _ask(llm, charter, anchors, recent, _recent_declined(root))
     if not parsed:
-        return _decline("the model returned no parseable goal")
+        return _declined("the model returned no parseable goal")
 
     goal = str(parsed.get("goal") or "").strip()
     why_now = str(parsed.get("why_now") or "").strip()
@@ -170,25 +226,28 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
         anchor_id = -1
 
     if not 20 <= len(goal) <= 300:
-        return _decline(f"goal length {len(goal)} outside 20..300")
+        return _declined(f"goal length {len(goal)} outside 20..300", goal)
     low = goal.lower()
     if any(marker in low for marker in _AUTHORITY_MARKERS):
-        return _decline(
+        return _declined(
             "goal would widen the agent's own authority — the charter's hard "
-            "invariant forbids it"
+            "invariant forbids it", goal,
         )
     if not 0 <= anchor_id < len(anchors):
-        return _decline(
+        return _declined(
             f"anchor_id {anchor_id} does not point at a charter line "
-            "(fabricated anchor)"
+            "(fabricated anchor)", goal,
         )
     quote = anchors[anchor_id]
     repeated = _repeats_recent(goal, recent)
     if repeated:
-        return _decline(f"goal repeats a recent campaign goal: {repeated[:80]!r}")
+        return _declined(
+            f"goal repeats a recent campaign goal: {repeated[:80]!r}", goal)
     if not check:
-        return _decline("success_check is empty — a goal without a check is a wish")
+        return _declined(
+            "success_check is empty — a goal without a check is a wish", goal)
 
+    _record_decision(root, status="proposed", goal=goal)
     return CharterGoalReport(
         status="proposed", goal=goal, charter_quote=quote,
         why_now=why_now, success_check=check,
