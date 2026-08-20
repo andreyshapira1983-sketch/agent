@@ -1,12 +1,4 @@
-"""The provenance meter in the planner's hands (read-only).
-
-Live replays 2026-08-17: with the route fixed, the agent answered the
-causal-use exam from raw logs — recurrence it could show, causal use it
-could not, because the receipt chain (core/lesson_provenance.py) was
-reachable only through an operator command. Same defect class as the lab
-(«the hand existed, the map did not show it»): an organ outside the
-registry does not exist for the loop. Reads stores, writes nothing.
-"""
+"""The provenance meter in the planner's hands (read-only)."""
 from __future__ import annotations
 
 from dataclasses import asdict

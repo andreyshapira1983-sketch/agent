@@ -1,33 +1,10 @@
 """In-memory priority event queue for the daemon dispatcher (plan item 3.1).
 
-This is the first dispatcher building block after the event sources (2.1–2.3).
-Producers (timer ticks, file-watcher batches, RuntimeTask wake-ups, future
-control commands) enqueue typed :class:`DaemonEvent` values; a later worker
-pool (3.2) will consume them. This module does **not** execute work and does
-**not** own :class:`~app.daemon.DaemonLoop`.
-
-Priorities
-----------
-``urgent > scheduled > background``. Within one priority band, events are
-strictly FIFO (stable insertion order via a monotonic sequence number).
-
-Anti-starvation policy
-----------------------
-Strict priority alone can starve ``background`` forever under a continuous
-stream of higher-priority events. After ``aging_after`` consecutive pops that
-served ``urgent`` or ``scheduled``, if any ``background`` event is waiting,
-the next :meth:`PriorityEventQueue.pop` / :meth:`get_nowait` serves the oldest
-background event instead and resets the aging counter. Set ``aging_after`` to
-``0`` to disable aging (pure strict priority — starvation possible; documented).
-
-Deduplication
--------------
-An optional non-empty ``dedup_key`` suppresses another event with the same key
-only while the first event is waiting in this queue. The first event is returned
-unchanged; its key is released as soon as it is popped. Unkeyed events are never
-deduplicated. This state is intentionally in-memory and has no TTL or recovery.
-
-``agent_tick.py`` is untouched; nothing here replaces the single-shot path.
+Deduplication ------------- An optional non-empty ``dedup_key`` suppresses
+another event with the same key only while the first event is waiting in
+this queue. The first event is returned unchanged; its key is released as
+soon as it is popped. Unkeyed events are never deduplicated. This state is
+intentionally in-memory and has no TTL or recovery.
 """
 from __future__ import annotations
 
@@ -96,12 +73,7 @@ def _normalize_dedup_key(value: str | None) -> str | None:
 
 @dataclass(frozen=True, order=True)
 class DaemonEvent:
-    """One typed dispatcher event.
-
-    Ordering fields (``priority``, ``sequence``) come first so a heap of
-    events sorts by priority then stable FIFO without a custom key function.
-    Payload and ids are excluded from comparisons.
-    """
+    """One typed dispatcher event."""
 
     priority: EventPriority
     sequence: int
@@ -141,17 +113,7 @@ PutCallback = Callable[[DaemonEvent], None]
 
 
 class PriorityEventQueue:
-    """Thread-hostile, asyncio-friendly priority queue (one loop owner).
-
-    Parameters
-    ----------
-    aging_after:
-        Anti-starvation threshold (see module docstring). ``0`` disables aging.
-    on_put:
-        Optional sync callback invoked after a successful put (e.g. to call
-        ``DaemonLoop.wake`` / ``wake_threadsafe``). Failures are logged and
-        isolated so a wake-hook bug cannot drop an already-queued event.
-    """
+    """Thread-hostile, asyncio-friendly priority queue (one loop owner)."""
 
     def __init__(
         self,

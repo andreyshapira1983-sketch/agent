@@ -1,9 +1,4 @@
-"""Integrity helpers for small JSONL state stores.
-
-The project keeps several operator-visible state files in JSONL. This module
-adds a shared envelope with a per-row SHA-256 checksum, lock-friendly append /
-rewrite helpers, legacy-row compatibility, and quarantine for corrupt rows.
-"""
+"""Integrity helpers for small JSONL state stores."""
 from __future__ import annotations
 
 import hashlib
@@ -141,12 +136,7 @@ def quarantine_dir_for(path: Path | str) -> Path:
 
 
 def backup_state_file(path: Path | str) -> Path:
-    """Copy *path* to ``<path>.<YYYYMMDDTHHMMSSZ>.bak`` and return the copy.
-
-    The shared pre-migration backup: every script that rewrites a state file
-    takes one of these first. The ``*.bak.*``/``*.bak`` names are already
-    ignored by git and swept by ``core.hygiene.cleanup_backups``.
-    """
+    """Copy *path* to ``<path>.<YYYYMMDDTHHMMSSZ>.bak`` and return the copy."""
     p = Path(path)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     target = p.with_suffix(p.suffix + f".{stamp}.bak")

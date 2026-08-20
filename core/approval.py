@@ -1,14 +1,9 @@
-"""Approval Providers (§7 Security, Policy & Autonomy Governance — Human Approval).
+"""Approval Providers (§7 Security, Policy & Autonomy Governance — Human
+Approval).
 
 PolicyGate decides whether an action carries enough risk that a human must
 authorise it (`escalate`). The Approval Provider is the surface that asks
 the human and brings back a typed `ApprovalDecision`.
-
-Three implementations:
-
-  ApprovalProvider          ABC — `request(req) -> ApprovalDecision`
-  CLIApprovalProvider       prompts the human on stdin/stderr
-  AutoApprover              deterministic auto-answer for tests + CI
 
 The loop is provider-agnostic: it never reads stdin itself, it never times
 out itself. All policy-on-human surface area lives here.

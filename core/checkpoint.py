@@ -90,11 +90,8 @@ class ResumeContext:
     """What the loop receives when --resume is used.
 
     ``answer`` is set only when the *last* checkpoint phase is ``respond``
-    (i.e. the previous run completed synthesis).  In that case the loop can
+    (i.e. the previous run completed synthesis). In that case the loop can
     return the cached answer immediately without re-running the LLM.
-
-    ``artifacts`` is a lightweight summary — label → {tool, chars} — rebuilt
-    from ACT checkpoints so the synthesizer can reference what was collected.
     """
 
     trace_id: str

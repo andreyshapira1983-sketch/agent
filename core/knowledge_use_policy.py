@@ -1,9 +1,4 @@
-"""Contextual memory-use policy.
-
-Memory write policy answers "may this be saved?". This module answers the
-next question: "may this saved record be used for the current role?" That is
-the guardrail against poppy, out-of-place memory reuse.
-"""
+"""Contextual memory-use policy."""
 from __future__ import annotations
 
 import re
@@ -70,14 +65,7 @@ class KnowledgeUseReport:
 
     @property
     def rejected_by(self) -> dict[str, int]:
-        """Rejections aggregated by cause, for the retrieval trace.
-
-        The three reject branches are distinct diagnoses — a type outside the
-        role's scope, a record marked unusable, and a record that simply has
-        nothing to do with the question. Collapsing them into one number (as
-        `len(records) - len(allowed)` did) tells the reader to look in the
-        wrong place two times out of three.
-        """
+        """Rejections aggregated by cause, for the retrieval trace."""
         counts: dict[str, int] = {}
         for decision in self.decisions:
             if decision.decision != "reject":

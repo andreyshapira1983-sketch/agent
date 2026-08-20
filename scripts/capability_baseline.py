@@ -1,26 +1,12 @@
 #!/usr/bin/env python3
 """Run the capability bench and print where the agent stands today.
 
-Operator instruction 2026-08-05: do not choose a fix direction by opinion —
-turn it into a measurable experiment. This is step two, the baseline: how many
-of the 40 tasks in `tests/capability_tasks.py` the system gets right
-BEFORE anything is changed.
-
-Two axes are scored, and they are not the same question.
-
-**Verdict** — did the system reach the right yes/no? A claim that holds should
-end `verified`; one that does not should end anywhere else. For the two
-loop-level categories the equivalent is whether the mismatch was detected and
-whether the next attempt is constrained.
-
 **Reason** — did the system produce a sentence the agent could REPAIR itself
 from? This is the operator's own criterion: if the agent gets the reason for
 its error, fixes its reasoning and does better on a similar task, capability
-grew; if only the label moves, the instrument got honest and the agent did not.
-So the reason column is scored separately and is never inferred from a correct
-verdict.
-
-Run:  python scripts/capability_baseline.py [--verbose]
+grew; if only the label moves, the instrument got honest and the agent did
+not. So the reason column is scored separately and is never inferred from a
+correct verdict.
 
 Read-only: no store is written, no model is called, nothing costs money.
 """

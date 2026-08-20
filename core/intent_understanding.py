@@ -1,23 +1,16 @@
 """Intent understanding — the translator between plain human language and the
 autonomous agent's actions.
 
-The deterministic keyword router (``core/operator_intent``) guesses intent from
-substrings; it cannot tell "прошу X" from "упомянул X в предложении", so a
-conversational turn that merely contains a phrase gets hijacked into a command.
-This module gives that judgement to the model, which understands language.
+1. **Grounded.** The model may only choose an ``action`` that is actually in
+the agent's real capability list (passed in from the kernel). An invented
+action is rejected. The truth of *what the agent can do* never comes from
+the model. 2. **Safe by default.** Malformed output, an ungrounded action,
+or a low-confidence guess all fall back to ``conversation`` — i.e. "just
+talk to the user", never a wrong command.
 
-Two guarantees that keep the model honest (kernel = truth, model = language):
-
-1. **Grounded.** The model may only choose an ``action`` that is actually in the
-   agent's real capability list (passed in from the kernel). An invented action
-   is rejected. The truth of *what the agent can do* never comes from the model.
-2. **Safe by default.** Malformed output, an ungrounded action, or a
-   low-confidence guess all fall back to ``conversation`` — i.e. "just talk to
-   the user", never a wrong command.
-
-This is Step 1: the translator itself. Wiring it into the loop (and shrinking
-the keyword router) is a later step; this module is additive and side-effect
-free — it only reads a message and returns a decision.
+This is Step 1: the translator itself. Wiring it into the loop (and
+shrinking the keyword router) is a later step; this module is additive and
+side-effect free — it only reads a message and returns a decision.
 """
 from __future__ import annotations
 
@@ -96,12 +89,7 @@ def understand_intent(
     available_actions: tuple[str, ...] | list[str],
     llm: Any,
 ) -> IntentDecision:
-    """Classify *message* into a grounded action or plain conversation.
-
-    ``available_actions`` is the agent's REAL capability list (kernel truth).
-    ``llm`` is any object with ``complete(system, user, ...) -> str``. Any
-    failure returns a ``conversation`` decision (safe default).
-    """
+    """Classify *message* into a grounded action or plain conversation."""
     actions = tuple(str(a) for a in available_actions if str(a).strip())
     if not message or not message.strip():
         return IntentDecision.conversation("empty message")

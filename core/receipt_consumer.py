@@ -1,10 +1,4 @@
-"""Tool receipts slice 1c — minimal consumer for verifier integration.
-
-When the verifier would mark a claim ``verified`` using evidence from a
-slice-1a tool, require a matching row in ``data/tool_receipts.jsonl`` for the
-current ``trace_id`` and tool ``operation``. Missing receipt → demote to
-``receipt_missing`` (displayed as unverified with ``[no-receipt]``).
-"""
+"""Tool receipts slice 1c — minimal consumer for verifier integration."""
 from __future__ import annotations
 
 from core.evidence import Evidence

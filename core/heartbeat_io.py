@@ -1,16 +1,4 @@
-"""Daemon liveness record — write, read, age, staleness.
-
-These four functions used to live in ``agent_tick.py`` and were reached from
-``core/campaign_io.py`` as ``agent_tick._read_heartbeat`` &c. That made the core
-depend on an entry point: the one decision layer the architecture says imports
-nothing from ``cli/``, ``app/`` or the tick script was reaching *up* into a cron
-script for private helpers. Whether the daemon is alive is an input to a
-decision (`best_next_action` asks it), so the reading belongs here; the tick
-script keeps owning *when* to write.
-
-``agent_tick`` re-exports these under their old private names, so existing
-callers and tests are unaffected.
-"""
+"""Daemon liveness record — write, read, age, staleness."""
 from __future__ import annotations
 
 import json

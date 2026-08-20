@@ -23,25 +23,11 @@ class FileReadTool(Tool):
 
     @staticmethod
     def _local_path(raw_path: str) -> Path:
-        """Interpret CLI/user paths consistently on Windows and POSIX.
-
-        Users often type Windows-style relative paths such as ``.\\docs\\a.md``.
-        On POSIX runners a backslash is a literal filename character, so we
-        normalize separators before giving the path to ``pathlib``.
-        """
+        """Interpret CLI/user paths consistently on Windows and POSIX."""
         return Path(raw_path.strip().replace("\\", "/"))
 
     def _nearest_dir_hint(self, target: Path) -> str:
-        """Best-effort listing of REAL entries near a missing path.
-
-        When a path guess misses, we walk up to the nearest ancestor
-        directory that actually exists (staying inside the sandbox) and
-        list its entries. This text rides along in the FileNotFoundError
-        message, which the loop surfaces to the planner inside the
-        ``<replan_context>`` block as the failed step's ``reason``. The
-        planner can then self-correct to a real path instead of guessing
-        again — i.e. the agent "scans itself" at the moment it guessed wrong.
-        """
+        """Best-effort listing of REAL entries near a missing path."""
         probe = target.parent
         while True:
             try:

@@ -1,43 +1,23 @@
-"""Prove the architecture's load-bearing claims — read-only, exit non-zero on drift.
+"""Prove the architecture's load-bearing claims — read-only, exit non-zero on
+drift.
 
-The doc guards check *references*: `docs_link_check.py` resolves Markdown links,
-`docs_code_conformance.py` resolves code paths, line anchors and `:command`
-tokens, `agent_anatomy_check.py` keeps the module index complete. All of them ask
-"does the thing the document points at exist?" — none asks "is the thing the
-document *claims* still true?"
+**INV-2 — no orphaned deciders.** Every module under `core/` must be
+imported by some non-test module. The repo's own recurring anti-pattern
+(`knowledge/doctrine/self-audit-lessons.md` #6) is "a module written to fix
+a live failure mode, never wired into its entry point" — a mechanism that
+exists, is unit-tested, and cannot run in production. `recover_stuck` was
+exactly that for months.
 
-`docs/COGNITIVE_CORE.md` §10 finding 2 put it exactly: *"The boundary is real but
-unguarded. `core/` imports nothing from `cli/`, `app/` or `main` today. Nothing
-enforces that; one import in the wrong direction would put a decision inside a
-command handler, and no test would notice."* That sentence describes this file's
-absence. It checks four invariants the architecture actually rests on:
+**INV-3 — documented environment flags exist.** Every `AGENT_*` variable
+named in `docs/` must appear in the code. A flag that was renamed leaves the
+docs telling operators to set something with no effect.
 
-**INV-1 — the core layer imports downward only.**
-No module under `core/` may import `cli`, `app`, `main` or `agent_tick`. A
-decision layer that reaches up into an entry point is no longer a layer, and the
-dependency is invisible until something circular breaks. (This caught a real
-one: `core/campaign_io.py` reached into `agent_tick._read_heartbeat`.)
-
-**INV-2 — no orphaned deciders.**
-Every module under `core/` must be imported by some non-test module. The repo's
-own recurring anti-pattern (`knowledge/doctrine/self-audit-lessons.md` #6) is "a module written
-to fix a live failure mode, never wired into its entry point" — a mechanism that
-exists, is unit-tested, and cannot run in production. `recover_stuck` was exactly
-that for months.
-
-**INV-3 — documented environment flags exist.**
-Every `AGENT_*` variable named in `docs/` must appear in the code. A flag that
-was renamed leaves the docs telling operators to set something with no effect.
-
-**INV-4 — the verifier's verdict vocabulary has no silent members.**
-Every verdict `core/verifier_core.py` can assign must be known to the consumers
-that bucket verdicts (`core/low_evidence_policy.py`, `core/unsupported_claims.py`,
-`core/loop.py`). A new verdict that nobody buckets is silently dropped from the
-evidence accounting — which is how a supported claim can end up counted as
-unsupported.
-
-Nothing is written. Failures print the file and line so they can be fixed or
-declared.
+**INV-4 — the verifier's verdict vocabulary has no silent members.** Every
+verdict `core/verifier_core.py` can assign must be known to the consumers
+that bucket verdicts (`core/low_evidence_policy.py`,
+`core/unsupported_claims.py`, `core/loop.py`). A new verdict that nobody
+buckets is silently dropped from the evidence accounting — which is how a
+supported claim can end up counted as unsupported.
 """
 from __future__ import annotations
 

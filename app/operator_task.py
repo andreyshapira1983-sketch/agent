@@ -1,11 +1,4 @@
-"""``:operator-task`` read-only planning/report handler.
-
-Split out of ``main.py``. Classifies operator tasks (safe system check vs
-programming/patch proposal), gathers digest evidence, and prints structured
-reports. Does not run file_write, shell_exec, repair, or allow-effects.
-
-``main.py`` re-exports ``_handle_operator_task`` for dispatch.
-"""
+"""``:operator-task`` read-only planning/report handler."""
 from __future__ import annotations
 
 import sys

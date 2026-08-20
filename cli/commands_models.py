@@ -87,13 +87,8 @@ def _handle_model_registry_audit(rest: str, agent: AgentLoop) -> bool:
 
 
 def _handle_refresh_models(rest: str, agent: AgentLoop) -> bool:
-    """Query provider APIs, classify models into tiers, write config/model_catalog.json.
-
-    Usage: :refresh-models [--anthropic] [--openai]
-
-    The catalog is queried from the provider's own API (not web search).
-    Results are classified by naming pattern (haiku→light, opus→deep, …)
-    and saved to config/model_catalog.json. No model names are hardcoded.
+    """Query provider APIs, classify models into tiers, write
+    config/model_catalog.json.
     """
     from core.model_catalog import refresh_catalog
     from core.task_complexity import ComplexityTier
@@ -224,15 +219,7 @@ _DISCOVERY_OPTION_FLAGS = frozenset({"--json", "--dry-run", "--write"})
 
 
 def _handle_model_discovery_audit(rest: str, agent: AgentLoop) -> bool:
-    """LOCAL, no-network model discovery readiness audit (TD-011).
-
-    Usage: :model-discovery-audit [--json]
-
-    Reports which providers are supported, have a live fetcher, and have
-    credentials configured, plus what the current on-disk catalog knows. It
-    contacts NO provider and writes nothing — purely local. Use
-    ':provider-catalog-refresh --dry-run' to compare against live provider models.
-    """
+    """LOCAL, no-network model discovery readiness audit (TD-011)."""
     from core.model_discovery import build_discovery_audit
 
     tokens = _split_meta_args(rest)
@@ -253,15 +240,14 @@ def _handle_model_discovery_audit(rest: str, agent: AgentLoop) -> bool:
 def _handle_provider_catalog_refresh(rest: str, agent: AgentLoop) -> bool:
     """DRY-RUN live model discovery + catalog diff, read-only (TD-011/012).
 
-    Usage: :provider-catalog-refresh --dry-run [--anthropic] [--openai] [--json]
-
     With --dry-run this queries the model lists of the providers that have
-    credentials (a metadata-only, non-inference provider call — still a network
-    call) and diffs them against config/model_catalog.json. It NEVER writes the
-    catalog and NEVER switches models. Without --dry-run it does nothing but
-    print usage, so it can never accidentally reach the network. The --write path
-    is intentionally not implemented here (reserved for a future, explicitly
-    approved change); use :refresh-models to persist a catalog.
+    credentials (a metadata-only, non-inference provider call — still a
+    network call) and diffs them against config/model_catalog.json. It NEVER
+    writes the catalog and NEVER switches models. Without --dry-run it does
+    nothing but print usage, so it can never accidentally reach the network.
+    The --write path is intentionally not implemented here (reserved for a
+    future, explicitly approved change); use :refresh-models to persist a
+    catalog.
     """
     from core.model_discovery import build_discovery_report
 

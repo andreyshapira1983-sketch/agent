@@ -1,10 +1,4 @@
-"""Release/supply-chain audit helpers.
-
-This is a local, deterministic gate: it does not contact package indexes or
-model providers. It checks whether the repository has the minimum mechanics
-needed to rebuild from GitHub with controlled dependencies and CI release
-checks.
-"""
+"""Release/supply-chain audit helpers."""
 from __future__ import annotations
 
 import re

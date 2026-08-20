@@ -1,17 +1,11 @@
 """Read-only triage for the approval inbox.
 
-Bounded autonomy means the agent *proposes* work and a human approves it. The
-risk is that the ``proposed_task`` queue silently grows into administrative
-debt: duplicates, stale ideas, and low-value noise nobody ever dismisses.
-
 This module turns that pile into a *managed* surface. It is intentionally
 **pure and read-only**:
 
-* it never mutates an :class:`~core.approval_inbox.ApprovalInbox`;
-* it never deletes or executes anything;
-* it only computes a recommendation per item plus cluster/duplicate views.
-
-The operator decides. ``recommended_action`` is advice, not an action.
+* it never mutates an :class:`~core.approval_inbox.ApprovalInbox`; * it
+never deletes or executes anything; * it only computes a recommendation per
+item plus cluster/duplicate views.
 """
 from __future__ import annotations
 

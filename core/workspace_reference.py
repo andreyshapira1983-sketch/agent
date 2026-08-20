@@ -1,11 +1,4 @@
-"""Does this text name something that exists in the workspace?
-
-A structural fact about the turn, decided by looking at the filesystem instead
-of matching vocabulary. Routing that asks this first stops depending on which
-words the operator happened to choose.
-
-Why it exists: docs/CODE_NOTES.md, "A path is a fact, a word is a guess".
-"""
+"""Does this text name something that exists in the workspace?"""
 from __future__ import annotations
 
 import re
@@ -43,13 +36,7 @@ def _exists(candidate: str, root: str) -> bool:
 
 
 def workspace_paths_named(text: str, *, root: Path | None = None) -> list[str]:
-    """Paths in *text* that actually exist in the workspace.
-
-    Existence is the whole point: `numpy.py` in a question about the public web
-    is a word, while `core/loop.py` is this repository. Nothing here is a
-    keyword list, so no phrasing evades it and no phrasing false-fires — a token
-    either resolves to a file we own or it does not.
-    """
+    """Paths in *text* that actually exist in the workspace."""
     base = str(root or _repo_root())
     seen: list[str] = []
     for match in _PATH_TOKEN_RE.finditer(text or ""):

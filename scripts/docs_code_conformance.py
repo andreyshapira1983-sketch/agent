@@ -197,13 +197,10 @@ RENAMED_REPLACEMENT_MISSING = "replacement_missing"  # DRIFT: map is stale
 def _renamed_ref_pattern(renames: Mapping[str, str] | None = None) -> re.Pattern[str]:
     """Match every declared old path in both spellings.
 
-    Prose writes `core/confidence_gate`; only code-ish references carry `.py`.
-    The old `_PATH_RE` required the extension, so the extensionless form — the
-    one a source-of-truth document actually uses — was invisible to this guard.
-
-    ``renames`` defaults to `None` rather than to the module table itself: a
-    mutable default is bound once at definition time, so a caller amending the
-    table would silently not be seen here.
+    Prose writes `core/confidence_gate`; only code-ish references carry
+    `.py`. The old `_PATH_RE` required the extension, so the extensionless
+    form — the one a source-of-truth document actually uses — was invisible
+    to this guard.
     """
     renames = _RENAMED_PATHS if renames is None else renames
     stems = sorted(
@@ -230,21 +227,7 @@ def classify_renamed_reference(
     renames: Mapping[str, str] | None = None,
     historical_docs: Collection[str] | None = None,
 ) -> str:
-    """Decide what one occurrence of a renamed path is. Pure.
-
-    ``old_path`` is normalised to the key in ``renames`` (with `.py`), ``doc`` is
-    the path relative to the docs root, ``exists`` answers "is this repo-relative
-    path a file". No I/O of its own, so the whole rule is testable without a
-    documentation tree.
-
-    Both tables default to `None` and are resolved per call, so amending the
-    module-level table is seen here — a mutable default would have frozen the
-    object this function consults at definition time.
-
-    Order matters: a stale rename map is reported even in a document that is
-    allowed to keep the old name, because "declared renamed to something that
-    does not exist" is a broken declaration, not provenance.
-    """
+    """Decide what one occurrence of a renamed path is. Pure."""
     renames = _RENAMED_PATHS if renames is None else renames
     historical_docs = (
         _HISTORICAL_RENAME_DOCS if historical_docs is None else historical_docs
@@ -277,16 +260,8 @@ def _registry_commands() -> set[str]:
 def _scan_targets(docs_root: Path) -> list[tuple[Path, str]]:
     """Every Markdown this check owns, paired with the name the allowlists use.
 
-    Three trees when running against the real `docs/`: the docs tree itself,
-    repo-root files, and `knowledge/` — what the AGENT reads. The last one needs
-    this check more than prose does: a stale code path there is injected into
-    the agent's context as current fact. It moved out of `docs/` on 2026-08-07
-    and left this checker's field of view; the document-count guard is what
-    noticed. Root and knowledge entries are named with a leading `../` so the
-    allowlists can address them unambiguously.
-
-    A custom `--docs` root scans only itself, which is what lets the tests point
-    the script at an isolated tree.
+    A custom `--docs` root scans only itself, which is what lets the tests
+    point the script at an isolated tree.
     """
     targets = [
         (doc, doc.relative_to(docs_root).as_posix())

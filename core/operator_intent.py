@@ -1,10 +1,4 @@
-"""Conversational routing for operator-control requests.
-
-The CLI still exposes explicit `:commands`, but the long-term operator UX
-should let the owner ask normal status questions. This module keeps that
-translation deterministic and local, so common control-plane requests do not
-need an LLM call.
-"""
+"""Conversational routing for operator-control requests."""
 from __future__ import annotations
 
 from dataclasses import dataclass

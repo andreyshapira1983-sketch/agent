@@ -6,24 +6,7 @@ import sys
 
 
 def _force_utf8_io() -> tuple[str, ...]:
-    """Make REPL safe for non-ASCII input on Windows.
-
-    Python on Windows opens stdin/stdout/stderr in the active console
-    code page (cp1251 / cp866 / cp65001 depending on locale + chcp).
-    Anything the user types that isn't ASCII therefore round-trips as
-    mojibake — and gets persisted to `memory.jsonl` that way too.
-
-    We force UTF-8 explicitly across the three streams. `reconfigure`
-    exists on `TextIOWrapper` (Python 3.7+). We also export
-    `PYTHONIOENCODING=utf-8` so any subprocess (e.g. shell_exec) inherits
-    the same encoding.
-
-    Returns the names of the streams whose encoding IS utf-8 afterwards,
-    checked by reading `stream.encoding` back rather than by assuming the
-    call worked. A stream can be missing `reconfigure`, refuse it, or
-    accept it and stay on its old codec; all three used to look identical
-    from outside, and none of them raised.
-    """
+    """Make REPL safe for non-ASCII input on Windows."""
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
     confirmed: list[str] = []
     for stream_name in ("stdin", "stdout", "stderr"):

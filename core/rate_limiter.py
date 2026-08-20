@@ -31,23 +31,7 @@ class RateLimitResult:
 
 
 class CLIRateLimiter:
-    """Token-bucket rate limiter for interactive CLI sessions.
-
-    Parameters
-    ----------
-    max_requests:
-        Bucket capacity and refill ceiling.  Also the burst allowance at
-        the start of a fresh session.
-    window_seconds:
-        Time (in seconds) it takes to fully refill an empty bucket.
-        ``refill_rate = max_requests / window_seconds`` tokens/second.
-
-    Examples
-    --------
-    >>> rl = CLIRateLimiter(max_requests=5, window_seconds=10.0)
-    >>> rl.consume().allowed
-    True
-    """
+    """Token-bucket rate limiter for interactive CLI sessions."""
 
     def __init__(
         self,
@@ -69,12 +53,7 @@ class CLIRateLimiter:
     # ------------------------------------------------------------------
 
     def consume(self) -> RateLimitResult:
-        """Attempt to consume one token.
-
-        Returns a :class:`RateLimitResult`.  When ``allowed=True`` the
-        caller may proceed.  When ``allowed=False`` the caller should
-        surface ``retry_after_seconds`` to the user and skip the request.
-        """
+        """Attempt to consume one token."""
         self._refill()
         if self._tokens >= 1.0:
             self._tokens -= 1.0

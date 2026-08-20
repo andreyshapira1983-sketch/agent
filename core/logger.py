@@ -1,14 +1,4 @@
-"""Structured JSONL logger for the agent loop.
-
-Every cycle phase emits one JSON line to both stdout (info+) and
-logs/<trace_id>.jsonl. This is what makes the agent debuggable.
-
-Hard rule (§7 / MVP-7): NO raw secret ever appears on a log line.
-Every payload — and every `extra` kwarg — is fed through
-`core.redaction.redact_payload` before serialisation. Adding new event
-types does not require remembering to redact them; the logger does it
-unconditionally.
-"""
+"""Structured JSONL logger for the agent loop."""
 from __future__ import annotations
 
 import json

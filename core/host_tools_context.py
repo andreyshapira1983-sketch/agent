@@ -1,12 +1,4 @@
-"""Host-tool context: which desktop tools exist and when to mention them.
-
-The single source of truth for operator-machine tools (Blender, OpenSCAD,
-ffmpeg, ...): the relevance gate that decides whether a question warrants
-mentioning them, and the prompt block describing them to the planner.
-Used by both the planner (system-prompt suffix) and the loop (synthesis
-critique). Pure environment/text inspection; moved verbatim from
-core/planner.py.
-"""
+"""Host-tool context: which desktop tools exist and when to mention them."""
 from __future__ import annotations
 
 import os
@@ -47,14 +39,7 @@ _HOST_RELEVANCE_RE = re.compile(
 
 
 def host_tools_relevant(text: str, tools_used: Iterable[str] = ()) -> bool:
-    """Deterministic gate: is this turn actually about host tools?
-
-    True when the text (question + planner reasoning) mentions a host-tool name
-    or a document/media/device task word (whole-word, so "word" inside "keyword"
-    does NOT fire), OR the plan actually used an effect tool (``shell_exec`` /
-    ``file_write``). No LLM. Used to avoid injecting ``.env`` host paths into
-    every synthesizer prompt (LPF-001 iteration 1b).
-    """
+    """Deterministic gate: is this turn actually about host tools?"""
     if _HOST_RELEVANCE_RE.search(text or ""):
         return True
     used = {str(t).strip().lower() for t in (tools_used or ()) if t}

@@ -1,19 +1,14 @@
 """Project import/dependency map for self-build changes.
 
-Before the agent modifies or splits a module it should know the file's real
-consumers: which project files import it, exactly which symbols they take from
-it, and which test files exercise it. This turns "don't break the public API"
-from a guess into a measured contract:
+* the Builder receives the list of symbols that are ACTUALLY imported
+elsewhere (with the importing files), so it knows what it must keep
+importable; * the Critic can veto a split that drops a symbol some other
+module really imports — naming the importer, not just the symbol; * the
+targeted-test selection can include the test files that import the target,
+so a break is caught by the lane instead of by a full-suite surprise.
 
-* the Builder receives the list of symbols that are ACTUALLY imported elsewhere
-  (with the importing files), so it knows what it must keep importable;
-* the Critic can veto a split that drops a symbol some other module really
-  imports — naming the importer, not just the symbol;
-* the targeted-test selection can include the test files that import the
-  target, so a break is caught by the lane instead of by a full-suite surprise.
-
-Pure standard library + AST; read-only; never raises out of the public helpers
-(best-effort: unparseable or unreadable files are skipped).
+Pure standard library + AST; read-only; never raises out of the public
+helpers (best-effort: unparseable or unreadable files are skipped).
 """
 from __future__ import annotations
 

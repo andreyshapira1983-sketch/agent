@@ -1,18 +1,11 @@
 """Broad-except audit for ``core/`` (MIR-077) — read-only classifier.
 
-The operator's standing rule: find the ROOT first. Review rounds #283 and
-#286 both found the same defect class — a broad ``except Exception`` that
-swallows a failure with no journal event, making the subsystem's breakage
-invisible. This script maps EVERY broad handler in ``core/`` into classes:
-
-* ``journaled``              — the handler logs/prints something;
-* ``reraise``                — the handler re-raises;
-* ``log_guard``              — the TRY body is itself only journaling, so a
-                               silent handler is the deliberate last-resort
-                               guard (the #283/#286 inner pattern);
-* ``silent_noop``            — pass/continue/break only;
-* ``silent_default_return``  — a bare default return;
-* ``silent_other``           — swallows and does something else.
+* ``journaled`` — the handler logs/prints something; * ``reraise`` — the
+handler re-raises; * ``log_guard`` — the TRY body is itself only journaling,
+so a silent handler is the deliberate last-resort guard (the #283/#286 inner
+pattern); * ``silent_noop`` — pass/continue/break only; *
+``silent_default_return`` — a bare default return; * ``silent_other`` —
+swallows and does something else.
 
 A silent handler WITHOUT a nearby comment naming its reason is the audit's
 target class. The pytest ratchet (`tests/test_except_audit_ratchet.py`) pins
@@ -274,22 +267,11 @@ def loop_layer_files(root: Path) -> list[Path]:
     """The loop layer, INCLUDING subsystems extracted out of it.
 
     A scope written as "files named ``loop*``" measures where someone looked
-    rather than where the defect can be, and census item B1 proved that costs
-    something real: moving `propose_repair` into `core/repair_commands.py` moved
-    one journal-silent handler with it, the budget read one lower, and nothing
-    had been fixed. A refactor must never be able to look like a repair.
-
-    So the scope follows the code. A mixin that keeps a thin facade and delegates
-    to its subsystem imports it as ``import core.X as Y`` — the dotted form the
-    architecture invariant can see — and that import is what pulls X back into
-    the measurement. Anything the layer extracts this way stays counted.
-
-    Not a general import walk on purpose: `from core.X import f` pulls in
-    helpers the layer merely USES, and counting those would claim past what the
-    census measured. The dotted-alias form is what the facade pattern uses, and
-    a future extraction that hides from this by choosing the other form still
-    has to get past `test_the_budget_matches_the_measurement`, which goes red on
-    a count that drops for any reason at all.
+    rather than where the defect can be, and census item B1 proved that
+    costs something real: moving `propose_repair` into
+    `core/repair_commands.py` moved one journal-silent handler with it, the
+    budget read one lower, and nothing had been fixed. A refactor must never
+    be able to look like a repair.
     """
     files = sorted(p for p in root.glob("loop*.py") if "__pycache__" not in p.parts)
     extracted: set[Path] = set()

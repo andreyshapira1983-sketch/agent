@@ -1,28 +1,17 @@
 """What is mutated right now, written where a lost context can still read it.
 
 The mapping program mutates production files as temporary instruments and
-restores them byte-for-byte. Until now the restore invariant — which path, which
-baseline hash — lived only in model context. Twenty applications survived on the
-fact that no turn was ever cut between the mutation and the restore.
+restores them byte-for-byte. Until now the restore invariant — which path,
+which baseline hash — lived only in model context. Twenty applications
+survived on the fact that no turn was ever cut between the mutation and the
+restore.
 
-The operator's §15C correction is what this implements, and its two halves are
-not symmetric:
+RECOVER is authorised ONLY for paths recorded in an open entry whose
+baseline is mechanically tied to the snapshot. Those are restored from the
+snapshot and verified by hash.
 
-  RECOVER  is authorised ONLY for paths recorded in an open entry whose baseline
-           is mechanically tied to the snapshot. Those are restored from the
-           snapshot and verified by hash.
-
-  DRIFT    that is NOT attributable to the open entry is an INTEGRITY CONFLICT.
-           It is reported and left alone. A recovery tool that deletes an
-           unexplained change destroys the evidence that something else is
-           happening, which is worse than the drift.
-
-The journal lives under `knowledge/quantum/`, outside every frozen subject path,
-so it can never itself trip the subject guard.
-
-    QM-JOURNAL: CLEAN | OPEN | RESTORED | CONFLICT | UNREADABLE
-
-Exit code follows the verdict.
+The journal lives under `knowledge/quantum/`, outside every frozen subject
+path, so it can never itself trip the subject guard.
 """
 from __future__ import annotations
 

@@ -1,11 +1,4 @@
-"""Activity-type decider: the door must not choose the mind.
-
-Classifies operator input into conversation / bounded_action /
-persistent_goal / goal_control BEFORE any channel semantics apply.
-Deterministic and conservative: launching work needs a start verb AND a
-continuity contract; hypothetical framing vetoes everything. Design prose:
-docs/CODE_NOTES.md («The door chose the mind»).
-"""
+"""Activity-type decider: the door must not choose the mind."""
 from __future__ import annotations
 
 import re

@@ -1,19 +1,4 @@
-"""Circuit breaker for bounded autonomous runtime runs.
-
-States
-------
-closed    Normal operation. All requests pass through.
-open      Tripped. All requests blocked. Counts down via check() calls.
-half-open Cooldown expired. ONE probe request passes through.
-          Success -> closed. Failure -> open (cooldown resets).
-
-Transition diagram::
-
-    closed ──(budget/consecutive failures)──> open
-    open   ──(cooldown_checks exhausted)────> half-open
-    half-open ──(record_success)────────────> closed
-    half-open ──(record_failure)────────────> open  (cooldown resets)
-"""
+"""Circuit breaker for bounded autonomous runtime runs."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

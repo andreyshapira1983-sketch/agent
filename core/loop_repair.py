@@ -1,25 +1,4 @@
-"""Фасад операторских команд починки на объекте агента.
-
-`core/loop_methods.py`, откуда это приехало, не было модулем: его сделал
-`core/incremental_splitter.py`, резавший `core/loop.py` по бюджету строк, а не
-по смыслу. Имя `methods` — это «остальное», и по нему нельзя было узнать, что
-внутри лежат пять несвязанных ответственностей.
-
-**И это не код цикла — проверено по вызывающим, а не по этой строке.** Зовут
-`cli/commands_repair.py`, `cli/commands_memory.py`, `cli/command_dispatch.py` и
-`core/self_repair.py`. Ни одна фаза `_run_inner` сюда не заходит.
-
-Что осталось здесь и почему (пункт B1 переписи, решение оператора). `agent`
-остаётся ЕДИНОЙ операторской точкой входа: `agent.propose_repair(...)`
-по-прежнему работает и ни один вызов в `cli/` не переписан. Но примесь больше
-не дом настоящей логики — она передаёт зависимости и вызывает
-`core/repair_commands.py`, где живут решения: выбор яруса модели с отложенным
-выбором и разбор трёх пустых случаев отката.
-
-Зависимости уезжают туда АРГУМЕНТАМИ. Функция, принимающая `agent` и лезущая в
-него через `getattr`, перенесла бы связь, а не убрала — этот утиный шов
-перепись уже нашла в другом месте.
-"""
+"""Фасад операторских команд починки на объекте агента."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,12 +13,7 @@ import core.repair_commands as repair_ops
 
 
 class AgentLoopRepair:
-    """Подмешивается в ``AgentLoop``; состояние живёт на композированном цикле.
-
-    Члены ниже — объявления контракта хоста (``AgentLoop`` их создаёт в
-    ``__init__``); присваиваний нет, поэтому во время выполнения ничего не
-    создаётся и не затеняется.
-    """
+    """Подмешивается в ``AgentLoop``; состояние живёт на композированном цикле."""
 
     if TYPE_CHECKING:  # pragma: no cover — только объявления
         log: Any
@@ -76,12 +50,7 @@ class AgentLoopRepair:
         *,
         workspace_root: Path,
     ):
-        """Run one self-repair proposal through the MVP-13.2 controller.
-
-        Stayed a direct delegation: the controller takes the AGENT itself, so
-        routing it through `repair_commands` would add a hop without moving any
-        decision. There is no logic here to move.
-        """
+        """Run one self-repair proposal through the MVP-13.2 controller."""
         from core.self_repair import SelfRepairController
 
         return SelfRepairController(

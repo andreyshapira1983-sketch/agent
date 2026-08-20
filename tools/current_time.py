@@ -1,22 +1,5 @@
 """Current Time tool — pure read-only clock query.
 
-Motivation: the agent has no implicit awareness of the current date.
-Without this tool, asking "when was this README written?" leads the
-LLM to guess from training-cutoff or copy a hard-coded date. A tiny
-deterministic clock primitive removes that whole class of hallucination.
-
-Returns a structured dict:
-    {
-        "iso_utc":   "2026-06-03T14:23:51+00:00",
-        "iso_local": "2026-06-03T17:23:51+03:00",
-        "unix":      1780000000,
-        "tz_name":   "Europe/Moscow",   # best-effort, may be None
-        "weekday":   "Wednesday",
-        "year":      2026,
-        "month":     6,
-        "day":       3,
-    }
-
 No arguments, no side effects, no network. Always `read_only` risk.
 """
 from __future__ import annotations
@@ -29,13 +12,7 @@ from tools.base import Tool
 
 
 def format_duration_seconds(seconds: float) -> str:
-    """Format a non-negative duration in seconds.
-
-    Examples:
-        59 -> "59s"
-        61 -> "1m 1s"
-        3661 -> "1h 1m 1s"
-    """
+    """Format a non-negative duration in seconds."""
     if seconds < 0:
         raise ValueError("seconds must be non-negative")
 

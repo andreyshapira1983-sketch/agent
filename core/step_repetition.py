@@ -1,11 +1,4 @@
-"""Step repetition detector — addresses MAST FM-1.3 (step repetition, 15.7%).
-
-Tracks (tool, normalized_args) pairs executed within a single ``run()`` call
-and surfaces a structured event when the same action is requested beyond a
-threshold across replans. Working-Memory ``cache_lookup`` already serves
-identical reads from cache; this module makes the loop *aware* that the
-planner is stuck repeating itself, which is the actual MAST signal.
-"""
+"""Step repetition detector — addresses MAST FM-1.3 (step repetition, 15.7%)."""
 
 from __future__ import annotations
 
@@ -34,13 +27,7 @@ class StepRepetitionTracker:
         self._reported: set[tuple[str, str]] = set()
 
     def observe(self, tool: str, arguments: Any) -> dict[str, Any] | None:
-        """Record one (tool, args) execution.
-
-        Returns a payload dict the caller should log under
-        ``step_repetition_detected`` the FIRST time the count reaches the
-        threshold; ``None`` otherwise. Subsequent repetitions of the same
-        key after threshold do not re-fire.
-        """
+        """Record one (tool, args) execution."""
         if not tool:
             return None
         key = (tool, normalize_args(arguments))

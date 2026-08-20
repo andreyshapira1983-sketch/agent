@@ -1,13 +1,11 @@
 """Was a self-build veto a verdict on the target, or our own pipeline breaking?
 
-The producer keeps a short cooldown of recently vetoed targets so it advances
-instead of hitting the same wall twice. That is only sound when the veto said
-something about the target. When the veto happened because the builder's reply
-never parsed, the cooldown teaches the agent to avoid exactly the files its own
-generator chokes on — the ones it most needs to work on.
-
-Measured 2026-08-04 over the agent's own episodes: four of five `critic_veto`
-episodes were pipeline failures, and all five put their target on the avoid list.
+The producer keeps a short cooldown of recently vetoed targets so it
+advances instead of hitting the same wall twice. That is only sound when the
+veto said something about the target. When the veto happened because the
+builder's reply never parsed, the cooldown teaches the agent to avoid
+exactly the files its own generator chokes on — the ones it most needs to
+work on.
 """
 from __future__ import annotations
 

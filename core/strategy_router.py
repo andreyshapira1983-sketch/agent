@@ -1,35 +1,12 @@
 """Strategy Router: deliberation kernel layer BEFORE the LLM planner.
 
-``classify_operator_strategy`` maps operator natural-language input to an
-``OperatorStrategy`` enum value with zero I/O and zero LLM calls.  The
-caller uses the strategy to decide whether to invoke a local handler or
-forward the request to the LLM planner.
-
-    strategy = classify_operator_strategy(user_text)
-    if strategy is OperatorStrategy.general_question:
-        # forward to planner / LLM
-        ...
-    else:
-        # dispatch to the local handler registered for that strategy
-        ...
-
-Safety contract
----------------
-* Pure function — no file I/O, no network, no LLM calls.
-* Deterministic — same input always returns the same strategy.
+Safety contract --------------- * Pure function — no file I/O, no network,
+no LLM calls. * Deterministic — same input always returns the same strategy.
 * ``general_question`` is the safe default: when in doubt, let the LLM
-  handle it rather than silently routing to a wrong local handler.
-* Explicit documentation requests ("по README", "по документации", …) are
-  NOT captured by any local strategy — they always map to
-  ``general_question`` so the LLM can read the docs as requested.
-
-Strategies
-----------
-All local strategies (anything except ``general_question``) are handled by
-existing handlers in ``main.py`` via ``handle_conversational_operator_input``.
-The handlers call live system modules (architecture audit, budget ledger,
-task queue, …) without issuing LLM calls or reading README/docs unless
-explicitly asked.
+handle it rather than silently routing to a wrong local handler. * Explicit
+documentation requests ("по README", "по документации", …) are NOT captured
+by any local strategy — they always map to ``general_question`` so the LLM
+can read the docs as requested.
 """
 from __future__ import annotations
 
@@ -39,12 +16,7 @@ from core.operator_intent import route_operator_intent
 
 
 class OperatorStrategy(str, Enum):
-    """Routing decision produced by the Strategy Router.
-
-    Members map 1-to-1 to ``OperatorIntentKind`` literals (so existing
-    dispatch tables in ``main.py`` continue to work without change).
-    ``general_question`` is the catch-all: the LLM planner handles it.
-    """
+    """Routing decision produced by the Strategy Router."""
 
     safe_self_check       = "safe_self_check"
     capability_request    = "capability_request"

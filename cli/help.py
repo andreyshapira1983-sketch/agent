@@ -1,22 +1,9 @@
 """Rendering of the operator help page and the REPL startup command summary.
 
-Phase 2 of the ``main.py`` extraction. Both texts used to be hand-written string
-literals inside ``main.py``; they now live here, and every command description
-that can be is pulled from :mod:`cli.command_registry` instead of being spelled
-out a second time.
-
-Why some lines are still verbatim. The page is not a uniform table: 24 lines are
-``flags:`` continuations belonging to the command above them, nine command lines
-put their description on a continuation line or separate it with a single space
-instead of the usual two, two lines document things that are not dispatchable
-commands at all (``:task-begin``, and ``:learn-project`` which is an alias with
-its own line), and seven are prose. Those are carried as ``Raw`` entries so the
-rendered page stays **byte-identical** to what operators see today.
-
-``tests/test_help_render.py`` holds the contract: the rendered page must equal a
-frozen fixture captured from the pre-extraction code, and every command in the
-registry must appear somewhere in the layout -- so a command cannot be added to
-the registry and silently stay out of ``:help``.
+``tests/test_help_render.py`` holds the contract: the rendered page must
+equal a frozen fixture captured from the pre-extraction code, and every
+command in the registry must appear somewhere in the layout -- so a command
+cannot be added to the registry and silently stay out of ``:help``.
 """
 from __future__ import annotations
 

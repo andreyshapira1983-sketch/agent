@@ -1,23 +1,14 @@
 """Hard rules learned from self-build rollbacks.
 
-A rollback by itself does not make the agent smarter: the lesson text lands in
-episodic memory and *may* steer the next Builder prompt, but nothing ENFORCES
-it. This module turns specific, machine-readable failure causes into durable
-HARD RULES that the Critic checks deterministically on every later attempt.
+becomes the rule "symbol X must remain importable from core/verifier.py". On
+the next produce run for that target the Critic re-parses the proposed
+content and vetoes BEFORE apply if the symbol is neither defined nor re-
+exported — no LLM judgement involved, so the same rollback can never happen
+twice for the same symbol.
 
-First rule kind — ``keep_importable``: a rollback whose reason contains
-
-    ImportError: cannot import name 'X' from 'core.verifier'
-
-becomes the rule "symbol X must remain importable from core/verifier.py".
-On the next produce run for that target the Critic re-parses the proposed
-content and vetoes BEFORE apply if the symbol is neither defined nor
-re-exported — no LLM judgement involved, so the same rollback can never
-happen twice for the same symbol.
-
-Storage is one JSONL file (``data/self_build_rules.jsonl``) next to the other
-agent state stores; loading and recording are best-effort and never raise
-into the caller.
+Storage is one JSONL file (``data/self_build_rules.jsonl``) next to the
+other agent state stores; loading and recording are best-effort and never
+raise into the caller.
 """
 from __future__ import annotations
 
