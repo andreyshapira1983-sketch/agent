@@ -131,15 +131,35 @@ def enumerate_mutations(source: str) -> list[Mutation]:
     return out
 
 
-def run_tests(selection: list[str]) -> bool:
-    """True when the selection is GREEN."""
+#: pytest's own vocabulary. 1 means tests ran and failed; 4 means the
+#: arguments were unusable (a path that is not there) and 5 that nothing was
+#: collected. Neither of the last two is a statement about the code.
+_PYTEST_FAILED, _PYTEST_USAGE, _PYTEST_NO_TESTS = 1, 4, 5
+
+
+def _pytest(selection: list[str]) -> int:
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:randomly", *selection],
         capture_output=True,
         text=True,
         check=False,
     )
-    return result.returncode == 0
+    return result.returncode
+
+
+def run_tests(selection: list[str]) -> bool:
+    """True when the selection is GREEN."""
+    return _pytest(selection) == 0
+
+
+def selection_state(selection: list[str]) -> str:
+    """`green`, `red`, or `uncollectable` — three states, never two."""
+    code = _pytest(selection)
+    if code == 0:
+        return "green"
+    if code == _PYTEST_FAILED:
+        return "red"
+    return "uncollectable"
 
 
 def probe(target: Path, selection: list[str], *, limit: int | None = None) -> int:
@@ -153,8 +173,14 @@ def probe(target: Path, selection: list[str], *, limit: int | None = None) -> in
     print(f"tests     : {' '.join(selection)}")
     print(f"mutations : {len(mutations)}\n")
 
-    if not run_tests(selection):
-        print("REFUSED: the selection is already red — a survivor would mean nothing")
+    state = selection_state(selection)
+    if state != "green":
+        print("REFUSED: " + (
+            "the selection is already red — a survivor would mean nothing"
+            if state == "red" else
+            "the selection could not be run at all — check that every path "
+            "exists and that it collects tests"
+        ))
         return -1
 
     backup = Path(tempfile.mkdtemp()) / target.name
