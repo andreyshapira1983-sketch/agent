@@ -23,6 +23,22 @@ _BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-/]*$")
 # Never delete or hard-target these, even if asked.
 _PROTECTED_BRANCHES = frozenset({"main", "master", "HEAD"})
 
+#: Every subcommand this class issues, and nothing else. An allowlist rather
+#: than a list of forbidden names: the absent name was never the property —
+#: the property is that no invocation can reach a remote.
+_LOCAL_VERBS = frozenset({
+    "add", "branch", "checkout", "clean", "commit", "reset", "rev-parse",
+    "status",
+})
+
+
+def _subcommand(args: tuple[str, ...]) -> str:
+    """The verb, past any leading ``-c key=value`` pairs ``commit`` prepends."""
+    i = 0
+    while i + 1 < len(args) and args[i] == "-c":
+        i += 2
+    return args[i] if i < len(args) else ""
+
 
 class VcsError(RuntimeError):
     """Raised when a git invocation fails or an argument is rejected."""
@@ -72,6 +88,9 @@ class SafeVCS:
 
     # -- internal ---------------------------------------------------------
     def _git(self, *args: str) -> VcsResult:
+        verb = _subcommand(args)
+        if verb not in _LOCAL_VERBS:
+            raise VcsError(f"refused: 'git {verb}' is not a local verb")
         argv = ["git", *args]
         result = self.runner(argv, cwd=self.workspace)
         if result.returncode != 0:

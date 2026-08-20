@@ -3528,3 +3528,57 @@ boundary. Today the two are interleaved: hard commands parse deterministically
 vetoed, and imperatives are lexical. Moving the imperatives behind the same
 veto is a design decision with a cost, not a bug to be fixed quietly, and it
 belongs to the operator.
+
+## Four locks on one door, and the door was never the wall
+
+The self-apply lane's git front-end promised something strong: no way to move
+code off this machine. Four separate tests stood behind that promise, in four
+files, and each said the same sentence in the same words — this class has no
+attribute called push, or fetch, or pull, or remote.
+
+Read them together and you feel covered. Four independent files agreeing is
+what corroboration looks like. It is not what it was: they were four copies of
+one assertion, and a copy is not a witness. Worse, they watched an axis the
+danger does not travel on. `SafeVCS` held a general git executor with an
+injectable runner, and every production call site took the default. A verb
+under any other name went straight through. In a throwaway repository, with
+all four assertions green, a forbidden verb ran and returned zero.
+
+This is not the discovery that the agent pushes code. Nothing asks it to. It
+is the discovery that "cannot reach a remote" was resting on nobody having
+chosen such a name — a convention, guarded by a spell-check.
+
+The fix is an allowlist of the eight subcommands the class actually issues,
+checked before git is invoked. Two details are load-bearing. The check has to
+skip the leading configuration pair that `commit` prepends, or the verb it
+reads is not the verb that runs. And the test injects a recording runner
+instead of letting the command fly, because a test that runs a forbidden verb
+and catches the resulting error cannot tell a refusal from a failure — and
+only one of those is the property.
+
+The old name assertions were left where they are. They cost nothing, and they
+now sit behind a mechanism rather than standing in for one.
+
+## An accurate refusal with the wrong reason
+
+The mutation probe is careful about not measuring nonsense: before it breaks
+anything it runs the selection and refuses if it is already failing, because a
+survivor in a red suite means nothing. That refusal is correct engineering.
+
+It just could not tell two situations apart. Any non-zero exit from pytest was
+read as failure, and pytest says 4 when it cannot find a file and 5 when it
+collected nothing. Launch a run against a path that does not exist and the
+probe announces, calmly and wrongly, that the selection is already red.
+
+Four audit agents hit this within the same hour, all because of one mistyped
+list of test paths. Each one dutifully went looking for failing tests. There
+were none: the tests did not exist. The message was true about its own
+decision and false about the world, which is the most expensive kind of wrong
+an instrument can be — it survives review, because nothing about it looks
+broken.
+
+Three states now, not two: green, red, and could-not-run. The lesson is not
+about pytest's exit codes. It is that any tool which folds "I could not
+measure" into "I measured a failure" will keep producing confident nonsense,
+and the confidence is the part that does the damage.
+
