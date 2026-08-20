@@ -20,11 +20,9 @@ from core.topic_tokens import FLAT, TokenSalience, topic_tokens
 
 EpisodeOutcome = Literal["success", "partial", "failed"]
 
-# Task completion, kept deliberately apart from `EpisodeOutcome` (MIR-057).
-# `outcome` answers "were the claims supported"; this answers "was the goal
-# reached". A cycle blocked by a truncated evidence budget can be impeccably
-# supported and still have answered nothing, which is how a non-answer became
-# the first episode the system ever admitted as reusable experience.
+# Task completion, kept deliberately apart from `EpisodeOutcome`: `outcome`
+# answers "were the claims supported", this answers "was the goal reached".
+# A cycle can be impeccably supported and still have answered nothing.
 CompletionState = Literal[
     "achieved",
     "partially_achieved",
@@ -45,33 +43,24 @@ CompletionDeclaration = Literal[
 _COMPLETION_STATES: frozenset[str] = frozenset(CompletionState.__args__)
 _COMPLETION_DECLARATIONS: frozenset[str] = frozenset(CompletionDeclaration.__args__)
 
-#: Declarations in which the run states it did NOT deliver the task. These are
-#: admissions, not evidence verdicts, so `episode_from_agent_cycle` refuses to
-#: bank them as `success` no matter how well the non-delivery was cited.
-#:
+#: Declarations in which the run states it did NOT deliver the task. These
+#: are admissions, not evidence verdicts, so `episode_from_agent_cycle`
+#: refuses to bank them as `success` however well the non-delivery was cited.
 #: DERIVED from the vocabulary rather than listed, so the set is fail-closed:
-#: a declaration added to `CompletionDeclaration` later is treated as
-#: non-delivery until someone deliberately names it a delivery below. The
-#: opposite default would let a new state silently bank successes.
-#: `partially_achieved` is a delivery — of a part — and the chunk counts remain
-#: the right judge of its quality.
+#: a declaration added later counts as non-delivery until someone names it a
+#: delivery below. `partially_achieved` IS a delivery — of a part.
 _DELIVERY_DECLARATIONS: frozenset[str] = frozenset({"achieved", "partially_achieved"})
 _NON_DELIVERY_DECLARATIONS: frozenset[str] = _COMPLETION_DECLARATIONS - _DELIVERY_DECLARATIONS
 ProcedureStatus = Literal["candidate", "active", "needs_review", "obsolete"]
 
-# A newly distilled procedure is unproven: born `candidate`, and it stays a
-# candidate — kept out of ordinary planning retrieval (`search`) — until a
-# SECOND, independent, completed+verified success promotes it to `active`
-# (MIR-003 A4 maturity gate; owner decision 2026-07-22). One lucky success can
-# no longer steer later plans before it has earned the right to. Demotion is
-# unchanged: sustained low confidence still reads `needs_review`, and that
+# A newly distilled procedure is unproven: born `candidate`, kept out of
+# ordinary planning retrieval, and promoted to `active` only by a SECOND,
+# independent, completed+verified success. Demotion is unchanged, and its
 # check comes first so a doubted procedure is never re-labelled candidate.
 _PROMOTION_MIN_SUCCESSES = 2
 
-# The real status vocabulary, derived from the type rather than restated.
-# Operator-facing tallies enumerate THIS — a hardcoded list is how adding
-# `candidate` made a procedure show up as "1 procedure, 0 in every status"
-# in `:smart-memory` on a live run (2026-07-22).
+# The real status vocabulary, derived from the type rather than restated:
+# operator-facing tallies enumerate THIS, so a hardcoded list goes stale.
 PROCEDURE_STATUSES: tuple[str, ...] = ProcedureStatus.__args__
 
 
@@ -112,13 +101,10 @@ def _compute_quality_score(
     return round(verified / total, 3)
 
 
-# Laplace (add-one) smoothing prior for procedure confidence. A procedure is a
-# reusable skill distilled from episodes; its confidence must reflect how much
-# EVIDENCE backs it, not just the raw success ratio. Without smoothing a single
-# successful episode yields success/total = 1/1 = 1.0 — the agent would treat a
-# workflow it has seen work exactly once as a certainty. Beta(1,1) smoothing
-# makes one success land at (1+1)/(1+2) = 0.667 (active but modest) and lets
-# confidence climb toward — but never reach — 1.0 as successes accumulate.
+# Laplace (add-one) smoothing prior for procedure confidence, so confidence
+# reflects how much EVIDENCE backs a workflow and not the raw ratio: without
+# it one success reads 1.0. Beta(1,1) puts one success at 0.667 and lets
+# confidence climb toward — but never reach — 1.
 _CONF_PRIOR_SUCCESS: float = 1.0
 _CONF_PRIOR_FAILURE: float = 1.0
 
@@ -171,11 +157,9 @@ class EpisodeRecord:
     task_id: str = ""
     run_id: str = ""
     # May this episode steer later answers? THREE states, deliberately not a
-    # bool: None = legacy_unclassified (written before this field existed),
-    # False = quarantined (an explicit decision to withhold), True = eligible.
-    # Collapsing None into False would make a legacy row indistinguishable
-    # from a deliberate quarantine. Retrieval admits only True — see
-    # `is_usage_eligible`.
+    # bool: None = legacy row (written before the field), False = quarantined
+    # (an explicit decision to withhold), True = eligible. Collapsing None
+    # into False would hide the difference. Retrieval admits only True.
     usage_eligible: bool | None = None
     # Procedures that actually influenced THIS run — judged from execution, not
     # from the plan. THREE states: None = legacy row, attribution unknown and
@@ -188,35 +172,24 @@ class EpisodeRecord:
     # is verified or shown, so it never reaches `full_answer`. None means no
     # declaration was produced — legacy row, no marker, or no synthesis at all.
     declared_completion: CompletionDeclaration | None = None
-    # The verdict, ASSEMBLED AT BANKING and frozen. Deliberately stored rather
-    # than derived on read: procedural feedback is applied once, under the rule
-    # in force at the time, and a state recomputed on every read would silently
-    # reclassify episodes whose credit or debit has already been spent.
-    # None = never classified (a row written before this field), and stays
-    # distinguishable from an explicit verdict exactly as `usage_eligible` does.
-    # Readers go through `effective_completion`, which maps None → "unknown".
+    # The verdict, ASSEMBLED AT BANKING and frozen. Stored rather than derived
+    # on read because procedural feedback is applied once, under the rule in
+    # force at the time; recomputing would silently reclassify episodes whose
+    # credit or debit is already spent. None = never classified; readers go
+    # through `effective_completion`, which maps None → "unknown".
     completion_state: CompletionState | None = None
-    # Defect signals this run raised about ITSELF — the sensors that fired while
-    # it worked. Recorded because the run's own faults were otherwise
-    # unrecoverable: each sensor logged its verdict and dropped it, so an agent
-    # that made the same mistake twice banked two clean episodes and had nothing
-    # to learn from. THREE states, same convention as the two fields above:
-    # None = a row written before this axis existed, nothing may be inferred;
-    # () = this version ran and no sensor fired; (names…) = these fired.
+    # Defect signals this run raised about ITSELF — the sensors that fired
+    # while it worked, recorded because each sensor otherwise logged its
+    # verdict and dropped it. THREE states, same convention as the two fields
+    # above: None = a row written before this axis existed, nothing may be
+    # inferred; () = this version ran and no sensor fired; (names…) = fired.
     #
-    # Authority here is PER SIGNAL, never blanket — do not read this list as
-    # inert, and do not read it as decisive:
-    #   * `obligation_silently_missing` IS authoritative. At banking it lowers a
-    #     claim of `achieved` to `partially_achieved` (see
-    #     `assemble_completion_verdict`) and so withholds procedure credit.
-    #     S3's ruling was "keep the requirement, replace the detector" — the
-    #     requirement is what carries the authority.
-    #   * every other member decides nothing today, `reasoning_action_mismatch`
-    #     included: S4's ruling was "keep as an observer, keep measuring", and a
-    #     test pins that it changes neither the state nor procedure credit.
-    # Adding a member does NOT grant it power; power is granted only by naming
-    # it in the verdict rule table, which is the operator's call and wants
-    # measured numbers first.
+    # Authority is PER SIGNAL, never blanket. `obligation_silently_missing`
+    # IS authoritative: at banking it lowers `achieved` to
+    # `partially_achieved` and so withholds procedure credit. Every other
+    # member — `reasoning_action_mismatch` included — decides nothing today.
+    # Adding a member does NOT grant it power; only naming it in the verdict
+    # rule table does, and that is the operator's call.
     defect_signals: tuple[str, ...] | None = None
     # The authoritative fact that displaced this run's own claim, when one did.
     # None = the claim stood (or there was no claim). `declared_completion` is
@@ -338,20 +311,13 @@ class ProcedureRecord:
     workflow_key: str
     trigger_tags: tuple[str, ...]
     steps: tuple[str, ...]
-    # One factual line per contributing episode: what was asked, what it worked
-    # on, how the claims held. Accumulated rather than overwritten, and kept
-    # parallel to `source_episode_ids`.
-    #
-    # Accumulating is what keeps this honest under the known key-pooling defect
-    # (MIR-050): `workflow_key` is the tool sequence, so two unrelated runs that
-    # used the same tools merge into one record. A single summary line would
-    # then describe one situation and silently claim the other's successes. A
-    # list makes the pooling visible instead — the reader sees the record was
-    # earned in several unrelated situations and can judge it.
-    #
-    # Every line is assembled from what the episode actually observed. Nothing
-    # here is inferred: an empty tuple means the run left no honest material,
-    # and an empty lesson is preferable to a confident wrong one.
+    # One factual line per contributing episode: what was asked, what it
+    # worked on, how the claims held. Accumulated rather than overwritten and
+    # kept parallel to `source_episode_ids`, because a `workflow_key` pools
+    # unrelated runs: a single summary line would describe one situation and
+    # silently claim another's successes. Every line comes from what the
+    # episode observed — nothing is inferred, and an empty tuple means the
+    # run left no honest material.
     lessons: tuple[str, ...] = ()
     source_episode_ids: tuple[str, ...] = ()
     success_count: int = 0
@@ -441,14 +407,8 @@ class ProcedureRecord:
             updated_at=_now_iso(),
         )
 
-    # ``with_episode`` (counter-moving fold-in) was retired 2026-08-03: #261
-    # made it unreachable from production — `upsert_from_episode` merges via
-    # `merged_from_episode`, and counters move only through the causal
-    # `apply_episode_feedback` → `with_outcome` path — after which the method
-    # existed solely so its own tests could pass. Removed under the series
-    # audit; its live guarantees are pinned against the live paths in
-    # `tests/test_procedure_lessons.py` and
-    # `tests/test_completion_procedural_gates.py`.
+    # Counter-moving fold-in (`with_episode`) no longer exists: counters move
+    # only through the causal `apply_episode_feedback` → `with_outcome` path.
 
 
 @dataclass(frozen=True)
@@ -687,11 +647,10 @@ class EpisodicMemoryStore:
                 best_ep = ep
         if best_ep is None:
             return None, 0.0
-        # Lower the threshold when the best candidate was a low-quality answer
-        # — or an unmeasured one. A re-ask hint is an offer to go deeper, not a
-        # verdict on the episode, and an answer that carried no evidence is a
-        # plausible reason someone is asking again. Treating None as 1.0 made
-        # the hint LESS likely exactly where it was most useful (MIR-002).
+        # Lower the threshold when the best candidate was a low-quality — or
+        # unmeasured — answer. A re-ask hint is an offer to go deeper, not a
+        # verdict, and an answer with no evidence is a plausible reason
+        # someone is asking again.
         effective_threshold = threshold
         if (
             best_ep.answer_quality_score is None
@@ -901,10 +860,8 @@ class ProceduralMemoryStore:
         created = True
         for proc in procedures:
             if proc.workflow_key == candidate.workflow_key:
-                # Merge provenance only — NO credit for a tool-set match
-                # (operator ruling 2026-08-02; see `merged_from_episode`).
-                # Promotion happens solely via the causal `used_procedure_ids`
-                # path in `apply_episode_feedback`.
+                # Merge provenance only — NO credit for a tool-set match.
+                # Promotion happens solely via `used_procedure_ids`.
                 updated = proc.merged_from_episode(episode)
                 out.append(updated)
                 created = False
@@ -956,11 +913,9 @@ class ProceduralMemoryStore:
                 scored.append((score, 0 if proc.status == "candidate" else 1, proc))
             else:
                 no_overlap += 1
-        # Уместность первой, зрелость — при РАВНОЙ уместности. Затвор охранял
-        # «неподтверждённое не вытесняет подтверждённое», и это сохранено там,
-        # где вопрос зрелости и живёт. Поверх темы он давал другое: единственная
-        # доказанная запись забирала первое место при любом совпадении, и на
-        # живом хранилище это стоило 24 пункта точности (37% против 61%).
+        # Уместность первой, зрелость — при РАВНОЙ уместности. Правило
+        # «неподтверждённое не вытесняет подтверждённое» сохранено там, где
+        # вопрос зрелости и живёт; поверх темы оно стоило точности.
         scored.sort(key=lambda item: (item[0], item[1], item[2].confidence,
                                       item[2].updated_at), reverse=True)
         selected = [proc for _score, _proven, proc in scored[:limit]]
@@ -1004,10 +959,8 @@ def procedure_credit_allowed(episode: EpisodeRecord) -> bool:
     `completion_state` is read FROZEN, through the shared accessor. It is
     never recomputed and never taken from `declared_completion`.
     """
-    # Третья ось, и она общая с допуском эпизода в использование. Прежде здесь
-    # стояли только две первые, и 2026-08-10 самоопровергнувшийся прогон,
-    # которому допуск уже отказали, тем же ходом повысил стояние активной
-    # процедуры. Предикат один на оба рубежа, чтобы они не разошлись снова.
+    # Третья ось, общая с допуском эпизода в использование: предикат один на
+    # оба рубежа, чтобы они не разошлись.
     if _answer_disqualified(episode):
         return False
     return bool(
@@ -1184,23 +1137,18 @@ def assemble_completion_verdict(
         return _displaced(
             "partially_achieved", declared, "obligation_silently_missing"
         )
-    # Та же односторонняя власть, другое основание. `obligation_unmet` — «долг
-    # остался невыполненным»; здесь — «часть контракта оператора модуль вообще
-    # не сумел представить», и удостоверять её выполнение не на чем. Живой
-    # повтор 2026-08-10: `coverage=partial` в начале хода и `satisfied=True` в
-    # конце него же. Отказ УДОСТОВЕРЯТЬ — не то же самое, что утверждать провал:
-    # `partially_achieved` и означает «сделано не всё, что просили проверить».
+    # Та же односторонняя власть, другое основание: `obligation_unmet` — долг
+    # остался невыполненным; здесь — часть контракта оператора модуль вообще
+    # не сумел представить. Отказ УДОСТОВЕРЯТЬ не равен утверждению провала:
+    # `partially_achieved` и означает «сделано не всё, что просили».
     if user_contract_partial and declared == "achieved":
         return _displaced(
             "partially_achieved", declared, "user_contract_unrepresented"
         )
-    # Census A2, and authoritative on measured grounds rather than caution. The
-    # answer-safety check raised, so the run delivered a safe refusal instead of
-    # the draft it had written: work happened, the honest outcome reached the
-    # user, and the process was defective. `partially_achieved` is exactly that
-    # — and it also withholds procedure credit and usage eligibility, because a
-    # run whose structural layer failed is not experience anything should be
-    # steered by.
+    # Census A2: the answer-safety check raised, so the run delivered a safe
+    # refusal instead of the draft it had written — work happened, the honest
+    # outcome reached the user, and the process was defective.
+    # `partially_achieved` also withholds procedure credit and eligibility.
     if enforcement_failed and declared == "achieved":
         return _displaced(
             "partially_achieved", declared, "answer_enforcement_failed"
@@ -1238,16 +1186,10 @@ def effective_completion(episode: EpisodeRecord) -> CompletionState:
 
 
 #: Сигналы дефекта, при которых ответ НЕЛЬЗЯ обращать в опыт — ни как эпизод,
-#: пригодный к использованию, ни как заслугу процедуры. Один список на оба
-#: рубежа сознательно: 2026-08-10 они разошлись, и самоопровергнувшийся прогон,
-#: помеченный `usage_eligible=False`, тем же ходом поднял счётчик успехов
-#: единственной активной процедуры. Порознь эти предикаты уже расходились;
-#: общее имя — единственное, что мешает им разойтись снова.
-#:
-#: Сюда попадает только то, что говорит о ЛОЖНОСТИ ответа, и список растёт по
-#: доказанному вреду, не по подозрению: `reasoning_action_mismatch` — чужая
-#: ошибка для процедуры (MIR-057), а `content_refuted` — тот же вред другим
-#: судьёй (2026-08-12, docs/CODE_NOTES.md «REFUTED is a polarity»).
+#: пригодный к использованию, ни как заслугу процедуры. Список ОДИН на оба
+#: рубежа: порознь эти предикаты уже расходились. Сюда попадает только то,
+#: что говорит о ЛОЖНОСТИ ответа, и растёт он по доказанному вреду, не по
+#: подозрению.
 DISQUALIFYING_DEFECT_SIGNALS: frozenset[str] = frozenset(
     {"self_contradiction", "content_refuted", "citation_fabricated"}
 )
@@ -1275,23 +1217,19 @@ def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
     """
     # ПЕРЕД всеми остальными осями, включая исключение для урока: ответ,
     # который сам себя опроверг, не становится опытом ни на каком основании.
-    # 2026-08-10 такой ответ прошёл КАЖДУЮ проверку ниже — outcome success,
-    # completion achieved, verified_chunks 14, качество 1.0 — потому что
-    # верификация меряет разрешимость ссылки, а не истинность референта
-    # (MIR-060). Ложь попала в обучение не в обход правил, а по ним.
+    # Такой ответ проходит КАЖДУЮ проверку ниже, потому что верификация меряет
+    # разрешимость ссылки, а не истинность референта (MIR-060).
     if _answer_disqualified(episode):
         return False
     if "lesson" in episode.tags:
         return True
     if episode.outcome != "success":
         return False
-    # The second axis, and the reason this function exists at all in its
-    # current form: `outcome` reports that the claims held up, which a blocked
-    # non-answer can satisfy perfectly. Both must agree — neither is a
-    # substitute for the other, and this one only ever subtracts permission.
+    # The second axis: `outcome` reports that the claims held up, which a
+    # blocked non-answer can satisfy perfectly. Both must agree — neither
+    # substitutes for the other — and this one only ever subtracts permission.
     # Read from the FROZEN state through the shared accessor, never from
-    # `declared_completion`: what the model claimed is auditable history, and
-    # the structural facts already outranked it when the episode was banked.
+    # `declared_completion`.
     if effective_completion(episode) != "achieved":
         return False
     if any(str(label).startswith("memory:") for label in episode.source_labels):
@@ -1332,15 +1270,11 @@ def admit_for_storage(episode: EpisodeRecord) -> EpisodeRecord:
         episode = replace(
             episode, usage_eligible=decide_usage_eligibility(episode)
         )
-    # The completion axis, same boundary, by the operator's D-6 ruling
-    # (2026-08-02, MIR-064): every NEW record must carry an explicit verdict.
-    # A writer that knows its outcome writes it (the mechanical writers map
-    # through `core/writer_completion.py`); one that cannot classify writes —
-    # or, here, receives — the explicit ``"unknown"``. Absence of the field is
-    # legal only when READING rows that predate the axis; a new row without it
-    # would impersonate that legacy population, which is the provenance break
-    # MIR-064 measured. Write-only, like the eligibility rule above: a `None`
-    # read back off disk stays `None`.
+    # The completion axis, same boundary: every NEW record carries an explicit
+    # verdict. A writer that knows its outcome writes it; one that cannot
+    # classify writes the explicit ``"unknown"``. Absence of the field is
+    # legal only when READING rows that predate the axis. Write-only, like the
+    # eligibility rule above: a `None` read back off disk stays `None`.
     if episode.completion_state is None:
         episode = replace(episode, completion_state="unknown")
     return episode
@@ -1378,21 +1312,18 @@ def _derive_episode_outcome(
     if replan_exhausted:
         return "failed"
     if declared_completion in _NON_DELIVERY_DECLARATIONS:
-        # Measured 2026-08-02: a probe answered "the experiment was not
-        # performed — blocked", banked `completion_state=blocked` and
-        # `outcome=success`, because outcome came from chunk counts alone and a
-        # well-cited non-delivery counts as well-cited. Three layers then told
-        # three different stories: the request asked for work, the answer said
-        # it was not done, memory recorded a success. `usage_eligible=False`
-        # does not repair that — the row still READS as a success.
+        # A well-cited non-delivery used to count as a well-cited success:
+        # outcome came from chunk counts alone, so the request asked for work,
+        # the answer said it was not done, and memory recorded a success.
+        # `usage_eligible=False` does not repair that — the row still READS
+        # as a success.
         return "failed" if declared_completion == "failed" else "partial"
     if unverified > verified:
         # A relative-majority test (mirrors the `weak >= verified` guard
-        # below), not a magic threshold. The old `and verified == 0` let a
-        # single lucky verified chunk immunise an answer with many more
-        # unverified ones, so verified=1/unverified=10 banked as a clean
-        # success (CORE-01/MGA-02). verified=0/unverified=0 is untouched — a
-        # pure general-knowledge answer stays `success`.
+        # below), not a magic threshold: a single lucky verified chunk must
+        # not immunise an answer with many more unverified ones.
+        # verified=0/unverified=0 is untouched — general knowledge stays
+        # `success`.
         return "partial"
     if weak > 0 and weak >= verified:
         # The answer leans at least as much on support the verifier could not
@@ -1452,12 +1383,10 @@ def episode_from_agent_cycle(
     # ledger. Runs without an id keep the random default.
     episode_id = episode_id_for_run(run_id) if run_id else new_id("ep")
     # Normalised once, here, because two things read it: the stored column and
-    # the verdict below. Deriving the authoritative flag from the same signal
-    # list the sensors filled keeps one source of truth — the fact that decides
-    # is the very fact that was recorded, not a parallel recomputation.
-    # Stripped before the blank filter, not after: a whitespace-only entry is
-    # blank in every sense that matters here, and letting one through would put
-    # an unnameable member into a list whose membership decides a verdict.
+    # the verdict below — the fact that decides is the very fact recorded, not
+    # a parallel recomputation. Stripped BEFORE the blank filter, not after:
+    # otherwise a whitespace-only entry becomes an unnameable member of a list
+    # whose membership decides a verdict.
     signals = (
         None if defect_signals is None
         else tuple(dict.fromkeys(
@@ -1513,18 +1442,12 @@ def episode_from_agent_cycle(
     )
 
 
-# Bounds on the two fields that accumulate across episodes. `workflow_key` is
-# the tool sequence, so a common one like `tools:file_read` pools every credited
-# run into a single record (MIR-050) and both fields would otherwise grow with
-# no limit. That is not only disk: the record is rewritten to JSONL on every
-# update and injected into planner prompts by `format_experience_context`, so
-# the growth is paid again on every later run. Unbounded tags also *destroy*
-# retrieval — a record carrying every token matches every query, which is the
-# opposite of what naming the subject was meant to achieve.
-#
-# The most RECENT lessons are kept: the field exists to make pooling visible,
-# and the situations a workflow was used for lately are the ones that describe
-# what it is now being used for.
+# Bounds on the two fields that accumulate across episodes. A common
+# `workflow_key` pools every credited run into one record, so both fields
+# would otherwise grow without limit — and the growth is paid again on every
+# later run, since the record is rewritten to JSONL and injected into planner
+# prompts. Unbounded tags also destroy retrieval: a record carrying every
+# token matches every query. The most RECENT lessons are kept.
 _MAX_LESSONS = 12
 _MAX_TRIGGER_TAGS = 40
 #: Evidence labels shown in one line, before a "+N more" summary. Shared by the
@@ -1571,10 +1494,8 @@ def lesson_from_episode(episode: EpisodeRecord) -> str:
 
 def procedure_from_episode(episode: EpisodeRecord) -> ProcedureRecord | None:
     # Same predicate as the counter and the verdict: a workflow is only worth
-    # minting from a run that finished the job (MIR-057). UNCHANGED by the
-    # lesson work: what a procedure *records* was the defect, not when one is
-    # created, and widening admission would bank better-written lessons behind
-    # the same false successes.
+    # minting from a run that finished the job. Widening admission would bank
+    # better-written lessons behind the same false successes.
     if not procedure_credit_allowed(episode):
         return None
     # Left as the tool sequence on purpose. `resolve_used_procedures` parses it
@@ -1604,12 +1525,9 @@ def procedure_from_episode(episode: EpisodeRecord) -> ProcedureRecord | None:
         name=f"{subject} via {readable_tools}" if subject else f"Workflow using {readable_tools}",
         workflow_key=workflow_key,
         # Question tokens join the tags so retrieval can match on what the
-        # workflow was for. Scoring reads name/tags/steps, and all three were
-        # previously tool names only — a query about the subject scored zero
-        # against every stored procedure.
-        # Tokenised from the FULL question, not from the 60-char display
-        # subject: truncation is a naming concern, and letting it reach the
-        # tags would silently drop the very words a later query arrives with.
+        # workflow was FOR: scoring reads name/tags/steps, and tool names
+        # alone score zero against a query about the subject. Tokenised from
+        # the FULL question, never the 60-char display subject.
         trigger_tags=tuple(dict.fromkeys([
             *episode.tools_used, *episode.tags, *sorted(_tokens(episode.question)),
         ]))[:_MAX_TRIGGER_TAGS],
@@ -1619,12 +1537,10 @@ def procedure_from_episode(episode: EpisodeRecord) -> ProcedureRecord | None:
         success_count=0,
         failure_count=0,
         confidence=0.5,
-        # Born unproven. `upsert_from_episode` immediately folds in the first
-        # episode via `merged_from_episode` — provenance and lesson only, no
-        # counter and no status change (operator ruling 2026-08-02). Promotion
-        # comes solely from the causal feedback path (`apply_episode_feedback`
-        # → `with_outcome`), so a fresh procedure stays `candidate`, never
-        # `active` (MIR-003 A4 maturity gate).
+        # Born unproven. `upsert_from_episode` folds in the first episode via
+        # `merged_from_episode` — provenance and lesson only, no counter and
+        # no status change. Promotion comes solely from the causal feedback
+        # path, so a fresh procedure stays `candidate`, never `active`.
         status="candidate",
     )
 

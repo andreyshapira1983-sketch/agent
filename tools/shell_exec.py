@@ -42,17 +42,14 @@ from core.compensation import CompensationAction, CompensationPlan
 from core.redaction import redact_text
 from tools.base import Risk, Tool, require_ascii_identifier
 
-# Commands whose output is informational only. Calling them does not
-# mutate filesystem or environment.
-# Exit-code semantics, per command FAMILY (MIR-010).
+# Commands whose output is informational only: calling them mutates neither
+# the filesystem nor the environment. Exit-code semantics are per command
+# FAMILY, because a command that ran and answered "no" is not a command that
+# failed — with one word for both, `grep` failing to open a file read exactly
+# like `grep` finding nothing.
 #
-# A command that ran and answered "no" is not a command that failed, and the
-# live defect came from having only one word for both: `shell_exec` reported
-# `status=success` whenever the subprocess started, so `grep` failing to open
-# a file read exactly like `grep` finding nothing.
-#
-# A blanket `exit != 0 -> failure` is the obvious fix and it is wrong. Measured
-# on Windows + git-bash while designing this:
+# A blanket `exit != 0 -> failure` is the obvious fix and it is wrong.
+# Measured on Windows + git-bash:
 #
 #     grep found         exit 0   stderr empty
 #     grep no match      exit 1   stderr empty       <- a legitimate ANSWER
@@ -60,11 +57,11 @@ from tools.base import Risk, Tool, require_ascii_identifier
 #     where not found    exit 1   stderr NON-empty   <- also a legitimate answer
 #     which bad option   exit 255
 #
-# So `where`/`which` write diagnostics on a perfectly ordinary negative
-# result. Sharing grep's "stderr means trouble" rule would turn every "not
-# found" into a failure. Each family therefore carries its own contract, and
-# only the ones that were measured or documented are listed. Anything absent
-# gets the conservative unknown contract.
+# So `where`/`which` write diagnostics on an ordinary negative result, and
+# sharing grep's "stderr means trouble" rule would turn every "not found"
+# into a failure. Each family carries its own contract; only measured or
+# documented ones are listed, and anything absent gets the conservative
+# unknown contract.
 _FAMILY_GREP = frozenset({"grep", "egrep", "fgrep"})
 _FAMILY_FINDSTR = frozenset({"findstr"})
 _FAMILY_RIPGREP = frozenset({"rg"})
@@ -165,14 +162,11 @@ READ_ONLY_SUBCOMMANDS: dict[str, frozenset[str]] = {
     ),
 }
 
-# `branch` and `tag` are listed as read-only, but the check only ever looked at
-# argv[1]. `git branch -f main HEAD` moves a protected ref, `git branch -D` and
-# `git tag -d` delete one — all three classified `read_only`, so the approval
-# gate never saw them. Observed on a live run: the agent created a branch with
-# `git branch <name>` while the tool believed it was reading.
-#
-# So for these two the whole argv is checked: listing flags only, and no
-# positional argument at all, since the positional IS the mutation.
+# `branch` and `tag` are read-only per argv[1], but `git branch -f main HEAD`
+# moves a protected ref and `-D` / `tag -d` delete one — all three would
+# classify as `read_only` and never reach the approval gate. So for these two
+# the WHOLE argv is checked: listing flags only, and no positional argument
+# at all, since the positional IS the mutation.
 LISTING_ONLY_SUBCOMMANDS: dict[str, frozenset[str]] = {
     "branch": frozenset({"--list", "-l", "-a", "--all", "-v", "-vv", "--verbose",
                          "--show-current", "-r", "--remotes", "--color", "--no-color"}),
@@ -181,16 +175,13 @@ LISTING_ONLY_SUBCOMMANDS: dict[str, frozenset[str]] = {
 
 
 # Subcommands that record work the agent has already done. Without them the
-# agent can write a file and run the tests but cannot commit the result, so a
-# programming task can never reach its end — measured on a live decomposition
-# run, where the agent completed the inventory and the baseline and then
-# reported, correctly, that it had no way to finish.
+# agent can write a file and run the tests but never commit the result, so a
+# programming task cannot reach its end.
 #
-# The line is drawn at the repository boundary: these three touch the local
-# index, the working tree and local refs only. `push`, `pull`, `fetch`,
-# `clone` (network), and `reset`, `rebase`, `merge`, `cherry-pick` (rewrite
-# existing history) stay out. Recording new work is not the same permission as
-# altering work already recorded.
+# The line is the repository boundary: these three touch the local index,
+# working tree and local refs only. `push`/`pull`/`fetch`/`clone` (network)
+# and `reset`/`rebase`/`merge`/`cherry-pick` (rewriting existing history)
+# stay out — recording new work is not permission to alter recorded work.
 WRITE_SUBCOMMANDS: dict[str, frozenset[str]] = {
     "git": frozenset({"add", "commit", "checkout"}),
 }
@@ -222,11 +213,9 @@ DEFAULT_OUTPUT_CAP = 64 * 1024  # 64 KiB per stream
 
 class ShellExecTool(Tool):
     name = "shell_exec"
-    # What this says is what the planner believes it may do. When the
-    # permissions grew and this text did not, the planner read the stale list,
-    # concluded it could not commit, and reported a failure it had never
-    # attempted — measured on a live run. Keep this in step with
-    # READ_ONLY_SUBCOMMANDS / WRITE_SUBCOMMANDS.
+    # What this says is what the planner believes it may do: a stale list is
+    # read as the contract, and the planner reports failures it never
+    # attempted. Keep in step with READ_ONLY_SUBCOMMANDS / WRITE_SUBCOMMANDS.
     description = (
         "Execute ONE whitelisted shell command inside the workspace. "
         "Read-only commands (whoami, hostname, where/which, git "
@@ -481,10 +470,8 @@ class ShellExecTool(Tool):
             )
         if not current.startswith(AGENT_BRANCH_PREFIX):
             # The rule this file states is "a branch the agent created", and
-            # enumerating forbidden names does not say that: it let the agent
-            # record onto any operator branch that simply was not called main.
-            # Observed on a live run — it staged onto the operator's own
-            # working branch. Requiring the prefix is the stated rule.
+            # enumerating forbidden names does not say that — it permits any
+            # operator branch not called main. Requiring the prefix does.
             raise PermissionError(
                 f"shell_exec '{cmd} {sub}' refused on '{current}': the agent "
                 f"records only on a branch it created under "
@@ -532,12 +519,11 @@ class ShellExecTool(Tool):
             # "nothing to undo" — true of `git log`, false here.
             #
             # The plan is a noop because the undo is not this tool's to
-            # perform: `reset` and `rebase` are deliberately outside the
-            # whitelist, and a compensation that rewrites history would hand
-            # back the permission the whitelist withholds. What bounds this
-            # instead is stated, not implied — the work lands on a branch the
-            # agent made, never on a protected one, and the policy gate asked
-            # before it ran.
+            # perform: `reset` and `rebase` are outside the whitelist, and a
+            # compensation that rewrites history would hand back the very
+            # permission the whitelist withholds. What bounds this instead is
+            # stated: the work lands on a branch the agent made, never on a
+            # protected one, and the policy gate asked before it ran.
             return CompensationPlan.noop(
                 tool_name=self.name,
                 description=(
@@ -776,15 +762,12 @@ class ShellExecTool(Tool):
             return "findstr"
         return cmd
 
-    # Git reads the committer's name and e-mail from the user's global config,
-    # which it finds through HOME (POSIX) or USERPROFILE/HOMEDRIVE+HOMEPATH
-    # (Windows). Without them `git commit` dies on "Author identity unknown"
-    # even though every other check passed — measured on a live run that had
-    # already written the files, run the tests and staged them.
-    #
-    # These name a directory. They carry no credential, unlike the rest of the
-    # environment this deliberately withholds, and git only reads its own
-    # config files there.
+    # Git reads the committer identity from the user's global config, found
+    # through HOME (POSIX) or USERPROFILE/HOMEDRIVE+HOMEPATH (Windows).
+    # Without them `git commit` dies on "Author identity unknown" even when
+    # every other check passed. These name a directory, carry no credential
+    # unlike the rest of the environment this withholds, and git only reads
+    # its own config files there.
     _GIT_IDENTITY_ENV: tuple[str, ...] = (
         "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
     )
@@ -798,11 +781,10 @@ class ShellExecTool(Tool):
             if sr:
                 env["SystemRoot"] = sr
             # PATHEXT is how Windows turns the NAME `python` into `python.exe`.
-            # Without it every by-name lookup fails, and the agent asking its own
-            # environment a question gets a false negative: measured 2026-08-04,
-            # `where python` returned exit 1 on the very machine where python is
-            # on PATH, and the agent concluded from that its tools might not be
-            # connected. It carries no credential — it is a list of suffixes.
+            # Without it every by-name lookup fails and the agent asking its own
+            # environment a question gets a FALSE NEGATIVE — it concludes its
+            # tools may not be connected. It carries no credential; it is a
+            # list of suffixes.
             pathext = os.environ.get("PATHEXT")
             if pathext:
                 env["PATHEXT"] = pathext
