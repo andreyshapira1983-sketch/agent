@@ -161,7 +161,8 @@ Two more traps that are *by design*, not drift:
 
   `docs/audit/PROVIDER_STRUCTURED_OUTPUT_AUDIT.md` and
   `docs/audit/PROVIDER_AUDIT_CHECKPOINT.md` — `docs/audit/` today holds
-  `MASTER_ISSUE_REGISTRY.md` and nothing else.
+  `MASTER_ISSUE_REGISTRY.md` and, since 2026-08-20,
+  `TEST_SUITE_AS_INSTRUMENT.md`.
 
   `архитектура автономного Агента.txt` (repo root) — this section called it
   **source-of-truth entry #2** and recorded it as *read in full on 2026-07-21*.
@@ -201,6 +202,7 @@ frozen operator protocol.
 | `CODE_NOTES.md` | why a change was made, with its live measurement | active reference; **binds nothing** | engineers and models arriving from a pointer in code (90 inbound) |
 | `PROJECT_MAP.ru.md` | the project map for the operator, in Russian | active reference | operator |
 | `audit/MASTER_ISSUE_REGISTRY.md` | defect status — the only live `MIR-` ledger | **authoritative for status** | engineering; the self-improvement signal gatherer |
+| `audit/TEST_SUITE_AS_INSTRUMENT.md` | what the suite can and cannot falsify, measured by breaking working code | active record; **binds nothing** | whoever is about to trust a green run |
 | `MISTAKE_NOTEBOOK.md` | mistakes caught live: symptom, cost, self-check | active reference | whoever is about to say "done" |
 | `EVIDENCE_PROTOCOL.md` | how several models may argue without confirming each other | **specification — nothing is built** | design work only |
 | `COGNITIVE_CORE.md` | the core boundary and its gates, proven from code | active reference | engineering |
