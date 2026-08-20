@@ -1,9 +1,7 @@
 """CEO tier-0 file line counts vs soft ceilings.
 
-See knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md. Read-only; does not modify the repo.
-
-Usage:
-    python scripts/check_ceo_file_baseline.py
+See knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md. Read-only; does not
+modify the repo.
 """
 from __future__ import annotations
 

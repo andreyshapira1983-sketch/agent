@@ -1,19 +1,4 @@
-"""Is the production subject still the frozen snapshot S?
-
-The mapping program characterises ONE snapshot. A human reading an empty
-`git diff --stat` is not a guard: it is a habit that fails silently on the day it
-matters. This exits non-zero on either way the subject can move.
-
-TRACKED DRIFT is the obvious one. UNTRACKED ADDITION is the one that hides: a new
-module under `core/` changes what the agent is without altering a single existing
-byte, and every "no changes" report stays true.
-
-    QM-SUBJECT: INTACT | TRACKED_DRIFT | UNTRACKED_ADDITION | BOTH | UNREADABLE
-
-Exit code follows the verdict, so callers may read either. Paths under `scripts/`,
-`tests/`, `docs/` and `knowledge/` are NOT the subject -- the laboratory is allowed
-to grow while the thing it describes stays still.
-"""
+"""Is the production subject still the frozen snapshot S?"""
 from __future__ import annotations
 
 import subprocess

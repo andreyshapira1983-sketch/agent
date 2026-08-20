@@ -2,24 +2,21 @@
 
 Autonomous runs must be *safe by default*. The persistent budget ledger
 (:mod:`core.budget_ledger`) already tracks hour/day spend, but it treats a
-missing or all-zero limit as *unlimited* — which is exactly the wrong default
-for an unattended daemon that can otherwise keep spending after the day budget
-is exhausted.
+missing or all-zero limit as *unlimited* — which is exactly the wrong
+default for an unattended daemon that can otherwise keep spending after the
+day budget is exhausted.
 
-This module adds two guarantees on top of the existing ledger, WITHOUT changing
-routing, provider catalogs, file-write / shell policies, or raising any limit:
-
-1. **Budget-on-by-default.** In autonomous mode a conservative *day* limit is
-   applied to the money/compute-heavy counters whenever no positive limit is
-   configured, so "no config" never means "unlimited".
-2. **Persistent kill-switch.** When a day-window counter reaches its effective
-   limit the switch latches to a small JSON state file. Once latched it stays
-   active across process restarts until an operator clears it, so repeated
-   ticks cannot keep spending.
+1. **Budget-on-by-default.** In autonomous mode a conservative *day* limit
+is applied to the money/compute-heavy counters whenever no positive limit is
+configured, so "no config" never means "unlimited". 2. **Persistent kill-
+switch.** When a day-window counter reaches its effective limit the switch
+latches to a small JSON state file. Once latched it stays active across
+process restarts until an operator clears it, so repeated ticks cannot keep
+spending.
 
 The evaluation logic is a pure function so it is trivially testable; the
-:class:`BudgetKillSwitch` class only adds persistence (load / latch / clear) and
-a read-only status view.
+:class:`BudgetKillSwitch` class only adds persistence (load / latch / clear)
+and a read-only status view.
 """
 from __future__ import annotations
 
@@ -192,12 +189,7 @@ def default_path(workspace: Path) -> Path:
 
 @dataclass
 class BudgetKillSwitch:
-    """Persistence + latching around :func:`evaluate_day_budget`.
-
-    Once engaged the state is written to :attr:`path` and stays active across
-    restarts until :meth:`clear` is called, so an exhausted day budget cannot be
-    silently reset by simply starting a new process.
-    """
+    """Persistence + latching around :func:`evaluate_day_budget`."""
 
     path: Path
     conservative_limits: Mapping[str, int] = field(
@@ -259,12 +251,7 @@ class BudgetKillSwitch:
         *,
         now_iso: str | None = None,
     ) -> KillSwitchState:
-        """Daemon gate: latch on a fresh trip, honour an existing latch.
-
-        Returns the effective state. If already latched active, the original
-        latch (and its timestamp) is preserved. If a live evaluation trips for
-        the first time, the state is persisted before returning.
-        """
+        """Daemon gate: latch on a fresh trip, honour an existing latch."""
         latched = self.load()
         if latched.active:
             return latched

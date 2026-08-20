@@ -29,13 +29,7 @@ def _replacement(kind: str) -> str:
 
 
 def redact_text(text: str) -> tuple[str, list[SecretFinding]]:
-    """Replace every secret span with a `[REDACTED:<kind>]` token.
-
-    Returns (redacted_text, findings). Overlapping matches are resolved
-    by sorting hits by start position descending and skipping any range
-    fully contained inside an earlier (later-replaced) range. This keeps
-    offsets stable during substitution.
-    """
+    """Replace every secret span with a `[REDACTED:<kind>]` token."""
     if not isinstance(text, str) or not text:
         return text, []
 
@@ -132,16 +126,13 @@ def redact_dlp_text(
 def redact_payload(obj: Any) -> Any:
     """Deep-walk a logging payload, redacting every string field.
 
-    Works on the JSON-serialisable shape that `TraceLogger._serialize`
-    produces: dict / list / tuple / scalars. Pydantic models should be
-    dumped first (logger already does that), then passed in here.
-
     Mapping keys are also read as evidence about their value. `redact_text`
-    already masks `password: hunter2`, because the scanner treats those names
-    as proof that what follows is a secret. Structured payloads are the form
-    the logger actually receives, and an opaque value there matches no regex,
-    so without the key it is indistinguishable from prose. Keys themselves are
-    never rewritten — they describe schema, and losing them loses the log.
+    already masks `password: hunter2`, because the scanner treats those
+    names as proof that what follows is a secret. Structured payloads are
+    the form the logger actually receives, and an opaque value there matches
+    no regex, so without the key it is indistinguishable from prose. Keys
+    themselves are never rewritten — they describe schema, and losing them
+    loses the log.
     """
     if isinstance(obj, str):
         red, _secret_findings, _pii_findings = redact_dlp_text(obj)

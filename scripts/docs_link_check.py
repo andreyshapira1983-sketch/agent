@@ -34,12 +34,8 @@ _LINE_ANCHOR_RE = re.compile(r":\d+(?:-\d+)?$")
 
 
 def _doc_files() -> list[str]:
-    """Every Markdown the repository owns: root README, ``docs/``, ``knowledge/``.
-
-    ``knowledge/`` is included since 2026-08-07, when what the agent reads moved
-    out of ``docs/``. A broken link there is worse than in prose: those files are
-    injected into the agent's context, so a pointer that no longer resolves
-    becomes a wasted step at runtime, not a nuisance for a reader.
+    """Every Markdown the repository owns: root README, ``docs/``,
+    ``knowledge/``.
     """
     files: list[str] = []
     readme = os.path.join(_ROOT, "README.md")

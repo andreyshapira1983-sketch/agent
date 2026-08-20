@@ -75,16 +75,9 @@ def _passes_positive_reuse(episode: EpisodeRecord) -> bool:
 def _passes_lesson_context(episode: EpisodeRecord) -> bool:
     """Admission through the curated-lesson arm, which ignores completion.
 
-    Surfacing a past failure as a warning is the whole purpose of the tag, so
-    this is a deliberate exception and is counted on its own line, never as an
-    anomaly.
-
-    Reads `is_usage_eligible` — the STORED bit — because that is what
-    retrieval reads. `decide_usage_eligibility` is the banking-time policy and
-    answers a different question: for a lesson it returns True whatever the
-    stored bit says. Using it here reported 108 legacy lessons as admitted
-    when the live agent admits none of them, and a diagnostic that overstates
-    what memory is reachable is worse than no diagnostic.
+    Surfacing a past failure as a warning is the whole purpose of the tag,
+    so this is a deliberate exception and is counted on its own line, never
+    as an anomaly.
     """
     return _is_lesson(episode) and is_usage_eligible(episode)
 
@@ -94,17 +87,7 @@ def _passes_fast_path(episode: EpisodeRecord) -> bool:
 
 
 def _backfill_candidate(episode: EpisodeRecord) -> bool:
-    """Would the migration settle this record's verdict?
-
-    Delegates to `scripts/completion_backfill.py`, the single decision point, so a
-    row this report calls a candidate is exactly a row the migration would
-    write, and nothing else. Restating the rule here is how a diagnostic starts
-    lying about a migration it no longer matches.
-
-    `replan_exhausted` alone does not qualify: the cycle's assembly table also
-    needs `aborted_reason` and a declaration, neither of which was persisted, so
-    no migration implements that path.
-    """
+    """Would the migration settle this record's verdict?"""
     return writer_backfill_verdict(episode.to_dict()) is not None
 
 

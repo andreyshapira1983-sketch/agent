@@ -1,42 +1,24 @@
-"""Read-only guard: the command registry and knowledge/maps/COMMANDS_MAP.md must agree.
+"""Read-only guard: the command registry and knowledge/maps/COMMANDS_MAP.md
+must agree.
 
-``knowledge/maps/COMMANDS_MAP.md`` claims to be the authoritative map of the real operator
-command surface ("if a command is not here, it does not exist"). This guard holds
-it to that claim by comparing it against ``cli/command_registry.py`` in **both**
-directions: every command in the registry must be documented, and the document
-must not list a command the registry does not have.
+``knowledge/maps/COMMANDS_MAP.md`` claims to be the authoritative map of the
+real operator command surface ("if a command is not here, it does not
+exist"). This guard holds it to that claim by comparing it against
+``cli/command_registry.py`` in **both** directions: every command in the
+registry must be documented, and the document must not list a command the
+registry does not have.
 
-Why the registry and not ``main.py``
-------------------------------------
-This check used to scan ``main.py`` for the ``head ==`` / ``head in {...}``
-dispatch chain. That made it silently useless the moment dispatch moved out of
-``main.py``: the extracted token set would shrink and the comparison would keep
-*passing*. The registry is the stable description of the surface, and it is tied
-to the running code by ``tests/test_command_registry.py``, which re-derives the
-dispatch chain and requires an exact match. So the chain of custody is:
-
-    dispatch chain in main.py  --(tests/test_command_registry.py)-->  registry
-    registry  --(this script)-->  knowledge/maps/COMMANDS_MAP.md
-
-``dispatched_commands()`` below is still the shared parser for the first link and
-is used by those tests; this script's own verdict no longer depends on it.
-
-Contract / non-goals
---------------------
-- Only the first column of the ``COMMANDS_MAP`` tables is read — the backticked
-  signature cell. Command names mentioned in prose are not treated as
-  documentation (the older whole-file scan wrongly picked up ``:command`` and
-  ``:commands`` from an example).
+Contract / non-goals -------------------- - Only the first column of the
+``COMMANDS_MAP`` tables is read — the backticked signature cell. Command
+names mentioned in prose are not treated as documentation (the older whole-
+file scan wrongly picked up ``:command`` and ``:commands`` from an example).
 - An escaped pipe separates aliases in that cell, but a usage sketch such as
-  ``[on\\|off\\|status]`` uses the same escape, so a part only starts a new alias
-  when it begins with a real token.
-- ``?`` is documented as an alias of ``:help`` but lives outside the ``:token``
-  namespace; the registry models it separately and it is skipped here.
-- Pure read-only: it reads two files and imports one pure-data module. No
-  runtime import, no shell-out, no network access.
-
-Exit 0 when both directions agree; exit 1 (and print the offenders) otherwise.
-Wired into CI via ``tests/test_commands_map_check.py``.
+``[on\\|off\\|status]`` uses the same escape, so a part only starts a new
+alias when it begins with a real token. - ``?`` is documented as an alias of
+``:help`` but lives outside the ``:token`` namespace; the registry models it
+separately and it is skipped here. - Pure read-only: it reads two files and
+imports one pure-data module. No runtime import, no shell-out, no network
+access.
 """
 from __future__ import annotations
 
@@ -60,12 +42,7 @@ _ROW_TOKEN_RE = re.compile(r"^(" + _CMD + r")(?:\s|$)")
 
 
 def dispatched_commands(source: str) -> set[str]:
-    """Command tokens dispatched via the ``head`` chain in ``source``.
-
-    Kept as the shared parser for the code-to-registry link that
-    ``tests/test_command_registry.py`` and the characterization snapshot assert.
-    This script's verdict does not use it.
-    """
+    """Command tokens dispatched via the ``head`` chain in ``source``."""
     cmds: set[str] = set(_EQ_RE.findall(source))
     for block in _IN_RE.findall(source):
         cmds.update(_TOKEN_IN_SET_RE.findall(block))

@@ -1,12 +1,4 @@
-"""Read-only operator status REPL handlers and digest formatters.
-
-Split out of ``main.py``. Collects architecture/runtime/queue/scheduler/budget
-state and prints operator-facing reports. Does not own task-queue dispatch,
-scheduler mutations, or approval decision handlers.
-
-``main.py`` re-exports the public handlers (and ``_operator_digest_payload`` for
-other handlers that still live in ``main``).
-"""
+"""Read-only operator status REPL handlers and digest formatters."""
 from __future__ import annotations
 
 import json
@@ -311,12 +303,7 @@ def _handle_operator_capability_check(agent: AgentLoop, workspace: Path) -> bool
 
 
 def _runtime_capability_facts(agent: AgentLoop) -> dict:
-    """Live runtime introspection: what THIS running agent actually has wired.
-
-    Reads the agent's own tool registry and memory handles (the same source
-    session_start logs), so a "what can you do now" question is answered from
-    the running process, not from README/web guesses (#2 introspection gap).
-    """
+    """Live runtime introspection: what THIS running agent actually has wired."""
     try:
         tools = sorted(tool.name for tool in agent.registry.list())
     except Exception:  # noqa: BLE001 — introspection must never crash the command

@@ -1,14 +1,10 @@
 """``:self-task-propose`` REPL command (roadmap Stage 1, Stage A).
 
-A single narrow operator trigger that runs the Stage-A *task producer*: from a
-real ``# TODO``/``# FIXME`` comment in the codebase it generates one coding task
-plus a failing acceptance test and drops a single approval item
-(``operation="self_build_task.approve"``) into the approval inbox.
-
-It NEVER writes implementation code and NEVER applies anything. The human reads
-the proposed test, approves the task with ``:approval-approve``, then triggers
-the implementation with ``:self-task-build`` (Stage B). Both applied steps stay
-behind human-in-the-loop approval and the existing self-apply lane.
+It NEVER writes implementation code and NEVER applies anything. The human
+reads the proposed test, approves the task with ``:approval-approve``, then
+triggers the implementation with ``:self-task-build`` (Stage B). Both
+applied steps stay behind human-in-the-loop approval and the existing self-
+apply lane.
 """
 from __future__ import annotations
 

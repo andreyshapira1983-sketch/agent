@@ -1,15 +1,11 @@
 """Russian question, English record — one domain vocabulary between them.
 
-The operator writes in Russian; every repository artefact, persistent memory
-included, is written in English. Retrieval scores by word overlap, so the two
-never meet: measured on the live store, "кто владеет архитектурой?" recalled
-0 records while "who owns the architecture?" recalled 3.
-
-Deliberately a table, not a translator: no model call, no embeddings, so recall
-stays deterministic and testable — the same contract the retrieval policy states
-for itself. Keys are STEMS, matched as prefixes, because Russian inflects
-("архитектура / архитектурой / архитектуры"). Keep entries to terms this project
-actually uses; a general dictionary would make every question match everything.
+Deliberately a table, not a translator: no model call, no embeddings, so
+recall stays deterministic and testable — the same contract the retrieval
+policy states for itself. Keys are STEMS, matched as prefixes, because
+Russian inflects ("архитектура / архитектурой / архитектуры"). Keep entries
+to terms this project actually uses; a general dictionary would make every
+question match everything.
 """
 from __future__ import annotations
 
@@ -72,14 +68,7 @@ _LATIN_RE = re.compile(r"[a-zA-Z]")
 
 
 def recall_language_diagnostics(question: str) -> dict[str, object]:
-    """Whether a recall miss can be blamed on the language gap, or not.
-
-    Journalled on every miss so the decision about a bigger fix — translating
-    the question, or semantic search — is made from counted misses instead of
-    an impression. A miss on a Cyrillic question that this table could not
-    widen at all (`bilingual_terms_added: 0`) is the case the table does not
-    cover; a miss with terms added is a genuine "we do not know that".
-    """
+    """Whether a recall miss can be blamed on the language gap, or not."""
     text = question or ""
     has_cyrillic = bool(_CYRILLIC_RE.search(text))
     has_latin = bool(_LATIN_RE.search(text))

@@ -1,9 +1,4 @@
-"""Persistent budget windows for long-running autonomous work.
-
-`BudgetGovernor` protects one runtime invocation. This ledger protects across
-processes/sessions by writing JSONL records and checking time windows such as
-"hour" and "day" before expensive actions are allowed.
-"""
+"""Persistent budget windows for long-running autonomous work."""
 from __future__ import annotations
 
 import json

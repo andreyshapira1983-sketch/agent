@@ -1,11 +1,4 @@
-"""Argument parsers and small text helpers for the REPL command layer.
-
-These are pure, dependency-light functions split out of ``main.py`` to keep
-the entry point focused on the REPL loop and command dispatch. ``main.py``
-used to re-export every name below; Phase 7 removed that block, so import them
-from here. (Historical note: ``from main import _parse_remember`` and the
-rest) keep working exactly as before.
-"""
+"""Argument parsers and small text helpers for the REPL command layer."""
 from __future__ import annotations
 
 import os
@@ -25,10 +18,6 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 def _parse_remember(rest: str) -> tuple[list[str], str]:
     """Parse `:remember [tag,tag] text...` into (tags, content).
-
-    Tags are detected when the first whitespace-separated token contains a
-    comma OR matches a known consent tag. Anything else is treated as part
-    of the content with the default tag list.
 
     ASCII-only identifier policy applies to TAGS (they are identifiers).
     `content` may contain any unicode (it's human text).

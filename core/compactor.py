@@ -1,28 +1,14 @@
 """Conversation history compaction (Anthropic 2025 — context engineering).
 
-Anthropic's Sep 2025 guidance on context engineering recommends *compacting*
-older conversation turns into a condensed summary rather than dropping them
-silently when the context window pressures rise. Our default `WorkingMemory`
-trims oldest turns once `max_turns` is exceeded — that addresses MAST FM-1.4
-("loss of conversation history") at the storage level but loses the gist.
+* Default summarizer is **deterministic** (no LLM call): it lists each user
+question, the tools that were exercised, and a one-line answer excerpt.
+Cheap, predictable, no extra latency or cost. * An optional ``summarizer``
+callable can be supplied for richer LLM- driven compaction (e.g. via Haiku).
+The callable receives the list of `Turn` objects and must return the summary
+string.
 
-This module produces a single synthetic `Turn` summarizing N older turns:
-
-* Default summarizer is **deterministic** (no LLM call): it lists each
-  user question, the tools that were exercised, and a one-line answer
-  excerpt. Cheap, predictable, no extra latency or cost.
-* An optional ``summarizer`` callable can be supplied for richer LLM-
-  driven compaction (e.g. via Haiku). The callable receives the list of
-  `Turn` objects and must return the summary string.
-
-Usage:
-
-    new_turns, summary_turn = compact_turns(mem.turns, keep_recent=3)
-    if summary_turn is not None:
-        mem.turns = new_turns
-
-Always returns a list whose first element (when compaction occurred) is
-the synthetic summary turn carrying the index of the latest dropped turn,
+Always returns a list whose first element (when compaction occurred) is the
+synthetic summary turn carrying the index of the latest dropped turn,
 followed by the kept recent turns in original order.
 """
 

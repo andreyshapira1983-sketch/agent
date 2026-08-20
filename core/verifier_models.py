@@ -19,17 +19,7 @@ class Citation:
 
 @dataclass(frozen=True)
 class ClaimReason:
-    """WHY a claim did not survive its check — structured, not a sentence.
-
-    A verdict is a stamp: it tells the agent it was wrong. This tells it what
-    to change. The distinction is the operator's criterion for MIR-060 — a
-    label that flips means the instrument got honest; only a usable reason can
-    make the next attempt better, and only if it reaches the next attempt.
-
-    Fields are separate rather than one string because the consumers differ:
-    the replan context wants `explanation`, a future gate may branch on `code`,
-    and a human reading the journal wants `expected`/`actual` side by side.
-    """
+    """WHY a claim did not survive its check — structured, not a sentence."""
 
     code: str                 # `sum_mismatch`, `count_mismatch`, ...
     expected: str = ""        # what the source implies

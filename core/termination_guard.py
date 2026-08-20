@@ -101,12 +101,8 @@ class TerminationGuard:
         failure_codes: Iterable[str],
         artifact_labels: Iterable[str],
     ) -> StagnationEvent | None:
-        """Record one attempt's outcome and return an event the FIRST time
-        the same (failures, artifacts) signature is seen twice in a row.
-
-        Subsequent identical attempts in the same chain do not re-fire to
-        keep the log signal a single edge, not a stream.  Resetting to a
-        different signature re-arms the detector.
+        """Record one attempt's outcome and return an event the FIRST time the
+        same (failures, artifacts) signature is seen twice in a row.
         """
         sig = _signature(failure_codes, artifact_labels)
         if self._last_signature is not None and sig == self._last_signature:
@@ -134,10 +130,6 @@ class TerminationGuard:
     ) -> PrematureCompletionEvent | None:
         """Flag premature completion: empty evidence on a tool-demanding
         question, with no artifacts produced anywhere in the run.
-
-        Question-class detection is intentionally narrow (a few high-
-        signal verbs) so generic conversation and definition lookups
-        don't trip the alarm.
         """
         if had_any_artifacts or chain_size > 0:
             return None

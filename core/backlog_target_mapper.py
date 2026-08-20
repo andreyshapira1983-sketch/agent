@@ -1,14 +1,10 @@
-"""Deterministic mapper from abstract backlog items to concrete self-build targets.
+"""Deterministic mapper from abstract backlog items to concrete self-build
+targets.
 
-The grounded backlog selector may surface a real but abstract debt item such as
-``TD-011 / TD-012``. The self-build producer cannot safely hand that abstract
-label to the Builder; it needs a concrete file target with local evidence. This
-module is the narrow translation layer:
-
-* known patterns only;
-* project-owned local evidence only;
-* no LLM, network, git, writes, approvals, scheduler, or runtime state access;
-* missing/broken evidence returns ``unknown`` / ``no_target`` instead of raising.
+* known patterns only; * project-owned local evidence only; * no LLM,
+network, git, writes, approvals, scheduler, or runtime state access; *
+missing/broken evidence returns ``unknown`` / ``no_target`` instead of
+raising.
 """
 from __future__ import annotations
 
@@ -107,12 +103,7 @@ def map_backlog_candidate(
     workspace: str | Path,
     allowed_targets: Iterable[str] = (),
 ) -> TargetMappingResult:
-    """Map a grounded backlog candidate to a concrete self-build target.
-
-    Already-concrete allowlisted candidates pass through as ``concrete``. Known
-    abstract patterns may map to a small explicit target when local evidence
-    proves the link. Everything else refuses.
-    """
+    """Map a grounded backlog candidate to a concrete self-build target."""
     if candidate is None:
         return TargetMappingResult("no_target", "no grounded backlog candidate")
 

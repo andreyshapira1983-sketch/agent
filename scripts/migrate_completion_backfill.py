@@ -1,28 +1,12 @@
-"""Settle the completion axis on episodes banked before their writer learned to.
+"""Settle the completion axis on episodes banked before their writer learned
+to.
 
-Nine rows in the live store carry no completion verdict while
-`admit_for_storage` marks them `usage_eligible=True` (MIR-042, so lessons stop
-being invisible). Retrieval therefore replays them carrying no verdict at all —
-the one thing `test_no_legacy_episode_in_the_live_store_is_ever_admitted`
-forbids. The writers that banked them now settle the axis; this script settles it
-for what they wrote earlier.
-
-**What it will not do.** It does not classify records generally. Every decision
-comes from :func:`scripts.completion_backfill.writer_backfill_verdict`, which proves
-a writer signature *before* consulting the shared table — so a cycle-banked row
-is left untouched even when its `outcome` looks mappable. Rows that already carry
-a verdict are never re-decided (MIR-057: the axis is settled once).
-
-**How it writes.** Rows are integrity-envelope encoded, so hand-editing the file
-corrupts it. The rewrite goes through `state_file_lock` +
-`rewrite_state_jsonl_unlocked`, the same path the store itself uses when pruning
-(`core/smart_memory.py:505-532`), and only the `completion_state` key is added —
-no `from_dict`/`to_dict` round trip that could silently normalise other fields.
-
-Dry-run is the default. `--apply` writes, after taking a timestamped backup.
-
-    python scripts/migrate_completion_backfill.py            # show the plan
-    python scripts/migrate_completion_backfill.py --apply    # write it
+**How it writes.** Rows are integrity-envelope encoded, so hand-editing the
+file corrupts it. The rewrite goes through `state_file_lock` +
+`rewrite_state_jsonl_unlocked`, the same path the store itself uses when
+pruning (`core/smart_memory.py:505-532`), and only the `completion_state`
+key is added — no `from_dict`/`to_dict` round trip that could silently
+normalise other fields.
 """
 
 from __future__ import annotations

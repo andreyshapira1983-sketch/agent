@@ -1,10 +1,4 @@
-"""Static architecture gap audit for the autonomous agent project.
-
-This is an operator control-plane helper, not an LLM judgement. It checks
-whether key architecture layers have concrete code/tests and highlights the
-gaps that matter before moving from dry-run team planning to real sub-agent
-execution.
-"""
+"""Static architecture gap audit for the autonomous agent project."""
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -1,38 +1,18 @@
 """Deterministic evaluation of arithmetic claims against a key=value excerpt.
 
-MIR-060 direction (b). The verifier's verdict tracks whether a citation
-resolved, never whether the claim follows from what was cited, so
-"the three values sum to 99" scores `verified` against `alpha=1 beta=2
-gamma=3`. Three of the four false claims measured on the capability bench are a
-sum, a count and a comparison — all decidable from the excerpt with no model at
-all. This module decides them.
-
-## Two rules it does not break
-
 **It computes, it does not guess.** Every verdict here is arithmetic over
-numbers parsed out of the excerpt. Where a claim's shape is not recognised the
-answer is :data:`SILENT`, never `REFUTES` — a checker that refuses to judge
-costs a missed defect, one that judges by resemblance costs a false accusation,
-and only the second is unrecoverable.
+numbers parsed out of the excerpt. Where a claim's shape is not recognised
+the answer is :data:`SILENT`, never `REFUTES` — a checker that refuses to
+judge costs a missed defect, one that judges by resemblance costs a false
+accusation, and only the second is unrecoverable.
 
 **A refutation carries its working.** :class:`ClaimVerdict` returns the
-expected value, the value the claim asserted, and the numbers the computation
-used. A bare "no" tells the agent it was wrong; "sum is 6, not 99, over
-alpha=1 beta=2 gamma=3" tells it what to change. That difference is the whole
-point of the direction — the operator's criterion is that a label change means
-the instrument got honest, and only a usable reason can make the next attempt
-better.
-
-## What it recognises
-
-  sum          "the values sum to N",     "сумма ... N"
-  average      "the average is N",        "среднее ... N"
-  count        "defines N keys",          "N ключей"
-  comparison   "X is smaller than Y",     "X больше Y"
-  multiple     "X is N times Y",          "X в N раз больше Y"
-
-Anything else is `SILENT`. The list grows by measurement — a shape is added
-when a bench task needs it, not because it might occur.
+expected value, the value the claim asserted, and the numbers the
+computation used. A bare "no" tells the agent it was wrong; "sum is 6, not
+99, over alpha=1 beta=2 gamma=3" tells it what to change. That difference is
+the whole point of the direction — the operator's criterion is that a label
+change means the instrument got honest, and only a usable reason can make
+the next attempt better.
 """
 from __future__ import annotations
 

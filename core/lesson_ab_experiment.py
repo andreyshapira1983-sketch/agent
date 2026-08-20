@@ -1,10 +1,4 @@
-"""The differentiating experiment: lesson OFF vs ON, everything else equal.
-
-Operator design 2026-08-17: same task class, arm A without the lesson, arm
-B with it, same model and candidate; the phantom instruments judge each
-generation, and the verdict vocabulary stays calibrated — one clean
-discrimination proves MECHANISM, never «эффект доказан навсегда».
-"""
+"""The differentiating experiment: lesson OFF vs ON, everything else equal."""
 from __future__ import annotations
 
 import ast

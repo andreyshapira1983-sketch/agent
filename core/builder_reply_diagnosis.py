@@ -1,12 +1,8 @@
 """Say what was wrong with a builder reply, in words rather than in silence.
 
-The first version of this named only the raw length, so a live rejection that
-cost 183 budget units explained nothing — the actual cause was a single stray
-backslash. Each answer here is meant to be actionable on its own.
-
-The distinction that matters most is "ran out of room" versus "wrote nonsense":
-they used to sound identical, and the veto that followed blamed the target file
-(MIR-083), which taught the agent to avoid files its own generator choked on.
+The first version of this named only the raw length, so a live rejection
+that cost 183 budget units explained nothing — the actual cause was a single
+stray backslash. Each answer here is meant to be actionable on its own.
 """
 from __future__ import annotations
 

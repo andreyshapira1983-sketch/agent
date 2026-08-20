@@ -1,13 +1,11 @@
 """Budget / autonomy-readiness REPL commands and their pure helpers.
 
 Split out of ``main.py``. These functions form a self-contained group: they
-only call each other, ``cli.parsers._split_meta_args``, and ``core`` classes —
-never back into ``main``. The two hybrid handlers that also need the operator
-digest (``_handle_operator_budget`` / ``_handle_autonomy_readiness``) stay in
-``main.py`` to avoid an import cycle.
-
-``main.py`` re-exports every name below, so existing imports and the REPL
-dispatch keep working unchanged.
+only call each other, ``cli.parsers._split_meta_args``, and ``core`` classes
+— never back into ``main``. The two hybrid handlers that also need the
+operator digest (``_handle_operator_budget`` /
+``_handle_autonomy_readiness``) stay in ``main.py`` to avoid an import
+cycle.
 """
 from __future__ import annotations
 

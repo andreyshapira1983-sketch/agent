@@ -1,10 +1,4 @@
-"""Network safety helpers for read-only HTTP tools.
-
-The fetch tools are intentionally small, but their network boundary has to be
-strict: a URL that looks public can redirect to localhost, or a hostname can
-resolve to a private address. This module centralizes those checks so
-`web_fetch` and `rss_fetch` enforce the same SSRF policy.
-"""
+"""Network safety helpers for read-only HTTP tools."""
 from __future__ import annotations
 
 import gzip
@@ -141,16 +135,7 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 
 def _assert_peer_ip_global(sock: Any, *, tool_name: str) -> None:
-    """Reject a socket whose *actual* connected peer is not a public global IP.
-
-    This is the connect-time half of the SSRF guard. ``validate_host`` checks the
-    addresses a hostname resolves to *before* the connection is made; this checks
-    the address the socket *actually* connected to, right after ``connect()`` and
-    before any HTTP request bytes are sent. It closes the DNS-rebinding TOCTOU
-    window: a hostname that validated as public but re-resolves to ``127.0.0.1``
-    at connect time is caught here because ``getpeername()`` cannot be spoofed by
-    a second DNS answer.
-    """
+    """Reject a socket whose *actual* connected peer is not a public global IP."""
     if sock is None:
         return
     try:
@@ -175,14 +160,7 @@ def _assert_peer_ip_global(sock: Any, *, tool_name: str) -> None:
 
 
 def _guarded_handlers(policy: NetworkSafetyPolicy) -> list[urllib.request.BaseHandler]:
-    """Build HTTP/HTTPS handlers that re-check the peer IP at connect time.
-
-    The connection subclasses run the normal ``connect()`` (DNS resolution, TCP,
-    and — for HTTPS — the TLS handshake with SNI + certificate verification, all
-    unchanged) and then verify the concrete peer address is public before the
-    request is transmitted. Raising here aborts the fetch before any data crosses
-    the boundary.
-    """
+    """Build HTTP/HTTPS handlers that re-check the peer IP at connect time."""
     tool_name = policy.tool_name
 
     class _GuardedHTTPConnection(http.client.HTTPConnection):

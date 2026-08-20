@@ -1,21 +1,12 @@
 """Generate the issue tally from the registry's own sections.
 
-The tally was maintained by hand and was wrong three times in one working
-session: two off-by-one list/count mismatches, and finally a document that
-claimed "50 issues total — this tally is the authoritative count" four lines
-below "Total is now 53". A source of truth that contradicts itself is worse
-than no source of truth, because it is quoted with confidence.
-
 So the count is derived, never typed. Each issue's own `**Status:**` line is
 the input; the header table is output.
 
-    python scripts/registry_tally.py --check    verify (exit 1 on drift)
-    python scripts/registry_tally.py --write    regenerate the table
-
-`### MIR-external-checklist` is deliberately excluded from the issue count: it
-is a checklist of externally-observed failure modes, explicitly not confirmed
-repo defects, and counting it as an issue is what made the totals ambiguous.
-It is reported separately.
+`### MIR-external-checklist` is deliberately excluded from the issue count:
+it is a checklist of externally-observed failure modes, explicitly not
+confirmed repo defects, and counting it as an issue is what made the totals
+ambiguous. It is reported separately.
 """
 from __future__ import annotations
 

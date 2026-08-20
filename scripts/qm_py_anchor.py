@@ -1,22 +1,4 @@
-"""EXPERIMENTAL parser bridge for Python anchors. Not production.
-
-The PowerShell side of this lab resolves its anchor with PowerShell's own parser,
-on the ruling that a semantic link may not depend on a parser weaker than the
-language it observes. This is the same instrument for Python: it resolves a
-function by name with `ast` and emits FACTS about what that function emits.
-
-It asserts nothing. Every assertion lives in a `.qm` file; `scripts/qm_link_check.py`
-is what compares the two.
-
-Facts emitted, as JSON on stdout:
-    parse_ok            the module parsed
-    anchor_found        the named function exists at module level
-    anchor_first_line / anchor_last_line
-    logged_events       every string-literal event name logged inside the anchor
-    payload_keys        for each such event, the literal keys of its payload dict
-
-Usage:  python scripts/qm_py_anchor.py <module.py> <function>
-"""
+"""EXPERIMENTAL parser bridge for Python anchors. Not production."""
 from __future__ import annotations
 
 import ast

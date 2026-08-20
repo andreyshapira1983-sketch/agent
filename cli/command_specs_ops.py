@@ -1,9 +1,4 @@
-"""Second half of the command table: operator/runtime/multi-agent/approvals.
-
-See :mod:`cli.command_specs` for the ``CommandSpec`` dataclass and the first
-half of the table, and :mod:`cli.command_registry` for the public API and
-the full purity contract these tables share.
-"""
+"""Second half of the command table: operator/runtime/multi-agent/approvals."""
 from __future__ import annotations
 
 from .command_specs import PHASE_PRE_DOTENV, CommandSpec

@@ -1,10 +1,4 @@
-"""Operator-facing conflict review for the Source Registry.
-
-The low-level `ConflictResolver` detects obvious contradictions and marks
-claims as `conflicted`. This module turns that raw signal into something an
-operator can inspect: competing claims, source trust, claim confidence, and a
-bounded recommendation.
-"""
+"""Operator-facing conflict review for the Source Registry."""
 from __future__ import annotations
 
 from dataclasses import dataclass

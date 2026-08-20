@@ -192,12 +192,7 @@ def usage() -> UsageResponse:
 @app.post("/ask", response_model=AskResponse, tags=["agent"],
           dependencies=[Depends(_require_auth)])
 def ask(body: AskRequest) -> AskResponse:
-    """Run one agent cycle and return the answer.
-
-    The agent maintains session memory across requests (working memory is
-    shared; the agent sees previous turns). Use ``file_hint`` to scope the
-    planner to a specific workspace file.
-    """
+    """Run one agent cycle and return the answer."""
     agent = _get_agent()
     # Serialize the whole run + response read: concurrent /ask calls must not
     # interleave the shared agent's TraceLogger / WorkingMemory / usage ledger.

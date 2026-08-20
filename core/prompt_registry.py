@@ -1,13 +1,4 @@
-"""§3.x Prompt Registry — centralised tracking of all LLM system prompts.
-
-Prompts self-register at module-load time via `register_prompt()`.
-Consumers retrieve via `get_prompt(key)`.
-
-Override any prompt without code changes by setting an env var:
-    AGENT_PROMPT_<KEY_UPPER>
-where the key is uppercased and dots/hyphens replaced by underscores.
-Example: key "synthesizer.system" → AGENT_PROMPT_SYNTHESIZER_SYSTEM
-"""
+"""§3.x Prompt Registry — centralised tracking of all LLM system prompts."""
 
 from __future__ import annotations
 
@@ -33,12 +24,7 @@ class PromptRecord:
 
 
 class PromptRegistry:
-    """Thread-safe registry of named prompt templates.
-
-    If the same key is registered more than once with *different* content,
-    the latest registration wins (content evolution across sessions).
-    If the content is identical, the call is a no-op.
-    """
+    """Thread-safe registry of named prompt templates."""
 
     def __init__(self) -> None:
         self._store: dict[str, PromptRecord] = {}
@@ -67,12 +53,7 @@ class PromptRegistry:
     # ── read ──────────────────────────────────────────────────────────────
 
     def get(self, key: str) -> str:
-        """Return prompt text for *key*.
-
-        Checks for an env-var override first:
-            AGENT_PROMPT_<KEY_UPPER>  (dots/hyphens → underscores)
-        Raises ``KeyError`` if key not found and no env override exists.
-        """
+        """Return prompt text for *key*."""
         env_name = "AGENT_PROMPT_" + key.upper().replace(".", "_").replace("-", "_")
         override = os.environ.get(env_name)
         if override is not None:
@@ -120,14 +101,7 @@ def register_prompt(
     module: str = "",
     description: str = "",
 ) -> PromptRecord:
-    """Register a prompt with the global singleton registry.
-
-    Intended to be called by each owning module once at import time::
-
-        from core.prompt_registry import register_prompt
-        MY_PROMPT = "..."
-        register_prompt("module.variant", MY_PROMPT, module="core.mymodule")
-    """
+    """Register a prompt with the global singleton registry."""
     return _REGISTRY.register(key, content, module=module, description=description)
 
 

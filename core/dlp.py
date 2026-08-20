@@ -1,9 +1,4 @@
-"""DLP helpers for sensitive personal data.
-
-Secrets are handled by `core.secret_scanner`. This module covers lower-risk
-but still sensitive PII that should not cross durable boundaries raw:
-logs, LLM prompts, user output, and persistent memory.
-"""
+"""DLP helpers for sensitive personal data."""
 from __future__ import annotations
 
 import re

@@ -1,20 +1,5 @@
-"""The command-line surface of ``python main.py`` -- flags, defaults, help text.
-
-Seven public flags: ``--ask``, ``--file``, ``--workspace``, ``--auto-approve``,
-``--resume``, ``--reason``, ``--expect``. Operators and scripts depend on their
-names, defaults and choices, and ``--help`` is the authoritative rendering of
-all three, so ``tests/characterization/test_cli_argparse_surface.py`` reads the
-text argparse itself produces rather than re-deriving the parser.
-
-Moved verbatim out of ``main()``: same description, same order, same help
-strings, same ``metavar`` and ``choices``. ``prog`` is not set here any more than
-it was there -- argparse takes it from ``sys.argv[0]``, which is what keeps the
-usage line reading ``usage: main.py [-h] ...`` both under ``python main.py`` and
-under the tests that patch ``sys.argv``.
-
-Building the parser has no side effects, so nothing patches it and nothing here
-needs the ``main`` compatibility seam that ``cli/one_shot.py`` and
-``cli/repl.py`` document.
+"""The command-line surface of ``python main.py`` -- flags, defaults, help
+text.
 """
 from __future__ import annotations
 

@@ -32,12 +32,7 @@ RESTART_POLICY_DESCRIPTION = (
 
 
 def _is_windows() -> bool:
-    """Return whether the current host is Windows.
-
-    Kept as a single indirection so tests can simulate the host OS without
-    mutating the global ``os.name`` (which would make ``pathlib.Path`` build
-    ``WindowsPath`` on POSIX and crash).
-    """
+    """Return whether the current host is Windows."""
 
     return os.name == "nt"
 

@@ -5,13 +5,6 @@ module (:mod:`core.incremental_splitter`) and publishes it as a normal
 ``self_apply_lane.run`` approval item. It never applies anything itself: the
 human approves the item and runs it via ``:self-apply-run``, which executes
 targeted + full tests and auto-rolls back on red.
-
-Unlike ``:self-build-produce`` this path uses NO LLM at all -- the code is
-moved verbatim by AST line slicing -- so it has no output-token ceiling and is
-allowed to work on modules far beyond the one-shot split limit (e.g.
-``core/loop.py``). Because no model generates content, the deterministic
-planner refuses any step it cannot prove safe (both post-images parse, the
-target shrinks, every moved top-level name stays importable).
 """
 from __future__ import annotations
 

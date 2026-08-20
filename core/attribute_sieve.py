@@ -1,10 +1,4 @@
-"""Attribute-phantom sieve: attribute access is verified like call kwargs.
-
-Measured 2026-08-17 (meas_8fd5b4e5, meas_be27ac23): Stage B twice invented
-`claim.state` — a field no class carries, state is computed — and the
-kwargs sieve could not see it. Judges structure against the RUNNING code;
-doubt = silence (the sieve subtracts garbage, never blocks on uncertainty).
-"""
+"""Attribute-phantom sieve: attribute access is verified like call kwargs."""
 from __future__ import annotations
 
 import ast

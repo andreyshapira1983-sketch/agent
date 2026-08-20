@@ -1,36 +1,24 @@
 """Break the code on purpose and see whether the tests notice.
 
-Census item C2. A test that has never failed is not evidence. Coverage says a
-line RAN; it does not say a break in that line would be caught. The difference
-is not academic — a test with no assertion gives full coverage and catches
-nothing.
-
-This asks the other question, and its answer needs no code reading:
-
-    caught      — the mutation was introduced and a test went red
-    NOT caught  — the mutation was introduced and everything stayed green
-
-The second line is the finding. It names a change to shipped code that no test
-objects to.
+Census item C2. A test that has never failed is not evidence. Coverage says
+a line RAN; it does not say a break in that line would be caught. The
+difference is not academic — a test with no assertion gives full coverage
+and catches nothing.
 
 Deliberately small and deliberately not a framework. It applies a handful of
-mutations that correspond to real defects this project has actually shipped —
-a comparison flipped, a boundary moved by one, a truth value inverted, a call
-removed — runs a chosen slice of the suite, and restores the file. Nothing is
-left mutated: the original is written back in a `finally`, and the run refuses
-to start on a dirty working tree so a crash can never be mistaken for the
-program.
-
-Usage:
-
-    python scripts/mutation_probe.py core/low_evidence_policy.py \\
-        tests/test_low_evidence_policy.py
+mutations that correspond to real defects this project has actually shipped
+— a comparison flipped, a boundary moved by one, a truth value inverted, a
+call removed — runs a chosen slice of the suite, and restores the file.
+Nothing is left mutated: the original is written back in a `finally`, and
+the run refuses to start on a dirty working tree so a crash can never be
+mistaken for the program.
 
 Exit codes, and the difference between the last two matters: 0 when every
-mutation was caught, 1 when any survived — so it can gate a change the way the
-ratchets do — and 2 when the probe REFUSED to run at all, either because the
-target has uncommitted changes or because the selected tests were already red.
-A refusal is not a finding, and a caller must be able to tell them apart.
+mutation was caught, 1 when any survived — so it can gate a change the way
+the ratchets do — and 2 when the probe REFUSED to run at all, either because
+the target has uncommitted changes or because the selected tests were
+already red. A refusal is not a finding, and a caller must be able to tell
+them apart.
 """
 from __future__ import annotations
 
@@ -62,18 +50,7 @@ class Mutation:
 
 
 def _default_value_nodes(tree: ast.AST) -> set[int]:
-    """Constants that are DEFAULTS — a signature default or a field default.
-
-    Mutating one is usually unobservable: every caller passes its own value, so
-    the change never reaches a branch and the probe reports a survivor where
-    there is no gap. Measured on the first real run: 3 of 5 survivors in
-    `core/low_evidence_policy.py` were of this kind — `chain_was_empty: bool =
-    False`, `realtime_required: bool = True`, `suppressed_chars: int = 0`.
-
-    Reporting those as findings would be the failure this project keeps
-    naming: a check that flags everything stops being read. They are skipped,
-    and a reader who wants them can say so.
-    """
+    """Constants that are DEFAULTS — a signature default or a field default."""
     skip: set[int] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.arguments):

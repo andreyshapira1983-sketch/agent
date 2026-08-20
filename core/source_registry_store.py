@@ -1,9 +1,4 @@
-"""Persistent store for SourceRegistry.
-
-The source catalog is separate from long-term memory. Memory stores verified
-knowledge the agent may reuse in prompts. SourceRegistryStore stores the
-audit/catalog trail: which sources were seen and which claims were extracted.
-"""
+"""Persistent store for SourceRegistry."""
 from __future__ import annotations
 
 from collections.abc import Iterable

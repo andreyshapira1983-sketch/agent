@@ -1,11 +1,4 @@
-"""Causal-provenance meter for lessons (read-only, no delivery organ here).
-
-A lesson's use is a chain of receipts: derived_from -> injected -> acted ->
-measured. PROVEN needs an independent machine receipt (episodic store record,
-injection-journal row); the claim's own prose reaches at most SELF_DECLARED;
-nothing behind a link is ABSENT. Design prose: docs/CODE_NOTES.md
-(«The provenance meter reads receipts, not prose»).
-"""
+"""Causal-provenance meter for lessons (read-only, no delivery organ here)."""
 from __future__ import annotations
 
 import json
@@ -104,12 +97,7 @@ def record_lesson_injections(
     action_ref: str = "",
     measurement_ref: str = "",
 ) -> int:
-    """Append one delivery receipt per keyed lesson; returns rows written.
-
-    Called at the moment lessons actually reach a prompt — this row is what
-    lifts the meter's `injected` link out of ABSENT. Keyless cards are
-    skipped: a receipt without an identity proves nothing.
-    """
+    """Append one delivery receipt per keyed lesson; returns rows written."""
     from datetime import datetime, timezone
 
     from core.state_integrity import append_state_jsonl
