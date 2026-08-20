@@ -1,12 +1,10 @@
 """Interactive REPL input: one owner for stdin, and the dialogue loop.
 
-:class:`_StdinLineReader` is the ONLY consumer of stdin — the top-level prompt,
-the block modes and the approval prompt all pull from its queue, so they cannot
-race. :func:`run_repl` is the loop: input modes, ``:command`` dispatch, the
-intent router, the rate-limit check, the agent call. Startup wiring lives in
-``cli/app.py``, which calls this.
-
-Design notes and the measurements behind them: docs/CODE_NOTES.md.
+:class:`_StdinLineReader` is the ONLY consumer of stdin — the top-level
+prompt, the block modes and the approval prompt all pull from its queue, so
+they cannot race. :func:`run_repl` is the loop: input modes, ``:command``
+dispatch, the intent router, the rate-limit check, the agent call. Startup
+wiring lives in ``cli/app.py``, which calls this.
 """
 from __future__ import annotations
 
@@ -30,14 +28,7 @@ if TYPE_CHECKING:  # annotation only -- it was an unresolved string in main.py
 def _collect_instruction_buffer(
     read_line: Callable[[], str],
 ) -> tuple[str, bool]:
-    """Collect operator instruction lines until a terminator marker.
-
-    Reads lines via ``read_line`` until ``:task-end`` (commit) or
-    ``:task-abort`` (discard). Returns ``(text, cancelled)`` where ``text`` is
-    the joined+stripped buffer and ``cancelled`` is ``True`` when the operator
-    aborted. ``read_line`` may raise ``EOFError``/``KeyboardInterrupt``; that is
-    propagated so the caller can treat it as a request to leave the REPL.
-    """
+    """Collect operator instruction lines until a terminator marker."""
     lines: list[str] = []
     while True:
         line = read_line()
@@ -50,12 +41,7 @@ def _collect_instruction_buffer(
 
 
 def _collect_pasted_block(read_line: Callable[[], str]) -> str:
-    """Collect a ``<<< … >>>`` block, joined with newlines and stripped.
-
-    Ends on the first line ending in ``>>>``, whether alone or glued to a paste
-    ("...text>>>"), keeping what precedes it. May return ""; what that means is
-    the caller's call. ``EOFError``/``KeyboardInterrupt`` propagate.
-    """
+    """Collect a ``<<< … >>>`` block, joined with newlines and stripped."""
     parts: list[str] = []
     while True:
         line = read_line()
@@ -74,12 +60,7 @@ PASTE_COALESCE_GAP_SECONDS = 0.05
 
 
 def _collect_operator_task_block(read_line: Callable[[], str]) -> str:
-    """Collect an ``:operator-task`` block, joined with newlines.
-
-    Ends on a line that is ``:end`` once stripped and lowercased. Returns the
-    block as typed — the handler judges an empty one itself.
-    ``EOFError``/``KeyboardInterrupt`` propagate.
-    """
+    """Collect an ``:operator-task`` block, joined with newlines."""
     lines: list[str] = []
     while True:
         line = read_line()
@@ -89,13 +70,7 @@ def _collect_operator_task_block(read_line: Callable[[], str]) -> str:
 
 
 def _collect_continuation(first_line: str, read_line: Callable[[], str]) -> str:
-    """Join a line ending in ``\\`` with the ones that continue it.
-
-    ``first_line`` still carries its trailing backslash. Reads on until a line
-    that does not end in one; the backslashes go, the parts are stripped and
-    joined with single spaces, and blank parts drop out — so the result may be
-    "", which the caller judges. ``EOFError``/``KeyboardInterrupt`` propagate.
-    """
+    """Join a line ending in ``\\`` with the ones that continue it."""
     parts: list[str] = [first_line[:-1]]
     while True:
         line = read_line()
@@ -246,12 +221,7 @@ def _ask_the_agent(
     workspace: Path,
     file_hint: str | None,
 ) -> None:
-    """Spend one rate-limit token, run the agent, print the answer.
-
-    Returns nothing: a refused token and a delivered answer both mean "this
-    message is done". `budget_guard` is addressed through the MODULE because the
-    suites patch it there, and a name bound at import time would not see that.
-    """
+    """Spend one rate-limit token, run the agent, print the answer."""
     rl = rate_limiter.consume()
     if not rl.allowed:
         print(
@@ -300,12 +270,7 @@ def run_repl(
     workspace: Path,
     file_hint: str | None = None,
 ) -> int:
-    """Run the interactive dialogue until EOF/Ctrl+C and return the exit code.
-
-    Returns ``0`` on every way out: end of input, Ctrl+C, or an abandoned block
-    mode. ``:quit``/``:exit`` leave through ``SystemExit`` raised by the
-    dispatcher, which passes straight through this loop.
-    """
+    """Run the interactive dialogue until EOF/Ctrl+C and return the exit code."""
     while True:
         try:
             q = reader.read_message("> ").strip()

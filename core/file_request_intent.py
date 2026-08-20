@@ -1,22 +1,18 @@
 """What kind of file request is this question? Deterministic classifiers.
 
-Moved out of ``core/loop.py`` (2026-08-02, piece 2 of its decomposition).
-Every function here answers one routing question the loop asks about the
-operator's wording before any tool runs:
-
-* does the question explicitly ask to read the hinted file?
-* is it a review/reading request at all?
-* is it a CHANGE request — work to produce, run or record — which a reading
-  must never swallow (the defect PR #211/#213 fixed, and the guard that
-  keeps it fixed lives here)?
-* did the operator explicitly name multi-file mode, or merely look like it?
-* is a user-supplied path safe to read from the workspace?
+* does the question explicitly ask to read the hinted file? * is it a
+review/reading request at all? * is it a CHANGE request — work to produce,
+run or record — which a reading must never swallow (the defect PR #211/#213
+fixed, and the guard that keeps it fixed lives here)? * did the operator
+explicitly name multi-file mode, or merely look like it? * is a user-
+supplied path safe to read from the workspace?
 
 No LLM, no I/O except the filesystem checks in ``validate_user_file_path``,
-no state. The judgement-by-model counterpart is ``core/intent_understanding``;
-choosing WHAT to analyse among candidates is ``core/referent_resolver``. This
-module only classifies the request's wording and validates its paths — it
-deliberately knows nothing about the loop.
+no state. The judgement-by-model counterpart is
+``core/intent_understanding``; choosing WHAT to analyse among candidates is
+``core/referent_resolver``. This module only classifies the request's
+wording and validates its paths — it deliberately knows nothing about the
+loop.
 """
 from __future__ import annotations
 
@@ -118,19 +114,11 @@ _FILENAME_EDGE_PUNCT = ".,;:!?()[]{}<>«»\"'`"
 def strip_file_tokens(text: str) -> str:
     """Drop whitespace-separated tokens that name a file.
 
-    Deliberately not a regular expression. The first version was one, and
-    CodeQL was right about it: `[\\w./\\\\-]*[\\w-]\\.` lets the leading
-    class and the character after it match the same input, so the engine
-    re-splits a long run of dashes at every position — and the text here is
-    the user's question, so the input is attacker-shaped by definition.
-    Measured on 16 000 dashes: that pattern 2 019 ms, a segmented rewrite
-    3 320 ms (worse), this loop 0.0 ms.
-
     Extension-agnostic on purpose: `extract_path_mentions` knows seven
     extensions, so `commit.log` and `commit.ts` would otherwise stay in the
-    text and vote for "commit". The suffix must be ASCII alphanumeric,
-    which keeps prose out — a sentence ending in "коммит." has nothing
-    after the dot, and "и т.д." is Cyrillic.
+    text and vote for "commit". The suffix must be ASCII alphanumeric, which
+    keeps prose out — a sentence ending in "коммит." has nothing after the
+    dot, and "и т.д." is Cyrillic.
     """
     kept: list[str] = []
     for token in text.split():
@@ -160,13 +148,6 @@ def is_change_request(question: str) -> bool:
     an instruction to commit. Left in, the guard would repeat in miniature
     the defect it fixes — deciding intent from text that is not about
     intent.
-
-    Removal is one linear pass over the tokens. It used to also substitute
-    each path `extract_path_mentions` returned, which meant one full scan
-    of the question per path — quadratic again, on the same
-    attacker-controlled text, and redundant: every path that extractor can
-    return carries an extension, so the token pass already removes it, in
-    any casing and without knowing the extension allowlist.
     """
     return bool(_CHANGE_INTENT_RE.search(strip_file_tokens(question)))
 
@@ -267,12 +248,7 @@ _PATH_EXTS = ("py", "md", "txt", "json", "yml", "yaml", "pdf")
 
 
 def _ext_at(text: str, dot: int, exts: tuple[str, ...]) -> int:
-    """Length of the extension right after ``text[dot]``, or 0.
-
-    ``exts`` is tried IN ORDER, replicating regex alternation: with
-    ``("json", "jsonl")`` a ``.jsonl`` suffix matches ``json`` and leaves the
-    ``l`` outside — exactly what the pattern this scanner replaced did.
-    """
+    """Length of the extension right after ``text[dot]``, or 0."""
     for ext in exts:
         if text[dot + 1: dot + 1 + len(ext)].lower() == ext:
             return len(ext)
@@ -345,12 +321,7 @@ def _scan_body(
 def extract_path_mentions(
     text: str, *, exts: tuple[str, ...] = _PATH_EXTS
 ) -> list[str]:
-    """File paths the question names, first-mention order, case-deduplicated.
-
-    Moved from ``AgentLoop`` (piece 3 of the loop decomposition) and rewritten
-    from a quadratic regex into this single-pass scanner — see the block
-    comment above for the measurements and the oracle tests for equivalence.
-    """
+    """File paths the question names, first-mention order, case-deduplicated."""
     n = len(text)
     seen: set[str] = set()
     paths: list[str] = []
@@ -474,13 +445,7 @@ def prepare_multi_file_review(
     workspace_root: Path | None,
     log: Callable[[str, dict[str, Any]], None],
 ) -> dict[str, Any]:
-    """Decide none / refusal / forced-plan for a multi-file review request.
-
-    Moved from ``AgentLoop`` (piece 6): every predicate it orchestrates already
-    lives in this module. The two loop facts it needs arrive as arguments —
-    ``workspace_root`` (where file_read may look) and ``log`` (the trace
-    callable) — so the module still knows nothing about the loop itself.
-    """
+    """Decide none / refusal / forced-plan for a multi-file review request."""
     requested_paths = extract_path_mentions(question)
     if len(requested_paths) < 2 or not is_file_review_request(question):
         return {"kind": "none"}

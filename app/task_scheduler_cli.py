@@ -1,12 +1,4 @@
-"""Runtime task queue and scheduler REPL handlers.
-
-Split out of ``main.py``. Owns queue/scheduler store accessors and the
-``:queue-status`` / ``:task-*`` / ``:schedule-*`` command surface. Does not own
-operator-task reports, dispatch, or approval decision handlers.
-
-``main.py`` re-exports handlers and ``_task_queue_for`` / ``_scheduler_for`` for
-other modules that still attach to the agent-scoped stores.
-"""
+"""Runtime task queue and scheduler REPL handlers."""
 from __future__ import annotations
 
 import json

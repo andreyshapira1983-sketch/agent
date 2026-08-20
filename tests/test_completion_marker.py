@@ -1,20 +1,13 @@
 """The synthesizer declares completion through a channel the user cannot forge.
 
-A plain `Status:` line would have been indistinguishable from user content: a
-question can legitimately ask for an answer ending in `Status: achieved`, and
-the loop would have banked a declaration the model never made. So the marker
-carries a nonce minted per synthesis attempt, and only a terminal line bearing
-the CURRENT attempt's nonce is read.
+A plain `Status:` line would have been indistinguishable from user content:
+a question can legitimately ask for an answer ending in `Status: achieved`,
+and the loop would have banked a declaration the model never made. So the
+marker carries a nonce minted per synthesis attempt, and only a terminal
+line bearing the CURRENT attempt's nonce is read.
 
-    [[agent.completion:<nonce>:<achieved|partially_achieved|blocked|refused|failed>]]
-
-Everything else — a wrong nonce, a bare marker the user asked for, a marker
-mid-text — is neither parsed nor removed. Removing it would damage an answer
-the user asked for; parsing it would let the answer's own content vote on how
-the answer is judged.
-
-This commit only produces, freezes and logs the declaration. No gate reads it
-yet, so nothing about retrieval, replay or procedures changes.
+This commit only produces, freezes and logs the declaration. No gate reads
+it yet, so nothing about retrieval, replay or procedures changes.
 """
 from __future__ import annotations
 
@@ -389,12 +382,7 @@ def test_a_declaration_does_not_leak_into_a_later_run(tmp_path: Path, monkeypatc
 
 
 def test_no_declaration_state_is_kept_on_the_agent(tmp_path: Path, monkeypatch) -> None:
-    """The contract: the verdict lives in the run, not on the instance.
-
-    `AgentLoop` is single-run-per-instance for other reasons already
-    (`_executed_tools`, `_last_procedure_records`). This pins that the
-    declaration adds no new shared state to that pile.
-    """
+    """The contract: the verdict lives in the run, not on the instance."""
     seen: dict = {}
     monkeypatch.setattr(
         "core.loop.AgentLoop._synthesize", _synthesize_declaring("blocked", seen=seen)

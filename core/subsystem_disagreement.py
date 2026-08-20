@@ -35,12 +35,7 @@ _PARTIAL_UNMATCH_THRESHOLD = 0.30
 
 
 def _plan_step_counts(plan_steps: Sequence[Any]) -> tuple[int, int, int]:
-    """Return (total, done, failed) over a plan's steps.
-
-    Each step is expected to expose a ``status`` attribute in
-    ``{"pending", "in_progress", "done", "failed"}``. Unknown statuses
-    (e.g. tests passing dicts) are tolerated by reading ``.get`` first.
-    """
+    """Return (total, done, failed) over a plan's steps."""
     total = len(plan_steps)
     done = 0
     failed = 0
@@ -190,10 +185,6 @@ def detect_budget_starvation(
     the trimmed blocks: (label, kept_chars, original_chars). Pure function,
     logging-only consumer — per the operator's sensor policy this observes
     and never changes behaviour.
-
-    The demoted memory block is exempt: memory paying first — down to the
-    absolute floor — is the deliberate outcome of its own measured incident,
-    not a contradiction between deciders.
     """
     events: list[dict[str, Any]] = []
     for label, kept, original in trims:

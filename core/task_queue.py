@@ -1,10 +1,4 @@
-"""Persistent task queue for autonomous runtime work.
-
-The first autonomous runtime could run a bounded dry-run pass, but it had no
-memory between launches. This queue is the durable handoff: scheduler ticks,
-CLI commands, and future monitors can enqueue work; the runtime can claim a
-pending task, run it, and record the result.
-"""
+"""Persistent task queue for autonomous runtime work."""
 from __future__ import annotations
 
 import logging
@@ -38,24 +32,7 @@ INTERACTIVE_GATEWAY_PATH = "repl"
 
 
 def checkpoint_is_resumable_work(gateway_path: str | None) -> bool:
-    """Стоит ли парковать прерванный ход как работу.
-
-    Прерванный `:auto-run` возобновлять надо: его никто не ждёт у экрана.
-    Прерванную реплику — нет: оператор сидит здесь и наберёт её заново.
-
-    Замер 2026-08-15: в очереди работ лежало 14 приостановленных «задач», из них
-    `Answer the question: привет`, `что ты чувствуешь когда ты неправ` и один
-    вставленный кусок лога. Очередь, которая кормит автономный режим, была
-    заполнена разговором.
-
-    Различие структурное, а не по тексту вопроса: `gateway_path` уже говорит,
-    на каком пути шёл ход, и рантайм ставит его сам (`autonomous_runtime`).
-    Судить по словам реплики значило бы гадать, чем «привет» отличается от
-    «почини X» — а это и есть тот разбор по словарю, который здесь всюду
-    проигрывает структурному факту.
-
-    Зачем: docs/CODE_NOTES.md, «The work queue was full of conversation».
-    """
+    """Стоит ли парковать прерванный ход как работу."""
     return str(gateway_path or INTERACTIVE_GATEWAY_PATH) != INTERACTIVE_GATEWAY_PATH
 
 
@@ -69,12 +46,7 @@ _VALID_STATUSES = {
 }
 
 class TaskAlreadyClaimed(RuntimeError):
-    """Raised when a claim loses the race — the task is no longer `pending`.
-
-    Distinct from ``KeyError`` on purpose: a task that is gone and a task
-    somebody else is already running call for different reactions from a
-    consumer, and both used to be indistinguishable because neither happened.
-    """
+    """Raised when a claim loses the race — the task is no longer `pending`."""
 
 
 #: A run that stopped because a human must approve something is neither a
@@ -209,13 +181,7 @@ def _failure_transition(
     report: dict | None = None,
     now: datetime,
 ) -> RuntimeTask:
-    """The single decider for "this attempt did not succeed".
-
-    Terminal ``failed`` once the attempt budget is spent, otherwise re-queued
-    with exponential backoff. Both ``mark_failed`` (the run reported a failure)
-    and ``recover_stuck`` (the run's process vanished) go through here, so the
-    retry cap cannot be honoured on one path and bypassed on the other.
-    """
+    """The single decider for "this attempt did not succeed"."""
     if task.attempts >= task.max_attempts:
         return task.with_updates(
             status="failed",
@@ -411,17 +377,7 @@ class TaskQueueStore:
         owner_pid: int | None = None,
         owner_host: str | None = None,
     ) -> RuntimeTask:
-        """Claim a pending task. Exclusive: a second claimant is refused.
-
-        The check runs inside `_update_one`'s file lock, on the row as just read
-        from disk, so the test and the write are one transaction. Without it two
-        consumers both claimed the same task — measured with two processes: the
-        second claim burned an attempt and overwrote `owner_pid`, so the row no
-        longer named the process that was actually running it.
-
-        The single-instance lock is not enough on its own: `agent_tick` takes it,
-        but `:task-run` and `:schedule-tick --run` do not.
-        """
+        """Claim a pending task. Exclusive: a second claimant is refused."""
         pid = os.getpid() if owner_pid is None else int(owner_pid)
         host = socket.gethostname() if owner_host is None else str(owner_host)
 
@@ -442,13 +398,7 @@ class TaskQueueStore:
         return self._update_one(task_id, claim)
 
     def heartbeat(self, task_id: str) -> RuntimeTask | None:
-        """Refresh liveness for a task that is still running.
-
-        Returns the updated task, or ``None`` when the task is gone or no longer
-        ``running`` — a heartbeat must never resurrect a finished task, and a
-        consumer whose heartbeat thread outlives the run must not be able to
-        keep a stale row looking alive.
-        """
+        """Refresh liveness for a task that is still running."""
         with exclusive_file_lock(self._lock_path):
             tasks = self._load_unlocked()
             out: list[RuntimeTask] = []
@@ -471,12 +421,7 @@ class TaskQueueStore:
         reason: str,
         report: dict | None = None,
     ) -> RuntimeTask:
-        """Park a task that cannot proceed without a human decision.
-
-        Distinct from ``failed`` on purpose: nothing went wrong, and no retry
-        schedule can unblock it. It leaves ``pending()`` (so no consumer picks
-        it up) and waits for the operator.
-        """
+        """Park a task that cannot proceed without a human decision."""
         return self._update_one(
             task_id,
             lambda task: task.with_updates(

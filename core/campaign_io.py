@@ -258,18 +258,7 @@ def _propose_engineering_step(
 def _propose_doctrine_draft(
     *, agent: Any, workspace: Any, goal: str, approval_inbox: Any,
 ) -> str | None:
-    """Документная цель становится черновиком в очереди — не файлом на диске.
-
-    Живой замер 2026-08-15: первая хартийная кампания выбрала целью «напиши
-    MEMORY_LIFECYCLE_CONTRACT.md», а исполнилось привычное действие ремонта —
-    в каталоге не было документных рук. Здесь эти руки: генерация полного
-    markdown-черновика и заявка `self_apply_lane.run` — решение человека,
-    лента с полным сьютом и откатом; сам этот код на диск не пишет ничего.
-
-    Отказы честные и поимённые: no_target_doc (цель не называет документ),
-    doc_exists (перезапись существующего — отдельное решение, не черновик),
-    empty_draft (модель промолчала).
-    """
+    """Документная цель становится черновиком в очереди — не файлом на диске."""
     from core.best_next_action import doc_target_from_goal
 
     target = doc_target_from_goal(goal)
@@ -362,14 +351,7 @@ _WEB_CITATION_RE = re.compile(
 def _propose_hypothesis_from_study(
     *, agent: Any, workspace: Any, goal: str, answer: str,
 ) -> str:
-    """Чтение внешнего мира оставляет ГИПОТЕЗУ нижней ступени — не истину.
-
-    Конденсация — отдельный узкий вызов (замер 2026-08-16: хвостовой блок в
-    длинном контракте nano роняет 3 раза из 3, короткий одиночный — держит).
-    Ссылки берутся из инлайн-цитат ответа, проверенных верификатором; выдумка
-    модели в поле «ИСТОЧНИК» — только справка. Права урока запись не получает:
-    только полная лестница (docs/CODE_NOTES.md, «Reading leaves a hypothesis»).
-    """
+    """Чтение внешнего мира оставляет ГИПОТЕЗУ нижней ступени — не истину."""
     refs = tuple(dict.fromkeys(
         m.group(1).strip() for m in _WEB_CITATION_RE.finditer(answer or "")
     ))
@@ -429,13 +411,7 @@ def _propose_hypothesis_from_study(
 def _propose_failing_test_from_diagnosis(
     *, agent: Any, workspace: Any, target: str, answer: str, approval_inbox: Any,
 ) -> str:
-    """Диагноз без красного теста едет в Stage A — за тестом, не за патчем.
-
-    Кандидат синтезируется из уже проверенного: адрес существует (проверен
-    диском выше), диагноз подтверждён целиком. Все гейты Stage A действуют без
-    изъятий — kill-switch, бюджет, одна задача в полёте, чистое дерево, критик
-    теста; человек благословляет тест до реализации (§9, анти-жульничество).
-    """
+    """Диагноз без красного теста едет в Stage A — за тестом, не за патчем."""
     from types import SimpleNamespace
 
     from core.self_task_producer import produce_coding_task
@@ -478,12 +454,7 @@ def _propose_failing_test_from_diagnosis(
 
 
 def _open_self_improvement_issues(workspace: Path) -> tuple[tuple[dict, ...], bool]:
-    """Открытые самонайденные дефекты и признак «реестр вообще читается».
-
-    Отдельной функцией, потому что хранилище может не открыться, а совет обязан
-    выйти в любом случае: пустой список тогда честно означает «не знаю», и
-    выбиратель падает на прежние признаки, а не на выдуманный ноль.
-    """
+    """Открытые самонайденные дефекты и признак «реестр вообще читается»."""
     try:
         from core.self_improvement_issues import SelfImprovementIssueRegistry
 
@@ -496,18 +467,7 @@ def _open_self_improvement_issues(workspace: Path) -> tuple[tuple[dict, ...], bo
 
 
 def _execute_daemon_liveness_probe(workspace: Any) -> CampaignActionOutcome:
-    """MIR-070: answer `restore_daemon_liveness` by READING ACTUAL STATE.
-
-    The signal comes from `core/heartbeat_io`; the old execution path handed
-    the question to a free-planning LLM run, which chose `read_logs` over the
-    agent's own run journal, found 0 events and honestly answered «не
-    подтверждает и не опровергает» — 2 model calls, 63 cost units, signal not
-    cleared (measured live 2026-08-03). No model can add anything the
-    heartbeat file does not already say, so the probe re-reads the SAME
-    window that raised the signal, spends zero LLM calls, and reports in the
-    operator's five-point form (что/как/доказательство/непроверенное/
-    уверенность — the evidence ruling of 2026-08-03).
-    """
+    """MIR-070: answer `restore_daemon_liveness` by READING ACTUAL STATE."""
     from core.heartbeat_io import (
         HEARTBEAT_PATH,
         heartbeat_age_seconds,

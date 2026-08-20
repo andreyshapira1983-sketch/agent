@@ -3,20 +3,17 @@
 A bounded-autonomy agent is only useful if it is *initiative inside a safe
 corridor*: it must notice problems, connect signals, and surface the **one**
 action that matters most right now — with evidence, a risk estimate, and an
-honest account of what it does **not** know. It must NOT spray ten speculative
-proposals every tick.
+honest account of what it does **not** know. It must NOT spray ten
+speculative proposals every tick.
 
-This module is the "what should I do next?" brain. It is intentionally
-**pure and advisory**:
+* it reads structured signals (passed in) and returns one recommendation; *
+it performs no I/O, mutates nothing, and never executes the action; * it
+always returns exactly one :class:`BestNextAction` — even "just observe" —
+so the agent is forced to commit to a single priority and justify it.
 
-* it reads structured signals (passed in) and returns one recommendation;
-* it performs no I/O, mutates nothing, and never executes the action;
-* it always returns exactly one :class:`BestNextAction` — even "just observe" —
-  so the agent is forced to commit to a single priority and justify it.
-
-The selection is deterministic: every candidate carries a fixed priority score
-and the highest score wins. Ties resolve by score then by a stable order, so the
-same signals always yield the same advice.
+The selection is deterministic: every candidate carries a fixed priority
+score and the highest score wins. Ties resolve by score then by a stable
+order, so the same signals always yield the same advice.
 """
 from __future__ import annotations
 
@@ -252,20 +249,13 @@ def select_best_next_action(
 ) -> BestNextAction:
     """Pick the single most important next action from the current signals.
 
-    Pure: no I/O, no mutation, no execution. The caller gathers the signals
-    (typically from the latest heartbeat plus a triage pass) and decides what
-    to do with the recommendation. The agent is expected to PROPOSE this action,
-    not perform it.
-
-    ``acknowledged`` is the set of action names the operator has accepted (see
-    :mod:`core.alert_ack`). An acknowledged candidate is removed from the
-    top-pick race ONLY when its severity is suppressible (``medium``/``low``) —
-    objective breakages (``critical``/``high``) are never silenced, so you can
-    never acknowledge away a real failure. Suppressed alerts are not deleted:
-    when nothing else is pressing they are surfaced by the ``observe`` fallback.
-
-    Returns exactly one :class:`BestNextAction`. When nothing is pressing it
-    returns an honest ``observe`` action rather than inventing busywork.
+    ``acknowledged`` is the set of action names the operator has accepted
+    (see :mod:`core.alert_ack`). An acknowledged candidate is removed from
+    the top-pick race ONLY when its severity is suppressible
+    (``medium``/``low``) — objective breakages (``critical``/``high``) are
+    never silenced, so you can never acknowledge away a real failure.
+    Suppressed alerts are not deleted: when nothing else is pressing they
+    are surfaced by the ``observe`` fallback.
     """
     candidates: list[BestNextAction] = []
 
