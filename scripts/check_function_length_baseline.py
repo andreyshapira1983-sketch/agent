@@ -27,10 +27,13 @@ from pathlib import Path
 #: Below this a function is unremarkable and stays out of the watch list.
 REPORT_THRESHOLD = 150
 
-#: Directories that are not ours to police.
+#: Directories that are not ours to police. `.claude` earns its place the hard
+#: way: the workflow runner puts full checkouts of this repository under
+#: `.claude/worktrees/`, and a filesystem walk then reports every long function
+#: in the repo a second time, under a path that does not exist for git.
 SKIP_DIRS = frozenset({
     ".git", ".venv", "venv", "__pycache__", "node_modules", ".mypy_cache",
-    ".pytest_cache", ".ruff_cache", "htmlcov", "logs", "data",
+    ".pytest_cache", ".ruff_cache", "htmlcov", "logs", "data", ".claude",
 })
 
 #: "path:function" -> ceiling. Measured 2026-08-04.
