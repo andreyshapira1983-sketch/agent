@@ -96,23 +96,6 @@ from core.source_registry import SourceRegistry
 from core.step_repetition import StepRepetitionTracker
 from core.termination_guard import TerminationGuard
 
-# Default attempt budget for re-planning. Two replans (3 attempts total)
-# is the tradeoff: enough room to recover from a typo or a flaky source,
-# not enough to mask a fundamentally wrong plan as "just one more try".
-
-
-# ReplanCode is an alias for FailureType (core/replan.py) — single source of truth.
-# Imported above. No local definition needed. `ReplanTrigger` and the two
-# helpers that summarise/format the failure history moved there too
-# (2026-08-02): the whole replan vocabulary now lives in one module.
-
-
-# Output Contract (§1 Interface & Communication + §8 Verification).
-# The LLM MUST emit this structure so the user gets:
-#   - a direct answer
-#   - explicit citations to source labels embedded in the evidence
-#   - explicit confidence and unverified gaps
-
 # §3.x — register this prompt with the global Prompt Registry
 try:
     from core.prompt_registry import register_prompt as _rp
@@ -120,15 +103,6 @@ try:
         description="Output contract for the LLM synthesizer (§3 Cognitive Core)")
 except ImportError:  # pragma: no cover
     pass
-
-# Regex that matches the internal verification markers the Verifier inlines
-# into the answer text.  These are audit annotations, not user content.
-# Stripped before the answer leaves the kernel so users never see them.
-
-
-# Regex that strips source citation tokens from individual sentences/bullets.
-# Matches: [general-knowledge] [web:url] [file:path] [search:q] [test:cmd]
-# [log:id] [shell:cmd] [diff:p] [memory:id] [user] [declared:...] etc.
 
 
 class AgentLoop(
@@ -489,7 +463,7 @@ class AgentLoop(
 
         # planner_out and plan are guaranteed set here (the for loop ran at
         # least once because max_replan_attempts >= 1 is enforced in __init__).
-        assert planner_out is not None and plan is not None
+        assert planner_out is not None and plan is not None  # noqa: S101 — type narrowing, guarded above
 
         # MVP-14.1 — fold memory & user-directive evidence into the chain.
         # The tool-level evidence was added per step inside the attempt

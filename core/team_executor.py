@@ -268,7 +268,7 @@ class TeamExecutor:
                 steps.append(_step_from_contract(order, contract, status=step_status, summary=summary))
             else:
                 # Real execution crosses the canonical contract boundary.
-                assert self._runner is not None  # guarded above
+                assert self._runner is not None  # noqa: S101 — narrowing; guarded above
                 canonical: CanonicalSubagentContract | None = None
                 try:
                     canonical = CanonicalSubagentContract.from_team_contract(contract)

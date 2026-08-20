@@ -408,7 +408,7 @@ class AgentLoopStepExecution:
                 )
                 return None
             decision = gw.policy
-            assert decision is not None
+            assert decision is not None  # noqa: S101 — type narrowing, guarded above
             self.log.log("policy", decision)
         else:
             # Policy Gate — pre-execution checkpoint (non-effectful tools)
@@ -813,7 +813,7 @@ class AgentLoopStepExecution:
             return None
 
     def _call_tool(self, action: Action) -> ToolResult:
-        assert action.tool_name is not None
+        assert action.tool_name is not None  # noqa: S101 — type narrowing, guarded above
         tool = self.registry.get(action.tool_name)
         call = ToolCall(
             action_id=action.id,

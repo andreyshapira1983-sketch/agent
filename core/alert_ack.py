@@ -203,7 +203,7 @@ class AlertAckStore:
         return list(self.acks)
 
     def _load(self) -> list[AlertAck]:
-        assert self.path is not None
+        assert self.path is not None  # noqa: S101 — type narrowing, guarded above
         path = Path(self.path)
         if not path.exists():
             return list(self.acks)

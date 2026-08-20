@@ -138,7 +138,7 @@ class AgentLoopContext:
         )
         if local_critique_active:
             _rd = self.last_referent_decision
-            assert _rd is not None and _rd.primary is not None
+            assert _rd is not None and _rd.primary is not None  # noqa: S101 — type narrowing, guarded above
             self.log.log(
                 "local_critique_path",
                 {
