@@ -20,6 +20,37 @@ the same problem can appear in four files with four different names and three
 different statuses. The fix is not to delete history — it is to know, per
 question, which single file is authoritative.
 
+### 1.1 Which tree a document belongs to
+
+The rule above says which file owns a question. This one says where that file
+lives, and it is deliberately **not** "human reads one, the agent reads the
+other" — the reader changes, the role of the artefact does not.
+
+**`docs/` — description of the system**, for navigation, audit, operation and
+history. A file being here does **not** make it a runtime input and does not
+give it authority over the agent.
+
+**`knowledge/` — material that is, or is intended to become, semantic input to
+the agent's reasoning and decisions**: doctrine, learned knowledge, contracts,
+generated knowledge.
+
+And the part that matters most: **`knowledge/` is not "the agent's truth".** A
+file there may be `future`, `proposal`, `generated`, `historical` or
+`inactive`. Tidying the old disorder into a new source of false authority
+would be worse than the disorder. So every file under `knowledge/` must have
+four things knowable at a glance, and §6 states them for the whole tree:
+
+| field | question it answers |
+|---|---|
+| **purpose** | which question this file owns |
+| **status / authority** | is it binding on the agent today, and if not, what is it |
+| **consumer** | who or what actually reads it — possibly nobody |
+| **provenance** | who wrote it: operator, engineering pass, or the agent itself |
+
+A file with no consumer is not automatically waste. It is a file whose
+operational utility is **not established** — which is a different claim, and
+the only one the evidence supports.
+
 ## 2. Routing table
 
 | I want to know… | Open | Authoritative for | **Not** authoritative for |
@@ -125,20 +156,102 @@ Two more traps that are *by design*, not drift:
 
 ## 5. Housekeeping
 
-- **`docs/audit/` — tracking status, corrected 2026-07-23.**
-  `PROVIDER_STRUCTURED_OUTPUT_AUDIT.md` and
-  `PROVIDER_AUDIT_CHECKPOINT.md` are now tracked in git. The earlier statement
-  that these files were untracked is historical and no longer describes the
-  current `main` branch.
+- **Three files this section used to route no longer exist. Checked
+  2026-08-20; the trace is kept because other text still points at them.**
 
-- The canonical target-architecture text (`архитектура автономного Агента.txt`,
-  repo root) is source-of-truth entry #2 per the README. **Read in full on
-  2026-07-21** (previously recorded here as unread). Its §5 names *Capability
-  Discovery & Negotiation* and *Tool Schema Drift Detection*; its §7 names
-  *Capability Awareness* / *Limitation Awareness* / ODD — foreseen, per that
-  document's own rule, is not implemented.
+  `docs/audit/PROVIDER_STRUCTURED_OUTPUT_AUDIT.md` and
+  `docs/audit/PROVIDER_AUDIT_CHECKPOINT.md` — `docs/audit/` today holds
+  `MASTER_ISSUE_REGISTRY.md` and nothing else.
+
+  `архитектура автономного Агента.txt` (repo root) — this section called it
+  **source-of-truth entry #2** and recorded it as *read in full on 2026-07-21*.
+  It is **absent from the current tree and from git history**: it was never
+  committed. **It must not be treated as authority, and no claim may cite it.**
+  What still points at it, verified: the docstring of `scripts/gen_anatomy.py`
+  and a fixture string in `tests/test_backlog_architecture_audit.py`. What does
+  **not**: the live architecture audit, whose evidence list is
+  `docs/AGENT_DOCTRINE.md`, `docs/COGNITIVE_CORE.md`, `README.md` — all
+  present. So the dangling reference is prose, not a live authority path.
 
 - Precedence everywhere: **current code → wired execution paths → reproducible
   tests → canonical docs.** When a document and the code disagree, the code wins
   and the document must be corrected.
 
+
+## 6. Document ledger — every file, its authority and its consumer
+
+The routing table above answers *"which file owns this question"*. This one
+answers the three questions that decide whether a file may be believed:
+**what it is, whether it binds the agent, and who actually reads it.**
+
+Counted 2026-08-20: **37 documents, 20 920 lines.** Before this section the
+routing table reached 22 of them; the largest document in the repository and
+the most-cited one — `CODE_NOTES.md`, 3427 lines and 90 inbound references —
+was not in it at all.
+
+"Inbound" below is the number of files in the tree that name the document.
+It measures attention, not worth: `ACCEPTANCE_LADDER.ru.md` has none and is a
+frozen operator protocol.
+
+### 6.1 `docs/` — description of the system (no authority over behaviour)
+
+| file | owns | status | read by |
+|---|---|---|---|
+| `INDEX.md` | which file owns which question, and this ledger | active routing contract | anyone opening the docs |
+| `CODE_NOTES.md` | why a change was made, with its live measurement | active reference; **binds nothing** | engineers and models arriving from a pointer in code (90 inbound) |
+| `PROJECT_MAP.ru.md` | the project map for the operator, in Russian | active reference | operator |
+| `audit/MASTER_ISSUE_REGISTRY.md` | defect status — the only live `MIR-` ledger | **authoritative for status** | engineering; the self-improvement signal gatherer |
+| `MISTAKE_NOTEBOOK.md` | mistakes caught live: symptom, cost, self-check | active reference | whoever is about to say "done" |
+| `EVIDENCE_PROTOCOL.md` | how several models may argue without confirming each other | **specification — nothing is built** | design work only |
+| `COGNITIVE_CORE.md` | the core boundary and its gates, proven from code | active reference | engineering |
+| `daemon-progress.md` | per-item daemon build state | historical log | traceability |
+| `OPERATIONAL_FAILURE_MODES.md` | an external operator's failure taxonomy | **no number in it measures this repo** | checklist use only |
+| `ACCEPTANCE_LADDER.ru.md` | stage-1 self-report calibration, frozen after six operator amendments | operator protocol | operator; **0 inbound** |
+| `LIVE_PROBE_FINDINGS.md` | what live runs showed (LPF-nnn) | evidence; **status superseded by the registry** | engineering |
+| `MEMORY_FIX_PLAN.md` | the A1–A8 memory plan | partly executed, partly superseded | historical |
+| `CORE_AUDIT_2026-07-18.md` | execution-verified core defects (CORE-nn) | evidence; **status superseded** | historical |
+| `Технический_анализ_автономного_агента_и_функций_мозга.md` | one analysis note on the agent and brain functions | note | occasional |
+| `NERVE_PROTOCOL.ru.md` | how to check that a nerve is really wired | active protocol | engineering |
+| `CONFIGURATION.md` | env vars, `config/`, `data/` layout | active reference | operator, engineering |
+| `INSTRUCTION_AUTHORITY.md` | whose instruction wins in a conflict | §1–§4 normative, §5 implemented, §6 planned | engineering |
+| `OPERATIONS.md` | run modes, HTTP API, troubleshooting | active reference | operator |
+| `AGENTS.md` | repository working guidelines | active convention | contributors |
+| `AGENT_DOCTRINE.md` | behavioural doctrine, correctness-first order | active convention | contributors, models |
+| `OPERATOR_NOTES.ru.md` | what documents the agent has created, for the operator | note | operator |
+
+### 6.2 `knowledge/` — semantic input, present or intended
+
+Presence here is not authority. The `status` column is the whole point.
+
+| file | owns | status | read by |
+|---|---|---|---|
+| `doctrine/CENTRAL_AGENT_GOVERNANCE.md` | what the agent may do alone vs. what needs a human | **binding** | the agent's own gates; engineering |
+| `doctrine/SUBAGENT_LIFECYCLE.md` | how sub-agents are proposed, bounded, retired | binding, subordinate to governance | sub-agent machinery |
+| `doctrine/SELF_REPAIR_DOCTRINE.md` | the self-diagnosis/repair protocol | sections marked NORMATIVE / IMPLEMENTED / PLANNED | repair work |
+| `doctrine/ROADMAP.md` | intended order of capabilities, per-track state | active | planning; charter goals |
+| `doctrine/self-audit-lessons.md` | the recurring anti-patterns and the audit procedure | active; **never delete** | audits |
+| `doctrine/MEMORY_SYSTEM_AUDIT.md` | the memory-governance audit (MGA-nn) | evidence; **status superseded** | historical |
+| `maps/COMMANDS_MAP.md` | the `:command` surface and NL-routing parity | active, hand-maintained | operator, dispatch review |
+| `generated/AGENT_ANATOMY.md` | the grouped `core/` module index | **generated** by `scripts/gen_anatomy.py`; a test fails if it drifts | navigation; backlog signals |
+| `quantum/SUBJECT_MODEL.md` | what a `.qm` artifact is about | working note | that line of work |
+| `doctrine/future/CORPORATE_MODEL.md` | the long-horizon multi-agent organisation | **future / aspirational** | design discussion |
+| `doctrine/future/MEMORY_LIFECYCLE_CONTRACT.md` | the target memory lifecycle | **v4-draft awaiting approval.** §1–§16 target, §17 a measured report of today | planning, from §17 |
+| `doctrine/future/MIGRATION_PATH.md` | how one would migrate to that target | draft / target | planning |
+| `doctrine/future/AGENT_ROLE_CONTRACT.md` | proposed durable specialised roles | **DRAFT / TARGET, non-binding. Written by the agent's own charter campaign. 0 inbound, no runtime consumer** | nobody today |
+| `doctrine/future/ORGANISATIONAL_ROLES_CONTRACT.md` | proposed role contracts and performance ledgers | **DRAFT / TARGET, non-binding. Written by the agent's own charter campaign. 0 inbound, no runtime consumer** | nobody today |
+
+**On those last two.** Together they are 2282 lines the agent wrote about
+itself, and nothing in the tree reads them. Both already carry a
+DRAFT/TARGET banner at their head, so the danger of a later model reading
+them as a live contract is bounded — but they are listed here explicitly as
+*unadopted agent-authored proposals* so that the ledger, not only the file,
+says so. Their operational utility is **not established**; that is not the
+same claim as "they are waste", and deciding between keep / merge / archive
+needs their content examined against the current charter first.
+
+### 6.3 Outside both trees
+
+| file | owns | status | read by |
+|---|---|---|---|
+| `README.md` | the entry point: what this is, how to run it | active | everyone (42 inbound) |
+| `.github/instructions/codacy.instructions.md` | how Codacy's tooling must be invoked | tool instruction | the Codacy integration |
