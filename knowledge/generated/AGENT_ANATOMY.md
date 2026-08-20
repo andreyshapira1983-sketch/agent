@@ -242,7 +242,7 @@ _Reflection-driven repair, self-build, value gating._
 | `core/repair_proposal` | MVP-13.3 repair proposal generation. |
 | `core/self_apply_bridge` | Approval -> trusted self-apply lane bridge (TD-024). |
 | `core/self_apply_lane` | Trusted low-risk self-apply lane (TD-023). |
-| `core/self_build_producer` | Subagent-backed full self-apply proposal producer (TD-025). |
+| `core/self_build_producer` | Writes at most ONE low-risk ``self_apply_lane.run`` proposal into the approval inbox, with full file content, for a human to bless. |
 | `core/self_build_supervisor` | Lightweight, read-only self-build supervisor cycle. |
 | `core/self_build_memory` | Record self-build / self-apply attempt outcomes into episodic memory. |
 | `core/self_build_rules` | Hard rules learned from self-build rollbacks. |

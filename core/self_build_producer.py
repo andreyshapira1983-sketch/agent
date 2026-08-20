@@ -1,33 +1,16 @@
-"""Subagent-backed full self-apply proposal producer (TD-025).
+"""Writes at most ONE low-risk ``self_apply_lane.run`` proposal into the
+approval inbox, with full file content, for a human to bless.
 
-This closes the *producer* gap in the self-build loop. The self-apply lane
-(TD-023) and the approval bridge (TD-024) can already apply an approved
-full-content proposal, but nothing yet *generates* a valid
-``operation="self_apply_lane.run"`` payload autonomously. The advisory
-self-build supervisor only emits a unified diff / ``NO_PATCH``.
+Never applies it: no patch reaches the tree, no lane runs, nothing is
+committed, pushed or merged, and the daemon, scheduler, agent_tick and the
+budget/model/catalog config are never touched.
 
-This module adds a narrow producer that runs a small, explicit role pipeline —
-
-    Manager -> Researcher -> Builder -> Critic -> Reporter
-
-— to produce **at most one** validated low-risk self-apply proposal with full
-file content and place it into the approval inbox. It never applies the patch,
-never runs the lane, never commits/pushes/merges, never touches the daemon,
-scheduler or agent_tick, and never changes budget/model/catalog config.
-
-Hard safety gates (checked before any LLM-heavy work, first trip wins):
-  1. budget kill-switch active     -> status="budget_kill_switch"
-  2. hour budget near-exhaustion   -> status="budget_wait"
-  3. pending self_apply approval    -> status="approval_wait"
-  4. dirty git working tree        -> status="dirty_tree_wait"
-
-Then the roles run. The Manager may pick no candidate (``no_patch``); the
-Critic may veto (``critic_veto``, no inbox item created); otherwise exactly one
-approval inbox item is created (``proposed``).
-
-Every dependency (LLM, VCS, inbox, budget snapshot, kill-switch, file reader)
-is injected so the whole pipeline is unit-testable with fakes — no real
-provider/network/LLM call ever happens here.
+Roles: Manager -> Researcher -> Builder -> Critic -> Reporter. Four hard
+gates run before any LLM work, first trip wins — budget kill-switch, hour
+budget, a self_apply approval already pending, dirty working tree. After
+them the Manager may find no candidate and the Critic may veto; either way
+no inbox item is created. Every dependency is injected, so no real provider
+is reachable from here.
 """
 from __future__ import annotations
 
